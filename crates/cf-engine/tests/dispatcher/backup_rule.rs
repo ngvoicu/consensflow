@@ -96,7 +96,10 @@ fn refused_after_move(context: &Context, tiers: &Tiers<'_>, question: i64, old: 
         .expect_err("the old window no longer waits for the answer");
     let words = error.to_string();
     assert_eq!(error.code(), Some("question-moved"), "{words}");
-    assert!(words.contains("starts over"), "{words}");
+    assert!(
+        !words.contains("starts over without the old conversation"),
+        "{words}"
+    );
     assert!(words.contains("cf tell T-1"), "{words}");
     assert_eq!(context.message(question).state, "cancelled");
     assert!(

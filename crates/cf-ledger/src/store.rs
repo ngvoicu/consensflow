@@ -3,7 +3,6 @@
 //! up by id or handle, and the one way a task changes state. The ledger holds
 //! it privately; nothing outside the crate reaches the connection.
 
-use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::{cell::RefCell, rc::Rc};
 
@@ -22,7 +21,6 @@ use crate::Event;
 pub(crate) struct Store {
     pub(crate) db: Connection,
     pub(crate) question_run: String,
-    pub(crate) pending_pi: HashMap<i64, crate::holding::PendingPi>,
     clock: Box<dyn Clock>,
     names: Box<dyn FnMut() -> String>,
     /// Told every event as it is logged.
@@ -39,7 +37,6 @@ impl Store {
         Self {
             db,
             question_run: crate::holding::initial_run(),
-            pending_pi: HashMap::new(),
             clock,
             names,
             trace,
@@ -62,10 +59,7 @@ impl Store {
             return work(self);
         }
         self.db.execute_batch("BEGIN IMMEDIATE")?;
-        match panic::catch_unwind(AssertUnwindSafe(|| {
-            crate::holding::sync_pending_pi(self)?;
-            work(self)
-        })) {
+        match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
             Ok(Ok(value)) => match self.db.execute_batch("COMMIT") {
                 Ok(()) => Ok(value),
                 Err(cause) => {

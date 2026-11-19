@@ -53,7 +53,6 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                 && participant.role != "chief"
             {
                 let mut ledger = context.ledger.borrow_mut();
-                ledger.refresh_pi_holding(participant.id)?;
                 if let Some(start) = identity.question_start {
                     if let Some(brief) = start.launch_brief {
                         if let Some(message) = ledger.message(brief)? {
@@ -77,6 +76,22 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(start) = identity.question_start {
+                    if let Some(task) = start.task_in_hand {
+                        if start.launch_brief.is_none()
+                            && start.last_brief == Some(-task)
+                            && ledger.question_holding(participant.id)?.is_none()
+                        {
+                            if let Some((number, resumed)) =
+                                ledger.resume_question_holding_for_task(participant.id, task)?
+                            {
+                                if !resumed {
+                                    question_launch_task = Some((task, number));
                                 }
                             }
                         }

@@ -133,10 +133,6 @@ pub(crate) fn decline_message(
             {
                 Some(super::moved_task_takes_no_answer(store, task)?.to_string())
             }
-            (_, Some(task)) if task.state == "done" => Some(format!(
-                "T-{} is done: reopen it in the same window before answering m-{reply_to}.",
-                task.number
-            )),
             _ => None,
         };
         let mut word = format!(

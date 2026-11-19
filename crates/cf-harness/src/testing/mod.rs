@@ -619,6 +619,9 @@ pub struct AnsweringHost<F> {
     answer: F,
     pub asked: RefCell<Vec<(String, Value)>>,
     pub reports: Cell<usize>,
+    pub handovers: Cell<usize>,
+    pub send_failures: Cell<usize>,
+    pub send_unknowns: Cell<usize>,
 }
 
 impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
@@ -627,6 +630,9 @@ impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
             answer,
             asked: RefCell::new(Vec::new()),
             reports: Cell::new(0),
+            handovers: Cell::new(0),
+            send_failures: Cell::new(0),
+            send_unknowns: Cell::new(0),
         }
     }
 }
@@ -640,6 +646,17 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
 
     fn delivery_reported(&self, _pane: &Pane) {
         self.reports.set(self.reports.get() + 1);
+    }
+
+    fn hand_over_to_broker(&self) -> bool {
+        self.handovers.set(self.handovers.get() + 1);
+        true
+    }
+    fn broker_send_failed(&self) {
+        self.send_failures.set(self.send_failures.get() + 1);
+    }
+    fn send_admission_unknown(&self) {
+        self.send_unknowns.set(self.send_unknowns.get() + 1);
     }
 }
 

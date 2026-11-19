@@ -109,6 +109,9 @@ fn next_delivery_among(
             "SELECT m.id FROM message m
        WHERE m.recipient_id = ?1 AND m.state = 'queued'
          AND m.carried_by IS NULL AND m.claimed_at IS NULL
+         AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)
+           OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
+             WHERE q.id = m.reply_to AND p.role NOT IN ('chief', 'human')))
          AND (m.kind != 'task' OR ?2 = 0 OR NOT EXISTS (
            SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
              AND id IS NOT m.task_id
@@ -541,6 +544,9 @@ fn closed_answer(store: &mut Store, message: &MessageView) -> Result<bool, Ledge
     let Some(question) = message.reply_to else {
         return Ok(false);
     };
+    if crate::holding::legacy_member_question(store, question)? {
+        return Ok(true);
+    }
     if crate::holding::awaiting_handover(store, question)? {
         return Ok(true);
     }
@@ -894,7 +900,7 @@ pub(crate) fn retry_delivery(
             params![reason, i64::from(refund), message_id],
         )?;
         if message.kind == "task" {
-            crate::holding::retract_brief(store, message_id)?;
+            crate::holding::retry_brief(store, message_id)?;
         }
         // A row withdrawn since keeps its mark: the paste goes again without it,
         // handed later than it was, and its confirmation reads it delivered no more
@@ -1007,6 +1013,9 @@ pub(crate) fn give_up_delivery(
         // Served whole to its recipient while it was on its way, it was received: it did not fail.
         if settle_when_given_up(store, message_id)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        if message.kind == "task" {
+            crate::holding::give_up_brief(store, message_id)?;
         }
         store.db.execute(
             "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",

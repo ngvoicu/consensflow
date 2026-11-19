@@ -386,10 +386,10 @@ fn lets_go_of_the_answer(w: &mut World, carrier: i64, answer: i64) {
     assert_eq!(ids(&in_flight), [carrier]);
     w.confirm(carrier);
     assert_eq!(w.states(&[carrier, answer]), ["delivered", "queued"]);
-    assert_eq!(w.next("zeus"), Some(answer));
-    let begun = w.deliver(answer);
-    assert!(begun.carried.is_empty(), "it rides in nothing");
-    assert_eq!(w.states(&[answer]), ["delivered"]);
+    // Limit 16: a pre-tracking answer has no proven holding and is not
+    // newly dispatched by this build. It stays queued for the owner's ruling.
+    assert_eq!(w.next("zeus"), None);
+    assert_eq!(w.states(&[answer]), ["queued"]);
     assert_eq!(w.state(1), "working");
 }
 
@@ -505,10 +505,9 @@ fn joined_a_carrier_waiting_again(attempts: i64, reason: &str) {
         "the answer no paste held is not received"
     );
     assert_eq!(w.state(1), "working", "the answer is on its way");
-    assert_eq!(w.next("zeus"), Some(answer));
-    let begun = w.deliver(answer);
-    assert!(begun.carried.is_empty(), "it rides in nothing");
-    assert_eq!(w.states(&[answer]), ["delivered"]);
+    // Limit 16: the old answer has no tracked holding, so it stays queued.
+    assert_eq!(w.next("zeus"), None);
+    assert_eq!(w.states(&[answer]), ["queued"]);
 }
 
 /// Astra's review of 2026-10-17: the start that took a home alpha.82 left past

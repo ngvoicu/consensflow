@@ -241,6 +241,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         .filter(|(name, _)| {
             !backup_triggers.contains(&name.as_str())
                 && name != "task_plan_key"
+                && name != "question_resume_anchor"
                 && name != "question_holding"
                 && name != "question_binding"
                 && name != "question_handover"

@@ -233,7 +233,7 @@ const envelopeRecord = {
 const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
-  it('moves a brief out of the inbox at the take before sending it', async () => {
+  it('keeps a published brief in the inbox until its acknowledgement', async () => {
     const s = await setup(envelopeRecord, { idle: false })
     try {
       const file = join(s.inbox, `${envelopeRecord.id}.json`)
@@ -244,7 +244,7 @@ describe('consensflow Pi extension', () => {
       }
       s.setIdle(true)
       await s.extension.consume()
-      assert.deepEqual(atSend, { waiting: false, taken: true, text: envelope })
+      assert.deepEqual(atSend, { waiting: true, taken: false, text: envelope })
     } finally {
       await s.close()
     }

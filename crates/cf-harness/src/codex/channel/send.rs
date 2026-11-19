@@ -181,6 +181,8 @@ pub async fn send(
         target.host.delivery_reported(target.pane);
     } else if answer.admitted == Some(false) {
         target.host.broker_send_failed();
+    } else {
+        target.host.send_admission_unknown();
     }
     Ok(answer)
 }

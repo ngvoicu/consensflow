@@ -36,7 +36,10 @@ const QUESTION_QUOTED: usize = 160;
 /// The rows of one task for one window that a carrier may take in: what is
 /// kept (a task, an answer or a note, never a tell, still waiting its turn).
 const KEPT: &str = "task_id = ?1 AND recipient_id = ?2 AND urgent = 0
-     AND kind IN ('task', 'answer', 'note') AND state = 'queued'";
+     AND kind IN ('task', 'answer', 'note') AND state = 'queued'
+     AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)
+       OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
+         WHERE q.id = m.reply_to AND p.role NOT IN ('chief', 'human')))";
 
 /// Every id a query finds, in the order it says.
 fn ids(store: &Store, sql: &str, values: impl rusqlite::Params) -> Result<Vec<i64>, LedgerError> {
@@ -53,7 +56,11 @@ pub(crate) fn carried(store: &Store, carrier: i64) -> Result<Vec<MessageView>, L
     Ok(store
         .db
         .prepare(&format!(
-            "{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued' ORDER BY m.id"
+            "{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued'
+             AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)
+               OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
+                 WHERE q.id = m.reply_to AND p.role NOT IN ('chief', 'human')))
+             ORDER BY m.id"
         ))?
         .query_map([carrier], message_view)?
         .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -139,7 +146,11 @@ fn requeue_unreceived_reads(
     let unread = ids(
         store,
         "SELECT id FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'answer'
-           AND state = 'read' AND receipt IS NULL AND created_at >= ?3 ORDER BY id",
+           AND state = 'read' AND receipt IS NULL AND created_at >= ?3
+           AND (EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to)
+             OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
+               WHERE q.id = message.reply_to AND p.role NOT IN ('chief', 'human')))
+           ORDER BY id",
         params![task.id, recipient, paused_at],
     )?;
     for id in &unread {
@@ -169,6 +180,15 @@ fn requeue_unreceived_reads(
 ///   joins, that wait on their own and are held behind nothing now, follow it
 ///   in, so the paste says them after it.
 pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
+    if let Some(message) = store.message(id)? {
+        if message.kind == "answer" {
+            if let Some(question) = message.reply_to {
+                if crate::holding::legacy_member_question(store, question)? {
+                    return Ok(());
+                }
+            }
+        }
+    }
     let adopted: Option<i64> = store
         .db
         .prepare(&format!(

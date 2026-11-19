@@ -373,7 +373,11 @@ pub(crate) fn claim_answer(
                 403,
             ));
         }
-        if shut.is_none() && crate::holding::awaiting_handover(store, question_id)? {
+        if crate::holding::legacy_member_question(store, question_id)? {
+            return Ok(Claim::Closed);
+        }
+        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?
+            || crate::holding::provisional_question(store, question_id)?) {
             return Ok(Claim::Waiting);
         }
         if shut.is_some() || crate::holding::question_is_live(store, question_id)? == Some(false) {
@@ -473,6 +477,19 @@ pub(crate) fn settle_claim(
         if answer.state == "read" {
             return Ok(());
         }
+        if let Some(question) = answer.reply_to {
+            if crate::holding::legacy_member_question(store, question)?
+                || crate::holding::question_is_live(store, question)? == Some(false)
+                || crate::holding::awaiting_handover(store, question)?
+                || crate::holding::provisional_question(store, question)?
+            {
+                return Err(LedgerError::refused_with(
+                    "door-closed",
+                    "this question's window cannot take its answer now",
+                    409,
+                ));
+            }
+        }
         let handed = answer.state == "queued"
             && store
                 .db
@@ -520,6 +537,13 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
+            if message.kind == "answer" {
+                if let Some(question) = message.reply_to {
+                    if crate::holding::legacy_member_question(store, question)? {
+                        continue;
+                    }
+                }
+            }
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
                 received += read_part(store, &message, 1, 1, cf)?;

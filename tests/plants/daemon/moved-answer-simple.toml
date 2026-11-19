@@ -175,8 +175,8 @@ replace = "                state.pasted = Some(self.clock.now() - std::time::Dur
 
 [[plant]]
 name = "moved answer simple: Pi's take is not reported"
-meant = "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"
-runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"]]
+meant = "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"]]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/channel/send.rs"
 find = "                target.host.delivery_reported(target.pane);"
@@ -261,42 +261,6 @@ find = "        target.host.broker_send_failed();"
 replace = "        let _ = target;"
 
 [[plant]]
-name = "moved answer simple: Pi sends before taking its inbox file"
-meant = "moves a brief out of the inbox at the take before sending it"
-runs = [["node", "--test", "--test-name-pattern=moves a brief out of the inbox", "tests/pi-extension.test.mjs"]]
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "            await rename(path, takenPath)"
-replace = "            await Promise.resolve()"
-
-[[plant]]
-name = "moved answer simple: the daemon asks before checking Pi's inbox"
-meant = "t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement"
-runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement"]]
-[[plant.edit]]
-file = "crates/cf-daemon/src/api/callers.rs"
-find = "                ledger.refresh_pi_holding(participant.id)?;"
-replace = "                let _ = participant.id;"
-
-[[plant]]
-name = "moved answer simple: Pi's refusal leaves its new holding in place"
-meant = "t1813_pi_refusal_after_take_rebinds_the_answer_to_the_old_holding"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_pi_refusal_after_take_rebinds_the_answer_to_the_old_holding"]]
-[[plant.edit]]
-file = "crates/cf-ledger/src/holding.rs"
-find = "            retract_brief(store, pending.message)?;"
-replace = "            let _ = pending.message;"
-
-[[plant]]
-name = "moved answer simple: Pi's uncertain send stops watching its file"
-meant = "t1813_pi_take_or_refusal_after_an_uncertain_channel_result_is_still_observed"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_pi_take_or_refusal_after_an_uncertain_channel_result_is_still_observed"]]
-[[plant.edit]]
-file = "crates/cf-ledger/src/ledger/messages.rs"
-find = "            if pending.message == message && !crate::holding::pi_may_still_move(pending)? {"
-replace = "            if pending.message == message {"
-
-[[plant]]
 name = "moved answer simple: approval closes a question while the brief may be refused"
 meant = "t1813_approval_during_a_brief_send_waits_for_its_result"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_approval_during_a_brief_send_waits_for_its_result"]]
@@ -314,8 +278,8 @@ meant = "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "    close_previous(store, brief, None)?;"
-replace = "    let _ = brief;"
+find = "pub(crate) fn confirm_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    close_previous(store, brief, None)?;"
+replace = "pub(crate) fn confirm_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    let _ = brief;"
 
 [[plant]]
 name = "moved answer simple: an uncertain pane reply retracts a possibly received brief"
@@ -323,10 +287,8 @@ meant = "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                    // lost. Let the existing delivery settlement decide it.
-                    _ => None,'''
-replace = '''                    // lost. Let the existing delivery settlement decide it.
-                    _ => Some(ledger.question_brief_refused(self.message)),'''
+find = "                    _ => Some(ledger.question_brief_uncertain(self.message)),"
+replace = "                    _ => Some(ledger.question_brief_refused(self.message)),"
 
 [[plant]]
 name = "moved answer simple: an uncertain broker reply retracts a possibly received brief"
@@ -335,4 +297,103 @@ runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/channel/send.rs"
 find = "    } else if answer.admitted == Some(false) {"
-replace = "    } else {"
+replace = "    } else if answer.admitted != Some(true) {"
+
+[[plant]]
+name = "round2 moved answer: request snapshot is replaced before response"
+meant = "t1823_finding_01_request_authenticated_while_idle_keeps_its_session_binding"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_01_request_authenticated_while_idle_keeps_its_session_binding"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "            placed.task = selected.map(|h| h.task_number);"
+replace = "            placed.task = crate::holding::of(store, window)?.map(|h| h.task_number);"
+
+[[plant]]
+name = "round2 moved answer: uncertain send leaves previous answers silent"
+meant = "t1823_finding_03_unknown_admission_closes_previous_answers_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_03_unknown_admission_closes_previous_answers_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "pub(crate) fn uncertain_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    close_previous(store, brief, None)?;"
+replace = "pub(crate) fn uncertain_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    let _ = brief;"
+
+[[plant]]
+name = "round2 moved answer: unknown send is wrongly retracted on retry"
+meant = "t1823_finding_03_unknown_admission_closes_previous_answers_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_03_unknown_admission_closes_previous_answers_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if !unknown {\n        retract_brief(store, brief)?;\n    }"
+replace = "    if unknown || !unknown {\n        retract_brief(store, brief)?;\n    }"
+
+[[plant]]
+name = "round2 moved answer: last failed send does not restore its prior holding"
+meant = "t1823_finding_04_after_final_send_failure_the_prior_holding_can_still_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_04_after_final_send_failure_the_prior_holding_can_still_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            crate::holding::give_up_brief(store, message_id)?;"
+replace = "            let _ = message_id;"
+
+[[plant]]
+name = "round2 moved answer: native door releases during provisional send"
+meant = "t1823_finding_05_a_provisional_native_door_does_not_give_words_to_a_window_whose_send_fails"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_05_a_provisional_native_door_does_not_give_words_to_a_window_whose_send_fails"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            || crate::holding::provisional_question(store, question_id)?) {"
+replace = "            || false) {"
+
+[[plant]]
+name = "round2 moved answer: last answer attempt loses the chief notice"
+meant = "t1823_finding_06_window_ends_on_last_answer_attempt_returns_words_to_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_06_window_ends_on_last_answer_attempt_returns_words_to_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "a.state IN ('queued', 'delivering', 'failed')"
+replace = "a.state IN ('queued', 'delivering')"
+
+[[plant]]
+name = "round2 moved answer: alpha10 resume has no new holding"
+meant = "t1823_finding_07_project_resume_after_real_alpha10_upgrade_binds_new_questions"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_07_project_resume_after_real_alpha10_upgrade_binds_new_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state IN ('working', 'waiting')"
+replace = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state = 'failed'"
+
+[[plant]]
+name = "round2 moved answer: old unbound answers become dispatchable"
+meant = "t1823_finding_09_unbound_legacy_taskless_answers_do_not_acquire_a_new_dispatch_route"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_09_unbound_legacy_taskless_answers_do_not_acquire_a_new_dispatch_route"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)\n           OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id\n             WHERE q.id = m.reply_to AND p.role NOT IN ('chief', 'human')))\n"
+replace = ""
+
+[[plant]]
+name = "round2 moved answer: pi publishes without recording handover"
+meant = "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "&& !target.host.hand_over_to_broker()"
+replace = "&& !target.host.admits()"
+
+[[plant]]
+name = "round2 moved answer: a refused request follows a later third task"
+meant = "t1823_finding_01_refused_send_request_never_follows_a_later_third_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_01_refused_send_request_never_follows_a_later_third_task"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "                            if h.active && h.task_id == task && h.first_brief == first\n                                && crate::holding::matches(store, window, Some(task), Some(first))? => Some(h),"
+replace = "                            if h.active => Some(h),"
+
+[[plant]]
+name = "round2 moved answer: an already delivered legacy answer disappears"
+meant = "t1823_finding_09_already_delivered_legacy_answer_remains_visible"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_09_already_delivered_legacy_answer_remains_visible"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'\n               AND a.state IN ('queued', 'delivering')"
+replace = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'"

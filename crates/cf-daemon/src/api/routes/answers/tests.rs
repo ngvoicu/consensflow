@@ -97,7 +97,7 @@ async fn the_answer_route_refuses_a_question_whose_task_was_taken_back() {
     assert!(
         words.contains("open")
             && words.contains("standard")
-            && words.contains("starts over")
+            && !words.contains("starts over without the old conversation")
             && words.contains("cf tell T-1"),
         "{words}"
     );

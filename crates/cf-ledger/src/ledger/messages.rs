@@ -2,6 +2,7 @@
 //! hold them.
 
 use cf_proto::cf_word::CfWord;
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 use super::Ledger;
@@ -13,7 +14,6 @@ impl Ledger {
     /// Start a new in-memory engine lifetime without changing stored messages.
     pub fn begin_question_engine(&mut self) {
         self.store.question_run = crate::holding::new_run();
-        self.store.pending_pi.clear();
     }
 
     /// End the prospectively recorded holdings whose physical windows were
@@ -43,7 +43,17 @@ impl Ledger {
     ) -> Result<bool, LedgerError> {
         self.store.write(|store| {
             let Some(holding) = crate::holding::of(store, window)? else {
-                return Ok(false);
+                let task: Option<i64> = store.db.query_row(
+                    "SELECT t.id FROM task t JOIN participant p ON p.id = ?1 JOIN project project ON project.id = t.project_id
+                     WHERE t.number = ?2 AND t.assignee_id = p.id AND p.project_id = t.project_id AND p.left_at IS NULL
+                       AND t.deleted_at IS NULL AND project.state = 'open' AND t.state IN ('working', 'waiting')",
+                    rusqlite::params![window, number], |r| r.get(0),
+                ).optional()?;
+                let Some(task) = task else { return Ok(false); };
+                store.db.execute("INSERT INTO question_resume_anchor (participant_id, task_id) VALUES (?1, ?2)", rusqlite::params![window, task])?;
+                let anchor = -store.db.last_insert_rowid();
+                store.db.execute("INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id) VALUES (?1, ?2, ?3, ?3, 0, ?4)", rusqlite::params![window, task, anchor, store.question_run])?;
+                return Ok(true);
             };
             if !holding.resumable || holding.task_number != number {
                 return Ok(false);
@@ -67,71 +77,32 @@ impl Ledger {
         })
     }
 
+    /// The newly opened physical window can start before its host replies.
+    pub fn resume_question_holding_for_task(
+        &mut self,
+        window: i64,
+        task: i64,
+    ) -> Result<Option<(i64, bool)>, LedgerError> {
+        let number: Option<i64> = self
+            .store
+            .db
+            .query_row("SELECT number FROM task WHERE id = ?", [task], |r| r.get(0))
+            .optional()?;
+        match number {
+            Some(number) => Ok(Some((
+                number,
+                self.resume_question_holding(window, number)?,
+            ))),
+            None => Ok(None),
+        }
+    }
+
     /// The prospectively recorded task last handed to a window.
     pub fn question_holding(
         &self,
         window: i64,
     ) -> Result<Option<crate::WindowHolding>, LedgerError> {
         crate::holding::of(&self.store, window)
-    }
-
-    /// Watch the existing inbox file of a new Pi brief while it is in flight.
-    pub fn watch_pi_brief(
-        &mut self,
-        message: i64,
-        inbox: &std::path::Path,
-        taken: &std::path::Path,
-        ack: &std::path::Path,
-    ) -> Result<(), LedgerError> {
-        if let Some(row) = self
-            .store
-            .message(message)?
-            .filter(|row| row.kind == "task")
-        {
-            if let Some(previous) = self.store.pending_pi.get(&row.recipient_id).cloned() {
-                self.store.write(|_| Ok(()))?;
-                if previous.inbox != inbox && crate::holding::pi_may_still_move(&previous)? {
-                    return Err(LedgerError::refused_with(
-                        "pi-delivery-pending",
-                        "the window's earlier Pi delivery is still awaiting its verdict",
-                        409,
-                    ));
-                }
-            }
-            self.store.pending_pi.insert(
-                row.recipient_id,
-                crate::holding::PendingPi {
-                    message,
-                    inbox: inbox.to_owned(),
-                    taken: taken.to_owned(),
-                    ack: ack.to_owned(),
-                },
-            );
-        }
-        Ok(())
-    }
-
-    /// Check Pi's inbox before placing a question from this window.
-    pub fn refresh_pi_holding(&mut self, window: i64) -> Result<(), LedgerError> {
-        if self.store.pending_pi.contains_key(&window) {
-            self.store.write(|_| Ok(()))?;
-        }
-        Ok(())
-    }
-
-    /// Forget a completed Pi send only after observing its last inbox state.
-    pub fn finish_pi_brief(&mut self, message: i64) -> Result<(), LedgerError> {
-        self.store.write(|_| Ok(()))?;
-        let mut finished = Vec::new();
-        for (&window, pending) in &self.store.pending_pi {
-            if pending.message == message && !crate::holding::pi_may_still_move(pending)? {
-                finished.push(window);
-            }
-        }
-        for window in finished {
-            self.store.pending_pi.remove(&window);
-        }
-        Ok(())
     }
 
     /// Whether this exact window and holding still match.
@@ -173,7 +144,6 @@ impl Ledger {
             )?);
             Ok(deferred)
         })?;
-        self.store.pending_pi.remove(&window);
         Ok(deferred)
     }
 
@@ -201,6 +171,20 @@ impl Ledger {
                AND (a.state IN ('queued', 'delivering') OR (a.state = 'cancelled' AND a.reason LIKE 'returned in m-%')) ORDER BY a.id"
         )?.query_map(rusqlite::params![project, reader], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut hidden = Vec::new();
+        let legacy: Vec<i64> = self
+            .store
+            .db
+            .prepare(
+                "SELECT a.id FROM message a JOIN message q ON q.id = a.reply_to
+             JOIN participant p ON p.id = q.sender_id
+             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'
+               AND a.state IN ('queued', 'delivering')
+               AND p.role NOT IN ('chief', 'human')
+               AND NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)",
+            )?
+            .query_map(rusqlite::params![project, reader], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        hidden.extend(legacy);
         for (answer, question, state, _) in candidates {
             if state == "cancelled"
                 || crate::holding::question_is_live(&self.store, question)? == Some(false)
@@ -468,6 +452,51 @@ impl Ledger {
         question: &NewQuestion,
     ) -> Result<MessageView, LedgerError> {
         messages::ask(&mut self.store, project_id, question)
+    }
+
+    /// Place a window request and choose its holding in the same transaction.
+    pub fn ask_from_window(
+        &mut self,
+        project: i64,
+        window: i64,
+        question: &NewQuestion,
+        observed: Option<crate::WindowHolding>,
+        launch_task: Option<(i64, i64)>,
+    ) -> Result<MessageView, LedgerError> {
+        self.store.write(|store| {
+            let current = crate::holding::of(store, window)?;
+            let selected = if let Some(old) = observed {
+                if crate::holding::matches(store, window, Some(old.task_id), Some(old.first_brief))? {
+                    Some(old)
+                } else {
+                    let restored: Option<(Option<i64>, Option<i64>)> = store.db.query_row(
+                        "SELECT previous_task_id, previous_first_brief_id FROM question_handover
+                         WHERE brief_id = ?1 AND participant_id = ?2 AND run_id = ?3 AND previous_closed = -1",
+                        rusqlite::params![old.last_brief, window, store.question_run],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    ).optional()?;
+                    match (restored, current) {
+                        (Some((None, None)), None) => None,
+                        (Some((Some(task), Some(first))), Some(h))
+                            if h.active && h.task_id == task && h.first_brief == first
+                                && crate::holding::matches(store, window, Some(task), Some(first))? => Some(h),
+                        _ => return Err(crate::holding::window_task_refusal(store, window, old.task_id)?),
+                    }
+                }
+            } else {
+                if let Some((task, _number)) = launch_task {
+                    return Err(crate::holding::window_task_refusal(store, window, task)?);
+                }
+                None
+            };
+            let mut placed = question.clone();
+            placed.task = selected.map(|h| h.task_number);
+            let message = messages::ask(store, project, &placed)?;
+            if selected.is_none() {
+                store.db.execute("UPDATE question_binding SET task_id = NULL, first_brief_id = NULL WHERE question_id = ?", [message.id])?;
+            }
+            Ok(message)
+        })
     }
 
     /// [`Ledger::ask`], and with the question the told notes its pause cancelled.
@@ -809,6 +838,12 @@ impl Ledger {
     pub fn question_brief_confirmed(&mut self, message_id: i64) -> Result<(), LedgerError> {
         self.store
             .write(|store| crate::holding::confirm_brief(store, message_id))
+    }
+
+    /// The send's admission is unknown; old answers must not remain silent.
+    pub fn question_brief_uncertain(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::uncertain_brief(store, message_id))
     }
 
     /// Record an authenticated transport report, even if the task ended

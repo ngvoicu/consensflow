@@ -196,7 +196,13 @@ async fn t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled(
     context
         .ledger
         .borrow_mut()
-        .retry_delivery(brief, "its record proves the send failed", true)
+        .retry_delivery(brief, "admission is unknown", true)
+        .unwrap();
+    assert_eq!(context.message(answer).task_number, Some(task.task.number));
+    context
+        .ledger
+        .borrow_mut()
+        .question_brief_refused(brief)
         .unwrap();
     assert!(context
         .ledger

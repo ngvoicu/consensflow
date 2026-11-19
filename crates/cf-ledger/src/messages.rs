@@ -362,6 +362,9 @@ pub(crate) fn answer(
                 403,
             ));
         }
+        if crate::holding::awaiting_handover(store, question_id)? {
+            return Err(LedgerError::refused_with("handover-pending", "This window is receiving another brief. Wait for the send to finish, then try again.", 409));
+        }
         if crate::holding::question_is_live(store, question_id)? == Some(false) {
             if let Some(task) = crate::holding::task_of_question(store, question_id)? {
                 if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
@@ -500,9 +503,7 @@ fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerErr
     };
     Ok(LedgerError::refused_with(
         "question-moved",
-        format!(
-            "T-{number} {place}; the next window starts over without the old conversation. {tell}"
-        ),
+        format!("T-{number} {place}. {tell}"),
         409,
     ))
 }
@@ -557,7 +558,7 @@ fn finished_task_takes_no_answer(
     let (code, words) = match task.state.as_str() {
         "cancelled" => (
             "task-cancelled",
-            format!("T-{number} is cancelled: nobody waits for this answer"),
+            format!("T-{number} is cancelled: nobody waits for this answer. Start a new task with what you meant to answer."),
         ),
         "accepted" => (
             "task-accepted",

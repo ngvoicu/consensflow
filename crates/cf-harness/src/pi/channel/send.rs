@@ -206,11 +206,14 @@ pub async fn send(
 ) -> Result<Answer, String> {
     match before(time, entropy, target, text).await {
         Ok(handover) => {
-            let answer = after(time, target, handover).await;
+            let answer = after(time, handover).await;
             if answer.ok && answer.admitted == Some(true) {
                 target.host.delivery_reported(target.pane);
+            } else if answer.admitted == Some(false) {
+                target.host.broker_send_failed();
+            } else {
+                target.host.send_admission_unknown();
             }
-            target.host.pi_inbox_finished(target.pane);
             Ok(answer)
         }
         Err(Failed::Answered(answer)) => Ok(answer),
@@ -262,7 +265,7 @@ async fn before(
     // The claim is the last wait before the rename, the hand-over, which follows
     // in this poll: the pane host is asked then whether it still admits the
     // message, and one it does not is a claim refused (`PaneHost::admits`).
-    if claimed.get("ok") == Some(&Value::Bool(true)) && !target.host.admits() {
+    if claimed.get("ok") == Some(&Value::Bool(true)) && !target.host.hand_over_to_broker() {
         claimed = json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED });
     }
     if claimed.get("ok") != Some(&Value::Bool(true)) {
@@ -314,7 +317,7 @@ fn pane_named(pane: &Pane) -> Result<(), String> {
 /// an error, and what is not Pi's own word is uncertain. A message nobody
 /// acknowledged is taken out of the inbox; one that failed stays there, as
 /// the extension refuses it once it expires.
-async fn after(time: &dyn Time, target: &Target<'_>, handover: Handover) -> Answer {
+async fn after(time: &dyn Time, handover: Handover) -> Answer {
     let Handover {
         id,
         expires_at,
@@ -322,18 +325,11 @@ async fn after(time: &dyn Time, target: &Target<'_>, handover: Handover) -> Answ
         ack_file,
         temporary,
     } = handover;
-    let taken = format!("{inbox_file}.taken");
-    if !target.host.pi_inbox_pending(
-        target.pane,
-        Path::new(&inbox_file),
-        Path::new(&taken),
-        Path::new(&ack_file),
-    ) {
+    if let Err(error) = rename(Path::new(&temporary), Path::new(&inbox_file)) {
         let _ = rm_force(Path::new(&temporary));
-        return Answer::zero_bytes("failed-with-zero-bytes", Some(NOT_ADMITTED.to_owned()));
+        return Answer::transport(error.to_string());
     }
     let acknowledged = async {
-        rename(Path::new(&temporary), Path::new(&inbox_file))?;
         let ack = ack_for(time, &ack_file, &id, expires_at).await?;
         if ack.is_none() {
             rm_force(Path::new(&inbox_file))?;

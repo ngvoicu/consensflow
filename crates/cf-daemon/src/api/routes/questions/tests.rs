@@ -184,7 +184,7 @@ async fn t1813_a_launch_token_follows_a_later_delivered_brief() {
 }
 
 #[tokio::test]
-async fn t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement() {
+async fn t1813_pi_question_binds_on_inbox_send_before_the_acknowledgement() {
     let scene = scene();
     let (number, _, session, first) = first_brief_opening(&scene);
     scene
@@ -230,20 +230,14 @@ async fn t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement() {
         ledger.begin_delivery(brief).unwrap();
         (next, brief)
     };
-    let dir = tempfile::tempdir().unwrap();
-    let inbox = dir.path().join("m-1.json");
-    let taken = dir.path().join("m-1.json.taken");
-    let ack = dir.path().join("ack.json");
-    std::fs::write(&inbox, b"brief").unwrap();
+    let before = ask(&scene, &token, r#"{"body":"Before the send"}"#).await;
+    assert_eq!(before.0, 409, "{before:?}");
     scene
         .context
         .ledger
         .borrow_mut()
-        .watch_pi_brief(brief, &inbox, &taken, &ack)
+        .question_brief_handed_over(brief)
         .unwrap();
-    let before = ask(&scene, &token, r#"{"body":"Before the take"}"#).await;
-    assert_eq!(before.0, 409, "{before:?}");
-    std::fs::rename(&inbox, &taken).unwrap();
     let after = ask(&scene, &token, r#"{"body":"After the take"}"#).await;
     assert_eq!(after.0, 201, "{after:?}");
     assert_eq!(after.1["message"]["task"], next);
@@ -956,7 +950,7 @@ async fn a_window_whose_task_was_cancelled_is_told_so_and_nothing_is_put() {
         (
             409,
             "task-cancelled",
-            "T-1 is cancelled: this window cannot ask on it now"
+            "T-1 is cancelled. Wait for another brief in this window before asking."
         )
     );
     // The body is read first: a bad one is the answer, cancelled or not.

@@ -471,9 +471,8 @@ impl PaneHost for Admitting<'_> {
                     {
                         Some(ledger.question_brief_refused(self.message))
                     }
-                    // The pane may have received a write even if its answer was
-                    // lost. Let the existing delivery settlement decide it.
-                    _ => None,
+                    // The write may have arrived; its former questions end.
+                    _ => Some(ledger.question_brief_uncertain(self.message)),
                 };
                 if let Some(Err(error)) = settled {
                     let cause = EngineError::from(error);
@@ -535,45 +534,13 @@ impl PaneHost for Admitting<'_> {
         }
     }
 
-    fn pi_inbox_pending(
-        &self,
-        pane: &Pane,
-        inbox: &std::path::Path,
-        taken: &std::path::Path,
-        ack: &std::path::Path,
-    ) -> bool {
-        let Some(record) = self.dispatcher.record_of_pane(pane) else {
-            return false;
-        };
-        let mut ledger = self.dispatcher.seams.ledger.borrow_mut();
-        let result = ledger.message(self.message).and_then(|message| {
-            if message
-                .as_ref()
-                .is_some_and(|message| message.recipient_id == record.id)
-            {
-                ledger.watch_pi_brief(self.message, inbox, taken, ack)
-            } else {
-                Err(cf_ledger::LedgerError::refused(
-                    "question-window-closed",
-                    "the delivery's window is no longer current",
-                ))
-            }
-        });
-        if let Err(error) = result {
-            *self.failed.borrow_mut() = Some(EngineError::from(error));
-            self.refused.set(true);
-            return false;
-        }
-        true
-    }
-
-    fn pi_inbox_finished(&self, _pane: &Pane) {
+    fn send_admission_unknown(&self) {
         if let Err(error) = self
             .dispatcher
             .seams
             .ledger
             .borrow_mut()
-            .finish_pi_brief(self.message)
+            .question_brief_uncertain(self.message)
         {
             *self.report_failed.borrow_mut() = Some(EngineError::from(error));
         }

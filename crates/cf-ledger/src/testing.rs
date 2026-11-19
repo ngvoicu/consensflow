@@ -111,7 +111,7 @@ pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
 /// Remove the prospective holding tables when a fixture reconstructs an older ledger.
 pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "DROP TABLE question_handover; DROP TABLE question_binding; DROP TABLE question_holding;",
+        "DROP TABLE question_handover; DROP TABLE question_binding; DROP TABLE question_holding; DROP TABLE question_resume_anchor;",
     )
 }
 
@@ -215,6 +215,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             model_list::TABLE,
             drawn_items::TABLE,
             "task_plan_key",
+            "question_resume_anchor",
             "question_holding",
             "question_binding",
             "question_handover",
@@ -282,6 +283,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != model_list::TABLE
             && entry["name"] != drawn_items::TABLE
             && entry["name"] != "task_plan_key"
+            && entry["name"] != "question_resume_anchor"
             && entry["name"] != "question_holding"
             && entry["name"] != "question_binding"
             && entry["name"] != "question_handover"

@@ -898,6 +898,16 @@ impl Dispatcher {
                     start.task_in_hand = Some(holding.task_id);
                 }
             }
+            if let Some(number) = resume_task {
+                if ledger.question_holding(participant.id)?.is_none() {
+                    if let Some(task) = ledger.task(project.id, number)? {
+                        // An alpha.10 conversation has no prospective holding yet.
+                        // The successful Resume itself makes one.
+                        start.task_in_hand = Some(task.task.id);
+                        start.last_brief = Some(-task.task.id);
+                    }
+                }
+            }
             if planned.first == FirstMessage::Opened {
                 if let Some(first) = &delivering {
                     if let Some(message) = ledger.message(first.message)? {
