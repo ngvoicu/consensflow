@@ -118,8 +118,7 @@ fn levels(model: &Value) -> Vec<String> {
 pub(crate) enum Unlisted {
     /// Pi said so: it refused the request.
     Said(String),
-    /// Pi answered with no model: no provider is set up, or the providers it has listed none.
-    /// Which of the two is told from Pi's folder ([`super::setup::Setup`]), read only then.
+    /// Pi answered with no model: an empty list does not establish why.
     NoModel,
 }
 
@@ -280,8 +279,8 @@ fn unconfirmed(answer: Value, why: &'static str) -> Settled {
 ///
 /// A read that fails says what Pi said (its error stream and its exit code are kept from the
 /// one start, and nothing is started again to find out); one that waited for Pi in vain says
-/// which packages and extensions it was loading. One that finds no model says whether Pi has a
-/// provider set up ([`super::setup::Setup`]), reading its folder only then, and on a thread of its own
+/// which packages and extensions it was loading. One that finds no model says what its non-login
+/// settings name ([`super::setup::Setup`]), reading its folder only then, and on a thread of its own
 /// ([`inspect`]). Where `settle` says so, the list is the one Pi has once its providers have
 /// loaded ([`settled`]); where that was not confirmed the list comes back stale, with why.
 pub(crate) async fn read(
@@ -361,10 +360,7 @@ async fn waiting_on(failed: Said, time: &dyn Time, env: &Env) -> Said {
         .await
         .loading()
         .map_or_else(String::new, |loading| format!(" ({loading})"));
-    let head = format!(
-        "{head}. Pi loads the packages and extensions it has before it lists, and one of \
-         them may be waiting for something{loading}"
-    );
+    let head = format!("{head}. Log in inside Pi with /login, or check Pi's settings{loading}");
     let words = match said {
         Some(said) => format!("{head}{IT_SAID}{said}"),
         None => head,
