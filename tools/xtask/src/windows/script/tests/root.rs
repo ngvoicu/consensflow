@@ -9,8 +9,8 @@
 //! the profile and at the copy before it removes or writes anything, and where either is a link it
 //! says so, removes nothing and fails the run. And it removes nothing beside the copy: the tarballs
 //! runs left in the profile were once taken by the shape of their names and their age, which any
-//! program's file can have; the run's own tarball is removed by its exact name by the run that made it,
-//! and what a run that was killed leaves is for a person to remove.
+//! program's file can have. The controller removes its own run folder after its receipt; what a
+//! killed or unknown run leaves is for a person to review and remove.
 
 use std::fs;
 use std::path::Path;
@@ -169,9 +169,9 @@ fn the_sweep_names_no_file_beside_the_copy_to_remove() {
     for gone in ["Remove-Item", ".tgz", "$beside", "$root.Parent"] {
         assert!(!text.contains(gone), "the sweep still holds {gone}: {text}");
     }
-    // The run's own tarball and markers are removed by exact names, by the scripts that made them.
-    assert!(bootstrap()
-        .contains("Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue"));
+    // The bootstrap records completion; the controller removes the run's folder separately.
+    assert!(!bootstrap().contains("Remove-Item -LiteralPath $tarball"));
+    assert!(bootstrap().contains("completed.txt"));
 }
 
 #[test]

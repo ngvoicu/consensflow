@@ -24,8 +24,8 @@ use super::options::Options;
 use super::queue::{self, Queues, Ticket, Waited, Who};
 use super::reach;
 use super::script::{
-    command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
-    Refusal, Script, BUILD_STEPS, TREE_MARK,
+    claim_script, cleanup_script, command_line, encode_script, remote_script, run_id, run_script,
+    stop_script, upload_name, Refusal, Script, BUILD_STEPS, TREE_MARK,
 };
 use super::session::{self, Ended};
 use super::{tree, Ending, Error};
@@ -54,6 +54,10 @@ pub enum Outcome {
 struct Plan {
     /// Where the tarball is sent, as scp names it.
     upload: String,
+    claim: String,
+    claimed: String,
+    cleanup: String,
+    removed: String,
     /// The run itself: the bootstrap.
     run: String,
     /// What the run is asked for (the steps, the variables, the command): the script the
@@ -81,6 +85,10 @@ impl Plan {
         };
         let upload = upload_name(&options.dir, id);
         Ok(Self {
+            claim: powershell(&claim_script(&options.dir, id))?,
+            claimed: format!("== claimed {id}"),
+            cleanup: powershell(&cleanup_script(id))?,
+            removed: format!("== removed {id}"),
             run: powershell(&remote_script(&script))?,
             script: run_script(&script),
             stop: powershell(&stop_script(&options.dir, id))?,
@@ -228,6 +236,32 @@ fn send_tree(
         return Ok(Sent::Stopped);
     }
     let tarball = packed?;
+    // A failed or interrupted claim may have made a folder; never guess that
+    // it is safe to remove it or start an upload when its answer was lost.
+    let claim = ssh(context, &machine.host, &plan.claim);
+    let claimed = process::capture(&claim, &context.env);
+    if stopped(interrupt, !matches!(&claimed, Ok(done) if done.code == 0)) {
+        return Ok(Sent::Stopped);
+    }
+    let claimed = claimed?;
+    if claimed.code == 255 {
+        return Err(Error::Disconnected(format!(
+            "ssh to {} ended without confirming the run's folder; its outcome is unknown and the folder may remain",
+            machine.host
+        )));
+    }
+    if claimed.code != 0
+        || !claimed
+            .stdout
+            .lines()
+            .any(|line| line.trim() == plan.claimed)
+    {
+        return Err(Error::step(
+            &claim,
+            claimed.code.max(1),
+            "the run's folder was not confirmed; it may remain on the machine",
+        ));
+    }
     let scp = reach::scp(context, reach::RUN)
         .arg(&tarball)
         .arg(&plan.upload);
@@ -245,7 +279,7 @@ fn send_tree(
     if sent.code != 0 {
         if reach::went_silent(&sent.stderr) {
             return Err(Error::Silent(format!(
-                "{} while the tree was being sent, and ssh ended it: nothing was started there",
+                "{} while the tree was being sent: the upload's outcome is unknown and it may still be going",
                 reach::silent_words(&machine.host, reach::RUN)
             )));
         }
@@ -265,9 +299,20 @@ fn stream_run(
 ) -> Result<Outcome, Error> {
     let run = ssh(context, &machine.host, &plan.run);
     let tree_said = format!("{TREE_MARK}{identity}");
-    match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
-        Ended::Exited(status) => Ok(Outcome::Exited(status)),
-        Ended::Unstarted(status) => Ok(Outcome::NotStarted(status)),
+    let mut receipt_seen = false;
+    match session::stream(&run, &context.env, console, interrupt, &tree_said, &mut receipt_seen)? {
+        Ended::Exited(status) => {
+            if receipt_seen {
+                cleanup_finished(context, machine, plan, console);
+            }
+            Ok(Outcome::Exited(status))
+        }
+        Ended::Unstarted(status) => {
+            if receipt_seen {
+                cleanup_finished(context, machine, plan, console);
+            }
+            Ok(Outcome::NotStarted(status))
+        }
         Ended::WrongTree(said) => {
             let ended = end_there(context, machine, plan)?;
             Err(Error::WrongTree {
@@ -297,6 +342,14 @@ fn stream_run(
             say_if_not_ended(end_there(context, machine, plan)?, console)?;
             Err(Error::Output(cause))
         }
+    }
+}
+
+fn cleanup_finished(context: &Context, machine: &Machine, plan: &Plan, console: &mut Console) {
+    let cleanup = ssh(context, &machine.host, &plan.cleanup);
+    if !matches!(process::capture(&cleanup, &context.env), Ok(done) if done.code == 0 && done.stdout.lines().any(|line| line.trim() == plan.removed))
+    {
+        let _ = writeln!(console.err, "windows: the completed run's folder could not be confirmed removed; review the listing");
     }
 }
 

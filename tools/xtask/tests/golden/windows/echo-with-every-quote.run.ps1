@@ -29,7 +29,7 @@ public static class CfJob {
   $job = $made
 } catch { Write-Output "== no job: $($_.Exception.Message), so a stop cannot safely end this run" }
 if ($null -ne $job) {
-  try { Add-Content -LiteralPath $owner -Value @('job', ([Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc()), 'consensflow-build.0000abcd-12345678.tgz') } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop cannot safely end this run" }
+  try { Add-Content -LiteralPath $owner -Value @('job', ([Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc()), 'consensflow-wrun-0000abcd-12345678/tree.tgz') } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop cannot safely end this run" }
 }
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target

@@ -7,6 +7,7 @@ mod bootstrap;
 mod golden;
 #[cfg(windows)]
 mod lock;
+mod owned;
 mod packages;
 mod powershell;
 mod reports;
@@ -506,7 +507,8 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
     assert_eq!(
         leaving,
         [
-            r#"function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }"#
+            r#"function Exit-Run([int]$code) { $script:completed = $code; exit $code }"#,
+            r#"    echo "`n== exit $script:completed""#,
         ]
     );
     // And it is what a profile or a copy that is a link, the lock, a machine with no tar of its
@@ -533,7 +535,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
     // `Exit-Run`.
     assert!(
         boot.contains(
-            "\n} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n  Free-Machine\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n}\n"
+            "\n} finally {\n  if ($null -ne $job) { [CfJob]::Release($job) }\n  Free-Machine\n  if ($null -ne $script:completed) {"
         ),
         "{boot}"
     );
@@ -578,7 +580,9 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
         (way_out.replace("%BODY%", r#"cmd /c "exit 0"; Exit-Run $LASTEXITCODE"#), 0),
         (way_out.replace("%BODY%", r#"cmd /c "exit -1"; Exit-Run $LASTEXITCODE"#), -1),
     ] {
-        let script = format!("$ProgressPreference = 'SilentlyContinue'\n{function}\n{body}\n");
+        let finally = text.rsplit_once("} finally {").unwrap().1;
+        let folder = temporary.path().display().to_string().replace('\'', "''");
+        let script = format!("$ProgressPreference = 'SilentlyContinue'\n$runFolder = '{folder}'\n$recordable = $true\n$job = $null\n{function}\ntry {{ {body} }} finally {{{finally}");
         let ran = process::capture(
             &exit_path_invocation("powershell", temporary.path(), &script),
             &Env::from_process(),
@@ -608,10 +612,11 @@ fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went
     use crate::process::{self, Invocation};
 
     let text = bootstrap();
-    let function = text
-        .lines()
-        .find(|line| line.starts_with("function Exit-Run"))
-        .unwrap();
+    let from = text.find("function Free-Machine").unwrap();
+    let to = text[from..].find("function Exit-Run").unwrap() + from;
+    let end = text[to..].find('\n').unwrap() + to;
+    let function = &text[from..end];
+    let temporary = tempfile::tempdir().unwrap();
     for (body, status) in [
         (r#"cmd /c "<nul set /p x=unfinished"; Exit-Run 0"#, 0),
         (r#"[Console]::Out.Write('unfinished'); Exit-Run 0"#, 0),
@@ -619,7 +624,9 @@ fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went
         // And one that did end its last line is as well read, with a blank line before the exit line.
         (r#"Write-Output 'finished'; Exit-Run 0"#, 0),
     ] {
-        let script = format!("$ProgressPreference = 'SilentlyContinue'\n{function}\n{body}\n");
+        let finally = text.rsplit_once("} finally {").unwrap().1;
+        let folder = temporary.path().display().to_string().replace('\'', "''");
+        let script = format!("$ProgressPreference = 'SilentlyContinue'\n$runFolder = '{folder}'\n$recordable = $true\n$job = $null\n$held = $false\n$lock = $null\n{function}\ntry {{ {body} }} finally {{{finally}");
         let ran = process::capture(
             &Invocation::new("powershell", ".")
                 .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
@@ -654,6 +661,7 @@ fn a_stop_without_its_record_leaves_a_same_named_tarball_alone() {
     let profile = folder.path().join("profile");
     std::fs::create_dir_all(profile.join(DIR)).unwrap();
     let tarball = profile.join(upload_name(DIR, ID));
+    std::fs::create_dir_all(tarball.parent().unwrap()).unwrap();
     std::fs::write(&tarball, b"unrelated").unwrap();
     let profile = profile.display().to_string().replace('\'', "''");
     let script = format!("$env:USERPROFILE = '{profile}'\n{}", stop_script(DIR, ID));
@@ -717,18 +725,20 @@ fn a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_
     let (a, b) = ("0000abcd-12345678", "0000abce-9abcdef0");
     assert_eq!(
         upload_name(DIR, a),
-        "consensflow-build.0000abcd-12345678.tgz"
+        "consensflow-wrun-0000abcd-12345678/tree.tgz"
     );
     assert_ne!(upload_name(DIR, a), upload_name(DIR, b));
-    assert_ne!(upload_name("one", a), upload_name("two", a));
+    assert_eq!(upload_name("one", a), upload_name("two", a));
     let (for_a, for_b) = (script_of_run(a), script_of_run(b));
     for (text, own, other) in [(&for_a, a, b), (&for_b, b, a)] {
-        let tarball = format!("$tarball = Join-Path $env:USERPROFILE '{DIR}.{own}.tgz'\n");
+        let tarball =
+            format!("$tarball = Join-Path $env:USERPROFILE 'consensflow-wrun-{own}/tree.tgz'\n");
         assert!(text.contains(&tarball), "{text}");
         assert!(!text.contains(other), "{text}");
-        // Its name is in the script once, and the unpack and the removal read the variable.
+        // Its name is in the bootstrap once; the unpack reads that variable.
         assert_eq!(
-            text.matches(&format!("{DIR}.{own}.tgz")).count(),
+            text.matches(&format!("consensflow-wrun-{own}/tree.tgz"))
+                .count(),
             1,
             "{text}"
         );
@@ -738,30 +748,29 @@ fn a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_
 }
 
 #[test]
-fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it() {
+fn a_run_records_completion_and_removes_lock_records_only_if_it_holds_them() {
     let text = bootstrap();
     let at = |what: &str| {
         text.find(what)
             .unwrap_or_else(|| panic!("{what} is not there: {text}"))
     };
-    // The lock's refusal is inside the try that has the finally: a refused run takes
-    // away what it sent, and not the records of the run that refused it.
+    // A lock refusal reaches the finally without taking another run's records.
     assert!(at("$held = $false\n") < at("try {\n"));
     assert!(at("try {\n") < at("Exit-Run 75"));
     assert!(at("Exit-Run 75") < at("} finally {\n"));
     let finally = &text[at("} finally {\n")..];
     assert!(
-        finally
-            .contains("  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"),
+        finally.contains("Join-Path $runFolder 'completed.txt'"),
         "{finally}"
     );
     // The records are the run's own to take away only if it holds the lock, and the pid file
     // only if it still holds this run's process: a script of the older form may have
     // written its own over it. They go first of what the run does to say it has ended
-    // (`Free-Machine`, which `Exit-Run` calls before it writes its line, and the `finally` again
-    // for a run that ends otherwise), so that the next run is never refused by this one's end.
+    // (`Free-Machine` in `finally` before the exit line), so that the next run is never
+    // refused by this one's end.
+    assert!(text.contains("ri -Lit $owner -Force -ea 0"), "{text}");
     assert!(
-        text.contains("function Free-Machine {\n  if ($script:held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n    $script:held = $false\n  }\n"),
+        text.contains("if ((gc $running -ea 0) -eq $PID) { ri -Lit $running -Force -ea 0 }"),
         "{text}"
     );
     assert!(finally.contains("  Free-Machine\n"), "{finally}");
@@ -790,14 +799,14 @@ fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_t
     // is known, and the reason where the open failed for any cause but the lock being open
     // (a run that dies of that has no exit line, and the Mac answers 1 for a refusal).
     assert!(
-        text.contains("if (-not $lock -or $other) { Write-Output \"A run is still going on this machine$(if ($other) { \" (process $($other.Id))\" })$(if ($why) { \" (the lock could not be opened: $why)\" }): one at a time.\"; Exit-Run 75 }\n"),
+        text.contains("if (-not $lock -or $other) { echo \"A run is still going on this machine$(if ($other) { \" (process $($other.Id))\" })$(if ($why) { \" (the lock could not be opened: $why)\" }): one at a time.\"; Exit-Run 75 }\n"),
         "{text}"
     );
     // Before the folder is touched by the run: the record, the owner, the unpack.
     assert!(at(open.trim_end()) < at("Exit-Run 75"));
     assert!(at("Exit-Run 75") < at("Set-Content -Path $running"));
     assert!(at("Exit-Run 75") < at("& $tar -xmzf"));
-    assert!(at("New-Item -ItemType Directory") < at(open.trim_end()));
+    assert!(at("ni -Type Directory") < at(open.trim_end()));
     // Closed when the run ends however it ends, a refusal too; the file stays in the folder.
     let finally = &text[at("} finally {\n")..];
     assert!(
@@ -827,12 +836,9 @@ fn the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_i
     // The file is read as nothing where it is gone or being written (no error, no process),
     // and a process counts only if it is a PowerShell that was started before the file was
     // written: a process id that a later program has taken is no run, and the lock decides.
+    assert!(text.contains("$holder = gc $running -ea 0\n"), "{text}");
     assert!(
-        text.contains("$holder = Get-Content $running -ErrorAction SilentlyContinue\n"),
-        "{text}"
-    );
-    assert!(
-        text.contains("$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }\n"),
+        text.contains("$other = if ($holder) { try { gps -Id $holder -ea Stop | ? { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (gi $running).LastWriteTime } } catch {} }\n"),
         "{text}"
     );
     // The run is named in the file beside it, with its process, which only a stop reads.
@@ -857,9 +863,7 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
     // that is the only line of the script that is read back, so it is the only one that must.
     let text = bootstrap();
     assert!(
-        text.contains(
-            "function Exit-Run([int]$code) { Free-Machine; Write-Output \"`n== exit $code\"; exit $code }\n"
-        ),
+        text.contains("echo \"`n== exit $script:completed\""),
         "{text}"
     );
     // What reads it back takes the last line that is not blank, so the blank line that
@@ -885,7 +889,7 @@ fn a_stop_checks_the_run_and_the_process_handle_before_termination() {
     for required in [
         "$of[0] -ne '0000abcd-12345678'",
         "$of[2] -ne 'job'",
-        "$of[4] -ne 'consensflow-build.0000abcd-12345678.tgz'",
+        "$of[4] -ne 'consensflow-wrun-0000abcd-12345678/tree.tgz'",
         "[int64]::TryParse($of[3]",
         "if ($actual -ne $created)",
         "OpenProcess(0x101001, false, pid)",
@@ -916,7 +920,7 @@ fn a_run_records_its_job_and_process_identity_before_starting_its_command() {
         "{run}"
     );
     assert!(
-        run.contains("consensflow-build.0000abcd-12345678.tgz"),
+        run.contains("consensflow-wrun-0000abcd-12345678/tree.tgz"),
         "{run}"
     );
     assert!(at("$job = $made") < at("Add-Content -LiteralPath $owner"));
@@ -935,16 +939,16 @@ fn the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_any
     };
     assert!(
         text.contains(
-            "Write-Output \"== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1)\"\n"
+            "echo \"== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1)\"\n"
         ),
         "{text}"
     );
-    assert!(at("if ($failed.Count) { Exit-Run 1 }") < at("Write-Output \"== tree "));
+    assert!(at("if ($failed.Count) { Exit-Run 1 }") < at("echo \"== tree "));
     // And only then is the run script read: what the run is asked for runs on a tree that is said.
     let read =
         ". ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))\n";
     assert!(text.contains(read), "{text}");
-    assert!(at("Write-Output \"== tree ") < at(read));
+    assert!(at("echo \"== tree ") < at(read));
     assert!(at(read) < at("} finally {"));
     assert!(!text.contains("foreach ($step in"), "{text}");
     assert!(TREE_MARK.starts_with("== ") && TREE_MARK.ends_with(' '));
@@ -1002,25 +1006,28 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
     assert!(full.ends_with("cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n"));
 }
 
-/// The machine's own PowerShell, on a machine that has one: the `finally` that takes a
-/// run's tarball away runs when the script leaves by `exit` from inside the `try`, as
-/// every way out of it does; a run that does not hold the lock leaves the lock's records
-/// alone, and so does one whose older file has another run's process written over it.
+/// The machine's own PowerShell runs `finally` when `exit` leaves the try: the completion
+/// receipt is written before the controller's separate cleanup, and the lock's record is
+/// retained if the run does not hold it.
 #[cfg(windows)]
 #[test]
-fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leaves_by_exit() {
+fn powershell_writes_the_receipt_in_finally_when_the_script_leaves_by_exit() {
     use cf_base::env::Env;
 
     use crate::process::{self, Invocation};
 
     for (held, lock_stays) in [("$true", false), ("$false", true)] {
         let folder = tempfile::tempdir().unwrap();
-        let (tarball, lock) = (folder.path().join("a.tgz"), folder.path().join("lock"));
+        let (tarball, lock, receipt) = (
+            folder.path().join("a.tgz"),
+            folder.path().join("lock"),
+            folder.path().join("completed.txt"),
+        );
         std::fs::write(&tarball, "x").unwrap();
         std::fs::write(&lock, "x").unwrap();
         let script = format!(
-            "$tarball = '{}'\n$running = '{}'\n$held = {held}\ntry {{ exit 75 }} finally {{\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n}}\n",
-            tarball.display(),
+            "$receipt = '{}'\n$running = '{}'\n$held = {held}\ntry {{ exit 75 }} finally {{\n  [IO.File]::WriteAllText($receipt, 'finished')\n  if ($held) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n}}\n",
+            receipt.display(),
             lock.display(),
         );
         let ran = process::capture(
@@ -1031,7 +1038,8 @@ fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leave
         )
         .unwrap();
         assert_eq!(ran.code, 75, "{}", said(&ran));
-        assert!(!tarball.exists(), "the tarball stayed: {held}");
+        assert!(tarball.exists(), "the upload was removed: {held}");
+        assert_eq!(std::fs::read_to_string(receipt).unwrap(), "finished");
         assert_eq!(lock.exists(), lock_stays, "held {held}");
     }
 }
@@ -1207,8 +1215,7 @@ fn the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_m
 
 #[test]
 fn a_folder_with_a_name_too_long_for_the_command_line_is_refused_saying_why() {
-    // The folder's name is in the bootstrap twice (the folder, the tarball's name): it is
-    // what is left that can make the line too long.
+    // The copy's name is in the bootstrap; a long one can make the line too long.
     let long = "d".repeat(900);
     let text = remote_script(&Script {
         dir: &long,
@@ -1377,7 +1384,7 @@ fn a_reused_pid_does_not_identify_a_run_for_stopping() {
     std::fs::create_dir_all(profile.join(DIR)).unwrap();
     let quoted = |path: &std::path::Path| path.display().to_string().replace('\'', "''");
     let script = format!(
-        "$env:USERPROFILE = '{}'\n$owner = Join-Path (Join-Path $env:USERPROFILE '{DIR}') '{OWNER}'\nSet-Content -LiteralPath $owner -Value @('{ID}', $PID, 'job', '1', '{DIR}.{ID}.tgz')\nfunction Get-Process {{ [pscustomobject]@{{ Name = 'powershell'; Id = $PID; StartTime = (Get-Date).AddMinutes(-1) }} }}\nfunction Get-Item {{ [pscustomobject]@{{ LastWriteTime = Get-Date }} }}\nfunction taskkill {{ [IO.File]::WriteAllText('{}', 'wrong process') }}\n{}",
+        "$env:USERPROFILE = '{}'\n$owner = Join-Path (Join-Path $env:USERPROFILE '{DIR}') '{OWNER}'\nSet-Content -LiteralPath $owner -Value @('{ID}', $PID, 'job', '1', 'consensflow-wrun-{ID}/tree.tgz')\nfunction Get-Process {{ [pscustomobject]@{{ Name = 'powershell'; Id = $PID; StartTime = (Get-Date).AddMinutes(-1) }} }}\nfunction Get-Item {{ [pscustomobject]@{{ LastWriteTime = Get-Date }} }}\nfunction taskkill {{ [IO.File]::WriteAllText('{}', 'wrong process') }}\n{}",
         quoted(&profile),
         quoted(&marker),
         stop_script(DIR, ID)
@@ -1387,4 +1394,22 @@ fn a_reused_pid_does_not_identify_a_run_for_stopping() {
         !marker.exists(),
         "a reused PID was selected for termination"
     );
+}
+
+#[test]
+fn a_runs_upload_is_in_its_unique_folder() {
+    let first = upload_name(DIR, ID);
+    let second = upload_name(DIR, "0000abcd-12345679");
+    assert_eq!(first, format!("consensflow-wrun-{ID}/tree.tgz"));
+    assert_ne!(first, second);
+}
+
+#[test]
+fn a_bootstrap_does_not_remove_the_upload_without_a_completion_receipt() {
+    let text = bootstrap();
+    assert!(
+        !text.contains("Remove-Item -LiteralPath $tarball"),
+        "{text}"
+    );
+    assert!(text.contains("completed.txt"), "{text}");
 }

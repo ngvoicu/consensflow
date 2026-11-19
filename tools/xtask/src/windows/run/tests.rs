@@ -28,8 +28,8 @@ fn id_in(log: &[String]) -> String {
     let scp: Vec<&str> = log[0].split('\t').collect();
     assert_eq!(&scp[..2], ["scp", "-q"], "{log:?}");
     let name = scp[2]
-        .strip_prefix(&format!("zeewin:{DEFAULT_DIR}."))
-        .and_then(|rest| rest.strip_suffix(".tgz"))
+        .strip_prefix("zeewin:consensflow-wrun-")
+        .and_then(|rest| rest.strip_suffix("/tree.tgz"))
         .unwrap_or_else(|| panic!("not a tarball of the run's own: {}", scp[2]));
     assert_eq!(name.len(), 17, "{name}");
     name.to_owned()
@@ -434,8 +434,8 @@ fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_no
         .split('\t')
         .collect();
     let name = scp[2]
-        .strip_prefix(&format!("zeewin2:{DEFAULT_DIR}."))
-        .and_then(|rest| rest.strip_suffix(".tgz"))
+        .strip_prefix("zeewin2:consensflow-wrun-")
+        .and_then(|rest| rest.strip_suffix("/tree.tgz"))
         .unwrap_or_else(|| panic!("not sent to the profile as zeewin's is: {}", scp[2]));
     let on_zeewin2 = asked(&log, "zeewin2");
     assert_eq!(on_zeewin2.len(), 2, "the disk, then the run: {log:?}");
@@ -715,7 +715,7 @@ fn a_run_whose_machine_said_nothing_of_the_command_answers_what_ssh_did_and_says
 }
 
 #[test]
-fn a_run_asks_nothing_of_the_machine_when_the_tree_could_not_be_sent() {
+fn a_run_does_not_start_the_command_when_the_tree_could_not_be_sent() {
     let rig = Rig::new();
     rig.program("scp", r#"echo "scp: connection refused" >&2; exit 3"#);
     rig.program("ssh", &machine(0));
@@ -723,7 +723,8 @@ fn a_run_asks_nothing_of_the_machine_when_the_tree_could_not_be_sent() {
     let said = ended.unwrap_err().to_string();
     assert!(said.starts_with("`scp -q "), "{said}");
     assert!(
-        said.contains(" zeewin:consensflow-build.") && said.ends_with(".tgz` ended with status 3"),
+        said.contains(" zeewin:consensflow-wrun-")
+            && said.ends_with("/tree.tgz` ended with status 3"),
         "{said}"
     );
     // What scp said is the run's own words, said as it said them.
@@ -767,7 +768,13 @@ fn a_stand_in_waits_for_a_file_that_is_made_and_gives_up_on_one_that_never_is() 
 
 #[test]
 fn a_step_that_failed_as_a_stop_ended_it_is_the_stop_when_the_stop_is_heard_a_moment_after() {
-    let rig = Rig::new();
+    let mut rig = Rig::new();
+    let owned_log = rig.bin.path().join("owned-events");
+    rig.context.env = rig
+        .context
+        .env
+        .clone()
+        .with_var("CF_OWNED_LOG", &owned_log.display().to_string());
     // The scp that is ended by the Ctrl-C: it says it ran, and ends badly.
     rig.program("scp", r#": > "$CF_FIRST"; exit 3"#);
     rig.program("ssh", &machine(0));
@@ -803,7 +810,12 @@ fn a_step_that_failed_as_a_stop_ended_it_is_the_stop_when_the_stop_is_heard_a_mo
     );
     assert_eq!(ended.unwrap(), Outcome::Stopped);
     assert_eq!((out.as_str(), err.as_str()), ("", ""));
-    assert!(rig.log().is_empty(), "no ssh was asked: {:?}", rig.log());
+    assert!(rig.log().is_empty(), "no run was started: {:?}", rig.log());
+    assert_eq!(fs::read_to_string(owned_log).unwrap(), "claim\n");
+    assert_eq!(
+        fs::read_dir(rig.bin.path().join("home")).unwrap().count(),
+        1
+    );
 }
 
 #[test]
@@ -1004,9 +1016,23 @@ fn two_runs_that_overlap_send_their_trees_to_files_of_their_own() {
             r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; waits "$CF_FIRST" || exit 97; {SAYS_TREE} echo "== exit 0""#
         ),
     );
-    b.program("ssh", &machine(0));
+    b.program(
+        "ssh",
+        &format!(
+            r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; waits "$CF_FIRST" || exit 97; {SAYS_TREE} echo "== exit 0""#
+        ),
+    );
 
     let (a_ended, b_ended, a_file, b_file, a_held, b_held) = std::thread::scope(|scope| {
+        struct Release(Vec<PathBuf>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                for path in &self.0 {
+                    let _ = fs::write(path, "");
+                }
+            }
+        }
+        let gates = Release(vec![a.bin.path().join("first"), b.bin.path().join("first")]);
         let a_run = scope.spawn(|| run_it(&a, &Interrupt::default()));
         // A's tree is on the machine and A's script has not unpacked it yet.
         let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -1014,14 +1040,21 @@ fn two_runs_that_overlap_send_their_trees_to_files_of_their_own() {
             assert!(std::time::Instant::now() < until, "run A never reached ssh");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let b_ended = run_it(&b, &Interrupt::default()).0;
+        let b_run = scope.spawn(|| run_it(&b, &Interrupt::default()));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while b.log().len() < 2 {
+            assert!(std::time::Instant::now() < until, "run B never reached ssh");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let (a_file, b_file) = (sent_to(&a, home.path()), sent_to(&b, home.path()));
         let (a_held, b_held) = (members(&a, &a_file), members(&b, &b_file));
         // Let A's script go on, now that what it was sent has been looked at.
         fs::write(a.bin.path().join("first"), "").unwrap();
+        fs::write(b.bin.path().join("first"), "").unwrap();
+        drop(gates);
         (
             a_run.join().unwrap().0,
-            b_ended,
+            b_run.join().unwrap().0,
             a_file,
             b_file,
             a_held,
@@ -1664,7 +1697,7 @@ fn a_tree_whose_sending_went_silent_is_said_and_nothing_is_started_on_the_machin
     assert!(matches!(error, Error::Silent(_)), "{error}");
     assert_eq!(
         error.to_string(),
-        "the connection to zeewin went silent for 135 s while the tree was being sent, and ssh ended it: nothing was started there"
+        "the connection to zeewin went silent for 135 s while the tree was being sent: the upload's outcome is unknown and it may still be going"
     );
     assert_eq!(error.status(), 69);
     // Only the machine's state was asked: nothing was run, and nothing is to be ended.
@@ -1835,4 +1868,43 @@ fn a_broken_ssh_connection_is_not_reported_as_an_unstarted_run() {
     };
     assert!(message.contains("may still be going"), "{message}");
     assert_eq!(rig.log().len(), 2, "no PID-based stop is safe here");
+}
+
+#[test]
+fn the_controller_cleans_only_after_the_run_says_it_finished() {
+    for (ssh, expect_cleanup) in [(machine(0), true), (silent(3), false), (silent(255), false)] {
+        let mut rig = Rig::new();
+        let events = rig.bin.path().join("owned-events");
+        rig.context.env = rig
+            .context
+            .env
+            .clone()
+            .with_var("CF_OWNED_LOG", &events.display().to_string());
+        rig.program("scp", KEEPS);
+        rig.program("ssh", &ssh);
+        let _ = run_it(&rig, &Interrupt::default());
+        let lines = fs::read_to_string(&events).unwrap();
+        assert_eq!(
+            lines.lines().collect::<Vec<_>>(),
+            if expect_cleanup {
+                vec!["claim", "cleanup"]
+            } else {
+                vec!["claim"]
+            }
+        );
+    }
+}
+
+#[test]
+fn a_claim_that_did_not_complete_never_starts_an_upload() {
+    let mut rig = Rig::new();
+    rig.context.env = rig.context.env.clone().with_var("CF_CLAIM_FAIL", "1");
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &machine(0));
+    let (outcome, _, _) = run_it(&rig, &Interrupt::default());
+    assert!(outcome.is_err());
+    assert!(
+        rig.log().is_empty(),
+        "an upload or run started after an unconfirmed claim"
+    );
 }

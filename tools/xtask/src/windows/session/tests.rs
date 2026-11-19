@@ -190,6 +190,7 @@ fn exits_held_to(status: &str, said: &str, tree: &str) -> (Ended, String, String
         },
         &Interrupt::default(),
         tree,
+        &mut false,
     )
     .unwrap();
     (
@@ -245,6 +246,7 @@ fn what_a_run_writes_is_written_as_it_comes_to_the_stream_it_came_on() {
         },
         &Interrupt::default(),
         TREE,
+        &mut false,
     )
     .unwrap();
     // It said nothing of how it ended, so ssh's status is the answer: and said so. It said no tree,
@@ -393,6 +395,7 @@ fn a_stop_ends_the_program_whole_and_is_said_and_what_it_had_written_is_kept() {
         },
         &interrupt,
         TREE,
+        &mut false,
     )
     .unwrap();
     assert!(matches!(ended, Ended::Stopped), "{ended:?}");
@@ -412,6 +415,7 @@ fn a_run_whose_output_cannot_be_written_is_ended_and_says_why() {
         },
         &Interrupt::default(),
         TREE,
+        &mut false,
     )
     .unwrap();
     let Ended::Unwritten(cause) = ended else {
@@ -512,6 +516,7 @@ fn a_program_that_is_not_there_is_said_and_starts_nothing() {
         },
         &Interrupt::default(),
         TREE,
+        &mut false,
     )
     .unwrap_err();
     assert!(

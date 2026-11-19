@@ -98,7 +98,9 @@ pub fn stream(
     console: &mut Console,
     interrupt: &Interrupt,
     tree: &str,
+    receipt_seen: &mut bool,
 ) -> Result<Ended, Error> {
+    *receipt_seen = false;
     let mut child = process::spawn(invocation, env, Stdio::null(), false)?;
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         let _ = child.kill();
@@ -147,6 +149,7 @@ pub fn stream(
                 return Ok(Ended::Stopped);
             };
             let said = tail.last_line().as_deref().and_then(exit_said);
+            *receipt_seen = said.is_some();
             let silent = said_silence.found().is_some_and(reach::says_silence);
             let tree_said = said_tree.found().is_some();
             let (ended, note) = exited(status.code(), said, tree_said, silent, interrupt);

@@ -220,7 +220,42 @@ pub fn run_id() -> String {
 /// and one lock, and runs from several trees queue for it: a name they shared would
 /// let the run that sent last be the one every script there unpacks.
 pub fn upload_name(dir: &str, id: &str) -> String {
-    format!("{dir}.{id}.tgz")
+    let _ = dir;
+    format!("consensflow-wrun-{id}/tree.tgz")
+}
+
+/// Makes this run's folder exclusively and records its owner before upload.
+pub fn claim_script(dir: &str, id: &str) -> String {
+    format!(
+        r#"# CF_OWNED_CLAIM
+$ErrorActionPreference='Stop'
+$u=$env:USERPROFILE
+if ((Get-Item -LiteralPath $u -Force).Attributes -band 1024) {{ throw 'profile is a link' }}
+$run=Join-Path $u 'consensflow-wrun-{id}'
+New-Item -ItemType Directory -Path $run -ErrorAction Stop | Out-Null
+[IO.File]::WriteAllText((Join-Path $run 'record.txt'), "id={id}`ncopy={dir}`ncreated=$([DateTime]::UtcNow.ToString('o'))`n")
+Write-Output '== claimed {id}'
+"#
+    )
+}
+
+/// Removes only this run's folder, after its own completion receipt exists.
+pub fn cleanup_script(id: &str) -> String {
+    format!(
+        r#"# CF_OWNED_CLEANUP
+$ErrorActionPreference='Stop'
+$u=$env:USERPROFILE
+$run=Join-Path $u 'consensflow-wrun-{id}'
+$receipt=Join-Path $run 'completed.txt'
+foreach($path in @($u,$run,$receipt)) {{
+  $item=Get-Item -LiteralPath $path -Force -ErrorAction Stop
+  if ($item.Attributes -band 1024) {{ throw "link refused: $path" }}
+}}
+if ([IO.File]::ReadAllText($receipt) -ne 'finished {id}') {{ throw 'completion receipt did not match' }}
+Remove-Item -LiteralPath $run -Recurse -Force
+Write-Output '== removed {id}'
+"#
+    )
 }
 
 /// The command as cmd.exe reads a line: an argument with a space or a quote in
@@ -366,9 +401,9 @@ pub struct Script<'a> {
 /// condition); this look is for what comes before it, and is one line because the bootstrap is what goes
 /// on ssh's command line (`the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more`).
 ///
-/// The bootstrap tries to remove its tarball when it ends. A killed bootstrap or upload
-/// can leave it behind; the sweep does not remove tarballs by name or age. A stop leaves
-/// the tarball and records in place until ownership-based cleanup is available.
+/// The bootstrap writes its completion receipt when it finishes. After the controller
+/// sees the exit line, it removes the run's own folder only if the receipt matches.
+/// A killed or unknown run keeps its folder for a reviewed manual cleanup.
 ///
 /// The unpack is Windows' own tar (bsdtar), `System32\tar.exe`, named by its path, and a
 /// machine without it ends the run saying so: a bare `tar.exe` is the first on the PATH,

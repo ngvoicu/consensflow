@@ -235,7 +235,9 @@ fn bootstrap_invocation(
     packed: &Path,
     before: &str,
 ) -> Invocation {
-    fs::copy(packed, profile.join(upload_name(SHARED, id))).unwrap();
+    let upload = profile.join(upload_name(SHARED, id));
+    fs::create_dir_all(upload.parent().unwrap()).unwrap();
+    fs::copy(packed, upload).unwrap();
     let sent = remote_script(&Script {
         id,
         dir: SHARED,
@@ -360,11 +362,18 @@ fn until(what: &str, holds: impl Fn() -> bool) {
 
 /// The `.tgz` files in `profile`.
 fn tarballs_in(profile: &Path) -> Vec<String> {
-    fs::read_dir(profile)
+    let mut found: Vec<String> = fs::read_dir(profile)
         .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".tgz"))
-        .collect()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let archive = entry.path().join("tree.tgz");
+            (name.starts_with("consensflow-wrun-") && archive.is_file())
+                .then(|| format!("{name}/tree.tgz"))
+        })
+        .collect();
+    found.sort();
+    found
 }
 
 /// The programs of a case that are marked by the address they ping (`mark`): their process ids.
@@ -479,7 +488,15 @@ fn of_two_runs_started_together_on_one_folder_one_runs_and_the_other_is_refused_
         assert!(!refused.said.contains("== tree "), "{}", describe());
         // What either sent is gone, the refused one's too; what the run unpacked is there.
         let left = tarballs_in(&profile);
-        assert!(left.is_empty(), "{left:?}\n{}", describe());
+        assert_eq!(
+            left,
+            vec![
+                upload_name(SHARED, "0000a001-00000001"),
+                upload_name(SHARED, "0000a002-00000002")
+            ],
+            "{}",
+            describe()
+        );
         let copy = profile.join(SHARED);
         assert_eq!(fs::read_to_string(copy.join("keep.txt")).unwrap(), "kept");
         // The lock stays where it is, closed; the records of the run that held it are gone.
@@ -728,7 +745,10 @@ fn files_that_do_not_hash_to_the_identity_end_the_run_before_it_says_a_tree_or_r
     );
     assert!(!ran.said.contains("== tree "), "{}", ran.said);
     assert!(!ran.said.contains("Pinging"), "{}", ran.said);
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b002-00000002")]
+    );
 }
 
 #[test]
@@ -754,7 +774,10 @@ fn a_lock_that_cannot_be_opened_for_a_cause_but_its_being_open_is_refused_with_7
         "{}",
         ran.said
     );
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b003-00000003")]
+    );
 }
 
 #[test]
@@ -828,7 +851,10 @@ fn a_powershell_that_holds_the_older_file_and_was_started_before_it_was_written_
         "{}",
         ran.said
     );
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b006-00000006")]
+    );
 }
 
 #[test]
@@ -1168,7 +1194,10 @@ fn what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running() {
         1,
         "the program it left is running"
     );
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b201-00000001")]
+    );
 }
 
 #[test]
@@ -1252,7 +1281,10 @@ fn a_run_started_with_gits_programs_first_on_the_path_unpacks_the_tree_with_wind
         fs::read_to_string(case.copy().join("keep.txt")).unwrap(),
         "kept"
     );
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b009-00000009")]
+    );
 }
 
 #[test]
@@ -1286,7 +1318,10 @@ fn a_run_on_a_machine_without_windows_own_tar_ends_saying_so_before_it_unpacks_a
     );
     assert!(!ran.said.contains("== tree "), "{}", ran.said);
     assert!(!case.copy().join("keep.txt").exists());
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(
+        tarballs_in(&case.profile),
+        vec![upload_name(SHARED, "0000b00a-0000000a")]
+    );
 }
 
 #[test]
@@ -1294,6 +1329,7 @@ fn a_stop_without_its_record_keeps_an_unrelated_tarball_and_reports_uncertainty(
     let case = Case::new();
     let id = "0000b601-00000001";
     let tarball = case.profile.join(upload_name(SHARED, id));
+    fs::create_dir_all(tarball.parent().unwrap()).unwrap();
     fs::write(&tarball, b"unrelated").unwrap();
     let stopped = stop_result(&case, id);
     assert_eq!(stopped.code, 1, "{}", said(&stopped));
