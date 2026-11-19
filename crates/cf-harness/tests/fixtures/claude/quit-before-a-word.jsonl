@@ -2,7 +2,7 @@
 {"type":"mode","mode":"normal","sessionId":"$SESSION"}
 {"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"$SESSION"}
 {"type":"atis-latch","atis":"2bb01393fe0c7041","sessionId":"$SESSION"}
-{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0,"ownerAccountUuid":"[scrubbed]","ownerOrganizationUuid":"[scrubbed]"}
+{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0}
 {"parentUuid":null,"isSidechain":false,"attachment":{"type":"hook_success","hookName":"SessionStart:startup","hookEvent":"SessionStart","exitCode":0,"durationMs":120,"command":"[scrubbed]"},"type":"attachment","uuid":"2cf2d4e7-7e72-42e9-922a-76762579501c","timestamp":"2026-10-11T19:02:01.917Z","userType":"external","entrypoint":"cli","cwd":"/work/app","sessionId":"$SESSION","version":"2.1.296","gitBranch":"main"}
 {"type":"file-history-snapshot","messageId":"a6011a31-b5d4-4034-9466-8d0d0b3f8a6c","snapshot":{"messageId":"a6011a31-b5d4-4034-9466-8d0d0b3f8a6c","trackedFileBackups":{},"timestamp":"2026-10-11T19:02:05.817Z"},"isSnapshotUpdate":false}
 {"parentUuid":"2cf2d4e7-7e72-42e9-922a-76762579501c","isSidechain":false,"promptId":"e3c16c39-450a-4b24-864c-3565bf680225","type":"user","message":{"role":"user","content":"Count from 1 to 40, one number to a line, and then reply with exactly one line: COUNTED"},"uuid":"a6011a31-b5d4-4034-9466-8d0d0b3f8a6c","timestamp":"2026-10-11T19:02:05.799Z","permissionMode":"bypassPermissions","origin":{"kind":"human"},"promptSource":"typed","turnOrigin":"human","turnPosition":{"promptIndex":1,"turnIndex":1},"userType":"external","entrypoint":"cli","cwd":"/work/app","sessionId":"$SESSION","version":"2.1.296","gitBranch":"main"}
@@ -22,6 +22,6 @@
 {"type":"mode","mode":"normal","sessionId":"$SESSION"}
 {"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"$SESSION"}
 {"type":"atis-latch","atis":"2bb01393fe0c7041","sessionId":"$SESSION"}
-{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0,"ownerAccountUuid":"[scrubbed]","ownerOrganizationUuid":"[scrubbed]"}
+{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0}
 {"type":"cost-state","sessionId":"$SESSION","totalCostUSD":0,"totalAPIDuration":0,"totalAPIDurationWithoutRetries":0,"totalToolDuration":0,"totalLinesAdded":0,"totalLinesRemoved":0,"totalDuration":5056,"startTime":1791745321186,"modelUsage":{},"hasUnknownModelCost":false}
 {"type":"ai-title","aiTitle":"[scrubbed]","sessionId":"$SESSION"}

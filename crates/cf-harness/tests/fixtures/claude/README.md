@@ -4,13 +4,13 @@ Kept 2026-10-07 by `npm run live:stops -- --case <case> --keep <folder>` (Claude
 Code 2.1.292, the native daemon of the receipt branch, a cheap model; the
 flag that keeps the transcripts is `--transcripts <folder>` now, and `--keep`
 leaves a run's home where it is), then scrubbed with
-`cargo xtask scrub-transcript <transcript> <fixture>` (a Node script made these
-files; the command that replaced it writes the same bytes from the same
-transcript).
+`cargo xtask scrub-transcript <transcript> <fixture>` (a Node script first made
+these files; the current command has since had further privacy fixes).
 Every record stays, in its order; the session id becomes `$SESSION` (a test puts
-its own there), and what is personal or opaque is replaced: folders, the
-branch, account and organization ids, what an attachment carried, request ids,
-thinking signatures. The user's and the assistant's words stay as written.
+its own there); account and organization UUID fields are removed at any depth.
+Other personal or opaque values are replaced: folders, the branch, what an
+attachment carried, request ids, and thinking signatures. The user's and the
+assistant's words stay as written.
 
 - `stopped-before-a-word.jsonl` — `--case early`. The daemon paused the task a
   moment after its brief and pressed Escape; Claude, in the hooks of the

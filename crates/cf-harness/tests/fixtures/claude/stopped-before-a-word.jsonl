@@ -22,5 +22,5 @@
 {"type":"mode","mode":"normal","sessionId":"$SESSION"}
 {"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"$SESSION"}
 {"type":"atis-latch","atis":"45f8c5182ce681e0","sessionId":"$SESSION"}
-{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0,"ownerAccountUuid":"[scrubbed]","ownerOrganizationUuid":"[scrubbed]"}
+{"type":"bridge-session","sessionId":"$SESSION","bridgeSessionId":"[scrubbed]","lastSequenceNum":0}
 {"type":"ai-title","aiTitle":"[scrubbed]","sessionId":"$SESSION"}
