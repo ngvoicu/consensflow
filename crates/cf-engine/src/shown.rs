@@ -253,6 +253,19 @@ impl Shown {
         self.tail.as_deref().unwrap_or_default()
     }
 
+    /// The last nonblank screen row only when the whole screen may be quoted.
+    /// A hint must not reveal even the kind of content on a withheld screen.
+    pub(crate) fn last_quotable_line(&self) -> Option<&str> {
+        let tail = self.tail.as_deref()?;
+        if screen::withheld(tail, self.own_session.as_deref()).is_some() {
+            return None;
+        }
+        tail.iter()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .map(String::as_str)
+    }
+
     /// What the screen showed, for the engine to classify why the window ended: the last
     /// lines of it with a word in them, as the host sent them with their blanks made one, and
     /// nothing done to them ([`Evidence`]). Empty where the host sent no screen.
