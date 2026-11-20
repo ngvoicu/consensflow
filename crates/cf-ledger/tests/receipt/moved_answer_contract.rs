@@ -870,6 +870,87 @@ fn t1803_finding_07_a_current_holding_can_ask_about_its_previous_task() {
 }
 
 #[test]
+fn a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding() {
+    let mut w = world();
+    let (previous, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    w.ledger.accept_task(w.project, previous, "human").unwrap();
+    let current = w.give_to(&session, &[], "Next task").unwrap();
+    w.deliver(current.message.unwrap().id);
+    let question = w.ask(&session, previous, "About the previous task").id;
+    w.deliver(question);
+    assert_eq!(w.state(current.task.number), "waiting");
+    assert_eq!(w.message(question).state, "delivered");
+
+    let waits = w.ledger.waiting_questions(w.project).unwrap();
+    let wait = waits
+        .iter()
+        .find(|wait| wait.id == question)
+        .expect("the question's current holding is still waiting");
+    assert_eq!(wait.held_task, Some(current.task.number));
+}
+
+#[test]
+fn a13_a_cross_task_question_reminder_names_its_held_task() {
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.open("Other worker's task").task.number;
+    let other_brief = w.assign(topic, "diana").message.unwrap().id;
+    w.deliver(other_brief);
+    let question = w.ask(&session, topic, "About the other task").id;
+    w.deliver(question);
+
+    let waits = w.ledger.waiting_questions(w.project).unwrap();
+    let wait = waits.iter().find(|wait| wait.id == question).unwrap();
+    assert_eq!(
+        wait.held_task,
+        Some(held),
+        "Finish must address the asking window's task"
+    );
+}
+
+#[test]
+fn a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder() {
+    use cf_ledger::NewNote;
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.open("Other worker's task").task.number;
+    let other_brief = w.assign(topic, "diana").message.unwrap().id;
+    w.deliver(other_brief);
+    let question = w.ask(&session, topic, "About the other task").id;
+    w.deliver(question);
+    let reminder = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: Some(topic),
+                body: "A reminder".into(),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    w.begin(reminder.id);
+
+    w.ledger
+        .record_finished(w.project, held, "Done", (0, 0))
+        .unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(
+        w.message(reminder.id).state,
+        "cancelled",
+        "an unhanded reminder ends with its question"
+    );
+}
+
+#[test]
 fn t1803_finding_07_a_door_follows_the_holding_not_a_paused_topic() {
     let mut w = world();
     let (_, session, brief) = assigned(&mut w, false);
