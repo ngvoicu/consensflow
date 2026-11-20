@@ -785,8 +785,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
-find = "SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})"
-replace = "SELECT 1 FROM task q WHERE 0 AND q.id = m.task_id AND q.state IN ({finished})"
+find = "SELECT 1 FROM task q WHERE q.id = {waiting_task} AND q.state IN ({finished})"
+replace = "SELECT 1 FROM task q WHERE 0 AND q.id = {waiting_task} AND q.state IN ({finished})"
 
 [[plant]]
 name = "live matrix: field fix out: Claude's 429 refusal is no allowance used up, and the task waiting out its quota fails (dip #3)"
