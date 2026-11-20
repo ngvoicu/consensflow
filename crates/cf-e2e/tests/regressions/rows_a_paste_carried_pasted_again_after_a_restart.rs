@@ -358,6 +358,19 @@ fn until_all_is_given(
         secs(180),
         || {
             let inbox = project.inbox(&kept.worker)?;
+            for answer in ANSWERS {
+                if let Some(message) = inbox.iter().find(|message| {
+                    message["kind"] == "answer"
+                        && message["body"]
+                            .as_str()
+                            .is_some_and(|body| body.contains(answer))
+                }) {
+                    assert_ne!(
+                        message["state"], "cancelled",
+                        "{answer} was withdrawn even though it follows its carrier: {message}"
+                    );
+                }
+            }
             let delivered = |words: &str| {
                 inbox.iter().any(|message| {
                     message["state"] == "delivered"
