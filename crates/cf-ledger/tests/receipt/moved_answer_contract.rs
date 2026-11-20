@@ -1062,6 +1062,15 @@ fn a13_cancelling_a_topic_keeps_the_other_holdings_queued_question() {
     let wait = w.ledger.waiting_questions(w.project).unwrap();
     let wait = wait.iter().find(|wait| wait.id == question).unwrap();
     assert_eq!((wait.task, wait.held_task), (Some(topic), Some(held)));
+    let answer = w.answer(question, "The answer still reaches its window").id;
+    assert_eq!(w.message(answer).task_number, Some(held));
+    assert_eq!(
+        w.ledger
+            .next_delivery_of(w.id(&session), answer)
+            .unwrap()
+            .map(|m| m.id),
+        Some(answer)
+    );
 }
 
 #[test]
@@ -1118,12 +1127,17 @@ fn a13_cancelling_a_topic_keeps_the_other_holdings_queued_reminder() {
         )
         .unwrap()
         .unwrap();
-    assert_eq!(w.message(reminder.id).state, "queued");
+    assert_eq!(w.message(reminder.id).state, "queued", "before topic ends");
 
     w.ledger.cancel_task(w.project, topic, "human").unwrap();
     assert_eq!(w.state(held), "waiting");
     assert_eq!(w.message(question).state, "delivered");
-    assert_eq!(w.message(reminder.id).state, "queued");
+    assert_eq!(
+        w.message(reminder.id).state,
+        "queued",
+        "{:?}",
+        w.message(reminder.id).reason
+    );
     w.begin(reminder.id);
     assert_eq!(
         w.ledger.admit(reminder.id, &[]).unwrap(),
@@ -1307,7 +1321,12 @@ fn a13_ending_an_unreceived_chief_step_releases_another_holdings_reminder() {
             }
         }
         assert_eq!(w.state(held), "waiting");
-        assert_eq!(w.message(reminder.id).state, "queued", "ending={ending}");
+        assert_eq!(
+            w.message(reminder.id).state,
+            "queued",
+            "ending={ending}, reason={:?}",
+            w.message(reminder.id).reason
+        );
         assert_eq!(
             w.ledger
                 .next_delivery_of(w.id("chief"), reminder.id)
