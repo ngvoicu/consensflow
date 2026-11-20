@@ -2186,21 +2186,78 @@ fn t1859_state_returned_answer_after_failure_was_recorded() {
 }
 
 #[test]
-fn t1859_state_paused_question_offers_the_active_commands() {
-    let mut w = world();
-    let (task, session, brief) = assigned(&mut w, false);
-    w.deliver(brief);
-    let question = w.ask(&session, task, "Which dialect?").id;
-    w.deliver(question);
-    w.ledger
-        .pause_task(w.project, task, Some("chief"), None)
-        .unwrap();
-    assert_eq!(w.state(task), "paused");
-    w.ledger.begin_question_engine();
-    w.ledger.close_questions_of_ended_engine().unwrap();
-    let note = t1859_state_notice(&w, question);
-    assert!(note.contains(&format!("cf tell T-{task} \"…\"")), "{note}");
-    assert!(note.contains(&format!("cf task finish T-{task}")), "{note}");
+fn t1859_state_paused_question_offers_resume_only() {
+    for restart in [true, false] {
+        let mut w = world();
+        let (task, session, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        let question = w.ask(&session, task, "Which dialect?").id;
+        w.deliver(question);
+        w.ledger
+            .pause_task(w.project, task, Some("chief"), None)
+            .unwrap();
+        assert_eq!(w.state(task), "paused");
+        t1859_end_paused_window(&mut w, &session, restart);
+        let note = t1859_state_notice(&w, question);
+        assert!(
+            note.contains(&format!("cf task resume T-{task} \"…\"")),
+            "{note}"
+        );
+        assert!(
+            !note.contains("cf tell") && !note.contains("cf task finish"),
+            "{note}"
+        );
+        let resumed = w
+            .ledger
+            .resume_task(w.project, task, Some("chief"), "Use ANSI")
+            .unwrap();
+        assert!(resumed.message.unwrap().body.contains("Use ANSI"));
+    }
+}
+
+#[test]
+fn t1859_state_paused_returned_answer_offers_resume_only() {
+    for restart in [true, false] {
+        let mut w = world();
+        let (task, session, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        let question = w.ask(&session, task, "Which dialect?").id;
+        w.deliver(question);
+        let answer = w.answer(question, "Use ANSI").id;
+        w.ledger
+            .pause_task(w.project, task, Some("chief"), None)
+            .unwrap();
+        assert_eq!(w.state(task), "paused");
+        t1859_end_paused_window(&mut w, &session, restart);
+        assert_eq!(w.message(answer).state, "cancelled");
+        let note = t1859_state_notice(&w, question);
+        assert!(note.contains("Use ANSI"), "{note}");
+        assert!(
+            note.contains(&format!("cf task resume T-{task} \"…\"")),
+            "{note}"
+        );
+        assert!(
+            !note.contains("cf tell") && !note.contains("cf task finish"),
+            "{note}"
+        );
+        let resumed = w
+            .ledger
+            .resume_task(w.project, task, Some("chief"), "Use ANSI")
+            .unwrap();
+        assert!(resumed.message.unwrap().body.contains("Use ANSI"));
+    }
+}
+
+fn t1859_end_paused_window(w: &mut World, session: &str, restart: bool) {
+    if restart {
+        w.ledger.begin_question_engine();
+        w.ledger.close_questions_of_ended_engine().unwrap();
+    } else {
+        w.ledger.set_project_state(w.project, "suspended").unwrap();
+        let window = w.id(session);
+        w.ledger.close_question_window(window, None).unwrap();
+        w.ledger.set_project_state(w.project, "open").unwrap();
+    }
 }
 
 #[test]
@@ -2230,7 +2287,7 @@ fn t1859_state_a_moved_task_does_not_offer_the_old_window_commands() {
 
 #[test]
 fn t1859_state_tell_and_finish_are_accepted_for_active_tasks() {
-    for state in ["working", "waiting", "paused"] {
+    for state in ["working", "waiting"] {
         for tell in [true, false] {
             let mut w = world();
             let (task, session, brief) = assigned(&mut w, false);
@@ -2238,10 +2295,6 @@ fn t1859_state_tell_and_finish_are_accepted_for_active_tasks() {
             if state == "waiting" {
                 let question = w.ask(&session, task, "Please decide").id;
                 w.deliver(question);
-            } else if state == "paused" {
-                w.ledger
-                    .pause_task(w.project, task, Some("chief"), None)
-                    .unwrap();
             }
             assert_eq!(w.state(task), state);
             if tell {

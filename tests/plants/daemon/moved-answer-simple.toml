@@ -756,8 +756,8 @@ meant = "t1859_state_failed_or_queued_question_left_in_an_older_ledger"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_failed_or_queued_question_left_in_an_older_ledger"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "\"working\" | \"waiting\" | \"paused\" => Some(format!("
-replace = "\"queued\" | \"working\" | \"waiting\" | \"paused\" => Some(format!("
+find = "\"working\" | \"waiting\" => Some(format!("
+replace = "\"queued\" | \"working\" | \"waiting\" => Some(format!("
 
 [[plant]]
 name = "T1859: a moved task gets the old window commands"
@@ -770,18 +770,27 @@ replace = "AND 1=1 AND p.left_at IS NULL"
 
 [[plant]]
 name = "T1859: a paused task loses its commands"
-meant = "t1859_state_paused_question_offers_the_active_commands"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_the_active_commands"]]
+meant = "t1859_state_paused_question_offers_resume_only"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_resume_only"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "\"working\" | \"waiting\" | \"paused\" => Some(format!("
-replace = "\"working\" | \"waiting\" => Some(format!("
+find = "\"paused\" => Some(format!(\"Use cf task resume T-{number} \\\"…\\\".\")),"
+replace = "\"paused\" => None,"
 
 [[plant]]
 name = "T1859: a question notice loses its way on"
-meant = "t1859_state_paused_question_offers_the_active_commands"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_the_active_commands"]]
+meant = "t1859_state_paused_question_offers_resume_only"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_resume_only"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
 find = "let way_on = question_way_on(store, question, location)?"
 replace = "let way_on = None::<String>"
+
+[[plant]]
+name = "T1859: a paused returned answer offers tell and finish"
+meant = "t1859_state_paused_returned_answer_offers_resume_only"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_returned_answer_offers_resume_only"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"paused\" => Some(format!(\"Use cf task resume T-{number} \\\"…\\\".\")),"
+replace = "\"paused\" => Some(format!(\"Use cf tell T-{number} \\\"…\\\" or cf task finish T-{number}.\")),"

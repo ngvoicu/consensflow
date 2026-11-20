@@ -664,9 +664,10 @@ fn question_way_on(
         return Ok(None);
     }
     Ok(match state.as_str() {
-        "working" | "waiting" | "paused" => Some(format!(
+        "working" | "waiting" => Some(format!(
             "Use cf tell T-{number} \"…\" or cf task finish T-{number}."
         )),
+        "paused" => Some(format!("Use cf task resume T-{number} \"…\".")),
         "done" => Some(format!("T-{number} is done; review its result.")),
         "failed" => Some(format!("T-{number} failed; review its result.")),
         _ => None,
