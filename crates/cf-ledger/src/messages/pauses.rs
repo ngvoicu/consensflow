@@ -491,12 +491,13 @@ pub(crate) fn leave_pause_notes(
     let [paused, moved] = answer_prefixes(task.number);
     let withdrawn: Vec<String> = store
         .db
-        .prepare(
+        .prepare(&format!(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
          AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? RETURNING body",
-        )?
+         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",
+            crate::waiting_questions::other_holding_sql("message")
+        ))?
         .query_map(
             params![
                 reason,

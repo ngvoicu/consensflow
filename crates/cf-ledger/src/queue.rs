@@ -261,11 +261,12 @@ pub(crate) fn withdraw_result(store: &Store, task: &TaskRow, why: &str) -> Resul
 }
 
 /// A cancelled or failed task's queued messages are never delivered.
-pub(crate) fn drop_queued(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+pub(crate) fn drop_queued(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')
-         AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
+        &format!("UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')
+         AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT {}", crate::waiting_questions::other_holding_sql("message")),
         [task_id],
     )?;
-    Ok(())
+    release_carried(store, task_id)
 }

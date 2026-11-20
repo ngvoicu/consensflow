@@ -13,7 +13,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{release_ready, require_task_state, task_by_id, task_row_by_id};
-use crate::messages::cancel_message;
+use crate::messages::{cancel_message, release_carried};
 use crate::model::{LedgerError, HELD_TASK_STATES};
 use crate::queue::{queue, Queued};
 use crate::store::Store;
@@ -73,10 +73,11 @@ fn on_their_way(
             .collect::<rusqlite::Result<_>>()?)
     };
     Ok((
-        ids(
+        ids(&format!(
             "SELECT id FROM message WHERE task_id = ? AND recipient_id = ?
-               AND state IN ('queued', 'gated') ORDER BY id",
-        )?,
+               AND state IN ('queued', 'gated') AND NOT {} ORDER BY id",
+            crate::waiting_questions::other_holding_sql("message")
+        ))?,
         ids(
             "SELECT id FROM message WHERE task_id = ? AND recipient_id = ?
                AND state = 'delivering' AND kind = 'task' ORDER BY id",
@@ -111,10 +112,14 @@ pub(super) fn finish(
     let chief = store.participant_row(task.requester_id)?;
     let (withdrawn, landing) = on_their_way(store, task, chief.id)?;
     store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ?
-         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated')",
+        &format!(
+            "UPDATE message SET state = 'cancelled', reason = ?
+         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND NOT {}",
+            crate::waiting_questions::other_holding_sql("message")
+        ),
         params![done_before(task, &chief.handle), task.id, chief.id],
     )?;
+    release_carried(store, task.id)?;
     let message_id = queue(
         store,
         project_id,

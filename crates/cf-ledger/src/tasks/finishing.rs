@@ -750,11 +750,15 @@ pub(crate) fn call_off(
         warnings = warnings_queued(store, &task)?;
         let on_their_way = warnings_on_their_way(store, &task)?;
         store.db.execute(
-            "UPDATE message SET state = 'cancelled', reason = ?
+            &format!(
+                "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
          AND id NOT IN (SELECT value FROM json_each(?))
          AND NOT (kind = 'note' AND sender_id IS NULL AND handed_at IS NOT NULL
-                  AND substr(body, 1, length(?)) = ?)",
+                  AND substr(body, 1, length(?)) = ?)
+         AND NOT {}",
+                crate::waiting_questions::other_holding_sql("message")
+            ),
             params![
                 format!("cancelled by @{by}"),
                 task.id,
@@ -763,6 +767,7 @@ pub(crate) fn call_off(
                 format!("T-{} has been working in the background for ", task.number)
             ],
         )?;
+        release_carried(store, task.id)?;
     }
     // A question already delivered to the chief was not among the rows dropped
     // above. Neither it nor its harness door waits once the task is cancelled.

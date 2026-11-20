@@ -31,6 +31,17 @@ fn holding_join() -> String {
     )
 }
 
+/// A tracked question, or its reminder, whose topic is another task. A taskless
+/// or pre-tracking question keeps the older topic-based handling.
+pub(crate) fn other_holding_sql(message: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM question_binding b
+         WHERE b.closed=0 AND b.task_id IS NOT NULL AND b.task_id != {message}.task_id
+           AND (b.question_id={message}.id OR b.question_id=(SELECT qr.question_id
+                FROM question_reminder qr WHERE qr.reminder_id={message}.id)))"
+    )
+}
+
 /// A member's question that reached the chief and still has no answer standing.
 /// A gated question does not reach the chief until it is approved and received;
 /// an answer at the gate stands, even though the member still awaits approval.

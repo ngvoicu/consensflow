@@ -509,17 +509,18 @@ pub(crate) fn kept_through_leaving(
 /// window, which wait for its reopen, which carries them (`fold`), as the words a
 /// delivery given up for good leaves do (the chief's decision on Calliope's P3-4
 /// of T-446).
-pub(crate) fn drop_queued_but_told(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+pub(crate) fn drop_queued_but_told(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
     store.db.execute(
         &format!(
             "UPDATE message SET state = 'cancelled'
              WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})
-               AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
-            told = told("message")
+               AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+               AND NOT {other}",
+            told = told("message"), other = crate::waiting_questions::other_holding_sql("message")
         ),
         [task_id],
     )?;
-    Ok(())
+    super::release_carried(store, task_id)
 }
 
 /// A launch called off before its window opened: its first message, `carrier`,
