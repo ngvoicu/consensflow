@@ -12,7 +12,7 @@
 //! - the session id, which becomes `$SESSION` (a test puts its own there), wherever
 //!   in a record it is written;
 //! - the folder the window ran in (`/work/app`), the git branch (`main`);
-//! - an account's, organization's and bridge's ids;
+//! - account and organization UUID values, at any depth, and the bridge id;
 //! - what an attachment carried (a hook's command and output, the skills, the
 //!   environment, the instructions, the e-mail address of the user): only its type,
 //!   and a hook's name, event, exit code and duration, are kept;
@@ -43,13 +43,6 @@ pub const COMMANDS: &[Command] = &[Command {
 
 /// The folder of the user's, and what stands for it.
 const FOLDER: &str = "/work/app";
-
-/// What names an account or its bridge: the fields that are opaque ids of one.
-const OPAQUE: [&str; 3] = [
-    "bridgeSessionId",
-    "ownerAccountUuid",
-    "ownerOrganizationUuid",
-];
 
 /// What replaces what is taken out.
 const SCRUBBED: &str = "[scrubbed]";
@@ -189,9 +182,7 @@ fn scrubbed(mut record: Map<String, Value>) -> String {
     }
     replace(&mut record, "cwd", json!(FOLDER));
     replace(&mut record, "gitBranch", json!("main"));
-    for name in OPAQUE {
-        replace(&mut record, name, json!(SCRUBBED));
-    }
+    replace(&mut record, "bridgeSessionId", json!(SCRUBBED));
     replace(&mut record, "requestId", json!("req_scrubbed"));
     let kept = record
         .get("attachment")
@@ -218,7 +209,33 @@ fn scrubbed(mut record: Map<String, Value>) -> String {
             *signature = json!(SCRUBBED);
         }
     }
-    Value::Object(record).to_string()
+    let mut record = Value::Object(record);
+    scrub_account_uuids(&mut record);
+    record.to_string()
+}
+
+/// Account and organization UUIDs identify an owner, even inside arrays and objects.
+fn scrub_account_uuids(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for (name, value) in fields {
+                if matches!(name.as_str(), "accountUuid" | "organizationUuid")
+                    || name.ends_with("AccountUuid")
+                    || name.ends_with("OrganizationUuid")
+                {
+                    *value = json!(SCRUBBED);
+                } else {
+                    scrub_account_uuids(value);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for value in items {
+                scrub_account_uuids(value);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Whether JavaScript takes the value for true: what an `if (attachment)` does.
