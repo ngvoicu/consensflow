@@ -1160,6 +1160,47 @@ fn a13_cancelling_a_topic_keeps_legacy_and_idle_question_paths() {
 }
 
 #[test]
+fn a13_finishing_the_chiefs_own_topic_keeps_another_holdings_question_and_reminder() {
+    use cf_ledger::NewNote;
+    for remind in [false, true] {
+        let mut w = world();
+        let (held, session, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        let topic = w.give("chief", "The chief's own subject");
+        w.deliver(topic.message.unwrap().id);
+        let question = w.ask(&session, topic.task.number, "About the subject").id;
+        let protected = if remind {
+            w.deliver(question);
+            w.ledger
+                .remind_question(
+                    w.project,
+                    question,
+                    None,
+                    &NewNote {
+                        from: None,
+                        to: "chief".into(),
+                        task: Some(topic.task.number),
+                        body: "A reminder".into(),
+                    },
+                )
+                .unwrap()
+                .unwrap()
+                .id
+        } else {
+            question
+        };
+        assert_eq!(w.message(protected).state, "queued");
+        let finished = w
+            .ledger
+            .record_finished(w.project, topic.task.number, "Done", (0, 0))
+            .unwrap();
+        assert_eq!(w.state(held), "waiting");
+        assert_eq!(w.message(protected).state, "queued", "remind={remind}");
+        assert!(!finished.withdrawn.iter().any(|m| m.id == protected));
+    }
+}
+
+#[test]
 fn a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder() {
     use cf_ledger::NewNote;
     let mut w = world();
