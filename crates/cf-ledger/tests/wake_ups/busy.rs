@@ -7,7 +7,7 @@
 //! board with nothing on it are the chief's own work. A wake-up skipped is not
 //! owed: the interval counts again from the skip.
 
-use cf_ledger::{NewChief, NewMember, NewProject, NewTask, WakeUpUnit};
+use cf_ledger::{NewChief, NewMember, NewProject, NewQuestion, NewTask, WakeUpUnit};
 
 use crate::world::{gated_world, world, World, DAY, MINUTE};
 
@@ -376,6 +376,46 @@ fn an_answer_the_gate_holds_for_the_human_is_on_its_way_and_holds_the_wake_up_ba
         "the chief has done its part: the answer waits for the human"
     );
     assert_eq!(w.held_by(), [given.task.number]);
+}
+
+#[test]
+fn a_cross_task_answer_at_the_gate_holds_the_waiting_tasks_wake_up_back() {
+    let mut w = gated_world();
+    w.turn_on(1, WakeUpUnit::Minutes);
+    w.advance(MINUTE);
+    w.wake_and_deliver();
+    let subject = w.give_self(&[]);
+    w.start(&subject);
+    w.ledger
+        .record_finished(w.project.id, subject.task.number, "Done", (0, 0))
+        .unwrap();
+    assert_eq!(w.state(subject.task.number), "accepted");
+    let held = w.give(&[]);
+    w.approve(held.message.as_ref().unwrap());
+    w.start(&held);
+    let question = w
+        .ledger
+        .ask(
+            w.project.id,
+            &NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                body: Some("About the chief's step?".to_owned()),
+                task: Some(subject.task.number),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(w.state(held.task.number), "waiting");
+    let answer = w.answer(&question);
+    assert_eq!(answer.state, "gated");
+    assert_eq!(w.state(held.task.number), "waiting");
+    w.advance(DAY);
+    assert!(
+        w.due().is_none(),
+        "the held task waits for the human's gate decision"
+    );
+    assert_eq!(w.held_by(), [held.task.number]);
 }
 
 #[test]
