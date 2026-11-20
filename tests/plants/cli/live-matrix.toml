@@ -64,7 +64,7 @@ matrix-trust-git-init = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test",
 matrix-window-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_window_closed"]
 matrix-tell-queued = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_tell_queued"]
 matrix-failure-reason = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_failure_reason"]
-matrix-switch-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_switch_chief"]
+matrix-switch-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_switch_chief_pretracking"]
 matrix-quota-out = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_matrix", "tests::field_quota_out"]
 # The daemon's API, the tooling's look at it among it.
 matrix-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::tests::"]
@@ -778,8 +778,8 @@ replace = '''            self.failure = Some(String::new());
 '''
 
 [[plant]]
-name = "live matrix: field fix out: the handoff of a switched chief sends it to answer a question the cancel left"
-meant = "field_switch_chief"
+name = "live matrix: field fix out: the handoff of a switched chief sends it to answer a pretracking question the cancel left"
+meant = "field_switch_chief_pretracking"
 runs = ["matrix-switch-chief"]
 builds = true
 

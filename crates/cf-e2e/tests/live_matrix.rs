@@ -17,6 +17,8 @@
 //!
 //! The evidence of a run is under `app/src-tauri/target/live-matrix/<run-id>/`.
 
+#[path = "support/handoff_questions.rs"]
+mod handoff_questions;
 #[path = "support/standin_boot.rs"]
 mod standin_boot;
 const ALLOW_LIVE_MATRIX: bool = true;
@@ -976,6 +978,12 @@ mod tests {
     #[test]
     fn field_switch_chief() {
         holds_but_its_known_reds("field-switch-chief");
+    }
+
+    /// The field's question predates tracking; keep its handoff guard covered too.
+    #[test]
+    fn field_switch_chief_pretracking() -> cf_e2e::Outcome {
+        crate::handoff_questions::cancelled_question_handoff(false)
     }
 
     #[test]
