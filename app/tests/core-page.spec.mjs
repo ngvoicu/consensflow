@@ -19453,3 +19453,38 @@ test('T-1847 shots: the staff screens and the team lane, one look', async ({ pag
   await page.getByRole('button', { name: "Show @diana's 2 sessions" }).click()
   await shot('lane-unfolded', page.locator('tbody[data-group="worker"]'))
 })
+
+// A no-end hold is not a reset, even when its stored date sorts like one.
+test('T1859 both team members held without an end say neither can take a task now', async ({
+  page,
+}) => {
+  const { data } = team({
+    out: { diana: '9999-12-31T23:59:59.998Z', hera: '9999-12-31T23:59:59.999Z' },
+  })
+  await open(page, data)
+  const lane = page.locator('tr[data-handle="diana"]')
+  if (process.env.CF_T1859_SHOTS) {
+    await lane.locator('.row-head').screenshot({ path: `${process.env.CF_T1859_SHOTS}/both.png` })
+  }
+  await expect(lane.locator('.row-status')).toHaveText('Neither can take a task now')
+})
+
+test('T1859 a team with one no-end hold gives the other part reset time in either order', async ({
+  page,
+}) => {
+  const reset = process.env.CF_T1859_RESET ?? fromNow(1.5)
+  for (const indefinite of ['diana', 'hera']) {
+    const other = indefinite === 'diana' ? 'hera' : 'diana'
+    const { data } = team({ out: { [indefinite]: '9999-12-31T23:59:59.999Z', [other]: reset } })
+    await open(page, data)
+    const lane = page.locator('tr[data-handle="diana"]')
+    if (process.env.CF_T1859_SHOTS && indefinite === 'diana') {
+      await lane
+        .locator('.row-head')
+        .screenshot({ path: `${process.env.CF_T1859_SHOTS}/mixed.png` })
+    }
+    await expect(lane.locator('.row-status')).toHaveText(
+      `Neither can take a task until ${await resetWords(page, reset)}`,
+    )
+  }
+})

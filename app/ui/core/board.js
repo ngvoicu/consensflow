@@ -308,7 +308,7 @@ const canWork = ({ participant }, now) =>
  * one that waits for an edit or for the human's word (its account, its moved model).
  */
 const backBy = ({ participant }, now) =>
-  participant.needsEdit || !outOfQuota(participant, now)
+  participant.needsEdit || unavailable(participant) || !outOfQuota(participant, now)
     ? Number.POSITIVE_INFINITY
     : Date.parse(participant.outUntil)
 
