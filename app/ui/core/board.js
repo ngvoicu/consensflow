@@ -1729,6 +1729,8 @@ export class TaskDrawer {
   #fold = null
   /** The session whose window works on the task, if it has one: the terminal it shows. */
   #terminal = null
+  /** The member whose availability may be holding this task. */
+  #waitingMember = null
   /**
    * What the task is, how it stands and what the human may do with it, at the drawer's
    * top however long its story: acting on a task never takes reading down it.
@@ -1768,7 +1770,15 @@ export class TaskDrawer {
    */
   show(
     task,
-    { total, closed = false, now = Date.now(), terminal = null, held = null, backupOf = null },
+    {
+      total,
+      closed = false,
+      now = Date.now(),
+      terminal = null,
+      held = null,
+      backupOf = null,
+      waitingMember = null,
+    },
   ) {
     const same = this.#drawn(task)
     const changed = !this.shows(task)
@@ -1782,15 +1792,17 @@ export class TaskDrawer {
       title,
       button('Close', 'quiet-button', () => this.#actions.onClose(), 'Close the task'),
     )
+    this.#waitingMember = waitingMember
+    const wait = this.#wait(task, now)
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]
     const actions = element('div', 'drawer-actions')
-    if (!closed) actions.append(...this.#taskActions(task))
+    if (!closed) actions.append(...this.#taskActions(task, wait))
     if (actions.childElementCount > 0) top.push(actions)
     const sections = [this.#story(task, same, now)]
     // What its window wrote is read only when asked for, folded until then.
@@ -1813,6 +1825,24 @@ export class TaskDrawer {
       this.#body.scrollTop = 0
     }
     if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
+  }
+
+  /** Why a task waiting for its member cannot run, and whether the member can be tried now. */
+  #wait(task, now) {
+    if (task.state !== 'queued' && !(task.state === 'paused' && task.heldUntil)) return null
+    if (this.#waitingMember === null) return null
+    const { participant, busy } = this.#waitingMember
+    if (participant.needsEdit) return { words: 'its member needs an edit under Project settings' }
+    if (!outOfQuota(participant, now)) return null
+    if (busy) return { words: `its member's model is busy until ${backAt(busy, now)}` }
+    if (modelMoved(participant)) return { words: "its member's model moved", retry: true }
+    if (unavailable(participant)) {
+      return { words: "its member's account is unavailable (login or billing)", retry: true }
+    }
+    return {
+      words: `its member is out of quota until ${backAt(participant.outUntil, now)}`,
+      retry: true,
+    }
   }
 
   /**
@@ -1900,7 +1930,7 @@ export class TaskDrawer {
    * What the human may do with a task: nothing that writes to the agent
    * (that is done in its terminal), and no accepting (that is the chief's).
    */
-  #taskActions(task) {
+  #taskActions(task, wait) {
     // A button kept across redraws acts on the task as it was read last.
     const on = (action) => () => action(this.#task)
     const actions = []
@@ -1921,6 +1951,13 @@ export class TaskDrawer {
     }
     if (task.state === 'paused') {
       actions.push(button('Resume', 'primary-button', on(this.#actions.onResume)))
+    }
+    if (wait?.retry) {
+      actions.push(
+        tryAgain(this.#waitingMember.participant, () =>
+          this.#actions.onTryAgain(this.#waitingMember.participant),
+        ),
+      )
     }
     // Taken from its member and back on the board for its tier; the chief's
     // own work and work given by name have no tier to go back to.
@@ -1965,6 +2002,7 @@ export class TaskDrawer {
     this.#task = null
     this.#fold = null
     this.#terminal = null
+    this.#waitingMember = null
     this.#root.hidden = true
     this.#top.replaceChildren()
     this.#body.replaceChildren()

@@ -2869,6 +2869,131 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
 })
 
+test('a queued task waiting for its held member says why and offers the right actions', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.participant.outUntil = at(-90)
+  lane.pane = null
+  lane.activity = { state: 'closed' }
+  const queued = task(12, 'Wait for its member', 'queued', 'chief', 'zeus', 1, {
+    pool: 'worker',
+    tier: 'standard',
+  })
+  lane.tasks.push(queued)
+  data.tasks['1:12'] = { ...queued, messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="12"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await expect(drawer).toContainText('out of quota until')
+  await expect(drawer.getByRole('button', { name: /^Try @zeus again now/ })).toHaveCount(1)
+  await expect(drawer.getByRole('button', { name: /^Reassign T-12/ })).toHaveCount(1)
+  await drawer.getByRole('button', { name: /^Try @zeus again now/ }).click()
+  await expect.poll(() => calls(page, 'member.back')).toEqual([{ project: 1, participant: 'zeus' }])
+  await drawer.getByRole('button', { name: /^Reassign T-12/ }).click()
+  await expect.poll(() => calls(page, 'task.reassign')).toEqual([{ project: 1, task: 12 }])
+})
+
+for (const example of [
+  {
+    name: 'account',
+    until: '9999-12-31T23:59:59.998Z',
+    words: 'account is unavailable',
+    retry: true,
+  },
+  { name: 'moved model', until: '9999-12-31T23:59:59.999Z', words: 'model moved', retry: true },
+  { name: 'needs an edit', until: null, words: 'needs an edit', edit: true, retry: false },
+  { name: 'busy model', until: at(-30), words: 'model is busy', busy: true, retry: false },
+]) {
+  test(`a queued task explains its member's ${example.name} hold`, async ({ page }) => {
+    const data = model()
+    const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    lane.participant.outUntil = example.until
+    lane.participant.needsEdit = example.edit ?? false
+    if (example.busy) lane.busy = example.until
+    const queued = task(12, 'Wait', 'queued', 'chief', 'zeus', 1, {
+      pool: 'worker',
+      tier: 'standard',
+    })
+    lane.tasks.push(queued)
+    data.tasks['1:12'] = { ...queued, messages: [] }
+    await open(page, data)
+    await page.locator('button.card[data-task="12"]').click()
+    const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+    await expect(drawer).toContainText(example.words)
+    await expect(drawer.getByRole('button', { name: /^Try @zeus again now/ })).toHaveCount(
+      example.retry ? 1 : 0,
+    )
+    await expect(drawer.getByRole('button', { name: /^Reassign T-12/ })).toHaveCount(1)
+  })
+}
+
+test('a quota-held session task tries its member, while a human-paused task has no hold actions', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.participant.outUntil = at(-90)
+  const window = session(20, lane.participant, 'amber-pine')
+  const held = task(12, 'Held', 'paused', 'chief', window.handle, 1, {
+    pool: 'worker',
+    tier: 'standard',
+    heldUntil: lane.participant.outUntil,
+  })
+  const paused = task(13, 'Human paused', 'paused', 'chief', 'zeus', 1, {
+    pool: 'worker',
+    tier: 'standard',
+    heldUntil: null,
+  })
+  lane.tasks.push(paused)
+  data.boards[1].lanes.push({
+    participant: window,
+    tasks: [held],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.tasks['1:12'] = { ...held, messages: [] }
+  data.tasks['1:13'] = { ...paused, messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="13"]').click()
+  const pausedDrawer = page.getByRole('complementary', { name: 'Task T-13' })
+  await expect(pausedDrawer).not.toContainText('out of quota')
+  await expect(pausedDrawer.getByRole('button', { name: /^Try .* again now/ })).toHaveCount(0)
+  await page.locator('button.card[data-task="12"]').click()
+  const heldDrawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await expect(heldDrawer).toContainText('out of quota until')
+  await heldDrawer.getByRole('button', { name: /^Try @zeus again now/ }).click()
+  await expect.poll(() => calls(page, 'member.back')).toEqual([{ project: 1, participant: 'zeus' }])
+})
+
+test('a queued tier task without a window can be reassigned, a named task cannot', async ({
+  page,
+}) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.pane = null
+  const tiered = task(12, 'Queued', 'queued', 'chief', 'zeus', 1, {
+    pool: 'worker',
+    tier: 'standard',
+  })
+  const named = task(13, 'Named', 'queued', 'chief', 'zeus', 1)
+  lane.tasks.push(tiered, named)
+  data.tasks['1:12'] = { ...tiered, messages: [] }
+  data.tasks['1:13'] = { ...named, messages: [] }
+  await open(page, data)
+  await page.locator('button.card[data-task="12"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await drawer.getByRole('button', { name: /^Reassign T-12/ }).click()
+  await expect.poll(() => calls(page, 'task.reassign')).toEqual([{ project: 1, task: 12 }])
+  await page.locator('button.card[data-task="13"]').click()
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Task T-13' })
+      .getByRole('button', { name: /^Reassign/ }),
+  ).toHaveCount(0)
+})
+
 /**
  * T-12 at work for zeus after a long thread: a hundred and twenty steps (a question and its
  * answer, again and again) and what its window wrote, as a task worked for hours reads.

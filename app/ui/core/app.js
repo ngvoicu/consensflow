@@ -279,6 +279,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
       await daemon('task.reassign', { project: task.projectId, task: task.number })
       note(`T-${task.number} is back on the board for another ${poolName(task)}.`)
     }),
+  onTryAgain: (participant) => tryAgain(participant),
   onFinish: (task) =>
     act(async () => {
       const { jobs = 0, agents = 0 } = await daemon('task.finish', {
@@ -426,6 +427,7 @@ async function openTask(project, number) {
     terminal: terminalOf(task),
     held: heldOf(task),
     backupOf: backupOf(task),
+    waitingMember: waitingMemberOf(task),
   })
 }
 
@@ -437,6 +439,17 @@ async function openTask(project, number) {
 function heldOf(task) {
   const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
   return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null
+}
+
+/** The member whose availability can hold this task, including a session's owner. */
+function waitingMemberOf(task) {
+  const lanes = state.board?.lanes ?? []
+  const assignee = lanes.find((lane) => lane.participant.handle === task.assignee)
+  if (assignee === undefined) return null
+  const handle = assignee.participant.member ?? assignee.participant.handle
+  const owner = lanes.find((lane) => lane.participant.handle === handle)
+  if (owner === undefined || ['chief', 'human'].includes(owner.participant.role)) return null
+  return { participant: owner.participant, busy: owner.busy ?? null }
 }
 
 /**
@@ -495,6 +508,7 @@ async function rereadTask() {
       terminal: terminalOf(task),
       held: heldOf(task),
       backupOf: backupOf(task),
+      waitingMember: waitingMemberOf(task),
     })
   } catch (cause) {
     closeTask()
