@@ -95,8 +95,32 @@ fn handoff_after_a_switch(rig: &Rig, project: &Project) -> Result<String, Box<dy
 #[test]
 fn a_question_whose_answer_a_cancel_took_back_is_not_in_the_handoff_of_a_switched_chief() -> Outcome
 {
+    cancelled_question_handoff(false)
+}
+
+#[test]
+fn a_tracked_question_whose_answer_a_cancel_returned_is_not_in_the_switched_chiefs_handoff(
+) -> Outcome {
+    cancelled_question_handoff(true)
+}
+
+/// The field question was recorded before holding tracking. Exercise that path
+/// and the current tracked path with the same handoff assertions.
+fn cancelled_question_handoff(tracked: bool) -> Outcome {
     let rig = Rig::start(config())?;
     let (project, question, session) = asked(&rig)?;
+    if !tracked {
+        let db = rusqlite::Connection::open(rig.home().join("consensflow.db"))?;
+        db.busy_timeout(secs(5))?;
+        assert_eq!(
+            db.execute(
+                "DELETE FROM question_binding WHERE question_id = ?",
+                [question]
+            )?,
+            1,
+            "the delivered question becomes a pretracking fixture"
+        );
+    }
     let chief = windows_of(&rig, &project)
         .into_iter()
         .next()
@@ -127,8 +151,8 @@ fn a_question_whose_answer_a_cancel_took_back_is_not_in_the_handoff_of_a_switche
     let cancelled = rig.cf_in_window(&chief, ["task", "cancel", "T-1"])?;
     assert_eq!(cancelled.code, Some(0), "{cancelled}");
 
-    // The shape of the field (m-2486, m-2487): the question was delivered and stays so;
-    // its answer reads `cancelled`, and its task is cancelled.
+    // The old question remains delivered; a tracked question is withdrawn and
+    // its unreceived answer returned. The answer and task are cancelled in both.
     let answer = project
         .inbox(&session)?
         .into_iter()
@@ -144,7 +168,26 @@ fn a_question_whose_answer_a_cancel_took_back_is_not_in_the_handoff_of_a_switche
         .into_iter()
         .find(|m| m["id"] == question)
         .unwrap_or(Value::Null);
-    assert_eq!(asked["state"], "delivered", "{asked}");
+    assert_eq!(
+        asked["state"],
+        if tracked { "cancelled" } else { "delivered" },
+        "{asked}"
+    );
+    let returned = project
+        .inbox("chief")?
+        .into_iter()
+        .filter(|m| {
+            m["kind"] == "note"
+                && m["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains("Use the new grammar"))
+        })
+        .count();
+    assert_eq!(
+        returned,
+        usize::from(tracked),
+        "the tracked answer returns once"
+    );
 
     let handoff = handoff_after_a_switch(&rig, &project)?;
     assert!(
