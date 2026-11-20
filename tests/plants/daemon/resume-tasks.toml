@@ -771,7 +771,7 @@ runs = ["harness-admission"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/channel/send.rs"
-find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.admits() {"
+find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.hand_over_to_broker() {"
 replace = "    if false {"
 
 [[plant]]
