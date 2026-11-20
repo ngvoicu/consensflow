@@ -87,6 +87,12 @@ pub(crate) fn chief_open_work(
     let chief = store.participant_by_handle(project_id, "chief")?;
     let finished = sql_list(&FINISHED_TASK_STATES);
     let standing_answer = has_standing_answer("m");
+    // A tracked question follows the task its window holds. A taskless window
+    // and an old, untracked question keep the earlier subject-task rule.
+    let waiting_task = format!(
+        "COALESCE({}, m.task_id)",
+        crate::holding::task_for_question_sql("m")
+    );
     let questions = store
         .db
         .prepare(&format!(
@@ -95,7 +101,7 @@ pub(crate) fn chief_open_work(
            AND m.state NOT IN ('gated', 'cancelled')
            AND NOT {standing_answer}
            AND NOT EXISTS (
-             SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})
+             SELECT 1 FROM task q WHERE q.id = {waiting_task} AND q.state IN ({finished})
            )
          ORDER BY m.id"
         ))?
