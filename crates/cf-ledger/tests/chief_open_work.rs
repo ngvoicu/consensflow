@@ -438,3 +438,36 @@ fn a_question_on_a_task_that_is_done_but_not_accepted_still_takes_its_answer() {
     assert!(answer > question);
     ledger.close().expect("the file is given up");
 }
+
+#[test]
+fn a_pretracking_question_on_a_cancelled_task_is_not_open() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    let answer = answered(&mut ledger, project, question);
+    assert_eq!(
+        ledger
+            .sqlite()
+            .execute(
+                "DELETE FROM question_binding WHERE question_id = ?",
+                [question]
+            )
+            .expect("make the question pretracking"),
+        1
+    );
+    ledger
+        .cancel_task(project, 1, "chief")
+        .expect("T-1 cancels");
+    assert_eq!(ledger.message(answer).unwrap().unwrap().state, "cancelled");
+    assert_eq!(
+        ledger.message(question).unwrap().unwrap().state,
+        "delivered"
+    );
+    assert_eq!(
+        open(&ledger, project),
+        [] as [i64; 0],
+        "a historical question on a cancelled task does not enter the handoff"
+    );
+    ledger.close().expect("the file is given up");
+}

@@ -35,7 +35,7 @@ handoff-rig-waiting = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "
 
 [[plant]]
 name = "handoff questions: a question on a task that is over is listed, whatever became of its answer"
-meant = "a_question_on_a_task_cancelled_after_its_answer_is_not_open"
+meant = "a_pretracking_question_on_a_cancelled_task_is_not_open"
 runs = ["handoff-open-work"]
 
 [[plant.edit]]
