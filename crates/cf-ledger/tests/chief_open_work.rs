@@ -471,3 +471,35 @@ fn a_pretracking_question_on_a_cancelled_task_is_not_open() {
     );
     ledger.close().expect("the file is given up");
 }
+
+#[test]
+fn a_pretracking_question_on_a_failed_task_is_not_open() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    assert_eq!(
+        ledger
+            .sqlite()
+            .execute(
+                "DELETE FROM question_binding WHERE question_id = ?",
+                [question]
+            )
+            .expect("make the question pretracking"),
+        1
+    );
+    ledger
+        .fail_task(project, 1, "its window died")
+        .expect("T-1 fails");
+    assert_eq!(
+        ledger.message(question).unwrap().unwrap().state,
+        "delivered",
+        "a historical question keeps its earlier state"
+    );
+    assert_eq!(
+        open(&ledger, project),
+        [] as [i64; 0],
+        "a historical question on a failed task does not enter the handoff"
+    );
+    ledger.close().expect("the file is given up");
+}
