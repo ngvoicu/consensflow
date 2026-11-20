@@ -27,6 +27,7 @@
 
 [run]
 handoff-open-work = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_open_work"]
+handoff-holding = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a13_handoff_"]
 handoff-receipt-open = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "open_questions::"]
 handoff-receipt-doors = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "doors::an_acceptance"]
 handoff-rig-cancelled = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task::a_question_whose_answer"]
@@ -39,8 +40,8 @@ runs = ["handoff-open-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
-find = "SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})"
-replace = "SELECT 1 FROM task q WHERE 0 AND q.id = m.task_id AND q.state IN ({finished})"
+find = "SELECT 1 FROM task q WHERE q.id = {waiting_task} AND q.state IN ({finished})"
+replace = "SELECT 1 FROM task q WHERE 0 AND q.id = {waiting_task} AND q.state IN ({finished})"
 
 [[plant]]
 name = "handoff questions: the same, and the handoff of a switched chief sends it to answer a question the cancel left (the field's shape)"
@@ -50,8 +51,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
-find = "SELECT 1 FROM task q WHERE q.id = m.task_id AND q.state IN ({finished})"
-replace = "SELECT 1 FROM task q WHERE 0 AND q.id = m.task_id AND q.state IN ({finished})"
+find = "SELECT 1 FROM task q WHERE q.id = {waiting_task} AND q.state IN ({finished})"
+replace = "SELECT 1 FROM task q WHERE 0 AND q.id = {waiting_task} AND q.state IN ({finished})"
 
 [[plant]]
 name = "handoff questions: a question on an accepted task is listed"
@@ -226,3 +227,25 @@ runs = ["daemon-lib-routes-door"]
 file = "crates/cf-daemon/src/api/routes/door.rs"
 find = "    let state = task.map(|task| task.state.as_str());"
 replace = "    let state = task.map(|task| if task.state == \"accepted\" && task.paused_at.is_some() { \"paused\" } else { task.state.as_str() });"
+
+# A tracked question is listed for the task its window holds; old and taskless
+# questions retain the earlier subject-based handoff rule.
+[[plant]]
+name = "handoff questions: a tracked question follows its subject instead of its holding"
+meant = "a13_handoff_keeps_a_tracked_question_whose_subject_is_accepted_but_holding_waits"
+runs = ["handoff-holding"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = 'crate::holding::task_for_question_sql("m")'
+replace = '"m.task_id"'
+
+[[plant]]
+name = "handoff questions: a taskless window loses its subject fallback"
+meant = "a13_handoff_keeps_the_subject_rule_for_a_taskless_window"
+runs = ["handoff-holding"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '"COALESCE({}, m.task_id)",'
+replace = '"{}",'
