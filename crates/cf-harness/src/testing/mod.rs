@@ -29,7 +29,7 @@ use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 use serde_json::Value;
 
-use crate::contract::{HostError, PaneHost, Records, Work};
+use crate::contract::{HostError, Pane, PaneHost, Records, Work};
 use crate::records::{self, Boundary, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
@@ -468,6 +468,9 @@ pub struct ScriptedHost {
     held: RefCell<VecDeque<HeldRequest>>,
     refusing: Cell<bool>,
     admissions: Cell<usize>,
+    broker_handovers: Cell<usize>,
+    broker_failures: Cell<usize>,
+    pub reports: Cell<usize>,
 }
 
 /// A request held: its operation, the work it belongs to, and where its
@@ -487,6 +490,14 @@ impl ScriptedHost {
     /// How often the host was asked whether it admits a hand-over.
     pub fn admissions(&self) -> usize {
         self.admissions.get()
+    }
+
+    pub fn broker_handovers(&self) -> usize {
+        self.broker_handovers.get()
+    }
+
+    pub fn broker_failures(&self) -> usize {
+        self.broker_failures.get()
     }
 
     /// Scripts the next answers to `op`, after those scripted already.
@@ -587,6 +598,19 @@ impl PaneHost for ScriptedHost {
         self.admissions.set(self.admissions.get() + 1);
         !self.refusing.get()
     }
+
+    fn hand_over_to_broker(&self) -> bool {
+        self.broker_handovers.set(self.broker_handovers.get() + 1);
+        self.admits()
+    }
+
+    fn broker_send_failed(&self) {
+        self.broker_failures.set(self.broker_failures.get() + 1);
+    }
+
+    fn delivery_reported(&self, _pane: &Pane) {
+        self.reports.set(self.reports.get() + 1);
+    }
 }
 
 /// A pane host that answers each request as `answer` says, at once, and
@@ -594,6 +618,10 @@ impl PaneHost for ScriptedHost {
 pub struct AnsweringHost<F> {
     answer: F,
     pub asked: RefCell<Vec<(String, Value)>>,
+    pub reports: Cell<usize>,
+    pub handovers: Cell<usize>,
+    pub send_failures: Cell<usize>,
+    pub send_unknowns: Cell<usize>,
 }
 
 impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
@@ -601,6 +629,10 @@ impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
         Self {
             answer,
             asked: RefCell::new(Vec::new()),
+            reports: Cell::new(0),
+            handovers: Cell::new(0),
+            send_failures: Cell::new(0),
+            send_unknowns: Cell::new(0),
         }
     }
 }
@@ -610,6 +642,21 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
         self.asked.borrow_mut().push((op.to_owned(), body));
         let answer = (self.answer)(op);
         Box::pin(async move { answer })
+    }
+
+    fn delivery_reported(&self, _pane: &Pane) {
+        self.reports.set(self.reports.get() + 1);
+    }
+
+    fn hand_over_to_broker(&self) -> bool {
+        self.handovers.set(self.handovers.get() + 1);
+        true
+    }
+    fn broker_send_failed(&self) {
+        self.send_failures.set(self.send_failures.get() + 1);
+    }
+    fn send_admission_unknown(&self) {
+        self.send_unknowns.set(self.send_unknowns.get() + 1);
     }
 }
 

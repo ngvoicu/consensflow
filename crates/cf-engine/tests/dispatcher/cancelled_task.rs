@@ -44,6 +44,31 @@ fn stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
     let session = tiers.assignee(1);
+    let session_id = tiers.id(&session);
+    let first_start = context
+        .credentials
+        .question_starts
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == session_id)
+        .unwrap()
+        .1;
+    assert_eq!(first_start.task_in_hand, Some(tiers.task(1).task.id));
+    assert!(
+        first_start.launch_brief.is_some(),
+        "the first brief is passed in the launch"
+    );
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .question_holding(session_id)
+            .unwrap()
+            .unwrap()
+            .task_id,
+        tiers.task(1).task.id
+    );
     let native = native_of(&context, tiers.id(&session));
     let pane = context.host.last("zeus").unwrap().pane;
     let begun = context.recorder.events().len();
@@ -80,6 +105,17 @@ fn stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_
     let kept = tiers.participant(&session).unwrap();
     assert_eq!(kept.left_at, None, "the session stays on the board");
     context.open_window(project, &session).unwrap();
+    let reopened_start = context
+        .credentials
+        .question_starts
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == session_id)
+        .unwrap()
+        .1;
+    assert_eq!(reopened_start.task_in_hand, None);
+    assert!(reopened_start.last_brief.is_some());
     let reopened = context.adapter.prepared().pop().unwrap();
     assert_eq!(
         [

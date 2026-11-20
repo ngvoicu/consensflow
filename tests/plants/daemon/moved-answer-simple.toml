@@ -1,0 +1,571 @@
+# T-1813: the holding, its end, and delivery across physical windows.
+
+[[plant]]
+name = "moved answer simple: a question forgets its window's held task"
+meant = "t1803_finding_07_a_question_about_another_task_follows_the_asking_windows_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_question_about_another_task_follows_the_asking_windows_holding"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            (Some(h.task_id), Some(h.first_brief))"
+replace = "            (None::<i64>, None::<i64>)"
+
+[[plant]]
+name = "moved answer simple: a queued brief is mistaken for a previous holding"
+meant = "t1813_a_queued_brief_that_moved_never_makes_the_idle_window_its_former_holder"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_a_queued_brief_that_moved_never_makes_the_idle_window_its_former_holder"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                let holding = crate::holding::of(store, asker.id)?;"
+replace = '''                let holding = crate::holding::of(store, asker.id)?;
+                if !question.urgent && holding.is_none()
+                    && store.db.prepare("SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'task' LIMIT 1")?.exists(params![row.id, asker.id])?
+                {
+                    return Err(LedgerError::refused_with("question-moved", "a queued brief is mistaken for a handover", 409));
+                }'''
+
+[[plant]]
+name = "moved answer simple: a prior topic leaves the current task working"
+meant = "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                    .then_some(h),"
+replace = "                    .then_some(h).filter(|_| false),"
+
+[[plant]]
+name = "moved answer simple: a door follows its topic instead of the holding"
+meant = "t1803_finding_07_a_door_follows_the_holding_not_a_paused_topic"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_door_follows_the_holding_not_a_paused_topic"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        let task = crate::holding::binding_task(store, question_id)?.unwrap_or(task);"
+replace = "        let task = task;"
+
+[[plant]]
+name = "moved answer simple: a question waits on its topic instead of the holding"
+meant = "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''             WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0'''
+replace = '''             WHERE q.task_id = ?1 AND {} IS NOT NULL AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0'''
+
+[[plant]]
+name = "moved answer simple: accepting the topic cancels a different holding's gated question"
+meant = "t1803_finding_07_accepting_a_topic_keeps_another_holdings_question_at_the_gate"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_topic_keeps_another_holdings_question_at_the_gate"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))",'''
+replace = '''         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",'''
+
+[[plant]]
+name = "moved answer simple: removal loses the queued answer"
+meant = "t1800_finding_03_and_t1803_finding_03_removal_returns_approved_answer_to_chief_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1800_finding_03_and_t1803_finding_03_removal_returns_approved_answer_to_chief_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            return_answer(store, answer, location)?;"
+replace = "            let _ = (answer, location);"
+
+[[plant]]
+name = "moved answer simple: a foreign window can receive a question's answer"
+meant = "t1800_finding_07_a_foreign_window_binding_cannot_receive_an_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1800_finding_07_a_foreign_window_binding_cannot_receive_an_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = '''            if !valid {
+                return Err(LedgerError::refused_with(
+                    "question-conflict",
+                    "the question's project, task or window records disagree; no answer was moved",'''
+replace = '''            if false && !valid {
+                return Err(LedgerError::refused_with(
+                    "question-conflict",
+                    "the question's project, task or window records disagree; no answer was moved",'''
+
+[[plant]]
+name = "moved answer simple: an ended holding passes the approval gate"
+meant = "t1803_finding_02_gated_answer_waits_for_approval_after_acceptance"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_02_gated_answer_waits_for_approval_after_acceptance"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = "                if crate::holding::question_is_live(store, question)? == Some(false) {"
+replace = "                if false && crate::holding::question_is_live(store, question)? == Some(false) {"
+
+[[plant]]
+name = "moved answer simple: an idle window's answer cannot be delivered"
+meant = "t1803_finding_06_taskless_plain_answer_is_dispatchable"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_06_taskless_plain_answer_is_dispatchable"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = " OR (m.kind = 'answer' AND m.task_id IS NULL\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) OR m.task_id IN ("
+replace = " OR m.task_id IN ("
+
+[[plant]]
+name = "moved answer simple: window exit strands an idle answer"
+meant = "t1813_an_idle_window_exit_returns_its_taskless_answer_to_the_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_an_idle_window_exit_returns_its_taskless_answer_to_the_chief"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(
+            record.id,
+            delivering.as_ref().map(|delivery| delivery.message),
+        )?;'''
+replace = "        let deferred_answers = Vec::new();"
+
+[[plant]]
+name = "moved answer simple: a queued brief becomes a handover"
+meant = "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if !reported
+            && matches!(outcome, Admission::Admitted { queued: false })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(message.id)?;'''
+replace = '''        if !reported
+            && matches!(outcome, Admission::Admitted { .. })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(message.id)?;'''
+
+[[plant]]
+name = "moved answer simple: project resume forgets the held task"
+meant = "t1813_project_resume_reopens_the_same_conversation_for_new_questions"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_project_resume_reopens_the_same_conversation_for_new_questions"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    .resume_question_holding(participant.id, number)?;'''
+replace = '''                    .question_holding(participant.id)?;'''
+
+[[plant]]
+name = "moved answer simple: an early launch question loses its first brief"
+meant = "t1813_a_window_started_with_its_brief_can_ask_before_the_host_answers_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_window_started_with_its_brief_can_ask_before_the_host_answers_open"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                                                ledger.question_brief_handed_over(brief)?;"
+replace = "                                                let _ = brief;"
+
+[[plant]]
+name = "moved answer simple: an early resume question loses its holding"
+meant = "t1813_a_resumed_window_can_ask_before_the_host_answers_its_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_resumed_window_can_ask_before_the_host_answers_its_open"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        ledger.resume_question_holding(participant.id, held.task_number)?;"
+replace = "                        let _ = held.task_number;"
+
+[[plant]]
+name = "moved answer simple: a delayed enter shortens the delivery retry grace"
+meant = "t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace"
+runs = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace"]]
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                state.pasted = Some(self.clock.now());"
+replace = "                state.pasted = Some(self.clock.now() - std::time::Duration::from_millis(25));"
+
+[[plant]]
+name = "moved answer simple: Pi's take is not reported"
+meant = "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "                target.host.delivery_reported(target.pane);"
+replace = "                let _ = target;"
+
+[[plant]]
+name = "moved answer simple: Codex confirmation is not reported"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        target.host.delivery_reported(target.pane);"
+replace = "        let _ = target;"
+
+[[plant]]
+name = "moved answer simple: a reported brief does not change the holding"
+meant = "t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .question_brief_reported(message)?;"
+replace = "                .message(message)?;"
+
+[[plant]]
+name = "moved answer simple: an old report replaces a later holding"
+meant = "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if !record.delivery.borrow().brief_report.as_ref().is_some_and("
+replace = "        if false && !record.delivery.borrow().brief_report.as_ref().is_some_and("
+
+[[plant]]
+name = "moved answer simple: an ended reported brief becomes an idle window"
+meant = "t1813_a_brief_reported_after_cancellation_refuses_the_window_with_the_task_location"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_brief_reported_after_cancellation_refuses_the_window_with_the_task_location"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = '''        self.store
+            .write(|store| crate::holding::reported_brief(store, message_id))'''
+replace = "        self.question_brief_handed_over(message_id)"
+
+[[plant]]
+name = "moved answer simple: a pane send starts without recording its holding"
+meant = "t1813_the_pane_holding_changes_when_the_daemon_issues_the_brief_write"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_the_pane_holding_changes_when_the_daemon_issues_the_brief_write"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    let started = self
+                        .dispatcher
+                        .seams
+                        .ledger
+                        .borrow_mut()
+                        .question_brief_handed_over(self.message);'''
+replace = '''                    let started = Ok::<(), cf_ledger::LedgerError>(());'''
+
+[[plant]]
+name = "moved answer simple: a refused pane send leaves the question on the new task"
+meant = "t1813_a_pane_refusal_rebinds_the_question_asked_during_the_write"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_a_pane_refusal_rebinds_the_question_asked_during_the_write"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                        Some(ledger.question_brief_refused(self.message))"
+replace = "                        Some(Ok(()))"
+
+[[plant]]
+name = "moved answer simple: a real broker send does not record its handover"
+meant = "t1813_system_codex_broker_handover_precedes_the_request_and_reply"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_system_codex_broker_handover_precedes_the_request_and_reply"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/loopback.rs"
+find = "            let reply = net::send(request, &|| host.hand_over_to_broker()).await?;"
+replace = "            let reply = net::send(request, &|| host.admits()).await?;"
+
+[[plant]]
+name = "moved answer simple: a broker refusal does not retract the handover"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        target.host.broker_send_failed();"
+replace = "        let _ = target;"
+
+[[plant]]
+name = "moved answer simple: approval closes a question while the brief may be refused"
+meant = "t1813_approval_during_a_brief_send_waits_for_its_result"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_approval_during_a_brief_send_waits_for_its_result"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '''                if crate::holding::awaiting_handover(store, question)? {
+                    return known_message(store, message_id);
+                }
+'''
+replace = ""
+
+[[plant]]
+name = "moved answer simple: a successful new brief leaves the previous answer open"
+meant = "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "pub(crate) fn confirm_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    close_previous(store, brief, None)?;"
+replace = "pub(crate) fn confirm_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    let _ = brief;"
+
+[[plant]]
+name = "moved answer simple: an uncertain pane reply retracts a possibly received brief"
+meant = "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                    _ => Some(ledger.question_brief_uncertain(self.message)),"
+replace = "                    _ => Some(ledger.question_brief_refused(self.message)),"
+
+[[plant]]
+name = "moved answer simple: an uncertain broker reply retracts a possibly received brief"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "    } else if answer.admitted == Some(false) {"
+replace = "    } else if answer.admitted != Some(true) {"
+
+[[plant]]
+name = "round2 moved answer: request snapshot is replaced before response"
+meant = "t1823_finding_01_request_authenticated_while_idle_keeps_its_session_binding"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_01_request_authenticated_while_idle_keeps_its_session_binding"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "            placed.task = selected.map(|h| h.task_number);"
+replace = "            placed.task = crate::holding::of(store, window)?.map(|h| h.task_number);"
+
+[[plant]]
+name = "round2 moved answer: uncertain send leaves previous answers silent"
+meant = "t1823_finding_03_unknown_admission_closes_previous_answers_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_03_unknown_admission_closes_previous_answers_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "pub(crate) fn uncertain_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    close_previous(store, brief, None)?;"
+replace = "pub(crate) fn uncertain_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {\n    let _ = brief;"
+
+[[plant]]
+name = "round2 moved answer: unknown send is wrongly retracted on retry"
+meant = "t1823_finding_03_unknown_admission_closes_previous_answers_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_03_unknown_admission_closes_previous_answers_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if !unknown {\n        retract_brief(store, brief)?;\n    }"
+replace = "    if unknown || !unknown {\n        retract_brief(store, brief)?;\n    }"
+
+[[plant]]
+name = "round2 moved answer: last failed send does not restore its prior holding"
+meant = "t1823_finding_04_after_final_send_failure_the_prior_holding_can_still_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_04_after_final_send_failure_the_prior_holding_can_still_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            crate::holding::give_up_brief(store, message_id)?;"
+replace = "            let _ = message_id;"
+
+[[plant]]
+name = "round2 moved answer: native door releases during provisional send"
+meant = "t1823_finding_05_a_provisional_native_door_does_not_give_words_to_a_window_whose_send_fails"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_05_a_provisional_native_door_does_not_give_words_to_a_window_whose_send_fails"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            || crate::holding::provisional_question(store, question_id)?) {"
+replace = "            || false) {"
+
+[[plant]]
+name = "round2 moved answer: last answer attempt loses the chief notice"
+meant = "t1823_finding_06_window_ends_on_last_answer_attempt_returns_words_to_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_06_window_ends_on_last_answer_attempt_returns_words_to_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "a.state IN ('queued', 'delivering', 'failed')"
+replace = "a.state IN ('queued', 'delivering')"
+
+[[plant]]
+name = "round2 moved answer: alpha10 resume has no new holding"
+meant = "t1823_finding_07_project_resume_after_real_alpha10_upgrade_binds_new_questions"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_07_project_resume_after_real_alpha10_upgrade_binds_new_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state IN ('working', 'waiting')"
+replace = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state = 'failed'"
+
+[[plant]]
+name = "round2 moved answer: pi publishes without recording handover"
+meant = "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "&& !target.host.hand_over_to_broker()"
+replace = "&& !target.host.admits()"
+
+[[plant]]
+name = "round2 moved answer: a refused request follows a later third task"
+meant = "t1823_finding_01_refused_send_request_never_follows_a_later_third_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_01_refused_send_request_never_follows_a_later_third_task"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "                            if h.active && h.task_id == task && h.first_brief == first\n                                && crate::holding::matches(store, window, Some(task), Some(first))? => Some(h),"
+replace = "                            if h.active => Some(h),"
+
+
+[[plant]]
+name = "round3 legacy: unbound answer cannot enter the delivery queue"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND m.carried_by IS NULL AND m.claimed_at IS NULL\n"
+replace = "         AND m.carried_by IS NULL AND m.claimed_at IS NULL\n         AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to))\n"
+
+[[plant]]
+name = "round3 legacy: unbound answers vanish from inbox"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "        let mut hidden = Vec::new();\n        for (answer, question, state, _) in candidates {"
+replace = "        let mut hidden: Vec<i64> = self.store.db.prepare(\n            \"SELECT a.id FROM message a JOIN message q ON q.id = a.reply_to\n             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'\n               AND NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\"\n        )?.query_map(rusqlite::params![project, reader], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;\n        for (answer, question, state, _) in candidates {"
+
+[[plant]]
+name = "round3 legacy: unbound answer cannot be admitted"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "    let Some(question) = message.reply_to else {\n        return Ok(false);\n    };\n    if crate::holding::awaiting_handover(store, question)? {"
+replace = "    let Some(question) = message.reply_to else {\n        return Ok(false);\n    };\n    if crate::holding::binding_task(store, question)?.is_none() {\n        return Ok(true);\n    }\n    if crate::holding::awaiting_handover(store, question)? {"
+
+[[plant]]
+name = "round3 legacy: in-flight unbound answer cannot be confirmed"
+meant = "t1827_finding_15_a_receipted_old_answer_does_not_block_project_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_15_a_receipted_old_answer_does_not_block_project_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        let message = require_message(store, message_id, \"delivering\")?;\n        let at = store.at();"
+replace = "        let message = require_message(store, message_id, \"delivering\")?;\n        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::binding_task(store, question)?.is_none() {\n                    return Ok(message);\n                }\n            }\n        }\n        let at = store.at();"
+
+[[plant]]
+name = "round3 legacy: native door closes an unbound question"
+meant = "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?"
+replace = "        if crate::holding::binding_task(store, question_id)?.is_none() {\n            return Ok(Claim::Closed);\n        }\n        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?"
+
+[[plant]]
+name = "round3 legacy: native door cannot receipt an unbound answer"
+meant = "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if let Some(question) = answer.reply_to {\n            if crate::holding::question_is_live(store, question)? == Some(false)"
+replace = "        if let Some(question) = answer.reply_to {\n            if crate::holding::binding_task(store, question)?.is_none() {\n                return Err(LedgerError::refused_with(\"door-closed\", \"legacy answer blocked\", 409));\n            }\n            if crate::holding::question_is_live(store, question)? == Some(false)"
+
+[[plant]]
+name = "round3 legacy: inbox read does not receipt an unbound answer"
+meant = "an_old_answer_read_in_the_inbox_is_receipted_on_the_old_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_read_in_the_inbox_is_receipted_on_the_old_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            let role = says_a_role(store, message.id)?;\n            if via == Read::Inbox && role {"
+replace = "            if message.kind == \"answer\" {\n                if let Some(question) = message.reply_to {\n                    if crate::holding::binding_task(store, question)?.is_none() {\n                        continue;\n                    }\n                }\n            }\n            let role = says_a_role(store, message.id)?;\n            if via == Read::Inbox && role {"
+
+[[plant]]
+name = "round3 legacy: old queued answer is left out of resumed carrier"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "     AND kind IN ('task', 'answer', 'note') AND state = 'queued'\";"
+replace = "     AND kind IN ('task', 'answer', 'note') AND state = 'queued'\n     AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to))\";"
+
+[[plant]]
+name = "round3 legacy: old carried answer is left out of paste"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "            \"{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued' ORDER BY m.id\""
+replace = "            \"{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued'\n             AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) ORDER BY m.id\""
+
+[[plant]]
+name = "round3 legacy: old unreceipted read is left behind on resume"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "           AND state = 'read' AND receipt IS NULL AND created_at >= ?3 ORDER BY id\","
+replace = "           AND state = 'read' AND receipt IS NULL AND created_at >= ?3\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to) ORDER BY id\","
+
+[[plant]]
+name = "round3 legacy: new answer to old question cannot join its waiting carrier"
+meant = "a_new_answer_to_an_old_question_joins_a_waiting_carrier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_new_answer_to_an_old_question_joins_a_waiting_carrier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {\n    let adopted:"
+replace = "pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {\n    if let Some(message) = store.message(id)? {\n        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::binding_task(store, question)?.is_none() {\n                    return Ok(());\n                }\n            }\n        }\n    }\n    let adopted:"
+
+[[plant]]
+name = "round3 legacy: old queued answer is not confirmed with its carrier"
+meant = "a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         WHERE carried_by = ? AND state = 'queued'\","
+replace = "         WHERE carried_by = ? AND state = 'queued'\n           AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to))\","
+
+[[plant]]
+name = "round3 legacy: old handed cancelled answer is not confirmed with its carrier"
+meant = "an_old_cancelled_answer_handed_with_a_carrier_is_settled_with_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_cancelled_answer_handed_with_a_carrier_is_settled_with_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         WHERE carried_by = ?3 AND state = 'cancelled'\n           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "         WHERE carried_by = ?3 AND state = 'cancelled'\n           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\n           AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to))\","
+
+[[plant]]
+name = "round3 legacy: a finished old question cannot take its replacement answer"
+meant = "t1827_legacy_question_with_failed_answer_can_be_reanswered_after_reopen"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_question_with_failed_answer_can_be_reanswered_after_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "        let finished_task = if binding.is_some() {\n            crate::holding::task_of_question(store, question_id)?\n        } else {\n            None\n        };"
+replace = "        let finished_task = if binding.is_some() {\n            crate::holding::task_of_question(store, question_id)?\n        } else {\n            message_task(store, question_id)?\n        };"
+
+[[plant]]
+name = "round3 legacy: finish leaves the old question open"
+meant = "t1827_legacy_question_is_withdrawn_by_finish_as_before"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_question_is_withdrawn_by_finish_as_before"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "    if why == \"was finished\" {\n        store.db.execute("
+replace = "    if false && why == \"was finished\" {\n        store.db.execute("
+
+[[plant]]
+name = "round3 legacy: cancellation changes an old delivered question"
+meant = "t1827_legacy_questions_keep_main_cancel_and_accept_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_questions_keep_main_cancel_and_accept_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "              WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0\n                AND id IN (SELECT question_id FROM question_binding)\n                AND (state IN"
+replace = "              WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0\n                AND (state IN"
+
+[[plant]]
+name = "round3 legacy: reassign withdraws an old delivered question"
+meant = "t1827_legacy_delivered_question_retains_main_reassign_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_delivered_question_retains_main_reassign_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "           AND id NOT IN (SELECT question_id FROM question_binding)\n           AND state IN ('queued', 'gated')\","
+replace = "           AND id NOT IN (SELECT question_id FROM question_binding)\n           AND state IN ('queued', 'gated', 'delivered')\","
+
+[[plant]]
+name = "round3 legacy: reassign closes an old question door"
+meant = "t1827_legacy_delivered_question_retains_main_reassign_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_delivered_question_retains_main_reassign_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "             WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL\n               AND id IN (SELECT question_id FROM question_binding)\","
+replace = "             WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL\","
+
+[[plant]]
+name = "round3 legacy: an old failed answer does not make its task wait"
+meant = "t1827_legacy_failed_answer_still_makes_its_task_wait"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_still_makes_its_task_wait"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+
+[[plant]]
+name = "round3 legacy: reopen forgets to remind about an old failed answer"
+meant = "t1827_legacy_failed_answer_is_reminded_on_reopen"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_is_reminded_on_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/again.rs"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+
+[[plant]]
+name = "round3 legacy: member removal keeps an old paused answer"
+meant = "t1827_legacy_paused_answer_follows_main_when_the_member_is_removed"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_paused_answer_follows_main_when_the_member_is_removed"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "(kind = 'answer' AND urgent = 0 AND reply_to IN (SELECT question_id FROM question_binding))"
+replace = "(kind = 'answer' AND urgent = 0)"

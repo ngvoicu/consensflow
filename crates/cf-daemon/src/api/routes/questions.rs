@@ -25,26 +25,28 @@ pub(super) async fn ask(
         ));
     }
     let body = request.json().await?;
-    let active = context
-        .ledger
-        .borrow()
-        .task_in_hand(caller.participant.id)?;
-    if active.is_none() {
-        refuse_cancelled(context, caller)?;
+    // The window can close while the request body is in flight. A newly opened
+    // window of the same session must not inherit this request.
+    if context.credentials.resolve(request.bearer()).is_none() {
+        return Err(Failure::refuse(
+            409,
+            "question-window-closed",
+            "this window closed before its question could be placed",
+        ));
     }
-    let asked = context.ledger.borrow_mut().ask(
+    let asked = context.ledger.borrow_mut().ask_from_window(
         caller.project.id,
+        caller.participant.id,
         &NewQuestion {
             from: Some(caller.participant.handle.clone()),
             to: "chief".to_owned(),
-            // Whatever is no text is no words: the ledger refuses it as it
-            // refuses a blank one, once the question is being put.
             body: body.get("body").and_then(Value::as_str).map(str::to_owned),
-            task: active.map(|thread| thread.task.number),
-            // Present is not absent: `null` is a list of questions that is none.
+            task: None,
             questions: body.get("questions").cloned(),
             urgent: false,
         },
+        caller.question_holding,
+        caller.question_launch_task,
     )?;
     (context.kick)();
     Ok(Answer::created(

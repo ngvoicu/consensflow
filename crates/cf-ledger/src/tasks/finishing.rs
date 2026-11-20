@@ -29,7 +29,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::outage;
-use super::pausing::shut_doors;
+use super::pausing::{shut_doors, shut_tracked_doors};
 use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, resume_words,
     task_by_id,
@@ -121,9 +121,7 @@ pub(crate) fn left_running(
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 
-/// `finished_by_word`: the chief or the human finishes the task, so its window's open
-/// questions are withdrawn with the move; the window's own result leaves them to be
-/// answered until the task is accepted.
+/// `finished_by_word`: the chief or the human finishes the task, rather than the window.
 fn record(
     store: &mut Store,
     project_id: i64,
@@ -210,9 +208,9 @@ fn record_counted(
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
-        // Finished at a word with a question of its window still open (it waited for the
-        // answer, or was paused on it), nobody waits for the answer any more: the question is
-        // withdrawn, and `cf answer` no longer reaches it (T-1119).
+        // The chief may explicitly take a raised question as the result.
+        // That withdraws unanswered questions without ending the holding or
+        // withdrawing an answer already accepted for its window.
         if finished_by_word {
             withdraw_open_questions(store, &task, "was finished")?;
         }
@@ -236,8 +234,6 @@ fn record_counted(
         };
         store.move_task(&task, "done", detail)?;
         release_ready(store, project_id)?;
-        // A question its window asked through its harness's tool, still open at its door, is
-        // shut out of waiting as an acceptance does.
         if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
             shut_doors(store, &task, assignee)?;
         }
@@ -312,6 +308,11 @@ fn accepted(
     checked: Option<(i64, &str)>,
 ) -> Result<TaskView, LedgerError> {
     require_result_received(store, task, by)?;
+    crate::holding::close_task(
+        store,
+        task,
+        Some(&format!("T-{} is accepted.", task.number)),
+    )?;
     withdraw_gated(store, task.id, &format!("accepted by @{by}"))?;
     withdraw_result(store, task, "was accepted")?;
     // What is still on its way to the member (an answer that came after its
@@ -332,6 +333,9 @@ fn accepted(
             ],
         )?;
     }
+    // A result can arrive while its window's question is still queued for the
+    // chief. Acceptance ends that question too, before it can be delivered.
+    withdraw_open_questions(store, task, "was accepted")?;
     let detail = match checked {
         // The words are the result, held by the one who wrote them: no hand-off, so no gate.
         Some((author, words)) => {
@@ -486,6 +490,11 @@ fn cancel_unreachable(
         format!("the conversation of @{} was lost", window.handle)
     };
     let dropped = Dropped::of(store, task)?;
+    crate::holding::close_task(
+        store,
+        task,
+        Some(&format!("T-{} is cancelled.", task.number)),
+    )?;
     drop_queued(store, task.id)?;
     store.move_task(task, "cancelled", json!({ "reason": why }))?;
     let requester = store.participant_row(task.requester_id)?;
@@ -548,7 +557,16 @@ pub(crate) fn reopen_task(
             None => found,
         };
         require_active(&assignee)?;
-        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
+        if task.state == "done" {
+            crate::queue::withdraw_gated_for_reopen(
+                store,
+                task.id,
+                assignee.id,
+                &format!("sent back by @{by}"),
+            )?;
+        } else {
+            withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
+        }
         withdraw_result(store, &task, "was sent back")?;
         let words = carrier_body(store, &task, assignee.id, body)?;
         let message_id = queue(
@@ -677,6 +695,11 @@ pub(crate) fn call_off(
         require_result_received(store, &task, by)?;
     }
     require_unawaited(store, &task, ending)?;
+    crate::holding::close_task(
+        store,
+        &task,
+        Some(&format!("T-{} is cancelled.", task.number)),
+    )?;
     // A timed reminder already handed to the chief remains the window's; those still
     // waiting are withdrawn before the general cancellation takes its other messages.
     crate::tasks::withdraw_background_reminders(store, task.id)?;
@@ -738,10 +761,16 @@ pub(crate) fn call_off(
             ],
         )?;
     }
+    // A question already delivered to the chief was not among the rows dropped
+    // above. Neither it nor its harness door waits once the task is cancelled.
+    withdraw_open_questions(store, &task, "was cancelled")?;
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;
     say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    if let Some(window) = task.assignee_id {
+        shut_tracked_doors(store, &task, window)?;
+    }
     release_ready(store, project_id)?;
     Ok(CalledOff {
         task,
@@ -1098,6 +1127,11 @@ fn fail(
         // moved on, then the note that the task failed (T-442). It does not wait for the
         // reopen.
         let answers = queued_paused_answers(store, &task)?;
+        crate::holding::close_task(
+            store,
+            &task,
+            Some(&format!("T-{} has failed.", task.number)),
+        )?;
         if given_up {
             drop_queued_but_told(store, task.id)?;
         } else {
@@ -1106,6 +1140,9 @@ fn fail(
         put_back_paused_answers(store, &answers)?;
         recover_after_lost_answer(store, &task, None, true)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        if let Some(window) = task.assignee_id {
+            shut_tracked_doors(store, &task, window)?;
+        }
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;
         let failed = |waiting: String| {
@@ -1229,6 +1266,7 @@ pub(crate) fn delete_tasks(
                         409,
                     ));
                 }
+                crate::holding::close_task(store, &task, Some(&format!("T-{number} was deleted.")))?;
                 let at = store.at();
                 store.db.execute(
                     "UPDATE task SET deleted_at = ? WHERE id = ?",

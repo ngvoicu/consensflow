@@ -323,8 +323,8 @@ runs = ["ch-ledger-testing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '        .chain([model_list::TABLE, drawn_items::TABLE, "task_plan_key"])'
-replace = '        .chain(["no such table", drawn_items::TABLE, "task_plan_key"])'
+find = "            model_list::TABLE,\n            drawn_items::TABLE,"
+replace = "            \"no such table\",\n            drawn_items::TABLE,"
 
 [[plant]]
 name = 'listing: daemon: a harness not installed here is asked'

@@ -220,8 +220,27 @@ pub(crate) fn withdraw_gated(
     reason: &str,
 ) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'",
+        "UPDATE message SET state = 'cancelled', reason = ?1 WHERE task_id = ?2 AND state = 'gated'
+         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))",
         params![reason, task_id],
+    )?;
+    release_carried(store, task_id)
+}
+
+/// Reopening the same task keeps questions and answers of its current holding at the gate.
+pub(crate) fn withdraw_gated_for_reopen(
+    store: &mut Store,
+    task_id: i64,
+    window: i64,
+    reason: &str,
+) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'cancelled', reason = ?1 WHERE task_id = ?2 AND state = 'gated'
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE participant_id = ?3 AND closed = 0))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))
+         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding WHERE participant_id = ?3))",
+        params![reason, task_id, window],
     )?;
     release_carried(store, task_id)
 }
@@ -244,7 +263,8 @@ pub(crate) fn withdraw_result(store: &Store, task: &TaskRow, why: &str) -> Resul
 /// A cancelled or failed task's queued messages are never delivered.
 pub(crate) fn drop_queued(store: &Store, task_id: i64) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')",
+        "UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')
+         AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
         [task_id],
     )?;
     Ok(())

@@ -108,6 +108,13 @@ pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("DROP TABLE task_plan_key")
 }
 
+/// Remove the prospective holding tables when a fixture reconstructs an older ledger.
+pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP TABLE question_handover; DROP TABLE question_binding; DROP TABLE question_holding; DROP TABLE question_resume_anchor;",
+    )
+}
+
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
 
@@ -204,7 +211,15 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     }
     // Kept in their order: a table taken out mid-list must not move the last into its place.
     let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE, drawn_items::TABLE, "task_plan_key"])
+        .chain([
+            model_list::TABLE,
+            drawn_items::TABLE,
+            "task_plan_key",
+            "question_resume_anchor",
+            "question_holding",
+            "question_binding",
+            "question_handover",
+        ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
 }
@@ -268,6 +283,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != model_list::TABLE
             && entry["name"] != drawn_items::TABLE
             && entry["name"] != "task_plan_key"
+            && entry["name"] != "question_resume_anchor"
+            && entry["name"] != "question_holding"
+            && entry["name"] != "question_binding"
+            && entry["name"] != "question_handover"
             && entry["name"] != "participant_one_live_backup"
             && entry["name"] != "participant_backup_insert"
             && entry["name"] != "participant_backup_update"

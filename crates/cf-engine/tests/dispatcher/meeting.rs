@@ -310,7 +310,7 @@ fn a_switch_chief_after_the_turn_during_a_meeting_asks_where_things_stand_and_go
 }
 
 #[test]
-fn a_close_ends_the_meeting_and_the_resume_gives_what_it_held_question_first() {
+fn a_close_ends_the_meeting_and_withdraws_the_ended_windows_question() {
     let context = Context::new();
     let project = at_rest_with_zeus_at_work(&context);
     meeting(&context, project.id, true);
@@ -332,17 +332,14 @@ fn a_close_ends_the_meeting_and_the_resume_gives_what_it_held_question_first() {
             headed(&context, "chief", note.id),
             headed(&context, "chief", question.id)
         ],
-        [0, 1],
-        "the question first, and one at a time"
+        [1, 0],
+        "the note goes on, while the ended window's question is closed"
     );
-    context.adapter.answer("chief", "Answered the question.");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(headed(&context, "chief", note.id), 1);
+    assert_eq!(context.message(question.id).state, "cancelled");
 }
 
 #[test]
-fn the_apps_quit_ends_the_meeting_and_the_resume_after_the_start_gives_what_it_held() {
+fn the_apps_quit_ends_the_meeting_and_closes_the_old_windows_question() {
     let context = Context::new();
     let project = at_rest_with_zeus_at_work(&context);
     meeting(&context, project.id, true);
@@ -364,8 +361,9 @@ fn the_apps_quit_ends_the_meeting_and_the_resume_after_the_start_gives_what_it_h
             headed(&context, "chief", note.id),
             headed(&context, "chief", question.id)
         ],
-        [0, 1]
+        [1, 0]
     );
+    assert_eq!(context.message(question.id).state, "cancelled");
 }
 
 /// The notes the human was told of a message held long, of `window`'s.

@@ -576,9 +576,8 @@ fn a_row_in_a_carrier_no_paste_of_which_began_rides_in_its_first_paste_through_0
     assert_eq!(w.next("zeus"), None, "nothing is left to paste");
 }
 
-/// A carrier this build began froze its set at its first paste: its rows were in
-/// every paste of it, and the start settles them with it (a review of 2026-10-16:
-/// let go of, they were pasted again on their own).
+/// An answer left with a paste begun by this daemon is settled with that paste,
+/// including when the answer was recorded before question holdings were tracked.
 #[test]
 fn a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it() {
     let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
@@ -586,7 +585,144 @@ fn a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it() {
     assert_eq!(ids(&w.ledger.in_flight().unwrap()), [carrier]);
     w.confirm(carrier);
     assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+    assert_eq!(w.receipt(answer), serde_json::json!({ "carrier": carrier }));
     assert_eq!(w.next("zeus"), None);
+}
+
+#[test]
+fn an_old_cancelled_answer_handed_with_a_carrier_is_settled_with_it() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET handed_at = '2026-10-08T12:00:00.000Z' WHERE id IN (?1, ?2)",
+            (carrier, answer),
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    w.confirm(carrier);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+    assert_eq!(w.receipt(answer)["carrier"], carrier);
+}
+
+#[test]
+fn an_old_inflight_answer_is_settled_with_its_receipt() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'delivered' WHERE id = ?",
+            [carrier],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'delivering', carried_by = NULL WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    w.confirm(answer);
+    let after = w.message(answer);
+    assert_eq!(after.state, "delivered");
+    assert_eq!(
+        after.receipt,
+        serde_json::json!({ "item": format!("i-{answer}") })
+    );
+}
+
+#[test]
+fn an_old_answer_can_be_claimed_and_receipted_at_its_native_door() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'delivered' WHERE id = ?",
+            [carrier],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    let asker = w.id("zeus");
+    assert!(
+        matches!(w.ledger.claim_answer(2, asker).unwrap(), Claim::Answered(found) if found.id == answer)
+    );
+    w.ledger.settle_claim(answer, asker, true).unwrap();
+    assert_eq!(w.states(&[answer]), ["read"]);
+    assert_eq!(w.receipt(answer), serde_json::json!({ "door": true }));
+}
+
+#[test]
+fn an_old_answer_read_in_the_inbox_is_receipted_on_the_old_path() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'delivered' WHERE id = ?",
+            [carrier],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    let reader = w.id("zeus");
+    let received = w
+        .ledger
+        .receive_read(
+            reader,
+            &[answer],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    assert_eq!(received, 1);
+    assert_eq!(w.states(&[answer]), ["read"]);
+    assert_eq!(w.receipt(answer), serde_json::json!({ "read": "inbox" }));
+}
+
+#[test]
+fn old_queued_and_unreceipted_read_answers_are_carried_on_resume() {
+    for state in ["queued", "read"] {
+        let (dir, db) = a_home_at(MIGRATIONS.len());
+        a_carrier_on_its_way_left_in(&db);
+        db.execute_batch(&format!(
+            "UPDATE message SET state = 'delivered' WHERE id = 3;
+             UPDATE message SET state = '{state}', carried_by = NULL, receipt = NULL WHERE id = 4;
+             UPDATE task SET state = 'paused', paused_at = '2026-10-08T12:00:00.000Z' WHERE id = 1;"
+        ))
+        .unwrap();
+        let (mut w, _, answer) = opened(dir, db);
+        let carrier = w.resume(1, "Go on").message.unwrap().id;
+        let begun = w.deliver(carrier);
+        assert_eq!(ids(&begun.carried), [answer], "old answer in state {state}");
+        assert_eq!(w.states(&[answer]), ["delivered"]);
+    }
+}
+
+#[test]
+fn a_new_answer_to_an_old_question_joins_a_waiting_carrier() {
+    let (dir, db) = a_home_at(MIGRATIONS.len());
+    a_carrier_on_its_way_left_in(&db);
+    db.execute_batch(
+        "DELETE FROM message WHERE id = 4;
+         DELETE FROM event WHERE kind = 'delivery.begun';
+         UPDATE message SET state = 'queued', attempts = 0 WHERE id = 3;
+         UPDATE task SET state = 'queued' WHERE id = 1;",
+    )
+    .unwrap();
+    let (mut w, carrier, _) = opened(dir, db);
+    let answer = w.answer(2, "JSON").id;
+    assert_eq!(w.next("zeus"), Some(carrier));
+    let begun = w.deliver(carrier);
+    assert_eq!(ids(&begun.carried), [answer]);
+    assert_eq!(w.states(&[answer]), ["delivered"]);
 }
 
 #[test]

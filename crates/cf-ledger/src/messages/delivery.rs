@@ -113,8 +113,10 @@ fn next_delivery_among(
            SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
              AND id IS NOT m.task_id
          ))
-         AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN (
-           SELECT id FROM task WHERE assignee_id = ?1 AND state IN ({})
+         AND (?2 = 0 OR m.urgent = 1 OR (m.kind = 'answer' AND m.task_id IS NULL
+           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) OR m.task_id IN (
+           SELECT id FROM task WHERE assignee_id = ?1 AND (state IN ({}) OR (state = 'done' AND m.kind = 'answer'
+             AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)))
          ))
          AND (m.urgent = 1 OR m.task_id IS NULL OR NOT EXISTS (
            SELECT 1 FROM message words WHERE words.task_id = m.task_id
@@ -484,9 +486,15 @@ pub(crate) fn admit(
         if !open {
             return Ok(HandOver::Closed);
         }
+        if closed_answer(store, &message)? {
+            return Ok(HandOver::Withdrawn);
+        }
         let mut stale = withdrawn_if_stale(store, &message)?;
         let carried = carried(store, message_id)?;
         for row in &carried {
+            if closed_answer(store, row)? {
+                return Ok(HandOver::Withdrawn);
+            }
             stale |= withdrawn_if_stale(store, row)?;
         }
         if stale {
@@ -525,6 +533,25 @@ pub(crate) fn admit(
         )?;
         Ok(HandOver::Admitted)
     })
+}
+
+/// An answer can go only to the same live holding that asked it.
+fn closed_answer(store: &mut Store, message: &MessageView) -> Result<bool, LedgerError> {
+    if message.kind != "answer" {
+        return Ok(false);
+    }
+    let Some(question) = message.reply_to else {
+        return Ok(false);
+    };
+    if crate::holding::awaiting_handover(store, question)? {
+        return Ok(true);
+    }
+    if crate::holding::question_is_live(store, question)? == Some(false) {
+        let place = crate::holding::answer_place(store, message.id)?;
+        crate::holding::close_question(store, question, &place)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// The first row of `begun_with` (what the paste of `message_id`, handed over
@@ -676,6 +703,10 @@ pub(crate) fn confirm_delivery(
             "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE id = ?",
             params![at, receipt, message_id],
         )?;
+        if message.kind == "task" {
+            crate::holding::hand_brief(store, message_id)?;
+            crate::holding::confirm_brief(store, message_id)?;
+        }
         let rode: Vec<i64> = carried(store, message_id)?
             .into_iter()
             .map(|row| row.id)
@@ -864,6 +895,9 @@ pub(crate) fn retry_delivery(
          WHERE id = ?",
             params![reason, i64::from(refund), message_id],
         )?;
+        if message.kind == "task" {
+            crate::holding::retry_brief(store, message_id)?;
+        }
         // A row withdrawn since keeps its mark: the paste goes again without it,
         // handed later than it was, and its confirmation reads it delivered no more
         // (`confirm_delivery` takes only the rows handed with the paste).
@@ -893,6 +927,9 @@ pub(crate) fn retry_delivery(
         // longer handed now; neither it nor a returned row riding with it may go again.
         withdraw_stale_among(store, &riding)?;
         let returned = known_message(store, message_id)?;
+        if closed_answer(store, &returned)? {
+            return known_message(store, message_id);
+        }
         if withdrawn_if_stale(store, &returned)? {
             return known_message(store, message_id);
         }
@@ -972,6 +1009,9 @@ pub(crate) fn give_up_delivery(
         // Served whole to its recipient while it was on its way, it was received: it did not fail.
         if settle_when_given_up(store, message_id)? {
             return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+        }
+        if message.kind == "task" {
+            crate::holding::give_up_brief(store, message_id)?;
         }
         store.db.execute(
             "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",

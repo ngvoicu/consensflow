@@ -462,7 +462,7 @@ pub(crate) fn kept_through_leaving(
     why: &str,
 ) -> Result<Vec<i64>, LedgerError> {
     let paused = format!(
-        "recipient_id = ?1 AND {told} AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
+        "recipient_id = ?1 AND ({told} OR (kind = 'answer' AND urgent = 0 AND reply_to IN (SELECT question_id FROM question_binding))) AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
         told = told("message")
     );
     let given_back: Vec<(i64, i64, i64)> = store
@@ -513,7 +513,8 @@ pub(crate) fn drop_queued_but_told(store: &Store, task_id: i64) -> Result<(), Le
     store.db.execute(
         &format!(
             "UPDATE message SET state = 'cancelled'
-             WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})",
+             WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})
+               AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
             told = told("message")
         ),
         [task_id],

@@ -392,6 +392,21 @@ pub(super) fn close_session(
     reason: &str,
     keep_conversation: bool,
 ) -> Result<(), LedgerError> {
+    crate::holding::close_previous_for_window(store, session.id, None, None)?;
+    if let Some(holding) = crate::holding::of(store, session.id)? {
+        if holding.active {
+            crate::holding::close(
+                store,
+                session.id,
+                Some(holding.task_id),
+                Some(&format!(
+                    "T-{} remains on the board; its window ended.",
+                    holding.task_number
+                )),
+            )?;
+        }
+    }
+    crate::holding::close(store, session.id, None, None)?;
     let at = store.at();
     store.db.execute(
         "UPDATE participant SET left_at = ? WHERE id = ?",

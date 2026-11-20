@@ -130,14 +130,21 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
     for _ in 0..4 {
         after.pass().unwrap();
     }
-    assert_eq!(context.message(answer.id).state, "delivered");
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(context.message(second.id).state, "cancelled");
     assert_eq!(
-        context.task(project.id, 1).task.state,
-        "waiting",
-        "the other question still waits, with no result from the earlier reply"
+        context
+            .inbox(context.id(project.id, "chief"))
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("JSON"))
+            .count(),
+        1
     );
-    context.answer(project.id, second.id, "The new schema");
-    assert_eq!(context.task(project.id, 1).task.state, "working");
+    assert_ne!(
+        context.task(project.id, 1).task.state,
+        "done",
+        "the ended window's old reply is not taken as the new result"
+    );
     context.close();
 }
 
@@ -189,6 +196,7 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // member by its model's id, and 0034, which named the compaction column for every member).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0041(&db).unwrap();
         cf_ledger::testing::undo_migration_0040(&db).unwrap();
         cf_ledger::testing::undo_migration_0038(&db).unwrap();
         cf_ledger::testing::undo_migration_0036(&db).unwrap();

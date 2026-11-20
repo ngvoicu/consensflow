@@ -378,8 +378,9 @@ pub(crate) struct Transfer {
 ///   not said twice;
 /// - what it had held at the gate, and any tell, is withdrawn: the human
 ///   gave no word for the next window, and the one that is gone was the tell's;
-/// - what it asked, and no one has seen yet, is withdrawn with it. Only the
-///   next window's own questions count for the task;
+/// - its questions without a standing answer are withdrawn, including those the
+///   chief has already seen and those whose former answer was taken into the brief.
+///   Only the next window's own questions count for the task;
 /// - what told it to go on after a cut turn is withdrawn first, and never said
 ///   in the brief (`continuations`): the next window never began that turn.
 pub(crate) fn transfer(
@@ -440,12 +441,14 @@ pub(crate) fn transfer(
     let gated = ids(
         store,
         "SELECT id FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND state = 'gated'
+           AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
          ORDER BY id",
         params![task.id, window.id],
     )?;
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?3
-         WHERE task_id = ?1 AND recipient_id = ?2 AND state IN ('queued', 'delivering', 'gated')",
+         WHERE task_id = ?1 AND recipient_id = ?2 AND state IN ('queued', 'delivering', 'gated')
+           AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
         params![
             task.id,
             window.id,
@@ -455,12 +458,26 @@ pub(crate) fn transfer(
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?3
          WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND urgent = 0
+           AND id NOT IN (SELECT question_id FROM question_binding)
            AND state IN ('queued', 'gated')",
         params![
             task.id,
             window.id,
             format!("@{} no longer has T-{}", window.handle, task.number)
         ],
+    )?;
+    store.db.execute(
+        &format!(
+            "UPDATE message SET state = 'cancelled', reason = ?3
+             WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND urgent = 0
+               AND id IN (SELECT question_id FROM question_binding)
+               AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
+                    OR (state = 'cancelled' AND EXISTS (
+                        SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
+               AND NOT {}",
+            super::has_standing_answer("message")
+        ),
+        params![task.id, window.id, super::MOVED_QUESTION],
     )?;
     Ok(Transfer { kept, gated })
 }

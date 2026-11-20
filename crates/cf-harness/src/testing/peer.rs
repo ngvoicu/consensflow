@@ -169,7 +169,7 @@ impl ScriptedLoopback {
         request: Request,
         host: Option<&'a dyn PaneHost>,
     ) -> Work<'a, Result<Box<dyn Reply>, String>> {
-        if host.is_some_and(|host| !host.admits()) {
+        if host.is_some_and(|host| !host.hand_over_to_broker()) {
             return Box::pin(async { Err(NOT_ADMITTED.to_owned()) });
         }
         let route = route(&request);

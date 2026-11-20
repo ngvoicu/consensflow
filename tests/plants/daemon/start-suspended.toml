@@ -166,26 +166,8 @@ runs = ["engine-resume", "daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''
-        returning(self.settle_in_flight()).await
-    }'''
-replace = '''
-        returning(self.settle_in_flight()).await?;
-        drop(_settling);
-        let suspended: Vec<i64> = self
-            .seams
-            .ledger
-            .borrow()
-            .projects()?
-            .into_iter()
-            .filter(|project| project.state == "suspended")
-            .map(|project| project.id)
-            .collect();
-        for project in suspended {
-            self.resume_project(project).await?;
-        }
-        Ok(())
-    }'''
+find = "        let settled = returning(self.settle_in_flight()).await;\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled\n    }"
+replace = "        let settled = returning(self.settle_in_flight()).await;\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled?;\n        drop(_settling);\n        let suspended: Vec<i64> = self.seams.ledger.borrow().projects()?.into_iter()\n            .filter(|project| project.state == \"suspended\").map(|project| project.id).collect();\n        for project in suspended { self.resume_project(project).await?; }\n        Ok(())\n    }"
 
 [[plant]]
 name = "start suspended: a start settles nothing of what was on its way"
@@ -194,12 +176,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''
-        returning(self.settle_in_flight()).await
-    }'''
-replace = '''
-        Ok(())
-    }'''
+find = "        let settled = returning(self.settle_in_flight()).await;\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled\n    }"
+replace = "        let settled = Ok(());\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled\n    }"
 
 [[plant]]
 name = "start suspended: a suspended project's windows are stepped by the pass"
@@ -258,8 +236,8 @@ replace = '''matches!(task.state.as_str(), "working" | "waiting" | "paused")'''
 
 [[plant]]
 name = "start suspended: a Resume does not bring back a window whose task waits for an answer"
-meant = "a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_that_came_meanwhile"
-runs = ["engine-resume"]
+meant = "a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume"]]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
@@ -389,26 +367,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''
-        returning(self.settle_in_flight()).await
-    }'''
-replace = '''
-        returning(self.settle_in_flight()).await?;
-        drop(_settling);
-        let suspended: Vec<i64> = self
-            .seams
-            .ledger
-            .borrow()
-            .projects()?
-            .into_iter()
-            .filter(|project| project.state == "suspended")
-            .map(|project| project.id)
-            .collect();
-        for project in suspended {
-            self.resume_project(project).await?;
-        }
-        Ok(())
-    }'''
+find = "        let settled = returning(self.settle_in_flight()).await;\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled\n    }"
+replace = "        let settled = returning(self.settle_in_flight()).await;\n        self.seams\n            .ledger\n            .borrow_mut()\n            .close_questions_of_ended_engine()?;\n        settled?;\n        drop(_settling);\n        let suspended: Vec<i64> = self.seams.ledger.borrow().projects()?.into_iter()\n            .filter(|project| project.state == \"suspended\").map(|project| project.id).collect();\n        for project in suspended { self.resume_project(project).await?; }\n        Ok(())\n    }"
 
 [[plant]]
 name = "start suspended rig: a Resume tells no window its turn was cut"

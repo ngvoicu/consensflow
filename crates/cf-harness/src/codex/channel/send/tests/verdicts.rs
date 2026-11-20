@@ -6,6 +6,65 @@ use super::*;
 use crate::seams::loopback::BodyFailed;
 
 #[test]
+fn t1813_codex_hands_over_when_the_broker_request_is_written() {
+    let mut stage = Stage::new();
+    stage.claim_with(json!({ "ok": true }));
+    stage.fakes.loopback.hold_connection("POST /deliver");
+    stage.fakes.loopback.serve("POST /deliver", [Served::Held]);
+    let pane = stage.pane.clone();
+    stage.begin(1, Some(THREAD), pane, "brief");
+    assert!(stage.driver.run().is_empty());
+    assert_eq!(
+        stage.host.broker_handovers(),
+        0,
+        "a connection waiting is not a send"
+    );
+    assert!(stage.fakes.loopback.connect("POST /deliver"));
+    assert!(stage.driver.run().is_empty());
+    assert_eq!(
+        stage.host.broker_handovers(),
+        1,
+        "the request was handed over before its reply"
+    );
+}
+
+#[test]
+fn t1813_codex_confirms_or_retracts_after_its_broker_handover() {
+    let mut stage = Stage::new();
+    stage.claim_with(json!({ "ok": true }));
+    stage.replies(
+        409,
+        r#"{"admitted":false,"bytesWritten":0,"error":"expired"}"#,
+    );
+    assert!(!stage.sends("first").unwrap().ok);
+    assert_eq!(stage.host.reports.get(), 0);
+    assert_eq!(stage.host.broker_failures(), 1);
+
+    stage.claim_with(json!({ "ok": true }));
+    stage
+        .fakes
+        .loopback
+        .serve("POST /deliver", [Served::NoHead]);
+    assert!(!stage.sends("uncertain").unwrap().ok);
+    assert_eq!(
+        stage.host.reports.get(),
+        0,
+        "an uncertain reply is not a report"
+    );
+    assert_eq!(
+        stage.host.broker_failures(),
+        1,
+        "a lost reply does not prove refusal"
+    );
+
+    stage.claim_with(json!({ "ok": true }));
+    stage.replies(200, r#"{"ok":true,"admitted":true}"#);
+    assert!(stage.sends("second").unwrap().ok);
+    assert_eq!(stage.host.reports.get(), 1, "the broker confirmed it");
+    assert_eq!(stage.host.broker_failures(), 1);
+}
+
+#[test]
 fn a_broker_that_gives_no_head_or_breaks_off_its_body_is_a_failure_of_the_transport() {
     let mut stage = Stage::new();
     for served in [

@@ -1119,6 +1119,72 @@ fn a_snapshot_says_how_long_since_a_paste_was_written_into_the_pane() {
 }
 
 #[test]
+fn t1813_the_delivery_retry_clock_is_not_set_before_enter() {
+    let key = PaneKey::new("pasted", 1);
+    let clock = SimClock::new();
+    let arbiter = Arc::new(InputArbiter::with_clock(
+        EnterTiming::fixed(25),
+        clock.clone(),
+    ));
+    let (writer, _observed) = RecordingWriter::timed(Arc::clone(&clock));
+    arbiter.register(&key).expect("register pane");
+    let (sent, received) = mpsc::channel();
+    let during_wait = Arc::clone(&arbiter);
+    let pane = key.clone();
+    clock.at(Duration::from_millis(10), move || {
+        let snapshot = during_wait
+            .snapshot(&pane)
+            .expect("snapshot during Enter wait");
+        sent.send(snapshot.paste_quiet_ms).expect("send snapshot");
+    });
+    arbiter
+        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .expect("write brief and Enter");
+    assert_eq!(
+        received.recv().unwrap(),
+        None,
+        "the retry clock starts only after Enter"
+    );
+}
+
+#[test]
+fn t1813_a_refused_or_failed_brief_write_records_no_paste() {
+    let key = PaneKey::new("pasted", 1);
+    let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+    arbiter.register(&key).expect("register pane");
+    let (writer, _observed) = RecordingWriter::new(Some(1));
+    assert!(arbiter
+        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .is_err());
+    assert_eq!(arbiter.snapshot(&key).unwrap().paste_quiet_ms, None);
+    assert!(arbiter
+        .write_paste_via(writer.as_ref(), &key, b"again", None)
+        .is_err());
+    assert_eq!(arbiter.snapshot(&key).unwrap().paste_quiet_ms, None);
+}
+
+#[test]
+fn t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace() {
+    let key = PaneKey::new("pasted", 1);
+    let Rig {
+        clock,
+        arbiter,
+        writer,
+        observed: _observed,
+    } = Rig::new(EnterTiming::fixed(25));
+    arbiter.register(&key).expect("register pane");
+    arbiter
+        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .expect("write paste");
+    assert_eq!(clock.elapsed(), Duration::from_millis(25));
+    assert_eq!(
+        arbiter.snapshot(&key).unwrap().paste_quiet_ms,
+        Some(0),
+        "the delivery retry clock starts when Enter is sent"
+    );
+}
+
+#[test]
 fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
     let key = PaneKey::new("recorded", 1);
     let Rig {

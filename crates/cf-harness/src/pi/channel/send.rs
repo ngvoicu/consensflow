@@ -3,11 +3,11 @@
 //! session, text, expiresAt}`, with a unique `m-<hex>` id, the launch's
 //! immutable id, the target's conversation and one absolute expiry. Native
 //! admission is gated by the pane's claim and the pane host's word that it still
-//! admits the message, immediately before the inbox rename, the hand-over: a
-//! failed claim, or any failure before the rename, is known to
-//! have written nothing ([`before`]). From the rename on, Pi may have taken the
-//! message, so a missing acknowledgement or any failure is uncertain and Pi's
-//! own record decides ([`after`]); the message is never retried automatically.
+//! admits the message, immediately before publishing it to the inbox. That
+//! publication queues it; the extension's later rename takes it out of the
+//! inbox and starts its question holding. A failed claim, or any failure before
+//! publication, is known to have written nothing ([`before`]). Once published,
+//! a missing acknowledgement or failure may be uncertain ([`after`]).
 
 use std::path::Path;
 use std::time::Duration;
@@ -205,7 +205,17 @@ pub async fn send(
     text: &str,
 ) -> Result<Answer, String> {
     match before(time, entropy, target, text).await {
-        Ok(handover) => Ok(after(time, handover).await),
+        Ok(handover) => {
+            let answer = after(time, handover).await;
+            if answer.ok && answer.admitted == Some(true) {
+                target.host.delivery_reported(target.pane);
+            } else if answer.admitted == Some(false) {
+                target.host.broker_send_failed();
+            } else {
+                target.host.send_admission_unknown();
+            }
+            Ok(answer)
+        }
         Err(Failed::Answered(answer)) => Ok(answer),
         Err(Failed::Threw(thrown)) => Err(thrown),
     }
@@ -255,7 +265,7 @@ async fn before(
     // The claim is the last wait before the rename, the hand-over, which follows
     // in this poll: the pane host is asked then whether it still admits the
     // message, and one it does not is a claim refused (`PaneHost::admits`).
-    if claimed.get("ok") == Some(&Value::Bool(true)) && !target.host.admits() {
+    if claimed.get("ok") == Some(&Value::Bool(true)) && !target.host.hand_over_to_broker() {
         claimed = json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED });
     }
     if claimed.get("ok") != Some(&Value::Bool(true)) {
@@ -315,8 +325,11 @@ async fn after(time: &dyn Time, handover: Handover) -> Answer {
         ack_file,
         temporary,
     } = handover;
+    if let Err(error) = rename(Path::new(&temporary), Path::new(&inbox_file)) {
+        let _ = rm_force(Path::new(&temporary));
+        return Answer::transport(error.to_string());
+    }
     let acknowledged = async {
-        rename(Path::new(&temporary), Path::new(&inbox_file))?;
         let ack = ack_for(time, &ack_file, &id, expires_at).await?;
         if ack.is_none() {
             rm_force(Path::new(&inbox_file))?;

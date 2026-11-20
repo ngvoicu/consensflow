@@ -96,10 +96,8 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
-find = "        for id in &windows {\n            let kept = kept_through_leaving(store, *id, &reason)?;"
-replace = "        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n        }\n        for id in &windows {\n            let kept = kept_through_leaving(store, *id, &reason)?;"
-
-# --- the wake-up calls and what the harness writes in the user's place ---
+find = "        for id in &windows {\n            crate::holding::close_previous_for_window(store, *id, None, None)?;\n            if let Some(holding) = crate::holding::of(store, *id)? {"
+replace = "        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n        }\n        for id in &windows {\n            crate::holding::close_previous_for_window(store, *id, None, None)?;\n            if let Some(holding) = crate::holding::of(store, *id)? {"
 
 [[plant]]
 name = "board notices: a notice the harness wrote in the user's place is taken for the human typing to the chief"

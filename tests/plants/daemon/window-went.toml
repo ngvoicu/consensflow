@@ -42,26 +42,8 @@ runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                self.settle_gone(delivering, closed_with_project, move |delivering| {
-                    // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief || closed_with_project {
-                        this.give_back(delivering.message, &told)
-                    } else {
-                        let retry = !delivering.launch;
-                        this.settle_failure(delivering, &told, retry)
-                    }
-                })
-                .await?;'''
-replace = '''
-                let _ = (&this, &told);
-                // A chief's first message (a handoff, most often) waits for its next window.
-                if delivering.chief || closed_with_project {
-                    self.give_back(delivering.message, &because)?;
-                } else {
-                    let retry = !delivering.launch;
-                    self.settle_failure(delivering, &because, retry)?;
-                }'''
+find = "                let settled = self\n                    .settle_gone(delivering, closed_with_project, move |delivering| {\n                        // A chief's first message (a handoff, most often) waits for its next window.\n                        if delivering.chief || closed_with_project {\n                            this.give_back(delivering.message, &told)\n                        } else {\n                            let retry = !delivering.launch;\n                            this.settle_failure(delivering, &told, retry)\n                        }\n                    })\n                    .await;"
+replace = "                let settled = if delivering.chief || closed_with_project {\n                    this.give_back(delivering.message, &told)\n                } else {\n                    let retry = !delivering.launch;\n                    this.settle_failure(delivering, &told, retry)\n                };"
 
 [[plant]]
 name = "window went: a window that closes as its harness takes a paste its record shows has it given back"

@@ -309,7 +309,23 @@ fn only_the_question_on_the_ended_task_leaves_the_list() {
     let mut ledger = ledger_in(&dir);
     let project = board(&mut ledger);
     let ended = asked(&mut ledger, project, Some(1));
-    let free = asked(&mut ledger, project, None);
+    // A genuinely idle window has no task, unlike the session holding T-1.
+    let free = ledger
+        .ask(
+            project,
+            &NewQuestion {
+                from: Some("zeus".into()),
+                to: "chief".into(),
+                body: Some("An idle question".into()),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap()
+        .id;
+    ledger.begin_delivery(free).unwrap();
+    ledger
+        .confirm_delivery(free, Some(&json!({"item":"idle"})))
+        .unwrap();
     assert_eq!(open(&ledger, project), [ended, free]);
 
     ledger
@@ -381,19 +397,16 @@ fn a_question_on_an_accepted_task_takes_no_answer() {
 
     let (code, words) = refused_answer(&mut ledger, project, question);
     assert_eq!(code, "task-accepted");
+    assert!(words.contains("T-1 is accepted"), "{words}");
     assert!(
-        words.contains("T-1 is accepted") && words.contains("finished"),
+        words.contains("new task") && !words.contains("reopen"),
         "{words}"
-    );
-    assert!(
-        words.contains("cf task add --after T-1"),
-        "the refusal names the command that reaches the same window: {words}"
     );
     ledger.close().expect("the file is given up");
 }
 
 #[test]
-fn a_question_on_a_failed_task_takes_no_answer_and_says_to_reopen_the_task() {
+fn a_question_on_a_failed_task_takes_no_answer_and_suggests_a_new_task() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
     let project = board(&mut ledger);
@@ -405,7 +418,7 @@ fn a_question_on_a_failed_task_takes_no_answer_and_says_to_reopen_the_task() {
     let (code, words) = refused_answer(&mut ledger, project, question);
     assert_eq!(code, "task-failed");
     assert!(
-        words.contains("reopen T-1 to go on with it"),
+        words.contains("new task") && !words.contains("cf task reopen"),
         "the refusal says what to do instead: {words}"
     );
     ledger.close().expect("the file is given up");

@@ -200,8 +200,9 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-gate-007", 15, DOOR_READ),
     ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
     ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued, ending its task's wait immediately"),
-    ("ledger-messages-010", 11, READ_AT_ONCE),
+    ("ledger-messages-010", 9, READ_AT_ONCE),
     ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
+    ("ledger-messages-012", 12, "cancelling the task closes its window's tracked question and records the door's closing time in the same step; Node left it open"),
     ("ledger-messages-013", 9, ANSWER_COUNT_SAID),
     ("ledger-messages-014", 9, ANSWER_COUNT_SAID),
     ("ledger-messages-015", 10, PICK_ROOM),
@@ -230,6 +231,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-024", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-025", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-027", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-staff-002", 12, "removing a member closes the questions and question door of its window's holding, where Node left them open"),
+    ("ledger-staff-003", 10, "removing a member closes the questions and question door of its window's holding even when a question has no task topic, where Node left them open"),
     ("ledger-staff-008", 13, KEPT_BY_PAUSE),
     ("ledger-staff-015", 8, FOLLOW_UP_BEHIND_WORK),
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
@@ -240,7 +243,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-staff-021", 29, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-staff-022", 14, RESULT_ACCEPTED),
     ("ledger-staff-023", 13, "the chief sends T-1 back while its result is still queued for it: the result is withdrawn then, with the reason `T-1 was sent back`, where Node leaves it queued until the task is cancelled, which withdraws it as `cancelled by @chief`"),
-    ("ledger-tasks-004", 13, RESULT_ACCEPTED),
+    ("ledger-tasks-004", 11, "acceptance closes the finished window's tracked question and records its door's closing time; worker done alone kept it answerable"),
     ("ledger-tasks-005", 26, REASON_PAUSE),
     ("ledger-tasks-010", 15, RESULT_ACCEPTED),
     ("ledger-tasks-011", 17, RESULT_ACCEPTED),
@@ -315,9 +318,10 @@ const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
 /// A pick that does not fit the answer says how long the longest could be.
 const PICK_ROOM: &str = "a pick that does not fit the answer is refused as `pick too long` with how long the longest could be, the headers of the questions and the other picks counted (T-969), where Node said the body limit and took a pick of the limit's own length to refuse it as a body; the choice answer that follows lands queued, not read";
-/// An answer is received, not read at its creation.
+/// A question before its first brief belongs to the idle window; a choice
+/// answer is received, not read at its creation.
 const READ_AT_ONCE: &str =
-    "a choice answer lands queued: Node marked it read and stamped it at its creation, two clock readings more";
+    "the question came before its first brief was delivered, so it belongs to the idle window and the task does not wait on it; Node put the task into waiting; later, a choice answer lands queued where Node marked it read at creation";
 /// A project is suspended at a start with no mark that it comes back by itself,
 /// so there is none to forget, and `forgetResume` of a project that is not there
 /// refuses nothing.

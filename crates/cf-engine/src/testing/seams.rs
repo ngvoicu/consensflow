@@ -17,7 +17,10 @@ use serde_json::{json, Value};
 
 use super::recorder::Recorder;
 use crate::roles::ProjectSpecs;
-use crate::seams::{AppSettings, Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Trace};
+use crate::seams::{
+    AppSettings, Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, QuestionWindowStart, Roles,
+    Trace,
+};
 
 /// The model each fake member runs on, by the name a test gives it: what a launch of it is
 /// given, as Node's roster gave its agent's (the kit's members are named by these names,
@@ -37,9 +40,21 @@ pub struct FakeCredentials {
     pub(crate) ledger: Rc<RefCell<Ledger>>,
     /// Why the system gives no token, where a test says it does not.
     pub fails: RefCell<Option<String>>,
+    /// The launch boundaries supplied with tokens, kept out of Node's trace.
+    pub question_starts: RefCell<Vec<(i64, QuestionWindowStart)>>,
 }
 
 impl Credentials for FakeCredentials {
+    fn issue_for_window(
+        &self,
+        project: i64,
+        participant: i64,
+        start: QuestionWindowStart,
+    ) -> Result<String, String> {
+        self.question_starts.borrow_mut().push((participant, start));
+        self.issue(project, participant)
+    }
+
     fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
         if let Some(cause) = self.fails.borrow().clone() {
             return Err(cause);

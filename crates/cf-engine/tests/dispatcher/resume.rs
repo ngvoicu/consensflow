@@ -2322,8 +2322,7 @@ fn a_member_whose_record_cannot_tell_a_cut_is_told_all_the_same_and_a_chief_is_n
 }
 
 #[test]
-fn a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_that_came_meanwhile()
-{
+fn a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume() {
     let context = Context::new();
     let tiers = at_work(&context);
     let project = tiers.project.id;
@@ -2338,15 +2337,29 @@ fn a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_th
     let native = native_of(&context, tiers.id("diana-brisk-birch"));
     let after = quit_and_start(&context);
 
-    // The answer comes while the project waits for the human.
-    let answer = context.answer(project, question.id, "ANSI");
+    // The old window has ended. Its question cannot receive a new answer.
+    let chief = tiers.id("chief");
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .answer(question.id, chief, Some(&json!("ANSI")), None)
+        .unwrap_err();
+    assert_eq!(refused.code(), Some("question-moved"));
     after.pass().unwrap();
-    assert_eq!(context.message(answer.id).state, "queued");
+    assert_eq!(context.message(question.id).state, "cancelled");
 
     after.resume_project(project).unwrap();
     let diana = launch_of(&context, "diana-brisk-birch");
     assert_eq!(diana["resume"], native.unwrap().as_str());
     assert_eq!(diana["message"], Value::Null, "at rest: it is told nothing");
+    let new_question = context.ask(
+        project,
+        "diana-brisk-birch",
+        "chief",
+        2,
+        "Which dialect now?",
+    );
+    let answer = context.answer(project, new_question.id, "ANSI");
     after.pass().unwrap();
     after.pass().unwrap();
     assert_eq!(context.message(answer.id).state, "delivered");
