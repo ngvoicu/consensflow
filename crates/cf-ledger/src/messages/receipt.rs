@@ -145,6 +145,9 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
         "UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering'",
         params![receipt.to_string(), message.id],
     )?;
+    if message.kind == "question" && message.recipient_role == "chief" && !message.urgent {
+        crate::waiting_questions::read_early(store, message.id)?;
+    }
     Ok(())
 }
 

@@ -470,6 +470,7 @@ pub(crate) fn answer(
             withdraw(store, question_id, &format!("answered by @{}", answerer.handle))?;
         }
         settle_answered(store, question_id)?;
+        crate::waiting_questions::end(store, question_id)?;
         let answer = known_message(store, id)?;
         // An answer on its way ends the wait; a gated one still waits for the human.
         if let Some(task_id) = task_id {

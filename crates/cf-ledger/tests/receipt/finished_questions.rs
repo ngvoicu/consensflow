@@ -161,3 +161,125 @@ fn a_question_open_at_a_harness_door_is_shut_out_of_waiting_by_the_finish() {
         "the door is told at once, not when its poll gives up"
     );
 }
+
+#[test]
+fn answering_or_finishing_withdraws_an_unhanded_reminder_and_a_returned_handed_one() {
+    use cf_ledger::{HandOver, NewNote};
+    for finish in [false, true] {
+        for handed in [false, true] {
+            let mut w = world();
+            let (task, question) = asked(&mut w);
+            w.deliver(question);
+            let reminder = w
+                .ledger
+                .remind_question(
+                    w.project,
+                    question,
+                    None,
+                    &NewNote {
+                        from: None,
+                        to: "chief".into(),
+                        task: Some(task),
+                        body: "A reminder".into(),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            w.begin(reminder.id);
+            if handed {
+                assert_eq!(
+                    w.ledger.admit(reminder.id, &[]).unwrap(),
+                    HandOver::Admitted
+                );
+            }
+            if finish {
+                w.ledger
+                    .record_finished(w.project, task, "Done", (0, 0))
+                    .unwrap();
+            } else {
+                w.answer(question, "JSON");
+            }
+            assert_eq!(
+                w.message(reminder.id).state,
+                if handed { "delivering" } else { "cancelled" },
+                "finish={finish}, handed={handed}"
+            );
+            if handed {
+                w.ledger
+                    .retry_delivery(reminder.id, "the paste was refused", false)
+                    .unwrap();
+                assert_eq!(
+                    w.message(reminder.id).state,
+                    "cancelled",
+                    "a returned reminder must not go again"
+                );
+            } else {
+                assert_eq!(
+                    w.ledger.admit(reminder.id, &[]).unwrap(),
+                    HandOver::Withdrawn
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_pending_question_reminder_cannot_stack_even_after_the_ledger_is_reopened() {
+    use cf_ledger::NewNote;
+    let mut w = world();
+    let (task, question) = asked(&mut w);
+    w.deliver(question);
+    let note = NewNote {
+        from: None,
+        to: "chief".into(),
+        task: Some(task),
+        body: "A reminder".into(),
+    };
+    let first = w
+        .ledger
+        .remind_question(w.project, question, None, &note)
+        .unwrap()
+        .unwrap();
+    assert!(w
+        .ledger
+        .remind_question(w.project, question, None, &note)
+        .unwrap()
+        .is_none());
+    w.edit(|_| {});
+    let open = w.ledger.waiting_questions(w.project).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].reminder.as_ref().unwrap().id, first.id);
+    assert!(
+        w.ledger
+            .remind_question(w.project, question, Some(first.id), &note)
+            .unwrap()
+            .is_none(),
+        "a still queued reminder cannot be followed by another"
+    );
+}
+
+#[test]
+fn migration_keeps_an_old_ledgers_delivered_question_and_its_receipt_time() {
+    let mut w = world();
+    let (task, question) = asked(&mut w);
+    w.deliver(question);
+    let before = w.message(question);
+    let receipt = before
+        .delivered_at
+        .clone()
+        .expect("the question was received");
+    w.edit(|db| {
+        cf_ledger::testing::undo_migration_0042(db).unwrap();
+        db.execute_batch("PRAGMA user_version = 41").unwrap();
+    });
+    let after = w.message(question);
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.state, before.state);
+    assert_eq!(after.delivered_at, before.delivered_at);
+    let open = w.ledger.waiting_questions(w.project).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, question);
+    assert_eq!(open[0].task, Some(task));
+    assert_eq!(open[0].received_at, receipt);
+    assert!(open[0].reminder.is_none());
+}

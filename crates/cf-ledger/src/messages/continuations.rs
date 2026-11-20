@@ -260,6 +260,9 @@ fn stale(store: &Store, message: &MessageView) -> Result<Option<String>, LedgerE
     {
         return Ok(None);
     }
+    if crate::waiting_questions::stale_reminder(store, message.id)? {
+        return Ok(Some("its question no longer waits".to_owned()));
+    }
     if message.task_number.is_some_and(|number| {
         message.body.starts_with(&format!(
             "T-{number} has been working in the background for "

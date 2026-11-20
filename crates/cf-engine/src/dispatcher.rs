@@ -881,6 +881,9 @@ impl Dispatcher {
         let listed = self.seams.ledger.borrow().projects()?;
         let mut projects = Vec::with_capacity(listed.len());
         for project in listed {
+            if project.state == "open" {
+                self.remind_waiting_questions(&project)?;
+            }
             if project.state == "open" && self.assign_open_tasks(&project)? {
                 projects.push(self.known_project(project.id)?);
             } else {

@@ -98,6 +98,7 @@ fn migration_0040_keeps_an_older_ledger_and_an_older_build_refuses_it() {
         .create_task(w.project, &section("first").task)
         .unwrap();
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0042(db).expect("reminders undone");
         cf_ledger::testing::undo_migration_0041(db).expect("question suspension undone");
         cf_ledger::testing::undo_migration_0040(db).unwrap();
         db.execute_batch("PRAGMA user_version = 39").unwrap();

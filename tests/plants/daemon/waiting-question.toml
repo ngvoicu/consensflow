@@ -1,0 +1,94 @@
+# Questions delivered to the chief are reminded, and never stacked.
+[run]
+timing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::unanswered_question_is_reminded_after_receipt_then_two_hours_after_delivery_without_stacking", "--", "--test-threads=2"]
+early-read = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_question_read_during_delivery_counts_from_the_read_not_the_later_confirmation", "--", "--test-threads=2"]
+finish = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_finished_question_withdraws_its_queued_reminder_and_is_not_reminded_again", "--", "--test-threads=2"]
+answer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::answering_one_question_withdraws_only_its_queued_reminder", "--", "--test-threads=2"]
+pending = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions::a_pending_question_reminder_cannot_stack_even_after_the_ledger_is_reopened", "--", "--test-threads=2"]
+returned = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions::answering_or_finishing_withdraws_an_unhanded_reminder_and_a_returned_handed_one", "--", "--test-threads=2"]
+answer-lookup = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "waiting_questions::tests::checking_unanswered_questions_uses_an_index_to_find_each_answer"]
+shell-switch = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered", "--", "--test-threads=2"]
+
+[[plant]]
+name = "waiting question: the first reminder is late"
+meant = "shown_notes::unanswered_question_is_reminded_after_receipt_then_two_hours_after_delivery_without_stacking"
+runs = ["timing"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const FIRST_REMINDER_MS: i64 = 30 * 60_000;"
+replace = "const FIRST_REMINDER_MS: i64 = 31 * 60_000;"
+
+[[plant]]
+name = "waiting question: the repeat is late"
+meant = "shown_notes::unanswered_question_is_reminded_after_receipt_then_two_hours_after_delivery_without_stacking"
+runs = ["timing"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const REPEAT_REMINDER_MS: i64 = 2 * 60 * 60_000;"
+replace = "const REPEAT_REMINDER_MS: i64 = 3 * 60 * 60_000;"
+
+[[plant]]
+name = "waiting question: an early read does not start its timer"
+meant = "shown_notes::a_question_read_during_delivery_counts_from_the_read_not_the_later_confirmation"
+runs = ["early-read"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        crate::waiting_questions::read_early(store, message.id)?;"
+replace = "        let _ = &message.id;"
+
+[[plant]]
+name = "waiting question: finish leaves its reminder queued"
+meant = "shown_notes::a_finished_question_withdraws_its_queued_reminder_and_is_not_reminded_again"
+runs = ["finish"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            crate::waiting_questions::end_for_task(store, task.id, task.assignee_id)?;"
+replace = "            let _ = task.id;"
+
+[[plant]]
+name = "waiting question: an answer leaves its reminder queued"
+meant = "shown_notes::answering_one_question_withdraws_only_its_queued_reminder"
+runs = ["answer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "        crate::waiting_questions::end(store, question_id)?;"
+replace = "        let _ = question_id;"
+
+[[plant]]
+name = "waiting question: a pending reminder is stacked"
+meant = "finished_questions::a_pending_question_reminder_cannot_stack_even_after_the_ledger_is_reopened"
+runs = ["pending"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''        if last != previous || state.as_deref().is_some_and(|state| matches!(state, "queued" | "gated" | "delivering")) {'''
+replace = '''        if last != previous && state.is_none() {'''
+
+[[plant]]
+name = "waiting question: a handed reminder returned after an answer is sent again"
+meant = "finished_questions::answering_or_finishing_withdraws_an_unhanded_reminder_and_a_returned_handed_one"
+runs = ["returned"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''    if crate::waiting_questions::stale_reminder(store, message.id)? {
+        return Ok(Some("its question no longer waits".to_owned()));
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "waiting question: a queued reminder keeps the former chief's shell"
+meant = "shown_notes::a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered"
+runs = ["shell-switch"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = 'finish the task with `cf task finish T-{number}`'
+replace = '''finish the task with `& 'C:\\Program Files\\ConsensFlow\\cf.exe' task finish T-{number}`'''
+
+[[plant]]
+name = "waiting question: finding every answer scans all messages"
+meant = "waiting_questions::tests::checking_unanswered_questions_uses_an_index_to_find_each_answer"
+runs = ["answer-lookup"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0042.sql"
+find = "CREATE INDEX message_answers_by_question ON message(reply_to) WHERE kind = 'answer';"
+replace = ""
