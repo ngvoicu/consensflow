@@ -1986,3 +1986,50 @@ fn t1859_a_question_read_while_delivering_is_named_by_number_after_restart() {
     assert_eq!(notes.len(), 1);
     assert!(!notes[0].body.contains("Already read in flight"));
 }
+
+#[test]
+fn t1859_reassign_after_a_returned_answer_keeps_the_restart_reason() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Before restart").id;
+    w.deliver(question);
+    let answer = w.answer(question, "Returned once").id;
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(
+        w.message(question).reason.as_deref(),
+        Some("ConsensFlow restarted")
+    );
+    w.ledger.release_task(w.project, task, "Reassign").unwrap();
+    assert_eq!(
+        w.message(question).reason.as_deref(),
+        Some("ConsensFlow restarted")
+    );
+    assert_eq!(word_notices(&w, "Returned once"), 1);
+}
+
+#[test]
+fn t1859_reopen_does_not_ask_the_chief_to_answer_a_closed_question_again() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Before restart").id;
+    w.deliver(question);
+    w.answer(question, "Returned once");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    w.ledger
+        .reopen_task(w.project, task, "chief", "Go on")
+        .unwrap();
+    let notes = w.ledger.inbox(w.id("chief"), 100).unwrap();
+    assert!(
+        !notes
+            .iter()
+            .any(|m| m.kind == "note" && m.body.contains(&format!("cf answer m-{question}"))),
+        "{notes:?}"
+    );
+    assert_eq!(word_notices(&w, "Returned once"), 1);
+}

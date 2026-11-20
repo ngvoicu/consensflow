@@ -677,3 +677,39 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-ledger/src/holding.rs"
 find = "    let way_on = match (same_place, task) {"
 replace = "    let way_on = match (same_window, task) {"
+
+[[plant]]
+name = "T1859: a restart reports only one question"
+meant = "t1859_restart_reports_each_unreceived_question_once_even_when_settled_again"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_reports_each_unreceived_question_once_even_when_settled_again"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "SELECT question_id, task_id FROM question_binding WHERE closed = 0 AND run_id <> ? ORDER BY question_id"
+replace = "SELECT question_id, task_id FROM question_binding WHERE closed = 0 AND run_id <> ? ORDER BY question_id LIMIT 1"
+
+[[plant]]
+name = "T1859: reassign overwrites the restart reason"
+meant = "t1859_reassign_after_a_returned_answer_keeps_the_restart_reason"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_reassign_after_a_returned_answer_keeps_the_restart_reason"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "               AND reason IS NOT ?4 AND reason IS NOT ?5"
+replace = "               AND (reason IS NOT ?4 OR reason IS NOT ?5)"
+
+[[plant]]
+name = "T1859: a returned answer reopens the closed wait"
+meant = "t1859_close_resume_returns_answer_without_second_notice"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_close_resume_returns_answer_without_second_notice"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5"
+replace = "OR (q.reason IS NOT ?3 AND (q.reason IS NOT ?4 OR q.reason IS NOT ?5)"
+
+[[plant]]
+name = "T1859: reopen asks to answer a closed question again"
+meant = "t1859_reopen_does_not_ask_the_chief_to_answer_a_closed_question_again"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_reopen_does_not_ask_the_chief_to_answer_a_closed_question_again"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/again.rs"
+find = "OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5"
+replace = "OR (q.reason IS NOT ?3 AND (q.reason IS NOT ?4 OR q.reason IS NOT ?5)"

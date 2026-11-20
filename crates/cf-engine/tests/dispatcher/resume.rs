@@ -4338,6 +4338,11 @@ fn t1859_returned_answer(restart: bool) {
         }
     }
     assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(
+        tiers.task(2).task.state,
+        "working",
+        "the closed question does not reopen the wait"
+    );
     let notices: Vec<_> = context
         .inbox(chief)
         .into_iter()
@@ -4412,4 +4417,51 @@ fn t1859_restart_keeps_pretracking_question() {
 #[test]
 fn t1859_close_resume_keeps_pretracking_question() {
     t1859_pretracking(false);
+}
+
+#[test]
+fn t1859_restart_reports_each_unreceived_question_once_even_when_settled_again() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    context.adapter.busy("chief");
+    let first = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    let second = context.ask(project, "diana-brisk-birch", "chief", 2, "Which encoding?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(first.id).state, "queued");
+    assert_eq!(context.message(second.id).state, "queued");
+    let after = quit_and_start(&context);
+    let notices = || {
+        context
+            .inbox(chief)
+            .into_iter()
+            .filter(|m| m.kind == "note" && m.body.contains("closed when ConsensFlow restarted"))
+            .collect::<Vec<_>>()
+    };
+    let notes = notices();
+    assert_eq!(notes.len(), 2, "each old question is reported");
+    for (id, words) in [(first.id, "Which dialect?"), (second.id, "Which encoding?")] {
+        assert_eq!(
+            notes
+                .iter()
+                .filter(|m| m.body.contains(&format!("m-{id}")) && m.body.contains(words))
+                .count(),
+            1
+        );
+        assert_eq!(context.message(id).state, "cancelled");
+    }
+    after.settle_after_restart().unwrap();
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        notices().len(),
+        2,
+        "settling and Resume never duplicate the notes"
+    );
 }

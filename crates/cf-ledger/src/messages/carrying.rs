@@ -471,13 +471,14 @@ pub(crate) fn transfer(
             "UPDATE message SET state = 'cancelled', reason = ?3
              WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND urgent = 0
                AND id IN (SELECT question_id FROM question_binding)
+               AND reason IS NOT ?4 AND reason IS NOT ?5
                AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
                     OR (state = 'cancelled' AND EXISTS (
                         SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
                AND NOT {}",
             super::has_standing_answer("message")
         ),
-        params![task.id, window.id, super::MOVED_QUESTION],
+        params![task.id, window.id, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION],
     )?;
     Ok(Transfer { kept, gated })
 }
