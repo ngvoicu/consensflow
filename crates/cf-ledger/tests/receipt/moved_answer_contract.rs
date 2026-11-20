@@ -2033,3 +2033,236 @@ fn t1859_reopen_does_not_ask_the_chief_to_answer_a_closed_question_again() {
     );
     assert_eq!(word_notices(&w, "Returned once"), 1);
 }
+
+fn t1859_state_notice(w: &World, question: i64) -> String {
+    let notes: Vec<_> = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{question}")))
+        .collect();
+    assert_eq!(notes.len(), 1, "exactly one notice: {notes:?}");
+    notes[0].body.clone()
+}
+
+fn t1859_review_only(note: &str, expected: &str) {
+    assert!(note.contains(expected), "{note}");
+    for command in [
+        "cf tell",
+        "cf task finish",
+        "cf task accept",
+        "cf task reopen",
+    ] {
+        assert!(!note.contains(command), "unexpected {command}: {note}");
+    }
+}
+
+#[test]
+fn t1859_state_done_question_at_restart_or_close() {
+    for restart in [true, false] {
+        for received in [true, false] {
+            let mut w = world();
+            let (task, session, brief) = assigned(&mut w, false);
+            w.deliver(brief);
+            let question = w.ask(&session, task, "Which dialect remains?").id;
+            if received {
+                w.deliver(question);
+            }
+            w.ledger
+                .record_result(w.project, task, "Done before the window closed")
+                .unwrap();
+            assert_eq!(w.state(task), "done");
+            if restart {
+                w.ledger.begin_question_engine();
+                w.ledger.close_questions_of_ended_engine().unwrap();
+            } else {
+                w.ledger.set_project_state(w.project, "suspended").unwrap();
+                let window = w.id(&session);
+                w.ledger.close_question_window(window, None).unwrap();
+                w.ledger.set_project_state(w.project, "open").unwrap();
+            }
+            let note = t1859_state_notice(&w, question);
+            t1859_review_only(&note, &format!("T-{task} is done; review its result"));
+            assert_eq!(note.contains("Which dialect remains?"), !received, "{note}");
+        }
+    }
+}
+
+#[test]
+fn t1859_state_returned_answer_of_done_task() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which dialect?").id;
+    w.deliver(question);
+    let answer = w.answer(question, "Use ANSI").id;
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(w.message(answer).state, "cancelled");
+    let note = t1859_state_notice(&w, question);
+    assert!(note.contains("Use ANSI"), "{note}");
+    t1859_review_only(&note, &format!("T-{task} is done; review its result"));
+}
+
+#[test]
+fn t1859_state_returned_answer_when_task_fails() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which dialect?").id;
+    w.deliver(question);
+    let answer = w.answer(question, "Use ANSI").id;
+    w.ledger
+        .fail_task(w.project, task, "Window failed")
+        .unwrap();
+    assert_eq!(w.state(task), "failed");
+    assert_eq!(w.message(answer).state, "cancelled");
+    let note = t1859_state_notice(&w, question);
+    assert!(note.contains("Use ANSI"), "{note}");
+    t1859_review_only(&note, &format!("T-{task} failed; review its result"));
+}
+
+#[test]
+fn t1859_state_failed_or_queued_question_left_in_an_older_ledger() {
+    for state in ["failed", "queued"] {
+        for received in [true, false] {
+            let mut w = world();
+            let (task, session, brief) = assigned(&mut w, false);
+            w.deliver(brief);
+            let question = w.ask(&session, task, "Unanswered old question").id;
+            if received {
+                w.deliver(question);
+            }
+            // A persisted task state from an older ledger, with a still-open binding.
+            w.ledger
+                .sqlite()
+                .execute(
+                    "UPDATE task SET state=?1 WHERE project_id=?2 AND number=?3",
+                    rusqlite::params![state, w.project, task],
+                )
+                .unwrap();
+            w.ledger.begin_question_engine();
+            w.ledger.close_questions_of_ended_engine().unwrap();
+            let note = t1859_state_notice(&w, question);
+            assert_eq!(
+                note.contains("Unanswered old question"),
+                !received,
+                "{note}"
+            );
+            if state == "failed" {
+                t1859_review_only(&note, &format!("T-{task} failed; review its result"));
+            } else {
+                for command in [
+                    "cf tell",
+                    "cf task finish",
+                    "cf task accept",
+                    "cf task reopen",
+                ] {
+                    assert!(!note.contains(command), "{note}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn t1859_state_returned_answer_after_failure_was_recorded() {
+    let mut w = gated_world();
+    let (task, session, brief) = assigned(&mut w, true);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which dialect?").id;
+    w.ledger.approve_message(question, "human").unwrap();
+    w.deliver(question);
+    let answer = w.answer(question, "Use ANSI later").id;
+    w.ledger
+        .fail_task(w.project, task, "Window failed")
+        .unwrap();
+    w.ledger.approve_message(answer, "human").unwrap();
+    let note = t1859_state_notice(&w, question);
+    assert!(note.contains("Use ANSI later"), "{note}");
+    t1859_review_only(&note, &format!("T-{task} failed; review its result"));
+}
+
+#[test]
+fn t1859_state_paused_question_offers_the_active_commands() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which dialect?").id;
+    w.deliver(question);
+    w.ledger
+        .pause_task(w.project, task, Some("chief"), None)
+        .unwrap();
+    assert_eq!(w.state(task), "paused");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    let note = t1859_state_notice(&w, question);
+    assert!(note.contains(&format!("cf tell T-{task} \"…\"")), "{note}");
+    assert!(note.contains(&format!("cf task finish T-{task}")), "{note}");
+}
+
+#[test]
+fn t1859_state_a_moved_task_does_not_offer_the_old_window_commands() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Question in the old window").id;
+    let replacement = w.id("diana");
+    // Model a persisted old binding whose task was moved by another ledger.
+    w.ledger
+        .sqlite()
+        .execute(
+            "UPDATE task SET assignee_id=?1 WHERE project_id=?2 AND number=?3",
+            rusqlite::params![replacement, w.project, task],
+        )
+        .unwrap();
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    let note = t1859_state_notice(&w, question);
+    assert!(note.contains("Question in the old window"), "{note}");
+    assert!(
+        !note.contains("cf tell") && !note.contains("cf task finish"),
+        "{note}"
+    );
+}
+
+#[test]
+fn t1859_state_tell_and_finish_are_accepted_for_active_tasks() {
+    for state in ["working", "waiting", "paused"] {
+        for tell in [true, false] {
+            let mut w = world();
+            let (task, session, brief) = assigned(&mut w, false);
+            w.deliver(brief);
+            if state == "waiting" {
+                let question = w.ask(&session, task, "Please decide").id;
+                w.deliver(question);
+            } else if state == "paused" {
+                w.ledger
+                    .pause_task(w.project, task, Some("chief"), None)
+                    .unwrap();
+            }
+            assert_eq!(w.state(task), state);
+            if tell {
+                w.ledger
+                    .ask(
+                        w.project,
+                        &NewQuestion {
+                            from: Some("chief".into()),
+                            to: session,
+                            task: Some(task),
+                            body: Some("Use ANSI".into()),
+                            urgent: true,
+                            ..NewQuestion::default()
+                        },
+                    )
+                    .unwrap_or_else(|error| panic!("tell in {state}: {error}"));
+            } else {
+                w.ledger
+                    .record_finished(w.project, task, "Finish", (0, 0))
+                    .unwrap_or_else(|error| panic!("finish in {state}: {error}"));
+            }
+        }
+    }
+}

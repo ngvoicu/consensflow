@@ -1138,7 +1138,7 @@ fn fail(
         crate::holding::close_task(
             store,
             &task,
-            Some(&format!("T-{} has failed.", task.number)),
+            Some(&format!("T-{} failed; review its result.", task.number)),
         )?;
         if given_up {
             drop_queued_but_told(store, task.id)?;

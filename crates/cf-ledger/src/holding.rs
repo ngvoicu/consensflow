@@ -593,34 +593,9 @@ pub(crate) fn return_answer(
         };
         recipient = store.participant_row(current)?;
     }
-    let same_window = store
-        .db
-        .prepare(
-            "SELECT 1 FROM message a JOIN question_binding b ON b.question_id = a.reply_to
-         JOIN task t ON t.id = b.task_id AND t.project_id = a.project_id
-         JOIN participant p ON p.id = b.participant_id AND p.project_id = a.project_id
-         WHERE a.id = ? AND t.assignee_id = b.participant_id AND p.left_at IS NULL
-           AND t.deleted_at IS NULL AND t.state IN ('queued', 'working', 'waiting', 'paused')",
-        )?
-        .exists([answer])?;
-    // A task's ending closes its holding before the task row is updated. The
-    // supplied place is where it is going, which may no longer be this window.
-    let same_place = if same_window {
-        let task_id: Option<i64> = store.db.query_row(
-            "SELECT task_id FROM message WHERE id = ?",
-            [answer],
-            |row| row.get(0),
-        )?;
-        place == task_place(store, task_id)?
-    } else {
-        false
-    };
-    let way_on = match (same_place, task) {
-        (true, Some(number)) => {
-            format!(" Use cf tell T-{number} \"…\" or cf task finish T-{number}.")
-        }
-        _ => String::new(),
-    };
+    let way_on = question_way_on(store, question, place)?
+        .map(|way| format!(" {way}"))
+        .unwrap_or_default();
     let body = format!("Your answer m-{answer} to m-{question} did not reach its window. {place}{way_on}\n\nYour words:\n{words}");
     let notice = queue(
         store,
@@ -659,6 +634,43 @@ pub(crate) fn task_place(store: &Store, task: Option<i64>) -> Result<String, Led
         "T-{number} {}.",
         crate::messages::moved_task_location(store, &task)?
     ))
+}
+
+/// Advice is for the same task and window, at its present location. A task's
+/// ending closes its holding before its row changes, so a different supplied
+/// destination must not inherit commands for the old state.
+fn question_way_on(
+    store: &Store,
+    question: i64,
+    place: &str,
+) -> Result<Option<String>, LedgerError> {
+    let task: Option<(i64, i64, String)> = store
+        .db
+        .query_row(
+            "SELECT t.id, t.number, t.state FROM question_binding b
+         JOIN message q ON q.id=b.question_id
+         JOIN task t ON t.id=b.task_id AND t.project_id=q.project_id
+         JOIN participant p ON p.id=b.participant_id AND p.project_id=q.project_id
+         WHERE b.question_id=? AND t.assignee_id=b.participant_id AND p.left_at IS NULL
+           AND t.deleted_at IS NULL",
+            [question],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((task_id, number, state)) = task else {
+        return Ok(None);
+    };
+    if place != task_place(store, Some(task_id))? {
+        return Ok(None);
+    }
+    Ok(match state.as_str() {
+        "working" | "waiting" | "paused" => Some(format!(
+            "Use cf tell T-{number} \"…\" or cf task finish T-{number}."
+        )),
+        "done" => Some(format!("T-{number} is done; review its result.")),
+        "failed" => Some(format!("T-{number} failed; review its result.")),
+        _ => None,
+    })
 }
 
 pub(crate) fn window_task_refusal(
@@ -813,7 +825,13 @@ pub(crate) fn close_project_question(
         } else {
             format!("\nQuestion: {words}")
         };
-        let body = format!("@{handle}'s question m-{question} on T-{number} closed when {}.{detail}\nUse cf tell T-{number} \"…\" or cf task finish T-{number}.", end.reason());
+        let way_on = question_way_on(store, question, location)?
+            .map(|way| format!("\n{way}"))
+            .unwrap_or_default();
+        let body = format!(
+            "@{handle}'s question m-{question} on T-{number} closed when {}.{detail}{way_on}",
+            end.reason()
+        );
         queue(
             store,
             project,

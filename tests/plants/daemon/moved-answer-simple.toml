@@ -630,8 +630,8 @@ meant = "t1859_restart_returns_answer_without_second_notice"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_returns_answer_without_second_notice"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "            format!(\" Use cf tell T-{number} \\\"…\\\" or cf task finish T-{number}.\")"
-replace = "            format!(\" T-{number}.\")"
+find = "let way_on = question_way_on(store, question, place)?"
+replace = "let way_on = None::<String>"
 
 [[plant]]
 name = "T1859: the Close withdrawal says the task moved"
@@ -675,8 +675,8 @@ meant = "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_nothing"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "    let way_on = match (same_place, task) {"
-replace = "    let way_on = match (same_window, task) {"
+find = "if place != task_place(store, Some(task_id))? {"
+replace = "if false && place != task_place(store, Some(task_id))? {"
 
 [[plant]]
 name = "T1859: a restart reports only one question"
@@ -713,3 +713,75 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "
 file = "crates/cf-ledger/src/messages/again.rs"
 find = "OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5"
 replace = "OR (q.reason IS NOT ?3 AND (q.reason IS NOT ?4 OR q.reason IS NOT ?5)"
+
+[[plant]]
+name = "T1859: a done question loses the result review"
+meant = "t1859_state_done_question_at_restart_or_close"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_done_question_at_restart_or_close"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"done\" => Some(format!(\"T-{number} is done; review its result.\")),"
+replace = "\"done\" => None,"
+
+[[plant]]
+name = "T1859: a failed question loses the result review"
+meant = "t1859_state_failed_or_queued_question_left_in_an_older_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_failed_or_queued_question_left_in_an_older_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"failed\" => Some(format!(\"T-{number} failed; review its result.\")),"
+replace = "\"failed\" => None,"
+
+[[plant]]
+name = "T1859: a failure already recorded loses its result review"
+meant = "t1859_state_returned_answer_after_failure_was_recorded"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_returned_answer_after_failure_was_recorded"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"failed\" => Some(format!(\"T-{number} failed; review its result.\")),"
+replace = "\"failed\" => None,"
+
+[[plant]]
+name = "T1859: a pending failure loses its result review"
+meant = "t1859_state_returned_answer_when_task_fails"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_returned_answer_when_task_fails"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "Some(&format!(\"T-{} failed; review its result.\", task.number)),"
+replace = "Some(&format!(\"T-{} has failed.\", task.number)),"
+
+[[plant]]
+name = "T1859: a queued task is offered unavailable commands"
+meant = "t1859_state_failed_or_queued_question_left_in_an_older_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_failed_or_queued_question_left_in_an_older_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"working\" | \"waiting\" | \"paused\" => Some(format!("
+replace = "\"queued\" | \"working\" | \"waiting\" | \"paused\" => Some(format!("
+
+[[plant]]
+name = "T1859: a moved task gets the old window commands"
+meant = "t1859_state_a_moved_task_does_not_offer_the_old_window_commands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_a_moved_task_does_not_offer_the_old_window_commands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "AND t.assignee_id=b.participant_id AND p.left_at IS NULL"
+replace = "AND 1=1 AND p.left_at IS NULL"
+
+[[plant]]
+name = "T1859: a paused task loses its commands"
+meant = "t1859_state_paused_question_offers_the_active_commands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_the_active_commands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "\"working\" | \"waiting\" | \"paused\" => Some(format!("
+replace = "\"working\" | \"waiting\" => Some(format!("
+
+[[plant]]
+name = "T1859: a question notice loses its way on"
+meant = "t1859_state_paused_question_offers_the_active_commands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_paused_question_offers_the_active_commands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "let way_on = question_way_on(store, question, location)?"
+replace = "let way_on = None::<String>"
