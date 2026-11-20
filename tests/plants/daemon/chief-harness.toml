@@ -343,7 +343,19 @@ runs = ["ch-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/models.rs"
-find = '        let _turn = turn.lock().await;'
+find = '''        let _turn = match turn.try_lock() {
+            Ok(turn) => turn,
+            Err(_) => {
+                tokio::time::timeout(Duration::from_millis(MODEL_QUEUE_TIMEOUT_MS), turn.lock())
+                    .await
+                    .map_err(|_| {
+                        format!(
+                            "{}'s model list is still being read; try again",
+                            harness.as_str()
+                        )
+                    })?
+            }
+        };'''
 replace = '        let _turn = turn.try_lock().ok();'
 
 

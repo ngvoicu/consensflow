@@ -8,10 +8,10 @@ use crate::seams::processes::{Child, Ending};
 use crate::seams::{arm, Time};
 
 /// How long a child asked to end has to end before it is forced to.
-const FORCE_AFTER_MS: u64 = 2000;
+const FORCE_AFTER_MS: u64 = cf_proto::models::CHILD_STOP_TIMEOUT_MS;
 
 /// How long past that it has to end, forced, before it is given up on.
-const SETTLE_MS: u64 = 2000;
+const SETTLE_MS: u64 = cf_proto::models::CHILD_KILL_TIMEOUT_MS;
 
 /// Asks `child` to end unless it has exited already, and waits until it has
 /// ended: forced at two seconds if it has not ended by then, and failed at

@@ -1,0 +1,59 @@
+# A silent Pi must finish its own bounded read and deliver its advice through
+# the page bridge. The app uses the same deadline selection as this test.
+
+[run]
+pi-listing-deadline = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::models::a_silent_pi_s_timeout_advice_reaches_the_page_bridge"]
+pi-listing-queue = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "models::tests::a_queued_model_read_that_cannot_get_a_turn_in_time_says_to_retry"]
+
+[[plant]]
+name = "pi listing deadline: model requests use the ordinary bridge deadline"
+meant = "a_silent_pi_s_timeout_advice_reaches_the_page_bridge"
+runs = ["pi-listing-deadline"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''| "backup.add" | "backup.change" => Some(crate::models::PAGE_MODEL_REQUEST_TIMEOUT_MS),'''
+replace = '''| "backup.add" | "backup.change" => None,'''
+
+[[plant]]
+name = "pi listing deadline: the outer wait ends at the adapter timeout"
+meant = "a_silent_pi_s_timeout_advice_reaches_the_page_bridge"
+runs = ["pi-listing-deadline"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '''pub const PAGE_MODEL_REQUEST_TIMEOUT_MS: u64 = MODEL_QUEUE_TIMEOUT_MS
+    + PI_UPDATE_TIMEOUT_MS
+    + LISTING_TIMEOUT_MS
+    + LISTING_CLEANUP_MS
+    + 10_000;'''
+replace = '''pub const PAGE_MODEL_REQUEST_TIMEOUT_MS: u64 = LISTING_TIMEOUT_MS;'''
+
+[[plant]]
+name = "pi listing deadline: a queue waiter never gets a retry reason"
+meant = "a_queued_model_read_that_cannot_get_a_turn_in_time_says_to_retry"
+runs = ["pi-listing-queue"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/models.rs"
+find = '''            Err(_) => {
+                tokio::time::timeout(Duration::from_millis(MODEL_QUEUE_TIMEOUT_MS), turn.lock())
+                    .await
+                    .map_err(|_| {
+                        format!(
+                            "{}'s model list is still being read; try again",
+                            harness.as_str()
+                        )
+                    })?
+            }'''
+replace = '''            Err(_) => turn.lock().await,'''
+
+[[plant]]
+name = "pi listing deadline: a queue waiter gives up before a refresh can finish"
+meant = "a_queued_model_read_that_cannot_get_a_turn_in_time_says_to_retry"
+runs = ["pi-listing-queue"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/models.rs"
+find = '''    PI_UPDATE_TIMEOUT_MS + LISTING_TIMEOUT_MS + LISTING_CLEANUP_MS + 5_000;'''
+replace = '''    LISTING_TIMEOUT_MS;'''

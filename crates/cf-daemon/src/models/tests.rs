@@ -431,8 +431,8 @@ fn a_harness_with_no_adapter_is_said_to_have_none() {
     );
 }
 
-#[test]
-fn two_reads_of_one_harness_are_one_after_the_other() {
+#[tokio::test]
+async fn two_reads_of_one_harness_are_one_after_the_other() {
     let home = home(&["devin"]);
     let gate = Rc::new(Notify::new());
     let devin = Rc::new(Listing {
@@ -463,11 +463,58 @@ fn two_reads_of_one_harness_are_one_after_the_other() {
     assert_eq!(*devin.asked.borrow(), [true, true]);
 }
 
+/// A request behind a stuck or long queue must get a useful refusal before
+/// the app bridge gives up on it, rather than starting a read too late.
+#[tokio::test(start_paused = true)]
+async fn a_queued_model_read_that_cannot_get_a_turn_in_time_says_to_retry() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = home(&["pi"]);
+            let pi = Rc::new(Listing {
+                gate: Some(Rc::new(Notify::new())),
+                ..Listing::default()
+            });
+            let lists = Rc::new(lists(&home, ByKind(vec![("pi", Rc::clone(&pi))])));
+            let first_lists = Rc::clone(&lists);
+            let first =
+                tokio::task::spawn_local(async move { first_lists.read(Harness::Pi, true).await });
+            while pi.asked.borrow().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            let next_lists = Rc::clone(&lists);
+            let later =
+                tokio::task::spawn_local(async move { next_lists.read(Harness::Pi, true).await });
+            tokio::task::yield_now().await;
+            tokio::time::advance(std::time::Duration::from_secs(95)).await;
+            tokio::task::yield_now().await;
+            assert!(
+                !later.is_finished(),
+                "one earlier refresh has time to finish"
+            );
+            tokio::time::advance(std::time::Duration::from_secs(7)).await;
+            let result = tokio::time::timeout(std::time::Duration::from_secs(1), later)
+                .await
+                .expect("the queued read must answer before the bridge deadline")
+                .unwrap();
+            assert_eq!(
+                result.unwrap_err(),
+                "pi's model list is still being read; try again"
+            );
+            assert_eq!(
+                *pi.asked.borrow(),
+                [true],
+                "the timed-out waiter started no second read"
+            );
+            first.abort();
+        })
+        .await;
+}
+
 /// A read serves only the asks that came before it started (A4-28, T-1321, review blocker 2):
 /// a dialog that opens while another's read of its harness is on its way is not given that
 /// read, which began before it opened, but a read begun for it.
-#[test]
-fn an_ask_that_arrives_after_a_read_started_waits_for_a_new_read() {
+#[tokio::test]
+async fn an_ask_that_arrives_after_a_read_started_waits_for_a_new_read() {
     let home = home(&["devin"]);
     let gate = Rc::new(Notify::new());
     let devin = Rc::new(Listing {
@@ -515,8 +562,8 @@ fn an_ask_that_arrives_after_a_read_started_waits_for_a_new_read() {
 
 /// Asks that are already waiting when a read begins share it: one read of a harness at a
 /// time, and no more of them than the asks need.
-#[test]
-fn asks_already_waiting_when_a_read_begins_share_it() {
+#[tokio::test]
+async fn asks_already_waiting_when_a_read_begins_share_it() {
     let home = home(&["devin"]);
     let gate = Rc::new(Notify::new());
     let devin = Rc::new(Listing {
@@ -567,8 +614,9 @@ fn asks_already_waiting_when_a_read_begins_share_it() {
 
 /// A Refresh reads for itself, however the reads of its harness were queued: one that waited
 /// behind a read which began after it came is not given that read, which fetches nothing.
-#[test]
-fn a_refresh_that_waited_behind_a_read_begun_after_it_came_still_reads_and_fetches_for_itself() {
+#[tokio::test]
+async fn a_refresh_that_waited_behind_a_read_begun_after_it_came_still_reads_and_fetches_for_itself(
+) {
     let home = home(&["devin"]);
     let gate = Rc::new(Notify::new());
     let devin = Rc::new(Listing {

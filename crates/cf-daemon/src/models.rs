@@ -8,7 +8,9 @@
 //! **A read serves only the asks that came before it began.** One harness is read one ask at
 //! a time (two probes of one harness have hung); an ask that arrives while a read of its
 //! harness is on its way waits for the next read, which it begins itself, and the asks already
-//! waiting when that read begins share it. Each read has an id, which the page sends back with
+//! waiting when that read begins share it. An ask that cannot get a turn within the queue's
+//! bound is refused with a retry reason before the app's bridge deadline. Each read has an id,
+//! which the page sends back with
 //! what it submits from the list it showed: **a submission is checked against that read**
 //! ([`ModelLists::checked`]), kept for this daemon's life (the last [`KEPT_READS`] of each
 //! harness), never against whichever read was made last. Where there is no such read (none in
@@ -28,12 +30,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_engine::seams::Adapters;
 use cf_harness::detect::harness_path;
 use cf_proto::agents::Harness;
-use cf_proto::models::{Freshness, ModelListing};
+use cf_proto::models::{Freshness, ModelListing, MODEL_QUEUE_TIMEOUT_MS};
 use tokio::sync::Mutex;
 
 /// How many of the reads of each harness a submission can still be checked against.
@@ -98,7 +101,19 @@ impl ModelLists {
         }
         let arrived = self.begun_reads(harness);
         let turn = Rc::clone(self.reading.borrow_mut().entry(harness).or_default());
-        let _turn = turn.lock().await;
+        let _turn = match turn.try_lock() {
+            Ok(turn) => turn,
+            Err(_) => {
+                tokio::time::timeout(Duration::from_millis(MODEL_QUEUE_TIMEOUT_MS), turn.lock())
+                    .await
+                    .map_err(|_| {
+                        format!(
+                            "{}'s model list is still being read; try again",
+                            harness.as_str()
+                        )
+                    })?
+            }
+        };
         // A read that began after this ask came, and ended while it waited for the turn, is the
         // read begun for the asks waiting then: this ask is one of them. A Refresh reads for
         // itself.

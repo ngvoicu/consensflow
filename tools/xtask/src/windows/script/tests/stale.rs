@@ -5,13 +5,13 @@
 //! was refused for as long as the file stayed).
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use super::lock::{Came, Case};
+use super::lock::{marked, until, Came, Case, Held};
 use crate::process::{self, Invocation};
 use crate::windows::machine::{state_script, State};
-use crate::windows::script::{exit_said, LOCK, OWNER, RUNNING};
+use crate::windows::script::{LOCK, OWNER, RUNNING};
 
 /// What the machine says of its copy `SHARED` ("race-copy" in the case's profile): the free disk
 /// and whether a run holds it, as `Machine::state` reads it.
@@ -31,14 +31,92 @@ fn state_of(case: &Case) -> State {
     State::read(&answer.stdout).unwrap_or_else(|| panic!("{:?}", answer.stdout))
 }
 
+/// An independent process with the same marker as the fixture's children.
+fn bystander(case: &Case, mark: &str) -> Held {
+    Held::new(
+        process::spawn(
+            &Invocation::new("ping", ".").args(["-n", "300", mark]),
+            &case.env,
+            Stdio::null(),
+            false,
+        )
+        .unwrap(),
+    )
+}
+
+fn already_running(case: &Case, mark: &str, other: u32) -> Vec<u32> {
+    until("the bystander did not start", || {
+        marked(&case.env, mark).contains(&other)
+    });
+    marked(&case.env, mark)
+}
+
+fn children_started(case: &Case, mark: &str, before: &[u32]) {
+    until(
+        "the fixture did not start a marked child beside the bystander",
+        || {
+            let seen = marked(&case.env, mark);
+            seen.iter().any(|pid| !before.contains(pid))
+        },
+    );
+}
+
+fn children_ended(case: &Case, mark: &str, before: &[u32], other: &mut Held) {
+    until(
+        "the fixture left a marked child after its job closed",
+        || {
+            marked(&case.env, mark)
+                .iter()
+                .all(|pid| before.contains(pid))
+        },
+    );
+    assert!(
+        other.runs().is_ok(),
+        "the unrelated same-marker process was ended"
+    );
+}
+
+#[test]
+fn a_fixture_that_panics_closes_its_job_but_not_an_unrelated_process() {
+    let scratch;
+    {
+        let case = Case::new();
+        scratch = case.scratch.path().to_owned();
+        let mark = "127.77.185.3";
+        let mut other = bystander(&case, mark);
+        let before = already_running(&case, mark, other.id());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _run = case.contained_run(
+                "0000d005-00000005",
+                &[("keep.txt", b"kept")],
+                &format!("ping -n 300 {mark}"),
+            );
+            children_started(&case, mark, &before);
+            panic!("fixture failure after its child started");
+        }));
+        let panic = result.unwrap_err();
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"fixture failure after its child started")
+        );
+        children_ended(&case, mark, &before, &mut other);
+    }
+    assert!(
+        !scratch.exists(),
+        "the fixture scratch folder was not removed"
+    );
+}
+
 #[test]
 fn a_run_killed_hard_leaves_records_that_neither_make_the_machine_busy_nor_refuse_the_next_run() {
     let case = Case::new();
-    let mut run = case.run(
+    let mark = "127.77.185.1";
+    let mut other = bystander(&case, mark);
+    let before = already_running(&case, mark, other.id());
+    let run = case.contained_run(
         "0000d001-00000001",
         &[("keep.txt", b"kept".as_slice())],
-        None,
-        "ping -n 120 127.0.0.1",
+        &format!("ping -n 300 {mark}"),
     );
     let owner = case.copy().join(OWNER);
     // The run goes on: its owner file names its process, and the machine says a run holds the copy.
@@ -48,9 +126,11 @@ fn a_run_killed_hard_leaves_records_that_neither_make_the_machine_busy_nor_refus
         std::thread::sleep(Duration::from_millis(100));
     }
     assert!(state_of(&case).running, "a run that goes on is a run");
+    children_started(&case, mark, &before);
     // Killed as a battery or a BSOD ends it: no `finally`, so no record is taken away.
-    run.kill().unwrap();
-    run.wait().unwrap();
+    run.kill_bootstrap();
+    drop(run);
+    children_ended(&case, mark, &before, &mut other);
     assert!(owner.exists(), "the owner file stays");
     assert!(case.copy().join(RUNNING).exists(), "the older file stays");
     // The machine says no run goes on there, though the records are there.
@@ -150,28 +230,25 @@ fn held_of(case: &Case) -> Vec<&'static str> {
 #[test]
 fn a_run_holds_nothing_of_the_machine_by_the_time_its_exit_line_is_read() {
     let case = Case::new();
-    let leave = b"@echo off\r\nstart \"\" /b ping -n 8 127.0.0.1 >nul\r\nexit /b 3\r\n";
+    let mark = "127.77.185.2";
+    let mut other = bystander(&case, mark);
+    let before = already_running(&case, mark, other.id());
+    let leave = format!("@echo off\r\nstart \"\" /b ping -n 300 {mark} >nul\r\nexit /b 3\r\n");
     let mut holding = Vec::new();
     for round in 0..10 {
         let id = format!("0000d1{round:02x}-000000{round:02x}");
-        let mut run = case.run(&id, &[("leave.cmd", leave.as_slice())], None, "leave.cmd");
-        let out = run.stdout.take().unwrap();
-        let mut said = String::new();
-        for line in BufReader::new(out).lines() {
-            let line = line.unwrap();
-            said.push_str(&line);
-            said.push('\n');
-            if exit_said(&line).is_some() {
-                // Read now, before anything else is asked of the machine.
-                let held = held_of(&case);
-                if !held.is_empty() {
-                    holding.push(format!("round {round}: {}", held.join(", ")));
-                }
-                break;
-            }
+        let run = case.contained_run(&id, &[("leave.cmd", leave.as_bytes())], "leave.cmd");
+        let said = run.wait_for_exit_line();
+        // Read now, before anything else is asked of the machine.
+        let held = held_of(&case);
+        if !held.is_empty() {
+            holding.push(format!("round {round}: {}", held.join(", ")));
         }
-        run.wait().unwrap();
+        assert_eq!(run.wait_for_bootstrap(), 3);
         assert!(said.contains("== exit 3"), "round {round}: {said}");
+        children_started(&case, mark, &before);
+        drop(run);
+        children_ended(&case, mark, &before, &mut other);
     }
     assert!(
         holding.is_empty(),

@@ -11,6 +11,31 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// The bound on a harness's one-shot model-list conversation.
+pub const LISTING_TIMEOUT_MS: u64 = 30_000;
+/// Pi's Refresh first lets its own catalog update for this long.
+pub const PI_UPDATE_TIMEOUT_MS: u64 = 60_000;
+/// A child has this long to exit after it is asked to stop.
+pub const CHILD_STOP_TIMEOUT_MS: u64 = 2_000;
+/// A child has this long to exit after it is forced to stop.
+pub const CHILD_KILL_TIMEOUT_MS: u64 = 2_000;
+/// Pi's setup inspection has this long to return its diagnostic detail.
+pub const PI_SETUP_TIMEOUT_MS: u64 = 2_000;
+/// A timed-out listing may still wait four seconds to stop its child and two
+/// seconds to inspect Pi's setup before returning the diagnostic.
+pub const LISTING_CLEANUP_MS: u64 =
+    CHILD_STOP_TIMEOUT_MS + CHILD_KILL_TIMEOUT_MS + PI_SETUP_TIMEOUT_MS;
+/// A read may wait for one preceding refresh, with room for its update to stop.
+pub const MODEL_QUEUE_TIMEOUT_MS: u64 =
+    PI_UPDATE_TIMEOUT_MS + LISTING_TIMEOUT_MS + LISTING_CLEANUP_MS + 5_000;
+/// Allow the queue wait, the requested refresh and its cleanup, and another
+/// ten seconds for update teardown, scheduling and bridge transport.
+pub const PAGE_MODEL_REQUEST_TIMEOUT_MS: u64 = MODEL_QUEUE_TIMEOUT_MS
+    + PI_UPDATE_TIMEOUT_MS
+    + LISTING_TIMEOUT_MS
+    + LISTING_CLEANUP_MS
+    + 10_000;
+
 /// What a picker says beside a contributor model.
 pub const CONTRIBUTOR_WARNING: &str =
     "Contributor model: Meta may train on what it sees, including your code.";
