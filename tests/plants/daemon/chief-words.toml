@@ -481,10 +481,10 @@ runs = ["cw-page-card"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      const edit = member.designer
-        ? null'''
-replace = '''      const edit = false
-        ? null'''
+find = '''    const edit = member.designer
+      ? []'''
+replace = '''    const edit = false
+      ? []'''
 
 [[plant]]
 name = "chief-words: New project does not say the model is switched in the chief's window"
