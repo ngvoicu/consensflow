@@ -8,6 +8,10 @@ pending = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt",
 returned = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions::answering_or_finishing_withdraws_an_unhanded_reminder_and_a_returned_handed_one", "--", "--test-threads=2"]
 answer-lookup = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "waiting_questions::tests::checking_unanswered_questions_uses_an_index_to_find_each_answer"]
 shell-switch = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered", "--", "--test-threads=2"]
+held-wait = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding", "--", "--test-threads=2"]
+held-subject = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_a_cross_task_question_reminder_names_its_held_task", "--", "--test-threads=2"]
+held-delivery = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_a_queued_reminder_survives_its_topics_acceptance", "--", "--test-threads=2"]
+held-finish = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder", "--", "--test-threads=2"]
 
 [[plant]]
 name = "waiting question: the first reminder is late"
@@ -60,7 +64,11 @@ meant = "finished_questions::a_pending_question_reminder_cannot_stack_even_after
 runs = ["pending"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/waiting_questions.rs"
-find = '''        if last != previous || state.as_deref().is_some_and(|state| matches!(state, "queued" | "gated" | "delivering")) {'''
+find = '''        if last != previous
+            || state
+                .as_deref()
+                .is_some_and(|state| matches!(state, "queued" | "gated" | "delivering"))
+        {'''
 replace = '''        if last != previous && state.is_none() {'''
 
 [[plant]]
@@ -92,3 +100,63 @@ runs = ["answer-lookup"]
 file = "crates/cf-ledger/migrations/0042.sql"
 find = "CREATE INDEX message_answers_by_question ON message(reply_to) WHERE kind = 'answer';"
 replace = ""
+
+[[plant]]
+name = "waiting question holding: the lookup follows the subject"
+meant = "moved_answer_contract::a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding"
+runs = ["held-wait"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            holding_join(), is_open()'''
+replace = '''            "LEFT JOIN task t ON t.id=q.task_id", is_open()'''
+
+[[plant]]
+name = "waiting question holding: the reminder changes its subject"
+meant = "moved_answer_contract::a13_a_cross_task_question_reminder_names_its_held_task"
+runs = ["held-subject"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '"SELECT q.id, topic.number, CASE WHEN t.assignee_id=q.sender_id'
+replace = '"SELECT q.id, t.number, CASE WHEN t.assignee_id=q.sender_id'
+
+[[plant]]
+name = "waiting question holding: writing a reminder follows the subject"
+meant = "moved_answer_contract::a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding"
+runs = ["held-wait"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''                    holding_join(),
+                    is_open()'''
+replace = '''                    "LEFT JOIN task t ON t.id=q.task_id",
+                    is_open()'''
+
+[[plant]]
+name = "waiting question holding: accepting the topic withdraws a waiting reminder"
+meant = "moved_answer_contract::a13_a_queued_reminder_survives_its_topics_acceptance"
+runs = ["held-delivery"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            holding_join(),
+            is_open()
+        ))?
+        .exists([reminder])'''
+replace = '''            "LEFT JOIN task t ON t.id=q.task_id",
+            is_open()
+        ))?
+        .exists([reminder])'''
+
+[[plant]]
+name = "waiting question holding: finish withdraws only reminders naming its task"
+meant = "moved_answer_contract::a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder"
+runs = ["held-finish"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''        .prepare(&format!(
+            "SELECT q.id FROM question_reminder qr JOIN message q ON q.id=qr.question_id
+         WHERE {}=? AND q.sender_id=? AND q.kind='question' AND q.urgent=0",
+            crate::holding::task_for_question_sql("q")
+        ))?'''
+replace = '''        .prepare(
+            "SELECT q.id FROM question_reminder qr JOIN message q ON q.id=qr.question_id
+         WHERE q.task_id=? AND q.sender_id=? AND q.kind='question' AND q.urgent=0",
+        )?'''
