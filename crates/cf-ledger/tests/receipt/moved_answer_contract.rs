@@ -2245,24 +2245,43 @@ fn t1859_state_tell_and_finish_are_accepted_for_active_tasks() {
             }
             assert_eq!(w.state(task), state);
             if tell {
-                w.ledger
-                    .ask(
-                        w.project,
-                        &NewQuestion {
-                            from: Some("chief".into()),
-                            to: session,
-                            task: Some(task),
-                            body: Some("Use ANSI".into()),
-                            urgent: true,
-                            ..NewQuestion::default()
-                        },
-                    )
+                // `cf tell T-n` routes through tell_queued, not an urgent question.
+                let told = w
+                    .ledger
+                    .tell_queued(w.project, task, "chief", "Use ANSI")
                     .unwrap_or_else(|error| panic!("tell in {state}: {error}"));
+                assert_eq!(told.kind, "note");
+                assert_eq!(w.state(task), state, "tell does not stop the task");
             } else {
                 w.ledger
                     .record_finished(w.project, task, "Finish", (0, 0))
                     .unwrap_or_else(|error| panic!("finish in {state}: {error}"));
             }
         }
+    }
+}
+
+#[test]
+fn t1859_state_tell_and_finish_are_refused_for_done_or_failed_tasks() {
+    for state in ["done", "failed"] {
+        let mut w = world();
+        let (task, _, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        if state == "done" {
+            w.ledger.record_result(w.project, task, "Result").unwrap();
+        } else {
+            w.ledger
+                .fail_task(w.project, task, "Window failed")
+                .unwrap();
+        }
+        assert_eq!(w.state(task), state);
+        assert!(w
+            .ledger
+            .tell_queued(w.project, task, "chief", "Use ANSI")
+            .is_err());
+        assert!(w
+            .ledger
+            .record_finished(w.project, task, "Finish", (0, 0))
+            .is_err());
     }
 }
