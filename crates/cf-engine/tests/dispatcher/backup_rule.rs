@@ -167,6 +167,175 @@ fn a_window_that_finishes_its_task_no_longer_waits_for_its_old_question() {
 }
 
 #[test]
+fn a_backup_added_after_a_member_is_held_takes_its_waiting_queued_task() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "queued");
+    assert_eq!(with(&tiers, 1), "zeus");
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 3);
+    assert_eq!(with(&tiers, 1), "zeus", "waits with no backup");
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 3);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(went(&tiers).len(), 1);
+}
+
+#[test]
+fn a_backup_added_after_a_real_quota_refusal_takes_the_held_task() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    passes(&context, 2);
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&soon(&context, 3))),
+    );
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), "zeus");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(tiers.task(1).task.held_until.is_some());
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(went(&tiers).len(), 1);
+}
+
+#[test]
+fn a_backup_added_later_takes_waiting_work_for_each_member_failure() {
+    for why in ["quota", "account", "moved", "edit"] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        tiers.open();
+        tiers.open_body("Second task");
+        context.pass().unwrap();
+        assert_eq!(with(&tiers, 1), "zeus", "{why}");
+        assert_eq!(with(&tiers, 2), "zeus", "{why}");
+        let id = tiers.id("zeus");
+        if why == "edit" {
+            context
+                .ledger
+                .borrow()
+                .sqlite()
+                .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [id])
+                .unwrap();
+        } else {
+            let (until, kind) = match why {
+                "account" => (NEVER.to_owned(), HoldKind::Account),
+                "moved" => (MOVED.to_owned(), HoldKind::Moved),
+                _ => (soon(&context, 3), HoldKind::Quota),
+            };
+            context
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(id, &until, why, kind)
+                .unwrap();
+        }
+        passes(&context, 3);
+        let backup = backed(&context, &tiers, "zeus");
+        passes(&context, 4);
+        for number in [1, 2] {
+            assert_eq!(with(&tiers, number), backup.handle, "{why}, T-{number}");
+        }
+        assert_eq!(went(&tiers).len(), 2, "{why}: {:?}", tiers.notes("chief"));
+        passes(&context, 2);
+        assert_eq!(went(&tiers).len(), 2, "{why}, told once per task");
+    }
+}
+
+#[test]
+fn a_later_replacement_or_return_from_vacation_takes_waiting_work() {
+    for change in ["replace", "return"] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        let old = backed(&context, &tiers, "zeus");
+        context
+            .send_on_vacation(tiers.project.id, &old.handle)
+            .unwrap();
+        tiers.open();
+        context.pass().unwrap();
+        out(&context, &tiers, "zeus", &soon(&context, 3));
+        passes(&context, 3);
+        assert_eq!(with(&tiers, 1), "zeus", "{change}: waits");
+        let backup = if change == "return" {
+            context
+                .bring_back_from_vacation(tiers.project.id, &old.handle)
+                .unwrap()
+        } else {
+            context
+                .change_backup(
+                    tiers.project.id,
+                    "zeus",
+                    NewMember {
+                        harness: "claude-code".to_owned(),
+                        model: Some("new-backup".to_owned()),
+                        effort: None,
+                        model_name: None,
+                        designer: false,
+                        roles: vec!["worker".to_owned()],
+                        tier: "standard".to_owned(),
+                    },
+                )
+                .unwrap()
+        };
+        passes(&context, 4);
+        assert_eq!(with(&tiers, 1), backup.handle, "{change}");
+        assert_eq!(went(&tiers).len(), 1, "{change}");
+    }
+}
+
+#[test]
+fn a_backup_added_after_a_hold_leaves_named_follow_up_and_human_paused_tasks() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    passes(&context, 2);
+    let session = tiers.assignee(1);
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(project, 1, "Parser done")
+        .unwrap();
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Follow up".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Named".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    tiers.open_body("Pause this task");
+    tiers.open_body("Move this task");
+    passes(&context, 2);
+    context.pause_task(project, 4);
+    let paused_with = tiers.assignee(4);
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 3);
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 4);
+    assert_eq!(tiers.assignee(2), session, "follow-up stays in its window");
+    assert_eq!(with(&tiers, 3), "zeus", "named task stays");
+    assert_eq!(tiers.assignee(4), paused_with, "human-paused task stays");
+    assert_eq!(tiers.task(4).task.state, "paused");
+    assert_eq!(with(&tiers, 5), backup.handle, "ordinary task moves");
+    assert_eq!(went(&tiers).len(), 1, "only the ordinary task is moved");
+}
+
+#[test]
 fn a_queued_task_of_a_member_refused_for_its_quota_goes_to_its_free_backup() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);

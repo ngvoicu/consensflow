@@ -1454,6 +1454,46 @@ async fn bkv_page_add_backup_and_refuse_a_second_or_a_chain() {
 }
 
 #[tokio::test]
+async fn a_later_backup_change_wakes_the_dispatcher_and_moves_waiting_work() {
+    LocalSet::new().run_until(async {
+        for change in ["add", "replace", "return"] {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let owner_id = s.member(&owner).id;
+            let old = if change == "add" {
+                None
+            } else {
+                let backup = bkv_page_backup(&s, &owner);
+                s.rig.kit.ledger.borrow_mut().send_on_vacation(s.project, &backup, &[]).unwrap();
+                Some(backup)
+            };
+            let task = s.rig.kit.create_task(s.project, cf_ledger::NewTask {
+                from: "chief".into(), pool: Some("worker".into()), tier: Some("standard".into()),
+                body: "Waiting work".into(), ..cf_ledger::NewTask::default()
+            });
+            s.rig.kit.ledger.borrow_mut().assign_task(s.project, task.task.number, owner_id).unwrap();
+            s.rig.kit.ledger.borrow_mut().mark_out_with_kind(
+                owner_id, "9999-12-31T23:59:59.000Z", "out of quota", cf_ledger::HoldKind::Quota,
+            ).unwrap();
+            s.rig.kit.pass().unwrap();
+            let before = s.rig.kicks.get();
+            let (operation, body) = match change {
+                "add" => ("backup.add", json!({"project": s.project, "member": owner, "harness": "codex", "model": "gpt-6.1-sol", "effort": "high"})),
+                "replace" => ("backup.change", json!({"project": s.project, "member": owner, "harness": "muse", "model": "muse-wonder-1.0", "effort": "high"})),
+                _ => ("member.vacation_back", json!({"project": s.project, "member": old.as_deref().unwrap()})),
+            };
+            let answer = bkv05_ask(&s, operation, body).await;
+            assert_eq!(answer["ok"], true, "{change}: {answer}");
+            assert_eq!(s.rig.kicks.get(), before + 1, "{change}: the page wakes the dispatcher");
+            let backup = answer["member"]["id"].as_i64().unwrap();
+            for _ in 0..3 { s.rig.kit.pass().unwrap(); }
+            let assigned = s.rig.kit.task(s.project, task.task.number).task.assignee.unwrap();
+            assert_eq!(s.member(&assigned).member_id, Some(backup), "{change}");
+        }
+    }).await;
+}
+
+#[tokio::test]
 async fn bkv_page_change_backup_replaces_its_row_and_keeps_the_owner() {
     LocalSet::new().run_until(async {
         let s = staffing();
