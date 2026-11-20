@@ -1201,6 +1201,59 @@ fn a13_finishing_the_chiefs_own_topic_keeps_another_holdings_question_and_remind
 }
 
 #[test]
+fn a13_finishing_an_unreceived_chief_step_releases_another_holdings_reminder() {
+    use cf_ledger::NewNote;
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.give("chief", "The chief's own subject");
+    let carrier = topic.message.unwrap().id;
+    let question = w.ask(&session, topic.task.number, "About the subject").id;
+    w.deliver(question);
+    let reminder = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: Some(topic.task.number),
+                body: "A reminder".into(),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    w.edit(|db| {
+        let carried_by: Option<i64> = db
+            .query_row(
+                "SELECT carried_by FROM message WHERE id=?",
+                [reminder.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(carried_by, Some(carrier));
+    });
+
+    let finished = w
+        .ledger
+        .record_finished(w.project, topic.task.number, "Done", (0, 0))
+        .unwrap();
+    assert_eq!(w.state(held), "waiting");
+    assert_eq!(w.message(reminder.id).state, "queued");
+    assert!(!finished.withdrawn.iter().any(|m| m.id == reminder.id));
+    assert_eq!(
+        w.ledger
+            .next_delivery_of(w.id("chief"), reminder.id)
+            .unwrap()
+            .map(|m| m.id),
+        Some(reminder.id),
+        "the cancelled carrier must not strand the reminder"
+    );
+}
+
+#[test]
 fn a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder() {
     use cf_ledger::NewNote;
     let mut w = world();
