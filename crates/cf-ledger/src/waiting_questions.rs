@@ -11,14 +11,24 @@ use crate::MessageView;
 #[derive(Debug, Clone)]
 pub struct QuestionWait {
     pub id: i64,
+    /// The task named as the subject, if any.
     pub task: Option<i64>,
-    /// The task the question's sender actually holds, if that is its subject.
+    /// The finishable task the question's sender actually holds, if any.
     pub held_task: Option<i64>,
     pub sender: String,
     pub recipient: String,
     pub recipient_id: i64,
     pub received_at: String,
     pub reminder: Option<MessageView>,
+}
+
+/// For a tracked question its window's holding is distinct from its topic.
+/// A pre-tracking question continues to use its topic as it did before.
+fn holding_join() -> String {
+    format!(
+        "LEFT JOIN task t ON t.id={}",
+        crate::holding::task_for_question_sql("q")
+    )
 }
 
 /// A member's question that reached the chief and still has no answer standing.
@@ -32,9 +42,10 @@ fn is_open() -> String {
                    WHERE early.question_id=q.id AND early.first_read_at IS NOT NULL)))
          AND s.role NOT IN ('chief', 'human')
          AND s.left_at IS NULL AND r.role = 'chief' AND r.left_at IS NULL
-         AND NOT {} AND (q.task_id IS NULL OR (t.id IS NOT NULL AND t.deleted_at IS NULL
+         AND NOT {} AND ({} IS NULL OR (t.id IS NOT NULL AND t.deleted_at IS NULL
              AND t.state NOT IN ('accepted', 'cancelled', 'failed')))",
-        has_standing_answer("q")
+        has_standing_answer("q"),
+        crate::holding::task_for_question_sql("q")
     )
 }
 
@@ -43,14 +54,15 @@ pub(crate) fn waiting(store: &Store, project: i64) -> Result<Vec<QuestionWait>, 
     let rows: Vec<(QuestionWait, Option<i64>)> = store
         .db
         .prepare(&format!(
-            "SELECT q.id, t.number, CASE WHEN t.assignee_id=q.sender_id
+            "SELECT q.id, topic.number, CASE WHEN t.assignee_id=q.sender_id
                     AND t.state IN ('working', 'waiting', 'paused') THEN t.number END,
                     s.handle, r.handle, q.recipient_id, coalesce(qr.first_read_at, q.delivered_at), qr.reminder_id
              FROM message q JOIN participant s ON s.id=q.sender_id
-             JOIN participant r ON r.id=q.recipient_id LEFT JOIN task t ON t.id=q.task_id
+             JOIN participant r ON r.id=q.recipient_id LEFT JOIN task topic ON topic.id=q.task_id
+             {}
              LEFT JOIN question_reminder qr ON qr.question_id=q.id
              WHERE q.project_id=? AND {} ORDER BY coalesce(qr.first_read_at, q.delivered_at), q.id",
-            is_open()
+            holding_join(), is_open()
         ))?
         .query_map([project], |row| {
             Ok((
@@ -97,16 +109,30 @@ pub(crate) fn remind(
     new_note: &NewNote,
 ) -> Result<Option<MessageView>, LedgerError> {
     store.write(|store| {
-        let current: Option<(Option<i64>, Option<String>)> = store.db.query_row(
-            &format!("SELECT qr.reminder_id, prior.state FROM message q
+        let current: Option<(Option<i64>, Option<String>)> = store
+            .db
+            .query_row(
+                &format!(
+                    "SELECT qr.reminder_id, prior.state FROM message q
                 JOIN participant s ON s.id=q.sender_id JOIN participant r ON r.id=q.recipient_id
-                LEFT JOIN task t ON t.id=q.task_id LEFT JOIN question_reminder qr ON qr.question_id=q.id
+                {} LEFT JOIN question_reminder qr ON qr.question_id=q.id
                 LEFT JOIN message prior ON prior.id=qr.reminder_id
-                WHERE q.id=?1 AND q.project_id=?2 AND {}", is_open()),
-            params![id, project], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?;
-        let Some((last, state)) = current else { return Ok(None) };
-        if last != previous || state.as_deref().is_some_and(|state| matches!(state, "queued" | "gated" | "delivering")) {
+                WHERE q.id=?1 AND q.project_id=?2 AND {}",
+                    holding_join(),
+                    is_open()
+                ),
+                params![id, project],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((last, state)) = current else {
+            return Ok(None);
+        };
+        if last != previous
+            || state
+                .as_deref()
+                .is_some_and(|state| matches!(state, "queued" | "gated" | "delivering"))
+        {
             return Ok(None);
         }
         let sent = note(store, project, new_note)?;
@@ -150,10 +176,11 @@ pub(crate) fn end_for_task(
 ) -> Result<(), LedgerError> {
     let ids: Vec<i64> = store
         .db
-        .prepare(
+        .prepare(&format!(
             "SELECT q.id FROM question_reminder qr JOIN message q ON q.id=qr.question_id
-         WHERE q.task_id=? AND q.sender_id=? AND q.kind='question' AND q.urgent=0",
-        )?
+         WHERE {}=? AND q.sender_id=? AND q.kind='question' AND q.urgent=0",
+            crate::holding::task_for_question_sql("q")
+        ))?
         .query_map(params![task, assignee], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     for id in ids {
@@ -170,8 +197,9 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
             "SELECT 1 FROM question_reminder qr JOIN message reminder ON reminder.id=qr.reminder_id
         WHERE qr.reminder_id=? AND reminder.handed_at IS NULL AND (qr.ended=1 OR NOT EXISTS (
             SELECT 1 FROM message q JOIN participant s ON s.id=q.sender_id
-            JOIN participant r ON r.id=q.recipient_id LEFT JOIN task t ON t.id=q.task_id
+            JOIN participant r ON r.id=q.recipient_id {}
             WHERE q.id=qr.question_id AND {}))",
+            holding_join(),
             is_open()
         ))?
         .exists([reminder])?)
@@ -179,7 +207,7 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
 
 #[cfg(test)]
 mod tests {
-    use super::is_open;
+    use super::{holding_join, is_open};
     use rusqlite::Connection;
 
     #[test]
@@ -190,8 +218,9 @@ mod tests {
             "EXPLAIN QUERY PLAN SELECT q.id FROM message q
              JOIN participant s ON s.id=q.sender_id
              JOIN participant r ON r.id=q.recipient_id
-             LEFT JOIN task t ON t.id=q.task_id
+             {}
              WHERE q.project_id=1 AND {}",
+            holding_join(),
             is_open()
         );
         let plan: Vec<String> = db
