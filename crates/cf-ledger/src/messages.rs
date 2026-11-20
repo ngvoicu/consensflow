@@ -41,6 +41,8 @@ use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 /// The durable withdrawal reason of a question whose task left its window.
 pub const MOVED_QUESTION: &str = "the task moved to another window";
+pub(crate) const RESTARTED_QUESTION: &str = "ConsensFlow restarted";
+pub(crate) const CLOSED_PROJECT_QUESTION: &str = "the project closed";
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
@@ -635,13 +637,13 @@ pub(crate) fn withdraw_open_questions(
               WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
                 AND id IN (SELECT question_id FROM question_binding)
                 AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
-                     OR (state = 'cancelled' AND reason IS NOT ?4 AND EXISTS (
+                     OR (state = 'cancelled' AND reason IS NOT ?4 AND reason IS NOT ?5 AND reason IS NOT ?6 AND EXISTS (
                          SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
                 AND NOT {}",
             crate::holding::task_for_question_sql("message"),
             has_standing_answer("message")
         ),
-        params![format!("T-{} {why}", task.number), task.id, window, MOVED_QUESTION],
+        params![format!("T-{} {why}", task.number), task.id, window, MOVED_QUESTION, RESTARTED_QUESTION, CLOSED_PROJECT_QUESTION],
     )?;
     Ok(())
 }

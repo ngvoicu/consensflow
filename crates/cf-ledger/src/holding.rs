@@ -593,7 +593,23 @@ pub(crate) fn return_answer(
         };
         recipient = store.participant_row(current)?;
     }
-    let body = format!("Your answer m-{answer} to m-{question} did not reach its window. {place}\n\nYour words:\n{words}");
+    let same_window = store
+        .db
+        .prepare(
+            "SELECT 1 FROM message a JOIN question_binding b ON b.question_id = a.reply_to
+         JOIN task t ON t.id = b.task_id AND t.project_id = a.project_id
+         JOIN participant p ON p.id = b.participant_id AND p.project_id = a.project_id
+         WHERE a.id = ? AND t.assignee_id = b.participant_id AND p.left_at IS NULL
+           AND t.deleted_at IS NULL AND t.state IN ('queued', 'working', 'waiting', 'paused')",
+        )?
+        .exists([answer])?;
+    let way_on = match (same_window, task) {
+        (true, Some(number)) => {
+            format!(" Use cf tell T-{number} \"…\" or cf task finish T-{number}.")
+        }
+        _ => String::new(),
+    };
+    let body = format!("Your answer m-{answer} to m-{question} did not reach its window. {place}{way_on}\n\nYour words:\n{words}");
     let notice = queue(
         store,
         project,
@@ -699,7 +715,11 @@ pub(crate) fn close_deferring(
     let mut deferred = Vec::new();
     for question in questions {
         deferred.extend(close_question_deferring(
-            store, question, &location, in_flight,
+            store,
+            question,
+            &location,
+            in_flight,
+            crate::messages::MOVED_QUESTION,
         )?);
     }
     if task.is_some() {
@@ -718,7 +738,84 @@ pub(crate) fn close_question(
     question: i64,
     location: &str,
 ) -> Result<(), LedgerError> {
-    close_question_deferring(store, question, location, None).map(|_| ())
+    close_question_deferring(
+        store,
+        question,
+        location,
+        None,
+        crate::messages::MOVED_QUESTION,
+    )
+    .map(|_| ())
+}
+
+/// Why a task-bound question ended with a whole project rather than moving.
+#[derive(Clone, Copy)]
+pub(crate) enum ProjectWindowEnd {
+    Restart,
+    Close,
+}
+
+impl ProjectWindowEnd {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Restart => crate::messages::RESTARTED_QUESTION,
+            Self::Close => crate::messages::CLOSED_PROJECT_QUESTION,
+        }
+    }
+}
+
+/// Close a tracked task question with its project. A still-gated question's
+/// replacement stays at the gate even if the gate was switched off meanwhile.
+pub(crate) fn close_project_question(
+    store: &mut Store,
+    question: i64,
+    location: &str,
+    in_flight: Option<i64>,
+    end: ProjectWindowEnd,
+) -> Result<Vec<i64>, LedgerError> {
+    type Notice = (i64, i64, i64, String, i64, String, String, bool);
+    let notice: Option<Notice> = store.db.query_row(
+        "SELECT q.project_id, q.sender_id, q.recipient_id, sender.handle, t.number, q.body, q.state,
+                (q.delivered_at IS NOT NULL OR EXISTS (SELECT 1 FROM question_reminder r
+                   WHERE r.question_id=q.id AND r.first_read_at IS NOT NULL))
+         FROM message q JOIN question_binding b ON b.question_id=q.id
+         JOIN task t ON t.id=b.task_id AND t.project_id=q.project_id
+         JOIN participant sender ON sender.id=q.sender_id AND sender.project_id=q.project_id
+         JOIN participant recipient ON recipient.id=q.recipient_id AND recipient.project_id=q.project_id
+         WHERE q.id=? AND b.closed=0 AND q.kind='question' AND q.urgent=0
+           AND q.state IN ('queued','delivering','gated','delivered','read')
+           AND sender.role NOT IN ('chief','human') AND recipient.role='chief'
+           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to=q.id AND a.kind='answer'
+                           AND a.state NOT IN ('cancelled','failed'))",
+        [question], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?)),
+    ).optional()?;
+    let deferred = close_question_deferring(store, question, location, in_flight, end.reason())?;
+    if let Some((project, sender, original_chief, handle, number, words, state, received)) = notice
+    {
+        let chief: i64 = store.db.query_row(
+            "SELECT id FROM participant WHERE project_id=? AND role='chief' AND left_at IS NULL ORDER BY id DESC LIMIT 1",
+            [project], |r| r.get(0),
+        )?;
+        let detail = if received && chief == original_chief {
+            String::new()
+        } else {
+            format!("\nQuestion: {words}")
+        };
+        let body = format!("@{handle}'s question m-{question} on T-{number} closed when {}.{detail}\nUse cf tell T-{number} \"…\" or cf task finish T-{number}.", end.reason());
+        queue(
+            store,
+            project,
+            &Queued {
+                to: chief,
+                from: (state == "gated").then_some(sender),
+                kind: "note",
+                body: &body,
+                must_gate: state == "gated",
+                ..Queued::default()
+            },
+        )?;
+    }
+    Ok(deferred)
 }
 
 fn close_question_deferring(
@@ -726,6 +823,7 @@ fn close_question_deferring(
     question: i64,
     location: &str,
     in_flight: Option<i64>,
+    reason: &str,
 ) -> Result<Vec<i64>, LedgerError> {
     let exists = store
         .db
@@ -752,9 +850,9 @@ fn close_question_deferring(
     store.db.execute(
         "UPDATE message SET
            state = CASE WHEN EXISTS (SELECT 1 FROM message a WHERE a.reply_to = ?3 AND a.kind = 'answer' AND a.state IN ('delivered', 'read')) THEN state ELSE 'cancelled' END,
-           reason = CASE WHEN EXISTS (SELECT 1 FROM message a WHERE a.reply_to = ?3 AND a.kind = 'answer' AND a.state IN ('delivered', 'read')) THEN reason ELSE ?1 END,
+           reason = CASE WHEN EXISTS (SELECT 1 FROM message a WHERE a.reply_to = ?3 AND a.kind = 'answer' AND a.state IN ('delivered', 'read')) OR reason IN (?4, ?5) THEN reason ELSE ?1 END,
            door_closed_at = COALESCE(door_closed_at, ?2) WHERE id = ?3",
-        params![crate::messages::MOVED_QUESTION, at, question],
+        params![reason, at, question, crate::messages::RESTARTED_QUESTION, crate::messages::CLOSED_PROJECT_QUESTION],
     )?;
     let answers: Vec<(i64, Option<i64>)> = store.db.prepare("SELECT id, carried_by FROM message WHERE reply_to = ? AND kind = 'answer' AND state IN ('queued','delivering') ORDER BY id")?.query_map([question], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
     let mut deferred = Vec::new();

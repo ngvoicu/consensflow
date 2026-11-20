@@ -4224,3 +4224,192 @@ fn a_give_up_whose_kill_is_refused_after_a_resume_and_a_second_close_leaves_the_
         "the second Close's pause, which its Resume ends"
     );
 }
+
+/// T-1859: an unanswered question closed with its physical window still needs
+/// one actionable account to the chief. The account is durable across another close.
+fn t1859_unanswered(restart: bool, chief_received: bool) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    if !chief_received {
+        context.adapter.busy("chief");
+    }
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.message(question.id).delivered_at.is_some(),
+        chief_received
+    );
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        for _ in 0..3 {
+            after.pass().unwrap();
+        }
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+    }
+    let why = if restart {
+        "ConsensFlow restarted"
+    } else {
+        "the project closed"
+    };
+    let closed = context.message(question.id);
+    assert_eq!(closed.state, "cancelled");
+    assert_eq!(
+        tiers.task(2).task.state,
+        if restart { "waiting" } else { "working" }
+    );
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id)))
+        .collect();
+    assert_eq!(notices.len(), 1, "one question notice: {notices:?}");
+    assert_eq!(closed.reason.as_deref(), Some(why));
+    let note = &notices[0].body;
+    assert!(
+        note.contains("@diana-brisk-birch") && note.contains("T-2"),
+        "{note}"
+    );
+    assert!(note.contains(why), "{note}");
+    assert_eq!(note.contains("Which dialect?"), !chief_received, "{note}");
+    assert!(
+        note.contains("cf tell T-2 \"…\"") && note.contains("cf task finish T-2"),
+        "{note}"
+    );
+    context.advance(3 * 60 * 60_000);
+    assert!(context
+        .ledger
+        .borrow()
+        .waiting_questions(project)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn t1859_restart_after_question_received() {
+    t1859_unanswered(true, true);
+}
+#[test]
+fn t1859_restart_before_question_received() {
+    t1859_unanswered(true, false);
+}
+#[test]
+fn t1859_close_resume_after_question_received() {
+    t1859_unanswered(false, true);
+}
+#[test]
+fn t1859_close_resume_before_question_received() {
+    t1859_unanswered(false, false);
+}
+
+fn t1859_returned_answer(restart: bool) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    assert_eq!(context.message(answer.id).state, "queued");
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        for _ in 0..3 {
+            after.pass().unwrap();
+        }
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+    }
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id)))
+        .collect();
+    assert_eq!(
+        notices.len(),
+        1,
+        "the returned answer is the only notice: {notices:?}"
+    );
+    let note = &notices[0].body;
+    assert!(note.contains("Use ANSI"), "{note}");
+    assert!(
+        note.contains("cf tell T-2 \"…\"") && note.contains("cf task finish T-2"),
+        "{note}"
+    );
+}
+
+#[test]
+fn t1859_restart_returns_answer_without_second_notice() {
+    t1859_returned_answer(true);
+}
+#[test]
+fn t1859_close_resume_returns_answer_without_second_notice() {
+    t1859_returned_answer(false);
+}
+
+fn t1859_pretracking(restart: bool) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "An old question");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let window = tiers.id("diana-brisk-birch");
+    context.ledger.borrow_mut().write_raw(&format!(
+        "DELETE FROM question_binding WHERE question_id = {}; DELETE FROM question_holding WHERE participant_id = {};",
+        question.id, window
+    )).unwrap();
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        assert_ne!(context.message(question.id).state, "cancelled");
+        let answer = context.answer(project, question.id, "Old answer");
+        for _ in 0..4 {
+            after.pass().unwrap();
+        }
+        assert_eq!(context.message(answer.id).state, "delivered");
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        assert_ne!(context.message(question.id).state, "cancelled");
+        let answer = context.answer(project, question.id, "Old answer");
+        for _ in 0..4 {
+            context.pass().unwrap();
+        }
+        assert_eq!(context.message(answer.id).state, "delivered");
+    }
+    assert!(!context
+        .inbox(chief)
+        .iter()
+        .any(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id))));
+}
+
+#[test]
+fn t1859_restart_keeps_pretracking_question() {
+    t1859_pretracking(true);
+}
+#[test]
+fn t1859_close_resume_keeps_pretracking_question() {
+    t1859_pretracking(false);
+}

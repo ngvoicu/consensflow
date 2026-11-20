@@ -32,6 +32,8 @@ pub(crate) struct Queued<'a> {
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) choices: Option<&'a [Vec<String>]>,
     pub(crate) urgent: bool,
+    /// A replacement for a still-gated message must remain at the human gate.
+    pub(crate) must_gate: bool,
     pub(crate) role: Option<&'a str>,
     /// What a note of ConsensFlow's own to a chief that asks it no decision says on its
     /// task's line ([`SHOWN`]): it is never typed into the chief's window.
@@ -58,7 +60,7 @@ pub(crate) fn queue(
     project_id: i64,
     message: &Queued<'_>,
 ) -> Result<i64, LedgerError> {
-    let landing = if gate_holds(store, project_id, message.from, message.to)? {
+    let landing = if message.must_gate || gate_holds(store, project_id, message.from, message.to)? {
         "gated"
     } else if message.from_window || message.shown.is_some() {
         "read"

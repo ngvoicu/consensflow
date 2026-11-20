@@ -233,7 +233,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
             "SELECT 1 FROM message q
              WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
                AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
-                 OR (q.reason IS NOT ?3
+                 OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
                    AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read'))
@@ -242,7 +242,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
                                AND a.kind = 'answer'))
              LIMIT 1", crate::holding::task_for_question_sql("q"),
         ))?
-        .exists(params![task, window, super::MOVED_QUESTION])?)
+        .exists(params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION])?)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:

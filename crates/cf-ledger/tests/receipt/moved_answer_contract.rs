@@ -1861,3 +1861,128 @@ fn a13_handoff_keeps_the_subject_rule_for_a_taskless_window() {
         .iter()
         .all(|q| q.id != question));
 }
+
+#[test]
+fn t1859_a_gated_question_notice_stays_gated_even_when_the_gate_was_switched_off() {
+    let mut w = gated_world();
+    let (task, session, brief) = assigned(&mut w, true);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Unapproved question words").id;
+    assert_eq!(w.message(question).state, "gated");
+    w.ledger.set_gate(w.project, false).unwrap();
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    let notes = |w: &World| -> Vec<i64> {
+        w.ledger.sqlite().prepare("SELECT id FROM message WHERE kind='note' AND body LIKE '%Unapproved question words%'").unwrap()
+            .query_map([], |row| row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+    };
+    let ids = notes(&w);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        w.message(ids[0]).state,
+        "gated",
+        "the question must not bypass approval"
+    );
+    assert_eq!(
+        word_notices(&w, "Unapproved question words"),
+        0,
+        "the chief cannot receive it yet"
+    );
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(notes(&w).len(), 1);
+    w.ledger.approve_message(ids[0], "human").unwrap();
+    assert_eq!(w.message(ids[0]).state, "queued");
+}
+
+#[test]
+fn t1859_a_gated_answer_is_the_only_notice_when_approved_after_restart() {
+    let mut w = gated_world();
+    let (task, session, brief) = assigned(&mut w, true);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which grammar?").id;
+    w.ledger.approve_message(question, "human").unwrap();
+    w.deliver(question);
+    let answer = w.answer(question, "Use ANSI later").id;
+    assert_eq!(w.message(answer).state, "gated");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(word_notices(&w, &format!("m-{question}")), 0);
+    w.ledger.approve_message(answer, "human").unwrap();
+    assert_eq!(
+        w.message(question).reason.as_deref(),
+        Some("ConsensFlow restarted")
+    );
+    let chief = w.id("chief");
+    let notes: Vec<_> = w
+        .ledger
+        .inbox(chief, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{question}")))
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].body.contains("Use ANSI later"));
+    assert!(notes[0].body.contains(&format!("cf tell T-{task} \"…\"")));
+    assert!(notes[0].body.contains(&format!("cf task finish T-{task}")));
+}
+
+#[test]
+fn t1859_a_taskless_question_keeps_its_prior_restart_path() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ledger.record_result(w.project, task, "Result").unwrap();
+    w.ledger.accept_task(w.project, task, "human").unwrap();
+    let question = w
+        .ledger
+        .ask(
+            w.project,
+            &NewQuestion {
+                from: Some(session),
+                to: "chief".into(),
+                body: Some("Idle question".into()),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap()
+        .id;
+    w.deliver(question);
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(
+        w.message(question).reason.as_deref(),
+        Some("the task moved to another window")
+    );
+    assert_eq!(word_notices(&w, &format!("m-{question}")), 0);
+}
+
+#[test]
+fn t1859_a_question_read_while_delivering_is_named_by_number_after_restart() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Already read in flight").id;
+    w.begin(question);
+    let chief = w.id("chief");
+    w.ledger
+        .receive_read(
+            chief,
+            &[question],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    assert_eq!(w.message(question).state, "delivering");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    let notes: Vec<_> = w
+        .ledger
+        .inbox(chief, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{question}")))
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert!(!notes[0].body.contains("Already read in flight"));
+}

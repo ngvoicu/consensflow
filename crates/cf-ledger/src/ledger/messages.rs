@@ -27,7 +27,11 @@ impl Ledger {
                 .collect::<rusqlite::Result<_>>()?;
             for (question, task) in questions {
                 let place = crate::holding::task_place(store, task)?;
-                crate::holding::close_question(store, question, &place)?;
+                if task.is_some() {
+                    crate::holding::close_project_question(store, question, &place, None, crate::holding::ProjectWindowEnd::Restart)?;
+                } else {
+                    crate::holding::close_question(store, question, &place)?;
+                }
             }
             store.db.execute("UPDATE question_holding SET closed = 2 WHERE closed = 0 AND run_id <> ?", [&store.question_run])?;
             Ok(())
@@ -123,6 +127,20 @@ impl Ledger {
     ) -> Result<Vec<i64>, LedgerError> {
         let deferred = self.store.write(|store| {
             let mut deferred = Vec::new();
+            let project_closed: bool = store.db.query_row(
+                "SELECT project.state = 'suspended' FROM participant p JOIN project ON project.id=p.project_id WHERE p.id=?",
+                [window], |r| r.get(0),
+            )?;
+            if project_closed {
+                let questions: Vec<(i64, i64)> = store.db.prepare(
+                    "SELECT question_id, task_id FROM question_binding WHERE participant_id=? AND task_id IS NOT NULL AND closed=0 AND run_id=? ORDER BY question_id"
+                )?.query_map(rusqlite::params![window, store.question_run], |r| Ok((r.get(0)?,r.get(1)?)))?
+                    .collect::<rusqlite::Result<_>>()?;
+                for (question, task) in questions {
+                    let place = crate::holding::task_place(store, Some(task))?;
+                    deferred.extend(crate::holding::close_project_question(store, question, &place, in_flight, crate::holding::ProjectWindowEnd::Close)?);
+                }
+            }
             crate::holding::close_previous_for_window(store, window, None, None)?;
             if let Some(h) = crate::holding::of(store, window)? {
                 if h.active {

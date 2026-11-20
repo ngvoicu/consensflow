@@ -128,7 +128,14 @@ pub(crate) fn decline_message(
         let moved = match (message.reply_to, task.as_ref()) {
             (Some(question), Some(task))
                 if store.message(question)?.is_some_and(|asked| {
-                    asked.reason.as_deref() == Some(super::MOVED_QUESTION)
+                    matches!(
+                        asked.reason.as_deref(),
+                        Some(
+                            super::MOVED_QUESTION
+                                | super::RESTARTED_QUESTION
+                                | super::CLOSED_PROJECT_QUESTION
+                        )
+                    )
                 }) =>
             {
                 Some(super::moved_task_takes_no_answer(store, task)?.to_string())

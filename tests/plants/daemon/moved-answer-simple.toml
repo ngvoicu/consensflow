@@ -549,8 +549,8 @@ meant = "t1827_legacy_failed_answer_still_makes_its_task_wait"
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_still_makes_its_task_wait"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
-replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
 
 [[plant]]
 name = "round3 legacy: reopen forgets to remind about an old failed answer"
@@ -558,8 +558,8 @@ meant = "t1827_legacy_failed_answer_is_reminded_on_reopen"
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_is_reminded_on_reopen"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/again.rs"
-find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
-replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
 
 [[plant]]
 name = "round3 legacy: member removal keeps an old paused answer"
@@ -569,3 +569,93 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_revie
 file = "crates/cf-ledger/src/messages/told.rs"
 find = "(kind = 'answer' AND urgent = 0 AND reply_to IN (SELECT question_id FROM question_binding))"
 replace = "(kind = 'answer' AND urgent = 0)"
+
+[[plant]]
+name = "T1859: no notice after restart"
+meant = "t1859_restart_before_question_received"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_before_question_received"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "= notice\n    {"
+replace = "= notice.filter(|_| false)\n    {"
+
+[[plant]]
+name = "T1859: no notice after project Close"
+meant = "t1859_close_resume_before_question_received"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_close_resume_before_question_received"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "            if project_closed {"
+replace = "            if project_closed && false {"
+
+[[plant]]
+name = "T1859: unreceived question words lost"
+meant = "t1859_restart_before_question_received"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_before_question_received"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "let detail = if received && chief == original_chief {"
+replace = "let detail = if true || (received && chief == original_chief) {"
+
+[[plant]]
+name = "T1859: whole early inbox read forgotten"
+meant = "t1859_a_question_read_while_delivering_is_named_by_number_after_restart"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_a_question_read_while_delivering_is_named_by_number_after_restart"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "q.delivered_at IS NOT NULL OR EXISTS (SELECT 1 FROM question_reminder r"
+replace = "q.delivered_at IS NOT NULL OR 0 AND EXISTS (SELECT 1 FROM question_reminder r"
+
+[[plant]]
+name = "T1859: a returned answer and a question note both arrive"
+meant = "t1859_restart_returns_answer_without_second_notice"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_returns_answer_without_second_notice"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to=q.id AND a.kind='answer'\n                           AND a.state NOT IN ('cancelled','failed'))"
+replace = "           AND 1=1"
+
+[[plant]]
+name = "T1859: a gated question bypasses approval"
+meant = "t1859_a_gated_question_notice_stays_gated_even_when_the_gate_was_switched_off"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_a_gated_question_notice_stays_gated_even_when_the_gate_was_switched_off"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "                must_gate: state == \"gated\","
+replace = "                must_gate: false,"
+
+[[plant]]
+name = "T1859: a returned answer omits its way on"
+meant = "t1859_restart_returns_answer_without_second_notice"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_restart_returns_answer_without_second_notice"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            format!(\" Use cf tell T-{number} \\\"…\\\" or cf task finish T-{number}.\")"
+replace = "            format!(\" T-{number}.\")"
+
+[[plant]]
+name = "T1859: the Close withdrawal says the task moved"
+meant = "t1859_close_resume_after_question_received"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1859_close_resume_after_question_received"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "Self::Close => crate::messages::CLOSED_PROJECT_QUESTION,"
+replace = "Self::Close => crate::messages::MOVED_QUESTION,"
+
+[[plant]]
+name = "T1859: approval overwrites the restart reason"
+meant = "t1859_a_gated_answer_is_the_only_notice_when_approved_after_restart"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_a_gated_answer_is_the_only_notice_when_approved_after_restart"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "OR reason IN (?4, ?5) THEN reason ELSE ?1 END"
+replace = "OR (0 AND reason IN (?4, ?5)) THEN reason ELSE ?1 END"
+
+[[plant]]
+name = "T1859: a taskless question changes its old path"
+meant = "t1859_a_taskless_question_keeps_its_prior_restart_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_a_taskless_question_keeps_its_prior_restart_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "                if task.is_some() {"
+replace = "                if task.is_some() || task.is_none() {"
