@@ -659,3 +659,21 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "
 file = "crates/cf-ledger/src/ledger/messages.rs"
 find = "                if task.is_some() {"
 replace = "                if task.is_some() || task.is_none() {"
+
+[[plant]]
+name = "T1859: a deleted project makes its window close fail"
+meant = "closes_every_window_it_still_has_of_a_deleted_project_however_the_project_was_closed_before_it_forgets_them"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closes_every_window_it_still_has_of_a_deleted_project_however_the_project_was_closed_before_it_forgets_them"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "                [window], |r| r.get(0),\n            ).optional()?.unwrap_or(false);\n            if project_closed {"
+replace = "                [window], |r| r.get(0),\n            )?;\n            if project_closed {"
+
+[[plant]]
+name = "T1859: a cancelled task gets an impossible returned-answer hint"
+meant = "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_nothing"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_nothing"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    let way_on = match (same_place, task) {"
+replace = "    let way_on = match (same_window, task) {"

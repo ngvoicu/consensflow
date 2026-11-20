@@ -603,7 +603,19 @@ pub(crate) fn return_answer(
            AND t.deleted_at IS NULL AND t.state IN ('queued', 'working', 'waiting', 'paused')",
         )?
         .exists([answer])?;
-    let way_on = match (same_window, task) {
+    // A task's ending closes its holding before the task row is updated. The
+    // supplied place is where it is going, which may no longer be this window.
+    let same_place = if same_window {
+        let task_id: Option<i64> = store.db.query_row(
+            "SELECT task_id FROM message WHERE id = ?",
+            [answer],
+            |row| row.get(0),
+        )?;
+        place == task_place(store, task_id)?
+    } else {
+        false
+    };
+    let way_on = match (same_place, task) {
         (true, Some(number)) => {
             format!(" Use cf tell T-{number} \"…\" or cf task finish T-{number}.")
         }

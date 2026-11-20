@@ -130,7 +130,7 @@ impl Ledger {
             let project_closed: bool = store.db.query_row(
                 "SELECT project.state = 'suspended' FROM participant p JOIN project ON project.id=p.project_id WHERE p.id=?",
                 [window], |r| r.get(0),
-            )?;
+            ).optional()?.unwrap_or(false);
             if project_closed {
                 let questions: Vec<(i64, i64)> = store.db.prepare(
                     "SELECT question_id, task_id FROM question_binding WHERE participant_id=? AND task_id IS NOT NULL AND closed=0 AND run_id=? ORDER BY question_id"
