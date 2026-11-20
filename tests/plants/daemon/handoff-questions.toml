@@ -66,7 +66,7 @@ replace = "AND q.state IN ({finished}) AND q.state != 'accepted'"
 
 [[plant]]
 name = "handoff questions: a question on a failed task is listed"
-meant = "a_question_on_a_task_the_daemon_failed_is_not_open"
+meant = "a_pretracking_question_on_a_failed_task_is_not_open"
 runs = ["handoff-open-work"]
 
 [[plant.edit]]
