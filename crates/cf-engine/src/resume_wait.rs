@@ -64,7 +64,18 @@ impl Dispatcher {
             ActivityState::Working => "window shows working".to_owned(),
             ActivityState::Starting => "window starting".to_owned(),
             ActivityState::Closed => "window not open".to_owned(),
-            ActivityState::Waiting => "window waits for the human".to_owned(),
+            ActivityState::Waiting => {
+                let delivery = record.delivery.borrow();
+                if delivery
+                    .for_human
+                    .as_deref()
+                    .is_some_and(|reason| Some(reason) == activity.reason.as_deref())
+                {
+                    "window needs the human".to_owned()
+                } else {
+                    "window's dialog waits for an answer".to_owned()
+                }
+            }
             ActivityState::Out => match activity.reason.as_deref() {
                 Some(reason) if reason.starts_with("model busy") => "member's model is busy",
                 Some(reason) if reason.starts_with("out of quota") => "member out of quota",

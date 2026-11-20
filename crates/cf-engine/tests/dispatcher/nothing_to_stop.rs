@@ -15,7 +15,9 @@
 //! words that send the task on go into the same window once it rests.
 
 use cf_engine::testing::Context;
-use cf_harness::contract::{Over, Pane};
+use std::rc::Rc;
+
+use cf_harness::contract::{Held, Over, Pane, Readiness, Waiting};
 use cf_harness::records::{Pending, Role};
 use cf_proto::panes::{Background, BackgroundProcess};
 use serde_json::{json, Value};
@@ -435,6 +437,65 @@ fn an_ordinary_pause_and_resume_does_not_tell_the_chief_the_resume_is_waiting() 
     context.advance(120_000);
     context.pass().unwrap();
     assert!(resume_wait_notices(&context, project).is_empty());
+}
+
+#[test]
+fn a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human() {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    // A member's own question is answered through the board, not necessarily
+    // by the human. Its dialog holds the resume words at the existing gate.
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some("its own question dialog is open".to_owned()),
+        });
+    });
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "window's dialog waits for an answer" }))
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("dialog waits for an answer"));
+    assert!(!notices[0].contains("the human"));
+}
+
+#[test]
+fn a_resume_waiting_for_human_action_says_so_without_quoting_its_window() {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy_until_interrupted("zeus");
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Held(Held::ForHuman(
+            "a private detail in its input box".to_owned(),
+        )))
+    }));
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "window needs the human" }))
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("window needs the human"));
+    assert!(!notices[0].contains("private detail"));
 }
 
 #[test]

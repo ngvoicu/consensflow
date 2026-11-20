@@ -7,6 +7,8 @@ out = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", 
 approval = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "words_that_resume_a_paused_task_wait_for_the_human_and_the_window_is_stopped_all_the_same", "--", "--test-threads=2"]
 long-hold = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "the_existing_long_hold_notice_does_not_tell_the_chief_the_same_resume_wait_twice", "--", "--test-threads=2"]
 board = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window", "--", "--test-threads=2"]
+question = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human", "--", "--test-threads=2"]
+human = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_resume_waiting_for_human_action_says_so_without_quoting_its_window", "--", "--test-threads=2"]
 
 [[plant]]
 name = "resume wait: the chief is never told"
@@ -93,6 +95,24 @@ runs = ["board"]
 file = "crates/cf-engine/src/resume_wait.rs"
 find = 'ActivityState::Working => "window shows working".to_owned(),'
 replace = 'ActivityState::Working => "window shows idle".to_owned(),'
+
+[[plant]]
+name = "resume wait: a member's question is mistaken for the human"
+meant = "a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human"
+runs = ["question"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = "\"window's dialog waits for an answer\".to_owned()"
+replace = '"window waits for the human".to_owned()'
+
+[[plant]]
+name = "resume wait: a human action is mistaken for a question"
+meant = "a_resume_waiting_for_human_action_says_so_without_quoting_its_window"
+runs = ["human"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = '.is_some_and(|reason| Some(reason) == activity.reason.as_deref())'
+replace = '.is_some_and(|_| false)'
 
 [[plant]]
 name = "resume wait: human approval is mistaken for a working window"
