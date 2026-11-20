@@ -1829,7 +1829,7 @@ export class TaskDrawer {
 
   /** Why a task waiting for its member cannot run, and whether the member can be tried now. */
   #wait(task, now) {
-    if (task.state !== 'queued' && !(task.state === 'paused' && task.heldUntil)) return null
+    if (task.state !== 'queued' && task.state !== 'paused') return null
     if (this.#waitingMember === null) return null
     const { participant, busy } = this.#waitingMember
     if (participant.needsEdit) return { words: 'its member needs an edit under Project settings' }
