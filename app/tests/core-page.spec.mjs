@@ -2078,6 +2078,33 @@ test("says the effort an agent runs at, after its model: on a member's row and a
   await expect(meta('athena')).toHaveText('advisor · light · Pi · muse-spark')
 })
 
+test('shows why resume words wait on the task card and in its drawer', async ({ page }) => {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  lane.tasks.push(task(12, 'Continue the parser', 'queued', 'chief', 'zeus', 1))
+  // The engine has not seen the stopped window become idle; it has no agent count.
+  lane.resumeWait = { task: 12, reason: 'window shows working' }
+  data.tasks['1:12'] = { ...lane.tasks.at(-1), messages: [] }
+  await open(page, data)
+
+  const card = page.locator('button.card[data-task="12"]')
+  const shots = process.env.CF_T1857_SHOTS
+  if (shots) {
+    mkdirSync(shots, { recursive: true })
+    await card.screenshot({ path: join(shots, 'card.png') })
+  }
+  await expect.soft(card).toContainText('resume waits', { timeout: 1000 })
+  await expect.soft(card).toContainText('window shows working', { timeout: 1000 })
+  await expect(card).not.toContainText('background agent')
+  await expect(page.locator('button.card[data-task="4"]')).not.toContainText('resume waits')
+  await card.click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  if (shots) await drawer.screenshot({ path: join(shots, 'drawer.png') })
+  await expect.soft(drawer).toContainText('resume waits', { timeout: 1000 })
+  await expect.soft(drawer).toContainText('window shows working', { timeout: 1000 })
+  await expect(drawer).not.toContainText('background agent')
+})
+
 test('shows what a task on the board waits for, on its card and in its drawer', async ({
   page,
 }) => {

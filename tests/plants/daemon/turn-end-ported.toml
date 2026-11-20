@@ -82,8 +82,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number\n        ? { ...task, held: lane.held }\n        : task"
-replace = "      return task"
+find = "        shown = { ...shown, held: lane.held }"
+replace = "        shown = task"
 
 [[plant]]
 name = "turn end finish page: every working task of a lane is said to wait"
@@ -93,8 +93,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number"
-replace = "      return task.state === 'working' && lane.held"
+find = "      } else if (task.state === 'working' && lane.held?.task === task.number) {"
+replace = "      } else if (task.state === 'working' && lane.held) {"
 
 [[plant]]
 name = "turn end finish page: a paused task is said to wait"
@@ -104,8 +104,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number"
-replace = "      return lane.held?.task === task.number"
+find = "      } else if (task.state === 'working' && lane.held?.task === task.number) {"
+replace = "      } else if (lane.held?.task === task.number) {"
 
 [[plant]]
 name = "turn end finish page: a lane that waits is said idle"

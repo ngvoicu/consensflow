@@ -1,0 +1,126 @@
+# A resume that still waits after a paid stop is visible, and its chief hears why once.
+[run]
+notice = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once", "--", "--test-threads=2"]
+late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_resume_sent_late_in_the_two_minutes_is_told_when_the_paid_stops_clock_reaches_them", "--", "--test-threads=2"]
+ordinary = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_resume_long_after_a_paid_pause_gets_a_chance_to_arrive_before_any_wait_notice", "--", "--test-threads=2"]
+out = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume_words_still_waiting_when_the_member_goes_out_tell_the_chief_the_quota_reason", "--", "--test-threads=2"]
+approval = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "words_that_resume_a_paused_task_wait_for_the_human_and_the_window_is_stopped_all_the_same", "--", "--test-threads=2"]
+long-hold = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "the_existing_long_hold_notice_does_not_tell_the_chief_the_same_resume_wait_twice", "--", "--test-threads=2"]
+board = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window", "--", "--test-threads=2"]
+
+[[plant]]
+name = "resume wait: the chief is never told"
+meant = "a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once"
+runs = ["notice"]
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            // A resume still waiting well after its stop was paid is told to the chief.
+            self.tell_resume_wait(project, participant, record)?;'''
+replace = '''            // A resume still waiting well after its stop was paid is told to the chief.
+            let _ = (project, participant, record);'''
+
+[[plant]]
+name = "resume wait: an out member is not watched"
+meant = "resume_words_still_waiting_when_the_member_goes_out_tell_the_chief_the_quota_reason"
+runs = ["out"]
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            if !self.forgotten(record) {
+                self.tell_resume_wait(project, participant, record)?;
+                self.close_if_free(record).await?;'''
+replace = '''            if !self.forgotten(record) {
+                self.close_if_free(record).await?;'''
+
+[[plant]]
+name = "resume wait: a paid stop keeps no time"
+meant = "a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once"
+runs = ["notice"]
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                part.stop_paid_at = Some(self.now());"
+replace = "                part.stop_paid_at = None;"
+
+[[plant]]
+name = "resume wait: the notice is late"
+meant = "a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once"
+runs = ["notice"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = "const RESUME_WAIT_NOTICE_MS: i64 = 2 * 60_000;"
+replace = "const RESUME_WAIT_NOTICE_MS: i64 = 3 * 60_000;"
+
+[[plant]]
+name = "resume wait: the deadline excludes its exact boundary"
+meant = "a_resume_sent_late_in_the_two_minutes_is_told_when_the_paid_stops_clock_reaches_them"
+runs = ["late"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = "        if self.now().saturating_sub(paid) < RESUME_WAIT_NOTICE_MS {"
+replace = "        if self.now().saturating_sub(paid) <= RESUME_WAIT_NOTICE_MS {"
+
+[[plant]]
+name = "resume wait: a late ordinary resume is reported before delivery"
+meant = "a_resume_long_after_a_paid_pause_gets_a_chance_to_arrive_before_any_wait_notice"
+runs = ["ordinary"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = "        if !seen {"
+replace = "        if !seen && false {"
+
+[[plant]]
+name = "resume wait: the chief is told again on every look"
+meant = "a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once"
+runs = ["notice"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = ".note_since(recipient, message.id, &head)?\n            .is_some()"
+replace = ".note_since(recipient, message.id, &head)?\n            .is_some_and(|_| false)"
+
+[[plant]]
+name = "resume wait: the long hold tells the chief again"
+meant = "the_existing_long_hold_notice_does_not_tell_the_chief_the_same_resume_wait_twice"
+runs = ["long-hold"]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            if !already_told {"
+replace = "            if !already_told || true {"
+
+[[plant]]
+name = "resume wait: a working window is said to be idle"
+meant = "a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window"
+runs = ["board"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = 'ActivityState::Working => "window shows working".to_owned(),'
+replace = 'ActivityState::Working => "window shows idle".to_owned(),'
+
+[[plant]]
+name = "resume wait: human approval is mistaken for a working window"
+meant = "words_that_resume_a_paused_task_wait_for_the_human_and_the_window_is_stopped_all_the_same"
+runs = ["approval"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = '            return Ok("needs human approval".to_owned());'
+replace = '            return Ok("window shows working".to_owned());'
+
+[[plant]]
+name = "resume wait: no task is projected onto the board"
+meant = "a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window"
+runs = ["board"]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume_wait.rs"
+find = '''        Ok(Some(json!({
+            "task": task.number,
+            "reason": self.resume_wait_reason(&message)?,
+        })))'''
+replace = '''        let _ = (task, message);
+        Ok(None)'''
+
+[[plant]]
+name = "resume wait: the page drops the engine's wait reason"
+meant = "a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window"
+runs = ["board"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '            fields.insert("resumeWait".to_owned(), wait);'
+replace = '            let _ = wait;'

@@ -192,6 +192,37 @@ fn a_pause_with_words_says_it_is_paused_as_a_tell_always_did() {
 }
 
 #[test]
+fn a_resume_says_its_words_are_queued_for_the_window_not_already_sent() {
+    let api = scripted(vec![reply(200, json!({ "task": task("queued") }))]);
+    let (code, printed) = window(&api, &["task", "resume", "T-3", "Use the v2 grammar"]);
+    assert_eq!(code, Some(0));
+    assert!(printed.contains("queued"), "{printed}");
+    assert!(printed.contains("@zeus-amber-pine"), "{printed}");
+    assert!(printed.contains("window"), "{printed}");
+    assert!(printed.contains("when it stops"), "{printed}");
+    assert!(!printed.contains(": sent "), "{printed}");
+    assert_eq!(
+        asked(&api),
+        [(
+            "/api/tasks/3/resume".to_owned(),
+            Some(json!({ "body": "Use the v2 grammar" }))
+        )]
+    );
+}
+
+#[test]
+fn a_resume_held_for_the_human_says_the_words_need_approval() {
+    let mut response = told("task", "queued");
+    response["message"]["state"] = json!("gated");
+    let api = scripted(vec![reply(200, response)]);
+    let (code, printed) = window(&api, &["task", "resume", "T-3", "Use the v2 grammar"]);
+    assert_eq!(code, Some(0));
+    assert!(printed.contains("queued"), "{printed}");
+    assert!(printed.contains("human must approve"), "{printed}");
+    assert!(!printed.contains(": sent "), "{printed}");
+}
+
+#[test]
 fn a_pause_with_words_behind_resume_words_says_it_is_a_note_with_no_answer_due() {
     let api = scripted(vec![reply(200, told("note", "working"))]);
     let (code, printed) = window(&api, &["task", "pause", "T-3", "Stop: use v2"]);
