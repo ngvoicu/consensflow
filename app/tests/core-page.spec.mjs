@@ -1272,7 +1272,11 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   await expect(rows.locator('.row-name')).toHaveText(['Chief of Staff', '@zeus', '@diana'])
   const zeus = table.locator('tr[data-handle="zeus"]')
   await expect(zeus.getByTestId('lamp')).toHaveAttribute('data-state', 'waiting')
-  await expect(zeus.locator('.row-status')).toHaveText('Waiting: permission to run a command')
+  // Why it waits, in its words, once (T-1855): its status line does not say it again.
+  await expect(zeus.locator('[data-part="member"] .team-words')).toHaveText(
+    'Waiting: permission to run a command',
+  )
+  await expect(zeus.locator('.row-status')).toHaveCount(0)
   // The chief's row holds its tasks; what it is doing is on its card in the dock.
   const chief = table.locator('tr[data-handle="chief"]')
   await expect(chief.locator('.row-status')).toHaveCount(0)
@@ -4162,10 +4166,13 @@ test('a member the update could not run on what it ran on says it needs an edit,
   })
   await open(page, data)
   const row = page.locator('tr[data-handle="my-coder"]')
-  await expect(row.locator('.row-status')).toHaveText(
-    'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
+  // In its words under its name, once (T-1855): its status line does not say it again.
+  await expect(row.locator('[data-part="member"] .team-words')).toHaveText(NEEDS_EDIT)
+  await expect(row.locator('[data-part="member"] .team-status')).toHaveAttribute(
+    'data-state',
+    'missing',
   )
-  await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
+  await expect(row.locator('.row-status')).toHaveCount(0)
   // It runs on no default, and says so.
   await expect(row.locator('.row-meta')).toContainText('no model: needs an edit')
   await expect(row.locator('.row-meta')).not.toContainText('default')
@@ -18890,7 +18897,7 @@ test('BKG a folded team lane says its backup stands by while its member works, a
   })
   head = await teamHead(lane)
   expect(head.parts.map(({ part, words }) => [part, words])).toEqual([
-    ['member', 'Needs an edit under Project settings'],
+    ['member', NEEDS_EDIT],
     ['backup', "Takes its member's tasks"],
   ])
 })
@@ -19072,6 +19079,313 @@ test('BKG a member with no backup and a team member read alike: the same lamp an
     solo_.words,
     solo_.state,
   ])
+})
+
+/**
+ * The colours the eye sees under a staff table's rows, a member's group at a time (T-1855, the
+ * owner on 2026-11-20 after T-1847's screens: "lets make each row a different color/shade like
+ * odd/even"): per group, what its rows are for, and every colour seen under its cells, each
+ * cell's background blended over its ancestors'. A group starts at a member's first row.
+ */
+const staffShades = (table) =>
+  table.locator('tbody tr').evaluateAll((rows) => {
+    const seen = (node) => {
+      const layers = []
+      for (let at = node; at !== null; at = at.parentElement) {
+        layers.unshift(getComputedStyle(at).backgroundColor)
+      }
+      let rgb = [0, 0, 0]
+      for (const layer of layers) {
+        const [r, g, b, a = 1] = layer.match(/[\d.]+/g).map(Number)
+        rgb = rgb.map((was, at) => was + ([r, g, b][at] - was) * a)
+      }
+      return rgb.map(Math.round).join(' ')
+    }
+    const groups = []
+    for (const row of rows) {
+      if (!row.classList.contains('staff-group-more')) groups.push({ rows: [], seen: new Set() })
+      const group = groups.at(-1)
+      group.rows.push(row.dataset.backupOf ? 'backup' : row.dataset.role)
+      for (const cell of row.cells) group.seen.add(seen(cell))
+    }
+    return groups.map((group) => ({ rows: group.rows, seen: [...group.seen] }))
+  })
+
+/** Groups whose shades take turns: each group one colour, the next another, and back. */
+function takeTurns(groups) {
+  for (const { rows, seen } of groups) expect(seen, `${rows} in one shade`).toHaveLength(1)
+  const [odd, even] = [groups[0].seen[0], groups[1].seen[0]]
+  expect(odd).not.toBe(even)
+  expect(groups.map(({ seen }) => seen[0])).toEqual(
+    groups.map((_, at) => (at % 2 === 0 ? odd : even)),
+  )
+}
+
+test('T-1855 settings shades each member in turn, odd and even, its roles and its backup slot in one shade', async ({
+  page,
+}) => {
+  await open(page, everyKindOfMember())
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const groups = await staffShades(dialog.getByRole('table', { name: 'On the staff' }))
+  expect(groups.map(({ rows }) => rows)).toEqual([
+    ['worker', 'tester', 'backup'],
+    ['worker', 'reviewer', 'backup'],
+    ['frontend', 'backup'],
+    ['advisor', 'backup'],
+    ['designer'],
+  ])
+  takeTurns(groups)
+  // A backup added keeps its member's shade: the slot is the group's, with or without one.
+  await dialog.getByRole('button', { name: 'Remove backup for @zeus' }).click()
+  await expect(dialog.locator('tr[data-backup-of="@zeus"]')).toContainText('none')
+  takeTurns(await staffShades(dialog.getByRole('table', { name: 'On the staff' })))
+})
+
+test('T-1855 New project shades each member in turn, odd and even, its roles and its backup slot in one shade', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker', 'tester'], 'complex'), id: 30 },
+    { ...lastMember('hera', 'codex', ['worker']), id: 31, backupOf: 30 },
+    { ...lastMember('diana', 'codex', ['reviewer', 'worker']), id: 32 },
+    { ...lastMember('athena', 'pi', ['frontend']), id: 33 },
+    { ...lastMember('kronos', 'pi', ['advisor']), id: 35 },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  const groups = await staffShades(table)
+  expect(groups.map(({ rows }) => rows)).toEqual([
+    ['worker', 'tester', 'backup'],
+    ['worker', 'reviewer', 'backup'],
+    ['frontend', 'backup'],
+    ['advisor', 'backup'],
+  ])
+  takeTurns(groups)
+  // A member taken off shifts the turns on: the next member takes its shade.
+  await table.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
+  await table.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  const after = await staffShades(table)
+  expect(after.map(({ rows }) => rows)).toEqual([
+    ['worker', 'tester', 'backup'],
+    ['frontend', 'backup'],
+    ['advisor', 'backup'],
+  ])
+  takeTurns(after)
+})
+
+/**
+ * A role group's lanes on the board as the eye takes them (T-1855): per row, whose it is, the
+ * colour seen under each of its cells, column by column, and under a team's backup part.
+ */
+const laneShades = (page, role) =>
+  page.locator(`tbody[data-group="${role}"] tr[data-handle]`).evaluateAll((rows) => {
+    const seen = (node) => {
+      const layers = []
+      for (let at = node; at !== null; at = at.parentElement) {
+        layers.unshift(getComputedStyle(at).backgroundColor)
+      }
+      let rgb = [0, 0, 0]
+      for (const layer of layers) {
+        const [r, g, b, a = 1] = layer.match(/[\d.]+/g).map(Number)
+        rgb = rgb.map((was, at) => was + ([r, g, b][at] - was) * a)
+      }
+      return rgb.map(Math.round).join(' ')
+    }
+    return rows.map((row) => {
+      const backup = row.querySelector('.team-part[data-part="backup"]')
+      return {
+        handle: row.dataset.handle,
+        seen: [...row.cells].map(seen),
+        backup: backup === null ? null : seen(backup),
+      }
+    })
+  })
+
+/** Two lanes in different shades: every column of the one seen apart from the other's. */
+const apart = (one, other) =>
+  expect(one.seen.map((colour, at) => colour !== other.seen[at])).toEqual(one.seen.map(() => true))
+
+test("T-1855 a role group's lanes take turns in shade, a team's backup and sessions in its member's", async ({
+  page,
+}) => {
+  const { data } = team({ working: ['diana', 'hera'] })
+  data.boards[1].lanes.push(
+    {
+      participant: participant(15, 'athena', 'worker', { harness: 'pi' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: participant(16, 'kronos', 'advisor', { harness: 'pi' }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  // Folded: zeus, the team of diana and hera, athena: one shade, then the other, then the first.
+  const folded = await laneShades(page, 'worker')
+  expect(folded.map(({ handle }) => handle)).toEqual(['zeus', 'diana', 'athena'])
+  apart(folded[0], folded[1])
+  expect(folded[2].seen).toEqual(folded[0].seen)
+  // The backup part is its member's lane: it is painted no shade of its own.
+  expect(folded[1].backup).toBe(folded[1].seen[0])
+  // Unfolded, the team's sessions, its backup's too, are in its shade.
+  await page.getByRole('button', { name: "Show @diana's 2 sessions" }).click()
+  const unfolded = await laneShades(page, 'worker')
+  expect(unfolded.map(({ handle }) => handle)).toEqual([
+    'zeus',
+    'diana',
+    'diana-amber-pine',
+    'hera-brisk-birch',
+    'athena',
+  ])
+  const [zeus, diana, dianas, heras, athena] = unfolded
+  expect([dianas.seen, heras.seen]).toEqual([diana.seen, diana.seen])
+  apart(zeus, diana)
+  expect(athena.seen).toEqual(zeus.seen)
+  // Each role group starts its turns again.
+  const [kronos] = await laneShades(page, 'advisor')
+  expect(kronos.seen).toEqual(zeus.seen)
+})
+
+test("T-1855 a backup's buttons stay on one line in both staff screens at their default width", async ({
+  page,
+}) => {
+  const lines = (table) =>
+    table.locator('.staff-actions').evaluateAll((lists) =>
+      lists.map((list) => {
+        const row = list.closest('tr')
+        const tops = [...list.querySelectorAll('button')].map((button) =>
+          Math.round(button.getBoundingClientRect().top),
+        )
+        // A member of New project with nothing to do but its roles' Remove has no tools: none.
+        return [
+          row.dataset.backupOf ?? row.dataset.handle ?? row.dataset.model,
+          Math.min(new Set(tops).size, 1) === new Set(tops).size,
+        ]
+      }),
+    )
+  // The app's window as it first opens (tauri.conf.json, 880 wide), and a wide one.
+  for (const width of [880, 1500]) {
+    await page.setViewportSize({ width, height: 900 })
+    const data = everyKindOfMember()
+    data.lastStaff = [
+      { ...lastMember('zeus', 'claude-code', ['worker', 'tester'], 'complex'), id: 30 },
+      { ...lastMember('hera', 'codex', ['worker']), id: 31, backupOf: 30, vacationSince: at(5) },
+      { ...lastMember('kronos', 'pi', ['advisor']), id: 35 },
+    ]
+    await open(page, data)
+    await page.getByRole('button', { name: 'Project settings' }).click()
+    const settings = page.getByRole('dialog', { name: 'Project settings' })
+    const shown = await lines(settings.getByRole('table', { name: 'On the staff' }))
+    expect(shown.filter(([who]) => who.startsWith('@')).length, `${width}: backups`).toBe(4)
+    expect(shown, `${width}: every button row on one line`).toEqual(
+      shown.map(([who]) => [who, true]),
+    )
+    await settings.getByRole('button', { name: 'Close' }).click()
+    await page.getByRole('button', { name: 'New project' }).click()
+    const made = page.getByRole('dialog', { name: 'New project' })
+    const picked = await lines(made.getByRole('table', { name: 'Members for the staff' }))
+    expect(picked, `${width}: New project's on one line`).toEqual(
+      picked.map(([who]) => [who, true]),
+    )
+    await made.getByRole('button', { name: 'Cancel' }).click()
+  }
+})
+
+/** What a member the update could not run on what it ran on says, in full (T-1202). */
+const NEEDS_EDIT =
+  'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it'
+
+test('T-1855 a member says each thing once: its words keep the fuller saying, its status line only the rest', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(9, 'my-coder', 'worker', {
+      agent: 'my-coder',
+      harness: 'codex',
+      model: null,
+      effort: null,
+      needsEdit: true,
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const zeus = page.locator('tr[data-handle="zeus"]')
+  // zeus's window waits on a permission: why, in its words, and not again under them.
+  expect(await memberHead(zeus)).toMatchObject({
+    lamp: 'waiting',
+    words: 'Waiting: permission to run a command',
+    state: 'waiting',
+    status: null,
+  })
+  // A member to edit: why and the ways out, in its words, once.
+  expect(await memberHead(page.locator('tr[data-handle="my-coder"]'))).toMatchObject({
+    words: NEEDS_EDIT,
+    state: 'missing',
+    status: null,
+  })
+  // Its window waiting with no reason given, at work, between tasks: each said once too.
+  for (const [activity, words] of [
+    [{ state: 'waiting' }, 'Waiting for you'],
+    [{ state: 'working' }, 'Working'],
+    [{ state: 'idle' }, 'Ready for a task'],
+  ]) {
+    await changed(
+      page,
+      (activity) => {
+        window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus').activity =
+          activity
+      },
+      activity,
+    )
+    expect(await memberHead(zeus), activity.state).toMatchObject({ words, status: null })
+  }
+})
+
+test("T-1855 a team says what each part does once: not again on the team's line", async ({
+  page,
+}) => {
+  const reset = fromNow(2)
+  const { data } = team({ out: { diana: reset } })
+  const hera = data.boards[1].lanes.find((lane) => lane.participant.handle === 'hera')
+  Object.assign(hera, {
+    activity: { state: 'waiting', reason: 'permission to run a command' },
+    pane: { id: 'p1-hera', generation: 2 },
+  })
+  await open(page, data)
+  const lane = page.locator('tr[data-handle="diana"]')
+  let head = await teamHead(lane)
+  expect(head.parts.map(({ part, words }) => [part, words])).toEqual([
+    ['member', `Out of quota until ${await resetWords(page, reset)}`],
+    ['backup', 'Waiting: permission to run a command'],
+  ])
+  expect(head.status).toBeNull()
+  // Both to edit: each says so, and the team's line does not say it a third time.
+  await changed(page, () => {
+    for (const lane of window.__model.boards[1].lanes) {
+      if (['diana', 'hera'].includes(lane.participant.handle)) {
+        Object.assign(lane.participant, { needsEdit: true, outUntil: null })
+        lane.activity = { state: 'closed' }
+        lane.pane = null
+      }
+    }
+  })
+  head = await teamHead(lane)
+  expect(head.parts.map(({ part, words }) => [part, words])).toEqual([
+    ['member', NEEDS_EDIT],
+    ['backup', NEEDS_EDIT],
+  ])
+  expect(head.status).toBeNull()
 })
 
 /**

@@ -444,12 +444,13 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''
-  if (participant.needsEdit && participant.role !== 'chief') {
-'''
-replace = '''
-  if (false && participant.needsEdit && participant.role !== 'chief') {
-'''
+find = '''  if (participant.needsEdit) return ['missing', NEEDS_EDIT]'''
+replace = '''  if (false && participant.needsEdit) return ['missing', NEEDS_EDIT]'''
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''  if (participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]'''
+replace = '''  if (false && participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]'''
 
 [[plant]]
 name = "harness models: New project drops the chief's effort"

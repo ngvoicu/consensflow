@@ -343,11 +343,23 @@ function rowStatus(row, board, now) {
 }
 
 /**
+ * A member's lane's status line, `said`, less what the words under its name (`words`, from
+ * `partState`) say already (T-1855, after T-1850: "Waiting for you" over "Waiting: permission
+ * to run a command"): its window at work, waiting or between tasks, and the edit it needs. The
+ * words say the same as the line where their state is the same; a member on Vacation whose
+ * window still waits says On Vacation in its words, and the line says what the window waits for.
+ */
+const IN_ITS_WORDS = ['working', 'waiting', 'idle', 'missing']
+const besideWords = (said, [state]) =>
+  said !== null && IN_ITS_WORDS.includes(said[0]) && said[0] === state ? null : said
+
+/**
  * A team's one status line (T-1847): the team's, as `rowStatus` says it, but where neither part
- * can run work, only when the first is back, for each part says under the lane why it is out.
+ * can run work, only when the first is back, for each part says under the lane why it is out;
+ * and nothing the part that speaks for it says in its own words.
  */
 function teamStatus(row, board, now) {
-  const said = rowStatus(row, board, now)
+  const said = besideWords(rowStatus(row, board, now), partState(teamLead(row, now), row, now))
   if (said?.[0] !== 'out') return said
   const lead = teamLead(row, now)
   const back = backBy(lead, now)
@@ -360,10 +372,10 @@ function teamStatus(row, board, now) {
 /**
  * A member's lane with no backup, its one status line (T-1850): its own, as `laneStatus` says
  * it, but not why it cannot run work, which its own words under its name say, with its Try
- * again now beside them, as a team's member's do.
+ * again now beside them, as a team's member's do; nor anything else they say.
  */
 function soloStatus(lane, board, now) {
-  const said = laneStatus(lane, board, now)
+  const said = besideWords(laneStatus(lane, board, now), partState(lane, lane, now))
   if (said?.[0] !== 'out') return said
   return lane.holding ? ['holding', HOLDING] : null
 }
@@ -379,16 +391,18 @@ function soloStatus(lane, board, now) {
 function partState(part, row, now) {
   const { participant } = part
   if (participant.vacationSince) return ['closed', 'On Vacation']
-  if (participant.needsEdit) return ['missing', 'Needs an edit under Project settings']
+  if (participant.needsEdit) return ['missing', NEEDS_EDIT]
   if (outOfQuota(participant, now)) return ['out', outShort(part, now)]
   // A member on Vacation rests its team: its backup takes none of its tasks (the engine's rule).
   if (part !== row && row.participant.vacationSince) return ['closed', 'Rests with its member']
   const windows = [
     part,
     ...(row.sessions ?? []).filter((session) => session.participant.member === participant.handle),
-  ].map((lane) => lane.activity?.state)
-  if (windows.includes('working')) return ['working', 'Working']
-  if (windows.includes('waiting')) return ['waiting', 'Waiting for you']
+  ].map((lane) => lane.activity ?? {})
+  if (windows.some(({ state }) => state === 'working')) return ['working', 'Working']
+  // What its window waits for, where the window says (T-1855).
+  const waiting = windows.find(({ state }) => state === 'waiting')
+  if (waiting) return ['waiting', waiting.reason ? `Waiting: ${waiting.reason}` : 'Waiting for you']
   if (part === row) return ['idle', 'Ready for a task']
   // A new task goes to the member, never straight to its backup: the backup stands by while
   // its member can work, and takes the member's tasks while it cannot.
@@ -568,6 +582,9 @@ const outOfQuota = (participant, now) =>
  * all the ledger keeps of why, across a restart.
  */
 const MODEL_MOVED = '9999-12-31T23:59:59.999Z'
+/** What a member the update could not run on what it ran on (T-1202) says, and its ways out. */
+const NEEDS_EDIT =
+  'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it'
 const unavailable = (participant) => participant.outUntil?.startsWith('9999-') === true
 const modelMoved = (participant) => participant.outUntil === MODEL_MOVED
 /** "@zeus · amber-pine" for a session; the member's own name otherwise. */
@@ -821,12 +838,7 @@ export function laneStatus(lane, board, now) {
     ]
   }
   // A member the update could not run on what it ran on (T-1202) runs nothing until edited.
-  if (participant.needsEdit && participant.role !== 'chief') {
-    return [
-      'missing',
-      'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
-    ]
-  }
+  if (participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]
   const out = outWords(lane, now)
   if (out !== null) {
     const backup = lane.backupReady?.[participant.role]
@@ -1251,16 +1263,22 @@ export class BoardView {
     return table
   }
 
-  /** `rows` as the board draws them: each, and an unfolded member's sessions' under it. */
+  /**
+   * `rows` as the board draws them: each, and an unfolded member's sessions' under it. They take
+   * turns in shade, odd and even, from a group's first (the owner, 2026-11-20: "lets make each
+   * row a different color/shade like odd/even"): a member's lane, its backup's part and every
+   * session under it are one shade, so one member is told from the next at a glance.
+   */
   #rows(rows, board, now) {
     const drawn = []
-    for (const row of rows) {
+    for (const [at, row] of rows.entries()) {
       const folded = this.#folded(board, row)
-      drawn.push(this.#row(row, board, now, folded))
-      if (folded !== false) continue
-      for (const session of row.sessions) {
-        drawn.push(this.#row(session, board, now, null))
+      const lane = [this.#row(row, board, now, folded)]
+      if (folded === false) {
+        for (const session of row.sessions) lane.push(this.#row(session, board, now, null))
       }
+      for (const one of lane) one.dataset.shade = at % 2 === 0 ? 'odd' : 'even'
+      drawn.push(...lane)
     }
     return drawn
   }

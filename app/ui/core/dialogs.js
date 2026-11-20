@@ -99,6 +99,17 @@ function memberGroup(who, roles, tools) {
 }
 
 /**
+ * A staff's groups, one a member, shaded odd and even in turn (the owner, 2026-11-20: "lets make
+ * each row a different color/shade like odd/even"): a member's rows and its backup slot take
+ * one shade, so one member is told from the next and never split from its backup.
+ */
+const shaded = (groups) =>
+  groups.flatMap((rows, at) => {
+    for (const row of rows) row.dataset.shade = at % 2 === 0 ? 'odd' : 'even'
+    return rows
+  })
+
+/**
  * The last row of a member's group, alike under every member that may have a backup, in both
  * staff dialogs: its backup (`who`, a staff cell, with Change backup, its Vacation and Remove
  * backup) or none (null, with Add backup). An image designer has no slot: it has no backup.
@@ -1268,7 +1279,7 @@ export class NewProjectDialog {
         return { picks, roles, lead, role: roles[0], tier: lead.tier, name: modelShown(lead) }
       })
       .sort(byRoleAndTier)
-    const rows = groups.flatMap((group) => this.#group(group, backups.get(group.lead._id)))
+    const rows = shaded(groups.map((group) => this.#group(group, backups.get(group.lead._id))))
     if (rows.length === 0) {
       rows.push(nobodyRow('Nobody yet: pick a role, a harness, a model and a tier, then Add.'))
     }
@@ -1735,20 +1746,22 @@ export class ProjectSettingsDialog {
         .filter((member) => member.backupOf != null)
         .map((member) => [member.backupOf, member]),
     )
-    const rows = primaries
-      .map((member) => ({
-        member,
-        role: inRoleOrder(member.roles)[0],
-        tier: member.tier,
-        name: member.handle,
-      }))
-      .sort(byRoleAndTier)
-      .flatMap(({ member }) => {
-        const rows = this.#memberRows(member)
-        if (member.designer || this.#removing === member.handle) return rows
-        const backup = backups.get(member.id)
-        return [...rows, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
-      })
+    const rows = shaded(
+      primaries
+        .map((member) => ({
+          member,
+          role: inRoleOrder(member.roles)[0],
+          tier: member.tier,
+          name: member.handle,
+        }))
+        .sort(byRoleAndTier)
+        .map(({ member }) => {
+          const rows = this.#memberRows(member)
+          if (member.designer || this.#removing === member.handle) return rows
+          const backup = backups.get(member.id)
+          return [...rows, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
+        }),
+    )
     if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the members this project may use.'))
     redraw(this.#members, rows)
     this.#gate.checked = board.project.gate ?? false
