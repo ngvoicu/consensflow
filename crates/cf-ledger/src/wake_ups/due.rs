@@ -157,6 +157,11 @@ const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
 /// it, and nobody else has it to go on with, so it is the chief's own work.
 fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
     let with_its_window = sql_list(&WITH_ITS_WINDOW);
+    // An idle window, like a pre-tracking question, keeps the old subject path.
+    let answer_task = format!(
+        "coalesce({}, q.task_id)",
+        crate::holding::task_for_question_sql("q")
+    );
     Ok(store
         .db
         .prepare(&format!(
@@ -165,7 +170,7 @@ fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerErr
                  AND (t.state IN ({with_its_window})
                       OR (t.state = 'waiting'
                           AND EXISTS (SELECT 1 FROM message a JOIN message q ON q.id = a.reply_to
-                                      WHERE q.task_id = t.id AND q.kind = 'question'
+                                      WHERE {answer_task} = t.id AND q.kind = 'question'
                                         AND a.kind = 'answer'
                                         AND a.state IN ('gated', 'queued', 'delivering')))
                       OR (t.state = 'paused' AND t.held_until IS NOT NULL
