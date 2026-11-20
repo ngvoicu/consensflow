@@ -12,7 +12,7 @@ tep-engine-turn-end = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 tep-turn-end-finish-cf-verb = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
 tep-turn-end-finish-cf-goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
 tep-turn-end-finish-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api"]
-tep-turn-end-finish-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "background|Finish"]
+tep-turn-end-finish-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "background|Finish", "--workers=4"]
 tep-turn-end-finish-regression-never-ends = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_never_ends"]
 tep-turn-end-review-2-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 tep-turn-end-review-2-cf-board-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
