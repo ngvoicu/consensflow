@@ -1480,3 +1480,90 @@ fn a_refunded_first_brief_does_not_create_a_task_holding() {
         .unwrap();
     assert_eq!(w.ledger.question_holding(w.id(&session)).unwrap(), None);
 }
+
+#[test]
+fn a13_handoff_keeps_a_tracked_question_whose_subject_is_accepted_but_holding_waits() {
+    let mut w = world();
+    let (subject, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ledger.record_result(w.project, subject, "Done").unwrap();
+    w.ledger.accept_task(w.project, subject, "human").unwrap();
+    let current = w.give_to(&session, &[], "Next task").unwrap();
+    w.deliver(current.message.unwrap().id);
+    let question = w.ask(&session, subject, "About the previous task").id;
+    w.deliver(question);
+    assert_eq!(w.state(current.task.number), "waiting");
+    assert_eq!(w.message(question).state, "delivered");
+
+    let open = w.ledger.chief_open_work(w.project).unwrap();
+    let listed = open.questions.iter().find(|q| q.id == question).expect(
+        "the handoff includes the question that the asking window's current task waits for",
+    );
+    assert_eq!(
+        listed.task_number,
+        Some(subject),
+        "its subject stays in the words"
+    );
+
+    w.ledger
+        .record_finished(w.project, current.task.number, "Done waiting", (0, 0))
+        .unwrap();
+    assert!(w
+        .ledger
+        .chief_open_work(w.project)
+        .unwrap()
+        .questions
+        .iter()
+        .all(|q| q.id != question));
+}
+
+#[test]
+fn a13_handoff_keeps_the_old_subject_rule_for_an_untracked_question() {
+    let mut w = world();
+    let (subject, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ledger.record_result(w.project, subject, "Done").unwrap();
+    let current = w.give_to(&session, &[], "Next task").unwrap();
+    w.deliver(current.message.unwrap().id);
+    let question = w.ask(&session, subject, "An old question").id;
+    w.deliver(question);
+    w.edit(|db| {
+        db.execute(
+            "DELETE FROM question_binding WHERE question_id=?",
+            [question],
+        )
+        .unwrap();
+    });
+    w.ledger.accept_task(w.project, subject, "human").unwrap();
+    assert_eq!(w.message(question).state, "delivered");
+    assert!(w
+        .ledger
+        .chief_open_work(w.project)
+        .unwrap()
+        .questions
+        .iter()
+        .all(|q| q.id != question));
+}
+
+#[test]
+fn a13_handoff_keeps_the_subject_rule_for_a_taskless_window() {
+    let mut w = world();
+    let (subject, session, _brief) = assigned(&mut w, false);
+    w.ledger
+        .release_task(w.project, subject, "Reassign")
+        .unwrap();
+    let moved = w.assign(subject, "diana");
+    w.deliver(moved.message.unwrap().id);
+    let question = w.ask(&session, subject, "Idle question").id;
+    w.deliver(question);
+    w.ledger.record_result(w.project, subject, "Done").unwrap();
+    w.ledger.accept_task(w.project, subject, "human").unwrap();
+    assert_eq!(w.message(question).state, "delivered");
+    assert!(w
+        .ledger
+        .chief_open_work(w.project)
+        .unwrap()
+        .questions
+        .iter()
+        .all(|q| q.id != question));
+}
