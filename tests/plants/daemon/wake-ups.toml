@@ -21,6 +21,8 @@
 [run]
 # The ledger's tests of the setting, the migration, when a wake-up is due and what is withdrawn.
 ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups"]
+held-answer = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "a_cross_task_answer_at_the_gate_holds_the_waiting_tasks_wake_up_back", "--", "--test-threads=2"]
+idle-answer = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "a_taskless_windows_answer_keeps_the_wake_ups_old_subject_path", "--", "--test-threads=2"]
 # The words of the setting and what it makes of a request.
 ledger-wake-ups-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "wake_ups::"]
 # The dispatcher's tests of when a chief is nudged.
@@ -39,6 +41,30 @@ live-wake-ups = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_w
 page-wake-up = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "wake-up"]
 
 # --- the ledger: the setting ---
+
+[[plant]]
+name = "wake-up holding: a gated answer follows the named subject"
+meant = "busy::a_cross_task_answer_at_the_gate_holds_the_waiting_tasks_wake_up_back"
+runs = ["held-answer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '''    let answer_task = format!(
+        "coalesce({}, q.task_id)",
+        crate::holding::task_for_question_sql("q")
+    );'''
+replace = '''    let answer_task = "q.task_id".to_owned();'''
+
+[[plant]]
+name = "wake-up holding: an idle question loses its subject path"
+meant = "busy::a_taskless_windows_answer_keeps_the_wake_ups_old_subject_path"
+runs = ["idle-answer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '''    let answer_task = format!(
+        "coalesce({}, q.task_id)",
+        crate::holding::task_for_question_sql("q")
+    );'''
+replace = '''    let answer_task = crate::holding::task_for_question_sql("q");'''
 
 [[plant]]
 name = "wake-up: a setting saved as it was is logged and restarts the clock"
