@@ -2,7 +2,8 @@
 # 2026-10-16, GPT-6-Astra and GPT-6.1-Sol): the words that resume a task carry what was kept for its
 # window (the answers to its questions), and the start that finds their carrier still on its way
 # settles what it carried with it: received with it where the window's record shows the carrier's
-# marker, queued again with it where it does not. Opening the ledger let go of the rows of a carrier
+# marker, queued again with it where it does not for pre-tracking answers. A tracked answer of a
+# physical window that ended returns to the chief instead. Opening the ledger let go of the rows of a carrier
 # that was `delivering`, which a start then pasted again on their own, or sent without their carrier.
 # Only a carrier this ledger wrote is so: it froze the set at the first paste. A carrier an earlier
 # build wrote may hold a row its recorded paste never had (Node pasted a carrier's own words alone;

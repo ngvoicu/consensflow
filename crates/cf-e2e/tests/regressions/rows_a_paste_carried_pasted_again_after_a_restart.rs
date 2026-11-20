@@ -14,8 +14,9 @@
 //! own. One that never reached the window went without its carrier.
 //!
 //! What should have happened: what a paste carried follows its carrier. Where the
-//! window's record shows the carrier's marker, the rows were received with it; where it
-//! does not, they go again in its paste. Each reaches the window once.
+//! window's record shows the carrier's marker, the rows were received with it. Where it
+//! does not, pre-tracking answers go again in its paste, while tracked answers of the
+//! physical window that ended return to the chief once. Each keeps its own path.
 //!
 //! A chief is given no such paste: a carrier is a task message for the window that has
 //! the task, and the chief's own work is never paused. So the cases are a worker's, of
@@ -153,19 +154,20 @@ fn message_id(printed: &str) -> cf_e2e::Result<String> {
 /// agent runs `cf ask`; the chief pauses T-1 and answers both while it is paused, which
 /// keeps them for the window. The chief's window, and what the case is about.
 fn two_answers_kept_for_a_paused_worker(
-    rig: &Rig,
+    mut rig: Rig,
     harness: Harness,
-) -> cf_e2e::Result<(Value, Kept)> {
-    write_roster(rig, harness)?;
-    let project = Project::open(rig, "chief", json!({}))?;
+    pretracking: bool,
+) -> Result<(Rig, Value, Kept), Box<dyn std::error::Error>> {
+    write_roster(&rig, harness)?;
+    let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
         .as_str()
         .unwrap_or("standard")
         .to_owned();
-    let chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
+    let mut chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
     cf(
-        rig,
+        &rig,
         &chief,
         &[
             "task",
@@ -186,26 +188,72 @@ fn two_answers_kept_for_a_paused_worker(
     let window = rig.open_frame(&format!("p{}-{worker}", project.id()), secs(30))?;
     let session = session_of(&window);
     let questions = [
-        message_id(&cf(rig, &window, &["ask", "Which format?"])?)?,
-        message_id(&cf(rig, &window, &["ask", "Which tests?"])?)?,
+        message_id(&cf(&rig, &window, &["ask", "Which format?"])?)?,
+        message_id(&cf(&rig, &window, &["ask", "Which tests?"])?)?,
     ];
-
-    cf(rig, &chief, &["task", "pause", "T-1"])?;
+    cf(&rig, &chief, &["task", "pause", "T-1"])?;
     rig.wait_for("T-1 to be paused and its window at rest", secs(60), || {
         Ok(project.task(1)?["state"] == "paused"
             && project.lane("worker")?["activity"]["state"] == "idle")
     })?;
+    let project_id = project.id();
+    if pretracking {
+        // The original carrier regression predates holding tracking. Stop this
+        // test daemon before recreating those rows, then reopen its paused project.
+        let file = rig.home().join("consensflow.db");
+        rig.kill_daemon();
+        rig.wait_for_daemon_exit(secs(10))?;
+        let root = rig.close_keeping_the_root()?;
+        {
+            let db = rusqlite::Connection::open(file)?;
+            for question in &questions {
+                let id: i64 = question.trim_start_matches("m-").parse().map_err(|_| {
+                    Error::Daemon(format!("question has no numeric id: {question}"))
+                })?;
+                assert_eq!(
+                    db.execute("DELETE FROM question_binding WHERE question_id=?", [id])?,
+                    1
+                );
+            }
+        }
+        rig = Rig::start(harness.config().existing_root(root))?;
+        let resumed = rig.page("project.resume", json!({ "project": project_id }))?;
+        assert_eq!(resumed["ok"], true, "{resumed}");
+        chief = rig.open_frame(&format!("p{project_id}-chief"), secs(30))?;
+    }
+    let project = Project::new(&rig, project_id);
+    assert_eq!(project.task(1)?["state"], "paused");
+    if pretracking {
+        // The original scenario resumes into an already open window. A human-
+        // paused task need not reopen its pane with the project, so show it first.
+        if !project.lane(&worker)?["pane"].is_object() {
+            let shown = rig.page(
+                "session.open",
+                json!({ "project": project_id, "handle": worker }),
+            )?;
+            assert_eq!(shown["ok"], true, "{shown}");
+        }
+        rig.wait_for(
+            "the paused worker's window to be open and idle",
+            secs(60),
+            || {
+                let lane = project.lane(&worker)?;
+                Ok(lane["pane"].is_object() && lane["activity"]["state"] == "idle")
+            },
+        )?;
+    }
     for (question, answer) in questions.iter().zip(ANSWERS) {
-        cf(rig, &chief, &["answer", question, answer])?;
+        cf(&rig, &chief, &["answer", question, answer])?;
     }
     for answer in ANSWERS {
         let kept = answer_to(&project, &worker, answer)?;
         assert_eq!(kept["state"], "queued", "kept for the window: {kept}");
     }
     Ok((
+        rig,
         chief,
         Kept {
-            project: project.id(),
+            project: project_id,
             worker,
             session,
         },
@@ -363,7 +411,7 @@ fn each_answer_went_in_once_with_the_words(given: &[String], carrier: i64) {
 /// before it took the receipt.
 fn the_paste_reached_the_window_before_the_restart(harness: Harness) -> Outcome {
     let rig = Rig::start(harness.config())?;
-    let (chief, kept) = two_answers_kept_for_a_paused_worker(&rig, harness)?;
+    let (rig, chief, kept) = two_answers_kept_for_a_paused_worker(rig, harness, false)?;
     let carrier = resumed_with_its_paste_caught(&rig, &chief, &kept, Pasted::IntoTheWindow)?;
     let marker = format!("[ConsensFlow m-{carrier} ");
     rig.wait_for("the worker's record to show the words", secs(60), || {
@@ -380,14 +428,63 @@ fn the_paste_reached_the_window_before_the_restart(harness: Harness) -> Outcome 
 }
 
 /// The paste never reached the window, and the daemon stopped waiting for it.
-fn the_paste_never_reached_the_window_before_the_restart(harness: Harness) -> Outcome {
+fn the_paste_never_reached_the_window_before_the_restart(
+    harness: Harness,
+    pretracking: bool,
+) -> Outcome {
     let rig = Rig::start(harness.config())?;
-    let (chief, kept) = two_answers_kept_for_a_paused_worker(&rig, harness)?;
+    let (rig, chief, kept) = two_answers_kept_for_a_paused_worker(rig, harness, pretracking)?;
     let carrier = resumed_with_its_paste_caught(&rig, &chief, &kept, Pasted::Nowhere)?;
     let before = harness.given(&rig, &kept.session)?.len();
     let rig = the_app_starts_again(rig, harness, kept.project)?;
-    let given = until_all_is_given(&rig, harness, &kept, before)?;
-    each_answer_went_in_once_with_the_words(&given, carrier);
+    if pretracking {
+        let given = until_all_is_given(&rig, harness, &kept, before)?;
+        each_answer_went_in_once_with_the_words(&given, carrier);
+    } else {
+        let project = Project::new(&rig, kept.project);
+        rig.wait_for("both answers to return to the chief", secs(60), || {
+            let inbox = project.inbox("chief")?;
+            Ok(ANSWERS.iter().all(|answer| {
+                inbox.iter().any(|message| {
+                    message["kind"] == "note"
+                        && message["body"]
+                            .as_str()
+                            .is_some_and(|body| body.contains(answer))
+                })
+            }))
+        })?;
+        rig.wait_for(
+            "the resumed words to reach the new window",
+            secs(180),
+            || {
+                Ok(project.lane(&kept.worker)?["pane"].is_object()
+                    && answer_to(&project, &kept.worker, RESUMED)?["state"] == "delivered"
+                    && harness.given(&rig, &kept.session)?.len() > before)
+            },
+        )?;
+        let notes = project.inbox("chief")?;
+        let given = harness.given(&rig, &kept.session)?;
+        let marker = format!("[ConsensFlow m-{carrier} ");
+        assert!(given.iter().any(|text| text.starts_with(&marker)));
+        for answer in ANSWERS {
+            let old = answer_to(&project, &kept.worker, answer)?;
+            assert_eq!(old["state"], "cancelled", "the old window ended: {old}");
+            let count = notes
+                .iter()
+                .filter(|note| {
+                    note["kind"] == "note"
+                        && note["body"]
+                            .as_str()
+                            .is_some_and(|body| body.contains(answer))
+                })
+                .count();
+            assert_eq!(count, 1, "{answer} returns to the chief once");
+            assert!(
+                !given.iter().any(|text| text.contains(answer)),
+                "{answer} never reached either window"
+            );
+        }
+    }
     rig.close()?;
     Ok(())
 }
@@ -407,13 +504,31 @@ fn answers_a_paste_carried_into_a_devin_workers_window_are_not_pasted_again_afte
 #[test]
 fn answers_a_paste_never_carried_into_a_claude_workers_window_go_again_in_it_after_a_restart(
 ) -> Outcome {
-    the_paste_never_reached_the_window_before_the_restart(Harness::Claude)
+    the_paste_never_reached_the_window_before_the_restart(Harness::Claude, true)
 }
 
 #[test]
 fn answers_a_paste_never_carried_into_a_devin_workers_window_go_again_in_it_after_a_restart(
 ) -> Outcome {
-    the_paste_never_reached_the_window_before_the_restart(Harness::Devin)
+    the_paste_never_reached_the_window_before_the_restart(Harness::Devin, true)
+}
+
+#[test]
+fn tracked_answers_a_paste_never_carried_return_to_the_chief_after_a_claude_restart() -> Outcome {
+    the_paste_never_reached_the_window_before_the_restart(Harness::Claude, false)
+}
+
+#[test]
+fn tracked_answers_a_paste_never_carried_return_to_the_chief_after_a_devin_restart() -> Outcome {
+    the_paste_never_reached_the_window_before_the_restart(Harness::Devin, false)
+}
+
+#[test]
+fn tracked_answers_a_paste_never_carried_return_to_the_chief_after_a_devin_3000_12_restart(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        tracked_answers_a_paste_never_carried_return_to_the_chief_after_a_devin_restart,
+    )
 }
 
 // The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as

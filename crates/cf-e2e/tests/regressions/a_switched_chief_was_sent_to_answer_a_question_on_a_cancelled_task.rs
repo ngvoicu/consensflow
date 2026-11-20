@@ -107,20 +107,31 @@ fn a_tracked_question_whose_answer_a_cancel_returned_is_not_in_the_switched_chie
 /// The field question was recorded before holding tracking. Exercise that path
 /// and the current tracked path with the same handoff assertions.
 fn cancelled_question_handoff(tracked: bool) -> Outcome {
-    let rig = Rig::start(config())?;
+    let mut rig = Rig::start(config())?;
     let (project, question, session) = asked(&rig)?;
+    let project_id = project.id();
     if !tracked {
-        let db = rusqlite::Connection::open(rig.home().join("consensflow.db"))?;
-        db.busy_timeout(secs(5))?;
-        assert_eq!(
-            db.execute(
-                "DELETE FROM question_binding WHERE question_id = ?",
-                [question]
-            )?,
-            1,
-            "the delivered question becomes a pretracking fixture"
-        );
+        let file = rig.home().join("consensflow.db");
+        rig.kill_daemon();
+        rig.wait_for_daemon_exit(secs(10))?;
+        let root = rig.close_keeping_the_root()?;
+        {
+            let db = rusqlite::Connection::open(file)?;
+            assert_eq!(
+                db.execute(
+                    "DELETE FROM question_binding WHERE question_id = ?",
+                    [question]
+                )?,
+                1,
+                "the delivered question becomes a pretracking fixture"
+            );
+        }
+        rig = Rig::start(config().existing_root(root))?;
+        let resumed = rig.page("project.resume", json!({ "project": project_id }))?;
+        assert_eq!(resumed["ok"], true, "{resumed}");
     }
+    let project = Project::new(&rig, project_id);
+    wait_for_the_chief(&rig, &project)?;
     let chief = windows_of(&rig, &project)
         .into_iter()
         .next()
