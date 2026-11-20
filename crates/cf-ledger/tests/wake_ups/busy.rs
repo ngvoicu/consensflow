@@ -419,6 +419,110 @@ fn a_cross_task_answer_at_the_gate_holds_the_waiting_tasks_wake_up_back() {
 }
 
 #[test]
+fn an_untracked_cross_task_answer_keeps_the_wake_ups_old_subject_path() {
+    let mut w = gated_world();
+    w.turn_on(1, WakeUpUnit::Minutes);
+    w.advance(MINUTE);
+    w.wake_and_deliver();
+    let subject = w.give_self(&[]);
+    w.start(&subject);
+    w.ledger
+        .record_finished(w.project.id, subject.task.number, "Done", (0, 0))
+        .unwrap();
+    let held = w.give(&[]);
+    w.approve(held.message.as_ref().unwrap());
+    w.start(&held);
+    let question = w
+        .ledger
+        .ask(
+            w.project.id,
+            &NewQuestion {
+                from: Some("zeus".into()),
+                to: "chief".into(),
+                body: Some("About the step?".into()),
+                task: Some(subject.task.number),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(w.answer(&question).state, "gated");
+    w.edit(|db| {
+        assert_eq!(
+            db.execute(
+                "DELETE FROM question_binding WHERE question_id=?",
+                [question.id]
+            )
+            .unwrap(),
+            1
+        )
+    });
+    assert_eq!(w.state(held.task.number), "waiting");
+    w.advance(DAY);
+    assert!(
+        w.due().is_some(),
+        "the pre-tracking answer still follows its finished subject"
+    );
+}
+
+#[test]
+fn a_taskless_windows_answer_keeps_the_wake_ups_old_subject_path() {
+    let mut w = gated_world();
+    w.turn_on(1, WakeUpUnit::Minutes);
+    w.advance(MINUTE);
+    w.wake_and_deliver();
+    let held = w.give(&[]);
+    w.approve(held.message.as_ref().unwrap());
+    w.start(&held);
+    w.ask(held.task.number);
+    let idle = w
+        .ledger
+        .add_member(
+            w.project.id,
+            &NewMember {
+                model: None,
+                effort: None,
+                model_name: Some("artemis".into()),
+                harness: "claude-code".into(),
+                designer: false,
+                roles: vec!["worker".into()],
+                tier: "standard".into(),
+            },
+        )
+        .unwrap();
+    let question = w
+        .ledger
+        .ask(
+            w.project.id,
+            &NewQuestion {
+                from: Some(idle.handle.clone()),
+                to: "chief".into(),
+                body: Some("About that task?".into()),
+                task: Some(held.task.number),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap();
+    w.edit(|db| {
+        let binding: Option<i64> = db
+            .query_row(
+                "SELECT task_id FROM question_binding WHERE question_id=?",
+                [question.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(binding, None, "the asking window actually holds no task");
+    });
+    assert_eq!(w.answer(&question).state, "gated");
+    assert_eq!(w.state(held.task.number), "waiting");
+    w.advance(DAY);
+    assert!(
+        w.due().is_none(),
+        "the taskless question keeps its older subject-based wake-up path"
+    );
+    assert_eq!(w.held_by(), [held.task.number]);
+}
+
+#[test]
 fn a_task_the_chief_holds_itself_and_works_on_is_the_chiefs_own_and_gets_a_wake_up() {
     let mut w = after_the_first();
     let own = w.give_self(&[]);
