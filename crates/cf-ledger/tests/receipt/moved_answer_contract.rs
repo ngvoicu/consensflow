@@ -1045,6 +1045,121 @@ fn a13_an_untracked_question_keeps_its_legacy_topic_rule() {
 }
 
 #[test]
+fn a13_cancelling_a_topic_keeps_the_other_holdings_queued_question() {
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.open("The subject").task.number;
+    let other_brief = w.assign(topic, "diana").message.unwrap().id;
+    w.deliver(other_brief);
+    let question = w.ask(&session, topic, "About that subject").id;
+    assert_eq!(w.message(question).state, "queued");
+
+    w.ledger.cancel_task(w.project, topic, "human").unwrap();
+    assert_eq!(w.state(held), "waiting");
+    assert_eq!(w.message(question).state, "queued");
+    w.deliver(question);
+    let wait = w.ledger.waiting_questions(w.project).unwrap();
+    let wait = wait.iter().find(|wait| wait.id == question).unwrap();
+    assert_eq!((wait.task, wait.held_task), (Some(topic), Some(held)));
+}
+
+#[test]
+fn a13_failing_a_topic_keeps_the_other_holdings_gated_question() {
+    for give_up in [false, true] {
+        let mut w = gated_world();
+        let (held, session, brief) = assigned(&mut w, true);
+        w.deliver(brief);
+        let topic = w.open("The subject").task.number;
+        let other_brief = w.assign(topic, "diana").message.unwrap().id;
+        w.ledger.approve_message(other_brief, "human").unwrap();
+        w.deliver(other_brief);
+        let question = w.ask(&session, topic, "About that subject").id;
+        assert_eq!(w.message(question).state, "gated");
+
+        if give_up {
+            w.ledger.give_up_task(w.project, topic, "Stopped").unwrap();
+        } else {
+            w.ledger.fail_task(w.project, topic, "Stopped").unwrap();
+        }
+        assert_eq!(w.state(held), "waiting");
+        assert_eq!(w.message(question).state, "gated", "give_up={give_up}");
+        w.ledger.approve_message(question, "human").unwrap();
+        w.deliver(question);
+        let wait = w.ledger.waiting_questions(w.project).unwrap();
+        let wait = wait.iter().find(|wait| wait.id == question).unwrap();
+        assert_eq!((wait.task, wait.held_task), (Some(topic), Some(held)));
+    }
+}
+
+#[test]
+fn a13_cancelling_a_topic_keeps_the_other_holdings_queued_reminder() {
+    use cf_ledger::{HandOver, NewNote};
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.open("The subject").task.number;
+    let other_brief = w.assign(topic, "diana").message.unwrap().id;
+    w.deliver(other_brief);
+    let question = w.ask(&session, topic, "About that subject").id;
+    w.deliver(question);
+    let reminder = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: Some(topic),
+                body: "A reminder".into(),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(w.message(reminder.id).state, "queued");
+
+    w.ledger.cancel_task(w.project, topic, "human").unwrap();
+    assert_eq!(w.state(held), "waiting");
+    assert_eq!(w.message(question).state, "delivered");
+    assert_eq!(w.message(reminder.id).state, "queued");
+    w.begin(reminder.id);
+    assert_eq!(
+        w.ledger.admit(reminder.id, &[]).unwrap(),
+        HandOver::Admitted
+    );
+}
+
+#[test]
+fn a13_cancelling_a_topic_keeps_legacy_and_idle_question_paths() {
+    for idle in [false, true] {
+        let mut w = world();
+        let (held, session, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        if idle {
+            w.ledger.release_task(w.project, held, "Reassign").unwrap();
+        }
+        let topic = w.open("The subject").task.number;
+        let other_brief = w.assign(topic, "diana").message.unwrap().id;
+        w.deliver(other_brief);
+        let question = w.ask(&session, topic, "About that subject").id;
+        if !idle {
+            w.edit(|db| {
+                db.execute(
+                    "DELETE FROM question_binding WHERE question_id=?",
+                    [question],
+                )
+                .unwrap();
+            });
+        }
+        assert_eq!(w.message(question).state, "queued");
+        w.ledger.cancel_task(w.project, topic, "human").unwrap();
+        assert_eq!(w.message(question).state, "cancelled", "idle={idle}");
+    }
+}
+
+#[test]
 fn a13_finishing_a_questions_holding_withdraws_its_cross_task_reminder() {
     use cf_ledger::NewNote;
     let mut w = world();
