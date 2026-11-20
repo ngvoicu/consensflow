@@ -999,6 +999,49 @@ fn unanswered_question_is_reminded_after_receipt_then_two_hours_after_delivery_w
 }
 
 #[test]
+fn a13_cross_task_reminder_names_the_subject_but_offers_to_finish_the_held_task() {
+    use cf_ledger::Read;
+
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.give(tiers.project.id, "diana", "The topic");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 2, "About T-2?");
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let notes: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("question m-{}", question.id)))
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0]
+            .body
+            .starts_with(&format!("T-2's question m-{}", question.id)),
+        "{}",
+        notes[0].body
+    );
+    assert!(
+        notes[0]
+            .body
+            .contains(&format!("`{} task finish T-1`", CfWord::bare())),
+        "{}",
+        notes[0].body
+    );
+}
+
+#[test]
 fn gated_question_counts_from_receipt_by_the_chief_not_its_time_at_the_gate() {
     use cf_ledger::Read;
     let context = Context::new();

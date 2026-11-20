@@ -871,6 +871,7 @@ fn t1803_finding_07_a_current_holding_can_ask_about_its_previous_task() {
 
 #[test]
 fn a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding() {
+    use cf_ledger::{HandOver, NewNote};
     let mut w = world();
     let (previous, session, brief) = assigned(&mut w, false);
     w.deliver(brief);
@@ -889,6 +890,70 @@ fn a13_a_question_about_an_accepted_topic_still_reminds_for_its_current_holding(
         .find(|wait| wait.id == question)
         .expect("the question's current holding is still waiting");
     assert_eq!(wait.held_task, Some(current.task.number));
+    assert_eq!(
+        wait.task,
+        Some(previous),
+        "the subject stays the previous task"
+    );
+    let reminder = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: Some(previous),
+                body: "A reminder".into(),
+            },
+        )
+        .unwrap()
+        .expect("the actual holding still waits when the reminder is written");
+    w.begin(reminder.id);
+    assert_eq!(
+        w.ledger.admit(reminder.id, &[]).unwrap(),
+        HandOver::Admitted,
+        "the accepted topic does not make the reminder stale"
+    );
+}
+
+#[test]
+fn a13_a_queued_reminder_survives_its_topics_acceptance() {
+    use cf_ledger::{HandOver, NewNote};
+    let mut w = world();
+    let (previous, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let current = w.give_to(&session, &[], "Next task").unwrap();
+    w.deliver(current.message.unwrap().id);
+    let question = w.ask(&session, previous, "About the previous task").id;
+    w.deliver(question);
+    let reminder = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: Some(previous),
+                body: "A reminder".into(),
+            },
+        )
+        .unwrap()
+        .expect("a reminder while the topic is done");
+
+    w.ledger.accept_task(w.project, previous, "human").unwrap();
+    assert_eq!(w.state(current.task.number), "waiting");
+    assert_eq!(w.message(question).state, "delivered");
+    w.begin(reminder.id);
+    assert_eq!(
+        w.ledger.admit(reminder.id, &[]).unwrap(),
+        HandOver::Admitted,
+        "the open question still belongs to the current holding"
+    );
 }
 
 #[test]
@@ -905,9 +970,77 @@ fn a13_a_cross_task_question_reminder_names_its_held_task() {
     let waits = w.ledger.waiting_questions(w.project).unwrap();
     let wait = waits.iter().find(|wait| wait.id == question).unwrap();
     assert_eq!(
+        wait.task,
+        Some(topic),
+        "the question's subject is unchanged"
+    );
+    assert_eq!(
         wait.held_task,
         Some(held),
         "Finish must address the asking window's task"
+    );
+}
+
+#[test]
+fn a13_an_idle_window_reminds_its_question_without_offering_its_topic_to_finish() {
+    let mut w = world();
+    let (topic, session, _brief) = assigned(&mut w, false);
+    w.ledger.release_task(w.project, topic, "Reassign").unwrap();
+    let moved = w.assign(topic, "diana");
+    w.deliver(moved.message.unwrap().id);
+    let question = w.ask(&session, topic, "Idle question about the task").id;
+    w.deliver(question);
+
+    let waits = w.ledger.waiting_questions(w.project).unwrap();
+    let wait = waits.iter().find(|wait| wait.id == question).unwrap();
+    assert_eq!(wait.task, Some(topic));
+    assert_eq!(
+        wait.held_task, None,
+        "an idle window holds no task to finish"
+    );
+    let answer = w.answer(question, "Reply to the idle window").id;
+    assert_eq!(
+        w.ledger
+            .next_delivery_of(w.id(&session), answer)
+            .unwrap()
+            .unwrap()
+            .id,
+        answer
+    );
+}
+
+#[test]
+fn a13_an_untracked_question_keeps_its_legacy_topic_rule() {
+    let mut w = world();
+    let (held, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let topic = w.open("Other worker's task").task.number;
+    let other_brief = w.assign(topic, "diana").message.unwrap().id;
+    w.deliver(other_brief);
+    let question = w.ask(&session, topic, "An old cross-task question").id;
+    w.deliver(question);
+    w.edit(|db| {
+        db.execute(
+            "DELETE FROM question_binding WHERE question_id=?",
+            [question],
+        )
+        .unwrap();
+    });
+
+    let waits = w.ledger.waiting_questions(w.project).unwrap();
+    let wait = waits.iter().find(|wait| wait.id == question).unwrap();
+    assert_eq!(wait.task, Some(topic));
+    assert_eq!(
+        wait.held_task, None,
+        "the old question does not acquire a reconstructed holding"
+    );
+    w.ledger
+        .record_finished(w.project, held, "Done", (0, 0))
+        .unwrap();
+    assert_ne!(
+        w.message(question).state,
+        "cancelled",
+        "the old topic path still applies"
     );
 }
 
