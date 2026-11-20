@@ -19,6 +19,7 @@
 
 [run]
 failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
+local-network-help = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
 failure-reason-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "told_once"]
 failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
 # The dispatcher's budget for an operation's future (`dispatcher/tests.rs`).
@@ -37,6 +38,53 @@ failure-reason-calls = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib
 failure-reason-contract = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "contract::"]
 failure-reason-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 failure-reason-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_failure_said_no_reason::"], builds = true }
+
+[[plant]]
+name = "local network help: no failure ever gets the settings guidance"
+meant = "a_private_address_that_node_cannot_reach_gets_conditional_local_network_help"
+runs = ["local-network-help"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/local_network.rs"
+find = '''    match evidence(words) {'''
+replace = '''    match None {'''
+
+[[plant]]
+name = "local network help: an ambiguous socket error is called a privacy denial"
+meant = "a_private_address_that_node_cannot_reach_gets_conditional_local_network_help"
+runs = ["local-network-help"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/local_network.rs"
+find = '''        Some(Evidence::Possible) => failed.push_str(
+            "; If that address is on your local network, check that ConsensFlow is on in System Settings > Privacy & Security > Local Network; the error does not identify the cause",
+        ),'''
+replace = '''        Some(Evidence::Possible) => failed.push_str(
+            "; macOS denied local network access; turn ConsensFlow on in System Settings > Privacy & Security > Local Network",
+        ),'''
+
+[[plant]]
+name = "local network help: a refused connection to a private address gets a settings hint"
+meant = "other_connection_failures_are_not_said_to_be_local_network_denials"
+runs = ["local-network-help"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/local_network.rs"
+find = '''        ("connect", "EHOSTUNREACH") if private_endpoint(destination) => Some(Evidence::Possible),'''
+replace = '''        ("connect", "EHOSTUNREACH" | "ECONNREFUSED") if private_endpoint(destination) => Some(Evidence::Possible),'''
+
+[[plant]]
+name = "local network help: a withheld screen is used to make a settings hint"
+meant = "a_withheld_screen_never_gives_local_network_guidance_from_its_hidden_lines"
+runs = ["local-network-help"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        if screen::withheld(tail, self.own_session.as_deref()).is_some() {
+            return None;
+        }
+        tail.iter()'''
+replace = '''        tail.iter()'''
 
 [[plant]]
 name = "failure reason: a failed Codex turn's words are dropped, and the task fails saying only that the harness reported a failure (the field's)"

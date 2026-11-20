@@ -55,6 +55,198 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn a_private_address_that_node_cannot_reach_gets_conditional_local_network_help() {
+    // Pi 1.5.2 keeps the Node socket's deepest cause in its errorMessage. A
+    // Candidate pane returned EHOSTUNREACH, which also means a host is down;
+    // neither that error nor a private address proves macOS denied access.
+    let context = Context::new();
+    let tiers = working(&context);
+    fails(
+        &context,
+        Some("Connection error.: connect EHOSTUNREACH 192.168.50.3:8080"),
+    );
+    let notes = told(&tiers);
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].contains("If that address is on your local network"),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("Privacy & Security > Local Network"),
+        "{}",
+        notes[0]
+    );
+    assert!(!notes[0].contains("macOS denied"), "{}", notes[0]);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn local_dns_and_private_ipv6_failures_also_get_conditional_help() {
+    for words in [
+        "Connection error.: getaddrinfo ENOTFOUND provider.local",
+        "Connection error.: connect EHOSTUNREACH [fd00::1234]:8080",
+    ] {
+        let context = Context::new();
+        let tiers = working(&context);
+        fails(&context, Some(words));
+        let notes = told(&tiers);
+        assert_eq!(notes.len(), 1, "{words}: {notes:?}");
+        assert!(
+            notes[0].contains("If that address is on your local network"),
+            "{words}: {}",
+            notes[0]
+        );
+        assert!(
+            notes[0].contains("Privacy & Security > Local Network"),
+            "{words}: {}",
+            notes[0]
+        );
+        assert!(!notes[0].contains("macOS denied"), "{words}: {}", notes[0]);
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_denial_named_by_apple_network_framework_gets_local_network_help() {
+    let context = Context::new();
+    let tiers = working(&context);
+    fails(
+        &context,
+        Some("NWPath.UnsatisfiedReason.localNetworkDenied"),
+    );
+    let notes = told(&tiers);
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].contains("reported that macOS denied local network access"),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("Privacy & Security > Local Network"),
+        "{}",
+        notes[0]
+    );
+}
+
+#[test]
+fn other_connection_failures_are_not_said_to_be_local_network_denials() {
+    for words in [
+        "Connection error.",
+        "Connection error.: connect ECONNREFUSED 192.168.50.3:8080",
+        "Connection error.: connect EHOSTUNREACH 127.0.0.1:8080",
+        "Connection error.: connect EHOSTUNREACH 8.8.8.8:443",
+        "localNetworkDenied was not reported",
+    ] {
+        let context = Context::new();
+        let tiers = working(&context);
+        fails(&context, Some(words));
+        let notes = told(&tiers);
+        assert_eq!(notes.len(), 1, "{words}: {notes:?}");
+        assert!(
+            !notes[0].contains("Privacy & Security > Local Network"),
+            "{words}: {}",
+            notes[0]
+        );
+        assert!(!notes[0].contains("macOS denied"), "{words}: {}", notes[0]);
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_failed_turn_with_only_the_denial_on_its_screen_names_the_setting() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.set_snapshot(json!({
+        "tail": ["NWPath.UnsatisfiedReason.localNetworkDenied"]
+    }));
+    fails(&context, None);
+    let notes = told(&tiers);
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].contains("its screen showed the macOS local network denial code"),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("Privacy & Security > Local Network"),
+        "{}",
+        notes[0]
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_withheld_screen_never_gives_local_network_guidance_from_its_hidden_lines() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.set_snapshot(json!({
+        "tail": ["password: example", "NWPath.UnsatisfiedReason.localNetworkDenied"]
+    }));
+    fails(&context, None);
+    let notes = told(&tiers);
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("lines named a secret"), "{}", notes[0]);
+    assert!(
+        !notes[0].contains("Privacy & Security > Local Network"),
+        "{}",
+        notes[0]
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_denial_code_in_the_brief_is_not_taken_for_the_windows_failure() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(
+        project.id,
+        "zeus",
+        "NWPath.UnsatisfiedReason.localNetworkDenied",
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let brief = context.task(project.id, 1).messages[0].clone();
+    let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
+    context
+        .host
+        .set_snapshot(json!({ "tail": [header, brief.body] }));
+    fails(&context, None);
+    let notes = crate::fixtures::notes(&context, context.id(project.id, "chief"));
+    assert!(
+        notes.iter().any(|note| note.contains("failed")),
+        "{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .all(|note| !note.contains("Privacy & Security > Local Network")),
+        "{notes:?}"
+    );
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_non_mac_failure_does_not_name_mac_local_network_settings() {
+    for words in [
+        "Connection error.: connect EHOSTUNREACH 192.168.50.3:8080",
+        "NWPath.UnsatisfiedReason.localNetworkDenied",
+    ] {
+        let context = Context::new();
+        let tiers = working(&context);
+        fails(&context, Some(words));
+        let notes = told(&tiers);
+        assert_eq!(notes.len(), 1, "{words}: {notes:?}");
+        assert!(
+            !notes[0].contains("Privacy & Security > Local Network"),
+            "{words}: {}",
+            notes[0]
+        );
+    }
+}
+
 #[test]
 fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words() {
     // T-823: Codex's safety filter refused the turn (kluris T-158 and T-163), and the board

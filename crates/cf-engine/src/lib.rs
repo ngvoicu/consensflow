@@ -28,6 +28,7 @@ pub mod handoff;
 pub mod host;
 mod image_facts;
 mod in_flight;
+mod local_network;
 mod never_began;
 mod ownership;
 mod pacing;

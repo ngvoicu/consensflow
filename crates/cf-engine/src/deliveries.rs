@@ -1597,6 +1597,7 @@ impl Dispatcher {
         }
         // Words with nothing of a word in them ("…") say nothing: the screen may.
         if let Some(words) = observed.failure() {
+            crate::local_network::append_guidance(&mut failed, words, false);
             if let Some(said) = after_words(&failed, words) {
                 return Ok(Why {
                     said,
@@ -1627,6 +1628,9 @@ impl Dispatcher {
             });
         }
         let shown = shown.without_pastes(&pastes);
+        if let Some(line) = shown.last_quotable_line() {
+            crate::local_network::append_guidance(&mut failed, line, true);
+        }
         Ok(Why {
             said: shown.after(&failed),
             key: shown.outage_key(),

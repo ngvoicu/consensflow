@@ -4,12 +4,15 @@
      microphone or control of another app in the words of the app it is attributed
      to: for a program in ConsensFlow's panes (Claude Code's /voice, say), ConsensFlow's
      own. Without them macOS refuses it outright, as it refuses an app that says nothing
-     (T-540). The release holds the built bundle to them (cf-release `sign_mac::verify`). -->
+     (T-540). The release holds the built bundle to them (cf-release `sign_mac::verify`).
+     Agents can also use the local network; macOS shows this purpose when it asks. -->
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>A program running in ConsensFlow would like to use your microphone.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>A program running in ConsensFlow would like to control another app.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>ConsensFlow's agents connect to model providers and tools on your local network.</string>
 </dict>
 </plist>
