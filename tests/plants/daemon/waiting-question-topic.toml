@@ -1,0 +1,138 @@
+# A tracked question and its reminder follow the held task, even if their subject ends.
+[run]
+cancel-question = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_question", "--", "--test-threads=2"]
+cancel-reminder = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_reminder", "--", "--test-threads=2"]
+fail-question = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_failing_a_topic_keeps_the_other_holdings_gated_question", "--", "--test-threads=2"]
+legacy = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_cancelling_a_topic_keeps_legacy_and_idle_question_paths", "--", "--test-threads=2"]
+finish-own = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_finishing_the_chiefs_own_topic_keeps_another_holdings_question_and_reminder", "--", "--test-threads=2"]
+finish-carrier = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_finishing_an_unreceived_chief_step_releases_another_holdings_reminder", "--", "--test-threads=2"]
+end-carrier = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "moved_answer_contract::a13_ending_an_unreceived_chief_step_releases_another_holdings_reminder", "--", "--test-threads=2"]
+
+[[plant]]
+name = "waiting question topic: only the named task owns the question"
+meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_question"
+runs = ["cancel-question"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "b.task_id != {message}.task_id"
+replace = "b.task_id = {message}.task_id"
+
+[[plant]]
+name = "waiting question topic: an idle window takes another task's rule"
+meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_legacy_and_idle_question_paths"
+runs = ["legacy"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "b.task_id IS NOT NULL AND b.task_id != {message}.task_id"
+replace = "b.task_id IS NOT {message}.task_id"
+
+[[plant]]
+name = "waiting question topic: a reminder has no holding"
+meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_reminder"
+runs = ["cancel-reminder"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "OR b.question_id=(SELECT qr.question_id"
+replace = "OR 0 AND b.question_id=(SELECT qr.question_id"
+
+[[plant]]
+name = "waiting question topic: cancelling the topic drops its question"
+meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_question"
+runs = ["cancel-question"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''                  AND substr(body, 1, length(?)) = ?)
+         AND NOT {}",'''
+replace = '''                  AND substr(body, 1, length(?)) = ?)
+         AND ({} OR 1)",'''
+
+[[plant]]
+name = "waiting question topic: leaving the topic pause drops its reminder"
+meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_queued_reminder"
+runs = ["cancel-reminder"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body"
+replace = "AND substr(body, 1, length(?)) != ? AND ({} OR 1) RETURNING body"
+
+[[plant]]
+name = "waiting question topic: failing the topic drops its gated question"
+meant = "moved_answer_contract::a13_failing_a_topic_keeps_the_other_holdings_gated_question"
+runs = ["fail-question"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "         AND NOT {}\", crate::waiting_questions::other_holding_sql(\"message\")),"
+replace = "         AND ({} OR 1)\", crate::waiting_questions::other_holding_sql(\"message\")),"
+
+[[plant]]
+name = "waiting question topic: giving up the topic drops its gated question"
+meant = "moved_answer_contract::a13_failing_a_topic_keeps_the_other_holdings_gated_question"
+runs = ["fail-question"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "               AND NOT {other}\","
+replace = "               AND ({other} OR 1)\","
+
+[[plant]]
+name = "waiting question topic: a chief's finish names another holding's message as withdrawn"
+meant = "moved_answer_contract::a13_finishing_the_chiefs_own_topic_keeps_another_holdings_question_and_reminder"
+runs = ["finish-own"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "AND state IN ('queued', 'gated') AND NOT {} ORDER BY id"
+replace = "AND state IN ('queued', 'gated') AND ({} OR 1) ORDER BY id"
+
+[[plant]]
+name = "waiting question topic: a chief's finish withdraws another holding's message"
+meant = "moved_answer_contract::a13_finishing_the_chiefs_own_topic_keeps_another_holdings_question_and_reminder"
+runs = ["finish-own"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND NOT {}"
+replace = "WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND ({} OR 1)"
+
+[[plant]]
+name = "waiting question topic: a chief's finish strands a reminder in its brief"
+meant = "moved_answer_contract::a13_finishing_an_unreceived_chief_step_releases_another_holdings_reminder"
+runs = ["finish-carrier"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "    release_carried(store, task.id)?;"
+replace = "    let _ = task.id;"
+
+[[plant]]
+name = "waiting question topic: cancelling strands a reminder in its brief"
+meant = "moved_answer_contract::a13_ending_an_unreceived_chief_step_releases_another_holdings_reminder"
+runs = ["end-carrier"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''        release_carried(store, task.id)?;
+    }
+    // A question already delivered'''
+replace = '''        let _ = task.id;
+    }
+    // A question already delivered'''
+
+[[plant]]
+name = "waiting question topic: failing strands a reminder in its brief"
+meant = "moved_answer_contract::a13_ending_an_unreceived_chief_step_releases_another_holdings_reminder"
+runs = ["end-carrier"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''        [task_id],
+    )?;
+    release_carried(store, task_id)
+}'''
+replace = '''        [task_id],
+    )?;
+    Ok(())
+}'''
+
+[[plant]]
+name = "waiting question topic: giving up strands a reminder in its brief"
+meant = "moved_answer_contract::a13_ending_an_unreceived_chief_step_releases_another_holdings_reminder"
+runs = ["end-carrier"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "    super::release_carried(store, task_id)"
+replace = "    Ok(())"

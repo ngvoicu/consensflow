@@ -31,8 +31,8 @@ runs = ["naming-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/own_steps.rs"
-find = "               AND state IN ('queued', 'gated') ORDER BY id\","
-replace = "               AND kind = 'task' AND state IN ('queued', 'gated') ORDER BY id\","
+find = "               AND state IN ('queued', 'gated') AND NOT {} ORDER BY id\","
+replace = "               AND kind = 'task' AND state IN ('queued', 'gated') AND NOT {} ORDER BY id\","
 
 [[plant]]
 name = "own step naming: a note held at the gate is withdrawn and not named"
@@ -41,8 +41,8 @@ runs = ["naming-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/own_steps.rs"
-find = "               AND state IN ('queued', 'gated') ORDER BY id\","
-replace = "               AND state = 'queued' ORDER BY id\","
+find = "               AND state IN ('queued', 'gated') AND NOT {} ORDER BY id\","
+replace = "               AND state = 'queued' AND NOT {} ORDER BY id\","
 
 [[plant]]
 name = "own step naming: a brief being typed in is not named as landing"
