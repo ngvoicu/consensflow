@@ -58,7 +58,7 @@ replace = '''
 
 [[plant]]
 name = "staff slots: a waiting task is given to its Critical holder"
-meant = "only_critical_held_waits_a_task_and_says_the_way_on_once_and_the_same_task_goes_once_a_slot_is_filled"
+meant = "a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical_holder"
 runs = ["ss-engine-tier"]
 
 [[plant.edit]]
