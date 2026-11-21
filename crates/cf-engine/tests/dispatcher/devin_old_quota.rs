@@ -158,11 +158,6 @@ fn old_quota_followed_by_io_errors(rewrite: bool) {
         home.fakes.time.settle_at(context.time.wall_ms());
         observe(&context, &session, &*window);
         passes(&context, 2);
-        println!(
-            "after I/O error {index}: state={}, delivered resumes={}",
-            tiers.task(1).task.state,
-            resumes(&context, &session)
-        );
         context.advance(120_001);
         home.fakes.time.settle_at(context.time.wall_ms());
         observe(&context, &session, &*window);
