@@ -257,10 +257,10 @@ runs = ["ss-daemon-members"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
 find = '''
-                    let draws = fields.get("designer") == Some(&Value::Bool(true))
+                    if draws {
 '''
 replace = '''
-                    let draws = false && fields.get("designer") == Some(&Value::Bool(true))
+                    if false && draws {
 '''
 
 [[plant]]

@@ -175,6 +175,10 @@ fn only_critical_held_waits_a_task_and_says_the_way_on_once_and_the_same_task_go
         )],
         "told once, in the registry's words"
     );
+    assert!(
+        context.task(project.id, number).task.assignee.is_none(),
+        "given to nobody, though the critical reviewer is free"
+    );
     // A member of a slot it may take comes: the same task goes to it.
     context
         .ledger
