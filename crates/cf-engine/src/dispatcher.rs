@@ -1875,7 +1875,10 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
-            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
+            if !drawing
+                && observed.takes_words
+                && observed.waiting.is_none()
+                && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.hand_first(&held).await })
@@ -1884,7 +1887,7 @@ impl Dispatcher {
             return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
-            && observed.settled
+            && observed.takes_words
             && observed.waiting.is_none();
         let idle = free && !drawing;
         self.note_rest(record, &observed, idle, looked);

@@ -1,0 +1,103 @@
+# A Claude Code window on the Mac whose turn an interrupt for a tool use ended while its
+# background agent runs takes words though its status says busy (N23, T-1927, I1 of D3's
+# intake page; Claude Code 2.1.329's recording, T-1857). `Observed::takes_words` is what
+# every delivery gate reads in place of `settled`; results, stops and the rest keep
+# `settled`. The adapter is `crates/cf-harness/src/claude/adapter.rs` and `stopped.rs`; the
+# gates are `crates/cf-engine/src/dispatcher.rs` (the step's `free`; a launch's first message reads it
+# too, and no test reaches that gate: a new window has no record ending in an interrupt) and `pacing.rs` (the fresh look before a paste). The tests are
+# `crates/cf-harness/tests/launch/claude/agents.rs` (the recording at its prefixes, the
+# other interrupts, the shared record) and `crates/cf-engine/tests/dispatcher/
+# nothing_to_stop.rs` (the immediate resume, the result that is not taken).
+#
+# - the interrupt's end must have stood a second (`Over::Held`);
+# - not on Windows (nothing recorded it there);
+# - not for the in-generation wording, and not for a refusal's end;
+# - not on a record another Claude shares;
+# - the step's gate and the fresh look before a paste read `takes_words`, not `settled`;
+# - a result is taken on `settled` alone.
+#
+# Every name holds `takes words`, so `cargo xtask plants daemon "takes words"` runs them all.
+
+[run]
+harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents::"]
+engine-dispatcher-nothing-to-stop = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "nothing_to_stop::"]
+
+[[plant]]
+name = "takes words: without the second's stand of the interrupt's end"
+meant = "a_mac_window_busy_with_a_background_agent_takes_words_once_the_tool_use_interrupt_has_stood"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                        && over == Over::Held\n                        && !self.shared.get()"
+replace = "                        && !self.shared.get()"
+
+[[plant]]
+name = "takes words: on Windows too"
+meant = "a_mac_window_busy_with_a_background_agent_takes_words_once_the_tool_use_interrupt_has_stood"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "let after_interrupt = cfg!(target_os = \"macos\")"
+replace = "let after_interrupt = cfg!(not(target_os = \"macos\"))"
+
+[[plant]]
+name = "takes words: for a refusal's end"
+meant = "a_window_takes_no_words_after_an_interrupt_in_generation_nor_after_a_refusal_whatever_its_status_says"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stopped.rs"
+find = "        .last()\n        .is_some_and(|item| item.role == Role::User && &*item.text == TOOL_USE_INTERRUPT)"
+replace = "        .last()\n        .is_some()"
+
+[[plant]]
+name = "takes words: for the in-generation wording"
+meant = "a_window_takes_no_words_after_an_interrupt_in_generation_nor_after_a_refusal_whatever_its_status_says"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/stopped.rs"
+find = "&*item.text == TOOL_USE_INTERRUPT)"
+replace = "item.text.starts_with(\"[Request interrupted by user\"))"
+
+[[plant]]
+name = "takes words: on a record another Claude shares"
+meant = "a_window_that_another_claude_shows_takes_no_words_after_the_interrupt_whatever_either_status_says"
+runs = ["harness-launch-claude-agents"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                        && !self.shared.get()\n"
+replace = ""
+
+[[plant]]
+name = "takes words: the step's gate reads settled again"
+meant = "an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs"
+runs = ["engine-dispatcher-nothing-to-stop"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            && observed.takes_words\n            && observed.waiting.is_none();\n        let idle = free"
+replace = "            && observed.settled\n            && observed.waiting.is_none();\n        let idle = free"
+
+[[plant]]
+name = "takes words: the fresh look before a paste reads settled again"
+meant = "an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs"
+runs = ["engine-dispatcher-nothing-to-stop"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "Ok(fresh) if !fresh.takes_words || fresh.waiting.is_some()"
+replace = "Ok(fresh) if !fresh.settled || fresh.waiting.is_some()"
+
+[[plant]]
+name = "takes words: a result is taken on takes_words"
+meant = "a_window_that_takes_words_for_its_background_agent_has_no_result_taken_while_it_runs"
+runs = ["engine-dispatcher-nothing-to-stop"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "        if !observed.settled {\n            self.tell_lost("
+replace = "        if !observed.takes_words {\n            self.tell_lost("

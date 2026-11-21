@@ -77,6 +77,9 @@ impl Stopped {
             .items()
             .last()
             .map(|item| (item.role, item.text.to_string()));
+        // The press, a new turn and a prompt's hooks are no case of the tool-use
+        // interrupt: the window takes words exactly when it is settled.
+        assert_eq!(observed.takes_words, observed.settled);
         (observed.settled, last)
     }
 
