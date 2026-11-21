@@ -305,10 +305,14 @@ fn a_fixture_link_cannot_silently_hide_a_file_or_a_fixture_directory() {
 /// nested strings. The synthetic homes preserve path shapes used by recorded tests.
 fn privacy_text(text: &str) -> String {
     static ASCII_ESCAPE: OnceLock<Regex> = OnceLock::new();
-    let ascii = ASCII_ESCAPE.get_or_init(|| Regex::new(r"(?i)\\u00([0-7][0-9a-f])").unwrap());
+    let ascii = ASCII_ESCAPE.get_or_init(|| {
+        Regex::new(r"(?i)\\u00([0-7][0-9a-f])").unwrap_or_else(|error| panic!("{error}"))
+    });
     ascii
         .replace_all(text, |capture: &regex::Captures<'_>| {
-            char::from(u8::from_str_radix(&capture[1], 16).unwrap()).to_string()
+            let byte =
+                u8::from_str_radix(&capture[1], 16).unwrap_or_else(|error| panic!("{error}"));
+            char::from(byte).to_string()
         })
         .replace(r"\/", "/")
         .replace("/Users/someone/", "/placeholder/")
