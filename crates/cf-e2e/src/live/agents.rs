@@ -612,13 +612,16 @@ fn listed_in_env(
 /// Claude Code whose rig starts it through the stand-in's shim, directly from the real program
 /// on the run's own config folder `config`. The shim hands the daemon's read of the list to the
 /// stand-in, which lists fake models only: a real model asked against it is refused before any
-/// window opens (T-1835, T-1857).
+/// window opens (T-1835, T-1857). Where the machine has no real Claude for the kit to ask (the
+/// offline rigs, whose Claude is the stand-in's program wholly, and CI), the daemon's list is the
+/// only one there is, and is the right one.
 fn list_route(
     harness: Harness,
     config: Option<&str>,
+    real_claude: bool,
 ) -> std::result::Result<Option<BTreeMap<String, String>>, String> {
     match (harness, config) {
-        (Harness::Claude, Some(config)) => isolated_env(
+        (Harness::Claude, Some(config)) if real_claude => isolated_env(
             Harness::Claude,
             &[("CLAUDE_CONFIG_DIR".to_owned(), config.to_owned())],
         )
@@ -798,7 +801,8 @@ fn models_asked(harness: Harness) -> Value {
 /// What `harness` lists now, read by the rig's daemon as the page's picker reads it
 /// (`models.get`: no window, no model turn); why it could not be read, where it could not.
 fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, String> {
-    if let Some(env) = list_route(harness, rig.var("CLAUDE_CONFIG_DIR"))? {
+    let real_claude = super::machine::command(Harness::Claude.name()).is_ok();
+    if let Some(env) = list_route(harness, rig.var("CLAUDE_CONFIG_DIR"), real_claude)? {
         return listed_in_env(harness, &env);
     }
     let answer = rig
@@ -971,20 +975,25 @@ mod tests {
     fn a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins() {
         let config = crate::door::made("cf-list-route-").unwrap();
         let folder = config.path().to_string_lossy().into_owned();
-        let env = list_route(Harness::Claude, Some(&folder)).unwrap().unwrap();
+        let env = list_route(Harness::Claude, Some(&folder), true)
+            .unwrap()
+            .unwrap();
         assert_eq!(env["CLAUDE_CONFIG_DIR"], folder);
         assert_eq!(env["HOME"], folder, "the owner's home is not a fallback");
         // The shim's folder is no part of the environment: the caller's search path finds the
         // real program, and the stand-in is a program of the rig's alone.
-        assert!(list_route(Harness::Claude, None).unwrap().is_none());
+        assert!(list_route(Harness::Claude, None, true).unwrap().is_none());
+        assert!(list_route(Harness::Claude, Some(&folder), false)
+            .unwrap()
+            .is_none());
         for other in [Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse] {
             assert!(
-                list_route(other, Some(&folder)).unwrap().is_none(),
+                list_route(other, Some(&folder), true).unwrap().is_none(),
                 "{other:?}"
             );
         }
         // A config folder that is not the run's own is refused, not read.
-        assert!(list_route(Harness::Claude, Some("/not-a-home-of-this-run")).is_err());
+        assert!(list_route(Harness::Claude, Some("/not-a-home-of-this-run"), true).is_err());
     }
 
     #[test]
