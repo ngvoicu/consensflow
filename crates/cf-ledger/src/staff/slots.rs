@@ -259,16 +259,26 @@ pub(crate) fn note_settled_moves(store: &mut Store) -> Result<(), LedgerError> {
                         let slot = if names.len() == 1 { "slot it held is" } else { "slots it held are" };
                         let adds: Vec<String> =
                             names.iter().map(|name| format!("a critical {name}")).collect();
-                        let plural: Vec<String> =
-                            names.iter().map(|name| format!("critical {name}s")).collect();
-                        let nearest: Vec<String> =
-                            names.iter().map(|name| format!("the nearest {name} held")).collect();
+                        let nearest: Vec<String> = emptied
+                            .iter()
+                            .filter_map(|role| roles::find(role))
+                            .map(|role| {
+                                let work = match role.id {
+                                    "reviewer" => "critical reviews go",
+                                    "tester" => "critical tests go",
+                                    "advisor" => "critical advice goes",
+                                    "architect" => "critical designs go",
+                                    "researcher" => "critical research goes",
+                                    _ => "critical work goes",
+                                };
+                                format!("{work} to the nearest {} held", role.name)
+                            })
+                            .collect();
                         line.push_str(&format!(
-                            " The critical {} {slot} empty now: add {} under Project settings. Until then, {} go to {}.",
+                            " The critical {} {slot} empty now: add {} under Project settings. Until then, {}.",
                             names.join(" and "),
                             adds.join(" and "),
-                            plural.join(" and "),
-                            nearest.join(" and "),
+                            nearest.join(", and "),
                         ));
                     }
                     said.push(line);

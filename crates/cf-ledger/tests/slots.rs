@@ -435,17 +435,15 @@ fn critical_goes_by_the_roles_effective_slot_so_an_old_image_designer_keeps_its_
     // A held drawing may start on the designer's backup, which inherited the tier.
     let spare = ledger
         .add_backup(project.id, "iris", &image("luna"))
-        .map(|view| view.id)
-        .unwrap_or(0);
-    if spare != 0 {
-        ledger
-            .sqlite()
-            .execute("UPDATE participant SET tier = 'critical' WHERE id = ?", [spare])
-            .unwrap();
-        ledger
-            .check_taker(project.id, drawing, spare)
-            .expect("its image backup may take the drawing");
-    }
+        .expect("an image backup")
+        .id;
+    ledger
+        .sqlite()
+        .execute("UPDATE participant SET tier = 'critical' WHERE id = ?", [spare])
+        .unwrap();
+    ledger
+        .check_taker(project.id, drawing, spare)
+        .expect("its image backup may take the drawing");
     // A tierless research task, and an advisor's at Critical with no purpose, are still refused.
     ledger
         .sqlite()
