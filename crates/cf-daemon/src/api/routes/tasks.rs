@@ -286,7 +286,19 @@ fn create_plan(
     let tasks: Vec<Value> = created
         .tasks
         .iter()
-        .map(|(name, number)| json!({ "name": name, "task": { "number": number } }))
+        .map(|section| {
+            let mut one = json!({ "name": section.name, "task": { "number": section.number } });
+            // The tier it went to, kept with the key; where it fell, the tier asked and who
+            // holds the one it went to (a replay says the same).
+            if let Some(tier) = &section.tier {
+                one["tier"] = json!(tier);
+            }
+            if let Some(asked) = &section.asked {
+                one["asked"] = json!(asked);
+                one["heldBy"] = json!(section.held_by);
+            }
+            one
+        })
         .collect();
     let answer = json!({ "tasks": tasks, "gated": gated });
     Ok(if created.repeated {

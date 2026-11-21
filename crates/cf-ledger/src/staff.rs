@@ -7,6 +7,7 @@ mod backup;
 mod pools;
 mod quota;
 mod sessions;
+pub(crate) mod slots;
 mod vacation;
 
 use cf_proto::ledger::{ParticipantView, RemovedMember};
@@ -24,9 +25,10 @@ use crate::store::Store;
 use crate::tasks::{shut_tracked_doors, tell_stranded_waiters};
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
+pub(crate) use slots::note_settled_moves;
 pub(crate) use backup::{add_backup, change_backup, remove_backup};
 pub(crate) use pools::{
-    candidates, candidates_for, has_members_of_tier, holders_of_tier, members, nearest_tier,
+    candidates, candidates_for, holders_of_tier, may_take_slot, members, place, Placed,
 };
 pub use pools::{BackupCandidate, Candidate, HoldKind};
 pub(crate) use quota::{hold_kind, mark_back, mark_out, mark_out_kind};
@@ -185,6 +187,8 @@ pub(crate) fn add_member(
 ) -> Result<ParticipantView, LedgerError> {
     let roles = member.check()?;
     store.write(|store| {
+        slots::require_offered(&roles, &member.tier)?;
+        slots::require_free(store, project_id, None, &roles, &member.tier)?;
         let left = store
             .db
             .query_row(
@@ -241,16 +245,14 @@ pub(crate) fn add_member(
 /// one it holds already stays though it does not (a member from before an
 /// image designer had to be an image agent), until the human drops it.
 ///
-/// Its tier follows its roles (spec new-roles, FD-04): a member whose roles had no tier was
-/// given none, so a role with tiers it gains comes with the `tier` the human chose, or is
-/// refused; one left with roles of no tier is kept in the lowest, as one added so is; and one
-/// that keeps a role with tiers keeps its tier, or takes the `tier` that comes.
+/// It keeps the tier it has, for all its roles: a role it gains must be offered at that tier
+/// and its slot free (`tier-not-offered`, `slot-taken`); one left with the image designer's
+/// role alone is kept in the lowest tier, as one added so is. Only Edit changes a tier.
 pub(crate) fn set_roles<S: AsRef<str>>(
     store: &mut Store,
     project_id: i64,
     handle: &str,
     roles: &[S],
-    tier: Option<&str>,
 ) -> Result<ParticipantView, LedgerError> {
     let roles = model::require_roles(roles, || {
         model::printed(Some(&json!(roles
@@ -258,9 +260,6 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             .map(AsRef::as_ref)
             .collect::<Vec<_>>())))
     })?;
-    if let Some(tier) = tier {
-        model::require_tier(tier)?;
-    }
     store.write(|store| {
         let member = store.participant_by_handle(project_id, handle)?;
         require_member_row(store, member.id, "changes roles")?;
@@ -279,7 +278,15 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             .filter(|role| !held.iter().any(|kept| kept == role))
             .collect();
         model::require_fitting_roles(handle, member.designer == 1, &gained)?;
-        let tier = tier_with_roles(handle, &held, &roles, &gained, tier, member.tier.as_deref())?;
+        let tier = if roles::takes_no_tier(&roles) {
+            Some(roles::NO_TIER.to_owned())
+        } else {
+            member.tier.clone()
+        };
+        if let Some(tier) = tier.as_deref().filter(|_| !gained.is_empty()) {
+            slots::require_offered(&gained, tier)?;
+            slots::require_free(store, project_id, Some(member.id), &gained, tier)?;
+        }
         store.db.execute(
             "UPDATE participant SET role = ?, roles = ?, tier = ? WHERE id = ?",
             params![roles[0], json!(roles).to_string(), tier, member.id],
@@ -295,35 +302,6 @@ pub(crate) fn set_roles<S: AsRef<str>>(
         )?;
         participant_view(&store.participant_row(member.id)?)
     })
-}
-
-/// The tier a member of `held` has once it holds `roles` (see [`set_roles`]).
-fn tier_with_roles(
-    handle: &str,
-    held: &[String],
-    roles: &[&str],
-    gained: &[&str],
-    given: Option<&str>,
-    had: Option<&str>,
-) -> Result<Option<String>, LedgerError> {
-    if roles::takes_no_tier(roles) {
-        return Ok(Some(roles::NO_TIER.to_owned()));
-    }
-    if let Some(given) = given {
-        return Ok(Some(given.to_owned()));
-    }
-    if !roles::takes_no_tier(held) {
-        return Ok(had.map(str::to_owned));
-    }
-    let tiered = gained
-        .iter()
-        .find_map(|role| roles::find(role).filter(|row| row.tiered))
-        .map_or_else(String::new, |row| row.a_name());
-    Err(LedgerError::refused_with(
-        "tier-required",
-        format!("{handle} has no tier: {tiered}'s tasks have one, so its tier comes with the role"),
-        400,
-    ))
 }
 
 /// What Edit member changes of a member (T-1143): the harness, the model and the effort
@@ -363,6 +341,13 @@ pub(crate) fn edit_member(
                 409,
             ));
         }
+        if member.backup_of.is_none() && member.tier.as_deref() != Some(edit.tier.as_str()) {
+            let held: Vec<String> = serde_json::from_str(&member.roles)?;
+            if !roles::takes_no_tier(&held) {
+                slots::require_offered(&held, &edit.tier)?;
+                slots::require_free(store, project_id, Some(member.id), &held, &edit.tier)?;
+            }
+        }
         let tier = if let Some(owner) = member.backup_of {
             let owner = store.participant_row(owner)?;
             if owner.tier.as_deref().is_some_and(|tier| tier != edit.tier) {
@@ -396,8 +381,11 @@ pub(crate) fn edit_member(
             ],
         )?;
         if member.backup_of.is_none() {
+            // The backup, and the windows it has open: each at the member's new tier.
             store.db.execute(
-                "UPDATE participant SET tier = ? WHERE backup_of = ? AND left_at IS NULL",
+                "UPDATE participant SET tier = ?1
+                  WHERE (backup_of = ?2 AND left_at IS NULL)
+                     OR member_id IN (SELECT id FROM participant WHERE backup_of = ?2)",
                 params![tier, member.id],
             )?;
         }

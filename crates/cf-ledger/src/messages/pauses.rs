@@ -489,13 +489,16 @@ pub(crate) fn leave_pause_notes(
     // on after a hold: that corrects what its requester was given, and a pause
     // that comes after it does not take it back.
     let [paused, moved] = answer_prefixes(task.number);
+    // And the note of where the task fell (`T-n asked for …`): it says where it went, not why
+    // it waits, so the pass that gives the task out does not take it back.
+    let fell = format!("T-{} asked for ", task.number);
     let withdrawn: Vec<String> = store
         .db
         .prepare(&format!(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
          AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",
             crate::waiting_questions::other_holding_sql("message")
         ))?
         .query_map(
@@ -507,7 +510,9 @@ pub(crate) fn leave_pause_notes(
                 paused,
                 paused,
                 moved,
-                moved
+                moved,
+                fell,
+                fell
             ],
             |row| row.get(0),
         )?

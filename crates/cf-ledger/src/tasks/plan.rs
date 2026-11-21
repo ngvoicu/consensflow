@@ -19,10 +19,70 @@ pub struct PlanTask {
     pub before: Vec<String>,
 }
 
-/// Names and numbers in the order the plan gave them, and whether it was a retry.
+/// One section's answer: its name and task number, the tier it went to (its effective tier,
+/// kept with the key, so `cf` never calls a Complex request that fell to Standard Complex),
+/// and, where it fell, the tier asked and the members of the tier it went to. An answer an
+/// earlier version kept has the name and the number alone.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanSection {
+    pub name: String,
+    pub number: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asked: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held_by: Vec<String>,
+}
+
+/// A saved answer, in the form it was kept: `[name, number]` before the slots, an object since.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SavedSection {
+    Old((String, i64)),
+    #[serde(rename_all = "camelCase")]
+    New {
+        name: String,
+        number: i64,
+        tier: Option<String>,
+        asked: Option<String>,
+        #[serde(default)]
+        held_by: Vec<String>,
+    },
+}
+
+impl From<SavedSection> for PlanSection {
+    fn from(saved: SavedSection) -> Self {
+        match saved {
+            SavedSection::Old((name, number)) => Self {
+                name,
+                number,
+                tier: None,
+                asked: None,
+                held_by: Vec::new(),
+            },
+            SavedSection::New {
+                name,
+                number,
+                tier,
+                asked,
+                held_by,
+            } => Self {
+                name,
+                number,
+                tier,
+                asked,
+                held_by,
+            },
+        }
+    }
+}
+
+/// The sections in the order the plan gave them, and whether it was a retry.
 #[derive(Debug)]
 pub struct PlanCreated {
-    pub tasks: Vec<(String, i64)>,
+    pub tasks: Vec<PlanSection>,
     pub repeated: bool,
 }
 
@@ -60,7 +120,8 @@ pub(crate) fn create_plan(
                 if saved != fingerprint {
                     return Err(LedgerError::refused_with("key-used", format!("key {key} was already used for a different plan"), 409));
                 }
-                return Ok(PlanCreated { tasks: serde_json::from_str(&answer)?, repeated: true });
+                let saved: Vec<SavedSection> = serde_json::from_str(&answer)?;
+                return Ok(PlanCreated { tasks: saved.into_iter().map(PlanSection::from).collect(), repeated: true });
             }
         }
         if tasks.is_empty() {
@@ -95,7 +156,7 @@ pub(crate) fn create_plan(
                 }
             }
         }
-        let mut made: Vec<Option<i64>> = vec![None; tasks.len()];
+        let mut made: Vec<Option<PlanSection>> = vec![None; tasks.len()];
         for _ in 0..tasks.len() {
             let Some(index) = (0..tasks.len()).find(|&index| made[index].is_none() && needs[index].iter().all(|&need| made[need].is_some())) else {
                 let index = made.iter().position(Option::is_none).unwrap_or_default();
@@ -103,14 +164,24 @@ pub(crate) fn create_plan(
             };
             let mut request = tasks[index].task.clone();
             for &need in &needs[index] {
-                let number = made[need].ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))?;
+                let number = made[need].as_ref().map(|section| section.number).ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))?;
                 let number = u64::try_from(number).map_err(|_| LedgerError::refused("invalid-needs", "not a task number"))?;
                 if !request.needs.contains(&number) { request.needs.push(number); }
             }
             let created = create_task(store, project, &request).map_err(|error| section(&tasks[index].name, error))?;
-            made[index] = Some(created.task.number);
+            let held_by = match (&created.asked, created.task.pool.as_deref(), created.task.tier.as_deref()) {
+                (Some(_), Some(pool), Some(tier)) => crate::staff::holders_of_tier(store, project, pool, tier)?,
+                _ => Vec::new(),
+            };
+            made[index] = Some(PlanSection {
+                name: tasks[index].name.clone(),
+                number: created.task.number,
+                tier: created.task.tier.clone(),
+                asked: created.asked.clone(),
+                held_by,
+            });
         }
-        let answer: Vec<(String, i64)> = tasks.iter().zip(made).map(|(task, number)| number.map(|number| (task.name.clone(), number)).ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))).collect::<Result<_, _>>()?;
+        let answer: Vec<PlanSection> = made.into_iter().map(|section| section.ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))).collect::<Result<_, _>>()?;
         if let Some(key) = key {
             store.db.execute(
                 "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, ?, ?, ?)",

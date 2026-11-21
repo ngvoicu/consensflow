@@ -25,9 +25,11 @@ pub struct Role {
     /// dashes are the field of `POST /api/tasks` that does. None for the role a task is
     /// for when it asks for none: the worker.
     pub switch: Option<&'static str>,
-    /// Whether its tasks are given by tier, and its members are told theirs. A role with
-    /// none (the image designer) takes a task with no tier, and every member of it may.
-    pub tiered: bool,
+    /// The tiers it has a slot at, most critical first. A role with none (the image
+    /// designer) takes a task with no tier, and its one slot has no tier.
+    pub tiers: &'static [&'static str],
+    /// The tier a task of it from before, with no tier, is placed at.
+    pub home: &'static str,
     /// Whether only an image agent holds it: an image agent (a Codex agent that draws)
     /// holds this role and nothing else, and no other agent holds it.
     pub image_agent: bool,
@@ -38,6 +40,16 @@ pub struct Role {
 }
 
 impl Role {
+    /// Whether its tasks are given by tier, and its members are told theirs.
+    pub fn tiered(&self) -> bool {
+        !self.tiers.is_empty()
+    }
+
+    /// Whether it has a slot at `tier`.
+    pub fn offers(&self, tier: &str) -> bool {
+        self.tiers.contains(&tier)
+    }
+
     /// The field of `POST /api/tasks` that asks for it: its switch without the dashes.
     pub fn field(&self) -> Option<&'static str> {
         self.switch.map(|switch| switch.trim_start_matches('-'))
@@ -62,13 +74,19 @@ impl Role {
     }
 }
 
+/// Every tier, most critical first: the tiers of a role that weighs, checks or designs.
+const ALL_TIERS: &[&str] = &["critical", "complex", "standard", "light"];
+/// The tiers of a role that writes the product's code: Critical has no coding.
+const CODING_TIERS: &[&str] = &["complex", "standard", "light"];
+
 /// The worker: the work itself, given by tier; a task that asks for no role is its.
 pub const WORKER: Role = Role {
     id: "worker",
     name: "worker",
     article: "a",
     switch: None,
-    tiered: true,
+    tiers: CODING_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: true,
 };
@@ -80,31 +98,34 @@ pub const FRONTEND: Role = Role {
     name: "frontend designer",
     article: "a",
     switch: Some("--frontend"),
-    tiered: false,
+    tiers: CODING_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: true,
 };
 
 /// The architect: the software's design written down as files (documents, contracts and the
-/// code's frame) before it is built, with no tier.
+/// code's frame) before it is built.
 pub const ARCHITECT: Role = Role {
     id: "architect",
     name: "architect",
     article: "an",
     switch: Some("--architect"),
-    tiered: false,
+    tiers: ALL_TIERS,
+    home: "complex",
     image_agent: false,
     changes_files: true,
 };
 
 /// The researcher: what the code, the project's documents and the web say, looked up and
-/// reported, with no tier.
+/// reported.
 pub const RESEARCHER: Role = Role {
     id: "researcher",
     name: "researcher",
     article: "a",
     switch: Some("--research"),
-    tiered: false,
+    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: false,
 };
@@ -115,7 +136,8 @@ pub const ADVISOR: Role = Role {
     name: "advisor",
     article: "an",
     switch: Some("--advice"),
-    tiered: true,
+    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: false,
 };
@@ -126,7 +148,8 @@ pub const REVIEWER: Role = Role {
     name: "reviewer",
     article: "a",
     switch: Some("--review"),
-    tiered: true,
+    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: false,
 };
@@ -137,18 +160,20 @@ pub const TESTER: Role = Role {
     name: "tester",
     article: "a",
     switch: Some("--test"),
-    tiered: true,
+    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: false,
 };
 
-/// The integrator: accepted work merged, checked and landed, with no tier.
+/// The integrator: accepted work merged, checked and landed.
 pub const INTEGRATOR: Role = Role {
     id: "integrator",
     name: "integrator",
     article: "an",
     switch: Some("--integrate"),
-    tiered: false,
+    tiers: CODING_TIERS,
+    home: "standard",
     image_agent: false,
     changes_files: true,
 };
@@ -159,7 +184,8 @@ pub const IMAGE_DESIGNER: Role = Role {
     name: "image designer",
     article: "an",
     switch: Some("--design"),
-    tiered: false,
+    tiers: &[],
+    home: "standard",
     image_agent: true,
     changes_files: true,
 };
@@ -204,9 +230,41 @@ pub fn ids() -> Vec<&'static str> {
     all().iter().map(|role| role.id).collect()
 }
 
-/// Whether `pool` is a role whose tasks take no tier.
+/// Whether `pool` is a role whose tasks take no tier: the image designer alone.
 pub fn untiered(pool: &str) -> bool {
-    find(pool).is_some_and(|role| !role.tiered)
+    find(pool).is_some_and(|role| !role.tiered())
+}
+
+/// Whether `role` has a slot at `tier`.
+pub fn offers(role: &str, tier: &str) -> bool {
+    find(role).is_some_and(|role| role.offers(tier))
+}
+
+/// One slot of the staff: a role at a tier (the image designer's has none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slot {
+    pub role: &'static Role,
+    pub tier: Option<&'static str>,
+}
+
+/// Every slot of the staff, in the roles' order and each role's tiers most critical first.
+pub fn slots() -> Vec<Slot> {
+    all()
+        .iter()
+        .flat_map(|role| -> Vec<Slot> {
+            if role.tiered() {
+                role.tiers
+                    .iter()
+                    .map(|tier| Slot {
+                        role,
+                        tier: Some(tier),
+                    })
+                    .collect()
+            } else {
+                vec![Slot { role, tier: None }]
+            }
+        })
+        .collect()
 }
 
 /// Whether a member that holds `roles` takes no tier: it holds a role, and none of its roles
@@ -250,12 +308,12 @@ pub fn name_of(pool: &str) -> &str {
 }
 
 /// "standard worker", "image designer": who an open task waits for, by its pool and its
-/// tier as the ledger holds them. A role with no tier is its name alone; any other pool is
-/// said after its tier, and a pool or a tier that is not there as `null`, as JavaScript
+/// tier as the ledger holds them. A task with no tier is its role's name alone (the image
+/// designer's, or one from before the roles had tiers); any other pool is said after its tier, and a pool or a tier that is not there as `null`, as JavaScript
 /// printed it.
 pub fn pool_name(pool: Option<&str>, tier: Option<&str>) -> String {
     match pool.and_then(find) {
-        Some(role) if !role.tiered => role.name.to_owned(),
+        Some(role) if !role.tiered() || tier.is_none() => role.name.to_owned(),
         _ => format!(
             "{} {}",
             tier.unwrap_or("null"),
@@ -267,14 +325,14 @@ pub fn pool_name(pool: Option<&str>, tier: Option<&str>) -> String {
 /// The same with its article: `a standard worker`, `an image designer`.
 pub fn a_pool(pool: Option<&str>, tier: Option<&str>) -> String {
     match pool.and_then(find) {
-        Some(role) if !role.tiered => role.a_name(),
+        Some(role) if !role.tiered() || tier.is_none() => role.a_name(),
         _ => format!("a {}", pool_name(pool, tier)),
     }
 }
 
 /// What the page reads of the roles, in their order: each one's id, its name and the label
 /// the page begins it with, its article, whether it has tiers and whether only an image
-/// agent holds it.
+/// agent holds it, and the tiers it has a slot at.
 pub fn page_view() -> serde_json::Value {
     all()
         .iter()
@@ -284,7 +342,8 @@ pub fn page_view() -> serde_json::Value {
                 "name": role.name,
                 "label": role.label(),
                 "article": role.article,
-                "tiered": role.tiered,
+                "tiered": role.tiered(),
+                "tiers": role.tiers,
                 "imageAgent": role.image_agent,
             })
         })
@@ -309,7 +368,7 @@ pub mod seam {
         TABLE.with(Cell::get)
     }
 
-    /// A sixth role, which only the tests hold: a field scout, given no tier, held by any
+    /// A sixth role, which only the tests hold: a field scout, with every tier, held by any
     /// agent but an image agent, named apart from its id, between the reviewer and the
     /// tester.
     pub const SCOUT: Role = Role {
@@ -317,7 +376,8 @@ pub mod seam {
         name: "field scout",
         article: "a",
         switch: Some("--scout"),
-        tiered: false,
+        tiers: super::ALL_TIERS,
+        home: "standard",
         image_agent: false,
         changes_files: false,
     };
@@ -429,19 +489,10 @@ mod tests {
         );
         let untiered: Vec<&str> = all()
             .iter()
-            .filter(|role| !role.tiered)
+            .filter(|role| !role.tiered())
             .map(|role| role.id)
             .collect();
-        assert_eq!(
-            untiered,
-            [
-                "frontend",
-                "architect",
-                "researcher",
-                "integrator",
-                "designer"
-            ]
-        );
+        assert_eq!(untiered, ["designer"]);
         assert_eq!(
             all()
                 .iter()
@@ -461,6 +512,34 @@ mod tests {
         // The two designers are told apart by their names wherever they are said.
         assert_eq!(name_of("designer"), "image designer");
         assert_eq!(name_of("frontend"), "frontend designer");
+    }
+
+    #[test]
+    fn the_staff_is_thirty_slots_and_critical_has_no_coding() {
+        let slots = slots();
+        assert_eq!(slots.len(), 30);
+        assert_eq!(slots.iter().filter(|slot| slot.tier.is_none()).count(), 1);
+        assert_eq!(slots.last().map(|slot| slot.role.id), Some("designer"));
+        for role in ["worker", "frontend", "integrator"] {
+            assert_eq!(find(role).unwrap().tiers, ["complex", "standard", "light"]);
+            assert!(!offers(role, "critical"), "{role}");
+        }
+        for role in ["architect", "researcher", "advisor", "reviewer", "tester"] {
+            assert_eq!(
+                find(role).unwrap().tiers,
+                ["critical", "complex", "standard", "light"]
+            );
+        }
+        assert!(!offers("designer", "light") && !offers("chief", "light"));
+        assert_eq!(find("architect").unwrap().home, "complex");
+        for role in ["worker", "frontend", "researcher", "integrator", "tester"] {
+            assert_eq!(find(role).unwrap().home, "standard", "{role}");
+        }
+        assert_eq!(page_view()[2]["tiers"], serde_json::json!(ALL_TIERS));
+        assert_eq!(page_view()[8]["tiers"], serde_json::json!([]));
+        // A task with no tier is said by its role alone.
+        assert_eq!(pool_name(Some("researcher"), None), "researcher");
+        assert_eq!(a_pool(Some("researcher"), None), "a researcher");
     }
 
     #[test]
@@ -520,7 +599,8 @@ mod tests {
                 name: "sixth hand",
                 article: "a",
                 switch: Some("--sixth"),
-                tiered: false,
+                tiers: &[],
+                home: "standard",
                 image_agent: false,
                 changes_files: false,
             },

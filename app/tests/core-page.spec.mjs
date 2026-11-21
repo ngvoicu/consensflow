@@ -18041,6 +18041,41 @@ test('BKG settings gives every member but an image designer the same backup slot
   await expect(table.getByRole('button', { name: /backup for @(hera|ares)/ })).toHaveCount(0)
 })
 
+test('D8 New project keeps an image designer\'s backup its backup: its id, backupOf and Vacation reach Start', async ({
+  page,
+}) => {
+  const data = model()
+  const drawing = {
+    harness: 'codex',
+    model: null,
+    modelName: null,
+    effort: null,
+    designer: true,
+    tier: 'light',
+    role: 'designer',
+    roles: ['designer'],
+  }
+  data.lastStaff = [
+    { ...drawing, id: 40 },
+    { ...drawing, id: 41, backupOf: 40, vacationSince: at(10) },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(2)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  const primary = staff.find((row) => row.id === 40)
+  const backup = staff.find((row) => row.id === 41)
+  expect(primary.roles).toEqual(['designer'])
+  expect(primary.backupOf).toBeUndefined()
+  expect(backup.roles).toEqual(['designer'])
+  expect(backup.backupOf).toBe(40)
+  expect(backup.vacationSince).toBeTruthy()
+  expect(staff.filter((row) => row.backupOf == null)).toHaveLength(1)
+})
+
 test('BKG New project gives every member but an image designer the same backup slot under its roles', async ({
   page,
 }) => {

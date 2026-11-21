@@ -53,7 +53,7 @@ pub use cf_proto::ledger::{
     Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView, MessageParties,
     MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
     Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
-    TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
+    TaskPlaced, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -84,7 +84,7 @@ pub use specs::SpecsChange;
 pub use staff::MemberEdit;
 pub use staff::{BackupCandidate, Candidate, HoldKind, StaffMember};
 pub use tasks::{
-    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanTask, RESUME_WORDS,
+    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanSection, PlanTask, RESUME_WORDS,
     SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};

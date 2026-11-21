@@ -18,6 +18,7 @@ use cf_proto::ledger::{MessageView, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 
 use crate::model::LedgerError;
+use crate::roles;
 use crate::store::Store;
 use crate::views::{message_view, task_view, TaskRow, MESSAGE_SELECT, TASK_SELECT};
 
@@ -30,7 +31,7 @@ pub(crate) use finishing::{
 };
 pub use giving::{asked_role, NewTask};
 pub(crate) use giving::{
-    assign_task, check_release, create_task, hand_task_on, release_inside, release_task,
+    assign_task, check_release, check_taker, create_task, hand_task_on, release_inside, release_task,
     retier_open_task,
 };
 pub(crate) use outage::{no_longer_failed, no_longer_waiting, show_closed, tell_closed};
@@ -46,7 +47,7 @@ pub(crate) use pausing::{
 };
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 pub(crate) use plan::{create_plan, decide_tasks};
-pub use plan::{PlanCreated, PlanTask};
+pub use plan::{PlanCreated, PlanSection, PlanTask};
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.
@@ -60,11 +61,22 @@ pub const RESUME_WORDS: &str = "Go on where you stopped.";
 const CRITICAL_RULE: &str =
     "It changes no project file: return analysis, evidence and recommendations to the chief.";
 
+/// What the architect's critical work is held to: it writes design files and the code's
+/// frame, nothing that runs, so "no project file" would forbid its own work.
+const ARCHITECT_RULE: &str = "It writes nothing that runs (documents, contracts, the code's frame): return them and its findings to the chief.";
+
 /// How a task reads when it is handed over: critical work leads with its purpose.
 fn delivery_body(task: &TaskRow) -> String {
     match &task.purpose {
         None => task.body.clone(),
-        Some(purpose) => format!("Critical work: {purpose}. {CRITICAL_RULE}\n\n{}", task.body),
+        Some(purpose) => {
+            let rule = if task.pool.as_deref() == Some(roles::ARCHITECT.id) {
+                ARCHITECT_RULE
+            } else {
+                CRITICAL_RULE
+            };
+            format!("Critical work: {purpose}. {rule}\n\n{}", task.body)
+        }
     }
 }
 

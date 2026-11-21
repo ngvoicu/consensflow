@@ -61,7 +61,7 @@ const BRIEFED: Shape = Shape {
 /// The flags of `cf task edit`: a brief and a title as any other, and the tier, the tasks it
 /// needs and the tasks that wait for it, which may stand alone.
 const EDIT: Shape = Shape {
-    valued: &[brief::FILE, TITLE, "--tier", "--needs", "--before"],
+    valued: &[brief::FILE, TITLE, "--tier", "--purpose", "--needs", "--before"],
     ..Shape::TEXT
 };
 
@@ -211,7 +211,7 @@ fn add(
                 .into(),
         ));
     }
-    let untiered = switched.iter().any(|role| !role.tiered);
+    let untiered = switched.iter().any(|role| !role.tiered());
     // Two roles are the board's to refuse, in words that name both.
     if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
         return Err(Failure::Usage(ADD_USAGE.into()));
@@ -362,7 +362,24 @@ fn add_plan(words: &Split, given: &[OsString], board: &Board) -> Result<Said, Fa
         let name = section["name"].as_str().unwrap_or_default();
         let number = js::text(task.get("task").and_then(|task| task.get("number")));
         let brief = section["body"].as_str().unwrap_or_default();
-        output.push(format!("{name} → T-{number}"));
+        let fell = match task.get("asked") {
+            None | Some(Value::Null) => String::new(),
+            asked => {
+                let role = cf_ledger::roles::asked(|field| {
+                    section.get(field) == Some(&Value::Bool(true))
+                })
+                .first()
+                .map_or(cf_ledger::roles::unasked(), |role| *role);
+                format!(
+                    " (no {} {} is on the staff, so the nearest tier, {}{})",
+                    js::text(asked),
+                    role.name,
+                    js::text(task.get("tier")),
+                    held_by(task)
+                )
+            }
+        };
+        output.push(format!("{name} → T-{number}{fell}"));
         if gated && !js::truthy(section.get("self")) {
             output.push(format!(
                 "T-{number}: The human approves each message before it moves."
@@ -541,10 +558,9 @@ fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Fail
             "you are already at it: do it now, or give it --needs T-3".into(),
         ));
     }
-    let untiered = switched.iter().any(|role| !role.tiered);
-    if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
-        return Err(Failure::Usage(ADD_USAGE.into()));
-    }
+    // A section's tier is the board's to ask for, not the CLI's: a plan an earlier version took
+    // under a key replays its saved answer before any section is checked.
+    let untiered = switched.iter().any(|role| !role.tiered());
     let text = if words.given(brief::FILE) {
         let file = words
             .value(brief::FILE)?
@@ -820,9 +836,13 @@ fn moved(
         .value("--tier")?
         .filter(|_| action == "edit")
         .map(str::to_owned);
+    let purpose = words
+        .value("--purpose")?
+        .filter(|_| action == "edit")
+        .map(str::to_owned);
     let needs = links_of("--needs", &words, action)?;
     let before = links_of("--before", &words, action)?;
-    let alone = tier.is_some() || needs.is_some() || before.is_some();
+    let alone = tier.is_some() || purpose.is_some() || needs.is_some() || before.is_some();
     let title = new_title(&words)?;
     let text = brief::brief_of(&words, given, input)?;
     // An edit with a title and nothing else changes the title alone.
@@ -840,7 +860,7 @@ fn moved(
         };
         return Err(Failure::Usage(match action {
             "edit" => format!(
-                "cf task edit T-{number} \"{what}\", or --tier <tier>, --needs T-4 or --before T-9"
+                "cf task edit T-{number} \"{what}\", or --tier <tier> [--purpose <purpose>], --needs T-4 or --before T-9"
             ),
             _ => format!("cf task {action} T-{number} \"{what}\""),
         }));
@@ -858,6 +878,9 @@ fn moved(
     }
     if let Some(tier) = &tier {
         body.insert("tier".into(), tier.as_str().into());
+    }
+    if let Some(purpose) = &purpose {
+        body.insert("purpose".into(), purpose.as_str().into());
     }
     if let Some(needs) = &needs {
         body.insert("needs".into(), needs.clone());

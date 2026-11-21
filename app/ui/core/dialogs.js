@@ -1240,7 +1240,13 @@ export class NewProjectDialog {
         return roles.map((role) =>
           member.designer
             ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              { harness: member.harness, role, _id: id, vacationSince: member.vacationSince }
+              {
+                harness: member.harness,
+                role,
+                _id: id,
+                backupOf: member.backupOf,
+                vacationSince: member.vacationSince,
+              }
             : {
                 harness: member.harness,
                 // The model as its harness's list names it (`modelName`): what the daemon takes for

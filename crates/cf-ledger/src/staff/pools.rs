@@ -5,7 +5,7 @@ use cf_proto::ledger::MemberView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 
-use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, TIERS};
+use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, PURPOSES, TIERS};
 use crate::store::Store;
 
 /// The durable reason for an out mark. Old timed marks can have no known kind.
@@ -67,36 +67,61 @@ pub struct Candidate {
     pub backup: Option<BackupCandidate>,
 }
 
-/// The tier a task for `pool` goes to: the one asked, when somebody holds
-/// it; else the nearest one somebody does, the next one up before the next
-/// one down. A pool with no tier (the designer) keeps none.
-pub(crate) fn nearest_tier(
+/// Where the placement puts a task of `pool`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Placed {
+    /// Its own slot is held, and the task may take it.
+    Stays(String),
+    /// Else the nearest held slot of its role, never Critical: the tier it goes to.
+    Fell(String),
+    /// No slot of its role is held outside Critical (a Critical task, none at all): it waits
+    /// on its own slot. `critical` is who holds the Critical slot, which takes only critical
+    /// work; none when the role is held nowhere.
+    Waits { critical: Vec<String> },
+}
+
+/// Whether a task asked at `tier` may take that slot of its role: the role has it, and
+/// Critical takes only a task at Critical with its purpose.
+pub(crate) fn may_take_slot(pool: &str, tier: &str, purpose: Option<&str>) -> bool {
+    crate::roles::offers(pool, tier)
+        && (tier != "critical" || purpose.is_some_and(|purpose| PURPOSES.contains(&purpose)))
+}
+
+/// The one function that decides where a task goes, for `cf task add` and `--plan`, `cf task
+/// edit --tier` and every dispatcher pass: to its slot, when a member holds it and the task
+/// may take it; else to the nearest held slot of its role outside Critical, the next tier up
+/// before the next one down (a task with no tier asks its role's home); else it waits.
+pub(crate) fn place(
     store: &Store,
     project_id: i64,
     pool: &str,
     tier: Option<&str>,
-) -> Result<Option<String>, LedgerError> {
-    let Some(asked) = tier else { return Ok(None) };
-    if has_members_of_tier(store, project_id, pool, Some(asked))? {
-        return Ok(Some(asked.to_string()));
+    purpose: Option<&str>,
+) -> Result<Placed, LedgerError> {
+    let home = crate::roles::find(pool).map_or("standard", |role| role.home);
+    let asked = tier.unwrap_or(home);
+    if may_take_slot(pool, asked, purpose) && has_members_of_tier(store, project_id, pool, Some(asked))? {
+        return Ok(Placed::Stays(asked.to_owned()));
     }
-    let at = TIERS
-        .iter()
-        .position(|tier| *tier == asked)
-        .unwrap_or_default();
+    let at = TIERS.iter().position(|tier| *tier == asked).unwrap_or_default();
     let mut near: Vec<(usize, &str)> = TIERS
         .iter()
         .copied()
         .enumerate()
-        .filter(|(_, other)| *other != asked)
+        .filter(|(_, other)| *other != "critical" && crate::roles::offers(pool, other))
         .collect();
     near.sort_by_key(|(index, _)| (index.abs_diff(at), *index));
     for (_, other) in near {
         if has_members_of_tier(store, project_id, pool, Some(other))? {
-            return Ok(Some(other.to_string()));
+            return Ok(Placed::Fell(other.to_owned()));
         }
     }
-    Ok(Some(asked.to_string()))
+    let critical = if crate::roles::offers(pool, "critical") {
+        holders_of_tier(store, project_id, pool, "critical")?
+    } else {
+        Vec::new()
+    };
+    Ok(Placed::Waits { critical })
 }
 
 /// Whether the staff has members of one role and tier (any tier when none),

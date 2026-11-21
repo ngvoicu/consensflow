@@ -67,7 +67,31 @@ pub(super) async fn handle(
             row
         })
         .collect();
-    let mut answer = json!({ "members": members });
+    // The slots, in the registry's order: each role at each tier with the members that hold it
+    // (a backup holds none; an image designer's one slot has no tier). Several holders are a
+    // slot the update left over its one.
+    let slots: Vec<Value> = cf_ledger::roles::slots()
+        .into_iter()
+        .map(|slot| {
+            let holders: Vec<&str> = caller
+                .project
+                .participants
+                .iter()
+                .filter(|member| {
+                    member.role != "chief"
+                        && member.role != "human"
+                        && member.harness.is_some()
+                        && member.member_id.is_none()
+                        && member.backup_of.is_none()
+                        && member.roles.iter().any(|role| role == slot.role.id)
+                        && slot.tier.is_none_or(|tier| member.tier.as_deref() == Some(tier))
+                })
+                .map(|member| member.handle.as_str())
+                .collect();
+            json!({ "role": slot.role.id, "tier": slot.tier, "holders": holders })
+        })
+        .collect();
+    let mut answer = json!({ "members": members, "slots": slots });
     if caller.project.own_hands {
         answer["ownHands"] = json!(true);
     }

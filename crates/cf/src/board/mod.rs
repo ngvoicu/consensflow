@@ -574,6 +574,13 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
     }
     let mut answer = board.get("/api/staff")?;
     let own_hands = answer.value().get("ownHands").and_then(Value::as_bool) == Some(true);
+    let slots = slot_lines(
+        answer
+            .value()
+            .get("slots")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice),
+    );
     let members = answer.take("members")?;
     let text = match answer.list(Some(&members), "members")? {
         [] => "No members are on this project's staff yet; the human adds them in the app."
@@ -640,12 +647,79 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
             .collect::<Vec<_>>()
             .join("\n"),
     };
+    let text = if slots.is_empty() {
+        text
+    } else {
+        format!("{slots}\n{text}")
+    };
     let text = if own_hands {
         format!("The chief works with its own hands; work goes on the board only on the person's word.\n{text}")
     } else {
         text
     };
     Ok(Said::new(members, text))
+}
+
+/// The slots, one line a role: each tier shows its holder, `empty`, or every holder with the
+/// rule where the update left several in one slot (`architecture/staff-slots.md`, section 3).
+fn slot_lines(slots: &[Value]) -> String {
+    let mut roles: Vec<(String, Vec<String>)> = Vec::new();
+    let mut overflow = Vec::new();
+    for slot in slots {
+        let role = js::text(slot.get("role")).into_owned();
+        let holders: Vec<String> = list(slot.get("holders"))
+            .iter()
+            .map(|handle| format!("@{}", js::text(Some(handle))))
+            .collect();
+        let name = cf_ledger::roles::name_of(&role).to_owned();
+        let tier = slot.get("tier").and_then(Value::as_str);
+        let shown = match holders.as_slice() {
+            [] => "empty".to_owned(),
+            [one] => one.clone(),
+            many => many.join(" + "),
+        };
+        if holders.len() > 1 {
+            let count = [
+                "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+            ]
+            .get(holders.len())
+            .map_or_else(|| holders.len().to_string(), |word| (*word).to_owned());
+            let which = tier.map_or_else(
+                || format!("The {name} slot"),
+                |tier| format!("The {tier} {name} slot"),
+            );
+            let together = match holders.as_slice() {
+                [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+                [] => String::new(),
+            };
+            overflow.push(if tier.is_some() {
+                format!(
+                    "  {which} holds {count} members, {together}: a role and tier holds one. Edit all but one to another tier, or remove the {name} role from them; removing a member cancels the tasks it holds. All take work until then."
+                )
+            } else {
+                format!(
+                    "  {which} holds {count} members, {together}: a project has one image designer. Remove all but one; removing a member cancels the tasks it holds. All take work until then."
+                )
+            });
+        }
+        let piece = match tier {
+            Some(tier) => format!("{tier}: {shown}"),
+            None => shown,
+        };
+        match roles.last_mut() {
+            Some((last, pieces)) if *last == name => pieces.push(piece),
+            _ => roles.push((name, vec![piece])),
+        }
+    }
+    if roles.is_empty() {
+        return String::new();
+    }
+    let mut lines: Vec<String> = roles
+        .iter()
+        .map(|(name, pieces)| format!("  {name}: {}", pieces.join(" · ")))
+        .collect();
+    lines.extend(overflow);
+    lines.join("\n")
 }
 
 /// What a member of `cf staff` runs on where its name does not say it (spec harness-models,

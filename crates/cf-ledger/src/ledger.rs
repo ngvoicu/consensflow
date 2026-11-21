@@ -131,6 +131,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     reconcile_released(&mut store)?;
     reconcile_answered_on_open(&mut store)?;
     note_stranded_waits(&mut store)?;
+    crate::staff::note_settled_moves(&mut store)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]

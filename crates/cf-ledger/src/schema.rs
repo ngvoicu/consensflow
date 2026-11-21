@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 43] = [
+pub const MIGRATIONS: [&str; 44] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -56,6 +56,7 @@ pub const MIGRATIONS: [&str; 43] = [
     include_str!("../migrations/0041.sql"),
     include_str!("../migrations/0042.sql"),
     include_str!("../migrations/0043.sql"),
+    include_str!("../migrations/0044.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
