@@ -323,7 +323,7 @@ fn a_screen_with_no_secret_and_no_key_on_it_is_quoted_as_it_always_was() {
         vec!["Compiling", "Finished", "Running"],
         vec!["YQ==", "next row says words"],
         vec!["ok", "YQ=="],
-        vec!["/Users/gabrielvoicu/Projects/ngvoicu/consensflow-trees/failure-why"],
+        vec!["/Users/someone-home/Projects/example/example-worktrees/failure-why"],
         vec!["12", "345", "6789"],
         vec!["connection", "refused"],
         vec!["src/lib.rs", "src/main.rs"],

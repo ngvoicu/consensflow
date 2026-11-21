@@ -59,9 +59,9 @@ refusal for quota writes is not here: the Mac's Muse login runs no model turn
 
 ## Recorded by T-705 and T-718 on a Muse that runs turns (2026-10-26), kept for MUS-23, MUS-24
 
-Copied byte for byte from the scrubbed fixtures the testers kept
-(`consensflow-trees/.runs/muse-research/fixtures/`; their paths, ids and Meta's own text are
-placeholders already), after the account paid for Muse (18:57):
+Copied byte for byte from the scrubbed fixtures the testers kept in the recording archive
+(their paths, ids and Meta's own text are placeholders already), after the account paid
+for Muse (18:57):
 
 - `billing-spark.jsonl`, `billing-wonder.jsonl` (T-705, `billing-spark-tui`,
   `billing-wonder-tui`): one turn each, `muse-spark-1.3` and `muse-wonder-1.0` at `minimal`
