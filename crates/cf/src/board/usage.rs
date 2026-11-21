@@ -231,7 +231,7 @@ mod tests {
                 "{line:?} goes on from {owner:?}"
             );
         }
-        assert!(task.contains("of that tier (--purpose for critical work)"));
+        assert!(task.contains("of that tier (critical work is not coding)"));
         assert!(task.contains("  cf task add --tier standard - <<'BRIEF'"));
     }
 }

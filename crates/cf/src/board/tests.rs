@@ -1428,6 +1428,38 @@ fn the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designe
     );
 }
 
+/// `cf staff` shows the slots first, one line a role: each tier shows its holder, `empty`, or
+/// every holder with the rule where the update left several in one slot.
+#[test]
+fn the_staff_shows_each_slot_with_its_holder_empty_or_every_holder_of_one_several_hold() {
+    let slot = |role: &str, tier: Value, holders: &[&str]| {
+        json!({ "role": role, "tier": tier, "holders": holders })
+    };
+    let answer = json!({
+        "members": [],
+        "slots": [
+            slot("worker", json!("complex"), &[]),
+            slot("worker", json!("standard"), &["zeus", "diana", "hera", "ares", "pan"]),
+            slot("worker", json!("light"), &["luna"]),
+            slot("reviewer", json!("critical"), &[]),
+            slot("reviewer", json!("standard"), &["argus"]),
+            slot("designer", Value::Null, &["iris"]),
+        ],
+    });
+    let ran = cf(&["staff"], vec![reply(200, answer)]);
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        concat!(
+            "  worker: complex: empty · standard: @zeus + @diana + @hera + @ares + @pan · light: @luna\n",
+            "  reviewer: critical: empty · standard: @argus\n",
+            "  image designer: @iris\n",
+            "  The standard worker slot holds five members, @zeus, @diana, @hera, @ares and @pan: a role and tier holds one. Edit all but one to another tier, or remove the worker role from them; removing a member cancels the tasks it holds. All take work until then.\n",
+            "No members are on this project's staff yet; the human adds them in the app.\n",
+        )
+    );
+}
+
 /// Roles are said by their names, so the frontend designer and the image designer are never
 /// one word (spec new-roles, FD-04), and a member of a role with tiers beside one without
 /// says its tier.
