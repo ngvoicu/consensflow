@@ -27,7 +27,13 @@ fn project_of(context: &Context, name: &str, staff: &[(&str, &[&str], &str)]) ->
         .expect("the project")
 }
 
-fn open(context: &Context, project: &ProjectView, pool: &str, tier: &str, purpose: Option<&str>) -> i64 {
+fn open(
+    context: &Context,
+    project: &ProjectView,
+    pool: &str,
+    tier: &str,
+    purpose: Option<&str>,
+) -> i64 {
     context
         .create_task(
             project.id,
@@ -113,7 +119,10 @@ fn a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once() {
     let project = project_of(
         &context,
         "app",
-        &[("zeus", &["worker"], "standard"), ("hera", &["reviewer"], "standard")],
+        &[
+            ("zeus", &["worker"], "standard"),
+            ("hera", &["reviewer"], "standard"),
+        ],
     );
     context.pass().unwrap();
     context.pass().unwrap();
@@ -121,7 +130,11 @@ fn a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once() {
     context.adapter.with("chief", |agent| agent.settled = false);
     // A review is created while a reviewer is seated; none is left before dispatch.
     let review = open(&context, &project, "reviewer", "standard", None);
-    context.ledger.borrow_mut().remove_member(project.id, "hera").unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .remove_member(project.id, "hera")
+        .unwrap();
     context.pass().unwrap();
     let first = notes(&context, &project, &format!("T-{review} waits for"));
     assert_eq!(first.len(), 1, "{first:?}");
@@ -138,14 +151,20 @@ fn a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once() {
         .unwrap();
     let after_resume = notes(&context, &project, &format!("T-{review} waits for"));
     assert_eq!(
-        after_resume.iter().filter(|(state, _)| state == "cancelled").count(),
+        after_resume
+            .iter()
+            .filter(|(state, _)| state == "cancelled")
+            .count(),
         1,
         "the resume withdrew the note: {after_resume:?}"
     );
     context.pass().unwrap();
     let told_again = notes(&context, &project, &format!("T-{review} waits for"));
     assert_eq!(
-        told_again.iter().filter(|(state, _)| state != "cancelled").count(),
+        told_again
+            .iter()
+            .filter(|(state, _)| state != "cancelled")
+            .count(),
         1,
         "the next pass queues one note: {told_again:?}"
     );
@@ -164,7 +183,10 @@ fn a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once() {
     }
     let given = notes(&context, &project, &format!("T-{review} waits for"));
     assert_eq!(
-        given.iter().filter(|(state, _)| state == "delivered" || state == "read").count(),
+        given
+            .iter()
+            .filter(|(state, _)| state == "delivered" || state == "read")
+            .count(),
         1,
         "{given:?}"
     );
@@ -176,10 +198,17 @@ fn the_note_of_where_a_task_fell_stays_queued_through_the_assignment_that_follow
     let project = project_of(
         &context,
         "app",
-        &[("zeus", &["tester"], "complex"), ("anubis", &["tester"], "standard")],
+        &[
+            ("zeus", &["tester"], "complex"),
+            ("anubis", &["tester"], "standard"),
+        ],
     );
     let number = open(&context, &project, "tester", "complex", None);
-    context.ledger.borrow_mut().remove_member(project.id, "zeus").unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .remove_member(project.id, "zeus")
+        .unwrap();
     context.pass().unwrap();
     assert!(context.task(project.id, number).task.assignee.is_some());
     let said = notes(&context, &project, &format!("T-{number} asked for"));
@@ -188,7 +217,11 @@ fn the_note_of_where_a_task_fell_stays_queued_through_the_assignment_that_follow
         said[0].0, "cancelled",
         "the assignment's withdrawal of the wait notes keeps the fall's: {said:?}"
     );
-    assert!(said[0].1.contains("@anubis"), "it names the holder: {:?}", said[0].1);
+    assert!(
+        said[0].1.contains("@anubis"),
+        "it names the holder: {:?}",
+        said[0].1
+    );
 }
 
 /// A second project with an open task and a free member: every pass must end well and give
@@ -230,7 +263,10 @@ fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_
     context.pass().unwrap();
     context.pass().unwrap();
     let task = context.task(project.id, work).task;
-    assert_eq!(task.state, "paused", "the first task stays in its member's window, held");
+    assert_eq!(
+        task.state, "paused",
+        "the first task stays in its member's window, held"
+    );
     assert!(task.held_until.is_some());
     assert_eq!(holder(&context, project.id, work), "zeus");
     assert!(
@@ -253,14 +289,35 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
     backup_of(&context, project.id, "hera", "gaia", &["researcher"]);
     backup_of(&context, project.id, "ares", "luna", &["advisor"]);
     let (other, other_task) = second_project(&context);
-    let research = open(&context, &project, "researcher", "critical", Some("important-question"));
-    let review = open(&context, &project, "reviewer", "critical", Some("critical-review"));
-    let advice = open(&context, &project, "advisor", "critical", Some("hard-problem"));
+    let research = open(
+        &context,
+        &project,
+        "researcher",
+        "critical",
+        Some("important-question"),
+    );
+    let review = open(
+        &context,
+        &project,
+        "reviewer",
+        "critical",
+        Some("critical-review"),
+    );
+    let advice = open(
+        &context,
+        &project,
+        "advisor",
+        "critical",
+        Some("hard-problem"),
+    );
     for _ in 0..3 {
         context.pass().unwrap();
     }
     for number in [research, review, advice] {
-        assert!(context.task(project.id, number).task.assignee.is_some(), "T-{number} is at work");
+        assert!(
+            context.task(project.id, number).task.assignee.is_some(),
+            "T-{number} is at work"
+        );
     }
     let windows_before = context.project(project.id).participants.len();
     // What the update and an older fall leave behind: a research task with no tier, and an
@@ -273,7 +330,8 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
             [research],
         )
         .unwrap();
-        db.execute("UPDATE task SET purpose = NULL WHERE number = ?", [advice]).unwrap();
+        db.execute("UPDATE task SET purpose = NULL WHERE number = ?", [advice])
+            .unwrap();
     }
     refuse_login(&context, "hera");
     refuse_login(&context, "ares");
@@ -288,12 +346,18 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
     // critical line first.
     assert_eq!(holder(&context, project.id, review), "gaia");
     let brief = context
-        .inbox(context.id(project.id, &context.task(project.id, review).task.assignee.unwrap()))
+        .inbox(context.id(
+            project.id,
+            &context.task(project.id, review).task.assignee.unwrap(),
+        ))
         .into_iter()
         .find(|message| message.kind == "task")
         .expect("its brief")
         .body;
-    assert!(brief.starts_with("Critical work: critical-review."), "{brief}");
+    assert!(
+        brief.starts_with("Critical work: critical-review."),
+        "{brief}"
+    );
     assert_eq!(
         context.project(project.id).participants.len(),
         windows_before + 1,
@@ -303,7 +367,8 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
 }
 
 #[test]
-fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the_edit_that_names_critical() {
+fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the_edit_that_names_critical(
+) {
     let context = Context::new();
     let project = project_of(&context, "app", &[("calliope", &["reviewer"], "standard")]);
     backup_of(&context, project.id, "calliope", "gaia", &["reviewer"]);
@@ -337,7 +402,11 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
     refuse_login(&context, "calliope");
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(holder(&context, project.id, review), "calliope", "the task stays held");
+    assert_eq!(
+        holder(&context, project.id, review),
+        "calliope",
+        "the task stays held"
+    );
     // The person's Reassign puts it on the board, where it waits, told the way on once.
     context
         .ledger
@@ -397,7 +466,10 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
         .find(|message| message.kind == "task")
         .expect("its brief")
         .body;
-    assert!(brief.starts_with("Critical work: critical-review."), "{brief}");
+    assert!(
+        brief.starts_with("Critical work: critical-review."),
+        "{brief}"
+    );
     // The first window's delivered brief is as it was.
     let now: Vec<String> = context
         .inbox(context.id(project.id, &first_window))
@@ -428,7 +500,10 @@ fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slo
         .ledger
         .borrow()
         .sqlite()
-        .execute("UPDATE task SET tier = NULL WHERE number IN (?, ?)", [research, frame])
+        .execute(
+            "UPDATE task SET tier = NULL WHERE number IN (?, ?)",
+            [research, frame],
+        )
         .unwrap();
     for _ in 0..3 {
         context.pass().unwrap();
@@ -437,7 +512,10 @@ fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slo
     // complex, which nobody holds: it falls to the light one, and the chief is told whose.
     let research_task = context.task(project.id, research).task;
     assert_eq!(
-        (research_task.tier.as_deref(), research_task.assignee.is_some()),
+        (
+            research_task.tier.as_deref(),
+            research_task.assignee.is_some()
+        ),
         (Some("standard"), true)
     );
     let frame_task = context.task(project.id, frame).task;
@@ -463,7 +541,9 @@ fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slo
         .map(Result::unwrap)
         .collect();
     assert!(
-        events.iter().any(|data| data.contains("\"from\":null") && data.contains("\"to\":\"standard\"")),
+        events
+            .iter()
+            .any(|data| data.contains("\"from\":null") && data.contains("\"to\":\"standard\"")),
         "the home tier is logged: {events:?}"
     );
 }

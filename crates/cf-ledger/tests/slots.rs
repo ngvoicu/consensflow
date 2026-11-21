@@ -177,9 +177,13 @@ fn each_write_is_refused_in_the_words_of_the_rule() {
         model_name: Some("ares".into()),
         tier: tier.into(),
     };
-    let refused = ledger.edit_member(project.id, "ares", &edit("standard")).unwrap_err();
+    let refused = ledger
+        .edit_member(project.id, "ares", &edit("standard"))
+        .unwrap_err();
     assert_eq!(said(refused).0, "slot-taken");
-    let refused = ledger.edit_member(project.id, "ares", &edit("critical")).unwrap_err();
+    let refused = ledger
+        .edit_member(project.id, "ares", &edit("critical"))
+        .unwrap_err();
     assert_eq!(said(refused).0, "tier-not-offered");
 }
 
@@ -199,9 +203,11 @@ fn new_projects_list_is_checked_whole_as_slots() {
         "the staff names two standard workers, zeus and diana: a role and tier holds one member"
     );
     let refused = ledger
-        .create_project(&request(vec![
-            member("zeus", &["worker", "architect"], "critical"),
-        ]))
+        .create_project(&request(vec![member(
+            "zeus",
+            &["worker", "architect"],
+            "critical",
+        )]))
         .unwrap_err();
     assert_eq!(said(refused).0, "tier-not-offered");
     let refused = ledger
@@ -261,7 +267,10 @@ fn a_slot_several_hold_stays_editable_and_every_way_of_meeting_the_rule_is_open(
     ledger
         .edit_member(project.id, "hera", &edit("hera", "light"))
         .expect("a free tier");
-    assert_eq!(tier_of(&ledger, project.id, "hera").as_deref(), Some("light"));
+    assert_eq!(
+        tier_of(&ledger, project.id, "hera").as_deref(),
+        Some("light")
+    );
     // A removal of one of three leaves two.
     let project = overflowing(
         &mut ledger,
@@ -347,7 +356,9 @@ fn edit_member_carries_the_new_tier_to_its_backups_open_windows() {
         .map(|p| (p.handle, p.tier))
         .collect();
     assert!(
-        tiers.iter().all(|(_, tier)| tier.as_deref() == Some("complex")),
+        tiers
+            .iter()
+            .all(|(_, tier)| tier.as_deref() == Some("complex")),
         "{tiers:?}"
     );
     assert_eq!(tiers.len(), 3);
@@ -369,7 +380,10 @@ fn a_purpose_is_taken_only_with_critical_at_add_as_at_edit() {
     );
     // A worker's task is never critical.
     let refused = ledger
-        .create_task(project.id, &work("worker", "critical", Some("architecture")))
+        .create_task(
+            project.id,
+            &work("worker", "critical", Some("architecture")),
+        )
         .unwrap_err();
     assert_eq!(
         said(refused),
@@ -410,7 +424,10 @@ fn critical_goes_by_the_roles_effective_slot_so_an_old_image_designer_keeps_its_
     // image backup inherits that tier.
     ledger
         .sqlite()
-        .execute("UPDATE participant SET tier = 'critical' WHERE handle = 'iris'", [])
+        .execute(
+            "UPDATE participant SET tier = 'critical' WHERE handle = 'iris'",
+            [],
+        )
         .unwrap();
     let drawing = ledger
         .create_task(
@@ -439,7 +456,10 @@ fn critical_goes_by_the_roles_effective_slot_so_an_old_image_designer_keeps_its_
         .id;
     ledger
         .sqlite()
-        .execute("UPDATE participant SET tier = 'critical' WHERE id = ?", [spare])
+        .execute(
+            "UPDATE participant SET tier = 'critical' WHERE id = ?",
+            [spare],
+        )
         .unwrap();
     ledger
         .check_taker(project.id, drawing, spare)
@@ -505,7 +525,9 @@ fn a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical() {
         .unwrap();
     assert_eq!(review.task.tier.as_deref(), Some("standard"));
     assert_eq!(review.asked, None);
-    let placed = ledger.retier_open_task(project.id, review.task.number).unwrap();
+    let placed = ledger
+        .retier_open_task(project.id, review.task.number)
+        .unwrap();
     assert_eq!(
         placed,
         TaskPlaced::Waits {
@@ -521,15 +543,25 @@ fn a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical() {
         .unwrap();
     assert_eq!(critical.task.tier.as_deref(), Some("critical"));
     assert_eq!(
-        ledger.retier_open_task(project.id, critical.task.number).unwrap(),
+        ledger
+            .retier_open_task(project.id, critical.task.number)
+            .unwrap(),
         TaskPlaced::Stays
     );
     // With nobody at Critical, it falls to the nearest tier held, keeping its purpose.
     ledger.remove_member(project.id, "hera").unwrap();
-    let fell = ledger.retier_open_task(project.id, critical.task.number).unwrap();
-    assert!(matches!(fell, TaskPlaced::Waits { ref critical } if critical.is_empty()), "{fell:?}");
+    let fell = ledger
+        .retier_open_task(project.id, critical.task.number)
+        .unwrap();
+    assert!(
+        matches!(fell, TaskPlaced::Waits { ref critical } if critical.is_empty()),
+        "{fell:?}"
+    );
     let advice = ledger
-        .create_task(project.id, &work("tester", "critical", Some("hard-problem")))
+        .create_task(
+            project.id,
+            &work("tester", "critical", Some("hard-problem")),
+        )
         .unwrap();
     assert_eq!(advice.task.tier.as_deref(), Some("standard"));
     assert_eq!(advice.task.purpose.as_deref(), Some("hard-problem"));
@@ -558,10 +590,16 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
     // Each section's answer carries its effective tier: a Complex request that fell to
     // Standard reads Standard, with the tier asked and who holds the one it went to.
     let plan = [section("check", work("tester", "complex", None))];
-    let made = ledger.create_plan(project.id, &plan, Some("k"), "one").unwrap();
+    let made = ledger
+        .create_plan(project.id, &plan, Some("k"), "one")
+        .unwrap();
     let got = &made.tasks[0];
     assert_eq!(
-        (got.tier.as_deref(), got.asked.as_deref(), got.held_by.clone()),
+        (
+            got.tier.as_deref(),
+            got.asked.as_deref(),
+            got.held_by.clone()
+        ),
         (Some("standard"), Some("complex"), vec!["pan".to_owned()])
     );
     // The holder moves away; the same key replays the answer as it was given.
@@ -569,9 +607,14 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
     ledger
         .add_member(project.id, &member("tess", &["tester"], "light"))
         .unwrap();
-    let again = ledger.create_plan(project.id, &plan, Some("k"), "one").unwrap();
+    let again = ledger
+        .create_plan(project.id, &plan, Some("k"), "one")
+        .unwrap();
     assert!(again.repeated);
-    assert_eq!(again.tasks, made.tasks, "the original destination, not a recomputed one");
+    assert_eq!(
+        again.tasks, made.tasks,
+        "the original destination, not a recomputed one"
+    );
     // An answer an earlier version kept (name and number alone) still replays, and a plan
     // that section had no tier replays instead of being refused.
     ledger
@@ -593,7 +636,9 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
     )];
     // The fingerprint is the ledger's own: a saved key under its hash replays, whatever the
     // sections say; a fresh key refuses the file for its tier.
-    let refused = ledger.create_plan(project.id, &legacy, Some("fresh"), "g").unwrap_err();
+    let refused = ledger
+        .create_plan(project.id, &legacy, Some("fresh"), "g")
+        .unwrap_err();
     assert_eq!(said(refused).0, "invalid-tier");
     let fingerprint = {
         use sha2::{Digest, Sha256};
@@ -607,9 +652,14 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
             [fingerprint],
         )
         .unwrap();
-    let replayed = ledger.create_plan(project.id, &legacy, Some("old"), "g").unwrap();
+    let replayed = ledger
+        .create_plan(project.id, &legacy, Some("old"), "g")
+        .unwrap();
     assert!(replayed.repeated);
-    assert_eq!((replayed.tasks[0].name.as_str(), replayed.tasks[0].number), ("lookup", 7));
+    assert_eq!(
+        (replayed.tasks[0].name.as_str(), replayed.tasks[0].number),
+        ("lookup", 7)
+    );
     assert_eq!(replayed.tasks[0].tier, None);
     // A changed file under the old key is still a different plan.
     let changed = [section(
@@ -619,7 +669,9 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
             ..legacy[0].task.clone()
         },
     )];
-    let refused = ledger.create_plan(project.id, &changed, Some("old"), "g").unwrap_err();
+    let refused = ledger
+        .create_plan(project.id, &changed, Some("old"), "g")
+        .unwrap_err();
     assert_eq!(said(refused).0, "key-used");
     let _ = json!(null);
 }

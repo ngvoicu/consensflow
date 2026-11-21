@@ -561,13 +561,21 @@ async fn a_project_opened_from_a_staff_with_an_image_designer_and_its_backup_kee
                 .filter(|participant| participant.roles.iter().any(|role| role == "designer"))
                 .filter(|participant| participant.member_id.is_none())
                 .collect();
-            let (primaries, backups): (Vec<_>, Vec<_>) =
-                drawers.into_iter().partition(|participant| participant.backup_of.is_none());
+            let (primaries, backups): (Vec<_>, Vec<_>) = drawers
+                .into_iter()
+                .partition(|participant| participant.backup_of.is_none());
             assert_eq!(primaries.len(), 1, "the slot is held once");
             assert_eq!(backups.len(), 1, "and its backup is its backup");
             assert_eq!(backups[0].backup_of, Some(primaries[0].id));
-            assert!(backups[0].designer && backups[0].model.is_none(), "no model was asked");
-            assert_eq!(backups[0].vacation_since.as_deref(), Some(vacation), "its Vacation kept");
+            assert!(
+                backups[0].designer && backups[0].model.is_none(),
+                "no model was asked"
+            );
+            assert_eq!(
+                backups[0].vacation_since.as_deref(),
+                Some(vacation),
+                "its Vacation kept"
+            );
         })
         .await;
 }

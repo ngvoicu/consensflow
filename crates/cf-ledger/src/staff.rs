@@ -25,7 +25,6 @@ use crate::store::Store;
 use crate::tasks::{shut_tracked_doors, tell_stranded_waiters};
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
-pub(crate) use slots::note_settled_moves;
 pub(crate) use backup::{add_backup, change_backup, remove_backup};
 pub(crate) use pools::{
     candidates, candidates_for, holders_of_tier, may_take_slot, members, place, Placed,
@@ -37,6 +36,7 @@ pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
     start_session, undecided_results, Giving,
 };
+pub(crate) use slots::note_settled_moves;
 pub(crate) use vacation::{
     bring_back as return_from_vacation, release_unopened, send as send_on_vacation,
 };

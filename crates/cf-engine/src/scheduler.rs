@@ -15,9 +15,8 @@ use cf_base::time;
 use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
-    TaskPlaced,
     BackupCandidate, Candidate, HeldTask, HoldKind, LedgerError, MemberView, NewNote,
-    ParticipantView, ProjectView, TaskCard, TaskThread, TaskView, RESUME_WORDS,
+    ParticipantView, ProjectView, TaskCard, TaskPlaced, TaskThread, TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 

@@ -7393,7 +7393,7 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
-test('the frontend designer, the architect, the researcher and the integrator are added on any harness and asked no tier', async ({
+test('the frontend designer, the architect, the researcher and the integrator are added on any harness and asked their tier', async ({
   page,
 }) => {
   const data = model()
@@ -7408,16 +7408,24 @@ test('the frontend designer, the architect, the researcher and the integrator ar
   ]
   const added = []
   for (const [role, label] of roles) {
-    await pickMember(dialog, { role, harness: 'Devin', model: 'swe-2' })
-    await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+    // Every role but the image designer has tiers now: each is asked its own.
+    await pickMember(dialog, { role, harness: 'Devin', model: 'swe-2', tier: 'standard' })
+    await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
     await dialog.getByRole('button', { name: 'Add to staff' }).click()
-    added.push({ project: 1, harness: 'devin', model: 'swe-2', effort: null, roles: [role] })
+    added.push({
+      project: 1,
+      harness: 'devin',
+      model: 'swe-2',
+      effort: null,
+      tier: 'standard',
+      roles: [role],
+    })
     await expect.poll(() => calls(page, 'member.add')).toEqual(added)
     await expect(page.locator('#status')).toHaveText(`@swe-2 joined the staff as ${label}.`)
   }
-  // A worker is asked its tier again.
-  await dialog.getByLabel('Role').selectOption('worker')
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  // The image designer is asked none.
+  await dialog.getByLabel('Role').selectOption('designer')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({

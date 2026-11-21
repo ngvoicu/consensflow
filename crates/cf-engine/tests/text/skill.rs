@@ -157,7 +157,10 @@ fn lists_the_members_without_their_backups() {
             .map(participant_of)
             .collect(),
     );
-    let names: Vec<String> = staff_of(&project).into_iter().map(|member| member.name).collect();
+    let names: Vec<String> = staff_of(&project)
+        .into_iter()
+        .map(|member| member.name)
+        .collect();
     assert_eq!(names, ["zeus"], "hera is zeus's backup and holds no slot");
 }
 

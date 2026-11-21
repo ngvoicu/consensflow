@@ -414,9 +414,7 @@ fn a_backup_of_an_untiered_member_keeps_the_null_tier_even_when_edited() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
     let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
-    ledger
-        .set_roles(p.id, "alpha", &["frontend"])
-        .unwrap();
+    ledger.set_roles(p.id, "alpha", &["frontend"]).unwrap();
     // Older ledgers can contain a null tier for an untiered member.
     ledger
         .sqlite()

@@ -457,14 +457,17 @@ async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_
                 (
                     400,
                     "tier-not-offered",
-                    format!("{whose} task is complex, standard or light: critical work is not coding")
-                        .as_str()
+                    format!(
+                        "{whose} task is complex, standard or light: critical work is not coding"
+                    )
+                    .as_str()
                 ),
                 "{critical}"
             );
         }
         // A purpose comes with Critical only.
-        let purposed = format!(r#"{{"{field}":true,"body":"x","tier":"light","purpose":"architecture"}}"#);
+        let purposed =
+            format!(r#"{{"{field}":true,"body":"x","tier":"light","purpose":"architecture"}}"#);
         let answered = post(&scene, &scene.chief, &purposed).await;
         assert_eq!(
             refused(&answered),
@@ -480,7 +483,11 @@ async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_
         let (status, said) = post(&scene, &scene.chief, &body).await;
         assert_eq!(status, 201, "{said}");
         assert_eq!(
-            (said["task"]["pool"].as_str(), said["task"]["tier"].as_str(), said["task"]["state"].as_str()),
+            (
+                said["task"]["pool"].as_str(),
+                said["task"]["tier"].as_str(),
+                said["task"]["state"].as_str()
+            ),
             (Some(pool), Some("standard"), Some("open")),
             "{body}"
         );
@@ -505,7 +512,11 @@ async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_
         let (status, said) = post(&scene, &scene.chief, &body).await;
         assert_eq!(status, 201, "{said}");
         assert_eq!(
-            (said["task"]["pool"].as_str(), said["task"]["tier"].as_str(), said["asked"].as_str()),
+            (
+                said["task"]["pool"].as_str(),
+                said["task"]["tier"].as_str(),
+                said["asked"].as_str()
+            ),
             (Some(pool), Some("light"), Some("standard")),
             "{body}"
         );
@@ -977,7 +988,10 @@ async fn a_plans_answer_carries_each_sections_tier_and_a_replay_gives_it_again_a
     assert_eq!(first[0]["asked"], "complex");
     assert_eq!(first[0]["heldBy"], json!(["zeus"]));
     assert_eq!(first[1]["tier"], "standard");
-    assert!(first[1].get("asked").is_none(), "a section that did not fall asks nothing");
+    assert!(
+        first[1].get("asked").is_none(),
+        "a section that did not fall asks nothing"
+    );
     // The holder moves to another tier; the same file and key answer as they first did.
     scene
         .context
@@ -997,14 +1011,18 @@ async fn a_plans_answer_carries_each_sections_tier_and_a_replay_gives_it_again_a
         .unwrap();
     let (status, again) = stc_post(&scene, &plan).await;
     assert_eq!(status, 200, "{again}");
-    assert_eq!(again["tasks"], first, "the original destination, not a recomputed one");
+    assert_eq!(
+        again["tasks"], first,
+        "the original destination, not a recomputed one"
+    );
 }
 
 /// A plan an earlier version took under a key replays its saved answer, though its section had
 /// no tier (a researcher's): the key is looked up before the section is read for its tier, and
 /// the same file under a fresh key is refused for it.
 #[tokio::test]
-async fn a_keyed_plan_an_earlier_version_took_replays_its_saved_answer_and_a_fresh_key_refuses_it() {
+async fn a_keyed_plan_an_earlier_version_took_replays_its_saved_answer_and_a_fresh_key_refuses_it()
+{
     let scene = scene();
     let plan = json!({ "key": "old", "plan": [
         { "name": "lookup", "research": true, "body": "Look it up\n" }

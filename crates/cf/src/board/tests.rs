@@ -1432,9 +1432,7 @@ fn the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designe
 /// every holder with the rule where the update left several in one slot.
 #[test]
 fn the_staff_shows_each_slot_with_its_holder_empty_or_every_holder_of_one_several_hold() {
-    let slot = |role: &str, tier: Value, holders: &[&str]| {
-        json!({ "role": role, "tier": tier, "holders": holders })
-    };
+    let slot = |role: &str, tier: Value, holders: &[&str]| json!({ "role": role, "tier": tier, "holders": holders });
     let answer = json!({
         "members": [],
         "slots": [

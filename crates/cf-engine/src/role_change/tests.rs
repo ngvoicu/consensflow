@@ -1252,7 +1252,6 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
     // These first lines are measured for the active path mode and each shell.
     const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
-    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
     const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
     const CHOOSE: &str = "## Choose the role, not the member";
     let mac = if PATH_ONCE { REVIEW } else { DESIGN };

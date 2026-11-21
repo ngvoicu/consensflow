@@ -91,13 +91,23 @@ pub(crate) fn edit_task_with(
         require_not_given(store, &task, routes_only)?;
         // The tier is checked before anything is written: a refusal changes nothing.
         let moving = match wanted {
-            Some(wanted) => Some(tier_for(store, project_id, &task, wanted, edit.purpose.as_deref())?),
+            Some(wanted) => Some(tier_for(
+                store,
+                project_id,
+                &task,
+                wanted,
+                edit.purpose.as_deref(),
+            )?),
             None => None,
         };
         let at = store.at();
         // A purpose given with Critical: the critical line of a brief that is queued or held
         // at the gate says it now, wherever the task keeps its tier.
-        let task = match edit.purpose.as_deref().filter(|purpose| task.purpose.as_deref() != Some(purpose)) {
+        let task = match edit
+            .purpose
+            .as_deref()
+            .filter(|purpose| task.purpose.as_deref() != Some(purpose))
+        {
             Some(purpose) => {
                 store.db.execute(
                     "UPDATE task SET purpose = ?, updated_at = ? WHERE id = ?",
@@ -548,11 +558,7 @@ pub(crate) fn tell_open(
 /// Whether the task's brief may still be replaced: it waits for a window (open,
 /// queued, or paused before any had it), and no task message of it began to
 /// reach one. The refusal says what to do instead, by where the task is.
-fn require_not_given(
-    store: &Store,
-    task: &TaskRow,
-    routes_only: bool,
-) -> Result<(), LedgerError> {
+fn require_not_given(store: &Store, task: &TaskRow, routes_only: bool) -> Result<(), LedgerError> {
     let number = task.number;
     let tell = format!("tell its window: cf tell T-{number} \"…\"");
     match task.state.as_str() {

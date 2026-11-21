@@ -92,7 +92,9 @@ fn the_archived_ledgers_of_alpha_10_are_taken_unchanged_and_every_row_is_as_befo
         let dir = archive(name);
         let before = {
             let db = Connection::open(dir.path().join("consensflow.db")).unwrap();
-            let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            let version: i64 = db
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(version, 40, "{name} is a schema-40 ledger");
             (kept(&db), tiers(&db), rows(&db, "event", &[]).len())
         };
@@ -103,7 +105,10 @@ fn the_archived_ledgers_of_alpha_10_are_taken_unchanged_and_every_row_is_as_befo
             rows(ledger.sqlite(), "event", &[]).len(),
         );
         assert_eq!(before.0, after.0, "{name}: every row, compared whole");
-        assert_eq!(before.1, after.1, "{name}: every worker is standard: no tier moves");
+        assert_eq!(
+            before.1, after.1,
+            "{name}: every worker is standard: no tier moves"
+        );
         assert_eq!(
             before.2, after.2,
             "{name}: none is added: nothing was settled and nobody is told"
@@ -134,15 +139,26 @@ fn the_archived_ledgers_of_alpha_10_are_taken_unchanged_and_every_row_is_as_befo
         assert_eq!(owner.0, 7, "{name}: T-1 is in session 7");
         let finished = ledger.record_result(1, 1, "The work is done").unwrap();
         assert_eq!(finished.task.state, "done", "{name}");
-        assert_eq!(finished.task.assignee.as_deref().map(str::is_empty), Some(false));
+        assert_eq!(
+            finished.task.assignee.as_deref().map(str::is_empty),
+            Some(false)
+        );
         let member = if name == "reassign" { 4 } else { 5 };
-        assert_eq!(owner.1, Some(member), "{name}: session 7 is member {member}'s");
+        assert_eq!(
+            owner.1,
+            Some(member),
+            "{name}: session 7 is member {member}'s"
+        );
     }
 }
 
 /// A ledger of the version before, with its rows written by SQL: this board's shape and the
 /// cases the archives lack.
-fn built() -> (tempfile::TempDir, Vec<Vec<Vec<String>>>, Vec<(String, Option<String>)>) {
+fn built() -> (
+    tempfile::TempDir,
+    Vec<Vec<Vec<String>>>,
+    Vec<(String, Option<String>)>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
     let db = Connection::open(&file).unwrap();
@@ -203,8 +219,8 @@ fn built() -> (tempfile::TempDir, Vec<Vec<Vec<String>>>, Vec<(String, Option<Str
 }
 
 #[test]
-fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows()
-{
+fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows(
+) {
     let (dir, before, tiers_before) = built();
     let ledger = open(&dir);
     let db = ledger.sqlite();
@@ -219,18 +235,34 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
             assert_eq!(now.len(), was.len(), "table {at} gains no row");
         }
     }
-    assert_eq!(after[1].len(), before[1].len() + 2, "a note for each of the two projects");
+    assert_eq!(
+        after[1].len(),
+        before[1].len() + 2,
+        "a note for each of the two projects"
+    );
     let now: std::collections::BTreeMap<String, Option<String>> = tiers(db).into_iter().collect();
     let was: std::collections::BTreeMap<String, Option<String>> =
         tiers_before.into_iter().collect();
     let tier = |name: &str| now[name].as_deref();
     // Step 1: a tierless member takes its home; a tier kept where its roles offer it.
     assert_eq!(tier("iris"), Some("standard"), "frontend, NULL");
-    assert_eq!(tier("daedalus"), Some("complex"), "an architect's `light` was nobody's choice");
+    assert_eq!(
+        tier("daedalus"),
+        Some("complex"),
+        "an architect's `light` was nobody's choice"
+    );
     assert_eq!(tier("argus"), Some("complex"), "complex is kept");
     assert_eq!(tier("janus"), Some("standard"), "integrator, NULL");
-    assert_eq!(tier("themis"), Some("complex"), "architect and researcher: the architect's home");
-    assert_eq!(tier("hera"), Some("light"), "a member with a role that had tiers keeps its tier");
+    assert_eq!(
+        tier("themis"),
+        Some("complex"),
+        "architect and researcher: the architect's home"
+    );
+    assert_eq!(
+        tier("hera"),
+        Some("light"),
+        "a member with a role that had tiers keeps its tier"
+    );
     assert_eq!(tier("zeus"), Some("standard"));
     // Step 2: a Critical member with a coding role moves to complex, with its backup and
     // the windows of both.
@@ -255,8 +287,16 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
             .unwrap_or_else(|| panic!("no move of {handle}"))["emptied"]
             .clone()
     };
-    assert_eq!(emptied("ares"), serde_json::json!([]), "a Critical worker alone empties none");
-    assert_eq!(emptied("dion"), serde_json::json!(["reviewer"]), "the only critical reviewer");
+    assert_eq!(
+        emptied("ares"),
+        serde_json::json!([]),
+        "a Critical worker alone empties none"
+    );
+    assert_eq!(
+        emptied("dion"),
+        serde_json::json!(["reviewer"]),
+        "the only critical reviewer"
+    );
     // The human has one note in each project where step 2 moved a member.
     let notes = |project: i64| -> Vec<String> {
         db.prepare(
@@ -303,7 +343,9 @@ fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_fin
     let mut ledger = open(&dir);
     // T-1 is Critical work with its purpose, in the window of the critical worker's backup,
     // which the update moved to complex: the task keeps its assignment, and finishes there.
-    let finished = ledger.record_result(1, 1, "Done in the backup's window").unwrap();
+    let finished = ledger
+        .record_result(1, 1, "Done in the backup's window")
+        .unwrap();
     assert_eq!(finished.task.state, "done");
     let window: String = ledger
         .sqlite()
@@ -317,7 +359,11 @@ fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_fin
     // The backup, now at complex, may not take that Critical task anew: the sweep's guard.
     let luna: i64 = ledger
         .sqlite()
-        .query_row("SELECT id FROM participant WHERE handle = 'luna'", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM participant WHERE handle = 'luna'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let refused = ledger.check_taker(1, 1, luna).unwrap_err();
     assert_eq!(refused.code(), Some("not-a-candidate"));

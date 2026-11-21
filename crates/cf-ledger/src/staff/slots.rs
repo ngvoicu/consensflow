@@ -109,10 +109,7 @@ fn taken(role: &Role, tier: &str, handle: &str) -> LedgerError {
     } else {
         LedgerError::refused_with(
             "slot-taken",
-            format!(
-                "the {} slot is @{handle}'s: a project has one",
-                role.name
-            ),
+            format!("the {} slot is @{handle}'s: a project has one", role.name),
             409,
         )
     }
@@ -121,7 +118,9 @@ fn taken(role: &Role, tier: &str, handle: &str) -> LedgerError {
 /// New project's list, checked whole: each entry's tier is offered to each of its roles, and
 /// no slot is named twice. `entries` are each member's name (what it runs on, for the words),
 /// roles and tier.
-pub(crate) fn check_list(entries: &[(String, Vec<&'static str>, String)]) -> Result<(), LedgerError> {
+pub(crate) fn check_list(
+    entries: &[(String, Vec<&'static str>, String)],
+) -> Result<(), LedgerError> {
     for (_, held, tier) in entries {
         require_offered(held, tier)?;
     }

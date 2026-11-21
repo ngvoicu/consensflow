@@ -456,11 +456,10 @@ pub(super) async fn resolve(
 /// gains is held at the tier it has: it takes no tier, and only Edit changes one.
 pub(super) async fn roles(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let roles = parse_roles(body.get("roles"))?;
-    let member = page.ledger.borrow_mut().set_roles(
-        body.whole("project")?,
-        &body.text("agent"),
-        &roles,
-    )?;
+    let member =
+        page.ledger
+            .borrow_mut()
+            .set_roles(body.whole("project")?, &body.text("agent"), &roles)?;
     one("member", member)
 }
 

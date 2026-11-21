@@ -15,8 +15,8 @@ use crate::model::{
 use crate::queue::{queue, send, Queued, Sent};
 use crate::roles::{self, a_pool, pool_name, Role};
 use crate::staff::{
-    follow_up_session, holders_of_tier, may_take_slot, place, require_free, Placed,
-    require_member_row, start_session, Giving,
+    follow_up_session, holders_of_tier, may_take_slot, place, require_free, require_member_row,
+    start_session, Giving, Placed,
 };
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
@@ -754,7 +754,13 @@ pub(crate) fn retier_open_task(
                 json!({ "task": number, "from": null, "to": asked }),
             )?;
         }
-        match place(store, project_id, pool, Some(&asked), task.purpose.as_deref())? {
+        match place(
+            store,
+            project_id,
+            pool,
+            Some(&asked),
+            task.purpose.as_deref(),
+        )? {
             Placed::Stays(_) => Ok(TaskPlaced::Stays),
             Placed::Waits { critical } => Ok(TaskPlaced::Waits { critical }),
             Placed::Fell(tier) => {

@@ -1130,11 +1130,30 @@ mod tests {
                 ],
                 vec!["task", "add", "--review", "--tier", "light", "Look at it"],
                 vec![
-                    "task", "add", "--frontend", "--tier", "standard", "Draw the page"
+                    "task",
+                    "add",
+                    "--frontend",
+                    "--tier",
+                    "standard",
+                    "Draw the page"
                 ],
-                vec!["task", "add", "--architect", "--tier", "complex", "Frame it"],
+                vec![
+                    "task",
+                    "add",
+                    "--architect",
+                    "--tier",
+                    "complex",
+                    "Frame it"
+                ],
                 vec!["task", "add", "--research", "--tier", "light", "Find it"],
-                vec!["task", "add", "--integrate", "--tier", "standard", "Land it"],
+                vec![
+                    "task",
+                    "add",
+                    "--integrate",
+                    "--tier",
+                    "standard",
+                    "Land it"
+                ],
             ]
         );
         assert!(dispatches("DISPATCH nothing", &line).is_empty());

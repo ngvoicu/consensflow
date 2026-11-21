@@ -150,7 +150,13 @@ fn a_refused_plan_does_not_trace_events_that_were_rolled_back() {
     events.borrow_mut().clear();
     assert!(w
         .ledger
-        .decide_tasks(w.project, &[made.tasks[0].number, 999], "chief", "cancel", "")
+        .decide_tasks(
+            w.project,
+            &[made.tasks[0].number, 999],
+            "chief",
+            "cancel",
+            ""
+        )
         .is_err());
     assert!(
         events.borrow().is_empty(),

@@ -84,7 +84,9 @@ pub(super) async fn handle(
                         && member.member_id.is_none()
                         && member.backup_of.is_none()
                         && member.roles.iter().any(|role| role == slot.role.id)
-                        && slot.tier.is_none_or(|tier| member.tier.as_deref() == Some(tier))
+                        && slot
+                            .tier
+                            .is_none_or(|tier| member.tier.as_deref() == Some(tier))
                 })
                 .map(|member| member.handle.as_str())
                 .collect();

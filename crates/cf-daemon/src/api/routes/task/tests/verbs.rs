@@ -1259,7 +1259,11 @@ async fn an_edit_takes_a_purpose_with_critical_only_and_sends_critical_work_to_i
     .await;
     assert_eq!(
         refused(&(status, said)),
-        (400, "purpose-without-critical", "a purpose comes with --tier critical")
+        (
+            400,
+            "purpose-without-critical",
+            "a purpose comes with --tier critical"
+        )
     );
     let (status, said) = post(
         &scene,

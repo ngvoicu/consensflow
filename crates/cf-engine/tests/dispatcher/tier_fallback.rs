@@ -9,16 +9,16 @@ use cf_engine::testing::Context;
 use cf_ledger::{NewTask, ProjectView};
 use serde_json::{json, Value};
 
-/// The tiers, from the one asked first to the one asked last.
-const TIERS: [&str; 4] = ["critical", "complex", "standard", "light"];
-
 /// The roles whose tasks have a tier, with the pool each is asked for.
 const POOLS: [&str; 4] = ["worker", "advisor", "reviewer", "tester"];
 
 /// Every role that has tiers, from the registry: the roles with a Critical slot hold work at
 /// Critical, the three that write code do not.
 fn tiered_roles() -> Vec<&'static cf_ledger::roles::Role> {
-    cf_ledger::roles::all().iter().filter(|role| role.tiered()).collect()
+    cf_ledger::roles::all()
+        .iter()
+        .filter(|role| role.tiered())
+        .collect()
 }
 
 /// A project at /work/app: apollo its chief, and `staff` as `(agent, role, tier)`.
@@ -133,12 +133,15 @@ fn a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical_for_eve
 }
 
 #[test]
-fn a_critical_task_with_its_purpose_with_nobody_at_critical_falls_to_the_nearest_tier_and_keeps_its_purpose()
-{
+fn a_critical_task_with_its_purpose_with_nobody_at_critical_falls_to_the_nearest_tier_and_keeps_its_purpose(
+) {
     let context = Context::new();
     let project = project_of(
         &context,
-        &[("zeus", "advisor", "light"), ("hera", "advisor", "standard")],
+        &[
+            ("zeus", "advisor", "light"),
+            ("hera", "advisor", "standard"),
+        ],
     );
     let number = open(&context, &project, "advisor", "critical");
     for _ in 0..3 {
@@ -146,14 +149,19 @@ fn a_critical_task_with_its_purpose_with_nobody_at_critical_falls_to_the_nearest
     }
     let task = context.task(project.id, number).task;
     assert_eq!(
-        (task.tier.as_deref(), task.purpose.as_deref(), task.assignee.is_some()),
+        (
+            task.tier.as_deref(),
+            task.purpose.as_deref(),
+            task.assignee.is_some()
+        ),
         (Some("standard"), Some("hard-problem"), true),
         "the nearest tier held, never the light one past it"
     );
 }
 
 #[test]
-fn only_critical_held_waits_a_task_and_says_the_way_on_once_and_the_same_task_goes_once_a_slot_is_filled() {
+fn only_critical_held_waits_a_task_and_says_the_way_on_once_and_the_same_task_goes_once_a_slot_is_filled(
+) {
     let context = Context::new();
     let project = project_of(&context, &[("zeus", "reviewer", "critical")]);
     let number = open(&context, &project, "reviewer", "standard");
@@ -223,7 +231,11 @@ fn the_edit_that_sends_it_to_critical_with_its_purpose_gives_it_to_the_critical_
     }
     let task = context.task(project.id, number).task;
     assert_eq!(
-        (task.tier.as_deref(), task.purpose.as_deref(), task.assignee.is_some()),
+        (
+            task.tier.as_deref(),
+            task.purpose.as_deref(),
+            task.assignee.is_some()
+        ),
         (Some("critical"), Some("critical-review"), true)
     );
 }
@@ -251,7 +263,11 @@ fn a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical
     }
     let kept = context.task(project.id, behind).task;
     assert_eq!(
-        (kept.tier.as_deref(), kept.assignee.is_some(), kept.state.as_str()),
+        (
+            kept.tier.as_deref(),
+            kept.assignee.is_some(),
+            kept.state.as_str()
+        ),
         (Some("critical"), false, "open")
     );
     assert!(context.task(project.id, first).task.assignee.is_some());
@@ -499,7 +515,11 @@ fn a_task_is_never_refused_for_want_of_a_member_for_every_pool() {
         for _ in 0..3 {
             context.pass().unwrap();
         }
-        let role = if pool == "designer" { "image designer" } else { pool };
+        let role = if pool == "designer" {
+            "image designer"
+        } else {
+            pool
+        };
         let tier = if pool == "designer" { "" } else { "standard " };
         assert_eq!(
             waits(&context, &project),

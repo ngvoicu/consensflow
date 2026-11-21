@@ -61,7 +61,14 @@ const BRIEFED: Shape = Shape {
 /// The flags of `cf task edit`: a brief and a title as any other, and the tier, the tasks it
 /// needs and the tasks that wait for it, which may stand alone.
 const EDIT: Shape = Shape {
-    valued: &[brief::FILE, TITLE, "--tier", "--purpose", "--needs", "--before"],
+    valued: &[
+        brief::FILE,
+        TITLE,
+        "--tier",
+        "--purpose",
+        "--needs",
+        "--before",
+    ],
     ..Shape::TEXT
 };
 
@@ -365,11 +372,10 @@ fn add_plan(words: &Split, given: &[OsString], board: &Board) -> Result<Said, Fa
         let fell = match task.get("asked") {
             None | Some(Value::Null) => String::new(),
             asked => {
-                let role = cf_ledger::roles::asked(|field| {
-                    section.get(field) == Some(&Value::Bool(true))
-                })
-                .first()
-                .map_or(cf_ledger::roles::unasked(), |role| *role);
+                let role =
+                    cf_ledger::roles::asked(|field| section.get(field) == Some(&Value::Bool(true)))
+                        .first()
+                        .map_or(cf_ledger::roles::unasked(), |role| *role);
                 format!(
                     " (no {} {} is on the staff, so the nearest tier, {}{})",
                     js::text(asked),
@@ -1893,10 +1899,30 @@ and 2 idle sessions (`cf task list --all`)";
     #[test]
     fn the_four_new_roles_are_asked_for_by_their_switches_and_a_tier_and_named_by_their_rows() {
         for (switch, field, pool, named) in [
-            ("--frontend", "frontend", "frontend", "a standard frontend designer"),
-            ("--architect", "architect", "architect", "a standard architect"),
-            ("--research", "research", "researcher", "a standard researcher"),
-            ("--integrate", "integrate", "integrator", "a standard integrator"),
+            (
+                "--frontend",
+                "frontend",
+                "frontend",
+                "a standard frontend designer",
+            ),
+            (
+                "--architect",
+                "architect",
+                "architect",
+                "a standard architect",
+            ),
+            (
+                "--research",
+                "research",
+                "researcher",
+                "a standard researcher",
+            ),
+            (
+                "--integrate",
+                "integrate",
+                "integrator",
+                "a standard integrator",
+            ),
         ] {
             let answer = json!({
                 "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
@@ -1916,7 +1942,10 @@ and 2 idle sessions (`cf task list --all`)";
             // With no tier, the usage is printed, whose lines name each role's tiers.
             let api = scripted(vec![]);
             let given: Vec<OsString> = [switch, "Do it"].iter().map(OsString::from).collect();
-            let words: Vec<String> = [switch, "Do it"].iter().map(|word| (*word).to_owned()).collect();
+            let words: Vec<String> = [switch, "Do it"]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
             let refused = add(
                 &words,
                 &given,
@@ -1927,7 +1956,10 @@ and 2 idle sessions (`cf task list --all`)";
                 matches!(&refused, Err(Failure::Usage(usage)) if usage == ADD_USAGE && usage.contains("<critical|complex|standard|light>") && usage.contains("<complex|standard|light>")),
                 "{switch}: not the usage"
             );
-            assert!(api.received().is_empty(), "{switch}: nothing is asked of the board");
+            assert!(
+                api.received().is_empty(),
+                "{switch}: nothing is asked of the board"
+            );
         }
     }
 
@@ -1937,7 +1969,11 @@ and 2 idle sessions (`cf task list --all`)";
     fn a_plan_section_that_fell_says_the_tier_it_went_to_and_never_the_one_it_asked() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("plan.md");
-        std::fs::write(&file, "=== check --test --tier complex\nRun it\n=== build --tier standard\nBuild it\n").unwrap();
+        std::fs::write(
+            &file,
+            "=== check --test --tier complex\nRun it\n=== build --tier standard\nBuild it\n",
+        )
+        .unwrap();
         let answer = json!({
             "tasks": [
                 { "name": "check", "task": { "number": 5 }, "tier": "standard", "asked": "complex", "heldBy": ["tess"] },
@@ -1963,7 +1999,11 @@ and 2 idle sessions (`cf task list --all`)";
             said.text
         );
         assert!(said.text.contains("build → T-6\n"), "{}", said.text);
-        assert!(!said.text.contains("check → T-5 for a complex"), "{}", said.text);
+        assert!(
+            !said.text.contains("check → T-5 for a complex"),
+            "{}",
+            said.text
+        );
     }
 
     /// `cf task edit T-n --tier critical --purpose …` posts the purpose beside the tier.

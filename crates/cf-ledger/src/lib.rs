@@ -52,8 +52,9 @@ pub use cf_proto::ledger::{
     EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail,
     Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView, MessageParties,
     MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
-    Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
-    TaskPlaced, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
+    Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskPlaced,
+    TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut,
+    TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -84,8 +85,8 @@ pub use specs::SpecsChange;
 pub use staff::MemberEdit;
 pub use staff::{BackupCandidate, Candidate, HoldKind, StaffMember};
 pub use tasks::{
-    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanSection, PlanTask, RESUME_WORDS,
-    SAME_ERROR_WITHIN_MS,
+    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanSection, PlanTask,
+    RESUME_WORDS, SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use waiting_questions::QuestionWait;

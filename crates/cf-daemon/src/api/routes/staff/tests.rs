@@ -50,6 +50,42 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
     assert_eq!(scene.kicks.get(), 0);
 }
 
+/// A slot the update left several members in says every holder, in the order they joined: four
+/// holders, never cut at two or at three, and the slot after it is its own.
+#[tokio::test]
+async fn a_slot_four_members_hold_says_all_four_holders() {
+    let _slots = cf_ledger::testing::slot_rule_off();
+    let scene = scene();
+    for name in ["hera", "ares", "pan"] {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(name.to_owned()),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: vec!["worker".to_owned()],
+                    tier: "standard".to_owned(),
+                },
+            )
+            .unwrap();
+    }
+    let (_, said) = staff(&scene, &scene.context).await;
+    assert_eq!(
+        said["slots"][1],
+        serde_json::json!({
+            "role": "worker", "tier": "standard",
+            "holders": ["zeus", "hera", "ares", "pan"]
+        })
+    );
+    assert_eq!(said["slots"][2]["holders"], serde_json::json!([]));
+}
+
 #[tokio::test]
 async fn staff_says_own_hands_only_while_the_person_has_it_on() {
     let scene = scene();

@@ -357,11 +357,6 @@ const NO_CRITICAL_CODING: &str =
 const NEVER_REFUSED_FOR_WANT: &str =
     "a task for a role nobody holds waits for a member and is told once the way on, where Node refused it (`no-member-of-tier`)";
 
-/// A critical task's lead was reworded in the role texts' own terms (T-1060):
-/// it changes no project file and answers to the chief.
-const CRITICAL_WORDS: &str =
-    "a critical task's lead says the work changes no project file and its findings go to the chief, where Node's forbade specifications and sent them to `your coordinator`";
-
 /// What Node's ledger drew in each call (the clock's readings, session
 /// names), answered here in the same order; drawing past them is noted.
 struct Draws<T> {

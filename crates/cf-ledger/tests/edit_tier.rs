@@ -202,7 +202,11 @@ fn a_role_nobody_holds_takes_the_edit_and_the_task_waits_for_one() {
         .expect("it")
         .task;
     assert_eq!(
-        (read.tier.as_deref(), read.body.as_str(), read.state.as_str()),
+        (
+            read.tier.as_deref(),
+            read.body.as_str(),
+            read.state.as_str()
+        ),
         (Some("light"), "A new brief", "open")
     );
 }
@@ -227,8 +231,7 @@ fn a_tier_that_is_none_is_refused_and_critical_work_needs_its_purpose() {
         (refused.code(), refused.to_string()),
         (
             Some("tier-not-offered"),
-            "a worker's task is complex, standard or light: critical work is not coding"
-                .to_owned()
+            "a worker's task is complex, standard or light: critical work is not coding".to_owned()
         )
     );
     // A purpose comes with Critical only.

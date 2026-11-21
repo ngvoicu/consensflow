@@ -100,10 +100,15 @@ pub(crate) fn place(
 ) -> Result<Placed, LedgerError> {
     let home = crate::roles::find(pool).map_or("standard", |role| role.home);
     let asked = tier.unwrap_or(home);
-    if may_take_slot(pool, asked, purpose) && has_members_of_tier(store, project_id, pool, Some(asked))? {
+    if may_take_slot(pool, asked, purpose)
+        && has_members_of_tier(store, project_id, pool, Some(asked))?
+    {
         return Ok(Placed::Stays(asked.to_owned()));
     }
-    let at = TIERS.iter().position(|tier| *tier == asked).unwrap_or_default();
+    let at = TIERS
+        .iter()
+        .position(|tier| *tier == asked)
+        .unwrap_or_default();
     let mut near: Vec<(usize, &str)> = TIERS
         .iter()
         .copied()
