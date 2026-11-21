@@ -203,7 +203,7 @@ fn a_long_base64_value_is_hidden_whether_or_not_a_digit_is_in_it() {
 fn a_name_a_path_and_a_number_are_not_taken_for_base64() {
     for text in [
         "ConsensFlowSupervisorStartupFailedError",
-        "/Users/gabrielvoicu/Projects/ngvoicu/consensflow/crates",
+        "/Users/someone-home/Projects/example/consensflow/crates",
         "cf_engine_dispatcher_tests_a_very_long_name_that_goes_on",
         "01234567890123456789012345678901234567890123456789",
     ] {
