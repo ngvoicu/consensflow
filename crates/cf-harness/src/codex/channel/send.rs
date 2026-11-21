@@ -176,7 +176,15 @@ pub async fn send(
     if deadline <= time.wall_ms() {
         return Ok(Answer::expired());
     }
-    Ok(hand_over(time, loopback, target, thread, text, deadline).await)
+    let answer = hand_over(time, loopback, target, thread, text, deadline).await;
+    if answer.ok && answer.admitted == Some(true) {
+        target.host.delivery_reported(target.pane);
+    } else if answer.admitted == Some(false) {
+        target.host.broker_send_failed();
+    } else {
+        target.host.send_admission_unknown();
+    }
+    Ok(answer)
 }
 
 /// The text handed to the broker, with what is left of the deadline to be

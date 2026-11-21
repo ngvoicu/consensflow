@@ -105,10 +105,10 @@
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
 //! harnesses a role goes to by a note, less the room its line takes). With `PATH_ONCE` off,
-//! the measured Mac fixture fits a staff of 138 rows with specs on or 162 without, two roles
+//! the measured Mac fixture fits a staff of 135 rows with specs on or 159 without, two roles
 //! per row and a name of twenty characters with model id and effort. The Windows PowerShell
-//! fixture fits 134 and 159. With the longest rules (8,000 bytes, 150 lines), specs on and even
-//! an empty staff need parts; without specs, 26 Mac rows or 23 Windows rows fit in one read.
+//! fixture fits 131 and 156. With the longest rules (8,000 bytes, 150 lines), specs on and even
+//! an empty staff need parts; without specs, 23 Mac rows or 20 Windows rows fit in one read.
 //! A role longer than that `cf` prints in parts, each within the bound
 //! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
 //! table goes on past a part, its line says so): the first by the command the paste
@@ -124,7 +124,7 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole. A chief's with specs on and the most
-//! rules needs parts even with an empty staff; without specs it fits 26 Mac rows or 23 Windows
+//! rules needs parts even with an empty staff; without specs it fits 23 Mac rows or 20 Windows
 //! rows in one piece. A row of the table is about 60 bytes.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the

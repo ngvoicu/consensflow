@@ -103,9 +103,33 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the wait boundary when a fixture reconstructs a ledger before 0043.
+pub fn undo_migration_0043(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP INDEX question_binding_wait;
+         ALTER TABLE question_binding DROP COLUMN wait_event_id;
+         ALTER TABLE question_binding DROP COLUMN wait_last_item;
+         ALTER TABLE question_binding DROP COLUMN wait_conversation_id;",
+    )
+}
+
+/// Remove the reminder objects when a test reconstructs a ledger from before 0042.
+pub fn undo_migration_0042(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP INDEX message_questions_for_chief; DROP INDEX message_answers_by_question; DROP TABLE question_reminder",
+    )
+}
+
 /// Remove the plan-key table when a test reconstructs a ledger from before 0040.
 pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("DROP TABLE task_plan_key")
+}
+
+/// Remove the prospective holding tables when a fixture reconstructs an older ledger.
+pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP TABLE question_handover; DROP TABLE question_binding; DROP TABLE question_holding; DROP TABLE question_resume_anchor;",
+    )
 }
 
 /// The last schema version Node's ledger had.
@@ -204,7 +228,16 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     }
     // Kept in their order: a table taken out mid-list must not move the last into its place.
     let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE, drawn_items::TABLE, "task_plan_key"])
+        .chain([
+            model_list::TABLE,
+            drawn_items::TABLE,
+            "task_plan_key",
+            "question_resume_anchor",
+            "question_holding",
+            "question_binding",
+            "question_handover",
+            "question_reminder",
+        ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
 }
@@ -268,6 +301,15 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != model_list::TABLE
             && entry["name"] != drawn_items::TABLE
             && entry["name"] != "task_plan_key"
+            && entry["name"] != "question_resume_anchor"
+            && entry["name"] != "question_holding"
+            && entry["name"] != "question_binding"
+            && entry["name"] != "question_binding_wait"
+            && entry["name"] != "question_handover"
+            && entry["name"] != "question_reminder"
+            && entry["name"] != "question_reminder_by_message"
+            && entry["name"] != "message_questions_for_chief"
+            && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"
             && entry["name"] != "participant_backup_insert"
             && entry["name"] != "participant_backup_update"
@@ -496,9 +538,10 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        let mut dump = json!({"userVersion": 39, "schema": schema, "tables": {
+        let mut dump = json!({"userVersion": 42, "schema": schema, "tables": {
             "participant": {"columns": ["id", "backup_of", "vacation_since", "out_kind", "handle"],
-                            "rows": [["3", "NULL", "NULL", "NULL", "'alpha'"]]}
+                            "rows": [["3", "NULL", "NULL", "NULL", "'alpha'"]]},
+            "question_reminder": {"columns": ["question_id"], "rows": [["7"]]}
         }});
         hold_apart_what_node_never_writes(dump["tables"].as_object_mut().unwrap());
         hold_apart_what_node_never_had_in_its_schema(&mut dump);
@@ -510,6 +553,7 @@ mod tests {
             dump["tables"]["participant"]["rows"],
             json!([["3", "'alpha'"]])
         );
+        assert!(dump["tables"].get("question_reminder").is_none());
         let schema = dump["schema"].as_array().unwrap();
         let participant = schema
             .iter()
@@ -528,6 +572,10 @@ mod tests {
             "participant_backup_insert",
             "participant_backup_update",
             "participant_backup_owner_update",
+            "question_reminder",
+            "question_reminder_by_message",
+            "message_questions_for_chief",
+            "message_answers_by_question",
         ] {
             assert!(
                 !schema.iter().any(|item| item["name"] == name),

@@ -64,6 +64,18 @@ pub(crate) fn approve_message(
             "message.approved",
             json!({ "message": message_id, "by": by }),
         )?;
+        if message.kind == "answer" {
+            if let Some(question) = message.reply_to {
+                if crate::holding::awaiting_handover(store, question)? {
+                    return known_message(store, message_id);
+                }
+                if crate::holding::question_is_live(store, question)? == Some(false) {
+                    let place = crate::holding::answer_place(store, message_id)?;
+                    crate::holding::close_question(store, question, &place)?;
+                    return known_message(store, message_id);
+                }
+            }
+        }
         adopt(store, message_id)?;
         if let ("answer", Some(tell), Some(task)) = (
             message.kind.as_str(),
@@ -104,16 +116,35 @@ pub(crate) fn decline_message(
             json!({ "message": message_id, "by": by }),
         )?;
         if let (Some(question), "answer") = (message.reply_to, message.kind.as_str()) {
-            reopen_question(store, question)?;
+            if crate::holding::question_is_live(store, question)? != Some(false) {
+                reopen_question(store, question)?;
+            }
         }
         let task = message_task(store, message_id)?;
         let reply_to = message
             .reply_to
             .map_or_else(|| "null".to_string(), |id| id.to_string());
         let mut told = message.sender.clone();
+        let moved = match (message.reply_to, task.as_ref()) {
+            (Some(question), Some(task))
+                if store.message(question)?.is_some_and(|asked| {
+                    matches!(
+                        asked.reason.as_deref(),
+                        Some(
+                            super::MOVED_QUESTION
+                                | super::RESTARTED_QUESTION
+                                | super::CLOSED_PROJECT_QUESTION
+                        )
+                    )
+                }) =>
+            {
+                Some(super::moved_task_takes_no_answer(store, task)?.to_string())
+            }
+            _ => None,
+        };
         let mut word = format!(
             "@{by} declined your answer to m-{reply_to}. {}",
-            answer_again(&reply_to)
+            moved.unwrap_or_else(|| answer_again(&reply_to))
         );
         if message.kind == "task" {
             if let Some(task) = &task {

@@ -191,10 +191,10 @@ pub type AfterPrepare = Rc<dyn Fn(&str)>;
 /// What the fake does with a delivery when it takes it: the agent refuses
 /// it, or takes it and shows it in its record. A test that replaced
 /// `deliver` runs it where it did (`deliver(request)` in the replacement).
-pub type Taking = Box<dyn FnOnce() -> Admission>;
+pub type Taking<'a> = Box<dyn FnOnce() -> Admission + 'a>;
 
 /// What a test's own `deliver` does with a delivery in place of the fake's.
-pub type Deliver = Rc<dyn Fn(Taking) -> Work<'static, Result<Admission, String>>>;
+pub type Deliver = Rc<dyn for<'a> Fn(Taking<'a>) -> Work<'a, Result<Admission, String>>>;
 
 /// The test's adapter, and its agents.
 pub struct FakeAdapter {

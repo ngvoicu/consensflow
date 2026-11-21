@@ -32,6 +32,8 @@ pub(crate) struct Queued<'a> {
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) choices: Option<&'a [Vec<String>]>,
     pub(crate) urgent: bool,
+    /// A replacement for a still-gated message must remain at the human gate.
+    pub(crate) must_gate: bool,
     pub(crate) role: Option<&'a str>,
     /// What a note of ConsensFlow's own to a chief that asks it no decision says on its
     /// task's line ([`SHOWN`]): it is never typed into the chief's window.
@@ -58,7 +60,7 @@ pub(crate) fn queue(
     project_id: i64,
     message: &Queued<'_>,
 ) -> Result<i64, LedgerError> {
-    let landing = if gate_holds(store, project_id, message.from, message.to)? {
+    let landing = if message.must_gate || gate_holds(store, project_id, message.from, message.to)? {
         "gated"
     } else if message.from_window || message.shown.is_some() {
         "read"
@@ -220,8 +222,27 @@ pub(crate) fn withdraw_gated(
     reason: &str,
 ) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ? WHERE task_id = ? AND state = 'gated'",
+        "UPDATE message SET state = 'cancelled', reason = ?1 WHERE task_id = ?2 AND state = 'gated'
+         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))",
         params![reason, task_id],
+    )?;
+    release_carried(store, task_id)
+}
+
+/// Reopening the same task keeps questions and answers of its current holding at the gate.
+pub(crate) fn withdraw_gated_for_reopen(
+    store: &mut Store,
+    task_id: i64,
+    window: i64,
+    reason: &str,
+) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET state = 'cancelled', reason = ?1 WHERE task_id = ?2 AND state = 'gated'
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE participant_id = ?3 AND closed = 0))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))
+         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding WHERE participant_id = ?3))",
+        params![reason, task_id, window],
     )?;
     release_carried(store, task_id)
 }
@@ -242,10 +263,12 @@ pub(crate) fn withdraw_result(store: &Store, task: &TaskRow, why: &str) -> Resul
 }
 
 /// A cancelled or failed task's queued messages are never delivered.
-pub(crate) fn drop_queued(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+pub(crate) fn drop_queued(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')",
+        &format!("UPDATE message SET state = 'cancelled' WHERE task_id = ? AND state IN ('queued', 'gated')
+         AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT {}", crate::waiting_questions::other_holding_sql("message")),
         [task_id],
     )?;
-    Ok(())
+    release_carried(store, task_id)
 }

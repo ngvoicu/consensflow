@@ -548,17 +548,12 @@ replace = '''
 [[plant]]
 name = "no low hold: a busy member's row has the button"
 meant = "a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list"
-runs = ["no-low-hold-page-holds"]
+runs = [["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a member whose model is busy says so"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now) && !part.busy)'''
-replace = '''    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now))'''
-
-[[plant.edit]]
-file = "app/ui/core/board.js"
-find = '''    if (teamLead(row, now).busy || out.length === 0) return []'''
-replace = '''    if (out.length === 0) return []'''
+find = '''    if (state === 'out' && !part.busy && acts(board)) {'''
+replace = '''    if (state === 'out' && acts(board)) {'''
 
 [[plant]]
 name = "no low hold: a busy member's chief card has the button"

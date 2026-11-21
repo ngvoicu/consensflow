@@ -47,8 +47,8 @@ replace = ""
 
 [[plant]]
 name = "review: a task sent back is not told to the one asked for the answer it lacks"
-meant = "a_task_sent_back_while_an_answer_waited_for_the_human_tells_the_chief_to_answer_it_again"
-runs = ["ledger-receipt"]
+meant = "a_same_window_reopen_reminds_the_chief_when_approval_declined_the_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_same_window_reopen_reminds_the_chief_when_approval_declined_the_answer"]]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"

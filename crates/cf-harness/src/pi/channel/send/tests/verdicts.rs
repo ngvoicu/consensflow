@@ -6,6 +6,44 @@ use std::cell::RefCell;
 use super::*;
 
 #[test]
+fn t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict() {
+    let mut stage = Stage::admitting();
+    assert!(stage.send("first").is_empty());
+    assert_eq!(stage.host.handovers.get(), 1, "the daemon sent the brief");
+    assert_eq!(
+        stage.host.reports.get(),
+        0,
+        "the extension has not acknowledged it"
+    );
+    stage.acknowledges(&json!({ "admitted": false, "bytesWritten": 0 }));
+    assert!(!stage.until_answered().ok);
+    assert_eq!(stage.host.send_failures.get(), 1);
+    assert_eq!(stage.host.reports.get(), 0, "a refusal is no take");
+
+    let mut stage = Stage::admitting();
+    assert!(stage.send("uncertain").is_empty());
+    stage.acknowledges(&json!({ "admitted": null }));
+    assert!(!stage.until_answered().ok);
+    assert_eq!(stage.host.send_unknowns.get(), 1);
+    assert_eq!(
+        stage.host.reports.get(),
+        0,
+        "an uncertain take is not a report"
+    );
+
+    let mut stage = Stage::admitting();
+    assert!(stage.send("second").is_empty());
+    assert_eq!(stage.host.reports.get(), 0);
+    stage.acknowledges(&json!({ "admitted": true, "mode": "tui" }));
+    assert!(stage.until_answered().ok);
+    assert_eq!(
+        stage.host.reports.get(),
+        1,
+        "the extension reported its take"
+    );
+}
+
+#[test]
 fn what_each_verdict_says_is_what_the_answer_says() {
     let ack = |fields: Value| {
         let mut ack = json!({ "id": "m-x" });
@@ -131,7 +169,7 @@ fn a_record_nobody_took_that_cannot_be_taken_out_is_uncertain_in_node_s_words() 
 }
 
 #[test]
-fn a_failure_after_the_claim_is_uncertain_and_never_a_refusal() {
+fn a_failed_inbox_publish_is_a_definite_failed_send() {
     // The host takes the record away as it claims: the rename then fails.
     let inbox = Rc::new(RefCell::new(String::new()));
     let seen = Rc::clone(&inbox);
@@ -146,7 +184,7 @@ fn a_failure_after_the_claim_is_uncertain_and_never_a_refusal() {
     let answer = answered(stage.send("vanishes"));
     assert_eq!(
         (answer.ok, answer.admitted, answer.error),
-        (false, None, Some("uncertain"))
+        (false, Some(false), Some("transport"))
     );
     let cause = answer.cause.unwrap();
     assert!(
@@ -154,5 +192,6 @@ fn a_failure_after_the_claim_is_uncertain_and_never_a_refusal() {
             && cause.contains(".json.tmp' -> '"),
         "{cause}"
     );
-    assert!(!answer.zero_bytes && answer.ack.is_none());
+    assert!(answer.zero_bytes && answer.ack.is_none());
+    assert_eq!(stage.host.send_failures.get(), 1);
 }

@@ -31,6 +31,27 @@ const ID: &str = "0000abcd-12345678";
 const BUILD: [&str; 2] = ["npm ci --no-audit --no-fund", "npm run build:bridge"];
 const EXIT_PATH_WRAPPER: &str = "try { %BODY% } finally { Remove-Item -LiteralPath (Join-Path $env:TEMP 'cf-nothing-here') -Force -ErrorAction SilentlyContinue }";
 
+#[test]
+fn stale_cases_with_long_lived_children_use_the_owned_fixture_job() {
+    let stale = include_str!("tests/stale.rs");
+    for name in [
+        "a_run_killed_hard_leaves_records_that_neither_make_the_machine_busy_nor_refuse_the_next_run",
+        "a_run_holds_nothing_of_the_machine_by_the_time_its_exit_line_is_read",
+    ] {
+        let body = stale
+            .split_once(&format!("fn {name}()"))
+            .unwrap()
+            .1
+            .split_once("\n}\n")
+            .unwrap()
+            .0;
+        assert!(
+            body.contains("case.contained_run("),
+            "{name} starts a command that can outlive the bootstrap; its fixture must keep a job"
+        );
+    }
+}
+
 fn exit_path_invocation(
     shell: &str,
     temporary: &std::path::Path,

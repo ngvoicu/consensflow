@@ -930,3 +930,342 @@ fn a_chief_switched_after_a_held_task_s_member_left_is_told_it_is_paused_and_no_
     );
     assert!(!handoff.contains("waits with @"), "{handoff}");
 }
+
+#[test]
+fn unanswered_question_is_reminded_after_receipt_then_two_hours_after_delivery_without_stacking() {
+    use cf_ledger::Read;
+
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let reminders = || {
+        tiers
+            .task(1)
+            .messages
+            .into_iter()
+            .filter(|m| m.kind == "note" && m.sender.is_none() && m.body.contains("question m-"))
+            .collect::<Vec<_>>()
+    };
+    context.advance(40 * 60_000);
+    context.pass().unwrap();
+    assert!(
+        reminders().is_empty(),
+        "a question not yet received starts no timer"
+    );
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000 - 1_000);
+    context.pass().unwrap();
+    assert!(reminders().is_empty(), "before 30 minutes");
+    context.advance(1_000);
+    context.pass().unwrap();
+    let first = reminders();
+    assert_eq!(first.len(), 1, "a typed reminder after 30 minutes");
+    assert_eq!(first[0].body, format!("T-1's question m-{} has waited 30 minutes. Answer it. If only the person can, ask them at the top of your reply, and don't keep the member waiting: finish the task with `{} task finish T-1`, and once they answer, give the next step as a new task with their answer.", question.id, CfWord::bare()));
+    context.advance(3 * 60 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(reminders().len(), 1, "a queued reminder is never stacked");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[first[0].id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(2 * 60 * 60_000 - 1_000);
+    context.pass().unwrap();
+    assert_eq!(reminders().len(), 1, "two hours from receipt, not creation");
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(
+        reminders().len(),
+        2,
+        "a second reminder when the two hours are up"
+    );
+    assert!(reminders()[1]
+        .body
+        .contains("has waited 5 h 30 min. Answer it."));
+    context.answer(tiers.project.id, question.id, "Use the test key");
+    context.advance(3 * 60 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(
+        reminders().len(),
+        2,
+        "an answered question is not reminded again"
+    );
+}
+
+#[test]
+fn a13_cross_task_reminder_names_the_subject_but_offers_to_finish_the_held_task() {
+    use cf_ledger::Read;
+
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.give(tiers.project.id, "diana", "The topic");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 2, "About T-2?");
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let notes: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("question m-{}", question.id)))
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0]
+            .body
+            .starts_with(&format!("T-2's question m-{}", question.id)),
+        "{}",
+        notes[0].body
+    );
+    assert!(
+        notes[0]
+            .body
+            .contains(&format!("`{} task finish T-1`", CfWord::bare())),
+        "{}",
+        notes[0].body
+    );
+}
+
+#[test]
+fn gated_question_counts_from_receipt_by_the_chief_not_its_time_at_the_gate() {
+    use cf_ledger::Read;
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .set_gate(tiers.project.id, true)
+        .unwrap();
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    assert_eq!(question.state, "gated");
+    context.advance(60 * 60_000);
+    context.pass().unwrap();
+    let notes = || {
+        tiers
+            .task(1)
+            .messages
+            .into_iter()
+            .filter(|m| m.kind == "note" && m.body.contains("question m-"))
+            .count()
+    };
+    assert_eq!(notes(), 0, "the question has not yet reached the chief");
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(question.id, "human")
+        .unwrap();
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000 - 1_000);
+    context.pass().unwrap();
+    assert_eq!(notes(), 0);
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(notes(), 1, "the chief has had it for 30 minutes");
+}
+
+#[test]
+fn a_finished_question_withdraws_its_queued_reminder_and_is_not_reminded_again() {
+    use cf_ledger::Read;
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let reminders = || {
+        tiers
+            .task(1)
+            .messages
+            .into_iter()
+            .filter(|m| m.kind == "note" && m.sender.is_none() && m.body.contains("question m-"))
+            .collect::<Vec<_>>()
+    };
+    let first = reminders();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].state, "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .record_finished(tiers.project.id, 1, "Work so far", (0, 0))
+        .unwrap();
+    assert_eq!(context.message(question.id).state, "cancelled");
+    assert_eq!(
+        context.message(first[0].id).state,
+        "cancelled",
+        "a queued reminder must not reach the chief after Finish"
+    );
+    context.advance(3 * 60 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(
+        reminders().len(),
+        1,
+        "a closed question has no new reminders"
+    );
+}
+
+#[test]
+fn answering_one_question_withdraws_only_its_queued_reminder() {
+    use cf_ledger::Read;
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let first = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let second = context.ask(tiers.project.id, "zeus", "chief", 1, "Which page?");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[first.id, second.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let notes = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("question m-"))
+        .collect::<Vec<_>>();
+    assert_eq!(notes.len(), 2);
+    let of = |question| {
+        notes
+            .iter()
+            .find(|m| m.body.contains(&format!("question m-{question} ")))
+            .unwrap()
+            .id
+    };
+    context.answer(tiers.project.id, first.id, "Use the key");
+    assert_eq!(context.message(of(first.id)).state, "cancelled");
+    assert_eq!(context.message(of(second.id)).state, "queued");
+}
+
+#[test]
+fn a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered() {
+    use cf_ledger::Read;
+    use cf_proto::cf_word::Shell;
+    let context = Context::new();
+    let cf = CfWord::new(r"C:\Program Files\ConsensFlow\cf.exe", Shell::PowerShell);
+    *context.roles.cf.borrow_mut() = cf.clone();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &cf)
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let note = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .find(|m| m.kind == "note" && m.body.contains("question m-"))
+        .unwrap();
+    // A switched chief can run a different shell on Windows: the stored note
+    // must be rendered for the recipient at delivery, not its previous shell.
+    let bash = CfWord::new(r"C:\Program Files\ConsensFlow\cf.exe", Shell::Posix);
+    for current in [&cf, &bash] {
+        let delivered = cf_engine::delivery_text::delivery_text(&note, &[], current);
+        assert!(
+            delivered.contains(&format!("`{current} task finish T-1`")),
+            "{delivered}"
+        );
+    }
+}
+
+#[test]
+fn a_question_read_during_delivery_counts_from_the_read_not_the_later_confirmation() {
+    use cf_ledger::Read;
+    use serde_json::json;
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(question.id)
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    assert_eq!(context.message(question.id).state, "delivering");
+    context.advance(20 * 60_000);
+    context
+        .ledger
+        .borrow_mut()
+        .confirm_delivery(question.id, Some(&json!({"item":"later"})))
+        .unwrap();
+    context.advance(10 * 60_000);
+    context.pass().unwrap();
+    let notes = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("question m-"))
+        .collect::<Vec<_>>();
+    assert_eq!(notes.len(), 1, "the chief read the question 30 minutes ago");
+}
+
+#[test]
+fn a_question_read_while_its_delivery_is_still_unsettled_is_reminded() {
+    use cf_ledger::Read;
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    let question = context.ask(tiers.project.id, "zeus", "chief", 1, "Which key?");
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .begin_delivery(question.id)
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(chief, &[question.id], Read::Inbox, &CfWord::bare())
+        .unwrap();
+    context.advance(30 * 60_000);
+    context.pass().unwrap();
+    let reminders = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("question m-"))
+        .count();
+    assert_eq!(
+        reminders, 1,
+        "a read question does not wait for its paste to settle"
+    );
+}

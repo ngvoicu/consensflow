@@ -47,8 +47,8 @@ runs = ["ledger-self-steps"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/own_steps.rs"
-find = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated')\","
-replace = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND 1 = 0\","
+find = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND NOT {}\","
+replace = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND NOT {} AND 1 = 0\","
 
 [[plant]]
 name = "own steps: the chief's own result comes back to it to be pasted"

@@ -45,6 +45,8 @@ pub enum Until {
     Resume,
     /// The end of the human's meeting with the chief.
     MeetingEnds,
+    /// An answer that was withdrawn and returned to its author.
+    Returned,
 }
 
 impl Until {
@@ -53,6 +55,7 @@ impl Until {
         match self {
             Self::Resume => WAITS,
             Self::MeetingEnds => MEETING_WAITS,
+            Self::Returned => "(this answer belongs to an ended window)",
         }
     }
 
@@ -60,9 +63,13 @@ impl Until {
     /// that it comes. The refusal and the note a thread has in its place are this
     /// one sentence.
     fn said_of(self, id: i64) -> String {
+        if matches!(self, Self::Returned) {
+            return format!("m-{id} belongs to a window that no longer holds its question");
+        }
         let until = match self {
             Self::Resume => "until the human resumes the project",
             Self::MeetingEnds => "until your meeting with the human ends",
+            Self::Returned => unreachable!(),
         };
         format!("m-{id} waits {until}: it comes to you then")
     }
@@ -92,6 +99,7 @@ pub struct Waits<'a> {
     /// What the reader's meeting with the human holds, the reader being the chief
     /// of an open project in a meeting.
     meeting: Vec<i64>,
+    returned: Vec<i64>,
 }
 
 impl<'a> Waits<'a> {
@@ -119,11 +127,14 @@ impl<'a> Waits<'a> {
         } else {
             Vec::new()
         };
+        let returned =
+            ledger.returned_answers_hidden_from(caller.project.id, caller.participant.id)?;
         Ok(Self {
             closed,
             reader: &caller.participant.handle,
             handed,
             meeting,
+            returned,
         })
     }
 
@@ -140,6 +151,9 @@ impl<'a> Waits<'a> {
     pub fn until(&self, message: &MessageView) -> Option<Until> {
         if message.sender.as_deref() == Some(self.reader) {
             return None;
+        }
+        if self.returned.contains(&message.id) {
+            return Some(Until::Returned);
         }
         if self.closed
             && matches!(message.state.as_str(), "queued" | "delivering")

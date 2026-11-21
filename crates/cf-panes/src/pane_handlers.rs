@@ -249,7 +249,8 @@ fn register(
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
         let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
-            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes(), read_empty)?)
+            let pending = paste_queue.paste(key, body.into_bytes(), read_empty)?;
+            wait_for_input_blocking(pending)
         });
         Ok(match pasted {
             Ok(()) => json!({"ok":true}),

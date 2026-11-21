@@ -26,7 +26,8 @@ fn request_daemon(connection: Result<Bridge, String>, operation: String, body: V
         Ok(bridge) => bridge,
         Err(cause) => return not_available(&operation, &cause),
     };
-    match bridge.request(operation.clone(), body, None) {
+    let deadline = cf_proto::page::request_deadline_ms(&operation);
+    match bridge.request(operation.clone(), body, deadline) {
         Ok(response) => response,
         Err(error) => json!({"ok":false,"error":error.to_string(),"operation":operation}),
     }
@@ -739,6 +740,47 @@ mod tests {
                 "detail":"ConsensFlow's daemon stopped while the app was running",
             })
         );
+    }
+
+    /// The real app-side bridge must wait past its usual deadline for a
+    /// model listing and pass the daemon's diagnosis on to the page.
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_model_listing_reaches_the_page_with_its_diagnosis() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let (host, mut peer) = UnixStream::pair().unwrap();
+        peer.write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .unwrap();
+        let connected = BridgeBuilder::new(Role::Host, 1024 * 1024)
+            .connect(host.try_clone().unwrap(), host)
+            .unwrap();
+        let daemon = thread::spawn(move || {
+            let mut line = String::new();
+            BufReader::new(peer.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["op"], "models.get");
+            std::thread::sleep(Duration::from_millis(30_500));
+            serde_json::to_writer(&mut peer, &json!({
+                "v": 1, "id": request["id"], "kind": "res", "op": "models.get",
+                "body": {"ok": true, "listing": {"freshness": {"why": "A package or extension of Pi's may be stuck"}}},
+            })).unwrap();
+            peer.write_all(b"\n").unwrap();
+        });
+        let answer = request_daemon(
+            Ok(connected.bridge),
+            "models.get".to_owned(),
+            json!({"harness": "pi"}),
+        );
+        daemon.join().unwrap();
+        assert_eq!(answer["ok"], true, "{answer}");
+        assert!(answer["listing"]["freshness"]["why"]
+            .as_str()
+            .unwrap()
+            .contains("package or extension"));
     }
 
     #[test]

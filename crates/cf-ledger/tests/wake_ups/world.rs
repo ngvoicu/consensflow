@@ -105,6 +105,23 @@ pub fn calls(on: bool, every: i64, unit: WakeUpUnit) -> NewWakeUp {
 }
 
 impl World {
+    /// Recreate a ledger from before tracking, or inspect a test-owned binding.
+    pub fn edit(&mut self, change: impl FnOnce(&rusqlite::Connection)) {
+        self.ledger.close_in_place().unwrap();
+        let file = self._dir.path().join("consensflow.db");
+        let db = rusqlite::Connection::open(&file).unwrap();
+        change(&db);
+        db.close().unwrap();
+        self.ledger = open_ledger(
+            &file,
+            Options {
+                clock: Box::new(Moving(Rc::clone(&self.now))),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+    }
+
     /// The clock moves on.
     pub fn advance(&self, ms: i64) {
         self.now.set(self.now.get() + ms);

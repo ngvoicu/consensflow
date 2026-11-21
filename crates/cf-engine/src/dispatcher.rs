@@ -124,6 +124,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     pub fn new(seams: Seams) -> Rc<Self> {
+        seams.ledger.borrow_mut().begin_question_engine();
         Rc::new(Self {
             seams,
             records: RefCell::new(HashMap::new()),
@@ -880,6 +881,9 @@ impl Dispatcher {
         let listed = self.seams.ledger.borrow().projects()?;
         let mut projects = Vec::with_capacity(listed.len());
         for project in listed {
+            if project.state == "open" {
+                self.remind_waiting_questions(&project)?;
+            }
             if project.state == "open" && self.assign_open_tasks(&project)? {
                 projects.push(self.known_project(project.id)?);
             } else {
@@ -1017,12 +1021,17 @@ impl Dispatcher {
         let said_yes = trust::yes_at_exit(&record, &shown);
         // What the engine had sent this window, told before `closed` clears it.
         let sent = record.window.borrow().sent_to.contains(pane);
-        self.closed(&record);
-        // No door survives its window: what one claimed and none acknowledged is the ledger's again.
+        // No door survives its window. Release claims before closing its
+        // questions, while a claimed answer is still queued and can be found.
         self.seams
             .ledger
             .borrow_mut()
             .release_claims(record.id, "its window exited")?;
+        let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(
+            record.id,
+            delivering.as_ref().map(|delivery| delivery.message),
+        )?;
+        self.closed(&record);
         // A participant that left is forgotten already: its exit settles nothing more.
         let was_leaving = {
             let mut leaving = self.leaving.borrow_mut();
@@ -1115,16 +1124,22 @@ impl Dispatcher {
                 let closed_with_project = project.state != "open" || resume_member_failed;
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
-                self.settle_gone(delivering, closed_with_project, move |delivering| {
-                    // A chief's first message (a handoff, most often) waits for its next window.
-                    if delivering.chief || closed_with_project {
-                        this.give_back(delivering.message, &told)
-                    } else {
-                        let retry = !delivering.launch;
-                        this.settle_failure(delivering, &told, retry)
-                    }
-                })
-                .await?;
+                let settled = self
+                    .settle_gone(delivering, closed_with_project, move |delivering| {
+                        // A chief's first message (a handoff, most often) waits for its next window.
+                        if delivering.chief || closed_with_project {
+                            this.give_back(delivering.message, &told)
+                        } else {
+                            let retry = !delivering.launch;
+                            this.settle_failure(delivering, &told, retry)
+                        }
+                    })
+                    .await;
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .settle_closed_window_answers(&deferred_answers)?;
+                settled?;
                 // The record may have been read with no window open: a participant that
                 // moved on meanwhile settles nothing more of this exit, and one that did
                 // not goes on with its project as it is now.
@@ -2179,6 +2194,9 @@ impl Dispatcher {
             // launch watches the stops its window pays.
             let first = match &coming {
                 Some(coming) => {
+                    if matches!(coming, Coming::Member { .. }) {
+                        this.bound_question_wait(project.id, participant).await?;
+                    }
                     let note = match this.cut_note(&project, &who, coming).await {
                         Ok(note) => note,
                         Err(cause) => {

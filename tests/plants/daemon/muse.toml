@@ -2160,14 +2160,20 @@ replace = '''
 [[plant]]
 name = "muse: the page says why only generically"
 meant = "says a member whose harness moved its model on its own is held, why in the words the engine gave, and what to do"
-runs = ["muse-page-why"]
+runs = [["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "says a member whose harness moved its model on its own is held"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
+function outShort({ participant, activity, busy }, now) {
+  if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
+  const said = (prefix) =>
     activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
 '''
 replace = '''
+function outShort({ participant, activity, busy }, now) {
+  if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
+  const said = (prefix) =>
     null
 '''
 

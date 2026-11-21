@@ -32,13 +32,16 @@ fn to_answer_again(store: &Store, task: i64, window: i64) -> Result<Vec<(i64, i6
         .prepare(
             "SELECT q.id, q.recipient_id FROM message q
              WHERE q.task_id = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
+                 OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
+                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
                AND EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
                            AND a.state IN ('cancelled', 'failed'))
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
                                AND a.state IN ('gated', 'queued', 'delivering', 'delivered', 'read'))
              ORDER BY q.id",
         )?
-        .query_map(params![task, window], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .query_map(params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 

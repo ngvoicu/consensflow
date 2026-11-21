@@ -62,27 +62,83 @@ const runsLabel = (member, named = true) => {
     .join(' · ')
 }
 
-/** One row of a staff table: the member, one of its roles, a Remove for that role, and an Edit of the member where it has one. */
-function staffRow(who, role, remove, edit = null) {
-  const row = element('tr')
-  row.dataset.role = role
-  row.append(who, element('td', null, roleLabel(role)))
-  const tools = element('td')
-  if (edit !== null) tools.append(edit)
-  tools.append(remove)
-  row.append(tools)
-  return row
+/** A member's roles in the order the picker offers them. */
+const inRoleOrder = (roles) => [...roles].sort((a, b) => rank(roleIds(), a) - rank(roleIds(), b))
+
+/** A staff table's last cell: the actions of the member or backup its row is for. */
+function toolsCell(tools) {
+  const cell = element('td', 'staff-tools')
+  const actions = element('div', 'staff-actions')
+  actions.append(...tools)
+  cell.append(actions)
+  return cell
 }
 
-/** The same backup row in both staff dialogs; its member supplies its role and tier. */
-function backupStaffRow(who, owner, controls) {
-  who.append(element('br'), element('span', 'member-meta', `backup of ${owner}`))
-  const row = element('tr')
-  const tools = element('td')
-  tools.append(...controls)
-  row.append(who, element('td'), tools)
-  return row
+/**
+ * A member's rows in a staff table, the same in both staff dialogs: one a role, each with that
+ * role's Remove beside it, and the member's cell and its own tools once, beside them all. The
+ * member's backup slot follows them (`backupSlot`): together they are the member's group, as the
+ * board draws a member and its backup as one team (the owner, 2026-11-19).
+ */
+function memberGroup(who, roles, tools) {
+  return roles.map(({ role, remove }, at) => {
+    const row = element('tr', at === 0 ? 'staff-group' : 'staff-group-more')
+    row.dataset.role = role
+    const removing = element('td', 'staff-role-remove')
+    removing.append(remove)
+    if (at === 0) who.rowSpan = roles.length
+    if (at === 0) row.append(who)
+    row.append(element('td', null, roleLabel(role)), removing)
+    if (at === 0) {
+      const cell = toolsCell(tools)
+      cell.rowSpan = roles.length
+      row.append(cell)
+    }
+    return row
+  })
 }
+
+/**
+ * A staff's groups, one a member, shaded odd and even in turn (the owner, 2026-11-20: "lets make
+ * each row a different color/shade like odd/even"): a member's rows and its backup slot take
+ * one shade, so one member is told from the next and never split from its backup.
+ */
+const shaded = (groups) =>
+  groups.flatMap((rows, at) => {
+    for (const row of rows) row.dataset.shade = at % 2 === 0 ? 'odd' : 'even'
+    return rows
+  })
+
+/**
+ * The last row of a member's group, alike under every member that may have a backup, in both
+ * staff dialogs: its backup (`who`, a staff cell, with Change backup, its Vacation and Remove
+ * backup) or none (null, with Add backup). An image designer has no slot: it has no backup.
+ */
+function backupSlot(owner, who, tools) {
+  const row = element('tr', 'staff-group-more backup-slot')
+  row.dataset.backupOf = owner
+  const cell = element('td')
+  cell.colSpan = 3
+  const part = element('div', who === null ? 'backup-part backup-none' : 'backup-part')
+  // Said to a screen reader as "backup of @zeus …", or "backup for @zeus: none".
+  part.append(
+    element('span', 'team-kind', 'backup'),
+    element('span', 'visually-hidden', who === null ? ` for ${owner}: ` : ` of ${owner} `),
+  )
+  if (who === null) part.append(element('span', 'member-meta', 'none'))
+  else part.append(...who.childNodes)
+  cell.append(part)
+  row.append(cell, toolsCell(tools))
+  return { row, part }
+}
+
+/** A backup slot's actions, the same in both staff dialogs: named for the member they are for. */
+const addBackup = (owner, action) =>
+  button('Add backup', 'quiet-button', action, `Add backup for ${owner}`)
+const changeBackup = (owner, action) =>
+  button('Change backup', 'quiet-button', action, `Change backup for ${owner}`)
+const removeBackup = (owner, action) =>
+  button('Remove backup', 'quiet-button', action, `Remove backup for ${owner}`)
 
 /** A staff table's first cell: who, and what it runs. */
 function whoCell(name, runs) {
@@ -134,11 +190,11 @@ function needsEditCell(name, runs, agent) {
   return cell
 }
 
-/** A staff table with nobody in it says so, and what to do, across its three columns. */
+/** A staff table with nobody in it says so, and what to do, across its four columns. */
 function nobodyRow(text) {
   const row = element('tr', 'staff-empty')
   const cell = element('td', null, text)
-  cell.colSpan = 3
+  cell.colSpan = 4
   row.append(cell)
   return row
 }
@@ -619,6 +675,7 @@ const TIER_PICK = Object.entries(TIER_LABEL)
 class MemberPicker {
   #fieldset
   #role
+  #harness
   #effort
   #tier
   #refresh
@@ -673,6 +730,7 @@ class MemberPicker {
     this.#fieldset = form.querySelector('.staff-add')
     this.#legend = this.#fieldset.querySelector('legend')
     this.#role = form.elements.role
+    this.#harness = form.elements.memberHarness
     this.#effort = form.elements.memberEffort
     this.#tier = form.elements.memberTier
     this.#refresh = form.elements.memberRefresh
@@ -753,6 +811,17 @@ class MemberPicker {
     this.#tier.closest('label').hidden = true
     this.#submit.textContent = current ? 'Save backup' : 'Add backup'
     this.#cancel.hidden = false
+    this.#reveal()
+  }
+
+  /**
+   * Brings the form into sight, its harness picked first, once a staff row's action fills it:
+   * the staff above it can be longer than the dialog, and the form below would change unseen.
+   */
+  #reveal() {
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+    this.#fieldset.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' })
+    this.#harness.focus({ preventScroll: true })
   }
 
   /**
@@ -770,6 +839,7 @@ class MemberPicker {
     this.#submit.textContent = 'Save member'
     this.#cancel.hidden = false
     this.say('')
+    this.#reveal()
     this.#fillHarnesses(member.roles.some(isImageAgentRole) ? ['codex'] : null)
     const kind = member.harness ?? ''
     if (!(kind in HARNESS_NAMES) || this.#missing.includes(harnessOf(kind))) return
@@ -1191,97 +1261,99 @@ export class NewProjectDialog {
   }
 
   #draw() {
-    const primaries = this.#picked.filter((pick) => pick.backupOf == null)
     const backups = new Map(
       this.#picked.filter((pick) => pick.backupOf != null).map((pick) => [pick.backupOf, pick]),
     )
-    const entries = primaries
-      .map((pick) => ({ ...pick, name: modelShown(pick) }))
-      .sort(byRoleAndTier)
-    const rows = []
-    for (const pick of entries) {
-      const remove = button(
-        'Remove',
-        'quiet-button',
-        () => {
-          this.#picked = this.#picked.filter(
-            (kept) => !(kept._id === pick._id && kept.role === pick.role),
-          )
-          if (!this.#picked.some((kept) => kept._id === pick._id)) {
-            this.#picked = this.#picked.filter((kept) => kept.backupOf !== pick._id)
-          }
-          this.#draw()
-        },
-        `Remove ${roleLabel(pick.role)} ${pick.name}`,
-      )
-      const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
-      if (pick.vacationSince) {
-        row.firstElementChild.append(element('br'), element('span', 'member-meta', 'on Vacation'))
-        row.lastElementChild.append(
-          vacationButton(pick.name, true, () => {
-            for (const chosen of this.#picked)
-              if (chosen._id === pick._id) chosen.vacationSince = null
-            this.#draw()
-          }),
-        )
-      }
-      row.dataset.model = pick.model ?? ''
-      rows.push(row)
-      if (pick.role === 'designer') continue
-      const backup = backups.get(pick._id)
-      const owner = { key: pick._id, label: pick.name }
-      if (backup) {
-        const row = backupStaffRow(
-          whoCell(
-            modelShown(backup),
-            runsLabel({ ...backup, role: pick.role, tier: pick.tier }, false),
-          ),
-          pick.name,
-          [
-            button(
-              'Change',
-              'quiet-button',
-              () => void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) }),
-              `Change backup for ${pick.name}`,
-            ),
-            button(
-              'Remove',
-              'quiet-button',
-              () => {
-                this.#picked = this.#picked.filter((kept) => kept.backupOf !== pick._id)
-                this.#draw()
-              },
-              `Remove backup for ${pick.name}`,
-            ),
-          ],
-        )
-        row.dataset.model = backup.model ?? ''
-        if (backup.vacationSince) {
-          row.firstElementChild.append(element('br'), element('span', 'member-meta', 'on Vacation'))
-          row.lastElementChild.append(
-            vacationButton(backup.model, true, () => {
-              backup.vacationSince = null
-              this.#draw()
-            }),
-          )
-        }
-        rows.push(row)
-      } else {
-        row.lastElementChild.append(
-          button(
-            `Add ${pick.name}'s backup`,
-            'quiet-button',
-            () => void this.#member.backupFor(owner),
-            `Add backup for ${pick.name}`,
-          ),
-        )
-      }
+    // A member is its picks, one a role, under one id: drawn as one group.
+    const members = new Map()
+    for (const pick of this.#picked) {
+      if (pick.backupOf != null) continue
+      if (!members.has(pick._id)) members.set(pick._id, [])
+      members.get(pick._id).push(pick)
     }
+    const groups = [...members.values()]
+      .map((picks) => {
+        const roles = inRoleOrder(picks.map((pick) => pick.role))
+        // The member's tier is its tiered picks' (a role with no tier is picked with none).
+        const lead = picks.find((pick) => pick.tier !== undefined) ?? picks[0]
+        return { picks, roles, lead, role: roles[0], tier: lead.tier, name: modelShown(lead) }
+      })
+      .sort(byRoleAndTier)
+    const rows = shaded(groups.map((group) => this.#group(group, backups.get(group.lead._id))))
     if (rows.length === 0) {
       rows.push(nobodyRow('Nobody yet: pick a role, a harness, a model and a tier, then Add.'))
     }
     this.#staff.replaceChildren(...rows)
     this.#drawComputerUse()
+  }
+
+  /** A member's group: its rows, one a role, and its backup slot. */
+  #group({ roles, lead, name }, backup) {
+    const id = lead._id
+    const who = whoCell(name, runsLabel({ ...lead, roles }, false))
+    const tools = []
+    if (lead.vacationSince) {
+      who.append(element('br'), element('span', 'member-meta', 'on Vacation'))
+      tools.push(
+        vacationButton(name, true, () => {
+          for (const chosen of this.#picked) if (chosen._id === id) chosen.vacationSince = null
+          this.#draw()
+        }),
+      )
+    }
+    const removes = roles.map((role) => ({
+      role,
+      remove: button(
+        'Remove',
+        'quiet-button',
+        () => {
+          this.#picked = this.#picked.filter((kept) => !(kept._id === id && kept.role === role))
+          if (!this.#picked.some((kept) => kept._id === id)) {
+            this.#picked = this.#picked.filter((kept) => kept.backupOf !== id)
+          }
+          this.#draw()
+        },
+        `Remove ${roleLabel(role)} ${name}`,
+      ),
+    }))
+    const rows = memberGroup(who, removes, tools)
+    for (const row of rows) row.dataset.model = lead.model ?? ''
+    if (roles.includes('designer')) return rows
+    const owner = { key: id, label: name }
+    if (!backup) {
+      const { row } = backupSlot(name, null, [
+        addBackup(name, () => void this.#member.backupFor(owner)),
+      ])
+      return [...rows, row]
+    }
+    const said = whoCell(
+      modelShown(backup),
+      runsLabel({ ...backup, roles, tier: lead.tier }, false),
+    )
+    const actions = [
+      changeBackup(
+        name,
+        () => void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) }),
+      ),
+    ]
+    if (backup.vacationSince) {
+      said.append(element('br'), element('span', 'member-meta', 'on Vacation'))
+      actions.push(
+        vacationButton(backup.model, true, () => {
+          backup.vacationSince = null
+          this.#draw()
+        }),
+      )
+    }
+    actions.push(
+      removeBackup(name, () => {
+        this.#picked = this.#picked.filter((kept) => kept.backupOf !== id)
+        this.#draw()
+      }),
+    )
+    const { row } = backupSlot(name, said, actions)
+    row.dataset.model = backup.model ?? ''
+    return [...rows, row]
   }
 
   /** The picked rows as the daemon takes a staff: each member once, with its roles. */
@@ -1674,33 +1746,22 @@ export class ProjectSettingsDialog {
         .filter((member) => member.backupOf != null)
         .map((member) => [member.backupOf, member]),
     )
-    const entries = primaries
-      .flatMap((member) =>
-        this.#memberRows(member).map((entry) => ({
-          ...entry,
+    const rows = shaded(
+      primaries
+        .map((member) => ({
+          member,
+          role: inRoleOrder(member.roles)[0],
           tier: member.tier,
           name: member.handle,
-          member,
-        })),
-      )
-      .sort(byRoleAndTier)
-    const rows = []
-    for (const entry of entries) {
-      rows.push(entry.row)
-      const owner = entry.member
-      if (owner.designer || this.#removing === owner.handle) continue
-      const backup = backups.get(owner.id)
-      if (backup) rows.push(this.#backupRow(owner, backup))
-      else
-        entry.row.lastElementChild.append(
-          button(
-            `Add @${owner.handle}'s backup`,
-            'quiet-button',
-            () => void this.#member.backupFor({ key: owner.handle, label: `@${owner.handle}` }),
-            `Add backup for @${owner.handle}`,
-          ),
-        )
-    }
+        }))
+        .sort(byRoleAndTier)
+        .map(({ member }) => {
+          const rows = this.#memberRows(member)
+          if (member.designer || this.#removing === member.handle) return rows
+          const backup = backups.get(member.id)
+          return [...rows, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
+        }),
+    )
     if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the members this project may use.'))
     redraw(this.#members, rows)
     this.#gate.checked = board.project.gate ?? false
@@ -1788,27 +1849,22 @@ export class ProjectSettingsDialog {
   /** A backup has its own identity but takes its member's roles and tier. */
   #backupRow(owner, backup) {
     const name = `@${backup.handle}`
+    const of = `@${owner.handle}`
     const runs = runsLabel(backup)
     const who = backup.needsEdit
       ? needsEditCell(name, runs, backup.agent)
       : this.#modelGone(backup)
         ? goneCell(name, modelShown(backup), runs, HARNESS_NAMES[backup.harness])
         : whoCell(name, runs)
-    const row = backupStaffRow(who, `@${owner.handle}`, [
-      this.#vacation(backup),
-      button(
-        'Change',
-        'quiet-button',
+    const { row, part } = backupSlot(of, who, [
+      changeBackup(
+        of,
         () =>
-          void this.#member.backupFor(
-            { key: owner.handle, label: `@${owner.handle}` },
-            this.#memberNow(backup),
-          ),
-        `Change backup for @${owner.handle}`,
+          void this.#member.backupFor({ key: owner.handle, label: of }, this.#memberNow(backup)),
       ),
-      button(
-        'Remove',
-        'quiet-button',
+      this.#vacation(backup),
+      removeBackup(
+        of,
         () =>
           void this.#page.act(async () => {
             try {
@@ -1816,24 +1872,31 @@ export class ProjectSettingsDialog {
                 project: this.#project,
                 member: owner.handle,
               })
-              this.#page.note(`@${owner.handle}'s backup left the staff.`)
+              this.#page.note(`${of}'s backup left the staff.`)
             } catch (refused) {
               this.#member.say(refused instanceof Error ? refused.message : String(refused))
               throw refused
             }
           }),
-        `Remove backup for @${owner.handle}`,
       ),
     ])
     row.dataset.handle = backup.handle
-    this.#sayOut(who, backup)
+    this.#sayOut(part, backup)
     return row
   }
 
+  /** The slot of a member with no backup: the same place, with Add backup. */
+  #noBackupRow(owner) {
+    const of = `@${owner.handle}`
+    return backupSlot(of, null, [
+      addBackup(of, () => void this.#member.backupFor({ key: owner.handle, label: of })),
+    ]).row
+  }
+
   /**
-   * A member's rows, one per role, each with the role it stands for: Remove
-   * drops that role, or, for its last role, asks first and takes the member
-   * off the staff.
+   * A member's rows, one per role, each with the role it stands for and its Remove: Remove
+   * drops that role, or, for its last role, asks first and takes the member off the staff. Its
+   * name and its own tools (Edit, its Vacation) are once, beside all of them.
    */
   #memberRows(member) {
     const page = this.#page
@@ -1841,23 +1904,21 @@ export class ProjectSettingsDialog {
     // A model its harness no longer lists is marked, and said (T-1143); ending its shift
     // and its replacement are the staff chains' (CHN-11).
     const gone = this.#modelGone(member)
-    // What the member runs on, its own (harness-models), and its tier, in a row of `roles`:
-    // none in the row of a role with no tier.
-    const who = (roles = member.roles) => {
-      const runs = runsLabel({ ...member, roles })
-      return member.needsEdit
-        ? needsEditCell(name, runs, member.agent)
-        : gone
-          ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
-          : whoCell(name, runs)
-    }
+    // What the member runs on, its own (harness-models), and its tier: none where none of its
+    // roles has a tier.
+    const runs = runsLabel(member)
+    const who = member.needsEdit
+      ? needsEditCell(name, runs, member.agent)
+      : gone
+        ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
+        : whoCell(name, runs)
     if (this.#removing === member.handle) {
-      const row = element('tr')
+      const row = element('tr', 'staff-group')
       row.dataset.handle = member.handle
-      row.append(who())
-      // The ask takes the role's column and the Remove's.
+      row.append(who)
+      // The ask takes the role's column, its Remove's and the tools'.
       const cell = element('td')
-      cell.colSpan = 2
+      cell.colSpan = 3
       const keep = button(`Keep ${name}`, 'quiet-button', () => {
         this.#removing = null
         this.#draw()
@@ -1876,10 +1937,11 @@ export class ProjectSettingsDialog {
         yes,
       )
       row.append(cell)
-      return [{ role: member.roles[0], row }]
+      return [row]
     }
-    return member.roles.map((role) => {
-      const remove = button(
+    const removes = inRoleOrder(member.roles).map((role) => ({
+      role,
+      remove: button(
         'Remove',
         'quiet-button',
         () => {
@@ -1898,22 +1960,25 @@ export class ProjectSettingsDialog {
           })
         },
         `Remove ${roleLabel(role)} ${name}`,
-      )
-      // An image designer has nothing to edit: Codex's own model, no effort, no tier.
-      const edit = member.designer
-        ? null
-        : button(
+      ),
+    }))
+    // An image designer has nothing to edit: Codex's own model, no effort, no tier.
+    const edit = member.designer
+      ? []
+      : [
+          button(
             'Edit',
             'quiet-button',
             () => void this.#member.edit(this.#memberNow(member)),
             `Edit ${name}`,
-          )
-      const row = staffRow(who([role]), role, remove, edit)
-      row.lastElementChild.append(this.#vacation(member))
-      this.#sayOut(row.firstElementChild, member)
+          ),
+        ]
+    this.#sayOut(who, member)
+    const rows = memberGroup(who, removes, [...edit, this.#vacation(member)])
+    for (const row of rows) {
       row.dataset.handle = member.handle
       if (gone) row.dataset.modelGone = member.model
-      return { role, row }
-    })
+    }
+    return rows
   }
 }

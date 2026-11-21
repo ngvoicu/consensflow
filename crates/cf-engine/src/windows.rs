@@ -37,7 +37,7 @@ use crate::resume::Coming;
 use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
-use crate::seams::EngineError;
+use crate::seams::{EngineError, QuestionWindowStart};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::startup::{Stage, Startup, Why};
@@ -877,7 +877,58 @@ impl Dispatcher {
             .conversation
             .as_ref()
             .and_then(|conversation| conversation.native_session.clone());
-        let token = match self.seams.credentials.issue(project.id, participant.id) {
+        let resumed = resume.is_some() && planned.native_session == resume;
+        let resume_task = if resumed {
+            match record.window.borrow().coming {
+                Some(Coming::Member { task, .. }) => Some(task),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let question_start = {
+            let ledger = self.seams.ledger.borrow();
+            let mut start = QuestionWindowStart::from_ledger(&ledger, participant.id)?;
+            if let (Some(number), Some(holding)) =
+                (resume_task, ledger.question_holding(participant.id)?)
+            {
+                if holding.resumable && holding.task_number == number {
+                    // Remember the task even if it moves while the host opens
+                    // the window, so that a question is refused with its place.
+                    start.task_in_hand = Some(holding.task_id);
+                }
+            }
+            if let Some(number) = resume_task {
+                if ledger.question_holding(participant.id)?.is_none() {
+                    if let Some(task) = ledger.task(project.id, number)? {
+                        // An alpha.10 conversation has no prospective holding yet.
+                        // The successful Resume itself makes one.
+                        start.task_in_hand = Some(task.task.id);
+                        start.last_brief = Some(-task.task.id);
+                    }
+                }
+            }
+            if planned.first == FirstMessage::Opened {
+                if let Some(first) = &delivering {
+                    if let Some(message) = ledger.message(first.message)? {
+                        if message.kind == "task" {
+                            if let Some(number) = message.task_number {
+                                if let Some(task) = ledger.task(project.id, number)? {
+                                    start.launch_brief = Some(message.id);
+                                    start.task_in_hand = Some(task.task.id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            start
+        };
+        let token = match self.seams.credentials.issue_for_window(
+            project.id,
+            participant.id,
+            question_start,
+        ) {
             Ok(token) => token,
             Err(cause) => {
                 // The plan wrote the launch's files; no window will read them.
@@ -906,7 +957,6 @@ impl Dispatcher {
         // is kept again; one whose answer never came may have, or may yet (kluris,
         // 2026-10-26: it started three seconds after the deadline). A window on a new
         // conversation leaves the one before as it was.
-        let resumed = resume.is_some() && planned.native_session == resume;
         let resumed_on = planned
             .conversation
             .as_ref()
@@ -1030,6 +1080,22 @@ impl Dispatcher {
                 );
             }
         };
+        if exited.is_none() && !self.forgotten(record) {
+            if let Some(number) = resume_task {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .resume_question_holding(participant.id, number)?;
+            }
+        }
+        if planned.first == FirstMessage::Opened && exited.is_none() && !self.forgotten(record) {
+            if let Some(first) = &delivering {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .question_brief_handed_over(first.message)?;
+            }
+        }
         // The window's own process: an adapter may find the harness's own
         // status by it from its first look.
         planned.window.opened(pid);

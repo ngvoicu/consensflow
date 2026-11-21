@@ -2322,8 +2322,7 @@ fn a_member_whose_record_cannot_tell_a_cut_is_told_all_the_same_and_a_chief_is_n
 }
 
 #[test]
-fn a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_that_came_meanwhile()
-{
+fn a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume() {
     let context = Context::new();
     let tiers = at_work(&context);
     let project = tiers.project.id;
@@ -2338,15 +2337,29 @@ fn a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_th
     let native = native_of(&context, tiers.id("diana-brisk-birch"));
     let after = quit_and_start(&context);
 
-    // The answer comes while the project waits for the human.
-    let answer = context.answer(project, question.id, "ANSI");
+    // The old window has ended. Its question cannot receive a new answer.
+    let chief = tiers.id("chief");
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .answer(question.id, chief, Some(&json!("ANSI")), None)
+        .unwrap_err();
+    assert_eq!(refused.code(), Some("question-moved"));
     after.pass().unwrap();
-    assert_eq!(context.message(answer.id).state, "queued");
+    assert_eq!(context.message(question.id).state, "cancelled");
 
     after.resume_project(project).unwrap();
     let diana = launch_of(&context, "diana-brisk-birch");
     assert_eq!(diana["resume"], native.unwrap().as_str());
     assert_eq!(diana["message"], Value::Null, "at rest: it is told nothing");
+    let new_question = context.ask(
+        project,
+        "diana-brisk-birch",
+        "chief",
+        2,
+        "Which dialect now?",
+    );
+    let answer = context.answer(project, new_question.id, "ANSI");
     after.pass().unwrap();
     after.pass().unwrap();
     assert_eq!(context.message(answer.id).state, "delivered");
@@ -4210,4 +4223,837 @@ fn a_give_up_whose_kill_is_refused_after_a_resume_and_a_second_close_leaves_the_
         "working",
         "the second Close's pause, which its Resume ends"
     );
+}
+
+/// T-1859: an unanswered question closed with its physical window still needs
+/// one actionable account to the chief. The account is durable across another close.
+fn t1859_unanswered(restart: bool, chief_received: bool) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    if !chief_received {
+        context.adapter.busy("chief");
+    }
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.message(question.id).delivered_at.is_some(),
+        chief_received
+    );
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        for _ in 0..3 {
+            after.pass().unwrap();
+        }
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+    }
+    let why = if restart {
+        "ConsensFlow restarted"
+    } else {
+        "the project closed"
+    };
+    let closed = context.message(question.id);
+    assert_eq!(closed.state, "cancelled");
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id)))
+        .collect();
+    assert_eq!(notices.len(), 1, "one question notice: {notices:?}");
+    assert_eq!(closed.reason.as_deref(), Some(why));
+    let note = &notices[0].body;
+    assert!(
+        note.contains("@diana-brisk-birch") && note.contains("T-2"),
+        "{note}"
+    );
+    assert!(note.contains(why), "{note}");
+    assert_eq!(note.contains("Which dialect?"), !chief_received, "{note}");
+    assert!(
+        note.contains("cf tell T-2 \"…\"") && note.contains("cf task finish T-2"),
+        "{note}"
+    );
+    context.advance(3 * 60 * 60_000);
+    assert!(context
+        .ledger
+        .borrow()
+        .waiting_questions(project)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn t1859_restart_after_question_received() {
+    t1859_unanswered(true, true);
+}
+#[test]
+fn t1859_restart_before_question_received() {
+    t1859_unanswered(true, false);
+}
+#[test]
+fn t1859_close_resume_after_question_received() {
+    t1859_unanswered(false, true);
+}
+#[test]
+fn t1859_close_resume_before_question_received() {
+    t1859_unanswered(false, false);
+}
+
+fn t1859_returned_answer(restart: bool) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    assert_eq!(context.message(answer.id).state, "queued");
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        for _ in 0..3 {
+            after.pass().unwrap();
+        }
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+    }
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(
+        tiers.task(2).task.state,
+        "waiting",
+        "the returned answer does not make the old turn the result"
+    );
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id)))
+        .collect();
+    assert_eq!(
+        notices.len(),
+        1,
+        "the returned answer is the only notice: {notices:?}"
+    );
+    let note = &notices[0].body;
+    assert!(note.contains("Use ANSI"), "{note}");
+    assert!(
+        note.contains("cf tell T-2 \"…\"") && note.contains("cf task finish T-2"),
+        "{note}"
+    );
+}
+
+#[test]
+fn t1859_restart_returns_answer_without_second_notice() {
+    t1859_returned_answer(true);
+}
+#[test]
+fn t1859_close_resume_returns_answer_without_second_notice() {
+    t1859_returned_answer(false);
+}
+
+fn t1859_pretracking(restart: bool) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "An old question");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let window = tiers.id("diana-brisk-birch");
+    context.ledger.borrow_mut().write_raw(&format!(
+        "DELETE FROM question_binding WHERE question_id = {}; DELETE FROM question_holding WHERE participant_id = {};",
+        question.id, window
+    )).unwrap();
+    if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        assert_ne!(context.message(question.id).state, "cancelled");
+        let answer = context.answer(project, question.id, "Old answer");
+        for _ in 0..4 {
+            after.pass().unwrap();
+        }
+        assert_eq!(context.message(answer.id).state, "delivered");
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        assert_ne!(context.message(question.id).state, "cancelled");
+        let answer = context.answer(project, question.id, "Old answer");
+        for _ in 0..4 {
+            context.pass().unwrap();
+        }
+        assert_eq!(context.message(answer.id).state, "delivered");
+    }
+    assert!(!context
+        .inbox(chief)
+        .iter()
+        .any(|m| m.kind == "note" && m.body.contains(&format!("m-{}", question.id))));
+}
+
+/// A real resumed record still contains the question turn. A tell has to reach
+/// the window, and Finish must read its next complete answer.
+fn t1869_tell_and_finish(restart: bool, returned_answer: bool) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    if returned_answer {
+        let answer = context.answer(project, question.id, "Use ANSI");
+        assert_eq!(context.message(answer.id).state, "queued");
+    }
+    let after = if restart {
+        let after = quit_and_start(&context);
+        after.resume_project(project).unwrap();
+        Some(after)
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        None
+    };
+    let pass = || match &after {
+        Some(after) => after.pass().unwrap(),
+        None => context.pass().unwrap(),
+    };
+    for _ in 0..4 {
+        pass();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    assert!(results(&tiers, 2).is_empty());
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    for _ in 0..8 {
+        pass();
+        if context.message(tell.id).state == "delivered" {
+            break;
+        }
+    }
+    assert_eq!(context.message(tell.id).state, "delivered");
+    assert_eq!(
+        tiers.task(2).task.state,
+        "working",
+        "the delivered tell releases the closed-question wait"
+    );
+    context.adapter.answer("diana", "The parser now uses ANSI.");
+    let finished = match &after {
+        Some(after) => after.finish_task(project, 2, "chief"),
+        None => context.finish_task(project, 2, "chief"),
+    }
+    .expect("finish takes the new answer");
+    assert_eq!(finished.task.state, "done");
+    let result = results(&tiers, 2).join("\n");
+    assert!(result.contains("The parser now uses ANSI."), "{result}");
+}
+
+#[test]
+fn t1869_close_unanswered_tell_then_finish() {
+    t1869_tell_and_finish(false, false);
+}
+#[test]
+fn t1869_close_returned_answer_tell_then_finish() {
+    t1869_tell_and_finish(false, true);
+}
+#[test]
+fn t1869_restart_returned_answer_tell_then_finish() {
+    t1869_tell_and_finish(true, true);
+}
+
+#[test]
+fn t1869_wait_survives_a_second_close_and_resume() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    for _ in 0..2 {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(tiers.task(2).task.state, "waiting");
+        assert!(results(&tiers, 2).is_empty());
+    }
+    assert_eq!(context.message(question.id).state, "cancelled");
+}
+
+#[test]
+fn t1869_an_answer_the_window_already_received_does_not_make_a_new_wait() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    for _ in 0..8 {
+        context.pass().unwrap();
+        if context.message(answer.id).state == "delivered" {
+            break;
+        }
+    }
+    assert_eq!(context.message(answer.id).state, "delivered");
+    context.adapter.answer("diana", "The parser uses ANSI.");
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+    assert!(results(&tiers, 2)
+        .join("\n")
+        .contains("The parser uses ANSI."));
+}
+
+#[test]
+fn t1869_after_a_tell_arrived_a_later_close_does_not_restore_the_old_wait() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    for _ in 0..8 {
+        context.pass().unwrap();
+        if context.message(tell.id).state == "delivered" {
+            break;
+        }
+    }
+    assert_eq!(context.message(tell.id).state, "delivered");
+    context.adapter.answer("diana", "The parser uses ANSI.");
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+    assert!(results(&tiers, 2)
+        .join("\n")
+        .contains("The parser uses ANSI."));
+}
+
+#[test]
+fn t1869_reading_the_tell_does_not_make_the_old_answer_a_result() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    let diana = tiers.id("diana-brisk-birch");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(
+            diana,
+            &[tell.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    let read = context.adapter.item(
+        cf_harness::records::Role::Tool,
+        &format!("m-{} [queued] note T-2 from @chief\n\nUse ANSI", tell.id),
+    );
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(read));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_ne!(
+        tiers.task(2).task.state,
+        "done",
+        "a read by itself is not a new answer"
+    );
+    assert!(results(&tiers, 2).is_empty());
+    // The boundary and the read must survive another engine restart.
+    let after = quit_and_start(&context);
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    context.adapter.answer("diana", "The parser now uses ANSI.");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+    assert!(results(&tiers, 2)
+        .join("\n")
+        .contains("The parser now uses ANSI."));
+}
+
+#[test]
+fn t1869_a_tool_output_before_the_old_window_ended_is_not_the_new_read() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    let text = format!("m-{} [queued] note T-2 from @chief\n\nUse ANSI", tell.id);
+    let old_tool = context.adapter.item(cf_harness::records::Role::Tool, &text);
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(old_tool));
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    let diana = tiers.id("diana-brisk-birch");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(
+            diana,
+            &[tell.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    let quotation = context.adapter.item(cf_harness::records::Role::User, &text);
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(quotation));
+    let wrong = context.adapter.item(
+        cf_harness::records::Role::Tool,
+        &format!(
+            "m-{} [queued] note T-2 from @chief\n\nDifferent words",
+            tell.id
+        ),
+    );
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(wrong));
+    context.adapter.answer("diana", "Unrelated old work.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    assert!(results(&tiers, 2).is_empty());
+    let read = context.adapter.item(cf_harness::records::Role::Tool, &text);
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(read));
+    context.adapter.answer("diana", "The parser now uses ANSI.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+    assert!(results(&tiers, 2)
+        .join("\n")
+        .contains("The parser now uses ANSI."));
+}
+
+#[test]
+fn t1869_an_inbox_read_after_restart_and_a_returned_answer_uses_the_new_json_result() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    let after = quit_and_start(&context);
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    let diana = tiers.id("diana-brisk-birch");
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(
+            diana,
+            &[tell.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    let text = json!({"id":tell.id,"body":"Use ANSI"}).to_string();
+    let read = context.adapter.item(cf_harness::records::Role::Tool, &text);
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(read));
+    after.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    context.adapter.answer("diana", "The parser now uses ANSI.");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+    assert!(results(&tiers, 2)
+        .join("\n")
+        .contains("The parser now uses ANSI."));
+}
+
+#[test]
+fn t1869_last_words_waiting_for_the_chief_do_not_raise_a_second_question() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context
+        .adapter
+        .answer("diana", "Waiting for the chief's answer.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    assert_eq!(context.message(question.id).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "question")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn t1869_a_slow_old_record_does_not_hold_up_project_resume_or_other_windows() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let diana = tiers.id("diana-brisk-birch");
+    let session = native_of(&context, diana).expect("the old conversation");
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    let reading = context
+        .adapter
+        .record_holds
+        .hold(move |args| args[0] == session);
+    let resuming = context.begin_resume_project(project);
+    context.settle();
+    let answered = resuming.take();
+    if answered.is_none() {
+        reading.open();
+        context.settle();
+        panic!("the member's slow record held the project Resume");
+    }
+    answered.unwrap().unwrap();
+    assert_eq!(context.project(project).state, "open");
+    assert!(
+        opened(&context)
+            .iter()
+            .filter(|pane| pane.as_str() == "p1-chief")
+            .count()
+            >= 2
+    );
+    reading.open();
+    context.settle();
+    assert_eq!(tiers.task(2).task.state, "waiting");
+}
+
+#[test]
+fn t1869_an_unreadable_old_record_never_makes_an_inbox_read_the_old_result() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let diana = tiers.id("diana-brisk-birch");
+    let session = native_of(&context, diana).unwrap();
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    context
+        .adapter
+        .with("diana", |agent| agent.records_unreadable.push(session));
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let tell = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .receive_read(
+            diana,
+            &[tell.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    let text = format!("m-{} [queued] note T-2 from @chief\n\nUse ANSI", tell.id);
+    let read = context.adapter.item(cf_harness::records::Role::Tool, &text);
+    context
+        .adapter
+        .with("diana", |agent| agent.items.push(read));
+    context.adapter.answer("diana", "The parser uses ANSI.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "waiting",
+        "without an old-record boundary the answer is uncertain"
+    );
+    assert!(results(&tiers, 2).is_empty());
+    // A later pasted tell supplies a new boundary and the task can go on.
+    let again = context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Reply with ANSI")
+        .unwrap();
+    for _ in 0..8 {
+        context.pass().unwrap();
+        if context.message(again.id).state == "delivered" {
+            break;
+        }
+    }
+    assert_eq!(context.message(again.id).state, "delivered");
+    context.adapter.answer("diana", "ANSI is implemented.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "done");
+}
+
+#[test]
+fn t1869_explicit_finish_can_take_the_question_turn_after_resume() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    let finished = context.finish_task(project, 2, "chief").unwrap();
+    assert_eq!(finished.task.state, "done");
+    assert!(results(&tiers, 2)[0].starts_with("I asked the chief."));
+}
+
+#[test]
+fn t1859_restart_keeps_pretracking_question() {
+    t1859_pretracking(true);
+}
+#[test]
+fn t1859_close_resume_keeps_pretracking_question() {
+    t1859_pretracking(false);
+}
+
+#[test]
+fn t1859_restart_reports_each_unreceived_question_once_even_when_settled_again() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    context.adapter.busy("chief");
+    let first = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    let second = context.ask(project, "diana-brisk-birch", "chief", 2, "Which encoding?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(first.id).state, "queued");
+    assert_eq!(context.message(second.id).state, "queued");
+    let after = quit_and_start(&context);
+    let notices = || {
+        context
+            .inbox(chief)
+            .into_iter()
+            .filter(|m| m.kind == "note" && m.body.contains("closed when ConsensFlow restarted"))
+            .collect::<Vec<_>>()
+    };
+    let notes = notices();
+    assert_eq!(notes.len(), 2, "each old question is reported");
+    for (id, words) in [(first.id, "Which dialect?"), (second.id, "Which encoding?")] {
+        assert_eq!(
+            notes
+                .iter()
+                .filter(|m| m.body.contains(&format!("m-{id}")) && m.body.contains(words))
+                .count(),
+            1
+        );
+        assert_eq!(context.message(id).state, "cancelled");
+    }
+    after.settle_after_restart().unwrap();
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        notices().len(),
+        2,
+        "settling and Resume never duplicate the notes"
+    );
+}
+
+/// A gated answer approved after its question's window closed must not erase
+/// the wait that protects the old question turn on the next project Resume.
+#[test]
+fn t1869_gated_answer_approved_after_resume_keeps_wait_through_second_close() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    context.ledger.borrow_mut().set_gate(project, true).unwrap();
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    assert_eq!(context.message(question.id).state, "gated");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(question.id, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    assert_eq!(context.message(answer.id).state, "gated");
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(answer.id, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    let returned: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| {
+            message.kind == "note"
+                && message.body.contains(&format!("m-{}", question.id))
+                && message.body.contains("Use ANSI")
+        })
+        .collect();
+    assert_eq!(returned.len(), 1, "the answer returns once: {returned:?}");
+    assert!(returned[0].body.contains("cf tell T-2"));
+    assert!(returned[0].body.contains("cf task finish T-2"));
+    assert_eq!(tiers.task(2).task.state, "waiting");
+
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..5 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "waiting",
+        "approval must not let the next Resume take the old question turn"
+    );
+    assert!(results(&tiers, 2).is_empty());
+    assert_eq!(tiers.task(1).task.state, "working");
 }

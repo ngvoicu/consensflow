@@ -2,6 +2,7 @@
 //! hold them.
 
 use cf_proto::cf_word::CfWord;
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 use super::Ledger;
@@ -10,6 +11,316 @@ use crate::{
 };
 
 impl Ledger {
+    /// A window's closed-question wait whose old conversation has not yet
+    /// been bounded. Its previous token was revoked; the new window has not
+    /// opened yet, so its inbox read cannot overtake the snapshot.
+    pub fn question_waits_without_boundary(
+        &self,
+        project: i64,
+        window: i64,
+    ) -> Result<Vec<(i64, i64, String)>, LedgerError> {
+        Ok(self
+            .store
+            .db
+            .prepare(
+                "SELECT DISTINCT b.participant_id,c.id,c.native_session FROM question_binding b
+             JOIN task t ON t.id=b.task_id AND t.assignee_id=b.participant_id
+             JOIN project p ON p.id=t.project_id
+             JOIN conversation c ON c.participant_id=b.participant_id AND c.ended_at IS NULL
+             WHERE p.id=?1 AND p.state='open' AND b.participant_id=?2 AND b.closed IN (2,3)
+               AND b.wait_last_item IS NULL AND c.native_session IS NOT NULL
+               AND t.state IN ('working','waiting')",
+            )?
+            .query_map(rusqlite::params![project, window], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Record the last native item of the old conversation, without its words.
+    /// The write is conditional on the same open project and conversation:
+    /// another Resume, a task move, or a new conversation cannot inherit it.
+    pub fn set_question_wait_boundary(
+        &mut self,
+        project: i64,
+        window: i64,
+        conversation: i64,
+        session: &str,
+        last_item: &str,
+    ) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            store.db.execute(
+                "UPDATE question_binding SET wait_conversation_id=?3, wait_last_item=?5
+                 WHERE participant_id=?2 AND closed IN (2,3) AND wait_last_item IS NULL
+                   AND EXISTS (SELECT 1 FROM task t JOIN project p ON p.id=t.project_id
+                     JOIN conversation c ON c.id=?3 AND c.participant_id=?2
+                     WHERE t.id=question_binding.task_id AND t.assignee_id=?2 AND p.id=?1
+                       AND p.state='open' AND c.ended_at IS NULL AND c.native_session=?4
+                       AND t.state IN ('working','waiting'))",
+                rusqlite::params![project, window, conversation, session, last_item],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Each read that can answer a closed-question wait, paired with the exact
+    /// old conversation boundary for that question. An unbounded or different
+    /// conversation cannot prove a later answer.
+    pub fn read_closed_question_waits(
+        &self,
+        window: i64,
+        task: i64,
+    ) -> Result<Vec<(i64, i64, String, MessageView)>, LedgerError> {
+        let rows: Vec<(i64,i64,String,i64)> = self.store.db.prepare(
+            "SELECT b.question_id,b.wait_conversation_id,b.wait_last_item,m.id
+             FROM question_binding b JOIN task t ON t.id=b.task_id AND t.assignee_id=b.participant_id
+             JOIN conversation c ON c.id=b.wait_conversation_id AND c.participant_id=b.participant_id AND c.ended_at IS NULL
+             JOIN message m ON m.task_id=b.task_id AND m.recipient_id=b.participant_id
+             WHERE b.participant_id=?1 AND b.task_id=?2 AND b.closed=3 AND b.wait_last_item IS NOT NULL
+               AND m.id>b.question_id AND m.state='read' AND m.kind IN ('note','answer')
+               AND json_extract(m.receipt, '$.read') IN ('inbox','task')
+             ORDER BY m.id DESC,b.question_id"
+        )?.query_map(rusqlite::params![window,task], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::new();
+        for (question, conversation, last, id) in rows {
+            if let Some(message) = self.store.message(id)? {
+                out.push((question, conversation, last, message));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The engine saw a complete answer after this read and this exact old
+    /// record boundary. Release only the same question and current holding.
+    pub fn release_read_question_wait(
+        &mut self,
+        window: i64,
+        task: i64,
+        question: i64,
+        message: i64,
+        conversation: i64,
+        last_item: &str,
+    ) -> Result<bool, LedgerError> {
+        self.store.write(|store| {
+            let changed = store.db.execute(
+                "UPDATE question_binding SET closed=1 WHERE question_id=?3 AND participant_id=?1 AND task_id=?2
+                   AND closed=3 AND question_id < ?4 AND wait_conversation_id=?5 AND wait_last_item=?6
+                   AND EXISTS (SELECT 1 FROM message m JOIN task t ON t.id=m.task_id
+                     JOIN conversation c ON c.id=?5 AND c.participant_id=?1 AND c.ended_at IS NULL
+                     WHERE m.id=?4 AND m.recipient_id=?1 AND m.task_id=?2 AND t.assignee_id=?1
+                       AND t.state IN ('working','waiting') AND m.state='read' AND m.kind IN ('note','answer')
+                       AND json_extract(m.receipt, '$.read') IN ('inbox','task'))",
+                rusqlite::params![window,task,question,message,conversation,last_item],
+            )?;
+            if changed > 0 { crate::messages::reconcile(store, task)?; }
+            Ok(changed > 0)
+        })
+    }
+
+    /// Start a new in-memory engine lifetime without changing stored messages.
+    pub fn begin_question_engine(&mut self) {
+        self.store.question_run = crate::holding::new_run();
+    }
+
+    /// End the prospectively recorded holdings whose physical windows were
+    /// lost with the previous engine. Called after their in-flight pastes have
+    /// been settled, not by ledger open or a schema migration.
+    pub fn close_questions_of_ended_engine(&mut self) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            let questions: Vec<(i64, Option<i64>)> = store.db.prepare(
+                "SELECT question_id, task_id FROM question_binding WHERE closed = 0 AND run_id <> ? ORDER BY question_id"
+            )?.query_map([&store.question_run], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (question, task) in questions {
+                let place = crate::holding::task_place(store, task)?;
+                if task.is_some() {
+                    crate::holding::close_project_question(store, question, &place, None, crate::holding::ProjectWindowEnd::Restart)?;
+                } else {
+                    crate::holding::close_question(store, question, &place)?;
+                }
+            }
+            store.db.execute("UPDATE question_holding SET closed = 2 WHERE closed = 0 AND run_id <> ?", [&store.question_run])?;
+            Ok(())
+        })
+    }
+
+    /// Rebind only an ended window's own task to a window reopened on the
+    /// same conversation. Old questions remain closed and keep their run.
+    pub fn resume_question_holding(
+        &mut self,
+        window: i64,
+        number: i64,
+    ) -> Result<bool, LedgerError> {
+        self.store.write(|store| {
+            let Some(holding) = crate::holding::of(store, window)? else {
+                let task: Option<i64> = store.db.query_row(
+                    "SELECT t.id FROM task t JOIN participant p ON p.id = ?1 JOIN project project ON project.id = t.project_id
+                     WHERE t.number = ?2 AND t.assignee_id = p.id AND p.project_id = t.project_id AND p.left_at IS NULL
+                       AND t.deleted_at IS NULL AND project.state = 'open' AND t.state IN ('working', 'waiting')",
+                    rusqlite::params![window, number], |r| r.get(0),
+                ).optional()?;
+                let Some(task) = task else { return Ok(false); };
+                store.db.execute("INSERT INTO question_resume_anchor (participant_id, task_id) VALUES (?1, ?2)", rusqlite::params![window, task])?;
+                let anchor = -store.db.last_insert_rowid();
+                store.db.execute("INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id) VALUES (?1, ?2, ?3, ?3, 0, ?4)", rusqlite::params![window, task, anchor, store.question_run])?;
+                return Ok(true);
+            };
+            if !holding.resumable || holding.task_number != number {
+                return Ok(false);
+            }
+            let changed = store.db.execute(
+                "UPDATE question_holding SET closed = 0, run_id = ?1
+                 WHERE participant_id = ?2 AND task_id = ?3 AND first_brief_id = ?4 AND closed = 2
+                   AND EXISTS (SELECT 1 FROM task t JOIN participant p ON p.id = ?2
+                     JOIN project project ON project.id = t.project_id
+                     WHERE t.id = ?3 AND t.assignee_id = ?2 AND p.project_id = t.project_id
+                       AND p.left_at IS NULL AND t.deleted_at IS NULL AND project.state = 'open'
+                       AND t.state IN ('working', 'waiting'))",
+                rusqlite::params![
+                    store.question_run,
+                    window,
+                    holding.task_id,
+                    holding.first_brief
+                ],
+            )?;
+            Ok(changed == 1)
+        })
+    }
+
+    /// The newly opened physical window can start before its host replies.
+    pub fn resume_question_holding_for_task(
+        &mut self,
+        window: i64,
+        task: i64,
+    ) -> Result<Option<(i64, bool)>, LedgerError> {
+        let number: Option<i64> = self
+            .store
+            .db
+            .query_row("SELECT number FROM task WHERE id = ?", [task], |r| r.get(0))
+            .optional()?;
+        match number {
+            Some(number) => Ok(Some((
+                number,
+                self.resume_question_holding(window, number)?,
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    /// The prospectively recorded task last handed to a window.
+    pub fn question_holding(
+        &self,
+        window: i64,
+    ) -> Result<Option<crate::WindowHolding>, LedgerError> {
+        crate::holding::of(&self.store, window)
+    }
+
+    /// Whether this exact window and holding still match.
+    pub fn question_holding_matches(
+        &self,
+        window: i64,
+        task: Option<i64>,
+        first_brief: Option<i64>,
+    ) -> Result<bool, LedgerError> {
+        crate::holding::matches(&self.store, window, task, first_brief)
+    }
+
+    /// A real window ended; it no longer owns either task or taskless questions.
+    pub fn close_question_window(
+        &mut self,
+        window: i64,
+        in_flight: Option<i64>,
+    ) -> Result<Vec<i64>, LedgerError> {
+        let deferred = self.store.write(|store| {
+            let mut deferred = Vec::new();
+            let project_closed: bool = store.db.query_row(
+                "SELECT project.state = 'suspended' FROM participant p JOIN project ON project.id=p.project_id WHERE p.id=?",
+                [window], |r| r.get(0),
+            ).optional()?.unwrap_or(false);
+            if project_closed {
+                let questions: Vec<(i64, i64)> = store.db.prepare(
+                    "SELECT question_id, task_id FROM question_binding WHERE participant_id=? AND task_id IS NOT NULL AND closed=0 AND run_id=? ORDER BY question_id"
+                )?.query_map(rusqlite::params![window, store.question_run], |r| Ok((r.get(0)?,r.get(1)?)))?
+                    .collect::<rusqlite::Result<_>>()?;
+                for (question, task) in questions {
+                    let place = crate::holding::task_place(store, Some(task))?;
+                    deferred.extend(crate::holding::close_project_question(store, question, &place, in_flight, crate::holding::ProjectWindowEnd::Close)?);
+                }
+            }
+            crate::holding::close_previous_for_window(store, window, None, None)?;
+            if let Some(h) = crate::holding::of(store, window)? {
+                if h.active {
+                    deferred.extend(crate::holding::close_deferring(
+                        store,
+                        window,
+                        Some(h.task_id),
+                        None,
+                        in_flight,
+                    )?);
+                    store.db.execute(
+                        "UPDATE question_holding SET closed = 2 WHERE participant_id = ?1 AND task_id = ?2 AND first_brief_id = ?3 AND closed = 1",
+                        rusqlite::params![window, h.task_id, h.first_brief],
+                    )?;
+                }
+            }
+            deferred.extend(crate::holding::close_deferring(
+                store, window, None, None, in_flight,
+            )?);
+            Ok(deferred)
+        })?;
+        Ok(deferred)
+    }
+
+    /// Finish a closed window's in-flight answers after the old paste's receipt
+    /// was checked. A delivered answer is never returned as undelivered.
+    pub fn settle_closed_window_answers(&mut self, answers: &[i64]) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            for answer in answers {
+                let place = crate::holding::answer_place(store, *answer)?;
+                crate::holding::return_answer(store, *answer, &place)?;
+            }
+            Ok(())
+        })
+    }
+    /// Answers this reader did not write and whose original holding has ended.
+    pub fn returned_answers_hidden_from(
+        &self,
+        project: i64,
+        reader: i64,
+    ) -> Result<Vec<i64>, LedgerError> {
+        let candidates: Vec<(i64, i64, String, Option<String>)> = self.store.db.prepare(
+            "SELECT a.id, a.reply_to, a.state, a.reason FROM message a
+             JOIN question_binding b ON b.question_id = a.reply_to
+             WHERE a.project_id = ?1 AND a.kind = 'answer' AND a.sender_id IS NOT ?2
+               AND (a.state IN ('queued', 'delivering') OR (a.state = 'cancelled' AND a.reason LIKE 'returned in m-%')) ORDER BY a.id"
+        )?.query_map(rusqlite::params![project, reader], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut hidden = Vec::new();
+        for (answer, question, state, _) in candidates {
+            if state == "cancelled"
+                || crate::holding::question_is_live(&self.store, question)? == Some(false)
+            {
+                hidden.push(answer);
+            }
+        }
+        Ok(hidden)
+    }
+
+    /// Open questions already received by the chief, and their last reminder.
+    pub fn waiting_questions(&self, project: i64) -> Result<Vec<crate::QuestionWait>, LedgerError> {
+        crate::waiting_questions::waiting(&self.store, project)
+    }
+
+    /// Atomically record a reminder if its question and cursor still stand.
+    pub fn remind_question(
+        &mut self,
+        project: i64,
+        question: i64,
+        previous: Option<i64>,
+        note: &NewNote,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
+    }
+
     /// One message, or none.
     pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
         self.store.message(id)
@@ -267,6 +578,51 @@ impl Ledger {
         question: &NewQuestion,
     ) -> Result<MessageView, LedgerError> {
         messages::ask(&mut self.store, project_id, question)
+    }
+
+    /// Place a window request and choose its holding in the same transaction.
+    pub fn ask_from_window(
+        &mut self,
+        project: i64,
+        window: i64,
+        question: &NewQuestion,
+        observed: Option<crate::WindowHolding>,
+        launch_task: Option<(i64, i64)>,
+    ) -> Result<MessageView, LedgerError> {
+        self.store.write(|store| {
+            let current = crate::holding::of(store, window)?;
+            let selected = if let Some(old) = observed {
+                if crate::holding::matches(store, window, Some(old.task_id), Some(old.first_brief))? {
+                    Some(old)
+                } else {
+                    let restored: Option<(Option<i64>, Option<i64>)> = store.db.query_row(
+                        "SELECT previous_task_id, previous_first_brief_id FROM question_handover
+                         WHERE brief_id = ?1 AND participant_id = ?2 AND run_id = ?3 AND previous_closed = -1",
+                        rusqlite::params![old.last_brief, window, store.question_run],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    ).optional()?;
+                    match (restored, current) {
+                        (Some((None, None)), None) => None,
+                        (Some((Some(task), Some(first))), Some(h))
+                            if h.active && h.task_id == task && h.first_brief == first
+                                && crate::holding::matches(store, window, Some(task), Some(first))? => Some(h),
+                        _ => return Err(crate::holding::window_task_refusal(store, window, old.task_id)?),
+                    }
+                }
+            } else {
+                if let Some((task, _number)) = launch_task {
+                    return Err(crate::holding::window_task_refusal(store, window, task)?);
+                }
+                None
+            };
+            let mut placed = question.clone();
+            placed.task = selected.map(|h| h.task_number);
+            let message = messages::ask(store, project, &placed)?;
+            if selected.is_none() {
+                store.db.execute("UPDATE question_binding SET task_id = NULL, first_brief_id = NULL WHERE question_id = ?", [message.id])?;
+            }
+            Ok(message)
+        })
     }
 
     /// [`Ledger::ask`], and with the question the told notes its pause cancelled.
@@ -579,6 +935,48 @@ impl Ledger {
     /// they are the window's, marked handed in this write.
     pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
         messages::admit(&mut self.store, message_id, carried, false)
+    }
+
+    /// Record that the daemon has started handing a task brief to its harness.
+    pub fn question_brief_handed_over(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            let delivering = store
+                .db
+                .prepare(
+                    "SELECT 1 FROM message WHERE id = ? AND kind = 'task' AND state = 'delivering'",
+                )?
+                .exists([message_id])?;
+            if delivering {
+                crate::holding::hand_brief(store, message_id)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// A transport refused a brief after its send began. Restore the earlier
+    /// holding and rebind, or close, questions asked during the attempt.
+    pub fn question_brief_refused(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::retract_brief(store, message_id))
+    }
+
+    /// Finalize the earlier holding after the started send succeeds.
+    pub fn question_brief_confirmed(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::confirm_brief(store, message_id))
+    }
+
+    /// The send's admission is unknown; old answers must not remain silent.
+    pub fn question_brief_uncertain(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::uncertain_brief(store, message_id))
+    }
+
+    /// Record an authenticated transport report, even if the task ended
+    /// between the transport's admission and its report.
+    pub fn question_brief_reported(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::reported_brief(store, message_id))
     }
 
     /// Whether an Enter may send a paste already handed over: its words cannot be

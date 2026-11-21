@@ -9,6 +9,7 @@
 use cf_engine::testing::Context;
 use cf_harness::records::Quota;
 use cf_ledger::{HoldKind, NewMember, NewTask, ParticipantView};
+use serde_json::json;
 
 use crate::fixtures::{after, exhausted, now, soon, Tiers};
 
@@ -70,6 +71,268 @@ fn passes(context: &Context, count: usize) {
     for _ in 0..count {
         context.pass().unwrap();
     }
+}
+
+/// A question the chief has received from the window currently working on T-1.
+fn question_at_chief(context: &Context, tiers: &Tiers<'_>) -> (i64, String) {
+    tiers.open();
+    passes(context, 2);
+    let window = tiers.assignee(1);
+    let question = context.ask(tiers.project.id, &window, "chief", 1, "Which format?");
+    context.adapter.answer(&window, "I asked the chief.");
+    passes(context, 2);
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(context.message(question.id).state, "delivered");
+    (question.id, window)
+}
+
+fn refused_after_move(context: &Context, tiers: &Tiers<'_>, question: i64, old: &str) -> String {
+    let chief = tiers.id("chief");
+    let old_id = tiers.id(old);
+    let error = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Use JSON")), None)
+        .expect_err("the old window no longer waits for the answer");
+    let words = error.to_string();
+    assert_eq!(error.code(), Some("question-moved"), "{words}");
+    assert!(
+        !words.contains("starts over without the old conversation"),
+        "{words}"
+    );
+    assert!(words.contains("cf tell T-1"), "{words}");
+    assert_eq!(context.message(question).state, "cancelled");
+    assert!(
+        context
+            .inbox(old_id)
+            .iter()
+            .all(|m| m.reply_to != Some(question)),
+        "nothing was queued to the old window"
+    );
+    words
+}
+
+#[test]
+fn moved_question_after_human_reassign_says_the_task_is_open_and_refuses_the_answer() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    let (question, old) = question_at_chief(&context, &tiers);
+    context.reassign_task(tiers.project.id, 1).unwrap();
+    assert_eq!(tiers.task(1).task.state, "open");
+    let words = refused_after_move(&context, &tiers, question, &old);
+    assert!(
+        words.contains("open") && words.contains("standard"),
+        "{words}"
+    );
+}
+
+#[test]
+fn moved_question_after_backup_takes_the_task_names_the_backup_and_refuses_the_answer() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    let (question, old) = question_at_chief(&context, &tiers);
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_ne!(tiers.assignee(1), old);
+    let words = refused_after_move(&context, &tiers, question, &old);
+    assert!(words.contains(&backup.handle), "{words}");
+}
+
+#[test]
+fn a_window_that_finishes_its_task_no_longer_waits_for_its_old_question() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (question, old) = question_at_chief(&context, &tiers);
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(tiers.project.id, 1, "Done after all")
+        .unwrap();
+    passes(&context, 4);
+    assert_eq!(tiers.task(1).task.state, "done");
+    let chief = tiers.id("chief");
+    let error = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Use JSON")), None)
+        .expect_err("a completed task's old window no longer waits");
+    assert!(error.to_string().contains("T-1"));
+    assert_eq!(context.message(question).state, "cancelled");
+    assert!(context
+        .inbox(tiers.id(&old))
+        .iter()
+        .all(|m| m.reply_to != Some(question)));
+}
+
+#[test]
+fn a_backup_added_after_a_member_is_held_takes_its_waiting_queued_task() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "queued");
+    assert_eq!(with(&tiers, 1), "zeus");
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 3);
+    assert_eq!(with(&tiers, 1), "zeus", "waits with no backup");
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 3);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(went(&tiers).len(), 1);
+}
+
+#[test]
+fn a_backup_added_after_a_real_quota_refusal_takes_the_held_task() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    passes(&context, 2);
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&soon(&context, 3))),
+    );
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), "zeus");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(tiers.task(1).task.held_until.is_some());
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(went(&tiers).len(), 1);
+}
+
+#[test]
+fn a_backup_added_later_takes_waiting_work_for_each_member_failure() {
+    for why in ["quota", "account", "moved", "edit"] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        tiers.open();
+        tiers.open_body("Second task");
+        context.pass().unwrap();
+        assert_eq!(with(&tiers, 1), "zeus", "{why}");
+        assert_eq!(with(&tiers, 2), "zeus", "{why}");
+        let id = tiers.id("zeus");
+        if why == "edit" {
+            context
+                .ledger
+                .borrow()
+                .sqlite()
+                .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [id])
+                .unwrap();
+        } else {
+            let (until, kind) = match why {
+                "account" => (NEVER.to_owned(), HoldKind::Account),
+                "moved" => (MOVED.to_owned(), HoldKind::Moved),
+                _ => (soon(&context, 3), HoldKind::Quota),
+            };
+            context
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(id, &until, why, kind)
+                .unwrap();
+        }
+        passes(&context, 3);
+        let backup = backed(&context, &tiers, "zeus");
+        passes(&context, 4);
+        for number in [1, 2] {
+            assert_eq!(with(&tiers, number), backup.handle, "{why}, T-{number}");
+        }
+        assert_eq!(went(&tiers).len(), 2, "{why}: {:?}", tiers.notes("chief"));
+        passes(&context, 2);
+        assert_eq!(went(&tiers).len(), 2, "{why}, told once per task");
+    }
+}
+
+#[test]
+fn a_later_replacement_or_return_from_vacation_takes_waiting_work() {
+    for change in ["replace", "return"] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        let old = backed(&context, &tiers, "zeus");
+        context
+            .send_on_vacation(tiers.project.id, &old.handle)
+            .unwrap();
+        tiers.open();
+        context.pass().unwrap();
+        out(&context, &tiers, "zeus", &soon(&context, 3));
+        passes(&context, 3);
+        assert_eq!(with(&tiers, 1), "zeus", "{change}: waits");
+        let backup = if change == "return" {
+            context
+                .bring_back_from_vacation(tiers.project.id, &old.handle)
+                .unwrap()
+        } else {
+            context
+                .change_backup(
+                    tiers.project.id,
+                    "zeus",
+                    NewMember {
+                        harness: "claude-code".to_owned(),
+                        model: Some("new-backup".to_owned()),
+                        effort: None,
+                        model_name: None,
+                        designer: false,
+                        roles: vec!["worker".to_owned()],
+                        tier: "standard".to_owned(),
+                    },
+                )
+                .unwrap()
+        };
+        passes(&context, 4);
+        assert_eq!(with(&tiers, 1), backup.handle, "{change}");
+        assert_eq!(went(&tiers).len(), 1, "{change}");
+    }
+}
+
+#[test]
+fn a_backup_added_after_a_hold_leaves_named_follow_up_and_human_paused_tasks() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    passes(&context, 2);
+    let session = tiers.assignee(1);
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(project, 1, "Parser done")
+        .unwrap();
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Follow up".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Named".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    tiers.open_body("Pause this task");
+    tiers.open_body("Move this task");
+    passes(&context, 2);
+    context.pause_task(project, 4);
+    let paused_with = tiers.assignee(4);
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 3);
+    let backup = backed(&context, &tiers, "zeus");
+    passes(&context, 4);
+    assert_eq!(tiers.assignee(2), session, "follow-up stays in its window");
+    assert_eq!(with(&tiers, 3), "zeus", "named task stays");
+    assert_eq!(tiers.assignee(4), paused_with, "human-paused task stays");
+    assert_eq!(tiers.task(4).task.state, "paused");
+    assert_eq!(with(&tiers, 5), backup.handle, "ordinary task moves");
+    assert_eq!(went(&tiers).len(), 1, "only the ordinary task is moved");
 }
 
 #[test]
@@ -524,4 +787,34 @@ fn the_giver_is_told_once_in_one_line_when_a_task_moves_to_the_backup() {
         .collect();
     assert_eq!(about.len(), 1, "{about:?}");
     assert!(about[0].contains("the backup of @zeus"), "{about:?}");
+}
+
+#[test]
+fn t1813_answer_returned_on_backup_move_names_the_backup() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    let (question, _) = question_at_chief(&context, &tiers);
+    let chief = tiers.id("chief");
+    let answer = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Backup answer words")), None)
+        .unwrap()
+        .id;
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(context.message(answer).state, "cancelled");
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("Backup answer words"))
+        .collect();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        notices[0].body.contains(&backup.handle),
+        "{}",
+        notices[0].body
+    );
 }

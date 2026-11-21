@@ -312,9 +312,25 @@ pub fn interrupts() -> Vec<Scenario> {
                     "W, Q and P",
                     "task add --tier standard :: CLAUDE-JOB 600 W_ANSWERED :: The job ended\ntask add --test --tier standard :: CF ask :: Which format?\ntask add --review --tier standard :: CLAUDE-JOB 600 P_ANSWERED :: The job ended",
                     |snapshot, bindings| {
+                        // Finish takes a complete answer, not merely a working task.
+                        // The held-work note is written only after that answer is read.
+                        let reported = |name: &str| {
+                            bindings.nth(name, 0).is_some_and(|number| {
+                                snapshot.chief_inbox.iter().any(|message| {
+                                    message["kind"] == "note"
+                                        && message["taskNumber"] == number
+                                        && message["body"].as_str().is_some_and(|body| {
+                                            body.contains("is still working in the background (")
+                                                && body.contains("\n\nWhat it said:\n\n")
+                                        })
+                                })
+                            })
+                        };
                         is(snapshot, bindings, "W", 0, &["working"])
                             && is(snapshot, bindings, "Q", 0, &["waiting"])
                             && is(snapshot, bindings, "P", 0, &["working"])
+                            && reported("W")
+                            && reported("P")
                     }
                 ),
                 run!("pause P", "task pause {P}", |snapshot, bindings| is(snapshot, bindings, "P", 0, &["paused"])),
@@ -341,4 +357,59 @@ pub fn interrupts() -> Vec<Scenario> {
             &[],
         ),
     ]
+}
+
+#[cfg(test)]
+mod finish_fixture_tests {
+    use crate::matrix::observe::{Bindings, Snapshot};
+    use crate::matrix::scenario::Scenario;
+    use serde_json::{json, Value};
+    use std::collections::BTreeMap;
+
+    fn background_note(task: i64, words: &str) -> Value {
+        json!({"kind": "note", "taskNumber": task, "body": format!("T-{task} is still working in the background (1 job); Finish takes what it said last.\n\nWhat it said:\n\n{words}")})
+    }
+
+    #[test]
+    fn finish_scenario_waits_for_both_workers_complete_answers() {
+        let scenario = Scenario::named("finish-each-state").unwrap();
+        let reached = scenario.steps[0].reached;
+        let bindings = Bindings {
+            found: BTreeMap::from([("W", vec![1]), ("Q", vec![2]), ("P", vec![3])]),
+        };
+        let mut snapshot = Snapshot {
+            tasks: vec![
+                json!({"number": 1, "state": "working"}),
+                json!({"number": 2, "state": "waiting"}),
+                json!({"number": 3, "state": "working"}),
+            ],
+            ..Snapshot::default()
+        };
+        assert!(
+            !reached(&snapshot, &bindings),
+            "working alone does not show an answer"
+        );
+        snapshot
+            .chief_inbox
+            .push(background_note(1, "a complete answer"));
+        snapshot
+            .chief_inbox
+            .push(background_note(1, "another note, but not P's"));
+        assert!(
+            !reached(&snapshot, &bindings),
+            "P's answer must belong to P's task"
+        );
+        snapshot
+            .chief_inbox
+            .push(background_note(3, "another complete answer"));
+        assert!(
+            reached(&snapshot, &bindings),
+            "both answers and task states are ready"
+        );
+        snapshot.tasks[2]["state"] = json!("done");
+        assert!(
+            !reached(&snapshot, &bindings),
+            "P must still be working before its pause"
+        );
+    }
 }

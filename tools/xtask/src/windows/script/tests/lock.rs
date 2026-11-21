@@ -298,25 +298,25 @@ const HELD_SECONDS: u32 = 300;
 
 /// A program a case started and waits on, ended when the case ends however it ends: a case
 /// that fails must not leave it on the machine for the [`HELD_SECONDS`].
-struct Held {
+pub(super) struct Held {
     child: Child,
     since: Instant,
 }
 
 impl Held {
-    fn new(child: Child) -> Self {
+    pub(super) fn new(child: Child) -> Self {
         Self {
             child,
             since: Instant::now(),
         }
     }
 
-    fn id(&self) -> u32 {
+    pub(super) fn id(&self) -> u32 {
         self.child.id()
     }
 
     /// Whether it still runs, or how long after it was started it was found to have ended.
-    fn runs(&mut self) -> Result<(), String> {
+    pub(super) fn runs(&mut self) -> Result<(), String> {
         match self.child.try_wait().unwrap() {
             None => Ok(()),
             Some(status) => Err(format!(
@@ -352,7 +352,7 @@ fn end(mut child: Child) {
 }
 
 /// Waits until `what` holds, or ends the case saying it never did.
-fn until(what: &str, holds: impl Fn() -> bool) {
+pub(super) fn until(what: &str, holds: impl Fn() -> bool) {
     let until = Instant::now() + Duration::from_secs(120);
     while !holds() {
         assert!(Instant::now() < until, "{what}");
@@ -380,7 +380,7 @@ fn tarballs_in(profile: &Path) -> Vec<String> {
 /// The processes are asked of the system by their command line, so that nothing another case
 /// of this binary starts is taken for one. A question the system does not answer is asked
 /// again, and then fails the case: no answer is not "none".
-fn marked(env: &Env, mark: &str) -> Vec<u32> {
+pub(super) fn marked(env: &Env, mark: &str) -> Vec<u32> {
     let script = format!(
         "$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\nGet-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | Where-Object {{ $_.CommandLine -like '*{mark}*' }} | ForEach-Object {{ $_.ProcessId }}\n"
     );
@@ -556,17 +556,18 @@ pub(super) struct Case {
 /// Dropping the job closes its handle and ends its members; no process lookup or pid is used.
 /// The guardian stays alive after the bootstrap exits, so the case can observe children which
 /// the bootstrap intentionally leaves running before it releases the job.
-struct ContainedRun {
+pub(super) struct ContainedRun {
     owned: Option<cf_process::Owned>,
     _runtime: tokio::runtime::Runtime,
     done: PathBuf,
     failure: PathBuf,
     errors: PathBuf,
     output: PathBuf,
+    kill_bootstrap: PathBuf,
 }
 
 impl ContainedRun {
-    fn wait_for_bootstrap(&self) -> i32 {
+    pub(super) fn wait_for_bootstrap(&self) -> i32 {
         let until = Instant::now() + Duration::from_secs(120);
         loop {
             if let Ok(failure) = fs::read_to_string(&self.failure) {
@@ -584,6 +585,29 @@ impl ContainedRun {
                 fs::read_to_string(&self.output).unwrap_or_default()
             );
             std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// End only the bootstrap the guardian started, retaining the outer job.
+    pub(super) fn kill_bootstrap(&self) {
+        fs::write(&self.kill_bootstrap, "").unwrap();
+        self.wait_for_bootstrap();
+    }
+
+    /// Read an exit line while the guardian still holds the job.
+    pub(super) fn wait_for_exit_line(&self) -> String {
+        let until = Instant::now() + Duration::from_secs(120);
+        loop {
+            if let Ok(failure) = fs::read_to_string(&self.failure) {
+                panic!("the guardian failed: {failure}");
+            }
+            let output =
+                String::from_utf8_lossy(&fs::read(&self.output).unwrap_or_default()).into_owned();
+            if output.lines().any(|line| exit_said(line).is_some()) {
+                return output;
+            }
+            assert!(Instant::now() < until, "no exit line: {output}");
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 }
@@ -638,7 +662,12 @@ impl Case {
 
     /// Run a case whose command can outlive the bootstrap inside a job the test owns. The
     /// guardian waits on `go` until the caller has checked the job was actually assigned.
-    fn contained_run(&self, id: &str, files: &[(&str, &[u8])], command: &str) -> ContainedRun {
+    pub(super) fn contained_run(
+        &self,
+        id: &str,
+        files: &[(&str, &[u8])],
+        command: &str,
+    ) -> ContainedRun {
         let context = checkout(self.scratch.path(), &self.env, files);
         let identity = tree::identity(&context, &tree::files(&context).unwrap()).unwrap();
         let packed = tarball(self.scratch.path(), &context, &identity, command, id);
@@ -649,6 +678,7 @@ impl Case {
         let failure = self.scratch.path().join(format!("guardian-{id}.failure"));
         let errors = self.scratch.path().join(format!("guardian-{id}.err"));
         let output = self.scratch.path().join(format!("guardian-{id}.out"));
+        let kill_bootstrap = self.scratch.path().join(format!("guardian-{id}.kill"));
         let guardian = r#"
 $ErrorActionPreference = 'Stop'
 try {
@@ -657,6 +687,10 @@ $run = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-
 # Windows PowerShell needs the process handle opened before exit to retain its exit code.
 $handle = $run.Handle
 if ($null -eq $handle) { throw 'could not retain the bootstrap process handle' }
+while (-not $run.HasExited) {
+  if (Test-Path -LiteralPath $env:CF_TEST_KILL_BOOTSTRAP) { $run.Kill(); break }
+  Start-Sleep -Milliseconds 20
+}
 $run.WaitForExit()
 [IO.File]::WriteAllText(($env:CF_TEST_DONE + '.pending'), [string]$run.ExitCode)
 [IO.File]::Move(($env:CF_TEST_DONE + '.pending'), $env:CF_TEST_DONE)
@@ -690,6 +724,7 @@ while ($true) { Start-Sleep -Milliseconds 100 }
             .env("CF_TEST_GO", &go)
             .env("CF_TEST_DONE", &done)
             .env("CF_TEST_FAILURE", &failure)
+            .env("CF_TEST_KILL_BOOTSTRAP", &kill_bootstrap)
             .stdin(Stdio::null())
             .stdout(Stdio::from(fs::File::create(&output).unwrap()))
             .stderr(Stdio::from(fs::File::create(&errors).unwrap()))
@@ -705,6 +740,7 @@ while ($true) { Start-Sleep -Milliseconds 100 }
             failure,
             errors,
             output,
+            kill_bootstrap,
         };
         assert!(
             refusal.is_none(),

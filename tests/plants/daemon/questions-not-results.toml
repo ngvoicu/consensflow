@@ -128,8 +128,8 @@ runs = ["qnr-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
-replace = '        if false {'
+find = "        if question.state == \"cancelled\" && (finished || !has_any_answer(store, question_id)?) {"
+replace = "        if false {"
 
 [[plant]]
 name = "questions not results: a withdrawal takes a question that has an answer"
@@ -139,8 +139,10 @@ runs = ["qnr-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
 find = '''                AND NOT {}",
+            crate::holding::task_for_question_sql("message"),
             has_standing_answer("message")'''
 replace = '''                AND NOT {}",
+            crate::holding::task_for_question_sql("message"),
             "0"'''
 
 [[plant]]
@@ -150,8 +152,8 @@ runs = ["qnr-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0"
-replace = "task_id = ?2 AND ?3 = ?3 AND kind = 'question'"
+find = "{} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0"
+replace = "{} = ?2 AND ?3 = ?3 AND kind = 'question'"
 
 [[plant]]
 name = "questions not results: a withdrawn question with an answer that failed is refused another"
@@ -160,8 +162,8 @@ runs = ["qnr-ledger-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
-replace = '        if question.state == "cancelled" {'
+find = "        if question.state == \"cancelled\" && (finished || !has_any_answer(store, question_id)?) {"
+replace = "        if question.state == \"cancelled\" {"
 
 [[plant]]
 name = "questions not results: the window's own result withdraws its question"

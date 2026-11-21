@@ -176,13 +176,13 @@ replace = "  return lane?.held?.task === task.number ? lane.held : null"
 [[plant]]
 name = "turn end finish page: Finish is offered on a closed project"
 meant = "offers no Finish on a closed project, where nothing acts, though its task is held"
-runs = ["tep-turn-end-finish-page-finish"]
+runs = [["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "offers no Finish on a closed project, where nothing acts, though its task is held"]]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "    if (!closed) actions.append(...this.#taskActions(task))"
-replace = "    if (!closed || this.#held !== null) actions.append(...this.#taskActions(task))"
+find = "    if (!closed) actions.append(...this.#taskActions(task, wait))"
+replace = "    if (!closed || held !== null) actions.append(...this.#taskActions(task, wait))"
 
 [[plant]]
 name = "turn end finish page: Finish cancels the task"

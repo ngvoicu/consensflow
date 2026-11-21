@@ -217,7 +217,47 @@ async fn a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gi
     let scene = scene();
     let number = working_task(&scene);
     let result = result_of(&scene, number);
-    let question = super::support::question_on(&scene, number).id;
+    // An unrelated member can still ask about a done task. The window that
+    // finished it can no longer ask a question whose answer it will not take.
+    let (question, author) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let member = ledger
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    harness: "claude-code".to_owned(),
+                    model: Some("claude-sonnet-5".to_owned()),
+                    model_name: Some("diana".to_owned()),
+                    effort: None,
+                    designer: false,
+                    roles: vec!["worker".to_owned()],
+                    tier: "standard".to_owned(),
+                },
+            )
+            .unwrap();
+        let question = ledger
+            .ask(
+                scene.project.id,
+                &cf_ledger::NewQuestion {
+                    from: Some(member.handle),
+                    to: "chief".to_owned(),
+                    task: Some(number),
+                    questions: Some(json!([{
+                        "question": "Which?", "header": "H",
+                        "options": [{ "label": "red" }, { "label": "blue" }], "multiple": false,
+                    }])),
+                    ..cf_ledger::NewQuestion::default()
+                },
+            )
+            .unwrap()
+            .id;
+        let token = scene
+            .context
+            .credentials
+            .issue(scene.project.id, member.id)
+            .unwrap();
+        (question, token)
+    };
     meeting(&scene, true);
 
     let said = thread_of(&scene, &scene.chief, number).await;
@@ -236,8 +276,8 @@ async fn a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gi
     let text = said.to_string();
     assert!(!text.contains("The parser is written"), "{said}");
     assert!(!text.contains("blue"), "its options: {said}");
-    // The one who wrote them reads them: zeus asked the question.
-    let own = thread_of(&scene, &scene.zeus, number).await;
+    // The one who wrote them reads them: diana asked the question.
+    let own = thread_of(&scene, &author, number).await;
     assert!(in_thread(&own, question).unwrap()["questions"].is_array());
 
     meeting(&scene, false);

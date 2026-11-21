@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 use super::*;
 use crate::api::callers::caller_of;
 use crate::api::routes::tests::support::{
-    api, note_for_zeus, project_is, question_on, state_of, working_question, working_task,
+    api, note_for_zeus, project_is, question_on, session_task_at_work, state_of, working_question,
+    working_task,
 };
 use crate::api::waits::WAITS;
 use crate::testing::{request, said, scene, Scene};
@@ -54,6 +55,68 @@ async fn the_chief_answers_in_words_and_the_answer_is_created_and_the_dispatcher
         answer_to(&scene).map(|found| found.body),
         Some("The first.".to_owned())
     );
+}
+
+#[tokio::test]
+async fn the_answer_route_refuses_a_question_whose_task_was_taken_back() {
+    let scene = scene();
+    let number = session_task_at_work(&scene);
+    let (question, old) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let old = ledger
+            .task(scene.project.id, number)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .unwrap();
+        let question = ledger
+            .ask(
+                scene.project.id,
+                &cf_ledger::NewQuestion {
+                    from: Some(old.clone()),
+                    to: "chief".to_owned(),
+                    task: Some(number),
+                    body: Some("Which format?".to_owned()),
+                    ..cf_ledger::NewQuestion::default()
+                },
+            )
+            .unwrap();
+        ledger.begin_delivery(question.id).unwrap();
+        ledger.confirm_delivery(question.id, None).unwrap();
+        ledger
+            .release_task(scene.project.id, number, "by @human")
+            .unwrap();
+        (question, old)
+    };
+    let body = json!({ "question": question.id, "body": "Use JSON" }).to_string();
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 409, "{said}");
+    assert_eq!(said["error"], "question-moved");
+    let words = said["message"].as_str().unwrap();
+    assert!(
+        words.contains("open")
+            && words.contains("standard")
+            && !words.contains("starts over without the old conversation")
+            && words.contains("cf tell T-1"),
+        "{words}"
+    );
+    assert_eq!(scene.kicks.get(), 0, "a refusal wakes no delivery");
+    let ledger = scene.context.ledger.borrow();
+    let old_id = ledger
+        .project(scene.project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|p| p.handle == old)
+        .unwrap()
+        .id;
+    assert!(ledger
+        .pending(old_id)
+        .unwrap()
+        .iter()
+        .all(|m| m.reply_to != Some(question.id)));
 }
 
 #[tokio::test]

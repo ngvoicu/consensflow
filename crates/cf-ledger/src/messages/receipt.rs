@@ -145,6 +145,9 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
         "UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering'",
         params![receipt.to_string(), message.id],
     )?;
+    if message.kind == "question" && message.recipient_role == "chief" && !message.urgent {
+        crate::waiting_questions::read_early(store, message.id)?;
+    }
     Ok(())
 }
 
@@ -224,19 +227,27 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 /// cancelled or declined. A withdrawn question with an answer still obliges if
 /// that answer did not stand; one withdrawn without an answer obliges no more.
 fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
+    if store.db.prepare(
+        "SELECT 1 FROM question_binding WHERE task_id = ?1 AND participant_id = ?2 AND closed IN (2,3) LIMIT 1",
+    )?.exists(params![task, window])? {
+        return Ok(true);
+    }
     Ok(store
         .db
-        .prepare(
+        .prepare(&format!(
             "SELECT 1 FROM message q
-             WHERE q.task_id = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+             WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
+                 OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
+                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read'))
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer'))
-             LIMIT 1",
-        )?
-        .exists(params![task, window])?)
+             LIMIT 1", crate::holding::task_for_question_sql("q"),
+        ))?
+        .exists(params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION])?)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:
@@ -371,6 +382,16 @@ pub(crate) fn claim_answer(
                 403,
             ));
         }
+        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?
+            || crate::holding::provisional_question(store, question_id)?) {
+            return Ok(Claim::Waiting);
+        }
+        if shut.is_some() || crate::holding::question_is_live(store, question_id)? == Some(false) {
+            return Ok(Claim::Closed);
+        }
+        // A question may discuss a different task; its door belongs to the
+        // asking window's holding just as its answer does.
+        let task = crate::holding::binding_task(store, question_id)?.unwrap_or(task);
         let paused = match task {
             Some(task) => {
                 let state: String = store.db.query_row(
@@ -382,7 +403,7 @@ pub(crate) fn claim_answer(
             }
             None => false,
         };
-        if shut.is_some() || paused {
+        if paused {
             return Ok(Claim::Closed);
         }
         let found: Option<(i64, String, Option<i64>, Option<String>)> = store
@@ -461,6 +482,18 @@ pub(crate) fn settle_claim(
         }
         if answer.state == "read" {
             return Ok(());
+        }
+        if let Some(question) = answer.reply_to {
+            if crate::holding::question_is_live(store, question)? == Some(false)
+                || crate::holding::awaiting_handover(store, question)?
+                || crate::holding::provisional_question(store, question)?
+            {
+                return Err(LedgerError::refused_with(
+                    "door-closed",
+                    "this question's window cannot take its answer now",
+                    409,
+                ));
+            }
         }
         let handed = answer.state == "queued"
             && store
@@ -722,6 +755,7 @@ fn received_as(
          WHERE id = ?",
         params![at, receipt.to_string(), message.id],
     )?;
+    crate::holding::clear_project_wait(store, message.id)?;
     crate::tasks::background_exchange(store, message.id, true)?;
     store.log(
         message.project_id,

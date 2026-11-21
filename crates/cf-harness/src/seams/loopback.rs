@@ -85,7 +85,7 @@ impl Loopback for SystemLoopback {
         host: &'a dyn PaneHost,
     ) -> Work<'a, Result<Box<dyn Reply>, String>> {
         Box::pin(async move {
-            let reply = net::send(request, &|| host.admits()).await?;
+            let reply = net::send(request, &|| host.hand_over_to_broker()).await?;
             Ok(Box::new(reply) as Box<dyn Reply>)
         })
     }
@@ -98,5 +98,49 @@ impl Reply for net::Reply {
 
     fn body(&mut self, limit: usize) -> Work<'_, Result<Vec<u8>, BodyFailed>> {
         Box::pin(net::Reply::body(self, limit))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::ScriptedHost;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn t1813_system_codex_broker_handover_precedes_the_request_and_reply() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let host = ScriptedHost::default();
+                let request = Request {
+                    method: Method::Post,
+                    url: format!(
+                        "http://127.0.0.1:{}/deliver",
+                        listener.local_addr().unwrap().port()
+                    ),
+                    headers: Vec::new(),
+                    body: Some(b"brief".to_vec()),
+                };
+                let peer = async {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut buffer = [0; 4096];
+                    assert!(socket.read(&mut buffer).await.unwrap() > 0);
+                    assert_eq!(
+                        host.broker_handovers(),
+                        1,
+                        "the holding changes before the broker receives the request"
+                    );
+                    socket
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                        .await
+                        .unwrap();
+                };
+                let (reply, ()) = tokio::join!(SystemLoopback.hand_over(request, &host), peer);
+                assert_eq!(reply.unwrap().status(), 200);
+            });
     }
 }

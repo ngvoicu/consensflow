@@ -771,7 +771,7 @@ runs = ["harness-admission"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/channel/send.rs"
-find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.admits() {"
+find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.hand_over_to_broker() {"
 replace = "    if false {"
 
 [[plant]]
@@ -1381,11 +1381,8 @@ runs = ["ledger-continuations"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        for row in &carried {
-            stale |= withdrawn_if_stale(store, row)?;
-        }'''
-replace = ""
+find = "        for row in &carried {\n            if closed_answer(store, row)? {\n                return Ok(HandOver::Withdrawn);\n            }\n            stale |= withdrawn_if_stale(store, row)?;\n        }"
+replace = "        for row in &carried {\n            if closed_answer(store, row)? {\n                return Ok(HandOver::Withdrawn);\n            }\n        }"
 
 [[plant]]
 name = "resume tasks: a carrier tried again keeps a continuation whose task is not at work"

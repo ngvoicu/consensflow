@@ -83,8 +83,8 @@ const PART_OUTPUT: usize = 16_000;
 /// more is refused at its launch in words, not started with none of it. Muse takes more (20 hooks
 /// of 16,000 bytes and 64 small ones were all taken, T-1246), so this is a choice of cost: each
 /// hook costs about 45 ms of a start on a Mac and 20 ms on Windows and 30 bytes of context
-/// (measured, `muse_role.rs`), and 8 is 2.7 times the 3 parts of the largest role there is
-/// (37,760 bytes of answer; the pins keep every role at half of this or fewer).
+/// (measured, `muse_role.rs`), and 8 is twice the 4 parts the largest chief role now needs
+/// on Windows with the most escaped rules; the pins keep every role at half of this or fewer.
 pub const MOST_PARTS: usize = 8;
 
 /// What every block of ours begins with, a part's frame and the filler alike: how a block of a

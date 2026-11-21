@@ -15,6 +15,27 @@ bkv-rule = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatch
 bkv-plain-run = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "plain_run::"]
 
 [[plant]]
+name = "t1848: a late backup never gets the held task"
+meant = "a_backup_added_after_a_member_is_held_takes_its_waiting_queued_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::a_backup_added_after_a_member_is_held_takes_its_waiting_queued_task"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''let mut assigned = self.hand_work_to_backups(project)?;'''
+replace = '''let mut assigned = false;'''
+
+[[plant]]
+name = "t1848: adding a backup does not wake the dispatcher"
+meant = "a_later_backup_change_wakes_the_dispatcher_and_moves_waiting_work"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_later_backup_change_wakes_the_dispatcher_and_moves_waiting_work"]]
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''            Self::ProjectsList
+                | Self::HarnessesMissing'''
+replace = '''            Self::ProjectsList
+                | Self::BackupAdd
+                | Self::HarnessesMissing'''
+
+[[plant]]
 name = "bkv ledger: inserting a backup skips link validation"
 meant = "a_backup_insert_cannot_link_across_projects_or_to_a_chief"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_insert_cannot_link_across_projects_or_to_a_chief"]]

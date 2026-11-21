@@ -46,6 +46,10 @@ pub struct FakeHost {
     pub refuse_kills: Cell<bool>,
     /// Keys (`pane.input`) are refused: they are asked, and none is taken.
     pub refuse_keys: Cell<bool>,
+    /// A paste is refused without writing it.
+    pub refuse_pastes: Cell<bool>,
+    /// The host cannot tell whether a paste reached the pane.
+    pub uncertain_pastes: Cell<bool>,
     /// An open waits for this gate.
     pub hold: RefCell<Option<Gate>>,
     /// The window of this handle exits as the next open is answered: the
@@ -306,8 +310,17 @@ impl FakeHost {
         let drawn_asked = body.get("bottom").is_some();
         self.requests.borrow_mut().push((op.to_owned(), body));
         let mut answer = Map::new();
-        let refused = op == "pane.input" && self.refuse_keys.get();
-        answer.insert("ok".to_owned(), json!(!refused));
+        let refused = (op == "pane.input" && self.refuse_keys.get())
+            || (op == "pane.write_paste" && self.refuse_pastes.get());
+        let uncertain = op == "pane.write_paste" && self.uncertain_pastes.get();
+        answer.insert("ok".to_owned(), json!(!refused && !uncertain));
+        if op == "pane.write_paste" && refused {
+            answer.insert("admitted".to_owned(), json!(false));
+            answer.insert("bytesWritten".to_owned(), json!(0));
+        }
+        if uncertain {
+            answer.insert("admitted".to_owned(), Value::Null);
+        }
         if op == "pane.snapshot" {
             answer.extend(self.snapshot.borrow().clone());
             // The screen's last lines as drawn go only to a request that asks for them, as the

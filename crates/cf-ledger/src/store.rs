@@ -20,6 +20,7 @@ use crate::Event;
 
 pub(crate) struct Store {
     pub(crate) db: Connection,
+    pub(crate) question_run: String,
     clock: Box<dyn Clock>,
     names: Box<dyn FnMut() -> String>,
     /// Told every event as it is logged.
@@ -35,6 +36,7 @@ impl Store {
     ) -> Self {
         Self {
             db,
+            question_run: crate::holding::initial_run(),
             clock,
             names,
             trace,
@@ -243,6 +245,9 @@ impl Store {
              WHERE id = ?",
             params![to, at, task.id],
         )?;
+        if matches!(to, "accepted" | "cancelled" | "failed") {
+            crate::holding::close_task(self, task, None)?;
+        }
         // What its task's line said of it, a note shown and not typed, held until now.
         crate::tasks::end_asides(self, task.id, &at)?;
         let mut data = json!({ "task": task.number, "from": task.state, "to": to });
@@ -250,6 +255,13 @@ impl Store {
             data.extend(detail);
         }
         self.log(task.project_id, kind, data)?;
+        // Every terminal transition closes the previous window's question doors,
+        // including failures made by a delivery rather than by a task verb.
+        if matches!(to, "accepted" | "cancelled" | "failed") {
+            if let Some(window) = task.assignee_id {
+                crate::tasks::shut_tracked_doors(self, task, window)?;
+            }
+        }
         if !ACTIVE_TASK_STATES.contains(&to) {
             withdraw_continuations(self, task, to)?;
         }

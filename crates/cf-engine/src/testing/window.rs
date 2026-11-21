@@ -367,7 +367,13 @@ impl Window for FakeWindow {
         let wrapped = self.fake.deliver_holds.wrap(&args);
         let fake = Rc::clone(&self.fake);
         let (launch, given) = (self.launch.clone(), text.to_owned());
-        let taking: Taking = Box::new(move || fake.take(&launch, &given));
+        let taking: Taking<'a> = Box::new(move || {
+            let admission = fake.take(&launch, &given);
+            if matches!(admission, Admission::Admitted { queued: false }) {
+                host.delivery_reported(pane);
+            }
+            admission
+        });
         let own = self.fake.deliver.borrow().clone();
         // What a delivery does is done when it is called, as the JavaScript
         // fake's was, or once the test lets a held one go; a test's own

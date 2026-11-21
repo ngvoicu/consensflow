@@ -239,6 +239,7 @@ impl Context {
             recorder: recorder.clone(),
             ledger: Rc::clone(&ledger),
             fails: RefCell::new(None),
+            question_starts: RefCell::new(Vec::new()),
         });
         let seams = Seams {
             ledger: Rc::clone(&ledger),

@@ -146,6 +146,74 @@ fn a_transcript_made_a_fixture_loses_what_is_personal_in_it() {
 }
 
 #[test]
+fn claude_2_1_328_session_owner_ids_are_scrubbed_without_losing_the_fields() {
+    let input = [json!({
+        "type": "session-owner",
+        "version": "2.1.328",
+        "sessionId": SESSION,
+        "accountUuid": "made-up-account-id",
+        "organizationUuid": "made-up-organization-id",
+        "userType": "external",
+    })];
+    let fixture = scrub(&transcript(&input)).unwrap();
+    assert_eq!(
+        read(&fixture),
+        [json!({
+            "type": "session-owner",
+            "version": "2.1.328",
+            "sessionId": "$SESSION",
+            "accountUuid": "[scrubbed]",
+            "organizationUuid": "[scrubbed]",
+            "userType": "external",
+        })]
+    );
+}
+
+#[test]
+fn account_and_organization_uuid_values_are_scrubbed_at_any_depth() {
+    let input = [json!({
+        "type": "user",
+        "sessionId": SESSION,
+        "ownerAccountUuid": "made-up-owner-account",
+        "ownerOrganizationUuid": "made-up-owner-organization",
+        "nested": [
+            { "accountUuid": "made-up-account", "deep": {
+                "organizationUuid": "made-up-organization",
+                "billingAccountUuid": 123,
+                "partnerOrganizationUuid": { "id": "made-up-partner" },
+                "AccountUuid": null,
+                "OrganizationUuid": ["made-up"],
+                "accountUuidSuffix": "keep",
+                "otherUuid": "keep-too",
+            } },
+            [ { "subAccountUuid": "made-up-sub-account" } ],
+        ],
+    })];
+    let fixture = scrub(&transcript(&input)).unwrap();
+    assert_eq!(
+        read(&fixture),
+        [json!({
+            "type": "user",
+            "sessionId": "$SESSION",
+            "ownerAccountUuid": "[scrubbed]",
+            "ownerOrganizationUuid": "[scrubbed]",
+            "nested": [
+                { "accountUuid": "[scrubbed]", "deep": {
+                    "organizationUuid": "[scrubbed]",
+                    "billingAccountUuid": "[scrubbed]",
+                    "partnerOrganizationUuid": "[scrubbed]",
+                    "AccountUuid": "[scrubbed]",
+                    "OrganizationUuid": "[scrubbed]",
+                    "accountUuidSuffix": "keep",
+                    "otherUuid": "keep-too",
+                } },
+                [ { "subAccountUuid": "[scrubbed]" } ],
+            ],
+        })]
+    );
+}
+
+#[test]
 fn a_record_keeps_its_keys_where_they_were_whatever_is_taken_out_of_it() {
     let text = format!(
         r#"{{"type":"attachment","a":1,"rendered":[],"b":2,"renderedRole":"x","attachment":{{"type":"skill","body":"x"}},"c":3,"sessionId":"{SESSION}"}}"#

@@ -84,8 +84,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "         AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN ("
-replace = "         AND (?2 = 0 OR m.urgent = 1 OR m.kind = 'task' OR m.task_id IN ("
+find = "         AND (?2 = 0 OR m.urgent = 1 OR (m.kind = 'answer' AND m.task_id IS NULL\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) OR m.task_id IN ("
+replace = "         AND (?2 = 0 OR m.urgent = 1 OR m.kind = 'task' OR (m.kind = 'answer' AND m.task_id IS NULL\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) OR m.task_id IN ("
 
 [[plant]]
 name = "pause: a confirm moves the task past the words that resume it"
@@ -181,8 +181,8 @@ replace = "            Look::Rest => None,"
 
 [[plant]]
 name = "pause: a claim is not voided when its window exits"
-meant = "an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_comes_with_the_words"
-runs = ["pause-receipts", "engine-dispatcher"]
+meant = "t1813_a_taskless_claim_is_released_when_its_window_exits"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_taskless_claim_is_released_when_its_window_exits"]]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"

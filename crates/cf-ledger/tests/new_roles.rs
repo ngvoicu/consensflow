@@ -188,6 +188,9 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0043(&raw).expect("question boundaries undone");
+    cf_ledger::testing::undo_migration_0042(&raw).expect("reminders undone");
+    cf_ledger::testing::undo_migration_0041(&raw).expect("question suspension undone");
     cf_ledger::testing::undo_migration_0040(&raw).expect("plan keys undone");
     cf_ledger::testing::undo_migration_0038(&raw).expect("own hands undone");
     undo_new_roles_migration(&raw).expect("the new roles' migration undone");
@@ -235,9 +238,27 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     for name in backup_triggers {
         assert!(wide.iter().any(|(found, _)| found == name));
     }
+    assert!(wide
+        .iter()
+        .any(|(found, _)| found == "question_binding_wait"));
     let narrowed: Vec<(String, String)> = wide
         .iter()
-        .filter(|(name, _)| !backup_triggers.contains(&name.as_str()) && name != "task_plan_key")
+        .filter(|(name, _)| {
+            !backup_triggers.contains(&name.as_str())
+                && ![
+                    "task_plan_key",
+                    "question_reminder",
+                    "question_reminder_by_message",
+                    "question_binding_wait",
+                    "message_questions_for_chief",
+                    "message_answers_by_question",
+                ]
+                .contains(&name.as_str())
+                && name != "question_resume_anchor"
+                && name != "question_holding"
+                && name != "question_binding"
+                && name != "question_handover"
+        })
         .map(|(name, sql)| {
             (
                 name.clone(),

@@ -58,6 +58,7 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use cf_harness::contract::{Opening, TurnLeft};
+use cf_harness::records::Reading;
 // How the chief's note that its turn was cut begins (`CHIEF_CUT`), in this build's
 // words and in those of the builds before it, which said no more: the ledger's, as
 // a meeting with the chief holds no such note and knows one by them.
@@ -262,7 +263,12 @@ impl Dispatcher {
     pub async fn settle_after_restart(self: &Rc<Self>) -> Result<(), EngineError> {
         let _settling = Settling::begin(&self.resumes);
         // An `async` method: its answer reaches this a turn after it was made.
-        returning(self.settle_in_flight()).await
+        let settled = returning(self.settle_in_flight()).await;
+        self.seams
+            .ledger
+            .borrow_mut()
+            .close_questions_of_ended_engine()?;
+        settled
     }
 
     /// The human's Resume: the project is open, with the tasks its suspension
@@ -303,6 +309,37 @@ impl Dispatcher {
         }
         self.changed();
         self.project_now(project)
+    }
+
+    /// Bound the old record before this member's new window and token exist.
+    /// This runs in the member's own opening step, so a slow record holds up
+    /// neither the project's Resume nor the other windows. If it cannot be
+    /// read, the wait remains until a paste supplies its own boundary.
+    pub(crate) async fn bound_question_wait(
+        &self,
+        project: i64,
+        window: i64,
+    ) -> Result<(), EngineError> {
+        let boundaries = self
+            .seams
+            .ledger
+            .borrow()
+            .question_waits_without_boundary(project, window)?;
+        for (window, conversation, session) in boundaries {
+            if let Some(reading) = self.record_left(window, &session).await? {
+                if let Reading::Known(record) = reading.as_ref() {
+                    let last = record.items.last().map_or("", |item| item.id.as_ref());
+                    self.seams.ledger.borrow_mut().set_question_wait_boundary(
+                        project,
+                        window,
+                        conversation,
+                        &session,
+                        last,
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The conversation a launch goes on with: the participant's current one,

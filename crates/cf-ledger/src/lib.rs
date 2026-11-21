@@ -18,6 +18,7 @@
 mod board;
 mod conversations;
 pub mod handles;
+mod holding;
 mod ledger;
 mod meeting;
 mod messages;
@@ -42,6 +43,7 @@ mod tasks;
 pub mod testing;
 mod text;
 mod views;
+mod waiting_questions;
 mod wake_ups;
 
 pub use board::Board;
@@ -58,6 +60,7 @@ pub use conversations::{
     ChiefSwitch, HistoryAsk, FIELD_MAX, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES,
     ID_SHOWN, NATIVE_SESSION_MAX, TRANSCRIPT_ITEM_MAX,
 };
+pub use holding::WindowHolding;
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
@@ -65,7 +68,7 @@ pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,
     is_told, sent_at_work, told_at_work, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
-    NewQuestion, Read, MAY_STILL_RUN, NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
+    NewQuestion, Read, MAY_STILL_RUN, MOVED_QUESTION, NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
@@ -85,4 +88,5 @@ pub use tasks::{
     SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
+pub use waiting_questions::QuestionWait;
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

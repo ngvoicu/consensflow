@@ -32,6 +32,8 @@
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
 // The stand-in's command is a shell of a Unix machine.
+#[path = "support/handoff_questions.rs"]
+mod handoff_questions;
 #[path = "support/standin_boot.rs"]
 mod standin_boot;
 const ALLOW_LIVE_MATRIX: bool = false;

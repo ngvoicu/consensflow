@@ -42,8 +42,8 @@ const WAIT: Duration = Duration::from_secs(60);
 /// (`api::handle`), so a path that is theirs is theirs to answer, whatever
 /// window asks. None of the traces asks one now: `GET /`, which the saved
 /// agents' screen answered, is the API's 404 `unknown-route` again, as Node's
-/// said it (harness-models). Every other answer is held to Node's bytes, and a
-/// test holds this list to the traces.
+/// said it (harness-models). A test holds this list to the traces. The separate
+/// cancelled-question advice below pins the one intentional wording change.
 pub const DEPARTURES: [(&str, u64); 0] = [];
 
 /// What the screens answer a request of theirs that carries no UI token, as
@@ -54,6 +54,34 @@ fn screens_answer() -> Value {
         "contentType": "application/json",
         "body": r#"{"error":"unauthorized"}"#,
     })
+}
+
+/// The moved-question contract gives a cancelled window advice about its next
+/// brief. Keep the original Node recording and pin just the two responses and
+/// the resulting `cf ask` error to the deliberately changed words; every
+/// other byte and effect of this trace is still compared.
+fn current_cancelled_question_advice(trace: &mut Value) {
+    const OLD: &str = r#"{"error":"task-cancelled","message":"T-1 is cancelled: nothing more of it goes to @chief"}"#;
+    const NEW: &str = r#"{"error":"task-cancelled","message":"T-1 is cancelled. Wait for another brief in this window before asking."}"#;
+    let steps = trace["steps"].as_array_mut().expect("the recorded steps");
+    for (at, id) in [(10, 1), (15, 5)] {
+        let step = &mut steps[at];
+        assert_eq!(step["kind"], "exchange");
+        assert_eq!(step["id"], id);
+        assert_eq!(step["request"]["target"], "/api/questions");
+        assert_eq!(step["response"]["body"], OLD);
+        step["response"]["body"] = json!(NEW);
+    }
+    let run = &mut steps[14];
+    assert_eq!(run["kind"], "run");
+    assert_eq!(run["id"], 1);
+    assert_eq!(run["argv"], json!(["ask", "Which format?"]));
+    assert_eq!(
+        run["stderr"],
+        "cf: T-1 is cancelled: nothing more of it goes to @chief\n"
+    );
+    run["stderr"] =
+        json!("cf: T-1 is cancelled. Wait for another brief in this window before asking.\n");
 }
 
 /// A run of `cf` still going: what it was, what it makes of the API, and the
@@ -95,7 +123,10 @@ struct Player<'a> {
 /// answered as Node answered.
 pub async fn play(name: &str) -> Result<Tally, String> {
     let rig = Rc::new(Rig::start().await);
-    let trace = trace::load(name);
+    let mut trace = trace::load(name);
+    if name == "cf-board-005" {
+        current_cancelled_question_advice(&mut trace);
+    }
     let steps = trace["steps"].as_array().cloned().unwrap_or_default();
     let mut made: HashMap<u64, Vec<Value>> = HashMap::new();
     for step in &steps {
