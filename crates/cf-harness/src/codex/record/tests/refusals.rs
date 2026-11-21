@@ -555,6 +555,16 @@ fn a_count_that_says_the_limit_was_reached_leaves_view_only_at_the_persons_words
         level(&[started(json!("t1")), reached(RESETS), started(json!("t1"))]),
         Some(Level::Exhausted)
     );
+    // The same turn's start replayed, then words in it: the turn is not a new one.
+    assert_eq!(
+        level(&[
+            started(json!("t1")),
+            reached(RESETS),
+            started(json!("t1")),
+            user_words("m9", "again")
+        ]),
+        Some(Level::Exhausted)
+    );
     let compacted = json!({ "type": "compacted", "payload": { "message": "summary" } });
     assert_eq!(
         level(&with(vec![started(json!("t2")), compacted, ended("t2")])),

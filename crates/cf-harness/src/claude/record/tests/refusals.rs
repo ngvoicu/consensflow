@@ -578,6 +578,16 @@ fn a_refusal_is_taken_out_of_view_only_by_a_prompt_written_after_it_on_its_branc
         json!({ "isMeta": true, "turnCompanion": true }),
     );
     kept("tool result with companion words", vec![beside]);
+    // A tool's result with words in the same record, not marked as Claude Code's own.
+    let mixed = user(
+        "u2",
+        json!("a1"),
+        json!([
+            tool_result(json!("t1"), json!("ok")),
+            text(json!("Words beside the result."))
+        ]),
+    );
+    kept("tool result with words", vec![mixed]);
     // A command typed at the prompt, what it printed, Claude Code's caveat, a cancelled /compact.
     let command = user(
         "u2",
