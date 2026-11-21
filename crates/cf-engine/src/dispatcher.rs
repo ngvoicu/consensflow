@@ -1003,9 +1003,6 @@ impl Dispatcher {
         let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
             return Ok(());
         };
-        if participant.role == "chief" {
-            return Ok(());
-        }
         self.collect(
             &project,
             participant,
