@@ -76,6 +76,7 @@
 //! the harness's folder in it ([`Installed::on_own_home`]), is none of this kit's: it reads
 //! and writes nothing of the owner's.
 
+mod attribution;
 mod pi;
 mod watch;
 
@@ -427,6 +428,8 @@ struct Made {
     owner: Seen,
     /// The folder, removed when this is dropped: with the run, however it ends.
     folder: crate::door::Made,
+    /// The processes of this harness outside the run when it began ([`attribution`]).
+    independent: Vec<super::members::Identity>,
 }
 
 /// The home a harness's windows run on for a run: made when the rig first asks for it, with a
@@ -660,6 +663,7 @@ impl Isolation {
             folder,
             copied,
             owner: self.look(),
+            independent: attribution::now(&super::members::ThisMachine, self.harness.name()),
         });
         Ok(path)
     }
@@ -995,6 +999,14 @@ impl Isolation {
                     touched.push(tables);
                 }
             }
+        }
+        // Said without opening the owner's files: who else could have written what changed.
+        if !touched.is_empty() && self.plan.in_place.is_none() {
+            touched.push(attribution::say(
+                self.harness.name(),
+                &made.independent,
+                &attribution::now(&super::members::ThisMachine, self.harness.name()),
+            ));
         }
         let refreshed = made
             .copied

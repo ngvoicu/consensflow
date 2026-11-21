@@ -2457,3 +2457,17 @@ fn t1744_review_guard_does_not_open_any_owner_login_file() {
         ran.output()
     );
 }
+
+/// B15, B23: a change of the owner's config during a run is a failure that says how sure the kit
+/// is of who wrote it, and never what the file holds.
+#[test]
+fn a_changed_owner_config_is_a_failure_that_says_who_could_have_written_it() {
+    let owner = Owner::new();
+    let isolation = owner.codex();
+    isolation.made_at(at(NOW)).unwrap();
+    let config = owner.path(".codex/config.toml");
+    fs::write(&config, "[tables_of_someone_else]\nkey = \"VALUE-NEVER-SAID\"\n").unwrap();
+    let said = isolation.finish().unwrap_err().to_string();
+    assert!(said.contains("config.toml") && said.contains("attribution:"), "{said}");
+    assert!(!said.contains("VALUE-NEVER-SAID"), "{said}");
+}
