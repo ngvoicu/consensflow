@@ -1,0 +1,81 @@
+# R1 of the refusal contract (T-1910, D3): a refusal in view is the record's last turn's. A genuine
+# user turn (Claude's and Pi's user prompt, Codex's task_started) takes an earlier refusal out of
+# view; a tool result and a message not yet taken do not; Codex keeps its count privately for the
+# reset a failed end names; Pi's JSON null time is no time.
+#
+# Every name holds `refusal readers`, so `cargo xtask plants daemon "refusal readers"` runs them all.
+
+[run]
+refusal-readers-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::refusals"]
+refusal-readers-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
+refusal-readers-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::tests::refusals"]
+
+[[plant]]
+name = "refusal readers: Claude keeps the refusal at a genuine prompt"
+meant = "a_refusal_stays_in_view_past_what_opens_no_turn_and_goes_at_a_genuine_prompt"
+runs = ["refusal-readers-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        self.quota = None;\n        self.turn_open = true;\n        self.candidate = None;\n        self.terminal = None;\n        Ok(())"
+replace = "        self.turn_open = true;\n        self.candidate = None;\n        self.terminal = None;\n        Ok(())"
+
+[[plant]]
+name = "refusal readers: Claude clears the refusal at a tool result"
+meant = "a_refusal_stays_in_view_past_what_opens_no_turn_and_goes_at_a_genuine_prompt"
+runs = ["refusal-readers-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        for result in &record.results {\n            self.tool_result(result, ran, at, seq)?;\n        }\n"
+replace = "        for result in &record.results {\n            self.tool_result(result, ran, at, seq)?;\n            self.quota = None;\n        }\n"
+
+[[plant]]
+name = "refusal readers: Pi keeps the refusal at a genuine prompt"
+meant = "a_second_distinct_refusal_after_a_retry_is_in_view_and_the_first_is_not"
+runs = ["refusal-readers-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                self.quota = None;\n                self.push(id, Role::User, text, true, at);"
+replace = "                self.push(id, Role::User, text, true, at);"
+
+[[plant]]
+name = "refusal readers: Pi clears the refusal at a tool result"
+meant = "a_refusal_names_its_quota_and_a_genuine_user_turn_or_the_next_step_clears_it"
+runs = ["refusal-readers-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                let detail = self.result_detail(&call, &field, &at);\n"
+replace = "                let detail = self.result_detail(&call, &field, &at);\n                self.quota = None;\n"
+
+[[plant]]
+name = "refusal readers: Pi reads a null time as zero"
+meant = "the_time_of_a_refusal_is_what_number_makes_of_the_message_time"
+runs = ["refusal-readers-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = 'js::to_number(field("timestamp").filter(|at| !at.is_null()))'
+replace = 'js::to_number(field("timestamp"))'
+
+[[plant]]
+name = "refusal readers: Codex keeps its count at the next turn's start"
+meant = "a_count_at_its_limit_leaves_view_at_the_next_turns_start_and_a_failed_end_still_names_its_reset"
+runs = ["refusal-readers-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "                if self.quota.as_deref().is_some_and(|q| q.level() != Level::Ok) {\n                    self.quota = None;\n                }"
+replace = ""
+
+[[plant]]
+name = "refusal readers: Codex loses the hidden count for the reset"
+meant = "a_count_at_its_limit_leaves_view_at_the_next_turns_start_and_a_failed_end_still_names_its_reset"
+runs = ["refusal-readers-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "                    self.quota = None;\n                }"
+replace = "                    self.quota = None;\n                    self.count = None;\n                }"
