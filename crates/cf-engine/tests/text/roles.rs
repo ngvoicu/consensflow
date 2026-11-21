@@ -492,7 +492,7 @@ fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_
     let text = instructions("chief", &[zeus()]);
     let card = section(&text, "Your commands");
     for role in cf_ledger::roles::all() {
-        let shown = match (role.switch, role.tiered) {
+        let shown = match (role.switch, role.tiered()) {
             (None, _) => "cf task add --tier <critical|complex|standard|light> \"…\"".to_owned(),
             (Some(switch), true) => format!("cf task add {switch} --tier <tier> \"…\""),
             (Some(switch), false) => format!("cf task add {switch} \"…\""),

@@ -15,6 +15,10 @@ use crate::store::Store;
 /// light, since critical work is not coding. The image designer, which has no tier, offers
 /// whatever the member is stored at.
 pub(crate) fn require_offered<S: AsRef<str>>(held: &[S], tier: &str) -> Result<(), LedgerError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if overflow::allowed() {
+        return Ok(());
+    }
     for role in held.iter().filter_map(|role| roles::find(role.as_ref())) {
         if role.tiered() && !role.offers(tier) {
             return Err(not_offered(role, tier));
@@ -79,6 +83,10 @@ pub(crate) fn require_free<S: AsRef<str>>(
     held: &[S],
     tier: &str,
 ) -> Result<(), LedgerError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if overflow::allowed() {
+        return Ok(());
+    }
     for role in held.iter().filter_map(|role| roles::find(role.as_ref())) {
         let at = role.tiered().then_some(tier);
         if let Some((_, handle)) = holders(store, project_id, role.id, at, except)?.first() {
@@ -116,6 +124,10 @@ fn taken(role: &Role, tier: &str, handle: &str) -> LedgerError {
 pub(crate) fn check_list(entries: &[(String, Vec<&'static str>, String)]) -> Result<(), LedgerError> {
     for (_, held, tier) in entries {
         require_offered(held, tier)?;
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    if overflow::allowed() {
+        return Ok(());
     }
     for (index, (name, held, tier)) in entries.iter().enumerate() {
         for role in held.iter().filter_map(|role| roles::find(role)) {
@@ -280,4 +292,26 @@ pub(crate) fn note_settled_moves(store: &mut Store) -> Result<(), LedgerError> {
         }
         Ok(())
     })
+}
+
+/// The kit's way to seat several members in one slot, as the update leaves a slot: the list of
+/// a new project is not refused for it while `run` runs on this thread.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) mod overflow {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ALLOWED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(crate) fn allowed() -> bool {
+        ALLOWED.with(Cell::get)
+    }
+
+    pub(crate) fn allowing<T>(run: impl FnOnce() -> T) -> T {
+        let before = ALLOWED.with(|cell| cell.replace(true));
+        let result = run();
+        ALLOWED.with(|cell| cell.set(before));
+        result
+    }
 }

@@ -832,3 +832,40 @@ mod tests {
         assert_eq!(tables, before);
     }
 }
+
+/// Seats member `handle` at `tier` the way the update leaves a slot several hold: the row
+/// is written as a ledger of the version before had it, which the rule never refused then.
+/// For a kit staff whose subject is not the slot (the members stand in for one another, or
+/// the test measures windows at once): the ledger now refuses to seat two in one slot.
+pub fn seat_in_slot(
+    ledger: &crate::Ledger,
+    project: i64,
+    handle: &str,
+    tier: &str,
+) -> rusqlite::Result<()> {
+    ledger.sqlite().execute(
+        "UPDATE participant SET tier = ?1
+          WHERE project_id = ?2 AND (handle = ?3 OR member_id IN
+                (SELECT id FROM participant WHERE project_id = ?2 AND handle = ?3))",
+        rusqlite::params![tier, project, handle],
+    )?;
+    Ok(())
+}
+
+impl crate::Ledger {
+    /// [`crate::Ledger::create_project`] for a kit staff that seats several members in one
+    /// slot, as the update leaves a slot several hold: the ledger refuses such a list now.
+    /// For a staff whose subject is not its slots.
+    pub fn create_project_overflowing(
+        &mut self,
+        request: &crate::NewProject,
+    ) -> Result<crate::ProjectView, crate::LedgerError> {
+        crate::staff::slots::overflow::allowing(|| self.create_project(request))
+    }
+}
+
+/// Runs `run` with the slot rule off on this thread: for the kit's recordings of ledgers that
+/// never had it (Node's traces), which seat members the rule refuses.
+pub fn without_the_slot_rule<T>(run: impl FnOnce() -> T) -> T {
+    crate::staff::slots::overflow::allowing(run)
+}

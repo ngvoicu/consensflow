@@ -38,7 +38,7 @@ fn on(harness: &str, model: &str, effort: Option<&str>, name: &str, tier: &str) 
 
 fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
     ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: NewChief {
@@ -85,92 +85,95 @@ fn named(ledger: &Ledger, project: i64, handle: &str) -> ParticipantView {
 
 #[test]
 fn a_member_is_named_by_its_model_and_effort_its_harness_in_front_where_that_is_taken() {
-    let dir = tempfile::tempdir().expect("a home");
-    let mut ledger = ledger_in(&dir);
-    let project = project(
-        &mut ledger,
-        vec![
-            on(
-                "claude-code",
-                "claude-opus-5-5",
-                Some("high"),
-                "claude-opus-5-5",
-                "complex",
-            ),
-            on(
-                "codex",
-                "gpt-6-astra",
-                Some("max"),
-                "gpt-6-astra",
-                "critical",
-            ),
-            on("devin", "swe-2-max", Some("max"), "swe-2", "light"),
-            on("devin", "adaptive", None, "adaptive", "standard"),
-            on(
-                "pi",
-                "anthropic/claude-opus-5-5",
-                Some("high"),
-                "anthropic/claude-opus-5-5",
-                "complex",
-            ),
-            on(
-                "devin",
+    // Which slots they hold is not the subject: the names are.
+    cf_ledger::testing::without_the_slot_rule(|| {
+        let dir = tempfile::tempdir().expect("a home");
+        let mut ledger = ledger_in(&dir);
+        let project = project(
+            &mut ledger,
+            vec![
+                on(
+                    "claude-code",
+                    "claude-opus-5-5",
+                    Some("high"),
+                    "claude-opus-5-5",
+                    "complex",
+                ),
+                on(
+                    "codex",
+                    "gpt-6-astra",
+                    Some("max"),
+                    "gpt-6-astra",
+                    "complex",
+                ),
+                on("devin", "swe-2-max", Some("max"), "swe-2", "light"),
+                on("devin", "adaptive", None, "adaptive", "standard"),
+                on(
+                    "pi",
+                    "anthropic/claude-opus-5-5",
+                    Some("high"),
+                    "anthropic/claude-opus-5-5",
+                    "complex",
+                ),
+                on(
+                    "devin",
+                    "claude-opus-5-5-high",
+                    Some("high"),
+                    "claude-opus-5-5",
+                    "complex",
+                ),
+            ],
+        );
+        assert_eq!(
+            handles(&project),
+            [
+                "human",
+                "chief",
                 "claude-opus-5-5-high",
-                Some("high"),
-                "claude-opus-5-5",
-                "complex",
+                "gpt-6-astra-max",
+                "swe-2-max",
+                "adaptive",
+                // Pi's name leaves its provider out, and takes it in front only where the
+                // name is taken.
+                "anthropic-claude-opus-5-5-high",
+                "devin-claude-opus-5-5-high",
+            ]
+        );
+        let opus = &project.participants[2];
+        assert_eq!(
+            (
+                opus.harness.as_deref(),
+                opus.model.as_deref(),
+                opus.effort.as_deref(),
+                opus.model_name.as_deref(),
+                opus.agent.as_deref(),
+                opus.tier.as_deref(),
             ),
-        ],
-    );
-    assert_eq!(
-        handles(&project),
-        [
-            "human",
-            "chief",
-            "claude-opus-5-5-high",
-            "gpt-6-astra-max",
-            "swe-2-max",
-            "adaptive",
-            // Pi's name leaves its provider out, and takes it in front only where the
-            // name is taken.
-            "anthropic-claude-opus-5-5-high",
-            "devin-claude-opus-5-5-high",
-        ]
-    );
-    let opus = &project.participants[2];
-    assert_eq!(
-        (
-            opus.harness.as_deref(),
-            opus.model.as_deref(),
-            opus.effort.as_deref(),
-            opus.model_name.as_deref(),
-            opus.agent.as_deref(),
-            opus.tier.as_deref(),
-        ),
-        (
-            Some("claude-code"),
-            Some("claude-opus-5-5"),
-            Some("high"),
-            Some("claude-opus-5-5"),
-            None,
-            Some("complex")
-        ),
-        "it holds what it runs on itself, and names no agent"
-    );
-    // A third of one name and harness takes a number.
-    let third = ledger
-        .add_member(
-            project.id,
-            &on(
-                "devin",
-                "claude-opus-5-5-high-fast",
+            (
+                Some("claude-code"),
+                Some("claude-opus-5-5"),
                 Some("high"),
-                "claude-opus-5-5",
-                "light",
+                Some("claude-opus-5-5"),
+                None,
+                Some("complex")
             ),
-        )
-        .expect("added");
-    assert_eq!(third.handle, "devin-claude-opus-5-5-high-2");
+            "it holds what it runs on itself, and names no agent"
+        );
+        // A third of one name and harness takes a number.
+        let third = ledger
+            .add_member(
+                project.id,
+                &on(
+                    "devin",
+                    "claude-opus-5-5-high-fast",
+                    Some("high"),
+                    "claude-opus-5-5",
+                    "light",
+                ),
+            )
+            .expect("added");
+        assert_eq!(third.handle, "devin-claude-opus-5-5-high-2");
+    });
 }
 
 #[test]
@@ -263,7 +266,7 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_names_them_by
                 model: Some("gpt-6.1-sol".into()),
                 effort: Some("max".into()),
                 model_name: Some("gpt-6.1-sol".into()),
-                tier: "critical".into(),
+                tier: "complex".into(),
             },
         )
         .expect("edited");
@@ -284,7 +287,7 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_names_them_by
             Some("gpt-6.1-sol"),
             Some("max"),
             Some("gpt-6.1-sol"),
-            Some("critical")
+            Some("complex")
         )
     );
     let logged = ledger.events(project.id, 0, 500).expect("the log");
@@ -300,7 +303,7 @@ fn edit_member_moves_a_member_and_its_windows_to_another_model_and_names_them_by
         json!({
             "handle": "claude-opus-5-5-high",
             "from": { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "complex" },
-            "to": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "max", "tier": "critical" },
+            "to": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "max", "tier": "complex" },
         })
     );
     assert_eq!(
@@ -499,7 +502,7 @@ fn an_edit_changes_only_the_member_its_sessions_and_its_backups_tier() {
                 model: Some("gpt-6.2-astra".into()),
                 effort: Some("max".into()),
                 model_name: Some("gpt-6.2-astra".into()),
-                tier: "critical".into(),
+                tier: "complex".into(),
             },
         )
         .expect("edited");
@@ -520,7 +523,7 @@ fn an_edit_changes_only_the_member_its_sessions_and_its_backups_tier() {
         assert_eq!(after.member_id, Some(member.id));
         assert_eq!(after.handle, format!("gpt-6-2-astra-max-{suffix}"));
         assert_eq!(after.model.as_deref(), Some("gpt-6.2-astra"));
-        assert_eq!(after.tier.as_deref(), Some("critical"));
+        assert_eq!(after.tier.as_deref(), Some("complex"));
     }
     let unchanged = by_id(other.id);
     assert_eq!(unchanged.handle, other.handle);
@@ -535,7 +538,7 @@ fn an_edit_changes_only_the_member_its_sessions_and_its_backups_tier() {
     let backup = by_id(backup.id);
     assert_eq!(backup.backup_of, Some(member.id));
     assert_eq!(backup.model.as_deref(), Some("claude-sonnet-5"));
-    assert_eq!(backup.tier.as_deref(), Some("critical"));
+    assert_eq!(backup.tier.as_deref(), Some("complex"));
 }
 
 #[test]
@@ -582,7 +585,7 @@ fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_ba
                 "claude-opus-5-5",
                 Some("max"),
                 "claude-opus-5-5",
-                "critical",
+                "complex",
             ),
         )
         .expect("added");
@@ -607,7 +610,7 @@ fn a_member_that_left_is_known_by_its_harness_model_and_effort_not_by_its_name()
         "claude-opus-5-5-high",
         Some("high"),
         "claude-opus-5-5",
-        "complex",
+        "standard",
     );
     let project = project(&mut ledger, vec![pi.clone(), devin.clone()]);
     let named = |ledger: &Ledger, handle: &str| named(ledger, project.id, handle).id;
@@ -708,7 +711,7 @@ fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
     let mut ledger = ledger_in(&dir);
     let untiered = on("codex", "gpt-6.1-sol", Some("high"), "gpt-6.1-sol", "");
     let refused = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: NewChief {

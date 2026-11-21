@@ -176,7 +176,7 @@ fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_and_whose_it
 }
 
 #[test]
-fn a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes() {
+fn a_role_nobody_holds_takes_the_edit_and_the_task_waits_for_one() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
     let project = project(
@@ -193,23 +193,17 @@ fn a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes()
         tier: Some("light".into()),
         ..TaskEdit::default()
     };
-    let refused = edit(&mut ledger, &project, task, &both).expect_err("nobody tests");
-    assert_eq!(
-        (refused.code(), refused.to_string()),
-        (
-            Some("no-member-of-tier"),
-            "no tester is on the staff: ask the human for one, in your terminal".to_owned()
-        )
-    );
+    // A task is never refused for want of a member: it takes the edit and waits for one.
+    let edited = edit(&mut ledger, &project, task, &both).expect("it waits");
+    assert_eq!(edited.asked, None);
     let read = ledger
         .task(project.id, task)
         .expect("a read")
         .expect("it")
         .task;
     assert_eq!(
-        (read.tier.as_deref(), read.body.as_str()),
-        (Some("standard"), "Do the work"),
-        "all or none: the brief is the old one too"
+        (read.tier.as_deref(), read.body.as_str(), read.state.as_str()),
+        (Some("light"), "A new brief", "open")
     );
 }
 
@@ -221,14 +215,45 @@ fn a_tier_that_is_none_is_refused_and_critical_work_needs_its_purpose() {
         &mut ledger,
         vec![
             member("zeus", &["worker"], "standard"),
-            member("ares", &["worker"], "critical"),
+            member("ares", &["reviewer"], "critical"),
         ],
     );
     let task = open(&mut ledger, &project, "worker", "standard").number;
     let refused = edit(&mut ledger, &project, task, &to("huge")).expect_err("no such tier");
     assert_eq!(refused.code(), Some("invalid-tier"));
-    let refused = edit(&mut ledger, &project, task, &to("critical")).expect_err("no purpose");
+    // A worker's work is never critical: coding is not critical work.
+    let refused = edit(&mut ledger, &project, task, &to("critical")).expect_err("no slot");
+    assert_eq!(
+        (refused.code(), refused.to_string()),
+        (
+            Some("tier-not-offered"),
+            "a worker's task is complex, standard or light: critical work is not coding"
+                .to_owned()
+        )
+    );
+    // A purpose comes with Critical only.
+    let purposed = TaskEdit {
+        tier: Some("light".into()),
+        purpose: Some("architecture".into()),
+        ..TaskEdit::default()
+    };
+    let refused = edit(&mut ledger, &project, task, &purposed).expect_err("no purpose below");
+    assert_eq!(
+        (refused.code(), refused.to_string()),
+        (
+            Some("purpose-without-critical"),
+            "a purpose comes with --tier critical".to_owned()
+        )
+    );
+    // Critical work without a purpose is asked for one, never told to be added again.
+    let review = open(&mut ledger, &project, "reviewer", "standard").number;
+    let refused = edit(&mut ledger, &project, review, &to("critical")).expect_err("no purpose");
     assert_eq!(refused.code(), Some("purpose-required"));
+    assert!(
+        refused.to_string().contains("give one with --purpose")
+            && !refused.to_string().contains("add it again"),
+        "{refused}"
+    );
     assert_eq!(
         tier_of(&ledger, &project, task).as_deref(),
         Some("standard")

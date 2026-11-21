@@ -255,7 +255,9 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
     ("ledger-tasks-027", 6, WAITED_FOR),
-    ("ledger-tiered-012", 9, CRITICAL_WORDS),
+    ("ledger-tiered-003", 8, NO_CRITICAL_CODING),
+    ("ledger-tiered-004", 6, NEVER_REFUSED_FOR_WANT),
+    ("ledger-tiered-012", 7, NO_CRITICAL_CODING),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 12, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none"),
 ];
@@ -346,6 +348,15 @@ const UNREACHED: &str =
 // A question answered while queued is read with its answer's receipt and time,
 // and never typed in later (T-260); Node leaves it queued. In the traces above,
 // the earlier answer-state change now precedes that departure.
+/// A worker has no Critical slot: critical work is not coding, and a worker's task at
+/// Critical is refused (`tier-not-offered`), where Node took it.
+const NO_CRITICAL_CODING: &str =
+    "a worker's task at critical is refused (`tier-not-offered`: critical work is not coding), where Node took it";
+
+/// A task is never refused for want of a member: it waits for one.
+const NEVER_REFUSED_FOR_WANT: &str =
+    "a task for a role nobody holds waits for a member and is told once the way on, where Node refused it (`no-member-of-tier`)";
+
 /// A critical task's lead was reworded in the role texts' own terms (T-1060):
 /// it changes no project file and answers to the chief.
 const CRITICAL_WORDS: &str =
@@ -621,7 +632,13 @@ fn at_this_schema(mut trace: Value) -> Value {
     trace
 }
 
+/// A recording of Node's ledger, which never had the slot rule, seats members the rule now
+/// refuses: it is replayed with the rule off, and the rule has its own tests.
 fn replay(text: &str) -> Outcome {
+    cf_ledger::testing::without_the_slot_rule(|| replayed(text))
+}
+
+fn replayed(text: &str) -> Outcome {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
     // The recorder wrote the ledger's path as «ledger»: this replay's goes back.
@@ -918,7 +935,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
         // A member's tier is the human's: nothing follows a catalog's (harness-models).
         "refreshMemberTiers" => return Err(NO_TIERS_FOLLOWED.to_owned()),
         "setRoles" => parse_roles(arg(args, 2))
-            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles, None))),
+            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
         "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
         "lastStaff" => encode(ledger.last_staff()),
         "holdsWork" => encode(ledger.has_task_in_hand(id())),

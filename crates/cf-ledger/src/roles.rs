@@ -368,7 +368,7 @@ pub mod seam {
         TABLE.with(Cell::get)
     }
 
-    /// A sixth role, which only the tests hold: a field scout, with every tier, held by any
+    /// A sixth role, which only the tests hold: a field scout, given no tier, held by any
     /// agent but an image agent, named apart from its id, between the reviewer and the
     /// tester.
     pub const SCOUT: Role = Role {
@@ -376,7 +376,7 @@ pub mod seam {
         name: "field scout",
         article: "a",
         switch: Some("--scout"),
-        tiers: super::ALL_TIERS,
+        tiers: &[],
         home: "standard",
         image_agent: false,
         changes_files: false,
