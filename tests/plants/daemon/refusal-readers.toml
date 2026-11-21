@@ -67,8 +67,8 @@ runs = ["refusal-readers-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/record.rs"
-find = "                if self.quota.as_deref().is_some_and(|q| q.level() != Level::Ok) {\n                    self.quota = None;\n                }"
-replace = ""
+find = "                    .is_some_and(|q| q.level() != Level::Ok)\n"
+replace = "                    .is_some_and(|q| q.level() == Level::Low && false)\n"
 
 [[plant]]
 name = "refusal readers: Codex loses the hidden count for the reset"
@@ -77,5 +77,5 @@ runs = ["refusal-readers-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/record.rs"
-find = "                    self.quota = None;\n                }"
-replace = "                    self.quota = None;\n                    self.count = None;\n                }"
+find = "                    self.quota = None;\n                }\n                self.current_turn"
+replace = "                    self.quota = None;\n                }\n                self.count = None;\n                self.current_turn"
