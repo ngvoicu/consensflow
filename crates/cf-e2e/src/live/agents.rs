@@ -591,7 +591,47 @@ pub fn validate_window(rig: &Rig, agent: &Value) -> Result {
 /// Admit a model for a direct, non-rig probe, using only a run-owned harness
 /// home. The listing operation opens no window and spends no model turn.
 pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
-    let names: &[&str] = match model.harness {
+    let env = isolated_env(model.harness, home)?;
+    validate_rows(&[agent_on(model)], |harness| listed_in_env(harness, &env))
+}
+
+/// What `harness` lists, asked of the real program with the isolated environment `env`
+/// ([`isolated_env`]): no window, no model turn, and never the rig's stand-in.
+fn listed_in_env(
+    harness: Harness,
+    env: &BTreeMap<String, String>,
+) -> std::result::Result<Vec<Listed>, String> {
+    let answer = super::ask::question(&json!({
+        "op": "models", "kind": harness.kind(), "env": env,
+    }))
+    .map_err(|why| why.to_string())?;
+    listing(&answer["listing"], harness)
+}
+
+/// Where a rig's list of `harness`'s models is read: by the rig's daemon (`models.get`), or, for
+/// Claude Code whose rig starts it through the stand-in's shim, directly from the real program
+/// on the run's own config folder `config`. The shim hands the daemon's read of the list to the
+/// stand-in, which lists fake models only: a real model asked against it is refused before any
+/// window opens (T-1835, T-1857).
+fn list_route(
+    harness: Harness,
+    config: Option<&str>,
+) -> std::result::Result<Option<BTreeMap<String, String>>, String> {
+    match (harness, config) {
+        (Harness::Claude, Some(config)) => isolated_env(
+            Harness::Claude,
+            &[("CLAUDE_CONFIG_DIR".to_owned(), config.to_owned())],
+        )
+        .map(Some)
+        .map_err(|why| why.to_string()),
+        _ => Ok(None),
+    }
+}
+
+/// The environment a direct read of `harness`'s models is given: only what `home` says of the
+/// run-owned folders its isolation names, never a folder that is not the run's.
+fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<String, String>> {
+    let names: &[&str] = match harness {
         Harness::Claude => &["CLAUDE_CONFIG_DIR"],
         Harness::Codex => &["CODEX_HOME"],
         Harness::Pi => &["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"],
@@ -609,15 +649,38 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     };
+    // agy's home is its kept home, which the kit keeps and no run makes; and it is run from the
+    // kit's own copy: a search path the caller gives is refused, the copy's folder is the only
+    // one a direct read may run it from (the owner's launcher updates itself).
+    let kept = (harness == Harness::Agy)
+        .then(|| {
+            super::machine::home()
+                .ok()
+                .and_then(|user| super::agy_home::kept(&user).ok())
+        })
+        .flatten();
+    if harness == Harness::Agy {
+        let copy_only = value("PATH").is_some_and(|path| {
+            std::env::split_paths(path).all(|folder| crate::door::is_made_or_below(&folder))
+                && !path.is_empty()
+        });
+        if !copy_only {
+            return Err(Error::Daemon(
+                "cannot check agy models: its search path is not the kit's own copy's folder alone"
+                    .to_owned(),
+            ));
+        }
+    }
     for name in names {
         let safe = value(name).is_some_and(|value| {
             let path = std::path::Path::new(value);
-            path.is_absolute() && crate::door::is_made_or_below(path)
+            path.is_absolute()
+                && (crate::door::is_made_or_below(path) || kept.as_deref() == Some(path))
         });
         if !safe {
             return Err(Error::Daemon(format!(
                 "cannot check {} models: {name} is not a run-owned folder",
-                model.harness.name()
+                harness.name()
             )));
         }
     }
@@ -636,6 +699,11 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
     .into_iter()
     .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
     .collect();
+    if harness == Harness::Agy {
+        if let Some(path) = value("PATH") {
+            env.insert("PATH".to_owned(), path.to_owned());
+        }
+    }
     for name in names {
         env.insert(
             (*name).to_owned(),
@@ -645,7 +713,7 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
     env.extend(
         super::launcher::updates_off().map(|(name, value)| (name.to_owned(), value.to_owned())),
     );
-    if model.harness == Harness::Pi {
+    if harness == Harness::Pi {
         env.insert("PI_OFFLINE".to_owned(), "1".to_owned());
     }
     if let Some(git) = value("GIT_CONFIG_GLOBAL") {
@@ -666,13 +734,7 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
     if !env.contains_key("USERPROFILE") {
         env.insert("USERPROFILE".to_owned(), owned_home.to_owned());
     }
-    validate_rows(&[agent_on(model)], |harness| {
-        let answer = super::ask::question(&json!({
-            "op": "models", "kind": harness.kind(), "env": env,
-        }))
-        .map_err(|why| why.to_string())?;
-        listing(&answer["listing"], harness)
-    })
+    Ok(env)
 }
 
 fn distance(a: &str, b: &str) -> usize {
@@ -764,6 +826,9 @@ fn models_asked(harness: Harness) -> Value {
 /// What `harness` lists now, read by the rig's daemon as the page's picker reads it
 /// (`models.get`: no window, no model turn); why it could not be read, where it could not.
 fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, String> {
+    if let Some(env) = list_route(harness, rig.var("CLAUDE_CONFIG_DIR"))? {
+        return listed_in_env(harness, &env);
+    }
     let answer = rig
         .page("models.get", models_asked(harness))
         .map_err(|why| why.to_string())?;
@@ -925,6 +990,55 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(foreign.contains("CODEX_HOME") && foreign.contains("run-owned"));
+    }
+
+    /// T-1835, T-1857: the model list a rig's roster is checked against is the real Claude's, on
+    /// the run's own config folder, never the shim's stand-in's; every other harness's is the
+    /// daemon's.
+    #[test]
+    fn a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins() {
+        let config = crate::door::made("cf-list-route-").unwrap();
+        let folder = config.path().to_string_lossy().into_owned();
+        let env = list_route(Harness::Claude, Some(&folder)).unwrap().unwrap();
+        assert_eq!(env["CLAUDE_CONFIG_DIR"], folder);
+        assert_eq!(env["HOME"], folder, "the owner's home is not a fallback");
+        // The shim's folder is no part of the environment: the caller's search path finds the
+        // real program, and the stand-in is a program of the rig's alone.
+        assert!(list_route(Harness::Claude, None).unwrap().is_none());
+        for other in [Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse] {
+            assert!(list_route(other, Some(&folder)).unwrap().is_none(), "{other:?}");
+        }
+        // A config folder that is not the run's own is refused, not read.
+        assert!(list_route(Harness::Claude, Some("/not-a-home-of-this-run")).is_err());
+    }
+
+    /// agy's direct read is run from the kit's own copy alone, with the updater switch, on the
+    /// kept home: the caller's search path, which finds the owner's launcher, is refused.
+    #[test]
+    fn a_direct_read_of_agy_runs_from_the_kits_copy_alone_with_the_updater_switch() {
+        let copy = crate::door::made("cf-agy-copy-").unwrap();
+        let home = crate::door::made("cf-agy-home-").unwrap();
+        let var = |name: &str, value: &std::path::Path| {
+            (name.to_owned(), value.to_string_lossy().into_owned())
+        };
+        let env = isolated_env(
+            Harness::Agy,
+            &[var("HOME", home.path()), var("PATH", copy.path())],
+        )
+        .unwrap();
+        assert_eq!(env["PATH"], copy.path().to_string_lossy());
+        assert_eq!(env["HOME"], home.path().to_string_lossy());
+        assert_eq!(env["AGY_CLI_DISABLE_AUTO_UPDATE"], "1");
+        for refused in [
+            vec![var("HOME", home.path())],
+            vec![
+                var("HOME", home.path()),
+                ("PATH".to_owned(), "/usr/local/bin:/usr/bin".to_owned()),
+            ],
+        ] {
+            let said = isolated_env(Harness::Agy, &refused).unwrap_err().to_string();
+            assert!(said.contains("kit's own copy"), "{said}");
+        }
     }
 
     #[test]
