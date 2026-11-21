@@ -25,6 +25,7 @@
 //! window's own and nothing of the machine's.
 
 mod commands;
+mod cursor;
 mod homes;
 mod install;
 mod jobs;
