@@ -11,6 +11,112 @@ use crate::{
 };
 
 impl Ledger {
+    /// A window's closed-question wait whose old conversation has not yet
+    /// been bounded. Its previous token was revoked; the new window has not
+    /// opened yet, so its inbox read cannot overtake the snapshot.
+    pub fn question_waits_without_boundary(
+        &self,
+        project: i64,
+        window: i64,
+    ) -> Result<Vec<(i64, i64, String)>, LedgerError> {
+        Ok(self
+            .store
+            .db
+            .prepare(
+                "SELECT DISTINCT b.participant_id,c.id,c.native_session FROM question_binding b
+             JOIN task t ON t.id=b.task_id AND t.assignee_id=b.participant_id
+             JOIN project p ON p.id=t.project_id
+             JOIN conversation c ON c.participant_id=b.participant_id AND c.ended_at IS NULL
+             WHERE p.id=?1 AND p.state='open' AND b.participant_id=?2 AND b.closed IN (2,3)
+               AND b.wait_last_item IS NULL AND c.native_session IS NOT NULL
+               AND t.state IN ('working','waiting')",
+            )?
+            .query_map(rusqlite::params![project, window], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Record the last native item of the old conversation, without its words.
+    /// The write is conditional on the same open project and conversation:
+    /// another Resume, a task move, or a new conversation cannot inherit it.
+    pub fn set_question_wait_boundary(
+        &mut self,
+        project: i64,
+        window: i64,
+        conversation: i64,
+        session: &str,
+        last_item: &str,
+    ) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            store.db.execute(
+                "UPDATE question_binding SET wait_conversation_id=?3, wait_last_item=?5
+                 WHERE participant_id=?2 AND closed IN (2,3) AND wait_last_item IS NULL
+                   AND EXISTS (SELECT 1 FROM task t JOIN project p ON p.id=t.project_id
+                     JOIN conversation c ON c.id=?3 AND c.participant_id=?2
+                     WHERE t.id=question_binding.task_id AND t.assignee_id=?2 AND p.id=?1
+                       AND p.state='open' AND c.ended_at IS NULL AND c.native_session=?4
+                       AND t.state IN ('working','waiting'))",
+                rusqlite::params![project, window, conversation, session, last_item],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Each read that can answer a closed-question wait, paired with the exact
+    /// old conversation boundary for that question. An unbounded or different
+    /// conversation cannot prove a later answer.
+    pub fn read_closed_question_waits(
+        &self,
+        window: i64,
+        task: i64,
+    ) -> Result<Vec<(i64, i64, String, MessageView)>, LedgerError> {
+        let rows: Vec<(i64,i64,String,i64)> = self.store.db.prepare(
+            "SELECT b.question_id,b.wait_conversation_id,b.wait_last_item,m.id
+             FROM question_binding b JOIN task t ON t.id=b.task_id AND t.assignee_id=b.participant_id
+             JOIN conversation c ON c.id=b.wait_conversation_id AND c.participant_id=b.participant_id AND c.ended_at IS NULL
+             JOIN message m ON m.task_id=b.task_id AND m.recipient_id=b.participant_id
+             WHERE b.participant_id=?1 AND b.task_id=?2 AND b.closed=3 AND b.wait_last_item IS NOT NULL
+               AND m.id>b.question_id AND m.state='read' AND m.kind IN ('note','answer')
+               AND json_extract(m.receipt, '$.read') IN ('inbox','task')
+             ORDER BY m.id DESC,b.question_id"
+        )?.query_map(rusqlite::params![window,task], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::new();
+        for (question, conversation, last, id) in rows {
+            if let Some(message) = self.store.message(id)? {
+                out.push((question, conversation, last, message));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The engine saw a complete answer after this read and this exact old
+    /// record boundary. Release only the same question and current holding.
+    pub fn release_read_question_wait(
+        &mut self,
+        window: i64,
+        task: i64,
+        question: i64,
+        message: i64,
+        conversation: i64,
+        last_item: &str,
+    ) -> Result<bool, LedgerError> {
+        self.store.write(|store| {
+            let changed = store.db.execute(
+                "UPDATE question_binding SET closed=1 WHERE question_id=?3 AND participant_id=?1 AND task_id=?2
+                   AND closed=3 AND question_id < ?4 AND wait_conversation_id=?5 AND wait_last_item=?6
+                   AND EXISTS (SELECT 1 FROM message m JOIN task t ON t.id=m.task_id
+                     JOIN conversation c ON c.id=?5 AND c.participant_id=?1 AND c.ended_at IS NULL
+                     WHERE m.id=?4 AND m.recipient_id=?1 AND m.task_id=?2 AND t.assignee_id=?1
+                       AND t.state IN ('working','waiting') AND m.state='read' AND m.kind IN ('note','answer')
+                       AND json_extract(m.receipt, '$.read') IN ('inbox','task'))",
+                rusqlite::params![window,task,question,message,conversation,last_item],
+            )?;
+            if changed > 0 { crate::messages::reconcile(store, task)?; }
+            Ok(changed > 0)
+        })
+    }
+
     /// Start a new in-memory engine lifetime without changing stored messages.
     pub fn begin_question_engine(&mut self) {
         self.store.question_run = crate::holding::new_run();

@@ -103,6 +103,16 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the wait boundary when a fixture reconstructs a ledger before 0043.
+pub fn undo_migration_0043(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP INDEX question_binding_wait;
+         ALTER TABLE question_binding DROP COLUMN wait_event_id;
+         ALTER TABLE question_binding DROP COLUMN wait_last_item;
+         ALTER TABLE question_binding DROP COLUMN wait_conversation_id;",
+    )
+}
+
 /// Remove the reminder objects when a test reconstructs a ledger from before 0042.
 pub fn undo_migration_0042(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
@@ -294,6 +304,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_resume_anchor"
             && entry["name"] != "question_holding"
             && entry["name"] != "question_binding"
+            && entry["name"] != "question_binding_wait"
             && entry["name"] != "question_handover"
             && entry["name"] != "question_reminder"
             && entry["name"] != "question_reminder_by_message"

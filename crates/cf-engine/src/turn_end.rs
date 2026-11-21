@@ -109,6 +109,43 @@ pub(crate) const LAST_WORDS: &str =
 /// after its last tool call where it wrote none there.
 pub(crate) const WITHOUT_ANSWER: &str = "(the agent ended its turn without a written answer)";
 
+/// A whole inbox read is printed by `cf` as a message line and body, or as a
+/// JSON message. Only a tool result can evidence it; a quotation by the model
+/// or a user's text is not a read from this window.
+fn tool_printed_message(item: &Item, message: &MessageView) -> bool {
+    if item.role != Role::Tool {
+        return false;
+    }
+    let text = item.text.as_ref();
+    let marker = format!("m-{} [", message.id);
+    if text
+        .lines()
+        .any(|line| line.trim_start().starts_with(&marker))
+        && text.contains(message.body.as_str())
+    {
+        return true;
+    }
+    fn contains_message(value: &Value, message: &MessageView) -> bool {
+        match value {
+            Value::Object(map) => {
+                (map.get("id").and_then(Value::as_i64) == Some(message.id)
+                    && map.get("body").and_then(Value::as_str) == Some(message.body.as_str()))
+                    || map.values().any(|value| contains_message(value, message))
+            }
+            Value::Array(values) => values.iter().any(|value| contains_message(value, message)),
+            _ => false,
+        }
+    }
+    text.find('{')
+        .and_then(|at| {
+            serde_json::Deserializer::from_str(&text[at..])
+                .into_iter::<Value>()
+                .next()
+        })
+        .and_then(Result::ok)
+        .is_some_and(|value| contains_message(&value, message))
+}
+
 /// What a worker's turn came to, for its task.
 pub(crate) enum Turn {
     /// Nothing is over: the turn goes on, or it answers no task, or it failed (and the
@@ -315,6 +352,61 @@ pub(crate) fn first_on_its_way(record: &Record) -> bool {
 }
 
 impl Dispatcher {
+    /// A tell read in the inbox is not a pasted turn boundary. Release its
+    /// closed-question wait only when this conversation contains both the
+    /// read and a later complete answer after the old window's saved boundary.
+    fn release_answered_reads(
+        &self,
+        participant: &ParticipantView,
+        thread: &TaskThread,
+        items: &[Item],
+    ) -> Result<bool, EngineError> {
+        let reads = self
+            .seams
+            .ledger
+            .borrow()
+            .read_closed_question_waits(participant.id, thread.task.id)?;
+        if reads.is_empty() {
+            return Ok(false);
+        }
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+        let mut released = false;
+        for (question, conversation, last, message) in reads {
+            let start = if last.is_empty() {
+                0
+            } else if let Some(at) = items.iter().rposition(|item| item.id.as_ref() == last) {
+                at + 1
+            } else {
+                continue;
+            };
+            let Some(read) = items[start..]
+                .iter()
+                .rposition(|item| tool_printed_message(item, &message))
+                .map(|at| start + at)
+            else {
+                continue;
+            };
+            let answered =
+                answers_to_the_task(&items[read + 1..], &replacements).is_some_and(|answer| {
+                    answer.last.is_some_and(|last| last.complete)
+                        && answer.final_run.iter().any(|item| {
+                            !item.synthetic && !item.commentary && !js::trim(&item.text).is_empty()
+                        })
+                });
+            if answered {
+                released |= self.seams.ledger.borrow_mut().release_read_question_wait(
+                    participant.id,
+                    thread.task.id,
+                    question,
+                    message.id,
+                    conversation,
+                    &last,
+                )?;
+            }
+        }
+        Ok(released)
+    }
+
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
     /// failure, whatever it left running, with why ([`Dispatcher::why_it_failed`]); one
@@ -330,11 +422,25 @@ impl Dispatcher {
         observed: &Observed,
         watching: Watching,
     ) -> Result<Turn, EngineError> {
-        let task = self
+        let mut task = self
             .seams
             .ledger
             .borrow()
             .active_task(participant.id, false)?;
+        if let Some(thread) = task
+            .as_ref()
+            .filter(|thread| thread.task.state == "waiting")
+        {
+            if observed.settled
+                && self.release_answered_reads(participant, thread, observed.items())?
+            {
+                task = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .active_task(participant.id, false)?;
+            }
+        }
         // A task may read working while its resume words or an answer to its window's
         // question still wait for that window. The turn before those words is no result:
         // the window must get them at rest first, just as when its task read waiting.

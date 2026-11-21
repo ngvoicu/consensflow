@@ -1927,6 +1927,132 @@ fn t1859_a_gated_answer_is_the_only_notice_when_approved_after_restart() {
 }
 
 #[test]
+fn t1869_receiving_words_releases_only_their_own_windows_wait() {
+    let mut w = world();
+    let (first, zeus, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let second = w.open("Another task").task.number;
+    let given = w.assign(second, "diana");
+    let diana = given.task.assignee.unwrap();
+    w.deliver(given.message.unwrap().id);
+    w.ask(&zeus, first, "First question");
+    w.ask(&diana, second, "Second question");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!([w.state(first), w.state(second)], ["waiting", "waiting"]);
+    let told = w
+        .ledger
+        .tell_queued(w.project, first, "chief", "First answer")
+        .unwrap();
+    assert_eq!([w.state(first), w.state(second)], ["waiting", "waiting"]);
+    w.deliver(told.id);
+    assert_eq!([w.state(first), w.state(second)], ["working", "waiting"]);
+}
+
+#[test]
+fn t1869_a_tell_read_in_the_inbox_waits_for_a_subsequent_answer() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    w.ask(&session, task, "Question");
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    assert_eq!(w.state(task), "waiting");
+    let told = w
+        .ledger
+        .tell_queued(w.project, task, "chief", "Use ANSI")
+        .unwrap();
+    w.ledger
+        .receive_read(
+            w.id(&session),
+            &[told.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .unwrap();
+    assert_eq!(w.message(told.id).state, "read");
+    assert_eq!(w.state(task), "waiting");
+}
+
+#[test]
+fn t1869_a_tell_confirmed_after_close_does_not_release_the_old_window_wait() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which grammar?").id;
+    w.deliver(question);
+    let tell = w
+        .ledger
+        .tell_queued(w.project, task, "chief", "Use ANSI")
+        .unwrap()
+        .id;
+    w.begin(tell);
+    w.ledger.set_project_state(w.project, "suspended").unwrap();
+    let window = w.id(&session);
+    w.ledger.close_question_window(window, Some(tell)).unwrap();
+    w.ledger
+        .pause_with_project(w.project, task, "project closed")
+        .unwrap();
+    w.confirm(tell);
+    w.ledger.set_project_state(w.project, "open").unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "confirmation of the old window's paste is not a new turn"
+    );
+}
+
+#[test]
+fn t1869_an_in_flight_answer_proved_delivered_at_close_does_not_leave_a_wait() {
+    let mut w = world();
+    let (task, session, brief) = assigned(&mut w, false);
+    w.deliver(brief);
+    let question = w.ask(&session, task, "Which grammar?").id;
+    w.deliver(question);
+    let answer = w.answer(question, "Use ANSI").id;
+    w.begin(answer);
+    w.ledger.set_project_state(w.project, "suspended").unwrap();
+    let window = w.id(&session);
+    let deferred = w
+        .ledger
+        .close_question_window(window, Some(answer))
+        .unwrap();
+    w.ledger
+        .pause_with_project(w.project, task, "project closed")
+        .unwrap();
+    w.confirm(answer);
+    w.ledger.settle_closed_window_answers(&deferred).unwrap();
+    w.ledger.set_project_state(w.project, "open").unwrap();
+    assert_eq!(w.message(answer).state, "delivered");
+    assert_eq!(w.state(task), "working", "the answer reached its window");
+    assert_eq!(word_notices(&w, "Use ANSI"), 0);
+}
+
+#[test]
+fn t1869_a_question_closed_after_the_project_pause_still_holds_its_task() {
+    for answered in [false, true] {
+        let mut w = world();
+        let (task, session, brief) = assigned(&mut w, false);
+        w.deliver(brief);
+        let question = w.ask(&session, task, "Which grammar?").id;
+        w.deliver(question);
+        if answered {
+            w.answer(question, "Use ANSI");
+        }
+        w.ledger.set_project_state(w.project, "suspended").unwrap();
+        w.ledger
+            .pause_with_project(w.project, task, "project closed")
+            .unwrap();
+        let window = w.id(&session);
+        w.ledger.close_question_window(window, None).unwrap();
+        w.ledger.set_project_state(w.project, "open").unwrap();
+        assert_eq!(w.message(question).state, "cancelled");
+        assert_eq!(w.state(task), "waiting", "answered={answered}");
+    }
+}
+
+#[test]
 fn t1859_a_taskless_question_keeps_its_prior_restart_path() {
     let mut w = world();
     let (task, session, brief) = assigned(&mut w, false);

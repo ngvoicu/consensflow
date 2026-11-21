@@ -227,6 +227,11 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 /// cancelled or declined. A withdrawn question with an answer still obliges if
 /// that answer did not stand; one withdrawn without an answer obliges no more.
 fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
+    if store.db.prepare(
+        "SELECT 1 FROM question_binding WHERE task_id = ?1 AND participant_id = ?2 AND closed IN (2,3) LIMIT 1",
+    )?.exists(params![task, window])? {
+        return Ok(true);
+    }
     Ok(store
         .db
         .prepare(&format!(
@@ -750,6 +755,7 @@ fn received_as(
          WHERE id = ?",
         params![at, receipt.to_string(), message.id],
     )?;
+    crate::holding::clear_project_wait(store, message.id)?;
     crate::tasks::background_exchange(store, message.id, true)?;
     store.log(
         message.project_id,

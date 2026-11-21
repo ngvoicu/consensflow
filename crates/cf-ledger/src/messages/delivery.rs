@@ -749,6 +749,10 @@ pub(crate) fn confirm_delivery(
                 message_id
             ],
         )?;
+        crate::holding::clear_project_wait(store, message_id)?;
+        for id in rode.iter().chain(&late) {
+            crate::holding::clear_project_wait(store, *id)?;
+        }
         let mut data = json!({ "message": message_id });
         if !rode.is_empty() {
             data["carried"] = json!(rode);

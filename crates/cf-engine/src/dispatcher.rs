@@ -2194,6 +2194,9 @@ impl Dispatcher {
             // launch watches the stops its window pays.
             let first = match &coming {
                 Some(coming) => {
+                    if matches!(coming, Coming::Member { .. }) {
+                        this.bound_question_wait(project.id, participant).await?;
+                    }
                     let note = match this.cut_note(&project, &who, coming).await {
                         Ok(note) => note,
                         Err(cause) => {

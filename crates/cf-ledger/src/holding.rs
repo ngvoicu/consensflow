@@ -798,6 +798,26 @@ pub(crate) fn close_project_question(
     in_flight: Option<i64>,
     end: ProjectWindowEnd,
 ) -> Result<Vec<i64>, LedgerError> {
+    // `closed = 2` is still a closed door. It additionally records that the
+    // task must wait for new words after this window ended. In particular an
+    // answer queued for the old window may have made the task read working,
+    // even though that answer never reached it. Do not infer this for old,
+    // unbound questions, other holdings, or answers the window already had.
+    let wait: Option<i64> = store.db.query_row(
+        "SELECT t.id FROM question_binding b JOIN message q ON q.id=b.question_id
+         JOIN task t ON t.id=b.task_id AND t.project_id=q.project_id AND t.assignee_id=b.participant_id
+         JOIN question_holding h ON h.participant_id=b.participant_id AND h.task_id=b.task_id
+           AND h.first_brief_id=b.first_brief_id AND h.run_id=b.run_id AND h.closed=0
+         WHERE b.question_id=? AND b.closed=0 AND q.kind='question' AND q.urgent=0
+           AND q.sender_id=b.participant_id AND (t.state IN ('working','waiting')
+             OR (t.state='paused' AND t.paused_with_project=1))
+           AND (q.state IN ('queued','delivering','gated','delivered','read') OR EXISTS
+                (SELECT 1 FROM message a WHERE a.reply_to=q.id AND a.kind='answer'
+                   AND a.state IN ('queued','delivering','gated')))
+           AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to=q.id AND a.kind='answer'
+                AND (a.state IN ('delivered','read') OR COALESCE(json_extract(a.receipt, '$.readEarly'), '') != ''))",
+        [question], |r| r.get(0),
+    ).optional()?;
     type Notice = (i64, i64, i64, String, i64, String, String, bool);
     let notice: Option<Notice> = store.db.query_row(
         "SELECT q.project_id, q.sender_id, q.recipient_id, sender.handle, t.number, q.body, q.state,
@@ -846,7 +866,38 @@ pub(crate) fn close_project_question(
             },
         )?;
     }
+    if let Some(task) = wait {
+        store.db.execute(
+            "UPDATE question_binding SET closed = 2, wait_event_id =
+                 (SELECT COALESCE(MAX(e.id),0) FROM event e JOIN task t ON t.project_id=e.project_id WHERE t.id=?2)
+             WHERE question_id = ?1 AND closed = 1",
+            params![question, task],
+        )?;
+        crate::messages::reconcile(store, task)?;
+    }
     Ok(deferred)
+}
+
+/// A new message reached the same task's window. A paste establishes a new
+/// turn; an inbox read (`closed = 3`) still needs an answer after that read in
+/// the harness record. A queued tell or a late confirmation of the old brief is
+/// not enough.
+pub(crate) fn clear_project_wait(store: &Store, message: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE question_binding SET closed = CASE WHEN (SELECT state FROM message WHERE id = ?1) = 'read' THEN 3 ELSE 1 END
+         WHERE closed IN (2,3) AND EXISTS (
+           SELECT 1 FROM message m JOIN task t ON t.id = question_binding.task_id
+           WHERE m.id = ?1 AND m.id > question_binding.question_id
+             AND m.task_id = t.id AND m.recipient_id = question_binding.participant_id
+             AND t.assignee_id = m.recipient_id AND m.state IN ('delivered','read')
+             AND (m.kind IN ('task','answer') OR (m.kind = 'note' AND m.sender_id IS NOT NULL AND m.urgent = 0))
+             AND (m.state = 'read' OR (m.kind = 'answer' AND m.reply_to = question_binding.question_id)
+               OR EXISTS (SELECT 1 FROM event e WHERE e.project_id=m.project_id AND e.kind='delivery.begun'
+                 AND e.id > question_binding.wait_event_id
+                 AND json_extract(e.data, '$.message') IN (m.id, m.carried_by))))",
+        [message],
+    )?;
+    Ok(())
 }
 
 fn close_question_deferring(
@@ -914,6 +965,10 @@ pub(crate) fn close_task(
     where_now: Option<&str>,
 ) -> Result<(), LedgerError> {
     if let Some(window) = task.assignee_id {
+        store.db.execute(
+            "UPDATE question_binding SET closed = 1 WHERE participant_id = ?1 AND task_id = ?2 AND closed IN (2,3)",
+            params![window, task.id],
+        )?;
         close_previous_for_window(store, window, Some(task.id), where_now)?;
         close(store, window, Some(task.id), where_now)?;
         // A move after a window ended also ends the right to resume that
