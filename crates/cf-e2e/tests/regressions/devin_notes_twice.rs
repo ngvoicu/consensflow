@@ -100,7 +100,6 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
         "agents": [
             { "id": "chief", "kind": "devin", "model": "fake" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
-            { "id": "worker2", "kind": "claude-code", "model": "fake" },
         ],
     });
     rig.stand_ins(&roster)
@@ -190,7 +189,6 @@ fn once_each(settle: Option<&str>) -> Outcome {
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
-    project.add_member("worker2")?;
     let tier = added["member"]["tier"]
         .as_str()
         .ok_or("the worker has no tier")?
