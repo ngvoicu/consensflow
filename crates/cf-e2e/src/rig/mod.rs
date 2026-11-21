@@ -76,6 +76,22 @@ const REQUEST: Duration = Duration::from_secs(10);
 /// How long the daemon and the pane host each have to end once their input has.
 const EXIT: Duration = Duration::from_secs(5);
 
+/// How long the daemon and the pane host each have to end once their input has, where the rig
+/// seats the installed Muse: its echo or live worker may be in a turn, and the pane host gives a
+/// program that does not leave ten seconds before it kills it, so a close that gives less than
+/// that fails on a window the host is still, rightly, waiting for (B22: Muse echo with a 60 s
+/// echo delay, the pane host gone 5.07 s after its input ended).
+const NATIVE_EXIT: Duration = Duration::from_secs(15);
+
+/// The bound [`Rig::close`] gives a rig that does (`native`) or does not seat a native program.
+fn exit_bound(native: bool) -> Duration {
+    if native {
+        NATIVE_EXIT
+    } else {
+        EXIT
+    }
+}
+
 /// Which of the two the rig ended did not leave within `exit` of its input's end: the failure
 /// of a close says it, as "process did not exit" alone says not which (CI run 42419505988, a
 /// resumed Devin case on Windows: the frames of both were told, and no word of which one ran on).
@@ -432,6 +448,8 @@ pub struct Rig {
     /// The launcher a live Muse of the rig runs through ([`Config::muse_live`]), where it
     /// seats one.
     muse_launcher: Option<PathBuf>,
+    /// How long each of the daemon and the pane host has to end at the close ([`exit_bound`]).
+    exit: Duration,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// The homes of real harnesses the windows run on, where a case gave any: its Claude
@@ -768,7 +786,7 @@ impl Rig {
     /// process that is none of any window's to run still). The home goes with
     /// it.
     pub fn close(mut self) -> Result<()> {
-        self.shutdown(EXIT)
+        self.shutdown(self.exit)
     }
 
     /// Begins the close without waiting for it: the daemon's input and the pane host's
@@ -798,7 +816,8 @@ impl Rig {
     /// [`Rig::close`], but the home is left, for a rig that resumes on it
     /// ([`Config::existing_root`]). Where it is.
     pub fn close_keeping_the_root(self) -> Result<PathBuf> {
-        self.close_keeping_the_root_within(EXIT)
+        let exit = self.exit;
+        self.close_keeping_the_root_within(exit)
     }
 
     /// [`Rig::close_keeping_the_root`], the daemon and the pane host each given
@@ -942,7 +961,7 @@ impl Drop for Rig {
                 outcome::leave(verdict, move || left.say());
             }
         }
-        let _ = self.shutdown(EXIT);
+        let _ = self.shutdown(self.exit);
         self.daemon.kill();
         self.host.kill();
         // A rig that did not end by being closed (a case that failed) is still asked
@@ -998,6 +1017,16 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B22: a rig that seats Muse closes within what the pane host gives a window before it kills
+    /// it, plus a margin; the stand-in agents' rigs keep the short bound.
+    #[test]
+    fn a_rig_with_a_native_muse_is_closed_within_the_pane_hosts_own_grace_and_a_margin() {
+        const HOST_GRACE: Duration = Duration::from_secs(10);
+        assert!(exit_bound(true) > HOST_GRACE);
+        assert_eq!(exit_bound(false), EXIT);
+        assert!(exit_bound(true) > exit_bound(false));
+    }
 
     /// The engine opens the window of a reopened member under the same pane id with a new
     /// generation, and the old window's process may have left what it ran: every process the host

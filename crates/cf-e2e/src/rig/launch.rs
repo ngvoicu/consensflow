@@ -130,6 +130,7 @@ impl Rig {
             host,
             cf,
             muse_launcher,
+            exit: super::exit_bound(config.muse.is_some()),
             stranger,
             homes,
             reports: config.reports,
