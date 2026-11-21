@@ -345,24 +345,33 @@ fn one_shot_within(
         .limit(limit)
         .run()?;
     forget(records, folder.path());
-    if ran.timed_out {
-        return Ok(Some(format!("it was ended after {} s", limit.as_secs())));
+    let said = if ran.timed_out {
+        Some(format!("it was ended after {} s", limit.as_secs()))
+    } else if ran.code == Some(0) {
+        None
+    } else {
+        let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        let said: String = said.chars().take(SAID).collect();
+        Some(format!(
+            "it ended {} ({})",
+            ran.code
+                .map_or_else(|| "by a signal".to_owned(), |code| code.to_string()),
+            if said.is_empty() {
+                "saying nothing"
+            } else {
+                &said
+            }
+        ))
+    };
+    // The renewal's own folder goes now, with what the harness left in it: one that stays (a
+    // file the harness still holds, on Windows) is said, never left behind in silence (CLN-22).
+    match crate::door::Door::of_run().remove_made(folder.path()) {
+        crate::door::Removed::Left(path, why) => Err(Error::Daemon(format!(
+            "the renewal's own folder {} is still there: {why}",
+            path.display()
+        ))),
+        _ => Ok(said),
     }
-    if ran.code == Some(0) {
-        return Ok(None);
-    }
-    let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
-    let said: String = said.chars().take(SAID).collect();
-    Ok(Some(format!(
-        "it ended {} ({})",
-        ran.code
-            .map_or_else(|| "by a signal".to_owned(), |code| code.to_string()),
-        if said.is_empty() {
-            "saying nothing"
-        } else {
-            &said
-        }
-    )))
 }
 
 /// Takes away of each folder in `records` the one entry the harness made there for the folder

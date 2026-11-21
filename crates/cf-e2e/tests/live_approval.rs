@@ -153,7 +153,8 @@ fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat()
     // that lacks it is the error. Any other it lacks is left out, and the report says so.
     let mut named = chiefs.clone();
     named.extend_from_slice(live::agents::asked()?.named());
-    let (seated, left_out) = live::seated(&named, live::lacks).map_err(Error::Daemon)?;
+    let (seated, left_out) = live::seated_without(&named, &live::without().map_err(Error::Daemon)?, live::lacks)
+        .map_err(Error::Daemon)?;
     log.leave_out(left_out);
     if seated.len() < 4 {
         return Err(Error::Daemon(format!(

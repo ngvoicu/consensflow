@@ -272,6 +272,46 @@ mod running {
         assert!(!Path::new(folder.trim()).exists(), "{folder}");
     }
 
+    /// CLN-22: the renewal's own folder, with whatever the harness left in it, is taken away when
+    /// the harness is gone, a link in it with its target left; one that stays is the error that
+    /// names it, never a folder left behind in silence.
+    #[test]
+    fn the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = tempfile::tempdir().unwrap();
+        let log = scratch.path().join("log");
+        let outside = scratch.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("theirs"), "theirs").unwrap();
+        let leaving = format!(
+            "mkdir -p .claude/deep && echo x > .claude/deep/f && ln -s '{}' link",
+            outside.display()
+        );
+        let program = stand_in(scratch.path(), &log, &leaving, 0);
+        assert_eq!(one_shot(Harness::Pi, &program, &[]).unwrap(), None);
+        let written = fs::read_to_string(&log).unwrap();
+        let folder = Path::new(written.split_once('\n').unwrap().1.trim());
+        assert!(!folder.exists(), "{}", folder.display());
+        assert_eq!(fs::read_to_string(outside.join("theirs")).unwrap(), "theirs");
+        // A folder the harness left where it cannot be taken away is said.
+        let holding = format!(
+            "mkdir -p stuck/inner && echo x > stuck/inner/f && chmod 500 stuck/inner && echo \"$(pwd)\" > '{}'",
+            scratch.path().join("where").display()
+        );
+        let program = stand_in(scratch.path(), &log, &holding, 0);
+        let said = one_shot(Harness::Pi, &program, &[]).unwrap_err().to_string();
+        let stuck = fs::read_to_string(scratch.path().join("where")).unwrap();
+        let stuck = Path::new(stuck.trim());
+        assert!(
+            said.contains(&stuck.display().to_string()) && said.contains("still there"),
+            "{said}"
+        );
+        // Put right what the test made unremovable, so that the scratch can go.
+        let _ = fs::set_permissions(stuck.join("stuck/inner"), fs::Permissions::from_mode(0o700));
+        let _ = fs::remove_dir_all(stuck);
+    }
+
     #[test]
     fn a_harness_that_ended_badly_says_how_in_what_it_said_and_not_what_it_printed() {
         let scratch = tempfile::tempdir().unwrap();

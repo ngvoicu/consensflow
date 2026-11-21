@@ -92,6 +92,15 @@ fn config_in(machine: &Path) -> Result<Value> {
     Ok(config)
 }
 
+/// Why this step is skipped, said before any harness is queried, login read or window opened: on
+/// Windows Devin keeps its config in its data folder, where the case cannot give it a threshold
+/// of its own (CLN-22). None where the step runs.
+pub fn skipped(windows: bool) -> Option<&'static str> {
+    windows.then_some(
+        "Devin compaction on Windows is not covered: it keeps its config in its data folder, where the run cannot set a threshold of its own; no harness or model was started",
+    )
+}
+
 /// Runs the Devin worker on a task its compactor compacts: what it came to, which holds
 /// when the task was done, its result reached the chief, and Devin compacted the turn.
 pub fn run(stand_in: &Path, log: &Log) -> Result<Finished> {
@@ -215,6 +224,17 @@ mod tests {
     use cf_e2e::rig::HarnessHome;
 
     use super::*;
+
+    /// CLN-22: on Windows the step is a skip that starts nothing, named as one; elsewhere it runs.
+    #[test]
+    fn devins_compaction_on_windows_is_a_skip_said_before_any_harness_is_reached() {
+        let said = skipped(true).expect("Windows skips");
+        assert!(
+            said.contains("not covered") && said.contains("no harness or model was started"),
+            "{said}"
+        );
+        assert!(skipped(false).is_none());
+    }
 
     #[test]
     fn the_compacted_plans_store_is_below_the_runs_home() {

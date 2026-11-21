@@ -165,7 +165,8 @@ fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_car
     // that lacks it is the error. Any other it lacks is left out, and the report says so.
     let mut named = chiefs.clone();
     named.extend_from_slice(live::agents::asked()?.named());
-    let (seated, left_out) = live::seated(&named, live::lacks).map_err(Error::Daemon)?;
+    let (seated, left_out) = live::seated_without(&named, &live::without().map_err(Error::Daemon)?, live::lacks)
+        .map_err(Error::Daemon)?;
     log.leave_out(left_out);
     let plan = plan::projects(&chiefs, &steps, &seated);
     if plan.is_empty() || plan.iter().all(|project| project.steps.is_empty()) {

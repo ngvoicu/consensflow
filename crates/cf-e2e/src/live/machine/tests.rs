@@ -920,6 +920,23 @@ fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_
     );
 }
 
+/// CLN-22: `--without` leaves a harness out of every seat, said, though the machine has it, and
+/// naming it too is the error; the rest are seated as before.
+#[test]
+fn a_harness_the_run_is_told_to_do_without_is_left_out_of_every_seat_though_the_machine_has_it() {
+    let (kept, said) = seated_without(&[], &[Harness::Pi, Harness::Muse], |_| None).unwrap();
+    assert_eq!(kept, [Harness::Claude, Harness::Devin, Harness::Codex]);
+    assert_eq!(
+        said,
+        [
+            "pi is left out of every seat: the run was told --without pi",
+            "muse is left out of every seat: the run was told --without muse"
+        ]
+    );
+    let both = seated_without(&[Harness::Pi], &[Harness::Pi], |_| None).unwrap_err();
+    assert!(both.contains("both asked for and left out"), "{both}");
+}
+
 /// T-931 P2-2: a run with no home to look for a login in cannot run a harness, as
 /// `installed` refuses it; it is not taken for one that can.
 #[test]

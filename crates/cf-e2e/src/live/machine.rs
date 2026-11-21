@@ -818,9 +818,34 @@ pub fn seated(
     named: &[Harness],
     lacks: impl Fn(Harness) -> Option<String>,
 ) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    seated_without(named, &[], lacks)
+}
+
+/// [`seated`], where the run was also told `--without` the harnesses `without` (a rotating run
+/// over every harness, one of which is not there to run: CLN-22): each is left out of every seat
+/// and said, whether or not the machine has it; one both named and left out is the error.
+pub fn seated_without(
+    named: &[Harness],
+    without: &[Harness],
+    lacks: impl Fn(Harness) -> Option<String>,
+) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    if let Some(both) = named.iter().find(|harness| without.contains(harness)) {
+        return Err(format!(
+            "{} was both asked for and left out with --without",
+            both.name()
+        ));
+    }
     let mut seated = Vec::new();
     let mut left_out = Vec::new();
     for harness in Harness::ALL {
+        if without.contains(&harness) {
+            left_out.push(format!(
+                "{} is left out of every seat: the run was told --without {}",
+                harness.name(),
+                harness.name()
+            ));
+            continue;
+        }
         match lacks(harness) {
             None => seated.push(harness),
             Some(why) if named.contains(&harness) => {
@@ -836,6 +861,25 @@ pub fn seated(
         }
     }
     Ok((seated, left_out))
+}
+
+/// The harnesses the run was told to leave out (`--without pi,muse`): none where it named none; a
+/// word that names no harness is the error.
+pub fn without() -> std::result::Result<Vec<Harness>, String> {
+    super::list("without")
+        .iter()
+        .map(|word| {
+            Harness::ALL
+                .into_iter()
+                .find(|harness| harness.name() == word)
+                .ok_or_else(|| {
+                    format!(
+                        "--without names no harness that a rotation seats: {word} (one of {})",
+                        Harness::ALL.map(Harness::name).join(", ")
+                    )
+                })
+        })
+        .collect()
 }
 
 /// The machine's Codex: [`installed`] for the harness the image designer runs on.
