@@ -15,6 +15,7 @@ page-acks = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/te
 app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
 app-page-reloads = ["cargo", "xtask", "app", "test", "page_reloads"]
 tiny-output = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "tiny_read"]
+tiny-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cursor_query"]
 
 [[plant]]
 name = "tiny read: a queued byte keeps the whole read buffer"
@@ -38,18 +39,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''    while let Ok(next) = stream.try_recv() {
-        if next.bytes.len() > MAX_OUTPUT_MESSAGE_BYTES.saturating_sub(message.bytes.len()) {
-            *pending = Some(next);
-            break;
-        }
-        feed(&next.bytes);
-        message.bytes.extend_from_slice(&next.bytes);
-        message.seq = next.seq;
-    }'''
-replace = '''    if let Ok(next) = stream.try_recv() {
-        *pending = Some(next);
-    }'''
+find = "    while joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
+replace = "    while false && joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
 
 [[plant]]
 name = "tiny read: joined reads reverse their order"
@@ -80,6 +71,99 @@ runs = ["tiny-output"]
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = "        feed(&next.bytes);"
 replace = "        // A later read does not reach the screen."
+
+[[plant]]
+name = "tiny read: the first ready read waits for a batch"
+meant = "tiny_read_queued_first_byte_is_published_before_later_screen_work"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''        feed(&message.bytes);
+        publish(message);'''
+replace = '''        pending = Some(message);
+        if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
+            publish(batch);
+        }'''
+
+[[plant]]
+name = "tiny read: screen work before a batch is unbounded"
+meant = "tiny_read_batch_limits_how_many_screen_updates_precede_publication"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4;"
+replace = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4096;"
+
+[[plant]]
+name = "tiny read: a batch grows during screen work"
+meant = "tiny_read_batch_does_not_grow_while_its_screen_is_fed"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    let mut size = message.bytes.len();
+    let mut joined = Vec::new();'''
+replace = '''    feed(&message.bytes);
+    let mut size = message.bytes.len();
+    let mut joined = Vec::new();'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    feed(&message.bytes);
+    for next in joined {'''
+replace = '''    for next in joined {'''
+
+[[plant]]
+name = "tiny cursor: a frame gets at most one reply"
+meant = "every_cursor_query_in_a_joined_frame_gets_a_reply"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/cursor.rs"
+find = '''        complete
+    }
+
+    pub(super) fn unfinished'''
+replace = '''        complete.min(1)
+    }
+
+    pub(super) fn unfinished'''
+
+[[plant]]
+name = "tiny cursor: a query cannot cross frames"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/cursor.rs"
+find = "        let mut complete = 0;"
+replace = "        self.matched = 0;\n        let mut complete = 0;"
+
+[[plant]]
+name = "tiny cursor: a prefix crosses generations"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                        let key = (pane.clone(), generation);"
+replace = "                        let key = (pane.clone(), 0);"
+
+[[plant]]
+name = "tiny cursor: an exited window keeps its prefix"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                    seen.cursor_queries.remove(&(id.to_owned(), generation));"
+replace = "                    let _ = (id, generation);"
 
 [[plant]]
 name = "page acks: each message waits for the one before it to be drawn"
