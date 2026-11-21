@@ -958,18 +958,18 @@ impl Dispatcher {
     /// another program's, nothing left running. Everything else an exit settles is as it
     /// was: a window that ended mid-turn, a crash, a task not working (paused, waiting), a
     /// turn that left work running, a close the engine made itself.
-    async fn collect_at_exit(
+    async fn collect_at_exit(self: &Rc<Self>, record: &Rc<Record>, pane: &Pane) {
+        if let Err(cause) = self.try_collect_at_exit(record, pane).await {
+            self.write_down(&cause);
+        }
+    }
+
+    async fn try_collect_at_exit(
         self: &Rc<Self>,
         record: &Rc<Record>,
         pane: &Pane,
     ) -> Result<(), EngineError> {
-        let Some(project) = self.project_of(record.id)? else {
-            return Ok(());
-        };
-        let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
-            return Ok(());
-        };
-        if participant.role == "chief" || record.window.borrow().own_exit_of(pane).is_some() {
+        if record.window.borrow().own_exit_of(pane).is_some() {
             return Ok(());
         }
         let working = self
@@ -981,7 +981,11 @@ impl Dispatcher {
         if !working {
             return Ok(());
         }
-        let Ok(observed) = returning(self.observe(participant, record)).await else {
+        // The window's own look at its harness's record, which asks no one else.
+        let Some(window) = record.window.borrow().window.clone() else {
+            return Ok(());
+        };
+        let Ok(observed) = returning(window.observe()).await else {
             return Ok(());
         };
         if self.forgotten(record)
@@ -991,6 +995,15 @@ impl Dispatcher {
             || observed.switched.is_some()
             || observed.pending().total() > 0
         {
+            return Ok(());
+        }
+        let Some(project) = self.project_of(record.id)? else {
+            return Ok(());
+        };
+        let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
+            return Ok(());
+        };
+        if participant.role == "chief" {
             return Ok(());
         }
         self.collect(
@@ -1042,10 +1055,7 @@ impl Dispatcher {
         }
         // An answer its harness wrote before the window went is collected before the exit
         // settles anything, as the pass the exit beat would have (`collect_at_exit`).
-        self.collect_at_exit(&record, pane).await?;
-        if self.forgotten(&record) {
-            return Ok(());
-        }
+        self.collect_at_exit(&record, pane).await;
         // The conversation the window ran in: the id its harness may have printed as it quit is
         // no secret in the window's own note (`Shown::with_own_session`).
         let shown = shown.with_own_session(self.native_session_of(record.id));

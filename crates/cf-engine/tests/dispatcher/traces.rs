@@ -268,7 +268,14 @@ const NOTE_TURNS_AND_NO_CAUSE: &str = "the engine asks the pane host what the wi
 
 const ANSWER_ON_ITS_WAY: &str = "an answer queued for its window moves the task from waiting to working at once, where Node waits for receipt; the answer is delivered as before";
 
+/// The exit of a window whose task works looks at its harness's record before it settles, to keep
+/// the final answer the harness wrote just before the window went.
+const EXIT_LOOKS: &str = "a window that exits with its task working is looked at once more (`observe` of its harness's record) before the exit settles, so a final answer written just before it is the task's result, where Node's exit paused the task at once";
+
 const DEPARTED: &[(&str, &str)] = &[
+    ("pauses the task and tells the requester when the worker window closes mid-task, and resumes it on its conversation", EXIT_LOOKS),
+    ("keeps a task with its window when the window would not stop, and reassigns it once it does", EXIT_LOOKS),
+    ("stops the window of a task the human reassigns before the task leaves it, even one the human opened", EXIT_LOOKS),
     ("leaves a task waiting on a question alone, and resumes it with the answer", ANSWER_ON_ITS_WAY),
     ("carries an advisor’s and a reviewer’s question to the chief and the answer back to their own window", ANSWER_ON_ITS_WAY),
     ("is handed nothing when it was withdrawn while its window got ready, and fails nothing", "the answer moves the waiting task to working as soon as it is queued; the later cancel withdraws the window's delivered question and returns the unreceived answer's words to the chief, where Node leaves the question delivered and gives no notice"),
@@ -294,7 +301,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "brings a tell to a task whose window is gone on that window's own conversation, still paused",
-        "the chief's tell takes over the pause ConsensFlow made when the window went, as the chief's own (a move to paused by the chief), and asks its stop of whatever window holds the task by then, where Node's left the pause ConsensFlow's (T-1199, T-1223's P2-3: a window the human brought back was never stopped for the tell)",
+        "the chief's tell takes over the pause ConsensFlow made when the window went, as the chief's own (a move to paused by the chief), and asks its stop of whatever window holds the task by then, where Node's left the pause ConsensFlow's (T-1199, T-1223's P2-3: a window the human brought back was never stopped for the tell); and a window that exits with its task working is looked at once more (`observe` of its harness's record) before the exit settles, so a final answer written just before it is the task's result, where Node's exit paused the task at once",
     ),
     (
         "gives a member on it no work, says why, and every pass goes on",

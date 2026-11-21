@@ -132,9 +132,8 @@ fn a_paused_or_background_task_is_told_nothing_more_for_the_answer_its_window_le
         if pause {
             context.pause_task(tiers.project.id, 1);
         }
-        match written {
-            Some(write) => write(&context),
-            None => {}
+        if let Some(write) = written {
+            write(&context);
         }
         context.host.exits_showing(Some(0), None, None);
         context.exit("zeus");
