@@ -341,8 +341,7 @@ fn bounded_path(forbidden: &[PathBuf]) -> (std::ffi::OsString, Option<PathBuf>) 
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let launchers = inherited_launchers();
     let safe = std::env::split_paths(&inherited).filter(|folder| {
-        !launchers.iter().any(|home| same_or_inside(folder, home))
-            && safe_path_entry(folder, forbidden)
+        !launchers.iter().any(|home| may_reach(folder, home)) && safe_path_entry(folder, forbidden)
     });
     let path =
         std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path"));
@@ -402,25 +401,107 @@ pub(crate) fn require_search_path(value: &str, lookup: &str) {
     }
 }
 
-/// Compare absolute path components without consulting any path or following links.
+/// Whether `folder` is `home` or below it, **by every account of it**: the path the way it is
+/// spelled, and, where it is there, the folder it really is, links followed (B19). Used where a
+/// path is let in (the run's own folders): a `..` anywhere in it, a link out of the run, and a
+/// spelling that is another folder's are all "not inside". A folder that is not there yet is
+/// held to its spelling alone, which has no `..`.
 fn same_or_inside(folder: &Path, home: &Path) -> bool {
+    if has_parent_part(folder) || has_parent_part(home) {
+        return false;
+    }
+    spelled_inside(folder, home) && spelled_inside(&real_of(folder), &real_of(home))
+}
+
+/// Whether `folder` could be `home` or below it by any account of it: as spelled, with its `..`
+/// settled, or as the folder it really is. Used where a path is kept out of a harness's home
+/// (B19): any one account that puts it there is enough.
+fn may_reach(folder: &Path, home: &Path) -> bool {
+    spelled_inside(folder, home)
+        || spelled_inside(&settled(folder), &settled(home))
+        || spelled_inside(&real_of(folder), &real_of(home))
+}
+
+/// Whether `path` names a parent folder in any part of it.
+fn has_parent_part(path: &Path) -> bool {
+    path.components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+}
+
+/// Compare absolute path components, as spelled, without consulting any path or following links,
+/// Windows' verbatim prefix (`\\?\C:`) taken as the plain one.
+fn spelled_inside(folder: &Path, home: &Path) -> bool {
     let Ok(folder) = std::path::absolute(folder) else {
         return false;
     };
     let Ok(home) = std::path::absolute(home) else {
         return false;
     };
-    let mut parts = folder.components();
-    home.components().all(|part| {
-        parts.next().is_some_and(|candidate| {
-            if cfg!(any(windows, target_os = "macos")) {
-                candidate.as_os_str().to_string_lossy().to_lowercase()
-                    == part.as_os_str().to_string_lossy().to_lowercase()
-            } else {
-                candidate == part
+    let words = |path: &Path| -> Vec<String> {
+        path.components()
+            .map(|part| match part {
+                std::path::Component::Prefix(prefix) => {
+                    use std::path::Prefix::{Verbatim, VerbatimDisk, VerbatimUNC};
+                    let text = prefix.as_os_str().to_string_lossy().to_lowercase();
+                    match prefix.kind() {
+                        VerbatimDisk(_) | Verbatim(_) | VerbatimUNC(..) => text
+                            .strip_prefix(r"\\?\")
+                            .unwrap_or(&text)
+                            .to_owned(),
+                        _ => text,
+                    }
+                }
+                other => {
+                    let text = other.as_os_str().to_string_lossy();
+                    if cfg!(any(windows, target_os = "macos")) {
+                        text.to_lowercase()
+                    } else {
+                        text.into_owned()
+                    }
+                }
+            })
+            .collect()
+    };
+    let (mut parts, home) = (words(&folder).into_iter(), words(&home));
+    home.iter().all(|part| parts.next().as_ref() == Some(part))
+}
+
+/// `path`, absolute, with its `.` and `..` words settled in the way a system settles them.
+fn settled(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut out = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
             }
-        })
-    })
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The folder `path` really is: its part that is there followed through every link, the part
+/// that is not appended; its `..` settled first.
+fn real_of(path: &Path) -> PathBuf {
+    let settled = settled(path);
+    let mut head = settled.clone();
+    let mut tail = Vec::new();
+    while !head.as_os_str().is_empty() {
+        if let Ok(found) = std::fs::canonicalize(&head) {
+            return tail.iter().rev().fold(found, |path, part| path.join(part));
+        }
+        match head.file_name().map(std::ffi::OsStr::to_owned) {
+            Some(name) => {
+                tail.push(name);
+                head.pop();
+            }
+            None => break,
+        }
+    }
+    settled
 }
 
 fn plain_absolute(folder: &Path) -> bool {
@@ -428,7 +509,7 @@ fn plain_absolute(folder: &Path) -> bool {
 }
 
 fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
-    !forbidden.iter().any(|home| same_or_inside(folder, home))
+    !forbidden.iter().any(|home| may_reach(folder, home))
 }
 
 /// Whether an inherited harness-home directory may be inspected by discovery.
@@ -732,5 +813,53 @@ mod tests {
         let alias = root.path().join("SYNTHETIC-OWNER/.CODEX/bin");
         assert!(super::same_or_inside(&alias, &forbidden));
         assert!(!safe_path_entry(&alias, &[forbidden]));
+    }
+
+    /// B19: the plain component check is no defence against the spellings that reach a folder
+    /// by another name: a `..` that climbs out of the run, a link inside the run that ends in a
+    /// harness home, and a link above one.
+    #[cfg(unix)]
+    #[test]
+    fn b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run() {
+        let root = crate::door::made("path-alias-").unwrap();
+        let run = root.path().join("run");
+        let owner = root.path().join("owner");
+        let forbidden = owner.join(".codex");
+        crate::door::make_dir(&run).unwrap();
+        crate::door::make_dir(&forbidden).unwrap();
+        // A `..` that leaves the run for the harness home beside it.
+        let climbing = run.join("home/../../owner/.codex/config.toml");
+        assert!(!safe_path_entry(&climbing, std::slice::from_ref(&forbidden)));
+        assert!(!super::same_or_inside(&climbing, &run), "a climbing path is inside the run");
+        // A link in the run that ends in the home, and a path through it.
+        let link = run.join("link");
+        std::os::unix::fs::symlink(&forbidden, &link).unwrap();
+        assert!(!safe_path_entry(&link.join("auth.json"), std::slice::from_ref(&forbidden)));
+        assert!(!super::same_or_inside(&link.join("auth.json"), &run));
+        // A link to the folder above the home: the home is below it.
+        let above = run.join("above");
+        std::os::unix::fs::symlink(&owner, &above).unwrap();
+        assert!(!safe_path_entry(&above.join(".codex/bin"), &[forbidden]));
+        // What is the run's, spelled plainly, is still its own and safe.
+        let plain = run.join("home/x");
+        assert!(super::same_or_inside(&plain, &run));
+        assert!(safe_path_entry(&plain, &[owner.join(".codex")]));
+    }
+
+    /// B19, on Windows: a verbatim spelling is the same folder as its plain one, and a
+    /// folder reached by its 8.3 short name is the folder.
+    #[cfg(windows)]
+    #[test]
+    fn b19_a_verbatim_spelling_of_a_harness_home_is_that_home() {
+        let root = crate::door::made("path-verbatim-").unwrap();
+        let forbidden = root.path().join("owner").join(".codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let plain = forbidden.join("bin");
+        let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", plain.display()));
+        assert!(!safe_path_entry(&plain, std::slice::from_ref(&forbidden)));
+        assert!(
+            !safe_path_entry(&verbatim, std::slice::from_ref(&forbidden)),
+            "the verbatim spelling was taken for another folder"
+        );
     }
 }
