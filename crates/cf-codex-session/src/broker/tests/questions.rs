@@ -683,3 +683,61 @@ fn a_different_request_reusing_an_old_rpc_id_is_a_new_question_stamped_anew() {
         assert!(posted[1]["askedAt"].as_i64().expect("a stamp") > stamp);
     });
 }
+
+// ---- Round 2 (review T-1928) ----
+
+#[test]
+fn a_retired_pairs_poll_gives_up_no_claim_its_replacement_holds_and_the_answer_goes_once() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_user_input());
+        wait(|| board.polls() == 1).await;
+        // The pair retires while its poll is held; Codex replays the request to the next.
+        tui.terminate();
+        wait(|| !f.codex.is_open(1)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _again = f.connect().await;
+        let mut replay = request_user_input();
+        replay["id"] = json!("ask-9");
+        f.codex.send_json(2, &replay);
+        wait(|| board.polls() == 2).await;
+        // Both polls get the one claimed answer.
+        board.release();
+        wait(|| asked_of(&f, "ask-9").is_some()).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            board.receipts(),
+            [json!(true)],
+            "only the replacement says what became of the claim"
+        );
+        let natives = f
+            .codex
+            .requests()
+            .into_iter()
+            .filter(|message| message.get("result").is_some())
+            .count();
+        assert_eq!(natives, 1, "the answer goes to Codex once");
+    });
+}
+
+#[test]
+fn another_threads_resolution_of_a_reused_rpc_id_leaves_the_first_requests_stamp() {
+    let first = request_user_input();
+    let mut other = request_user_input();
+    other["params"]["threadId"] = json!(B);
+    other["params"]["turnId"] = json!("turn-b");
+    other["params"]["itemId"] = json!("item-b");
+    let key = |request: &Value| {
+        crate::questions::Asked::read(request.get("params"))
+            .unwrap()
+            .key(&request["id"], request.get("params"))
+    };
+    let mut stamps = crate::questions::Stamps::default();
+    let begun = stamps.of(key(&first), &first["id"]).asked_at();
+    stamps.of(key(&other), &other["id"]);
+    // B's request is resolved under the RPC id both used.
+    stamps.resolve(&other["id"], Some(B));
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(stamps.of(key(&first), &json!("ask-9")).asked_at(), begun);
+}

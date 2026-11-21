@@ -121,44 +121,141 @@ pub(crate) struct RequestKey {
 /// lifetime: each keeps when it was first received and the question it made
 /// there, so a replay of it after a reconnect is the same question, asked at the
 /// same moment. A broker that restarts loses them.
+///
+/// One pair at a time holds a request: the one that received it last. The board's
+/// claim on its answer is that pair's, and a retired pair that was first to hear
+/// the answer leaves it with the entry for the pair that holds the request now.
 #[derive(Default)]
 pub(crate) struct Stamps {
-    held: Vec<(RequestKey, Value, Asking)>,
+    held: Vec<Entry>,
+    holds: u64,
+    /// Requests a pair settled, with the hold that settled them: a retired hold
+    /// that hears of its answer afterwards has nothing to give back.
+    settled: Vec<(RequestKey, u64)>,
+}
+
+struct Entry {
+    key: RequestKey,
+    /// The RPC id the request has now.
+    id: Value,
+    asking: Asking,
+    /// Which hold of the request is the live one.
+    owner: u64,
+    /// An answer a retired pair's poll was given and did not settle.
+    claimed: Option<Answer>,
+}
+
+/// A pair's hold of a request.
+pub(crate) struct Hold {
+    pub(crate) asking: Asking,
+    pub(crate) owner: u64,
+}
+
+impl Hold {
+    /// When the request was first received.
+    #[cfg(test)]
+    pub(crate) fn asked_at(&self) -> i64 {
+        self.asking.asked_at()
+    }
 }
 
 /// The most requests it holds: the oldest goes first.
 const MOST_HELD: usize = 64;
 
 impl Stamps {
-    /// The asking of the request `key`, which began now where it is new; `id` is
-    /// the RPC id it came under this time.
-    pub(crate) fn of(&mut self, key: RequestKey, id: &Value) -> Asking {
-        if let Some((_, current, asking)) = self.held.iter_mut().find(|(held, ..)| *held == key) {
-            *current = id.clone();
-            return asking.clone();
+    /// The hold of the request `key` that a pair takes now: its asking began at the
+    /// request's first receipt, and it replaces any earlier hold of it; `id` is the RPC
+    /// id it came under this time.
+    pub(crate) fn of(&mut self, key: RequestKey, id: &Value) -> Hold {
+        self.holds += 1;
+        let owner = self.holds;
+        if let Some(entry) = self.held.iter_mut().find(|entry| entry.key == key) {
+            entry.id = id.clone();
+            entry.owner = owner;
+            return Hold {
+                asking: entry.asking.clone(),
+                owner,
+            };
         }
         if self.held.len() >= MOST_HELD {
             self.held.remove(0);
         }
         let asking = Asking::now();
-        self.held.push((key, id.clone(), asking.clone()));
-        asking
+        self.held.push(Entry {
+            key,
+            id: id.clone(),
+            asking: asking.clone(),
+            owner,
+            claimed: None,
+        });
+        Hold { asking, owner }
     }
 
-    /// The request `key` is settled: Codex has its answer.
-    pub(crate) fn settle(&mut self, key: &RequestKey) {
-        self.held.retain(|(held, ..)| held != key);
+    /// A later hold of the request `key` has replaced `owner`'s.
+    pub(crate) fn superseded(&self, key: &RequestKey, owner: u64) -> bool {
+        match self.held.iter().find(|entry| entry.key == *key) {
+            Some(entry) => entry.owner != owner,
+            None => self
+                .settled
+                .iter()
+                .any(|(settled, by)| settled == key && *by != owner),
+        }
     }
 
-    /// The turn on `thread` is over.
-    pub(crate) fn end_turn_of(&mut self, thread: &str) {
+    /// A retired pair's poll was given `answer` after a replacement took the request:
+    /// the replacement settles it.
+    pub(crate) fn leave_claim(&mut self, key: &RequestKey, answer: Answer) {
+        if let Some(entry) = self.held.iter_mut().find(|entry| entry.key == *key) {
+            entry.claimed = Some(answer);
+        }
+    }
+
+    /// The answer a retired poll left for the live hold of `key`, if it is taken.
+    pub(crate) fn take_claim(&mut self, key: &RequestKey) -> Option<Answer> {
         self.held
-            .retain(|(key, ..)| key.thread.as_deref() != Some(thread));
+            .iter_mut()
+            .find(|entry| entry.key == *key)
+            .and_then(|entry| entry.claimed.take())
     }
 
-    /// Codex says the request it knows as `id` is resolved.
-    pub(crate) fn resolve(&mut self, id: &Value) {
-        self.held.retain(|(_, current, _)| current != id);
+    /// The request `key` is settled: Codex has its answer. The answer a retired
+    /// poll left, if one, is given back.
+    pub(crate) fn settle(&mut self, key: &RequestKey, owner: u64) -> Option<Answer> {
+        let left = self.take_claim(key);
+        self.held.retain(|entry| entry.key != *key);
+        self.settled.retain(|(settled, _)| settled != key);
+        if self.settled.len() >= MOST_HELD {
+            self.settled.remove(0);
+        }
+        self.settled.push((key.clone(), owner));
+        left
+    }
+
+    /// The turn on `thread` is over: its requests are forgotten, and the answers
+    /// retired polls left for them are given back.
+    pub(crate) fn end_turn_of(&mut self, thread: &str) -> Vec<Answer> {
+        self.forget(|entry| entry.key.thread.as_deref() == Some(thread))
+    }
+
+    /// Codex says the request it knows as `id` (on `thread`, where it says) is resolved.
+    pub(crate) fn resolve(&mut self, id: &Value, thread: Option<&str>) -> Vec<Answer> {
+        self.forget(|entry| {
+            entry.id == *id
+                && thread.is_none_or(|thread| entry.key.thread.as_deref() == Some(thread))
+        })
+    }
+
+    fn forget(&mut self, gone: impl Fn(&Entry) -> bool) -> Vec<Answer> {
+        let mut left = Vec::new();
+        self.held.retain_mut(|entry| {
+            if gone(entry) {
+                left.extend(entry.claimed.take());
+                false
+            } else {
+                true
+            }
+        });
+        left
     }
 }
 
@@ -248,7 +345,7 @@ mod tests {
         let apart = stamps.of(key(&other), &other["id"]);
         assert!(apart.asked_at() > begun.asked_at());
         // A request settled is forgotten; its replay would be new.
-        stamps.settle(&key(&first));
+        stamps.settle(&key(&first), 0);
         std::thread::sleep(Duration::from_millis(5));
         assert!(stamps.of(key(&first), &first["id"]).asked_at() > apart.asked_at());
     }

@@ -398,12 +398,20 @@ impl Pair {
         } else {
             None
         };
-        // A request the turn or Codex has ended is not replayed: its stamp goes.
+        // A request the turn or Codex has ended is not replayed: its stamp goes, and
+        // an answer a retired poll left for it is given back.
+        let mut left = Vec::new();
         if let (true, Some(thread)) = (turn_over, thread) {
-            self.shared.stamps.borrow_mut().end_turn_of(thread);
+            left.extend(self.shared.stamps.borrow_mut().end_turn_of(thread));
         }
         if let Some(request) = resolved {
-            self.shared.stamps.borrow_mut().resolve(request);
+            left.extend(self.shared.stamps.borrow_mut().resolve(request, thread));
+        }
+        if let Some(board) = &self.shared.board {
+            for answer in left {
+                self.shared
+                    .spawn(acknowledge(Arc::clone(board), answer, false));
+            }
         }
         for held in self.held.borrow().iter() {
             let turn_ended = turn_over && thread.is_some() && held.thread.as_deref() == thread;
@@ -439,7 +447,8 @@ impl Pair {
         // broker, and the question it made on the board, whichever pair
         // received it and whatever RPC id it came under.
         let key = asked.key(&id, params);
-        let asking = self.shared.stamps.borrow_mut().of(key.clone(), &id);
+        let hold = self.shared.stamps.borrow_mut().of(key.clone(), &id);
+        let (asking, owner) = (hold.asking, hold.owner);
         self.held.borrow_mut().push(Held {
             thread: params
                 .and_then(|params| params.get("threadId"))
@@ -463,19 +472,52 @@ impl Pair {
             let ended = ending.is_raised();
             match (outcome, ended) {
                 (Ok(Reply::Answered(answer)), false) => {
-                    this.hand_over(&asked.answered(&id, &answer), answer, board, ending, key);
+                    this.hand_over(
+                        &asked.answered(&id, &answer),
+                        answer,
+                        board,
+                        ending,
+                        (key, owner),
+                    );
                     return;
                 }
-                (Ok(Reply::Answered(answer)), true) => acknowledge(board, answer, false).await,
+                (Ok(Reply::Answered(answer)), true) => {
+                    // The board's claim on the answer is its holder's: a pair whose
+                    // request a replacement holds now leaves the claim to it.
+                    let superseded = this.shared.stamps.borrow().superseded(&key, owner);
+                    if superseded {
+                        this.shared.stamps.borrow_mut().leave_claim(&key, answer);
+                    } else {
+                        acknowledge(board, answer, false).await;
+                    }
+                }
                 (Ok(Reply::Refused(reason)), false) => {
-                    this.shared.stamps.borrow_mut().settle(&key);
+                    let left = this.shared.stamps.borrow_mut().settle(&key, owner);
+                    if let Some(left) = left {
+                        this.shared
+                            .spawn(acknowledge(Arc::clone(&board), left, false));
+                    }
                     this.answer_codex(&asked.refused(&id, &reason));
                 }
                 (Ok(Reply::Unanswered) | Err(_), false) => {
-                    this.shared.stamps.borrow_mut().settle(&key);
+                    let left = this.shared.stamps.borrow_mut().settle(&key, owner);
+                    if let Some(left) = left {
+                        this.shared
+                            .spawn(acknowledge(Arc::clone(&board), left, false));
+                    }
                     this.forward(&this.tui, text);
                 }
-                (_, true) => {}
+                (_, true) => {
+                    let superseded = this.shared.stamps.borrow().superseded(&key, owner);
+                    let left = if superseded {
+                        None
+                    } else {
+                        this.shared.stamps.borrow_mut().take_claim(&key)
+                    };
+                    if let Some(left) = left {
+                        acknowledge(Arc::clone(&board), left, false).await;
+                    }
+                }
             }
             this.release(&ending);
         });
@@ -497,7 +539,7 @@ impl Pair {
         answer: Answer,
         board: Arc<Board>,
         ending: Rc<Ending>,
-        key: RequestKey,
+        (key, owner): (RequestKey, u64),
     ) {
         let frame = Message::Text(Utf8Bytes::from(response.to_string()));
         let written = match self.native.send_unless(frame, Arc::clone(&ending.raised)) {
@@ -518,7 +560,7 @@ impl Pair {
             this.release(&ending);
             let received = handed && !ending.is_raised();
             if received {
-                this.shared.stamps.borrow_mut().settle(&key);
+                let _ = this.shared.stamps.borrow_mut().settle(&key, owner);
             }
             acknowledge(board, answer, received).await;
         });

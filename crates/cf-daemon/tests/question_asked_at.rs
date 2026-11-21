@@ -395,3 +395,151 @@ async fn q1_a_question_from_two_holdings_back_is_asked_again_and_one_from_one_ba
         "{two_back}"
     );
 }
+
+// ---- Round 2 (review T-1928) ----
+
+#[tokio::test]
+async fn q1_a_late_positive_report_of_the_brief_leaves_a_cancelled_holding_its_known_bounds() {
+    let mut w = world();
+    let (task, session, brief) = assignment(&mut w, false);
+    let (project, window, chief) = (w.project, w.id(&session), w.id("chief"));
+    let (ctx, _dir) = into_context(w);
+    let auth = issued(&ctx, project, window);
+    let (begin, end) = {
+        let mut l = ctx.ledger.borrow_mut();
+        l.begin_delivery(brief).unwrap();
+        assert_eq!(l.admit(brief, &[]).unwrap(), HandOver::Admitted);
+        l.question_brief_handed_over(brief).unwrap();
+        let begin = l
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .began_at
+            .unwrap();
+        l.cancel_task(project, task, "human").unwrap();
+        let end = l
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .ended_at
+            .unwrap();
+        (begin, end)
+    };
+    let old = begin + 1;
+    assert!(old < end);
+    let (code, _) = post(&ctx, asked(&auth, "Before the cancel", Some(old))).await;
+    assert_eq!(code, 409);
+    ctx.ledger
+        .borrow_mut()
+        .question_brief_reported(brief)
+        .unwrap();
+    let after = ctx
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    assert_eq!((after.began_at, after.ended_at), (Some(begin), Some(end)));
+    let (code, late) = post(&ctx, asked(&auth, "Before the cancel, delayed", Some(old))).await;
+    assert_eq!(
+        (code, late["error"].as_str()),
+        (409, Some("task-cancelled")),
+        "{late}"
+    );
+    // After the cancel the session's own question stays taskless, and so does its answer.
+    let (code, fresh) = post(&ctx, asked(&auth, "After the cancel", Some(end))).await;
+    assert_eq!((code, stored(&fresh)), (201, None), "{fresh}");
+    let q = fresh["message"]["id"].as_i64().unwrap();
+    let a = ctx
+        .ledger
+        .borrow_mut()
+        .answer(q, chief, Some(&json!("Fresh")), None)
+        .unwrap();
+    assert_eq!(a.task_number, None);
+}
+
+#[tokio::test]
+async fn q1_an_idle_token_asking_while_its_previous_generation_resumes_is_taskless() {
+    let mut w = world();
+    let (task, session, brief) = assignment(&mut w, false);
+    let (p, member) = (w.project, w.id(&session));
+    w.deliver(brief);
+    w.ledger.close_question_window(member, None).unwrap();
+    let (c, _dir) = into_context(w);
+    let auth = issued(&c, p, member);
+    let r = asked(&auth, "An idle process", Some(latest(&c) + 1));
+    let caller = caller_of(&c, &r).unwrap();
+    assert!(caller.question_holding.is_none() && caller.question_launch_task.is_none());
+    let route = recognize(&r.method, &r.path).unwrap();
+    // The previous window's generation resumes while this authenticated body is in flight.
+    assert!(c
+        .ledger
+        .borrow_mut()
+        .resume_question_holding(member, task)
+        .unwrap());
+    let response = dispatch(&c, &caller, route, r)
+        .await
+        .unwrap_or_else(|e| e.answer());
+    let Content::Json(body) = response.content else {
+        panic!()
+    };
+    assert_eq!((response.status, stored(&body)), (201, None), "{body}");
+}
+
+#[tokio::test]
+async fn q1_a_fresh_idle_window_asks_taskless_whatever_the_closed_holding_before_it() {
+    let mut w = world();
+    let (task, session, brief) = assignment(&mut w, false);
+    w.deliver(brief);
+    let (p, window) = (w.project, w.id(&session));
+    w.ledger.close_question_window(window, None).unwrap();
+    let start = QuestionWindowStart::from_ledger(&w.ledger, window).unwrap();
+    assert!(start.task_in_hand.is_none());
+    let (c, _dir) = into_context(w);
+    let auth = c.credentials.issue_for_window(p, window, start).unwrap();
+    let (code, stamped) = post(&c, asked(&auth, "Fresh window", Some(latest(&c) + 1))).await;
+    assert_eq!((code, stored(&stamped)), (201, None), "T-{task}: {stamped}");
+}
+
+#[tokio::test]
+async fn q1_a_migrated_idle_window_asks_taskless_after_its_preupdate_cancel() {
+    let mut w = world();
+    let (task, session, brief) = assignment(&mut w, false);
+    let (p, window) = (w.project, w.id(&session));
+    w.deliver(brief);
+    w.ledger.cancel_task(p, task, "human").unwrap();
+    w.edit(|db| {
+        cf_ledger::testing::undo_migration_0044(db).unwrap();
+        db.pragma_update(None, "user_version", 43).unwrap();
+    });
+    let (c, _dir) = into_context(w);
+    let auth = issued(&c, p, window);
+    let (code, plain) = post(&c, asked(&auth, "No stamp", None)).await;
+    assert_eq!((code, stored(&plain)), (201, None), "{plain}");
+    let (code, stamped) = post(&c, asked(&auth, "Stamped", Some(latest(&c) + 1))).await;
+    assert_eq!((code, stored(&stamped)), (201, None), "{stamped}");
+}
+
+#[test]
+fn q1_a_failed_end_date_write_fails_the_cancel() {
+    let mut w = world();
+    let (task, session, brief) = assignment(&mut w, false);
+    w.deliver(brief);
+    let window = w.id(&session);
+    w.ledger
+        .sqlite()
+        .execute_batch(
+            "CREATE TEMP TRIGGER test_end_write BEFORE UPDATE OF ended_at ON question_holding
+             WHEN OLD.ended_at=-1 AND NEW.ended_at>0 BEGIN SELECT RAISE(ABORT,'test end write failed'); END;",
+        )
+        .unwrap();
+    let outcome = w.ledger.cancel_task(w.project, task, "human");
+    assert!(
+        outcome.is_err(),
+        "the cancel committed with its end date unwritten"
+    );
+    // The cancel did not happen, and the holding keeps no pending end.
+    assert_ne!(w.state(task), "cancelled");
+    let held = w.ledger.question_holding(window).unwrap().unwrap();
+    assert_ne!(held.ended_at, Some(-1));
+}

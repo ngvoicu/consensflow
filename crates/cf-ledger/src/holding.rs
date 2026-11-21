@@ -38,6 +38,16 @@ pub(crate) fn new_run() -> String {
     format!("{}-{}", process_run(), NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
+/// What a question request says of when and where it was asked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuestionStamp {
+    /// When its asking process began, in ms; none for a program that sends none.
+    pub asked_at: Option<i64>,
+    /// The last brief of a holding that was the window's before the asking token was
+    /// made, which the token was not given: its process asks in no turn of it.
+    pub idle_generation: Option<i64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowHolding {
     pub task_id: i64,
@@ -332,11 +342,16 @@ pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), Ledg
         confirm_brief(store, message)?;
         return Ok(());
     }
+    let own = of(store, window)?.filter(|h| h.task_id == task && h.last_brief == message);
     if let Some(previous) = of(store, window)?.filter(|h| h.active) {
         close(store, window, Some(previous.task_id), None)?;
     }
-    let at = began_of(store, message, false)?;
-    put_holding(store, window, task, message, 1, at, at)?;
+    // The holding this very brief made is known already, with the end its task's
+    // ending gave it: a late report of the send does not date it again.
+    if own.is_none() {
+        let at = began_of(store, message, false)?;
+        put_holding(store, window, task, message, 1, at, at)?;
+    }
     confirm_brief(store, message)?;
     Ok(())
 }
@@ -602,7 +617,16 @@ pub(crate) enum Placed {
 /// before `at` (and had not ended), else the one it replaced if that had begun
 /// and not ended, else none. A holding recorded before begins were kept reaches
 /// back for ever.
-pub(crate) fn placed_at(store: &Store, window: i64, at: i64) -> Result<Placed, LedgerError> {
+///
+/// `idle_generation` is the holding the asking window's token found already there
+/// when it was made and was not given (the window ended, or was closed): its process
+/// asks in no turn of that holding, whatever dates it has or lacks.
+pub(crate) fn placed_at(
+    store: &Store,
+    window: i64,
+    at: i64,
+    idle_generation: Option<i64>,
+) -> Result<Placed, LedgerError> {
     type Span = (
         i64,
         i64,
@@ -636,6 +660,9 @@ pub(crate) fn placed_at(store: &Store, window: i64, at: i64) -> Result<Placed, L
     let Some((_, last_brief, began, ended, prior, prior_began, prior_ended, earlier)) = span else {
         return Ok(Placed::Taskless);
     };
+    if idle_generation == Some(last_brief) {
+        return Ok(Placed::Taskless);
+    }
     if began.is_none_or(|began| at >= began) {
         return Ok(match ended {
             Some(ended) if at >= ended => Placed::Taskless,

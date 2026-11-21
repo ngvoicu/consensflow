@@ -73,5 +73,52 @@ meant = "a_request_replayed_after_a_reconnect_under_a_new_rpc_id_keeps_its_stamp
 runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_request_replayed"]]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/questions.rs"
-find = "            return asking.clone();"
-replace = "            return Asking::now();"
+find = "                asking: entry.asking.clone(),"
+replace = "                asking: Asking::now(),"
+
+# Round 2 (review T-1928).
+
+[[plant]]
+name = "question asked at: a late report of the brief dates its holding again"
+meant = "q1_a_late_positive_report_of_the_brief_leaves_a_cancelled_holding_its_known_bounds"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if own.is_none() {"
+replace = "    if true {"
+
+[[plant]]
+name = "question asked at: a token's own previous generation is placed by its dates"
+meant = "q1_an_idle_token_asking_while_its_previous_generation_resumes_is_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if idle_generation == Some(last_brief) {"
+replace = "    if false && idle_generation == Some(last_brief) {"
+
+[[plant]]
+name = "question asked at: a failed end-date write is swallowed"
+meant = "q1_a_failed_end_date_write_fails_the_cancel"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "                self.end_failed.get_or_insert(cause);"
+replace = "                let _ = cause;"
+
+[[plant]]
+name = "question asked at: a retired poll releases the claim its replacement holds"
+meant = "a_retired_pairs_poll_gives_up_no_claim_its_replacement_holds_and_the_answer_goes_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_retired_pairs_poll"]]
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "                    if superseded {\n                        this.shared"
+replace = "                    if false {\n                        this.shared"
+
+[[plant]]
+name = "question asked at: another thread's resolution drops the request's stamp"
+meant = "another_threads_resolution_of_a_reused_rpc_id_leaves_the_first_requests_stamp"
+runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::another_threads_resolution"]]
+[[plant.edit]]
+file = "crates/cf-codex-session/src/questions.rs"
+find = "                && thread.is_none_or(|thread| entry.key.thread.as_deref() == Some(thread))"
+replace = "                && true"
