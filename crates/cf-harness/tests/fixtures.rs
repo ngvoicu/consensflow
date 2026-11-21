@@ -314,11 +314,12 @@ fn privacy_text(text: &str) -> String {
         .replace("/Users/someone/", "/placeholder/")
         .replace("/Users/someone-home/", "/placeholder/")
         .replace("/Users/user/", "/placeholder/")
+        .replace("/Users/me/", "/placeholder/")
         .replace("$ROOT/home/", "$ROOT/placeholder/")
 }
 
 /// The folder and redraw checks cover every fixture, prose included, and the compressed
-/// replay goldens made from recorded fixtures. List every offending file in one failure.
+/// replay goldens and inline test screens. List every offending file in one failure.
 #[test]
 fn no_fixture_of_any_harness_holds_a_folder_of_the_owner_or_a_fragment_of_one() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -335,6 +336,16 @@ fn no_fixture_of_any_harness_holds_a_folder_of_the_owner_or_a_fragment_of_one() 
         &mut files,
     )
     .unwrap();
+    files.extend(
+        [
+            "crates/cf-base/src/bundle.rs",
+            "crates/cf-engine/src/shown/mask/tests.rs",
+            "crates/cf-engine/src/shown/screen/tests.rs",
+            "crates/cf-harness/src/shared/compacting/tests.rs",
+        ]
+        .into_iter()
+        .map(|path| root.join(path)),
+    );
     files.sort();
     for required in [
         harness_fixtures.join("claude"),
@@ -371,15 +382,21 @@ fn no_fixture_of_any_harness_holds_a_folder_of_the_owner_or_a_fragment_of_one() 
         let mut text = privacy_text(&String::from_utf8_lossy(&data));
         // These exact identities are part of the application and release contracts,
         // not a person's home or a recorded link to their repository.
-        if path.starts_with(root.join("crates/cf-panes/tests/fixtures/tcc")) {
-            text = text.replace(concat!("dev.ngvoi", "cu"), "dev.example");
+        if path == root.join("crates/cf-panes/tests/fixtures/tcc/app-preflight.ndjson")
+            || path == root.join("crates/cf-base/src/bundle.rs")
+        {
+            text = text.replace(
+                concat!("dev.ngvoi", "cu.consensflow"),
+                "dev.example.consensflow",
+            );
         }
         if path == root.join("tests/fixtures/install/make-fixtures.mjs")
             || path == root.join("tools/cf-release/tests/fixtures/prepare-update/latest.json")
+            || path == root.join("crates/cf-base/src/bundle.rs")
         {
             text = text.replace(
-                concat!("https://github.com/ngvoi", "cu/consensflow/releases/"),
-                "https://github.com/example/consensflow/releases/",
+                concat!("https://github.com/ngvoi", "cu/consensflow/releases"),
+                "https://github.com/example/consensflow/releases",
             );
         }
         for (found, pattern) in &folders {
@@ -414,6 +431,7 @@ fn folder_patterns_find_plain_and_json_escaped_paths_but_allow_synthetic_homes()
         r"\/Users\/someone\/work",
         "/Users/someone-home/work",
         "/Users/user/work",
+        "/Users/me/work",
     ] {
         assert!(!found.is_match(&privacy_text(placeholder)), "{placeholder}");
     }
