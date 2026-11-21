@@ -16,14 +16,14 @@
 # - the step's gate and the fresh look before a paste read `takes_words`, not `settled`;
 # - a result is taken on `settled` alone.
 #
-# Every name holds `takes words`, so `cargo xtask plants daemon "takes words"` runs them all.
+# Every name holds `claude interrupt words`, so `cargo xtask plants daemon "claude interrupt words"` runs them all.
 
 [run]
 harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents::"]
 engine-dispatcher-nothing-to-stop = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "nothing_to_stop::"]
 
 [[plant]]
-name = "takes words: without the second's stand of the interrupt's end"
+name = "claude interrupt words: without the second's stand of the interrupt's end"
 meant = "a_mac_window_busy_with_a_background_agent_takes_words_once_the_tool_use_interrupt_has_stood"
 runs = ["harness-launch-claude-agents"]
 
@@ -33,7 +33,7 @@ find = "                        && over == Over::Held\n                        &
 replace = "                        && !self.shared.get()"
 
 [[plant]]
-name = "takes words: on Windows too"
+name = "claude interrupt words: on Windows too"
 meant = "a_mac_window_busy_with_a_background_agent_takes_words_once_the_tool_use_interrupt_has_stood"
 runs = ["harness-launch-claude-agents"]
 
@@ -43,7 +43,7 @@ find = "let after_interrupt = cfg!(target_os = \"macos\")"
 replace = "let after_interrupt = cfg!(not(target_os = \"macos\"))"
 
 [[plant]]
-name = "takes words: for a refusal's end"
+name = "claude interrupt words: for a refusal's end"
 meant = "a_window_takes_no_words_after_an_interrupt_in_generation_nor_after_a_refusal_whatever_its_status_says"
 runs = ["harness-launch-claude-agents"]
 
@@ -53,7 +53,7 @@ find = "        .last()\n        .is_some_and(|item| item.role == Role::User && 
 replace = "        .last()\n        .is_some()"
 
 [[plant]]
-name = "takes words: for the in-generation wording"
+name = "claude interrupt words: for the in-generation wording"
 meant = "a_window_takes_no_words_after_an_interrupt_in_generation_nor_after_a_refusal_whatever_its_status_says"
 runs = ["harness-launch-claude-agents"]
 
@@ -63,7 +63,7 @@ find = "&*item.text == TOOL_USE_INTERRUPT)"
 replace = "item.text.starts_with(\"[Request interrupted by user\"))"
 
 [[plant]]
-name = "takes words: on a record another Claude shares"
+name = "claude interrupt words: on a record another Claude shares"
 meant = "a_window_that_another_claude_shows_takes_no_words_after_the_interrupt_whatever_either_status_says"
 runs = ["harness-launch-claude-agents"]
 
@@ -73,7 +73,7 @@ find = "                        && !self.shared.get()\n"
 replace = ""
 
 [[plant]]
-name = "takes words: the step's gate reads settled again"
+name = "claude interrupt words: the step's gate reads settled again"
 meant = "an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs"
 runs = ["engine-dispatcher-nothing-to-stop"]
 
@@ -83,8 +83,8 @@ find = "            && observed.takes_words\n            && observed.waiting.is_
 replace = "            && observed.settled\n            && observed.waiting.is_none();\n        let idle = free"
 
 [[plant]]
-name = "takes words: the fresh look before a paste reads settled again"
-meant = "an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs"
+name = "claude interrupt words: the fresh look before a paste reads settled again"
+meant = "a_paced_resume_goes_into_the_stopped_window_once_the_settle_has_stood_and_a_fresh_look_reads_it_so"
 runs = ["engine-dispatcher-nothing-to-stop"]
 
 [[plant.edit]]
@@ -93,7 +93,7 @@ find = "Ok(fresh) if !fresh.takes_words || fresh.waiting.is_some()"
 replace = "Ok(fresh) if !fresh.settled || fresh.waiting.is_some()"
 
 [[plant]]
-name = "takes words: a result is taken on takes_words"
+name = "claude interrupt words: a result is taken on takes_words"
 meant = "a_window_that_takes_words_for_its_background_agent_has_no_result_taken_while_it_runs"
 runs = ["engine-dispatcher-nothing-to-stop"]
 

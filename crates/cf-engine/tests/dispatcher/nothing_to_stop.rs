@@ -14,7 +14,7 @@
 //! stays open with what it left running, nobody is told it did not stop, and the
 //! words that send the task on go into the same window once it rests.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use std::rc::Rc;
 
 use cf_harness::contract::{Held, Over, Pane, Readiness, Waiting};
@@ -279,69 +279,6 @@ fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_a
         context.adapter.prepared().len(),
         launches,
         "the same window"
-    );
-}
-
-#[test]
-#[ignore = "D3 must supply a safe-input signal for the stopped turn"]
-fn an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs() {
-    let context = Context::new();
-    let project = working(&context);
-    let launches = context.adapter.prepared().len();
-    // The host still sees work from this window. Like Claude's interrupted turn,
-    // the stand-in's record reads over but has no pending-agent count, while its
-    // live status remains busy. Nothing else ends the work or makes it idle.
-    context.background.leaves(Some(Background {
-        total: 1,
-        processes: vec![BackgroundProcess {
-            pid: 4711,
-            command: "background-agent".to_owned(),
-        }],
-        ..Background::default()
-    }));
-    context.adapter.busy_with_agents_until_interrupted("zeus");
-    context.pause_task(project, 1);
-    context.resume_task(project, 1, "Go on with the parser");
-    context.pass().unwrap();
-    let pane = context.host.last("zeus").expect("its window").pane;
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "the first turn was interrupted"
-    );
-    for _ in 0..4 {
-        context.advance(3_100);
-        context.pass().unwrap();
-    }
-
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "no later pause round"
-    );
-    assert!(
-        context.host.killed().is_empty(),
-        "background work was not ended"
-    );
-    assert_eq!(
-        given(&context, "zeus", "Resumed: Go on with the parser"),
-        1,
-        "the resume must reach the same window while its background work still runs"
-    );
-    assert_eq!(context.task(project, 1).task.state, "working");
-    assert_eq!(
-        context.adapter.prepared().len(),
-        launches,
-        "the same window"
-    );
-    for _ in 0..4 {
-        context.advance(3_100);
-        context.pass().unwrap();
-    }
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "no later pause round cuts the resumed turn"
     );
 }
 
@@ -920,6 +857,32 @@ fn an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_run
         [escape(&pane)],
         "no later pause round cuts the resumed turn"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_paced_resume_goes_into_the_stopped_window_once_the_settle_has_stood_and_a_fresh_look_reads_it_so(
+) {
+    // The pacing's gate reads the same word as the step's: the rest holds over looks of
+    // one frontier for the settle, and the fresh look before the paste must read the
+    // window taking words too (it is not settled: its status says busy for the agent).
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    let project = working(&context);
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+    for _ in 0..6 {
+        context.advance(1_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on with the parser"),
+        1,
+        "once the settle stood"
+    );
+    assert_eq!(context.host.inputs(), [escape(&pane)], "no more keys");
 }
 
 #[cfg(not(target_os = "macos"))]
