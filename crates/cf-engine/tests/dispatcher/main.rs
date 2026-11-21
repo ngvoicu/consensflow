@@ -71,6 +71,7 @@ mod devin_old_quota;
 #[path = "../../../cf-harness/tests/launch/devin/fixtures.rs"]
 mod devin_fixture;
 mod designer_images;
+mod exit_keeps_answer;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;
