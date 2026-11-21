@@ -28,8 +28,24 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
     let (status, said) = staff(&scene, &scene.context).await;
     assert_eq!(status, 200);
     assert_eq!(
-        said.to_string(),
-        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]}"#
+        said["members"].to_string(),
+        r#"[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]"#
+    );
+    // The slots, in the registry's order, each with its holders: 29 tiered and the image
+    // designer's one with no tier; the empty ones are there too.
+    let slots = said["slots"].as_array().unwrap();
+    assert_eq!(slots.len(), 30);
+    assert_eq!(
+        slots[1],
+        serde_json::json!({ "role": "worker", "tier": "standard", "holders": ["zeus"] })
+    );
+    assert_eq!(
+        slots[0],
+        serde_json::json!({ "role": "worker", "tier": "complex", "holders": [] })
+    );
+    assert_eq!(
+        slots[29],
+        serde_json::json!({ "role": "designer", "tier": null, "holders": [] })
     );
     assert_eq!(scene.kicks.get(), 0);
 }
@@ -167,6 +183,9 @@ async fn an_image_designer_is_said_with_no_tier_because_a_design_task_has_none()
 #[tokio::test]
 async fn a_member_whose_roles_have_no_tier_is_said_with_none_and_one_with_a_role_with_tiers_with_its_own(
 ) {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     // The scout of the table's seam: a role with no tier that is no image agent. The ledger's
     // CHECKs name the five roles of today alone, so they are off for its rows.
     let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);

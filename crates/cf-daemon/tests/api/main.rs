@@ -102,10 +102,16 @@ const STAFF_ON_ITS_OWN_MODEL: &str = "`cf staff` says the model, its name and th
 /// `cf task list` says it after the role in each lane's head.
 const LANE_RUNS_ON: &str = "a lane of the board says the model and effort its participant runs on, and `cf task list` says it in the lane's head, where Node's said the handle and role alone";
 
+/// `cf task add` given no tier prints the usage whose lines name each role's tiers: the worker,
+/// the frontend designer and the integrator have no Critical (critical work is not coding), and
+/// the roles Node gave no tier have one now.
+const USAGE_NAMES_EACH_ROLES_TIERS: &str = "`cf task add` with no tier prints a usage that names each role's tiers (a worker is complex, standard or light; the frontend designer, the architect, the researcher and the integrator take a tier too), where Node's said the roles with no tier took none";
+
 const DEPARTED: &[Departed] = &[
     ("cf-board-014", LANE_RUNS_ON),
     ("cf-board-016", LANE_RUNS_ON),
     ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),
+    ("cf-board-019", USAGE_NAMES_EACH_ROLES_TIERS),
     ("cf-board-021", LANE_RUNS_ON),
     ("cf-board-027", STAFF_ON_ITS_OWN_MODEL),
     ("core-api-003", RESULT_ACCEPTED),
@@ -222,6 +228,8 @@ fn every_trace_of_the_api_is_answered_as_node_answered_it() {
 
 #[test]
 fn every_run_of_cf_against_the_api_prints_what_it_printed_against_node() {
+    // Node's recordings never had the slot rule: they seat members it now refuses.
+    let _off = cf_ledger::testing::slot_rule_off();
     play_all(&["cf-board"], 29);
 }
 

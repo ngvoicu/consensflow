@@ -140,6 +140,8 @@ fn the_traces_ask_every_operation_of_the_page() {
 /// Every page trace of Node's but the departed answers here as it answered there.
 #[test]
 fn every_page_trace_is_answered_as_node_answered() {
+    // Node's recordings never had the slot rule: they seat members it now refuses.
+    let _off = cf_ledger::testing::slot_rule_off();
     let names = trace::names(&SUITES);
     assert_eq!(
         names.len(),

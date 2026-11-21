@@ -879,3 +879,19 @@ impl crate::Ledger {
 pub fn without_the_slot_rule<T>(run: impl FnOnce() -> T) -> T {
     crate::staff::slots::overflow::allowing(run)
 }
+
+/// The slot rule off on this thread until the guard is dropped: for a test whose work goes on
+/// across `.await`s on a runtime of this one thread (the kit's replays of Node's traces).
+#[must_use = "the rule is on again as soon as this is dropped"]
+pub fn slot_rule_off() -> SlotRuleOff {
+    SlotRuleOff(crate::staff::slots::overflow::set(true))
+}
+
+/// The rule as it was, put back on drop.
+pub struct SlotRuleOff(bool);
+
+impl Drop for SlotRuleOff {
+    fn drop(&mut self) {
+        crate::staff::slots::overflow::set(self.0);
+    }
+}

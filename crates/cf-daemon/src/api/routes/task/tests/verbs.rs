@@ -1210,6 +1210,76 @@ async fn the_chief_changes_the_tier_of_a_task_no_window_has_with_the_brief_or_wi
     );
 }
 
+/// `cf task edit T-n --tier critical --purpose …`: the route takes the purpose with Critical
+/// alone, and the task is taken to its critical slot with it.
+#[tokio::test]
+async fn an_edit_takes_a_purpose_with_critical_only_and_sends_critical_work_to_its_slot() {
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            scene.project.id,
+            &cf_ledger::NewMember {
+                model: None,
+                effort: None,
+                model_name: Some("ares".to_owned()),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["advisor".to_owned()],
+                tier: "critical".to_owned(),
+            },
+        )
+        .unwrap();
+    let number = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .create_task(
+            scene.project.id,
+            &cf_ledger::NewTask {
+                from: "chief".to_owned(),
+                pool: Some("advisor".to_owned()),
+                tier: Some("standard".to_owned()),
+                body: "Why?".to_owned(),
+                ..cf_ledger::NewTask::default()
+            },
+        )
+        .unwrap()
+        .task
+        .number;
+    let open = number.to_string();
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"light","purpose":"hard-problem"}"#,
+    )
+    .await;
+    assert_eq!(
+        refused(&(status, said)),
+        (400, "purpose-without-critical", "a purpose comes with --tier critical")
+    );
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{open}/edit"),
+        r#"{"tier":"critical","purpose":"hard-problem"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["tier"].as_str(), Some("critical"));
+    let thread = scene
+        .context
+        .ledger
+        .borrow()
+        .task(scene.project.id, number)
+        .unwrap()
+        .unwrap();
+    assert_eq!(thread.task.purpose.as_deref(), Some("hard-problem"));
+}
+
 #[tokio::test]
 async fn a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose() {
     let scene = scene();
@@ -1222,8 +1292,8 @@ async fn a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose(
         r#"{"tier":"critical"}"#,
     )
     .await;
-    // The task has no purpose, which critical work names.
-    assert_eq!(refused(&(status, said)).1, "purpose-required");
+    // A worker's task is never critical: coding is not critical work.
+    assert_eq!(refused(&(status, said)).1, "tier-not-offered");
     let (status, said) = post(
         &scene,
         &scene.chief,

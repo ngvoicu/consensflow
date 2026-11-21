@@ -70,6 +70,9 @@ fn assert_ran_apart(rig: &Rig, project: i64) {
 
 #[tokio::test(start_paused = true)]
 async fn two_looks_whose_timers_elapse_together_are_two_callbacks_in_the_order_the_kit_ran_them() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     scene(async {
         let clock: Rc<RefCell<Option<Rc<dyn Time>>>> = Rc::default();
         let waiting = Rc::clone(&clock);
@@ -127,6 +130,9 @@ async fn records_looked_at() -> (Rig, Rc<Standing>, Rc<Looks>) {
 
 #[tokio::test]
 async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_the_kit_ran_them() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     scene(async {
         let (mut rig, standing, looks) = records_looked_at().await;
         let project = two_workers_with_a_look_each(&mut rig).await;
@@ -147,6 +153,9 @@ async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_th
 
 #[tokio::test]
 async fn two_looks_answered_before_the_executors_first_poll_of_the_pass_are_two_callbacks_too() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     scene(async {
         let (mut rig, standing, looks) = records_looked_at().await;
         let project = two_workers_with_a_look_each(&mut rig).await;

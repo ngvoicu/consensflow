@@ -26,12 +26,18 @@ async fn the_page_reads_the_roles_from_the_table_in_its_order_and_its_tests_read
             assert_eq!(
                 roles[8],
                 json!({ "id": "designer", "name": "image designer", "label": "Image designer",
-                    "article": "an", "tiered": false, "imageAgent": true })
+                    "article": "an", "tiered": false, "tiers": [], "imageAgent": true })
             );
             assert_eq!(
                 roles[1],
                 json!({ "id": "frontend", "name": "frontend designer", "label": "Frontend designer",
-                    "article": "a", "tiered": false, "imageAgent": false })
+                    "article": "a", "tiered": true, "tiers": ["complex", "standard", "light"],
+                    "imageAgent": false })
+            );
+            // The architect has a slot at every tier, Critical's first.
+            assert_eq!(
+                roles[2]["tiers"],
+                json!(["critical", "complex", "standard", "light"])
             );
             let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../app/tests/fixtures/roles.json");
@@ -71,7 +77,7 @@ async fn a_role_in_the_table_alone_is_in_the_pages_list_in_its_place() {
             assert_eq!(
                 roles[3],
                 json!({ "id": "scout", "name": "field scout", "label": "Field scout",
-                    "article": "a", "tiered": false, "imageAgent": false })
+                    "article": "a", "tiered": false, "tiers": [], "imageAgent": false })
             );
         })
         .await;

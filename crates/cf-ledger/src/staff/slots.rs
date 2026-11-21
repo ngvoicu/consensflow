@@ -318,6 +318,11 @@ pub(crate) mod overflow {
         ALLOWED.with(Cell::get)
     }
 
+    /// The rule off (or back on) on this thread: what it was before.
+    pub(crate) fn set(value: bool) -> bool {
+        ALLOWED.with(|cell| cell.replace(value))
+    }
+
     pub(crate) fn allowing<T>(run: impl FnOnce() -> T) -> T {
         let before = ALLOWED.with(|cell| cell.replace(true));
         let result = run();

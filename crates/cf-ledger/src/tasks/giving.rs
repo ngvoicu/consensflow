@@ -75,14 +75,21 @@ impl NewTask {
         let text = |field: &str| value.get(field).and_then(Value::as_str).map(str::to_string);
         let to = text("to");
         let after = value.get("after").and_then(Value::as_i64);
-        let tier = text("tier");
+        let mut tier = text("tier");
         if to.is_none() && after.is_none() {
             let pool = value.get("pool");
             if !pool.and_then(Value::as_str).is_some_and(roles::is_role) {
                 return Err(invalid_pool(&cf_base::js::text(pool)));
             }
-            // The tier is checked where the task is given (`check_work`), after a plan's key
-            // is looked up: a plan an earlier version took still replays its saved answer.
+            // A tier that is said is read here as it always was. One that is left out is the
+            // ledger's to ask for where the task is given (`check_work`), after a plan's key is
+            // looked up: a plan an earlier version took under a key (a section of a role that
+            // had no tier) still replays its saved answer.
+            if value.get("tier").is_some()
+                && !pool.and_then(Value::as_str).is_some_and(roles::untiered)
+            {
+                tier = Some(model::parse_tier(value.get("tier"))?.to_string());
+            }
         }
         let task = Self {
             from: text("from").unwrap_or_default(),
@@ -95,7 +102,11 @@ impl NewTask {
             needs,
             before,
         };
-        task.check_work()?;
+        // A tier left out is asked for where the task is given (`create_task`), after a plan's
+        // key is looked up.
+        if task.tier.is_some() || task.to.is_some() || task.after.is_some() {
+            task.check_work()?;
+        }
         Ok(task)
     }
 

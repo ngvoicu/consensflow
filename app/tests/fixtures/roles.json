@@ -5,6 +5,11 @@
     "label": "Worker",
     "article": "a",
     "tiered": true,
+    "tiers": [
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -12,7 +17,12 @@
     "name": "frontend designer",
     "label": "Frontend designer",
     "article": "a",
-    "tiered": false,
+    "tiered": true,
+    "tiers": [
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -20,7 +30,13 @@
     "name": "architect",
     "label": "Architect",
     "article": "an",
-    "tiered": false,
+    "tiered": true,
+    "tiers": [
+      "critical",
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -28,7 +44,13 @@
     "name": "researcher",
     "label": "Researcher",
     "article": "a",
-    "tiered": false,
+    "tiered": true,
+    "tiers": [
+      "critical",
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -37,6 +59,12 @@
     "label": "Advisor",
     "article": "an",
     "tiered": true,
+    "tiers": [
+      "critical",
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -45,6 +73,12 @@
     "label": "Reviewer",
     "article": "a",
     "tiered": true,
+    "tiers": [
+      "critical",
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -53,6 +87,12 @@
     "label": "Tester",
     "article": "a",
     "tiered": true,
+    "tiers": [
+      "critical",
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -60,7 +100,12 @@
     "name": "integrator",
     "label": "Integrator",
     "article": "an",
-    "tiered": false,
+    "tiered": true,
+    "tiers": [
+      "complex",
+      "standard",
+      "light"
+    ],
     "imageAgent": false
   },
   {
@@ -69,6 +114,7 @@
     "label": "Image designer",
     "article": "an",
     "tiered": false,
+    "tiers": [],
     "imageAgent": true
   }
 ]

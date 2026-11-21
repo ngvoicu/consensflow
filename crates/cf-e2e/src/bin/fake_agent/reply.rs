@@ -12,7 +12,7 @@
 //!   lines of a few dozen words as a worker's are, with no picture: a message that Claude
 //!   Code is given in pieces when the machine is loaded (T-763's live case).
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
-//!   standard <task>`, and `--test` the same) runs `cf task add` with those
+//!   standard <task>`, and `--test`, `--frontend`, `--architect`, `--research` and `--integrate` the same; `--design` takes no tier) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
 //!   own token, the way a chief hands out work. Each such line of a message is
 //!   run, in order, so that one turn puts several tasks on the board at once, as
@@ -1116,7 +1116,7 @@ mod tests {
             r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|frontend|architect|research|integrate|self)|--\S+ \S+) )+)(.+)$",
         )
         .unwrap();
-        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it\nDISPATCH --frontend Draw the page\nDISPATCH --architect Frame it\nDISPATCH --research Find it\nDISPATCH --integrate Land it";
+        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it\nDISPATCH --frontend --tier standard Draw the page\nDISPATCH --architect --tier complex Frame it\nDISPATCH --research --tier light Find it\nDISPATCH --integrate --tier standard Land it";
         let words: Vec<Vec<String>> = dispatches(text, &line);
         assert_eq!(
             words,
@@ -1129,10 +1129,12 @@ mod tests {
                     "JOB 60 SLEEP 30 Build\nit"
                 ],
                 vec!["task", "add", "--review", "--tier", "light", "Look at it"],
-                vec!["task", "add", "--frontend", "Draw the page"],
-                vec!["task", "add", "--architect", "Frame it"],
-                vec!["task", "add", "--research", "Find it"],
-                vec!["task", "add", "--integrate", "Land it"],
+                vec![
+                    "task", "add", "--frontend", "--tier", "standard", "Draw the page"
+                ],
+                vec!["task", "add", "--architect", "--tier", "complex", "Frame it"],
+                vec!["task", "add", "--research", "--tier", "light", "Find it"],
+                vec!["task", "add", "--integrate", "--tier", "standard", "Land it"],
             ]
         );
         assert!(dispatches("DISPATCH nothing", &line).is_empty());

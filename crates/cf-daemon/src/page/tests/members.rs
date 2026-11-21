@@ -142,7 +142,7 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                     "harness": "claude-code",
                     "model": "claude-opus-5-5",
                     "effort": "high",
-                    "tier": "critical",
+                    "tier": "complex",
                     "roles": ["worker"],
                 }))
                 .await;
@@ -150,7 +150,7 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
             assert_eq!(added["member"]["handle"], "claude-opus-5-5-high");
             assert_eq!(added["member"]["agent"], json!(null), "no saved agent");
             assert_eq!(added["member"]["modelName"], "claude-opus-5-5");
-            assert_eq!(added["member"]["tier"], "critical");
+            assert_eq!(added["member"]["tier"], "complex");
             assert_eq!(
                 staffing.runs("claude-opus-5-5-high"),
                 (
@@ -160,7 +160,9 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                     Some("claude-opus-5-5".into())
                 )
             );
-            // The same model at the same effort is the same member: the role is one more.
+            // Add never merges: the same model at the same effort is a second member, with its
+            // own name, whatever role and tier it is added for. To give a role to a member
+            // already on the staff is `member.roles`, at the tier it has.
             let again = staffing
                 .add(json!({
                     "harness": "claude-code",
@@ -170,15 +172,16 @@ async fn a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_th
                     "roles": ["reviewer"],
                 }))
                 .await;
-            assert_eq!(again["member"]["handle"], "claude-opus-5-5-high", "{again}");
-            assert_eq!(again["member"]["roles"], json!(["worker", "reviewer"]));
+            assert_ne!(again["member"]["handle"], "claude-opus-5-5-high", "{again}");
+            assert_eq!(again["member"]["roles"], json!(["reviewer"]));
+            assert_eq!(staffing.member("claude-opus-5-5-high").roles, ["worker"]);
             // Another effort is another member.
             let other = staffing
                 .add(json!({
                     "harness": "claude-code",
                     "model": "claude-opus-5-5",
                     "effort": "max",
-                    "tier": "critical",
+                    "tier": "light",
                 }))
                 .await;
             assert_eq!(other["member"]["handle"], "claude-opus-5-5-max", "{other}");
@@ -252,7 +255,7 @@ async fn a_codex_member_runs_the_model_codex_lists_at_its_effort() {
         .run_until(async {
             let staffing = staffing();
             let added = staffing
-                .add(json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "ultra", "tier": "critical" }))
+                .add(json!({ "harness": "codex", "model": "gpt-6.1-sol", "effort": "ultra", "tier": "complex" }))
                 .await;
             assert_eq!(added["member"]["handle"], "gpt-6-1-sol-ultra", "{added}");
             assert_eq!(added["member"]["roles"], json!(["worker"]), "a worker unless said");
@@ -303,11 +306,14 @@ async fn an_image_designer_is_added_on_codex_with_no_model_effort_or_tier() {
                 staffing.member("codex-default").tier.as_deref(),
                 Some("light")
             );
-            // A second one is that designer again.
+            // A project has one image designer: a second is refused (`slot-taken`).
             let again = staffing
                 .add(json!({ "harness": "codex", "roles": ["designer"] }))
                 .await;
-            assert_eq!(again["member"]["handle"], "codex-default", "{again}");
+            assert_eq!(
+                again,
+                json!({ "ok": false, "error": "the image designer slot is @codex-default's: a project has one" })
+            );
             // Another harness does not draw.
             let refused = staffing
                 .add(json!({ "harness": "claude-code", "roles": ["designer"] }))
@@ -436,7 +442,8 @@ async fn a_member_on_a_listed_model_with_a_long_id_is_added_and_starts_a_project
             staffing.lists_of("pi").set(listing);
             for len in [129, 256] {
                 let added = staffing
-                    .add(json!({ "harness": "pi", "model": long(len), "effort": "high", "tier": "complex" }))
+                    .add(json!({ "harness": "pi", "model": long(len), "effort": "high",
+                        "tier": if len == 129 { "complex" } else { "standard" } }))
                     .await;
                 assert_eq!(added["ok"], true, "add at {len}: {added}");
                 assert_eq!(added["member"]["modelName"], long(len).as_str());
@@ -511,6 +518,56 @@ async fn a_project_starts_with_an_image_designer_as_the_page_picks_one() {
                 refused,
                 json!({ "ok": false, "error": "an image designer draws on Codex's own model: it takes no model, effort or tier" })
             );
+        })
+        .await;
+}
+
+/// New project copied from a staff with an image designer and its image backup (on Vacation):
+/// `project.open` reads the backup row as an image designer's, asks it for no model, and the
+/// ledger reads back one image designer with its image backup, its Vacation kept, the slot held
+/// once. On main the route read it as a light worker and asked its model.
+#[tokio::test]
+async fn a_project_opened_from_a_staff_with_an_image_designer_and_its_backup_keeps_the_pair() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let vacation = "2026-11-20T10:00:00.000Z";
+            let opened = ask(
+                &staffing.app,
+                "project.open",
+                json!({
+                    "directory": "/work/drawn",
+                    "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high",
+                    "staff": [
+                        { "id": 40, "harness": "codex", "roles": ["designer"] },
+                        { "id": 41, "backupOf": 40, "harness": "codex", "roles": ["designer"],
+                          "vacationSince": vacation },
+                    ],
+                }),
+            )
+            .await;
+            assert_eq!(opened["ok"], true, "{opened}");
+            let project = staffing
+                .rig
+                .kit
+                .ledger
+                .borrow()
+                .project(opened["project"]["id"].as_i64().unwrap())
+                .unwrap()
+                .unwrap();
+            let drawers: Vec<&cf_ledger::ParticipantView> = project
+                .participants
+                .iter()
+                .filter(|participant| participant.roles.iter().any(|role| role == "designer"))
+                .filter(|participant| participant.member_id.is_none())
+                .collect();
+            let (primaries, backups): (Vec<_>, Vec<_>) =
+                drawers.into_iter().partition(|participant| participant.backup_of.is_none());
+            assert_eq!(primaries.len(), 1, "the slot is held once");
+            assert_eq!(backups.len(), 1, "and its backup is its backup");
+            assert_eq!(backups[0].backup_of, Some(primaries[0].id));
+            assert!(backups[0].designer && backups[0].model.is_none(), "no model was asked");
+            assert_eq!(backups[0].vacation_since.as_deref(), Some(vacation), "its Vacation kept");
         })
         .await;
 }
@@ -653,8 +710,9 @@ async fn edit_member_moves_a_member_to_another_model_in_the_tier_chosen() {
 }
 
 /// An image designer draws with Codex's image tool and holds no other role, so it is a
-/// member of its own beside a worker, whichever is added first; a second designer is that
-/// designer again, and holds no model for a worker on Codex's model to be named like.
+/// member of its own beside a worker, whichever is added first; a second designer is refused,
+/// for a project has one image designer, and the designer holds no model for a worker on
+/// Codex's model to be named like.
 #[tokio::test]
 async fn a_worker_and_an_image_designer_are_two_members_in_either_order() {
     LocalSet::new()
@@ -679,7 +737,7 @@ async fn a_worker_and_an_image_designer_are_two_members_in_either_order() {
             assert_eq!(added["member"]["handle"], "gpt-6-1-sol-high");
             assert_eq!(added["member"]["designer"], false);
             let again = staffing.add(designer).await;
-            assert_eq!(again["member"]["handle"], "codex-default", "{again}");
+            assert_eq!(again["ok"], false, "{again}");
             assert_eq!(staffing.member("codex-default").roles, ["designer"]);
         })
         .await;
@@ -1298,7 +1356,7 @@ async fn a_member_whose_roles_have_no_tier_is_added_and_edited_with_none() {
 }
 
 /// A member that holds a role with tiers and one without keeps the tier it has for the role
-/// with tiers: a scout's role added to a worker on its model leaves its tier as it was, and
+/// with tiers: a scout's role given to a worker (`member.roles`) leaves its tier as it was, and
 /// such a member added at once is asked for a tier.
 #[tokio::test]
 async fn a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier() {
@@ -1310,9 +1368,12 @@ async fn a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier() {
                 .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "complex", "roles": ["worker"] }))
                 .await;
             assert_eq!(worker["ok"], true, "{worker}");
-            let scout = staffing
-                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "roles": ["scout"] }))
-                .await;
+            let scout = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["worker", "scout"] }),
+            )
+            .await;
             assert_eq!(scout["ok"], true, "{scout}");
             let member = staffing.member("claude-sonnet-5-5-medium");
             assert_eq!(
@@ -1330,30 +1391,49 @@ async fn a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier() {
         .await;
 }
 
-/// A member whose roles have no tier was given none (spec new-roles, FD-04): a worker's role it
-/// gains comes with the tier the human chose. Add member onto an integrator on the same model
-/// takes the tier of the add; `member.roles` takes the `tier` it is sent, refuses the change
-/// without one in the ledger's words, and leaves a member that drops its role with tiers in
-/// the lowest.
+/// Add never merges, and a role given to a member already on the staff is `member.roles`, which
+/// takes no tier: the role comes at the tier the member has, offered there and its slot free.
 #[tokio::test]
-async fn an_integrator_gains_a_workers_role_only_with_the_tier_the_human_chose() {
+async fn a_role_is_given_to_a_member_by_member_roles_at_the_tier_it_has_and_add_never_merges() {
     LocalSet::new()
         .run_until(async {
             let staffing = staffing();
             let integrator = staffing
-                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "roles": ["integrator"] }))
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "light", "roles": ["integrator"] }))
                 .await;
             assert_eq!(integrator["ok"], true, "{integrator}");
+            // The same model at another tier is a second member, never the first one's role.
             let worker = staffing
                 .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "standard", "roles": ["worker"] }))
                 .await;
             assert_eq!(worker["ok"], true, "{worker}");
+            let second = worker["member"]["handle"].as_str().unwrap().to_owned();
+            assert_ne!(second, "claude-sonnet-5-5-medium");
+            assert_eq!(staffing.member("claude-sonnet-5-5-medium").roles, ["integrator"]);
+            assert_eq!(staffing.member(&second).tier.as_deref(), Some("standard"));
+
+            // The role comes at the tier the member has, and no tier is taken with it.
+            let given = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator", "worker"], "tier": "complex" }),
+            )
+            .await;
+            assert_eq!(given["ok"], true, "{given}");
             let member = staffing.member("claude-sonnet-5-5-medium");
             assert_eq!(
                 (member.roles, member.tier.as_deref()),
-                (vec!["integrator".to_owned(), "worker".to_owned()], Some("standard"))
+                (vec!["integrator".to_owned(), "worker".to_owned()], Some("light"))
             );
-
+            // A slot another member holds is refused, in the rule's words.
+            let taken = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "light", "roles": ["worker"] }))
+                .await;
+            assert_eq!(
+                taken,
+                json!({ "ok": false, "error": "the light worker slot is @claude-sonnet-5-5-medium's: a role and tier holds one member. Pick another tier" })
+            );
+            // A member that gives its roles up keeps its tier.
             let alone = ask(
                 &staffing.app,
                 "member.roles",
@@ -1362,29 +1442,6 @@ async fn an_integrator_gains_a_workers_role_only_with_the_tier_the_human_chose()
             .await;
             assert_eq!(alone["ok"], true, "{alone}");
             assert_eq!(staffing.member("claude-sonnet-5-5-medium").tier.as_deref(), Some("light"));
-
-            let untold = ask(
-                &staffing.app,
-                "member.roles",
-                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator", "worker"] }),
-            )
-            .await;
-            assert_eq!(
-                untold,
-                json!({ "ok": false, "error": "claude-sonnet-5-5-medium has no tier: a worker's tasks have one, so its tier comes with the role" })
-            );
-            let told = ask(
-                &staffing.app,
-                "member.roles",
-                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator", "worker"], "tier": "complex" }),
-            )
-            .await;
-            assert_eq!(told["ok"], true, "{told}");
-            let member = staffing.member("claude-sonnet-5-5-medium");
-            assert_eq!(
-                (member.roles, member.tier.as_deref()),
-                (vec!["integrator".to_owned(), "worker".to_owned()], Some("complex"))
-            );
         })
         .await;
 }
@@ -1598,7 +1655,7 @@ async fn bkv_page_adding_a_primary_does_not_merge_into_the_same_model_backup() {
         let s = staffing();
         let owner = bkv_page_owner(&s).await;
         let backup = bkv_page_backup(&s, &owner);
-        let added = s.add(json!({"harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "tier": "standard", "roles": ["worker"]})).await;
+        let added = s.add(json!({"harness": "codex", "model": "gpt-6.1-sol", "effort": "high", "tier": "light", "roles": ["worker"]})).await;
         assert_eq!(added["ok"], true, "{added}");
         assert_ne!(added["member"]["handle"], backup);
         let lanes = bkv_page_link(&s, s.project);
@@ -2124,6 +2181,8 @@ async fn bkv05_board_backup_readiness_follows_the_scheduler_for_every_hold() {
                 "backup_out" => { s.rig.kit.ledger.borrow_mut().mark_out_with_kind(backup_id, until, "hold", cf_ledger::HoldKind::Quota).unwrap(); },
                 "backup_edit" => { s.rig.kit.ledger.borrow().sqlite().execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [backup_id]).unwrap(); },
                 "free_peer" => {
+                    // A peer in the owner's own slot, as the update leaves one: all take work.
+                    let _off = cf_ledger::testing::slot_rule_off();
                     let added = s.add(json!({"harness":"codex", "model":"gpt-6.1-sol", "effort":"high", "tier":"standard", "roles":["worker"]})).await;
                     assert_eq!(added["ok"], true, "{added}");
                 },

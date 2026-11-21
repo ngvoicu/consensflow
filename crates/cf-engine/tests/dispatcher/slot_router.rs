@@ -409,3 +409,61 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
     assert!(context.task(other.id, other_task).task.assignee.is_some());
     let _ = HoldKind::Quota;
 }
+
+#[test]
+fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slot_or_falls() {
+    let context = Context::new();
+    let project = project_of(
+        &context,
+        "app",
+        &[
+            ("argus", &["researcher"], "standard"),
+            ("daedalus", &["architect"], "light"),
+        ],
+    );
+    let research = open(&context, &project, "researcher", "light", None);
+    let frame = open(&context, &project, "architect", "light", None);
+    // Tasks of a ledger from before the roles had tiers: given with none.
+    context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute("UPDATE task SET tier = NULL WHERE number IN (?, ?)", [research, frame])
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    // The researcher's home is standard, held: it goes to its slot. The architect's is
+    // complex, which nobody holds: it falls to the light one, and the chief is told whose.
+    let research_task = context.task(project.id, research).task;
+    assert_eq!(
+        (research_task.tier.as_deref(), research_task.assignee.is_some()),
+        (Some("standard"), true)
+    );
+    let frame_task = context.task(project.id, frame).task;
+    assert_eq!(
+        (frame_task.tier.as_deref(), frame_task.assignee.is_some()),
+        (Some("light"), true)
+    );
+    let said = notes(&context, &project, &format!("T-{frame} asked for"));
+    assert_eq!(
+        said.iter().map(|(_, body)| body.as_str()).collect::<Vec<_>>(),
+        [format!(
+            "T-{frame} asked for a complex architect; none is on the staff, so it goes to the light tier: @daedalus."
+        )]
+    );
+    let events: Vec<String> = context
+        .ledger
+        .borrow()
+        .sqlite()
+        .prepare("SELECT data FROM event WHERE kind = 'task.retiered' ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(
+        events.iter().any(|data| data.contains("\"from\":null") && data.contains("\"to\":\"standard\"")),
+        "the home tier is logged: {events:?}"
+    );
+}
