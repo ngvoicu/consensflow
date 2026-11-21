@@ -4984,3 +4984,76 @@ fn t1859_restart_reports_each_unreceived_question_once_even_when_settled_again()
         "settling and Resume never duplicate the notes"
     );
 }
+
+/// A gated answer approved after its question's window closed must not erase
+/// the wait that protects the old question turn on the next project Resume.
+#[test]
+fn t1869_gated_answer_approved_after_resume_keeps_wait_through_second_close() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    context.ledger.borrow_mut().set_gate(project, true).unwrap();
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    assert_eq!(context.message(question.id).state, "gated");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(question.id, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    let answer = context.answer(project, question.id, "Use ANSI");
+    assert_eq!(context.message(answer.id).state, "gated");
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(tiers.task(2).task.state, "waiting");
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(answer.id, "human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    let returned: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| {
+            message.kind == "note"
+                && message.body.contains(&format!("m-{}", question.id))
+                && message.body.contains("Use ANSI")
+        })
+        .collect();
+    assert_eq!(returned.len(), 1, "the answer returns once: {returned:?}");
+    assert!(returned[0].body.contains("cf tell T-2"));
+    assert!(returned[0].body.contains("cf task finish T-2"));
+    assert_eq!(tiers.task(2).task.state, "waiting");
+
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..5 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Noted.");
+    }
+    assert_eq!(
+        tiers.task(2).task.state,
+        "waiting",
+        "approval must not let the next Resume take the old question turn"
+    );
+    assert!(results(&tiers, 2).is_empty());
+    assert_eq!(tiers.task(1).task.state, "working");
+}

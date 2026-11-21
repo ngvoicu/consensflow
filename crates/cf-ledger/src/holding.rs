@@ -925,7 +925,7 @@ fn close_question_deferring(
         ));
     }
     store.db.execute(
-        "UPDATE question_binding SET closed = 1 WHERE question_id = ?",
+        "UPDATE question_binding SET closed = 1 WHERE question_id = ? AND closed = 0",
         [question],
     )?;
     let at = store.at();

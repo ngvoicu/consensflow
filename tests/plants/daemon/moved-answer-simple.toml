@@ -949,3 +949,12 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/turn_end.rs"
 find = "&& text.contains(message.body.as_str())"
 replace = "&& true"
+
+[[plant]]
+name = "T1869 B4: approving a returned answer erases its closed-question wait"
+meant = "t1869_gated_answer_approved_after_resume_keeps_wait_through_second_close"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1869_gated_answer_approved_after_resume_keeps_wait_through_second_close"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "UPDATE question_binding SET closed = 1 WHERE question_id = ? AND closed = 0"
+replace = "UPDATE question_binding SET closed = 1 WHERE question_id = ?"
