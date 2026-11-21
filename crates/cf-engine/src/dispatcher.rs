@@ -1003,6 +1003,16 @@ impl Dispatcher {
         let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
             return Ok(());
         };
+        // A refusal a pass would act on is the quota's to settle, not a result: the look
+        // reads it as the pass does (`refused_here`) and leaves what it recorded as it was.
+        let owner = self.member_of(&project, participant);
+        let before = record.quota.borrow().reported.clone();
+        self.record_quota(record, observed.quota.clone());
+        let refused = self.refused_here(record, &owner);
+        self.record_quota(record, before);
+        if refused {
+            return Ok(());
+        }
         self.collect(
             &project,
             participant,

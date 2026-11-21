@@ -173,3 +173,73 @@ fn a_turn_that_failed_is_not_collected_at_its_exit() {
     let (state, results) = after_exit(&context, &tiers);
     assert_eq!((state.as_str(), results.len()), ("paused", 0));
 }
+
+/// A Devin-shaped end: its quota refusal with complete words in the record. An ordinary pass
+/// takes the refusal as the quota's, and so does the exit that is first to see it (T-1904).
+#[test]
+fn a_refusal_first_seen_at_the_exit_is_the_quotas_as_after_a_pass_and_not_a_result() {
+    use cf_engine::testing::Made;
+    use cf_harness::records::Quota;
+    use serde_json::json;
+    for (refused, words, pass_first, expected) in [
+        (false, true, false, ("done", 1)),
+        (true, true, false, ("paused", 0)),
+        (true, true, true, ("paused", 0)),
+        (true, false, false, ("paused", 0)),
+    ] {
+        let context = Context::made(Made {
+            harnesses: vec!["claude-code", "devin"],
+            ..Made::default()
+        });
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app", "name": "exit review",
+                "chief": {"harness": "claude-code", "model": "claude-opus-5"},
+                "staff": [{"agent": "zeus", "harness": "devin", "role": "worker", "tier": "standard"}]
+            }))
+            .unwrap()
+            .unwrap();
+        let tiers = crate::fixtures::Tiers {
+            context: &context,
+            project,
+        };
+        tiers.open();
+        for _ in 0..4 {
+            context.pass().unwrap();
+        }
+        let window = tiers.assignee(1);
+        context.adapter.busy(&window);
+        context.pass().unwrap();
+        assert_eq!(tiers.task(1).task.state, "working");
+        if words {
+            context
+                .adapter
+                .answer(&window, "I recorded the first two findings.");
+        } else {
+            context.adapter.with(&window, |agent| {
+                agent.settled = true;
+                agent.failed = false;
+            });
+        }
+        if refused {
+            context.adapter.quota(
+                &window,
+                Some(Quota::Exhausted {
+                    at: None,
+                    resets_at: None,
+                }),
+            );
+        }
+        if pass_first {
+            context.pass().unwrap();
+        }
+        context.host.exits_showing(Some(0), None, Some(&["done"]));
+        context.exit(&window);
+        let (state, results) = after_exit(&context, &tiers);
+        assert_eq!(
+            (state.as_str(), results.len()),
+            expected,
+            "refused {refused}, words {words}, pass first {pass_first}"
+        );
+    }
+}
