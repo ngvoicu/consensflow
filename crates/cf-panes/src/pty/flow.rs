@@ -152,13 +152,14 @@ pub(super) fn stream_output(
     sender: mpsc::Sender<PaneOutput>,
 ) {
     const MAX_CHUNK_BYTES: usize = 8 * 1024;
+    let mut buffer = [0; MAX_CHUNK_BYTES];
 
     while let Some(allowance) = flow.read_allowance() {
-        let mut bytes = vec![0; allowance.min(MAX_CHUNK_BYTES)];
-        let output_end::Got::Bytes(byte_count) = output.read(&mut bytes) else {
+        let output_end::Got::Bytes(byte_count) =
+            output.read(&mut buffer[..allowance.min(MAX_CHUNK_BYTES)])
+        else {
             break;
         };
-        bytes.truncate(byte_count);
         let Some(seq) = flow.record(byte_count) else {
             break;
         };
@@ -166,7 +167,7 @@ pub(super) fn stream_output(
             .send(PaneOutput {
                 key: key.clone(),
                 seq,
-                bytes,
+                bytes: buffer[..byte_count].to_vec(),
             })
             .is_err()
         {
@@ -176,6 +177,48 @@ pub(super) fn stream_output(
     let mut discarded = [0; MAX_CHUNK_BYTES];
     while let output_end::Got::Bytes(_) = output.read(&mut discarded) {}
     flow.close();
+}
+
+#[cfg(test)]
+mod tiny_read_tests {
+    use super::*;
+
+    #[test]
+    fn a_one_byte_read_does_not_keep_an_eight_kibibyte_allocation() {
+        #[cfg(unix)]
+        let (reader, terminal) = {
+            use std::io::Write;
+            use std::os::unix::net::UnixStream;
+
+            let (reader, mut writer) = UnixStream::pair().expect("socket pair");
+            writer.write_all(b"x").expect("write one byte");
+            drop(writer);
+            let terminal = reader.try_clone().expect("duplicate descriptor").into();
+            (Box::new(reader) as Box<dyn Read + Send>, terminal)
+        };
+        #[cfg(not(unix))]
+        let (reader, terminal) = (
+            Box::new(std::io::Cursor::new(vec![b'x'])) as Box<dyn Read + Send>,
+            output_end::Terminal,
+        );
+
+        let output = output_end::Output::new(reader, terminal, Box::new(|_| true));
+        let (sender, received) = mpsc::channel();
+        stream_output(
+            PaneKey::new("one-byte", 1),
+            output,
+            Arc::new(OutputFlow::new(1024 * 1024)),
+            sender,
+        );
+        let message = received.recv().expect("one byte was read");
+        assert_eq!(message.bytes, b"x");
+        assert_eq!(
+            message.bytes.capacity(),
+            1,
+            "a queued byte holds only itself"
+        );
+        assert!(received.try_recv().is_err());
+    }
 }
 
 /// A descriptor of the pane's terminal of the output's own, which it asks whether there
