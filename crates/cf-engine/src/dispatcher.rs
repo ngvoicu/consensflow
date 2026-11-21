@@ -1004,13 +1004,14 @@ impl Dispatcher {
             return Ok(());
         };
         // A refusal a pass would act on is the quota's to settle, not a result: the look
-        // reads it as the pass does (`refused_here`) and leaves what it recorded as it was.
+        // reads it as the pass does (`refused_here`, and `refused_unhandled` for a member already out) and leaves what it recorded as it was.
         let owner = self.member_of(&project, participant);
         let before = record.quota.borrow().reported.clone();
         self.record_quota(record, observed.quota.clone());
-        let refused = self.refused_here(record, &owner);
+        let refused = self.refused_here(record, &owner) || self.refused_unhandled(record);
         self.record_quota(record, before);
-        if refused {
+        // A member held for its quota is settled as it was: its windows' turns are the hold's.
+        if refused || self.is_out(&owner) {
             return Ok(());
         }
         self.collect(

@@ -243,3 +243,96 @@ fn a_refusal_first_seen_at_the_exit_is_the_quotas_as_after_a_pass_and_not_a_resu
         );
     }
 }
+
+/// A member held by another window's refusal: its window B, whose message was received, exits
+/// with a refusal dated before the hold. A pass leaves B's turn to the hold, and so does the
+/// exit that sees it first (T-1920).
+#[test]
+fn a_window_of_a_member_held_by_its_sibling_is_no_result_at_its_exit_as_after_a_pass() {
+    use cf_engine::testing::Made;
+    use cf_harness::records::Quota;
+    use serde_json::json;
+    for exit_first in [false, true] {
+        let context = Context::made(Made {
+            harnesses: vec!["claude-code", "devin"],
+            ..Made::default()
+        });
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app", "name": "sibling hold",
+                "chief": {"harness": "claude-code", "model": "claude-opus-5"},
+                "staff": [{"agent": "zeus", "harness": "devin", "role": "worker", "tier": "standard"}]
+            }))
+            .unwrap()
+            .unwrap();
+        let tiers = crate::fixtures::Tiers {
+            context: &context,
+            project,
+        };
+        let passes = |n: usize| {
+            for _ in 0..n {
+                context.pass().unwrap();
+            }
+        };
+        tiers.open();
+        passes(4);
+        let b = tiers.assignee(1);
+        context.adapter.with(&b, |agent| {
+            agent.settled = true;
+            agent.at_prompt = true;
+        });
+        let until = crate::fixtures::after(&context, 30_000);
+        context
+            .ledger
+            .borrow_mut()
+            .hold_task(tiers.project.id, 1, &until, "one retry")
+            .unwrap();
+        let retry = context
+            .ledger
+            .borrow_mut()
+            .resume_task(
+                tiers.project.id,
+                1,
+                None,
+                "Your last turn was refused by its provider: trying again. Go on where you stopped.",
+            )
+            .unwrap()
+            .message
+            .unwrap();
+        passes(5);
+        assert_eq!(context.message(retry.id).state, "delivered");
+        context.give(tiers.project.id, "zeus", "A second window after receipt");
+        passes(5);
+        let a = tiers.assignee(2);
+        assert_ne!(a, b);
+        context.advance(1000);
+        let dated = crate::fixtures::now(&context);
+        context.advance(1000);
+        context.adapter.refuse(
+            &a,
+            Quota::Exhausted {
+                at: Some(crate::fixtures::now(&context)),
+                resets_at: Some(crate::fixtures::soon(&context, 1)),
+            },
+        );
+        passes(3);
+        assert!(tiers.out_until("zeus").is_some(), "the member is held");
+        context
+            .adapter
+            .answer(&b, "Partial words beside the refused turn");
+        context.adapter.quota(
+            &b,
+            Some(Quota::Exhausted {
+                at: Some(dated),
+                resets_at: Some(crate::fixtures::soon(&context, 1)),
+            }),
+        );
+        if !exit_first {
+            context.pass().unwrap();
+        }
+        context.host.exits_showing(Some(0), None, Some(&["done"]));
+        context.exit(&b);
+        let given = results(&context, &tiers);
+        assert!(given.is_empty(), "exit first {exit_first}: {given:?}");
+    }
+}
