@@ -952,10 +952,21 @@ pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Resul
     for (name, value) in usage_vars(real_home, config_home, cfg!(windows)) {
         run = run.var(name, value);
     }
-    run.closed_input()
+    let ran = run
+        .closed_input()
         .limit(std::time::Duration::from_secs(60))
-        .run()?
-        .json()
+        .run()?;
+    ran.json().map_err(|failed| {
+        // Muse says why on its stderr (not logged in, a refused home); the parse error alone
+        // hides it (T-1835).
+        let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        let said: String = said.chars().take(300).collect();
+        Error::Daemon(format!(
+            "`muse usage --json` gave no JSON ({failed}); exit {:?}, stderr: {}",
+            ran.code,
+            if said.is_empty() { "nothing" } else { &said }
+        ))
+    })
 }
 
 /// The variables `muse usage --json` is run with: the settings and, on a Mac, the login's
@@ -1267,6 +1278,31 @@ mod tests {
         for path in &protected {
             assert_eq!(std::fs::read_to_string(path).unwrap(), "sentinel\n");
         }
+    }
+
+    /// T-1835: a `muse usage --json` that prints no JSON says why in what it printed on stderr.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_usage_read_that_gave_no_json_says_what_muse_said_on_stderr() {
+        let folder = crate::door::made("muse-usage-stderr-").unwrap();
+        let program = folder.path().join("muse");
+        crate::door::write_executable(
+            &program,
+            "#!/bin/sh\necho 'Not logged in. Run muse login.' >&2\nexit 3\n",
+        )
+        .unwrap();
+        let install = super::Installed {
+            binary: program,
+            version: "x".to_owned(),
+            stand_in: None,
+        };
+        let config = folder.path().join("run/config");
+        crate::door::make_dir(&config).unwrap();
+        let said = super::usage(&install, folder.path(), &config)
+            .unwrap_err()
+            .to_string();
+        assert!(said.contains("Not logged in. Run muse login."), "{said}");
+        assert!(said.contains("exit Some(3)"), "{said}");
     }
 
     use std::path::Path;
