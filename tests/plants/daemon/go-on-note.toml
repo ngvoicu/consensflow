@@ -17,6 +17,7 @@
 [run]
 goon-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "go_on_note::"]
 goon-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end::waits::"]
+goon-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_task_held_for_a_job_at_the_close_is_done_after_the_resume"]
 goon-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_turn_that_ended_to_wait"]
 
 [[plant]]
@@ -26,9 +27,16 @@ runs = ["goon-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
 '''
-replace = '''        if false && ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+replace = '''        if false
+            && pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
 '''
 
 [[plant]]
@@ -39,9 +47,16 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
 '''
-replace = '''        if false && ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+replace = '''        if false
+            && pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
 '''
 
 [[plant]]
@@ -51,9 +66,12 @@ runs = ["goon-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
 '''
-replace = '''        if ends_to_wait(&words_of(&answers.final_run)) {
+replace = '''        if pending.retired == 0 && ends_to_wait(&words_of(&answers.final_run)) {
 '''
 
 [[plant]]
@@ -135,3 +153,14 @@ file = "crates/cf-engine/src/turn_end/earlier_turns.rs"
 find = '''                    _ if message.kind == "note" && is_go_on_note(message) => Why::Note(message.id),
 '''
 replace = ''''''
+
+[[plant]]
+name = "go on note: a job the close retired is sent on, though the resume decided its old answer is the result"
+meant = "a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired"
+runs = ["goon-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if pending.retired == 0
+            && ends_to_wait'''
+replace = '''        if ends_to_wait'''

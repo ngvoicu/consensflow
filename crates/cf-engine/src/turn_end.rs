@@ -679,8 +679,12 @@ impl Dispatcher {
         // Its last words say it ends its turn to wait for its own work, which nothing here is
         // pending for and nothing wakes it from: no result. It is told once, as the window
         // rests, to go on and wait inside its turn; the requester is told nothing, and a
-        // second such end is the result (T-1923).
-        if ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+        // second such end is the result (T-1923). Work its harness named as retired by a
+        // close is the Resume's (T-405): the old answer is the result, with that said.
+        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
             self.seams.ledger.borrow_mut().note(
                 project.id,
                 &NewNote {
