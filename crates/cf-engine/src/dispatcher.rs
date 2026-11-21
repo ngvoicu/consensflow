@@ -53,7 +53,7 @@ use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
-use crate::turn_end::{last_paste, lost_in_turn, Turn};
+use crate::turn_end::{last_paste, lost_in_turn, Turn, Watching};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -951,6 +951,59 @@ impl Dispatcher {
         }
     }
 
+    /// A worker's window that exits right after its harness wrote the final answer to its
+    /// working task, before the pass that would take it: the answer is collected first, by
+    /// the collector a pass uses, so the exit finds the task done and not working. Only a
+    /// turn a pass would take as an answer is collected here: settled, not failed, not
+    /// another program's, nothing left running. Everything else an exit settles is as it
+    /// was: a window that ended mid-turn, a crash, a task not working (paused, waiting), a
+    /// turn that left work running, a close the engine made itself.
+    async fn collect_at_exit(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+    ) -> Result<(), EngineError> {
+        let Some(project) = self.project_of(record.id)? else {
+            return Ok(());
+        };
+        let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
+            return Ok(());
+        };
+        if participant.role == "chief" || record.window.borrow().own_exit_of(pane).is_some() {
+            return Ok(());
+        }
+        let working = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(record.id, false)?
+            .is_some_and(|thread| thread.task.state == "working");
+        if !working {
+            return Ok(());
+        }
+        let Ok(observed) = returning(self.observe(participant, record)).await else {
+            return Ok(());
+        };
+        if self.forgotten(record)
+            || !observed.settled
+            || observed.failed
+            || observed.shared
+            || observed.switched.is_some()
+            || observed.pending().total() > 0
+        {
+            return Ok(());
+        }
+        self.collect(
+            &project,
+            participant,
+            record,
+            &observed,
+            Watching::Undecided,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// What a window's exit settles: the engine's own close of a window
     /// awaits it and fails with it; the host's event (`pane_exited`) tells it
     /// to the log. `shown` is what the host said of the window's end, which a
@@ -985,6 +1038,12 @@ impl Dispatcher {
             if let Some(opening) = record.window.borrow_mut().opening.as_mut() {
                 opening.exited = Some(shown);
             }
+            return Ok(());
+        }
+        // An answer its harness wrote before the window went is collected before the exit
+        // settles anything, as the pass the exit beat would have (`collect_at_exit`).
+        self.collect_at_exit(&record, pane).await?;
+        if self.forgotten(&record) {
             return Ok(());
         }
         // The conversation the window ran in: the id its harness may have printed as it quit is

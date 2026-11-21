@@ -67,6 +67,7 @@ mod decided_results;
 mod deleted_sessions;
 mod deliveries;
 mod designer_images;
+mod exit_keeps_answer;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;
