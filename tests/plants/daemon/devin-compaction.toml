@@ -338,7 +338,9 @@ runs = ["harness-lib-devin-wire-log"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        self.turns.follow(&event);\n"
+find = '''        if self.turns.follow(&event) {
+            self.quota = None;
+        }'''
 replace = ""
 
 [[plant]]

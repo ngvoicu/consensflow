@@ -84,6 +84,8 @@ struct Said {
     /// turn's end (T-660), so a turn that waits is still one that is open. Only the turn's
     /// own end (`cause`) closes it.
     open: bool,
+    /// Whether the last line opened a turn, even if it also ended it.
+    began: bool,
     /// The texts of the messages Devin said back as the open turn took them in, oldest first:
     /// live ([`said_back_live`]), or an older Devin's with a turn open around it
     /// ([`Said::unclaimed`]); the turn's own, and any typed into it while it worked, which the
@@ -183,11 +185,11 @@ pub(in crate::devin) struct Turns {
 }
 
 impl Turns {
-    /// One line of the log. A line the record's look would fail on still says what it
-    /// says of a turn: the record's look tells of the failure.
-    pub(in crate::devin) fn follow(&mut self, event: &Value) {
+    /// One line of the log. Returns whether it opened a turn. A line the record's look
+    /// would fail on still says what it says of a turn: the record's look tells of the failure.
+    pub(in crate::devin) fn follow(&mut self, event: &Value) -> bool {
         let Some(session) = event.get("sessionId").and_then(Value::as_str) else {
-            return;
+            return false;
         };
         let said = self.said.entry(session.to_owned()).or_default();
         // How the turns ended is the record's to keep: here, each end is an end.
@@ -199,6 +201,7 @@ impl Turns {
                 natives: &mut HashMap::new(),
             },
         );
+        said.began
     }
 
     /// The log is read again from its start: what it says now is read anew.
@@ -489,6 +492,7 @@ impl Said {
     /// A record of the log (`visitWire`): what it says of the session's
     /// turn. A line that names the session is never JSON's `null`.
     fn visit(&mut self, event: &Value, session: &str, ended: &mut Ended<'_>) -> Result<(), Stop> {
+        self.began = false;
         if event.get("sessionId").and_then(Value::as_str) != Some(session) {
             return Ok(());
         }
@@ -555,6 +559,7 @@ impl Said {
         }
         // A turn is open from its first work, the message said back, or Devin's word that it
         // works: `blocked` and a dialog end nothing, the turn's own end does (below).
+        self.began = !self.open && self.busy;
         self.open |= self.busy;
         if self.open {
             self.said_back.append(&mut self.unclaimed);
