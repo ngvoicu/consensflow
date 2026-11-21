@@ -130,12 +130,9 @@ fn the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_wh
 ) -> Outcome {
     let rig = Rig::start(config())?;
     write_staff(&rig)?;
-    let p = Project::open_with_staff(
-        &rig,
-        "chief",
-        None,
-        &[("worker", "worker"), ("worker2", "worker")],
-    )?;
+    // One worker holds the standard slot: the task the human gives back goes to a new window
+    // of that member, which is the other member of its tier no more.
+    let p = Project::open_with_staff(&rig, "chief", None, &[("worker", "worker")])?;
     let session = chief_session(&rig, &p)?;
     let taken_back = Regex::new(r"^T-1 was taken back from ")?;
     // The first worker works on its brief while the chief is in a turn far
@@ -151,6 +148,10 @@ fn the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_wh
     rig.wait_for("the first worker to take T-1", secs(60), || {
         Ok(p.task(1)?["state"] == "working")
     })?;
+    let first_window = p.task(1)?["assignee"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     let reassigned = rig.page("task.reassign", json!({ "project": p.id(), "task": 1 }))?;
     assert_eq!(reassigned["ok"], true, "{reassigned}");
 
@@ -170,10 +171,10 @@ fn the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_wh
     assert!(taken["receipt"]["shown"].is_string(), "{taken}");
     // The second worker takes the task while the chief is still in its turn: the task's line
     // says who has it, and no longer that it waits.
-    rig.wait_for("the second worker to take T-1", secs(30), || {
+    rig.wait_for("a new window of the worker to take T-1", secs(30), || {
         Ok(p.task(1)?["assignee"]
             .as_str()
-            .is_some_and(|assignee| assignee.starts_with("worker2-")))
+            .is_some_and(|assignee| assignee.starts_with("worker-") && assignee != first_window))
     })?;
     let task = p.task(1)?;
     assert!(

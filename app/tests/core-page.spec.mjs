@@ -18049,7 +18049,7 @@ test('BKG settings gives every member but an image designer the same backup slot
   await expect(table.getByRole('button', { name: /backup for @(hera|ares)/ })).toHaveCount(0)
 })
 
-test('D8 New project keeps an image designer\'s backup its backup: its id, backupOf and Vacation reach Start', async ({
+test("D8 New project keeps an image designer's backup its backup: its id, backupOf and Vacation reach Start", async ({
   page,
 }) => {
   const data = model()

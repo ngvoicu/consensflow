@@ -710,6 +710,11 @@ fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief() 
             )
             .expect("a purpose, a tier alone: taken");
         let body = ledger.message(message).unwrap().unwrap();
+        assert_eq!(
+            body.state,
+            if gate { "gated" } else { "queued" },
+            "the brief waits for its window, or for the human's gate"
+        );
         assert!(
             body.body.starts_with("Critical work: hard-problem."),
             "{} (gate {gate}, {})",

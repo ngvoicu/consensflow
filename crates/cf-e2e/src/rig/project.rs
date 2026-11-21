@@ -159,7 +159,8 @@ pub fn write_staff(rig: &Rig) -> Result<()> {
         "agents": [
             agent("chief", "fake-chief"),
             agent("worker", "fake"),
-            agent("worker2", "fake"),
+            // A role at a tier holds one member: the second worker is at another tier.
+            json!({ "id": "worker2", "kind": "claude-code", "model": "fake", "workTier": "light" }),
             agent("checker", "fake-2"),
         ],
     }))
