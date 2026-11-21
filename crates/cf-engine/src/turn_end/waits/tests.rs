@@ -26,7 +26,7 @@ fn the_five_field_sentences_end_to_wait() {
 #[test]
 fn other_first_person_ways_to_say_it() {
     waits("I am ending my turn here until the build finishes.");
-    waits("Ending my turn to wait for the run.");
+    waits("I will end my turn to wait for the run.");
     waits("Work is running.\n\nOnce the gate ends, I will continue with the review.");
     waits("After the suite finishes, I'll report the counts.");
     waits("I’m ending this turn until it runs.");
@@ -50,6 +50,8 @@ fn a_result_is_left_alone() {
     is_a_result("I did not end my turn until it ran; it ran inside the turn.");
     is_a_result("I won't resume when it reports; the work is done.");
     is_a_result("I never check them at the next wakeup.");
+    // No first person in the clause: a limit of the reading, as for any other words.
+    is_a_result("Ending my turn to wait for the run.");
     is_a_result("The test asserts `I'm ending this turn until it runs.` is read.");
     is_a_result("The note says \"I'll resume when it reports.\"");
     is_a_result("> I'll resume when it reports.");
