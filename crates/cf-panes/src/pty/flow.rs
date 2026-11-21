@@ -179,6 +179,33 @@ pub(super) fn stream_output(
     flow.close();
 }
 
+/// A descriptor of the pane's terminal of the output's own, which it asks whether there
+/// is anything to read (Unix); none is needed elsewhere.
+#[cfg(unix)]
+pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
+    use std::os::fd::BorrowedFd;
+
+    let fd = pane
+        .master
+        .as_raw_fd()
+        .ok_or_else(|| PaneError::Pty("the terminal has no descriptor".to_owned()))?;
+    // SAFETY: the master's descriptor, open for as long as the pane holds it, which it
+    // does while the table's lock is held; a copy of it is taken, which the output owns.
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    Ok(borrowed.try_clone_to_owned()?)
+}
+
+#[cfg(not(unix))]
+pub(super) fn terminal_of(_pane: &Pane) -> Result<output_end::Terminal, PaneError> {
+    Ok(output_end::Terminal)
+}
+
+pub(super) fn close_output(pane: &Pane) {
+    if let Some(flow) = &pane.output_flow {
+        flow.close();
+    }
+}
+
 #[cfg(test)]
 mod tiny_read_tests {
     use super::*;
@@ -218,32 +245,5 @@ mod tiny_read_tests {
             "a queued byte holds only itself"
         );
         assert!(received.try_recv().is_err());
-    }
-}
-
-/// A descriptor of the pane's terminal of the output's own, which it asks whether there
-/// is anything to read (Unix); none is needed elsewhere.
-#[cfg(unix)]
-pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
-    use std::os::fd::BorrowedFd;
-
-    let fd = pane
-        .master
-        .as_raw_fd()
-        .ok_or_else(|| PaneError::Pty("the terminal has no descriptor".to_owned()))?;
-    // SAFETY: the master's descriptor, open for as long as the pane holds it, which it
-    // does while the table's lock is held; a copy of it is taken, which the output owns.
-    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-    Ok(borrowed.try_clone_to_owned()?)
-}
-
-#[cfg(not(unix))]
-pub(super) fn terminal_of(_pane: &Pane) -> Result<output_end::Terminal, PaneError> {
-    Ok(output_end::Terminal)
-}
-
-pub(super) fn close_output(pane: &Pane) {
-    if let Some(flow) = &pane.output_flow {
-        flow.close();
     }
 }
