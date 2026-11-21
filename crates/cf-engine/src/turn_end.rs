@@ -97,6 +97,7 @@ use crate::seams::{CommandsSeen, EngineError};
 
 use self::asks::asks_the_chief;
 use self::earlier_turns::with_earlier;
+use self::waits::{ends_to_wait, go_on_note, go_on_told};
 
 /// What a result says above the words the never-empty rule took (T-262): its turn wrote none
 /// after its last tool call, and these are the last it wrote before it, which may be a line of
@@ -674,6 +675,23 @@ impl Dispatcher {
             )?;
             self.changed();
             return Ok(Turn::Asked);
+        }
+        // Its last words say it ends its turn to wait for its own work, which nothing here is
+        // pending for and nothing wakes it from: no result. It is told once, as the window
+        // rests, to go on and wait inside its turn; the requester is told nothing, and a
+        // second such end is the result (T-1923).
+        if ends_to_wait(&words_of(&answers.final_run)) && !go_on_told(&thread, participant) {
+            self.seams.ledger.borrow_mut().note(
+                project.id,
+                &NewNote {
+                    from: None,
+                    to: participant.handle.clone(),
+                    task: Some(thread.task.number),
+                    body: go_on_note(thread.task.number),
+                },
+            )?;
+            self.changed();
+            return Ok(Turn::Open);
         }
         // The turns that ended with a question of the worker's out, whose words no result
         // took (T-1204): the result begins with them.
@@ -1750,6 +1768,7 @@ mod asks;
 mod earlier_turns;
 mod finish;
 mod paused;
+mod waits;
 
 pub use finish::Finished;
 

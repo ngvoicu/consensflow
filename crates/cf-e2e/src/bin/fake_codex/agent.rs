@@ -861,6 +861,7 @@ fn run_cf(words: &[String]) -> String {
 fn what_it_says(text: &str) -> (Duration, String) {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static SAY: OnceLock<Regex> = OnceLock::new();
     static COMPACT: OnceLock<Regex> = OnceLock::new();
 
     if let Some(compact) = pattern::once(&COMPACT, r"(?m)^COMPACT \d+ (.+)$").captures(text) {
@@ -870,6 +871,11 @@ fn what_it_says(text: &str) -> (Duration, String) {
         let seconds = slow[1].parse().unwrap_or(0);
         let (_, said) = what_it_says(&slow[2]);
         return (Duration::from_secs(seconds), said);
+    }
+    // A line `SAY <words>` answers the words as they stand: a worker whose last words are any
+    // words a case needs (the fake Claude's `SAY`, T-1923).
+    if let Some(said) = pattern::once(&SAY, r"(?m)^SAY (.+)$").captures(text) {
+        return (Duration::ZERO, said[1].trim_end().to_owned());
     }
     let said = pattern::once(&EXACT, r"Reply with exactly: (\S+)")
         .captures(text)
