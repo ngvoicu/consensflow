@@ -429,6 +429,10 @@ impl Transcript {
         self.hooks.clear();
         self.active_assistant = None;
         self.failure = None;
+        // A genuine user turn takes an earlier turn's refusal out of view; a tool's
+        // result, a record written to the transcript alone and a queued message not
+        // yet taken returned above or are no user record.
+        self.quota = None;
         self.turn_open = true;
         self.candidate = None;
         self.terminal = None;

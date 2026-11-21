@@ -156,6 +156,9 @@ struct Rollout {
     current_turn: Key,
     latest_turn: Key,
     quota: Option<Arc<Quota>>,
+    /// The latest rate limits as Codex wrote them, kept past the turn's start that takes
+    /// `quota` out of view: a failed end later names its reset from them.
+    count: Option<Arc<Quota>>,
     /// The latest model Codex rerouted a turn to on its own (MUS-24).
     rerouted: Option<Arc<ModelMoved>>,
     /// The last tool call the rollout shows, as a line (`calls::describe`).
@@ -241,6 +244,7 @@ impl Rollout {
             current_turn: Key::Null,
             latest_turn: Key::Null,
             quota: None,
+            count: None,
             rerouted: None,
             last_call: None,
             records: 0,
@@ -417,7 +421,9 @@ impl Rollout {
                 if let Some(limits) =
                     field(payload, "rate_limits").filter(|limits| js::truthy(Some(limits)))
                 {
-                    self.quota = Some(Arc::new(codex_quota(limits).map_err(Stop::Failed)?));
+                    let count = Arc::new(codex_quota(limits).map_err(Stop::Failed)?);
+                    self.quota = Some(Arc::clone(&count));
+                    self.count = Some(count);
                     self.name_the_reset();
                 }
             }
@@ -425,6 +431,15 @@ impl Rollout {
                 // A reroute is a turn's: the next turn to begin (the human's Try again, or
                 // their own words) is on its model again until it says otherwise (T-816).
                 self.rerouted = None;
+                // A turn's start takes an earlier turn's count at its limit out of view; the
+                // reset it names stays in `count` for a failed end later in this turn.
+                if self
+                    .quota
+                    .as_deref()
+                    .is_some_and(|q| q.level() != Level::Ok)
+                {
+                    self.quota = None;
+                }
                 self.current_turn = named.clone();
                 self.latest_turn = named.clone();
                 self.named_turn(&named, "task_started", seq)?.started = true;
@@ -521,7 +536,7 @@ impl Rollout {
         let at = at.as_str().and_then(time::parse);
         Some(Arc::new(Quota::Exhausted {
             at: at.map(time::iso),
-            resets_at: reset_after(self.quota.as_deref(), at),
+            resets_at: reset_after(self.count.as_deref(), at),
         }))
     }
 
@@ -545,7 +560,7 @@ impl Rollout {
             return;
         }
         let at = refusal.at().and_then(time::parse);
-        if let Some(resets_at) = reset_after(self.quota.as_deref(), at) {
+        if let Some(resets_at) = reset_after(self.count.as_deref(), at) {
             *refusal = Arc::new(Quota::Exhausted {
                 at: at.map(time::iso),
                 resets_at: Some(resets_at),

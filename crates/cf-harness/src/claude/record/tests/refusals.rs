@@ -184,9 +184,9 @@ fn a_refusal_is_the_latest_assistant_record_s_to_say_and_a_prompt_does_not_take_
         once(&[hello(), calling("m0"), refusal()]),
         failed(&two, true)
     );
-    // A prompt after it leaves the quota, and no failure: the turn is not over.
+    // A genuine prompt after it takes the refusal out of view: the new turn is not over.
     let prompted = format!(
-        r#"{{"items":[["u1","user","Hello",true,0],["m1","assistant","{LIMIT}",false,"{AT}"],["u2","user","Try again",true,2]],"inFlight":true,"asking":false,"failed":false,"quota":{{"state":"exhausted","at":"{AT}","resetsAt":"2026-09-19T12:00:00.000Z"}},"settlement":"in-flight"}}"#
+        r#"{{"items":[["u1","user","Hello",true,0],["m1","assistant","{LIMIT}",false,"{AT}"],["u2","user","Try again",true,2]],"inFlight":true,"asking":false,"failed":false,"quota":null,"settlement":"in-flight"}}"#
     );
     let first = refused("a1", json!({ "apiErrorStatus": 429 }));
     assert_eq!(
@@ -510,4 +510,38 @@ fn the_words_of_an_api_error_are_the_harnesss_own_until_the_model_says_something
     assert!(!items[1].synthetic, "{:?}", items[1].text);
     let (items, _) = look_at(&[hello(), refusal(), back]);
     assert!(!items[1].synthetic, "{:?}", items[1].text);
+}
+
+#[test]
+fn a_refusal_stays_in_view_past_what_opens_no_turn_and_goes_at_a_genuine_prompt() {
+    let first = refused("a1", json!({ "apiErrorStatus": 429 }));
+    let in_view = |records: &[Value]| once(records).contains(r#""quota":{"state":"exhausted""#);
+    // A 429, then a genuine prompt: none in view; then a second 429 is in view again.
+    let prompt = user("u2", json!("a1"), json!("Try again"));
+    assert!(!in_view(&[hello(), first.clone(), prompt.clone()]));
+    let second = assistant(
+        "a3",
+        "u2",
+        json!("m3"),
+        json!([text(json!("You've hit your limit. Resets in 2 hours."))]),
+        Value::Null,
+    );
+    let second = having(
+        second,
+        json!({ "isApiErrorMessage": true, "apiErrorStatus": 429, "timestamp": "2026-09-19T10:30:00.000Z" }),
+    );
+    assert!(in_view(&[hello(), first.clone(), prompt, second]));
+    // A tool's result opens no turn: the refusal is kept.
+    let result = user(
+        "u2",
+        json!("a1"),
+        json!([tool_result(json!("t1"), json!("ok"))]),
+    );
+    assert!(in_view(&[hello(), first.clone(), result]));
+    // A message queued and not yet taken opens no turn: the refusal is kept.
+    let waiting = having(
+        queue("enqueue", json!("Try again")),
+        json!({ "timestamp": "2026-09-19T10:05:00.000Z", "sessionId": SESSION }),
+    );
+    assert!(in_view(&[hello(), first, waiting]));
 }

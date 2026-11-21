@@ -491,3 +491,28 @@ fn every_failure_kind_codex_names_that_is_no_limit_has_a_plain_name_with_its_own
     let none = read(&[started(json!("t1")), errored(Value::Null, "Words.")]).unwrap();
     assert_eq!(none.failure_kind, None);
 }
+
+#[test]
+fn a_count_at_its_limit_leaves_view_at_the_next_turns_start_and_a_failed_end_still_names_its_reset()
+{
+    // The earlier turn's count at its limit is no quota of the turn that begins.
+    let begun = read(&[limits(100.0, RESETS), started(json!("t1"))]).unwrap();
+    assert_eq!(begun.quota, None);
+    // A failed end later in that turn takes its reset from the count it no longer shows.
+    let ended = read(&[
+        limits(100.0, RESETS),
+        started(json!("t1")),
+        failed("t1", "usage_limit_exceeded", AT),
+    ])
+    .unwrap();
+    assert_eq!(
+        ended.quota.as_deref(),
+        Some(&Quota::Exhausted {
+            at: Some(AT.to_owned()),
+            resets_at: Some(cf_base::time::iso(RESETS * 1000)),
+        })
+    );
+    // A count that is not at its limit stays what the usage display reads.
+    let calm = read(&[limits(3.0, RESETS), started(json!("t1"))]).unwrap();
+    assert_eq!(calm.quota.as_deref().map(Quota::level), Some(Level::Ok));
+}

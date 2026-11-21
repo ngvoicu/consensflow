@@ -136,7 +136,7 @@ fn a_refusal_that_has_not_changed_is_the_same_quota_look_after_look() {
         append(&file, &format!("{line}\n"));
     }
     let records = [
-        // A record that says nothing, and a turn that goes on after the refusal.
+        // A record that says nothing keeps the refusal; a genuine prompt takes it out of view.
         json!({ "type": "mode", "mode": "normal", "sessionId": session }),
         json!({
             "type": "user", "uuid": "u-2", "sessionId": session, "isSidechain": false,
@@ -161,10 +161,17 @@ fn a_refusal_that_has_not_changed_is_the_same_quota_look_after_look() {
                 !Arc::ptr_eq(&before, &after),
                 "a record that grew: another reading"
             );
-            assert!(
-                Arc::ptr_eq(&refused, &refusal(&after)),
-                "the refusal that did not change: one quota"
-            );
+            if record["type"] == "mode" {
+                assert!(
+                    Arc::ptr_eq(&refused, &refusal(&after)),
+                    "the refusal that did not change: one quota"
+                );
+            } else {
+                assert!(
+                    matches!(&*after, Reading::Known(record) if record.quota.is_none()),
+                    "a genuine prompt takes the refusal out of view"
+                );
+            }
             before = after;
         }
     });

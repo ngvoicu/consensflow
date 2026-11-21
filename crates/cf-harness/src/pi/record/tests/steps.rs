@@ -247,7 +247,7 @@ fn a_step_that_names_no_end_keeps_the_turn_open_and_the_failure_as_it_was() {
 }
 
 #[test]
-fn a_refusal_names_its_quota_and_only_the_next_assistant_step_clears_it() {
+fn a_refusal_names_its_quota_and_a_genuine_user_turn_or_the_next_step_clears_it() {
     let refused = || {
         failing(
             "a1",
@@ -269,11 +269,22 @@ fn a_refusal_names_its_quota_and_only_the_next_assistant_step_clears_it() {
         first.quota.as_ref().unwrap(),
         again.quota.as_ref().unwrap()
     ));
-    // A user message ends the failure but not the quota.
+    // A tool's result opens no turn: the refusal stays in view.
+    stage.write(&[
+        header(),
+        user("u1", "go"),
+        refused(),
+        result("t1", &json!("c1")),
+    ]);
+    assert_eq!(stage.at(0).quota.as_deref(), Some(&quota));
+    // A user message with words takes the refusal out of view.
     stage.write(&[header(), user("u1", "go"), refused(), user("u2", "again")]);
     let record = stage.at(0);
     assert!(!record.failed && record.in_flight);
-    assert_eq!(record.quota.as_deref(), Some(&quota));
+    assert_eq!(record.quota, None);
+    // A message of white space is no turn.
+    stage.write(&[header(), user("u1", "go"), refused(), user("u2", "  ")]);
+    assert_eq!(stage.at(0).quota.as_deref(), Some(&quota));
     stage.write(&[
         header(),
         user("u1", "go"),
@@ -378,11 +389,16 @@ fn the_time_of_a_refusal_is_what_number_makes_of_the_message_time() {
         quota_at(Some(json!(1_790_000_000_000.9))),
         ok("2026-09-21T14:13:20.000Z")
     );
-    assert_eq!(quota_at(Some(json!(null))), ok("1970-01-01T00:00:00.000Z"));
+    // A JSON `null` is no time, as an absent one is.
     assert_eq!(quota_at(Some(json!(true))), ok("1970-01-01T00:00:00.001Z"));
     assert_eq!(quota_at(Some(json!([5]))), ok("1970-01-01T00:00:00.005Z"));
     // `NaN` is no time at all: none is said.
-    for at in [None, Some(json!("soon")), Some(json!({}))] {
+    for at in [
+        None,
+        Some(json!(null)),
+        Some(json!("soon")),
+        Some(json!({})),
+    ] {
         assert_eq!(quota_at(at.clone()), Ok(json!(null)), "{at:?}");
     }
     // A time past what a date holds fails the look, where `toISOString` threw.
@@ -702,4 +718,31 @@ fn a_providers_refusal_for_a_moment_is_busy_and_no_quota() {
     ]);
     let record = stage.at(0);
     assert!(record.failed && record.quota.is_none());
+}
+
+#[test]
+fn a_second_distinct_refusal_after_a_retry_is_in_view_and_the_first_is_not() {
+    // T-1904's replay: the first 401, the retry's user item, the second 401.
+    let refused = |id: &str| failing(id, &json!("401: Authentication failed"), &json!(null));
+    let mut stage = Stage::with(&[header(), user("u1", "work"), refused("a1")]);
+    let first = stage.at(0);
+    assert!(first.failed && first.quota.is_some());
+    stage.write(&[
+        header(),
+        user("u1", "work"),
+        refused("a1"),
+        user("u2", "retry"),
+    ]);
+    let retried = stage.at(0);
+    assert!(retried.in_flight && !retried.failed);
+    assert_eq!(retried.quota, None);
+    stage.write(&[
+        header(),
+        user("u1", "work"),
+        refused("a1"),
+        user("u2", "retry"),
+        refused("a2"),
+    ]);
+    let second = stage.at(0);
+    assert!(second.failed && second.quota.is_some());
 }

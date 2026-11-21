@@ -252,6 +252,8 @@ impl Session {
                 self.failed = false;
                 self.failure = None;
                 self.failure_kind = None;
+                // A genuine user turn takes an earlier turn's refusal out of view.
+                self.quota = None;
                 self.push(id, Role::User, text, true, at);
                 self.turn_open = true;
                 self.terminal = None;
@@ -368,7 +370,9 @@ impl Session {
                 // tried again, not the turn's failure (T-1112).
                 let busy = busy_refusal(&failure, None);
                 if refusal.is_some() || refused_for_quota(&failure) || busy {
-                    let at_ms = js::to_number(field("timestamp")).map_err(Stop::Failed)?;
+                    // A JSON `null` time is no time, not the epoch `Number(null)` makes of it.
+                    let at_ms = js::to_number(field("timestamp").filter(|at| !at.is_null()))
+                        .map_err(Stop::Failed)?;
                     let quota = match refusal {
                         Some(refusal) => unavailable_quota(at_ms, refusal, &failure),
                         None if refused_for_quota(&failure) => {
