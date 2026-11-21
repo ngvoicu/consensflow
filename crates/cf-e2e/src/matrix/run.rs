@@ -875,9 +875,7 @@ mod tests {
             "matrix-worker" => Some("gpt-6-1-luna".to_owned()),
             _ => None,
         };
-        let started = |handle: &str, member: &str| {
-            json!({ "kind": "session.started", "data": { "handle": handle, "member": member } })
-        };
+        let started = |handle: &str, member: &str| json!({ "kind": "session.started", "data": { "handle": handle, "member": member } });
         let kinds = record_kinds(
             &[
                 started("swe-2-medium-amber", "swe-2-medium"),

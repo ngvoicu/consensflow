@@ -1001,7 +1001,7 @@ impl Isolation {
             }
         }
         // Said without opening the owner's files: who else could have written what changed.
-        if !touched.is_empty() && self.plan.in_place.is_none() {
+        if !touched.is_empty() {
             touched.push(attribution::say(
                 self.harness.name(),
                 &made.independent,

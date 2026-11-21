@@ -402,14 +402,10 @@ pub(crate) fn require_search_path(value: &str, lookup: &str) {
 }
 
 /// Whether `folder` is `home` or below it, **by every account of it**: the path the way it is
-/// spelled, and, where it is there, the folder it really is, links followed (B19). Used where a
-/// path is let in (the run's own folders): a `..` anywhere in it, a link out of the run, and a
-/// spelling that is another folder's are all "not inside". A folder that is not there yet is
-/// held to its spelling alone, which has no `..`.
+/// spelled, and the folder it really is, links and `..` followed as the system follows them
+/// (B19). Used where a path is let in (the run's own folders): a `..` that climbs out of the
+/// run, a link out of it, and a spelling that is another folder's are all "not inside".
 fn same_or_inside(folder: &Path, home: &Path) -> bool {
-    if has_parent_part(folder) || has_parent_part(home) {
-        return false;
-    }
     spelled_inside(folder, home) && spelled_inside(&real_of(folder), &real_of(home))
 }
 
@@ -420,12 +416,6 @@ fn may_reach(folder: &Path, home: &Path) -> bool {
     spelled_inside(folder, home)
         || spelled_inside(&settled(folder), &settled(home))
         || spelled_inside(&real_of(folder), &real_of(home))
-}
-
-/// Whether `path` names a parent folder in any part of it.
-fn has_parent_part(path: &Path) -> bool {
-    path.components()
-        .any(|part| matches!(part, std::path::Component::ParentDir))
 }
 
 /// Compare absolute path components, as spelled, without consulting any path or following links,
@@ -444,10 +434,9 @@ fn spelled_inside(folder: &Path, home: &Path) -> bool {
                     use std::path::Prefix::{Verbatim, VerbatimDisk, VerbatimUNC};
                     let text = prefix.as_os_str().to_string_lossy().to_lowercase();
                     match prefix.kind() {
-                        VerbatimDisk(_) | Verbatim(_) | VerbatimUNC(..) => text
-                            .strip_prefix(r"\\?\")
-                            .unwrap_or(&text)
-                            .to_owned(),
+                        VerbatimDisk(_) | Verbatim(_) | VerbatimUNC(..) => {
+                            text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+                        }
                         _ => text,
                     }
                 }
@@ -483,9 +472,14 @@ fn settled(path: &Path) -> PathBuf {
     out
 }
 
-/// The folder `path` really is: its part that is there followed through every link, the part
-/// that is not appended; its `..` settled first.
+/// The folder `path` really is: as the system says where it is there (its links and `..`
+/// followed as it follows them: `link/..` is the parent of what the link ends in); where it is
+/// not, its part that is there followed through every link, the part that is not appended, its
+/// `..` settled.
 fn real_of(path: &Path) -> PathBuf {
+    if let Ok(found) = std::fs::canonicalize(path) {
+        return found;
+    }
     let settled = settled(path);
     let mut head = settled.clone();
     let mut tail = Vec::new();
@@ -829,13 +823,34 @@ mod tests {
         crate::door::make_dir(&forbidden).unwrap();
         // A `..` that leaves the run for the harness home beside it.
         let climbing = run.join("home/../../owner/.codex/config.toml");
-        assert!(!safe_path_entry(&climbing, std::slice::from_ref(&forbidden)));
-        assert!(!super::same_or_inside(&climbing, &run), "a climbing path is inside the run");
+        assert!(!safe_path_entry(
+            &climbing,
+            std::slice::from_ref(&forbidden)
+        ));
+        assert!(
+            !super::same_or_inside(&climbing, &run),
+            "a climbing path is inside the run"
+        );
         // A link in the run that ends in the home, and a path through it.
         let link = run.join("link");
         std::os::unix::fs::symlink(&forbidden, &link).unwrap();
-        assert!(!safe_path_entry(&link.join("auth.json"), std::slice::from_ref(&forbidden)));
+        assert!(!safe_path_entry(
+            &link.join("auth.json"),
+            std::slice::from_ref(&forbidden)
+        ));
         assert!(!super::same_or_inside(&link.join("auth.json"), &run));
+        // `link/..` is the parent of what the link ends in, not of the link: a path that settles
+        // to the run by its words and is a harness home by the system's.
+        let deep = forbidden.join("sub");
+        crate::door::make_dir(&deep).unwrap();
+        let through = run.join("through");
+        std::os::unix::fs::symlink(&deep, &through).unwrap();
+        let parent_of_link = through.join("..");
+        assert!(!safe_path_entry(
+            &parent_of_link,
+            std::slice::from_ref(&forbidden)
+        ));
+        assert!(!super::same_or_inside(&parent_of_link, &run));
         // A link to the folder above the home: the home is below it.
         let above = run.join("above");
         std::os::unix::fs::symlink(&owner, &above).unwrap();

@@ -2466,8 +2466,15 @@ fn a_changed_owner_config_is_a_failure_that_says_who_could_have_written_it() {
     let isolation = owner.codex();
     isolation.made_at(at(NOW)).unwrap();
     let config = owner.path(".codex/config.toml");
-    fs::write(&config, "[tables_of_someone_else]\nkey = \"VALUE-NEVER-SAID\"\n").unwrap();
+    fs::write(
+        &config,
+        "[tables_of_someone_else]\nkey = \"VALUE-NEVER-SAID\"\n",
+    )
+    .unwrap();
     let said = isolation.finish().unwrap_err().to_string();
-    assert!(said.contains("config.toml") && said.contains("attribution:"), "{said}");
+    assert!(
+        said.contains("config.toml") && said.contains("attribution:"),
+        "{said}"
+    );
     assert!(!said.contains("VALUE-NEVER-SAID"), "{said}");
 }

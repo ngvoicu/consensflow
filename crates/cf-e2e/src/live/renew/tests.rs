@@ -276,8 +276,8 @@ mod running {
     /// the harness is gone, a link in it with its target left; one that stays is the error that
     /// names it, never a folder left behind in silence.
     #[test]
-    fn the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error()
-    {
+    fn the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error(
+    ) {
         use std::os::unix::fs::PermissionsExt;
         let scratch = tempfile::tempdir().unwrap();
         let log = scratch.path().join("log");
@@ -293,14 +293,19 @@ mod running {
         let written = fs::read_to_string(&log).unwrap();
         let folder = Path::new(written.split_once('\n').unwrap().1.trim());
         assert!(!folder.exists(), "{}", folder.display());
-        assert_eq!(fs::read_to_string(outside.join("theirs")).unwrap(), "theirs");
+        assert_eq!(
+            fs::read_to_string(outside.join("theirs")).unwrap(),
+            "theirs"
+        );
         // A folder the harness left where it cannot be taken away is said.
         let holding = format!(
             "mkdir -p stuck/inner && echo x > stuck/inner/f && chmod 500 stuck/inner && echo \"$(pwd)\" > '{}'",
             scratch.path().join("where").display()
         );
         let program = stand_in(scratch.path(), &log, &holding, 0);
-        let said = one_shot(Harness::Pi, &program, &[]).unwrap_err().to_string();
+        let said = one_shot(Harness::Pi, &program, &[])
+            .unwrap_err()
+            .to_string();
         let stuck = fs::read_to_string(scratch.path().join("where")).unwrap();
         let stuck = Path::new(stuck.trim());
         assert!(

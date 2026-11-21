@@ -101,9 +101,15 @@ mod tests {
 
     #[test]
     fn what_is_said_of_a_change_names_how_sure_it_is_and_never_reads_a_file() {
-        let seen = [Identity { pid: 5, started: 50 }];
+        let seen = [Identity {
+            pid: 5,
+            started: 50,
+        }];
         let alone = say("codex", &[], &[]);
-        assert!(alone.contains("likely writer") && alone.contains("not proved"), "{alone}");
+        assert!(
+            alone.contains("likely writer") && alone.contains("not proved"),
+            "{alone}"
+        );
         let shared = say("codex", &seen, &[]);
         assert!(
             shared.contains("not established") && shared.contains("1 codex process(es)"),

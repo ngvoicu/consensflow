@@ -240,6 +240,14 @@ impl Installed {
         if let Some(isolation) = &self.isolation {
             vars.extend(isolation.vars()?);
         }
+        // An empty list reads as "nothing to set", and a program started on it runs on the
+        // person's own home: refused, for every harness and both platforms.
+        if vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it (its isolation is the rig's own launcher, or none): a read of its own program outside a rig would run on the person's own home; use the kit's rig or a copied home",
+                self.harness.name()
+            )));
+        }
         Ok(vars)
     }
 

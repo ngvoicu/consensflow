@@ -649,33 +649,10 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     };
-    // agy's home is its kept home, which the kit keeps and no run makes; and it is run from the
-    // kit's own copy: a search path the caller gives is refused, the copy's folder is the only
-    // one a direct read may run it from (the owner's launcher updates itself).
-    let kept = (harness == Harness::Agy)
-        .then(|| {
-            super::machine::home()
-                .ok()
-                .and_then(|user| super::agy_home::kept(&user).ok())
-        })
-        .flatten();
-    if harness == Harness::Agy {
-        let copy_only = value("PATH").is_some_and(|path| {
-            std::env::split_paths(path).all(|folder| crate::door::is_made_or_below(&folder))
-                && !path.is_empty()
-        });
-        if !copy_only {
-            return Err(Error::Daemon(
-                "cannot check agy models: its search path is not the kit's own copy's folder alone"
-                    .to_owned(),
-            ));
-        }
-    }
     for name in names {
         let safe = value(name).is_some_and(|value| {
             let path = std::path::Path::new(value);
-            path.is_absolute()
-                && (crate::door::is_made_or_below(path) || kept.as_deref() == Some(path))
+            path.is_absolute() && crate::door::is_made_or_below(path)
         });
         if !safe {
             return Err(Error::Daemon(format!(
@@ -699,11 +676,6 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
     .into_iter()
     .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
     .collect();
-    if harness == Harness::Agy {
-        if let Some(path) = value("PATH") {
-            env.insert("PATH".to_owned(), path.to_owned());
-        }
-    }
     for name in names {
         env.insert(
             (*name).to_owned(),
@@ -1006,39 +978,13 @@ mod tests {
         // real program, and the stand-in is a program of the rig's alone.
         assert!(list_route(Harness::Claude, None).unwrap().is_none());
         for other in [Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse] {
-            assert!(list_route(other, Some(&folder)).unwrap().is_none(), "{other:?}");
+            assert!(
+                list_route(other, Some(&folder)).unwrap().is_none(),
+                "{other:?}"
+            );
         }
         // A config folder that is not the run's own is refused, not read.
         assert!(list_route(Harness::Claude, Some("/not-a-home-of-this-run")).is_err());
-    }
-
-    /// agy's direct read is run from the kit's own copy alone, with the updater switch, on the
-    /// kept home: the caller's search path, which finds the owner's launcher, is refused.
-    #[test]
-    fn a_direct_read_of_agy_runs_from_the_kits_copy_alone_with_the_updater_switch() {
-        let copy = crate::door::made("cf-agy-copy-").unwrap();
-        let home = crate::door::made("cf-agy-home-").unwrap();
-        let var = |name: &str, value: &std::path::Path| {
-            (name.to_owned(), value.to_string_lossy().into_owned())
-        };
-        let env = isolated_env(
-            Harness::Agy,
-            &[var("HOME", home.path()), var("PATH", copy.path())],
-        )
-        .unwrap();
-        assert_eq!(env["PATH"], copy.path().to_string_lossy());
-        assert_eq!(env["HOME"], home.path().to_string_lossy());
-        assert_eq!(env["AGY_CLI_DISABLE_AUTO_UPDATE"], "1");
-        for refused in [
-            vec![var("HOME", home.path())],
-            vec![
-                var("HOME", home.path()),
-                ("PATH".to_owned(), "/usr/local/bin:/usr/bin".to_owned()),
-            ],
-        ] {
-            let said = isolated_env(Harness::Agy, &refused).unwrap_err().to_string();
-            assert!(said.contains("kit's own copy"), "{said}");
-        }
     }
 
     #[test]

@@ -1,0 +1,122 @@
+# The plants of K3's guards: a wrong result here is silent and lets a live run touch an owner's home or login.
+[run]
+ki-lib-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
+ki-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
+ki-lib-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+ki-lib-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents"]
+ki-lib-standin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standin_process"]
+ki-lib-matrix = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
+ki-lib-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::tests"]
+ki-lib-renew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::renew"]
+
+
+[[plant]]
+name = "K3: a direct read on no variables runs on the person's home"
+meant = "a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        if vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it'''
+replace = '''        if false && vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it'''
+
+[[plant]]
+name = "K3: a stand-in seat the run names is the real Claude's"
+meant = "a_stand_in_seat_the_run_names_is_the_stand_ins_and_one_it_does_not_is_the_real_claudes"
+runs = ["ki-lib-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''.chain(names.iter().cloned())'''
+replace = '''.chain(names.iter().take(0).cloned())'''
+
+[[plant]]
+name = "K3: a path through a link and a `..` is taken for what its words say"
+meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    if let Ok(found) = std::fs::canonicalize(path) {
+        return found;
+    }
+    let settled = settled(path);'''
+replace = '''    let settled = settled(path);'''
+
+[[plant]]
+name = "K3: a link into a harness home is a safe path"
+meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''        || spelled_inside(&real_of(folder), &real_of(home))
+}'''
+replace = '''}'''
+
+[[plant]]
+name = "K3: an owner's own process counts as the run's"
+meant = "an_owners_own_harness_is_independent_and_the_runs_own_is_not"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/attribution.rs"
+find = '''        .filter(|process| !own.iter().any(|mine| mine.identity == process.identity))
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3: a seat that joined under a model name is read as the first reader's"
+meant = "a_member_that_joined_under_a_model_name_is_its_seat_and_a_stranger_is_none"
+runs = ["ki-lib-matrix"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/seating.rs"
+find = '''.find(|seat| joined(&seat.agent()).as_deref() == Some(member))'''
+replace = '''.find(|seat| seat.agent() == member)'''
+
+[[plant]]
+name = "K3: a rig that seats Muse closes in the short bound"
+meant = "a_rig_with_a_native_muse_is_closed_within_the_pane_hosts_own_grace_and_a_margin"
+runs = ["ki-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''    if native {
+        NATIVE_EXIT'''
+replace = '''    if false && native {
+        NATIVE_EXIT'''
+
+[[plant]]
+name = "K3: a renewal's folder that stays is said nowhere"
+meant = "the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        crate::door::Removed::Left(path, why) => Err('''
+replace = '''        crate::door::Removed::Left(path, why) if false => Err('''
+
+[[plant]]
+name = "K3: a rig with no real Claude on the machine is listed by a program that is not there"
+meant = "a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins"
+runs = ["ki-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env('''
+replace = '''        (Harness::Claude, Some(config)) if true => isolated_env('''
+
+[[plant]]
+name = "K3: a real Claude model is listed by the stand-in"
+meant = "a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins"
+runs = ["ki-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env('''
+replace = '''        (Harness::Codex, Some(config)) if real_claude => isolated_env('''

@@ -996,6 +996,48 @@ fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_pers
     assert!(bare.home_outside_a_rig().is_err());
 }
 
+/// A direct read of a harness's own CLI on `home_vars` (B16): a harness whose isolation is not
+/// made of variables (Muse's is the rig's own launcher; a bare install has none) gets no empty
+/// list that reads as "nothing to set" but a refusal that says why, before any program starts.
+#[test]
+fn a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables() {
+    let person = crate::door::made("cf-test-").unwrap();
+    let muse_home = person.path().join(".config");
+    let muse = Installed::at(Harness::Muse, "muse", person.path()).with_isolation(Arc::new(
+        super::super::isolation::Isolation::muse(person.path(), &muse_home, &muse_home),
+    ));
+    for bare in [
+        muse,
+        Installed::at(Harness::Muse, "muse", person.path()),
+        Installed::at(Harness::Claude, "claude", person.path()),
+        Installed::at(Harness::Pi, "pi", person.path()),
+    ] {
+        let harness = bare.harness().name();
+        let refusal = bare
+            .home_vars()
+            .expect_err(&format!(
+                "{harness}: an empty list read as 'nothing to set'"
+            ))
+            .to_string();
+        assert!(
+            refusal.contains(harness) && refusal.contains("no variables"),
+            "{harness}: {refusal}"
+        );
+    }
+    // One whose isolation is variables still answers with them.
+    let theirs = person.path().join(".codex");
+    fs::create_dir_all(&theirs).unwrap();
+    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
+        super::super::isolation::Isolation::codex(person.path(), &theirs),
+    ));
+    assert!(codex
+        .home_vars()
+        .unwrap()
+        .iter()
+        .any(|(name, _)| name == "CODEX_HOME"));
+}
+
 /// On Windows the rig's Muse is the stand-in program cargo builds beside the tests, one folder
 /// above the test program's own (T-1084).
 #[test]

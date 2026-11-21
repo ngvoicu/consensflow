@@ -129,10 +129,9 @@ use crate::{Error, Result};
 
 pub use machine::{
     claude_project_key, codex, command, installed, installed_for, installed_for_claude_parity,
-    isolated_claude, lacks, rig, rig_with_claude_config, rig_with_stand_in_seats, rig_with_stand_ins,
-    seated, seated_without, without,
-    shimmed_claude, shimmed_claude_with_servers, windows_wrapper, working_command, Harness,
-    Installed, ISOLATION,
+    isolated_claude, lacks, rig, rig_with_claude_config, rig_with_stand_in_seats,
+    rig_with_stand_ins, seated, seated_without, shimmed_claude, shimmed_claude_with_servers,
+    windows_wrapper, without, working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 

@@ -68,7 +68,14 @@ pub fn shimmed_claude_for(
 ) -> Result<PathBuf> {
     check_names(names)?;
     if cfg!(windows) {
-        return on_windows(folder, "claude-shimmed", claude, Some(stand_in), None, names);
+        return on_windows(
+            folder,
+            "claude-shimmed",
+            claude,
+            Some(stand_in),
+            None,
+            names,
+        );
     }
     written(
         folder,
@@ -363,7 +370,8 @@ mod tests {
         );
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
-            script.contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
+            script
+                .contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -381,7 +389,8 @@ mod tests {
             &[],
         );
         assert!(
-            script.contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
+            script
+                .contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -405,7 +414,8 @@ mod tests {
         let agent = folder.path().join("agent");
         crate::files::write_executable(&agent, "#!/bin/sh\necho \"stand-in $*\"\n").unwrap();
         let names = ["matrix-reviewer".to_owned(), "worker-b".to_owned()];
-        let shim = shimmed_claude_for(folder.path(), Path::new("/bin/echo"), &agent, &names).unwrap();
+        let shim =
+            shimmed_claude_for(folder.path(), Path::new("/bin/echo"), &agent, &names).unwrap();
         let ran = |words: &[&str]| {
             crate::process::Run::new("/bin/sh")
                 .arg(&shim)
@@ -414,14 +424,26 @@ mod tests {
                 .unwrap()
                 .stdout
         };
-        for named in ["matrix-reviewer", "worker-b", "fake", "fake-chief", "worker", "fake-2"] {
+        for named in [
+            "matrix-reviewer",
+            "worker-b",
+            "fake",
+            "fake-chief",
+            "worker",
+            "fake-2",
+        ] {
             assert_eq!(
                 ran(&["--model", named]),
                 format!("stand-in --model {named}\n"),
                 "{named} is a stand-in's seat"
             );
         }
-        for real in ["matrix-reviewer-2", "claude-sonnet-5-5", "matrix", "worker-c"] {
+        for real in [
+            "matrix-reviewer-2",
+            "claude-sonnet-5-5",
+            "matrix",
+            "worker-c",
+        ] {
             let said = ran(&["--model", real]);
             assert!(
                 said.starts_with("--strict-mcp-config --no-chrome"),
@@ -440,7 +462,8 @@ mod tests {
         // A name no model has is refused, whatever it would do in a script.
         for bad in ["a b", "x';rm", "", "$(x)"] {
             assert!(
-                shimmed_claude_for(folder.path(), Path::new("/c"), &agent, &[bad.to_owned()]).is_err(),
+                shimmed_claude_for(folder.path(), Path::new("/c"), &agent, &[bad.to_owned()])
+                    .is_err(),
                 "{bad:?}"
             );
         }
@@ -774,7 +797,8 @@ mod tests {
         let mut argv = vec![node.to_string_lossy().into_owned()];
         argv.extend(real.iter().map(|word| (*word).to_owned()));
         let program =
-            write_windows_wrapper(folder.path(), "w", "Why.", &node, &argv, Some(&node), &[]).unwrap();
+            write_windows_wrapper(folder.path(), "w", "Why.", &node, &argv, Some(&node), &[])
+                .unwrap();
         crate::process::Run::new(&node)
             .arg(program.with_extension("mjs"))
             .args(given)

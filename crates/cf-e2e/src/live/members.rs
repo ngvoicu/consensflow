@@ -223,7 +223,12 @@ impl Members {
             source,
         })?;
         let config = plan.vars.iter().fold(
-            rig_for_seats(&installs, shims.path(), stand_in, &stand_in_seats(&plan.roster))?,
+            rig_for_seats(
+                &installs,
+                shims.path(),
+                stand_in,
+                &stand_in_seats(&plan.roster),
+            )?,
             |config, (name, value)| config.var(name, value),
         );
         let config = plan
