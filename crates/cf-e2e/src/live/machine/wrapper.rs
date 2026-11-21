@@ -38,7 +38,7 @@ const WHY: &str = "Written by a live test: its Claude windows reach no MCP serve
 /// and every Claude window of the run starts through it. Where it is.
 pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
     if cfg!(windows) {
-        return on_windows(folder, "claude-isolated", claude, None, None);
+        return on_windows(folder, "claude-isolated", claude, None, None, &[]);
     }
     written(folder, "claude-isolated", isolating_script(claude))
 }
@@ -51,14 +51,66 @@ pub fn isolated_claude(folder: &Path, claude: &Path) -> Result<PathBuf> {
 /// members are stand-ins and whose other members are real. Made in `folder`.
 /// Where it is.
 pub fn shimmed_claude(folder: &Path, claude: &Path, stand_in: &Path) -> Result<PathBuf> {
+    shimmed_claude_for(folder, claude, stand_in, &[])
+}
+
+/// [`shimmed_claude`], where the windows of the stand-in agents `names` are the stand-in's as
+/// well: a seat's agent is run on the model that is its own name (`rig::member_body`:
+/// `matrix-reviewer`, `worker-b`), which no list of three words can know. The caller says which
+/// seats are stand-ins, and the shim hands the stand-in exactly those and the three it always
+/// has; every other window is the real one's (B27). A name with a character no model name has
+/// is refused.
+pub fn shimmed_claude_for(
+    folder: &Path,
+    claude: &Path,
+    stand_in: &Path,
+    names: &[String],
+) -> Result<PathBuf> {
+    check_names(names)?;
     if cfg!(windows) {
-        return on_windows(folder, "claude-shimmed", claude, Some(stand_in), None);
+        return on_windows(folder, "claude-shimmed", claude, Some(stand_in), None, names);
     }
     written(
         folder,
         "claude-shimmed",
-        shimming_script(claude, stand_in, None),
+        shimming_script(claude, stand_in, None, names),
     )
+}
+
+/// The names of stand-in seats, as words of a script: letters, digits, `.`, `_` and `-`.
+fn check_names(names: &[String]) -> Result {
+    for name in names {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        {
+            return Err(crate::Error::Daemon(format!(
+                "a stand-in seat's name is letters, digits, '.', '_' and '-': {name:?} is none"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The model words that are the stand-in's whatever seats a run names: the three of
+/// [`crate::live::agents`] and the rig's second fake model.
+fn stand_in_words(names: &[String]) -> Vec<String> {
+    [
+        STAND_IN_WORKER_MODEL,
+        STAND_IN_CHIEF_MODEL,
+        STAND_IN_MEMBER_MODEL,
+        "fake-2",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain(names.iter().cloned())
+    .fold(Vec::new(), |mut words, word| {
+        if !words.contains(&word) {
+            words.push(word);
+        }
+        words
+    })
 }
 
 /// [`shimmed_claude`], whose real Claude Code also loads the MCP servers the file
@@ -78,12 +130,13 @@ pub fn shimmed_claude_with_servers(
             claude,
             Some(stand_in),
             Some(servers),
+            &[],
         );
     }
     written(
         folder,
         "claude-shimmed",
-        shimming_script(claude, stand_in, Some(servers)),
+        shimming_script(claude, stand_in, Some(servers), &[]),
     )
 }
 
@@ -118,15 +171,12 @@ fn on_windows(
     claude: &Path,
     stand_in: Option<&Path>,
     servers: Option<&Path>,
+    names: &[String],
 ) -> Result<PathBuf> {
-    windows_wrapper(
-        folder,
-        name,
-        WHY,
-        &real_words(claude, servers),
-        &own_var("PATH").unwrap_or_default(),
-        stand_in,
-    )
+    let env = [("PATH".to_owned(), own_var("PATH").unwrap_or_default())];
+    let argv = ask::program(&real_words(claude, servers), &env)?;
+    let node = path::command("node")?;
+    write_windows_wrapper(folder, name, WHY, &node, &argv, stand_in, names)
 }
 
 /// A program called `name` for a Windows machine, in `folder`: the `.cmd` in npm's shape
@@ -152,7 +202,7 @@ pub fn windows_wrapper(
     let env = [("PATH".to_owned(), search.to_owned())];
     let argv = ask::program(words, &env)?;
     let node = path::command("node")?;
-    write_windows_wrapper(folder, name, why, &node, &argv, stand_in)
+    write_windows_wrapper(folder, name, why, &node, &argv, stand_in, &[])
 }
 
 /// [`windows_wrapper`], once the program the real one's window opens on (`argv`) and the
@@ -164,9 +214,10 @@ fn write_windows_wrapper(
     node: &Path,
     argv: &[String],
     stand_in: Option<&Path>,
+    names: &[String],
 ) -> Result<PathBuf> {
     let script = folder.join(format!("{name}.mjs"));
-    crate::door::write(&script, relay(why, argv, stand_in))?;
+    crate::door::write(&script, relay(why, argv, stand_in, names))?;
     let program = folder.join(format!("{name}.cmd"));
     crate::door::write_executable(&program, cmd(why, node, &script))?;
     Ok(program)
@@ -175,7 +226,7 @@ fn write_windows_wrapper(
 /// The Node script a Windows wrapper runs: it starts the program and the arguments of
 /// `argv` with the arguments it was given after them, or, where a `stand_in` is given and
 /// one of the arguments it was given is the model of a stand-in agent, the stand-in.
-fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
+fn relay(why: &str, argv: &[String], stand_in: Option<&Path>, names: &[String]) -> String {
     let route = match stand_in {
         None => format!("const [file, ...args] = {}", json!(argv)),
         Some(agent) => [
@@ -187,13 +238,11 @@ fn relay(why: &str, argv: &[String], stand_in: Option<&Path>) -> String {
             format!("const lists = process.argv.slice(2, 5).join(' ') === '{LIST_READ}'"),
             format!(
                 "const fake = lists || process.argv.slice(2).some((word) => {})",
-                [
-                    STAND_IN_WORKER_MODEL,
-                    STAND_IN_CHIEF_MODEL,
-                    STAND_IN_MEMBER_MODEL
-                ]
-                .map(|model| format!("word === '{model}'"))
-                .join(" || ")
+                stand_in_words(names)
+                    .iter()
+                    .map(|model| format!("word === '{model}'"))
+                    .collect::<Vec<_>>()
+                    .join(" || ")
             ),
             "const [file, ...args] = fake ? stand_in : real".to_owned(),
         ]
@@ -238,14 +287,19 @@ fn isolating_script(claude: &Path) -> String {
 /// member's, `worker`. `servers` is
 /// the file of the MCP servers the real Claude Code loads (alone: the isolation
 /// flags shut the rest out); it comes first, before a flag that ends its list.
-fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> String {
+fn shimming_script(
+    claude: &Path,
+    stand_in: &Path,
+    servers: Option<&Path>,
+    names: &[String],
+) -> String {
     let servers = servers.map_or_else(String::new, |file| {
         format!("--mcp-config {} ", shell_word(&file.to_string_lossy()))
     });
     format!(
         "#!/bin/sh\n\
          # Written by a live test: a window whose model is fake, fake-chief or worker (the\n\
-         # stand-in member's) is the stand-in's, which writes its records where the daemon\n\
+         # stand-in member's) or the name of a seat the run says is a stand-in is the stand-in's, which writes its records where the daemon\n\
          # reads Claude's (the folder CLAUDE_CONFIG_DIR names, as it does for the real\n\
          # Claude); every other Claude window reaches no MCP server and no browser. The\n\
          # daemon's read of the models Claude lists is the stand-in's too: it lists what the\n\
@@ -259,12 +313,7 @@ fn shimming_script(claude: &Path, stand_in: &Path, servers: Option<&Path>) -> St
          \x20 esac\n\
          done\n\
          exec {} {servers}{} \"$@\"\n",
-        [
-            STAND_IN_WORKER_MODEL,
-            STAND_IN_CHIEF_MODEL,
-            STAND_IN_MEMBER_MODEL
-        ]
-        .join(" | "),
+        stand_in_words(names).join(" | "),
         shell_word(&stand_in.to_string_lossy()),
         shell_word(&claude.to_string_lossy()),
         ISOLATION.join(" "),
@@ -303,6 +352,7 @@ mod tests {
             Path::new("/real/claude"),
             Path::new("/the/fake-agent"),
             Some(Path::new("/run/it's/mcp.json")),
+            &[],
         );
         // The list of a flag that takes several files ends at the flag after it.
         assert!(
@@ -313,11 +363,11 @@ mod tests {
         );
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
-            script.contains("fake | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
+            script.contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
-            !shimming_script(Path::new("/c"), Path::new("/s"), None).contains("--mcp-config"),
+            !shimming_script(Path::new("/c"), Path::new("/s"), None, &[]).contains("--mcp-config"),
             "a shim with no servers names none"
         );
     }
@@ -328,9 +378,10 @@ mod tests {
             Path::new("/real/claude"),
             Path::new("/the/fake-agent"),
             None,
+            &[],
         );
         assert!(
-            script.contains("fake | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
+            script.contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -342,6 +393,57 @@ mod tests {
             script.find("fake-agent").unwrap() < script.find("/real/claude").unwrap(),
             "{script}"
         );
+    }
+
+    /// B27: a stand-in seat whose model is its own name (`matrix-reviewer`, `worker-b`) is the
+    /// stand-in's when the run names it, and a name the run did not give is the real Claude's,
+    /// never guessed from a list of three words.
+    #[cfg(unix)]
+    #[test]
+    fn a_stand_in_seat_the_run_names_is_the_stand_ins_and_one_it_does_not_is_the_real_claudes() {
+        let folder = crate::door::made("cf-test-").unwrap();
+        let agent = folder.path().join("agent");
+        crate::files::write_executable(&agent, "#!/bin/sh\necho \"stand-in $*\"\n").unwrap();
+        let names = ["matrix-reviewer".to_owned(), "worker-b".to_owned()];
+        let shim = shimmed_claude_for(folder.path(), Path::new("/bin/echo"), &agent, &names).unwrap();
+        let ran = |words: &[&str]| {
+            crate::process::Run::new("/bin/sh")
+                .arg(&shim)
+                .args(words)
+                .run()
+                .unwrap()
+                .stdout
+        };
+        for named in ["matrix-reviewer", "worker-b", "fake", "fake-chief", "worker", "fake-2"] {
+            assert_eq!(
+                ran(&["--model", named]),
+                format!("stand-in --model {named}\n"),
+                "{named} is a stand-in's seat"
+            );
+        }
+        for real in ["matrix-reviewer-2", "claude-sonnet-5-5", "matrix", "worker-c"] {
+            let said = ran(&["--model", real]);
+            assert!(
+                said.starts_with("--strict-mcp-config --no-chrome"),
+                "{real} was routed to the stand-in: {said}"
+            );
+        }
+        // The same names, on the Windows relay.
+        let text = relay(
+            "Why.",
+            &strings(&["C:\\real.exe"]),
+            Some(Path::new(r"C:\bin\fake-agent.exe")),
+            &names,
+        );
+        assert!(text.contains("word === 'matrix-reviewer'"), "{text}");
+        assert!(text.contains("word === 'worker-b'"), "{text}");
+        // A name no model has is refused, whatever it would do in a script.
+        for bad in ["a b", "x';rm", "", "$(x)"] {
+            assert!(
+                shimmed_claude_for(folder.path(), Path::new("/c"), &agent, &[bad.to_owned()]).is_err(),
+                "{bad:?}"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -574,6 +676,7 @@ mod tests {
                 "model=\"m\"",
             ]),
             None,
+            &[],
         );
         assert!(
             text.contains(
@@ -600,6 +703,7 @@ mod tests {
             "Why.",
             &strings(&["C:\\real.exe", "--no-chrome"]),
             Some(Path::new(r"C:\bin\fake-agent.exe")),
+            &[],
         );
         assert!(
             text.contains("const real = [\"C:\\\\real.exe\",\"--no-chrome\"]"),
@@ -612,7 +716,7 @@ mod tests {
         // A word that is the model of a stand-in, as the shell script reads it.
         assert!(
             text.contains(
-                "const fake = lists || process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker')"
+                "const fake = lists || process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker' || word === 'fake-2')"
             ),
             "{text}"
         );
@@ -645,6 +749,7 @@ mod tests {
             Path::new(r"C:\nodejs\node.exe"),
             &strings(&[r"C:\real.exe"]),
             Some(Path::new(r"C:\fake-agent.exe")),
+            &[],
         )
         .unwrap();
         assert_eq!(program, folder.path().join("claude-shimmed.cmd"));
@@ -669,7 +774,7 @@ mod tests {
         let mut argv = vec![node.to_string_lossy().into_owned()];
         argv.extend(real.iter().map(|word| (*word).to_owned()));
         let program =
-            write_windows_wrapper(folder.path(), "w", "Why.", &node, &argv, Some(&node)).unwrap();
+            write_windows_wrapper(folder.path(), "w", "Why.", &node, &argv, Some(&node), &[]).unwrap();
         crate::process::Run::new(&node)
             .arg(program.with_extension("mjs"))
             .args(given)

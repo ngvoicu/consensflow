@@ -332,7 +332,9 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         checks.extend(oracle::after_done(&snapshot, &bindings, earlier, later));
     }
     let (mut checks, known) = sort_known(checks, scenario.known);
-    let turns = snapshot.turns_by_seat(seating, asks_in);
+    let turns = snapshot.turns_by_seat(seating, asks_in, &|agent| {
+        members.added_handle(agent).map(str::to_owned)
+    });
     let total_turns = snapshot.total_turns(asks_in);
     checks.push(Check::new(
         "bounds",
@@ -449,6 +451,41 @@ fn tokens(members: &Members) -> Vec<String> {
         .collect()
 }
 
+/// The record kind of each window of the run, by handle: the chief's, and each session of a
+/// member by the seat that member is ([`Seating::of_member`]). A session of a member no seat is
+/// is an error that says so: an export that read it as Claude's would be empty and look whole
+/// (B27, CLN-16).
+fn record_kinds(
+    events: &[Value],
+    seating: &Seating,
+    joined: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<(String, &'static str)>> {
+    let mut handles: Vec<(String, &'static str)> =
+        vec![("chief".to_owned(), seating.seat(Role::Chief).kind())];
+    for event in events
+        .iter()
+        .filter(|event| event["kind"] == "session.started")
+    {
+        let handle = event["data"]["handle"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let member = event["data"]["member"].as_str().unwrap_or_default();
+        let seat = seating.of_member(member, joined).ok_or_else(|| {
+            crate::Error::Daemon(format!(
+                "session {handle} is of member {member:?}, which is no seat of this board: its record cannot be read as any harness's"
+            ))
+        })?;
+        if handles.iter().any(|(held, _)| *held == handle) {
+            return Err(crate::Error::Daemon(format!(
+                "session {handle} started twice: one record file would hold two windows"
+            )));
+        }
+        handles.push((handle, seat.kind()));
+    }
+    Ok(handles)
+}
+
 /// Each window's own record, as the daemon reads it, a file to each session of the run:
 /// `records/<handle>.json`, its items' roles, words and ends.
 fn records_of(
@@ -457,23 +494,9 @@ fn records_of(
     snapshot: &Snapshot,
     evidence: &Evidence,
 ) -> Result {
-    let mut handles: Vec<(String, &'static str)> =
-        vec![("chief".to_owned(), seating.seat(Role::Chief).kind())];
-    for event in snapshot
-        .events
-        .iter()
-        .filter(|event| event["kind"] == "session.started")
-    {
-        let handle = event["data"]["handle"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        let kind = event["data"]["member"]
-            .as_str()
-            .and_then(|agent| seating.of_agent(agent))
-            .map_or("claude-code", super::seating::Seat::kind);
-        handles.push((handle, kind));
-    }
+    let handles = record_kinds(&snapshot.events, seating, &|agent| {
+        members.added_handle(agent).map(str::to_owned)
+    })?;
     for (handle, kind) in handles {
         let items = observe::record(members, &snapshot.events, kind, &handle).unwrap_or_default();
         let rows: Vec<Value> = items
@@ -841,6 +864,53 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CLN-16: each session's record is read as its seat's harness, found by the handle its
+    /// member joined under; a member of no seat, or a session twice, fails the export.
+    #[test]
+    fn each_sessions_record_is_read_as_the_harness_of_its_seat_and_an_unmatched_one_fails() {
+        let board = Seating::board(0).unwrap();
+        let joined = |agent: &str| match agent {
+            "matrix-advisor" => Some("swe-2-medium".to_owned()),
+            "matrix-worker" => Some("gpt-6-1-luna".to_owned()),
+            _ => None,
+        };
+        let started = |handle: &str, member: &str| {
+            json!({ "kind": "session.started", "data": { "handle": handle, "member": member } })
+        };
+        let kinds = record_kinds(
+            &[
+                started("swe-2-medium-amber", "swe-2-medium"),
+                started("gpt-6-1-luna-amber", "gpt-6-1-luna"),
+            ],
+            &board,
+            &joined,
+        )
+        .unwrap();
+        assert_eq!(
+            kinds,
+            [
+                ("chief".to_owned(), "claude-code"),
+                ("swe-2-medium-amber".to_owned(), "devin"),
+                ("gpt-6-1-luna-amber".to_owned(), "codex"),
+            ]
+        );
+        let stranger = record_kinds(&[started("x-amber", "x")], &board, &joined)
+            .unwrap_err()
+            .to_string();
+        assert!(stranger.contains("no seat of this board"), "{stranger}");
+        let twice = record_kinds(
+            &[
+                started("swe-2-medium-amber", "swe-2-medium"),
+                started("swe-2-medium-amber", "swe-2-medium"),
+            ],
+            &board,
+            &joined,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("started twice"), "{twice}");
+    }
 
     /// A stand-in board ends a scenario at three minutes, and one that waits by design (minutes
     /// of wake-up calls) at three and what it waits; never past the scenario's own deadline.

@@ -45,7 +45,8 @@ use crate::{checkout, files, Error, Result};
 pub(crate) use path::find_muse_install;
 pub use path::{command, working_command};
 pub use wrapper::{
-    isolated_claude, shimmed_claude, shimmed_claude_with_servers, windows_wrapper, ISOLATION,
+    isolated_claude, shimmed_claude, shimmed_claude_for, shimmed_claude_with_servers,
+    windows_wrapper, ISOLATION,
 };
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a
@@ -664,6 +665,18 @@ pub fn rig_with_stand_ins(
     folder: &Path,
     stand_in: &Path,
 ) -> Result<Config> {
+    rig_with_stand_in_seats(installs, folder, stand_in, &[])
+}
+
+/// [`rig_with_stand_ins`], where the windows of the stand-in seats `names` (each seat's model is
+/// its own name) are the stand-in's too: the run says which seats are stand-ins, and the shim
+/// routes no other (B27).
+pub fn rig_with_stand_in_seats(
+    installs: &[Installed],
+    folder: &Path,
+    stand_in: &Path,
+    names: &[String],
+) -> Result<Config> {
     let claude = installs
         .iter()
         .find(|install| install.harness == Harness::Claude)
@@ -675,7 +688,7 @@ pub fn rig_with_stand_ins(
                 "a rig whose Claude windows are the real Claude Code's and the stand-in's needs Claude Code installed",
             ),
         })?;
-    let shim = shimmed_claude(folder, claude.command(), stand_in)?;
+    let shim = shimmed_claude_for(folder, claude.command(), stand_in, names)?;
     Ok(rig(installs, shim))
 }
 
