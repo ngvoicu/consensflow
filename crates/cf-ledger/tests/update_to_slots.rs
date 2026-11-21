@@ -154,11 +154,14 @@ fn the_archived_ledgers_of_alpha_10_are_taken_unchanged_and_every_row_is_as_befo
 
 /// A ledger of the version before, with its rows written by SQL: this board's shape and the
 /// cases the archives lack.
-fn built() -> (
+/// The ledger's file, what the update must keep of it, and every member's tier before it.
+type Built = (
     tempfile::TempDir,
     Vec<Vec<Vec<String>>>,
     Vec<(String, Option<String>)>,
-) {
+);
+
+fn built() -> Built {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
     let db = Connection::open(&file).unwrap();

@@ -164,11 +164,9 @@ fn each_write_is_refused_in_the_words_of_the_rule() {
     ledger
         .add_member(project.id, &member("ares", &["worker"], "light"))
         .expect("a light worker");
-    let refused = ledger
+    ledger
         .set_roles(project.id, "ares", &["worker", "reviewer"])
-        .map(|_| ())
-        .unwrap_or(());
-    assert_eq!(refused, (), "a light reviewer slot is free");
+        .expect("a light reviewer slot is free");
     // Edit to another tier: each role at the new tier.
     let edit = |tier: &str| MemberEdit {
         harness: "claude-code".into(),
