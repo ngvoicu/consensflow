@@ -339,7 +339,7 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         role.len()
     );
     assert!(role.contains("## This project's specs"), "specs on");
-    assert!(role.contains("member-24"), "all of the staff");
+    assert!(role.contains("member-13"), "all of the staff");
     // Every hook ended well. (Before T-1246 the one hook ended `failed`: `output_too_large:
     // hook stdout exceeded its 16384-byte ceiling; the process tree was terminated and no
     // stream was parsed`.)
