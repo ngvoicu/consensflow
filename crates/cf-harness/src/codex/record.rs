@@ -159,6 +159,9 @@ struct Rollout {
     /// The latest rate limits as Codex wrote them, kept past the turn's start that takes
     /// `quota` out of view: a failed end later names its reset from them.
     count: Option<Arc<Quota>>,
+    /// The turn a start began after a count that says the limit was reached: the person's
+    /// words in it take that count out of view.
+    awaiting_words: Option<Key>,
     /// The latest model Codex rerouted a turn to on its own (MUS-24).
     rerouted: Option<Arc<ModelMoved>>,
     /// The last tool call the rollout shows, as a line (`calls::describe`).
@@ -245,6 +248,7 @@ impl Rollout {
             latest_turn: Key::Null,
             quota: None,
             count: None,
+            awaiting_words: None,
             rerouted: None,
             last_call: None,
             records: 0,
@@ -431,14 +435,19 @@ impl Rollout {
                 // A reroute is a turn's: the next turn to begin (the human's Try again, or
                 // their own words) is on its model again until it says otherwise (T-816).
                 self.rerouted = None;
-                // A turn's start takes an earlier turn's count at its limit out of view; the
-                // reset it names stays in `count` for a failed end later in this turn.
-                if self
-                    .quota
-                    .as_deref()
-                    .is_some_and(|q| q.level() != Level::Ok)
-                {
-                    self.quota = None;
+                // A new turn's start takes an earlier turn's count out of view where it holds
+                // nobody (a count short of the limit); one that says the limit was reached
+                // waits for the person's words in that turn, since a repeated start, a
+                // compaction and a standalone shell command begin turns that ask nothing of
+                // the provider. The reset it names stays in `count` for a failed end later.
+                let new_turn = named != self.latest_turn;
+                self.awaiting_words = None;
+                if new_turn {
+                    match self.quota.as_deref().map(Quota::level) {
+                        Some(Level::Low) => self.quota = None,
+                        Some(Level::Exhausted) => self.awaiting_words = Some(named.clone()),
+                        _ => {}
+                    }
                 }
                 self.current_turn = named.clone();
                 self.latest_turn = named.clone();

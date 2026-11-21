@@ -545,3 +545,79 @@ fn a_refusal_stays_in_view_past_what_opens_no_turn_and_goes_at_a_genuine_prompt(
     );
     assert!(in_view(&[hello(), first, waiting]));
 }
+
+#[test]
+fn a_refusal_is_taken_out_of_view_only_by_a_prompt_written_after_it_on_its_branch() {
+    // T-1932: every case but the last keeps the refusal, and the last clears it.
+    let first = refused("a1", json!({ "apiErrorStatus": 429 }));
+    let in_view = |records: &[Value]| once(records).contains(r#""quota":{"state":"exhausted""#);
+    let kept = |name: &str, extra: Vec<Value>| {
+        let mut records = vec![first.clone()];
+        records.extend(extra);
+        assert!(in_view(&records), "{name}");
+    };
+    // The refused turn's own prompt, written after the refusal: a late ancestor, with its
+    // chain still arriving or whole, or its direct parent.
+    kept("late direct parent", vec![hello()]);
+    let chained = having(first.clone(), json!({ "parentUuid": "x2" }));
+    let prompt = user("x1", Value::Null, json!("original"));
+    let link = attachment("x2", "x1");
+    assert!(
+        in_view(&[chained.clone(), prompt.clone()]),
+        "chain arriving"
+    );
+    assert!(in_view(&[chained, prompt, link]), "chain whole");
+    // A tool's result with the companion's words beside it.
+    let result = tool_result(json!("t1"), json!("ok"));
+    let beside = having(
+        user(
+            "u2",
+            json!("a1"),
+            json!([result, text(json!("A note beside the result."))]),
+        ),
+        json!({ "isMeta": true, "turnCompanion": true }),
+    );
+    kept("tool result with companion words", vec![beside]);
+    // A command typed at the prompt, what it printed, Claude Code's caveat, a cancelled /compact.
+    let command = user(
+        "u2",
+        json!("a1"),
+        json!("<command-name>/reload-skills</command-name>\n<command-message>reload-skills</command-message>\n<command-args></command-args>"),
+    );
+    kept("local command", vec![command]);
+    let caveat = having(
+        user(
+            "u2",
+            json!("a1"),
+            json!("<local-command-caveat>Run by the user.</local-command-caveat>"),
+        ),
+        json!({ "isMeta": true }),
+    );
+    kept("local command caveat", vec![caveat]);
+    let printed = user(
+        "u2",
+        json!("a1"),
+        json!("<local-command-stdout>Reloaded skills</local-command-stdout>"),
+    );
+    kept("what a command printed", vec![printed]);
+    // A sidechain's prompt, another session's prompt, and a prompt whose chain has a gap.
+    let prompt = user("u2", json!("a1"), json!("Try again"));
+    kept(
+        "sidechain prompt",
+        vec![having(prompt.clone(), json!({ "isSidechain": true }))],
+    );
+    kept(
+        "another session's prompt",
+        vec![having(prompt.clone(), json!({ "sessionId": "other" }))],
+    );
+    kept(
+        "a prompt with a gap in its chain",
+        vec![user("u2", json!("nowhere"), json!("Try again"))],
+    );
+    // A prompt that descends from the refusal through the records between clears it.
+    assert!(!in_view(&[
+        first.clone(),
+        duration("d1", "a1"),
+        user("u2", json!("d1"), json!("Try again"))
+    ]));
+}

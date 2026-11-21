@@ -516,3 +516,72 @@ fn a_count_at_its_limit_leaves_view_at_the_next_turns_start_and_a_failed_end_sti
     let calm = read(&[limits(3.0, RESETS), started(json!("t1"))]).unwrap();
     assert_eq!(calm.quota.as_deref().map(Quota::level), Some(Level::Ok));
 }
+
+/// The rate limits as a `token_count` reports them once the limit is reached.
+fn reached(resets_at: i64) -> Value {
+    event(json!({
+        "type": "token_count",
+        "rate_limits": {
+            "primary": { "used_percent": 100.0, "window_minutes": 300, "resets_at": resets_at },
+            "rate_limit_reached_type": "rate_limit_reached",
+        },
+    }))
+}
+
+/// A user's message in the model's context, in the turn the last start began.
+fn user_words(id: &str, words: &str) -> Value {
+    response(json!({
+        "type": "message", "role": "user", "id": id,
+        "content": [{ "type": "input_text", "text": words }],
+    }))
+}
+
+fn ended(turn: &str) -> Value {
+    event(json!({ "type": "task_complete", "turn_id": turn, "last_agent_message": null }))
+}
+
+#[test]
+fn a_count_that_says_the_limit_was_reached_leaves_view_only_at_the_persons_words_in_a_new_turn() {
+    let level = |records: &[Value]| read(records).unwrap().quota.as_deref().map(Quota::level);
+    let before = [
+        started(json!("t1")),
+        user_words("m1", "original"),
+        reached(RESETS),
+        ended("t1"),
+    ];
+    let with = |more: Vec<Value>| [before.to_vec(), more].concat();
+    // T-1932: the same turn started again, a compaction, a standalone shell command.
+    assert_eq!(
+        level(&[started(json!("t1")), reached(RESETS), started(json!("t1"))]),
+        Some(Level::Exhausted)
+    );
+    let compacted = json!({ "type": "compacted", "payload": { "message": "summary" } });
+    assert_eq!(
+        level(&with(vec![started(json!("t2")), compacted, ended("t2")])),
+        Some(Level::Exhausted)
+    );
+    let shell = user_words(
+        "m2",
+        "<user_shell_command>\n<command>pwd</command>\n</user_shell_command>",
+    );
+    assert_eq!(
+        level(&with(vec![started(json!("t2")), shell, ended("t2")])),
+        Some(Level::Exhausted)
+    );
+    // The person's words in a new turn take it out of view.
+    assert_eq!(
+        level(&with(vec![started(json!("t2")), user_words("m3", "retry")])),
+        None
+    );
+    // A failed end after the words still names the reset the hidden count held.
+    let failed = read(&with(vec![
+        started(json!("t2")),
+        user_words("m3", "retry"),
+        failed("t2", "usage_limit_exceeded", AT),
+    ]))
+    .unwrap();
+    assert_eq!(
+        failed.quota.as_deref().and_then(Quota::resets_at),
+        Some(&*cf_base::time::iso(RESETS * 1000))
+    );
+}

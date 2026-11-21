@@ -118,7 +118,19 @@ impl Reader {
     }
 }
 
+/// What a user message took out of view: the refused turn's, as it stood before it.
+#[derive(Clone)]
+struct Taken {
+    quota: Option<Arc<Quota>>,
+    failed: bool,
+    failure: Option<String>,
+    failure_kind: Option<&'static str>,
+    terminal: Option<Arc<str>>,
+    turn_open: bool,
+}
+
 /// What a session said so far.
+#[derive(Clone)]
 struct Session {
     session: Arc<str>,
     /// The zone a reset that names none is read in.
@@ -143,6 +155,16 @@ struct Session {
     /// The last tool call the session shows, as a line (`calls::describe`).
     last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
+    /// Every entry's id and its parent's (`parentId`, null for the first), for the path from
+    /// the last entry back: the branch Pi is on.
+    parents: HashMap<Arc<str>, Option<Arc<str>>>,
+    /// The id of the last entry of any kind: the branch's leaf.
+    leaf: Option<Arc<str>>,
+    /// A record names no `parentId` at all: a linear session, where file order is the path.
+    linear: bool,
+    /// What the latest user message took out of view, with its id: given back where that
+    /// message is not on the path to the leaf (the retry belongs to another branch).
+    taken: Option<(Arc<str>, Taken)>,
     records: usize,
     keys: Keys,
     /// The items only the history shows (a step's thinking, a compaction), each with the
@@ -170,11 +192,51 @@ impl Session {
             failure_kind: None,
             last_call: None,
             quota: None,
+            parents: HashMap::new(),
+            leaf: None,
+            linear: false,
+            taken: None,
             records: 0,
             keys: Keys::default(),
             beside: Vec::new(),
             calls: HashMap::new(),
         }
+    }
+
+    /// The session as it stands where the last user message took a refusal out of view but
+    /// is not on the path from the leaf: Pi was put back on the refused branch, and the
+    /// retry belongs to another. None where there is nothing to give back.
+    fn given_back(&self) -> Option<Self> {
+        let (user, taken) = self.taken.as_ref()?;
+        if self.linear || self.on_path(user) {
+            return None;
+        }
+        let mut back = self.clone();
+        back.taken = None;
+        back.quota.clone_from(&taken.quota);
+        back.failed = taken.failed;
+        back.failure.clone_from(&taken.failure);
+        back.failure_kind = taken.failure_kind;
+        back.terminal.clone_from(&taken.terminal);
+        back.turn_open = taken.turn_open;
+        Some(back)
+    }
+
+    /// Whether the entry `id` is on the path from the leaf to the first entry.
+    fn on_path(&self, id: &str) -> bool {
+        let mut at = self.leaf.clone();
+        let mut steps = 0;
+        while let Some(entry) = at {
+            if &*entry == id {
+                return true;
+            }
+            steps += 1;
+            if steps > self.parents.len() {
+                return false;
+            }
+            at = self.parents.get(&entry).cloned().flatten();
+        }
+        false
     }
 
     /// An item only the history shows, where it stands: after the items so far.
@@ -249,11 +311,18 @@ impl Session {
                     return Ok(());
                 }
                 self.open_tools.clear();
+                self.taken = Some((
+                    Arc::clone(&id),
+                    Taken {
+                        quota: self.quota.take(),
+                        failed: self.failed,
+                        failure: self.failure.take(),
+                        failure_kind: self.failure_kind.take(),
+                        terminal: self.terminal.clone(),
+                        turn_open: self.turn_open,
+                    },
+                ));
                 self.failed = false;
-                self.failure = None;
-                self.failure_kind = None;
-                // A genuine user turn takes an earlier turn's refusal out of view.
-                self.quota = None;
                 self.push(id, Role::User, text, true, at);
                 self.turn_open = true;
                 self.terminal = None;
@@ -337,6 +406,7 @@ impl Session {
             }
         }
         self.quota = None;
+        self.taken = None;
         self.turn_open = true;
         let cut_tool_calls = stop == Some("length")
             && matches!(field("content"), Some(Value::Array(blocks))
@@ -458,6 +528,9 @@ impl Session {
         if self.records == 0 {
             return Err(format!("empty pi session {}", self.session));
         }
+        if let Some(given_back) = self.given_back() {
+            return given_back.result(env, options, now_ms, file);
+        }
         let frontier = evidence::frontier(&self.session, env, options)?;
         let has_native_boundary = self
             .terminal
@@ -511,6 +584,21 @@ impl Parser for Session {
             return Err(Stop::Failed(null_record(index)));
         }
         let seq = Value::from(index);
+        if let Some(entry) = record
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|_| record.get("type").and_then(Value::as_str) != Some("session"))
+        {
+            let entry: Arc<str> = Arc::from(entry);
+            match record.get("parentId") {
+                None => self.linear = true,
+                Some(parent) => {
+                    let parent = parent.as_str().map(Arc::from);
+                    self.parents.insert(Arc::clone(&entry), parent);
+                }
+            }
+            self.leaf = Some(entry);
+        }
         // `record.message ?? {}`: none and null hold no field.
         let message = record.get("message").filter(|message| !message.is_null());
         let at = [

@@ -135,11 +135,13 @@ fn a_refusal_that_has_not_changed_is_the_same_quota_look_after_look() {
     for line in fixture_lines(name) {
         append(&file, &format!("{line}\n"));
     }
+    // The refused record's own uuid, which the genuine prompt after it descends from.
+    let parent = "07f93422-a3ab-4ec1-9e2d-e0078840742e";
     let records = [
         // A record that says nothing keeps the refusal; a genuine prompt takes it out of view.
         json!({ "type": "mode", "mode": "normal", "sessionId": session }),
         json!({
-            "type": "user", "uuid": "u-2", "sessionId": session, "isSidechain": false,
+            "type": "user", "uuid": "u-2", "parentUuid": parent, "sessionId": session, "isSidechain": false,
             "timestamp": "2026-08-24T12:51:00.000Z", "message": { "role": "user", "content": "go on" },
         }),
     ];

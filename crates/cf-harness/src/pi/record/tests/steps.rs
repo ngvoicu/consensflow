@@ -746,3 +746,46 @@ fn a_second_distinct_refusal_after_a_retry_is_in_view_and_the_first_is_not() {
     let second = stage.at(0);
     assert!(second.failed && second.quota.is_some());
 }
+
+#[test]
+fn a_retry_on_another_branch_than_the_one_pi_is_on_takes_no_refusal_out_of_view() {
+    // T-1932: the file holds the prompt, the refused step and the retry's prompt; Pi was
+    // put back on the refused step and saved a label or a branch summary there, so the path
+    // to the leaf does not hold the retry.
+    let with_parent = |mut record: Value, parent: Option<&str>| {
+        record["parentId"] = parent.map_or(Value::Null, |parent| json!(parent));
+        record
+    };
+    let refused = || {
+        with_parent(
+            failing("a1", &json!("401: Authentication failed"), &json!(null)),
+            Some("u1"),
+        )
+    };
+    let base = || {
+        vec![
+            header(),
+            with_parent(user("u1", "work"), None),
+            refused(),
+            with_parent(user("u2", "retry"), Some("a1")),
+        ]
+    };
+    let label = |parent: &str| {
+        json!({ "type": "label", "id": "l1", "parentId": parent, "targetId": parent,
+            "label": "prior result", "timestamp": "2026-08-24T18:00:03.000Z" })
+    };
+    let summary = json!({ "type": "branch_summary", "id": "s1", "parentId": "a1", "fromId": "a1",
+        "summary": "older branch", "timestamp": "2026-08-24T18:00:03.000Z" });
+    let state = |rows: Vec<Value>| {
+        let mut stage = Stage::with(&rows);
+        let record = stage.at(0);
+        (record.quota.is_some(), record.failed)
+    };
+    // The leaf is the retry's label: the retry is on the path, and the refusal is out of view.
+    assert_eq!(state([base(), vec![label("u2")]].concat()), (false, false));
+    // The leaf is the refused step's label or summary: the retry is on another branch.
+    assert_eq!(state([base(), vec![label("a1")]].concat()), (true, true));
+    assert_eq!(state([base(), vec![summary]].concat()), (true, true));
+    // And with no label at all, the retry is the leaf: it clears.
+    assert_eq!(state(base()), (false, false));
+}
