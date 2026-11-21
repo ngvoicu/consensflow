@@ -133,10 +133,15 @@ fn the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_
             )],
             "{args:?}"
         );
-        assert!(
-            printed.ends_with("\nT-3: sent 19 characters, ending \"Use the v2 grammar.\".\n"),
-            "{args:?}: {printed}"
-        );
+        if args[1] == "resume" {
+            assert!(printed.contains("resume words are queued"), "{printed}");
+            assert!(!printed.contains(": sent "), "{printed}");
+        } else {
+            assert!(
+                printed.ends_with("\nT-3: sent 19 characters, ending \"Use the v2 grammar.\".\n"),
+                "{args:?}: {printed}"
+            );
+        }
     }
 }
 

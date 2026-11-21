@@ -104,6 +104,13 @@ fn words_that_resume_a_paused_task_wait_for_the_human_and_the_window_is_stopped_
     );
     assert_eq!(context.task(project, 1).task.state, "queued");
     assert_eq!(context.message(words).state, "gated");
+    assert_eq!(
+        context
+            .dispatcher
+            .resume_wait(context.id(project, "zeus"))
+            .unwrap(),
+        Some(json!({ "task": 1, "reason": "needs human approval" }))
+    );
 }
 
 #[test]

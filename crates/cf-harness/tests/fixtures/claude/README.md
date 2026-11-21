@@ -158,6 +158,21 @@ and the chief's answer):
 
 A new Claude version that writes these otherwise is a new fixture, not an edit.
 
+Kept 2026-11-20 by the isolated live stops kit (Claude Code 2.1.329 on the
+kit's cheapest Claude model, on the Mac), then scrubbed with
+`cargo xtask scrub-transcript`. Account and organization IDs added by this
+Claude version, the background agent ID, and its temporary output path were
+also replaced. All 40 records remain in their original order.
+
+- `interrupted-with-background-agent.jsonl` — a turn launched an `Agent` in the
+  background and then ran a foreground command. Escape interrupted that command
+  while the background agent's marked command was still running. Claude wrote
+  the foreground tool's error result and `[Request interrupted by user for tool
+  use]`, with no `turn_duration`; its screen showed the interruption and the
+  still-running background agent. A short line typed next appeared as a human
+  prompt in the record 192 ms later, while the same marked background command
+  still ran. The record alone does not prove when that process ended.
+
 Made 2026-10-27 from two field records, not live runs (T-814), by a script that kept
 each record's type, subtype, origin, timestamps, uuids, parent links, queue
 operations, tool ids and background job ids, and gave every word of the user's, the

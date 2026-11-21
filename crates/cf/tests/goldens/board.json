@@ -1381,7 +1381,7 @@
         "body": "{\"body\":\"go on\"}"
       }
     ],
-    "stdout": "T-3 resumes in @zeus with your words.\nT-3: sent 5 characters, ending \"go on\".\n",
+    "stdout": "T-3: your resume words are queued for @zeus's window and go in when it stops.\n",
     "stderr": "",
     "code": 0
   },
@@ -1409,7 +1409,7 @@
         "body": "{\"body\":\"go\"}"
       }
     ],
-    "stdout": "T-3 is back on the board for a standard worker: the window that had it has ended.\nT-3: sent 2 characters, ending \"go\".\n",
+    "stdout": "T-3 is back on the board for a standard worker: the window that had it has ended. Your words are in its brief.\n",
     "stderr": "",
     "code": 0
   },

@@ -342,6 +342,9 @@ pub(crate) struct WindowPart {
     /// forget the first's, and be interrupted for it again on going back to
     /// it: only a member's own lane, given tasks by name, can.
     pub(crate) stopped: Option<(i64, i64)>,
+    /// When this window paid that stop, on the engine's clock. A resume that
+    /// still cannot reach the window is reported from this time.
+    pub(crate) stop_paid_at: Option<i64>,
     /// The stop it paid at rest with its turn's message not yet taken back: a harness that
     /// takes the message back writes so a moment after the turn's end (Muse's
     /// `run_retracted`, 5–11 ms after its `terminal cancelled`), and a look between the two
@@ -443,6 +446,7 @@ impl Default for WindowPart {
             trust_keys: 0,
             trust_sure: false,
             stopped: None,
+            stop_paid_at: None,
             paid_untaken: None,
             stalled: None,
             interrupted: None,
@@ -601,6 +605,7 @@ impl Dispatcher {
             window.hidden = false;
             window.settled = false;
             window.stopped = None;
+            window.stop_paid_at = None;
             window.stalled = None;
             window.interrupted = None;
             window.unstopped = None;
@@ -1169,6 +1174,7 @@ impl Dispatcher {
             part.named = false;
             part.took = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
+            part.stop_paid_at = planned.stop.map(|_| self.now());
             part.owner = planned.owner;
             part.conversation = conversation_id;
             part.unproven = resumed_on.is_some() && !proven;

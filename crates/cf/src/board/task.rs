@@ -846,7 +846,7 @@ fn moved(
         }));
     }
     // What the words that send a window on say of themselves.
-    let sent = if (briefed || action == "pause") && !text.is_empty() {
+    let sent = if (briefed || action == "pause") && action != "resume" && !text.is_empty() {
         format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
@@ -882,6 +882,12 @@ fn moved(
         Some(running) => still_running(number, running),
         None => String::new(),
     };
+    let resume_gated = answer
+        .value()
+        .get("message")
+        .and_then(|message| message.get("state"))
+        .and_then(Value::as_str)
+        == Some("gated");
     let task = answer.take("task")?;
     // A resume's line names no title, so a new one is said.
     let titled = title.as_ref().map_or_else(String::new, |title| {
@@ -911,10 +917,13 @@ fn moved(
             pause_withdrew(answer.value().get("toldWithdrawn"))
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
-            "T-{number} is back on the board for {}: the window that had it has ended.{titled}",
+            "T-{number} is back on the board for {}: the window that had it has ended. Your words are in its brief.{titled}",
             a_pool(task.get("pool"), task.get("tier"))
         ),
-        "resume" => format!("T-{number} resumes in @{} with your words.{titled}", js::text(task.get("assignee"))),
+        "resume" => {
+            let approval = if resume_gated { " The human must approve them first." } else { "" };
+            format!("T-{number}: your resume words are queued for @{}'s window and go in when it stops.{approval}{titled}", js::text(task.get("assignee")))
+        }
         "finish" => {
             let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
             let withdrawn = match answer.value().get("toldWithdrawn") {

@@ -1828,6 +1828,8 @@ impl Dispatcher {
             // A resumed task whose window is at work on it reads working while its words
             // wait for the window's rest.
             self.show_resumed_at_work(project, participant, record, &observed)?;
+            // A resume still waiting well after its stop was paid is told to the chief.
+            self.tell_resume_wait(project, participant, record)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
@@ -2026,6 +2028,7 @@ impl Dispatcher {
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {
+                self.tell_resume_wait(project, participant, record)?;
                 self.close_if_free(record).await?;
             }
         }

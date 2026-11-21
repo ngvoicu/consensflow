@@ -426,6 +426,7 @@ async function openTask(project, number) {
     closed: closedProject(project),
     terminal: terminalOf(task),
     held: heldOf(task),
+    resumeWait: resumeWaitOf(task),
     backupOf: backupOf(task),
     waitingMember: waitingMemberOf(task),
   })
@@ -439,6 +440,12 @@ async function openTask(project, number) {
 function heldOf(task) {
   const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
   return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null
+}
+
+/** The reason this task's resume words still wait for its own window. */
+function resumeWaitOf(task) {
+  const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
+  return lane?.resumeWait?.task === task.number ? lane.resumeWait : null
 }
 
 /** The member whose availability can hold this task, including a session's owner. */
@@ -507,6 +514,7 @@ async function rereadTask() {
       closed: closedProject(project),
       terminal: terminalOf(task),
       held: heldOf(task),
+      resumeWait: resumeWaitOf(task),
       backupOf: backupOf(task),
       waitingMember: waitingMemberOf(task),
     })
