@@ -642,12 +642,13 @@ fn a_request_replayed_after_a_reconnect_under_a_new_rpc_id_keeps_its_stamp_and_i
         replay["id"] = json!("ask-9");
         f.codex.send_json(2, &replay);
         wait(|| board.polls() == 2).await;
+        // Released first: a failing assertion must not leave the held polls to time out.
+        board.release();
         assert_eq!(
             board.questions_posted().len(),
             1,
             "the board's question is reused"
         );
-        board.release();
         wait(|| asked_of(&f, "ask-9").is_some()).await;
         assert_eq!(
             asked_of(&f, "ask-9").unwrap()["result"]["answers"]["colour"]["answers"],
