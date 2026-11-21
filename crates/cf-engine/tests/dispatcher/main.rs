@@ -142,6 +142,7 @@ mod several_roles;
 mod shared;
 mod shown_notes;
 mod sixth_role;
+mod slot_router;
 mod slow_records;
 mod specs;
 mod stale_box;

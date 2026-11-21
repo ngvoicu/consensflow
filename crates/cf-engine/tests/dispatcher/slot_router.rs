@@ -1,0 +1,411 @@
+//! What the staff as slots owes the dispatcher beside the placement (`tier_fallback.rs`): a
+//! wait note withdrawn before the chief had it is told again, a fall's note is kept through the
+//! assignment that follows it, and the backup sweep asks whether the backup may take a task
+//! before it releases one (`architecture/staff-slots.md`, section 4).
+
+use cf_engine::testing::Context;
+use cf_ledger::{HoldKind, MemberEdit, NewMember, NewTask, ProjectView, TaskEdit};
+use serde_json::{json, Value};
+
+use crate::fixtures::{after, exhausted, now};
+
+fn project_of(context: &Context, name: &str, staff: &[(&str, &[&str], &str)]) -> ProjectView {
+    let members: Vec<Value> = staff
+        .iter()
+        .map(|(agent, roles, tier)| {
+            json!({ "agent": agent, "harness": "claude-code", "roles": roles, "tier": tier })
+        })
+        .collect();
+    context
+        .open_project(json!({
+            "directory": format!("/work/{name}"),
+            "name": name,
+            "chief": { "harness": "claude-code", "model": "apollo" },
+            "staff": members,
+        }))
+        .unwrap()
+        .expect("the project")
+}
+
+fn open(context: &Context, project: &ProjectView, pool: &str, tier: &str, purpose: Option<&str>) -> i64 {
+    context
+        .create_task(
+            project.id,
+            NewTask {
+                from: "chief".to_owned(),
+                pool: Some(pool.to_owned()),
+                tier: Some(tier.to_owned()),
+                purpose: purpose.map(str::to_owned),
+                body: "Do the work".to_owned(),
+                ..NewTask::default()
+            },
+        )
+        .task
+        .number
+}
+
+fn backup_of(context: &Context, project: i64, member: &str, name: &str, roles: &[&str]) {
+    context
+        .ledger
+        .borrow_mut()
+        .add_backup(
+            project,
+            member,
+            &NewMember {
+                harness: "claude-code".to_owned(),
+                model: Some(name.to_owned()),
+                effort: None,
+                model_name: None,
+                designer: false,
+                roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+                tier: "standard".to_owned(),
+            },
+        )
+        .expect("a backup");
+}
+
+/// The chief's notes about `task` that begin `prefix`, with their states: the inbox lists the
+/// cancelled ones too.
+fn notes(context: &Context, project: &ProjectView, prefix: &str) -> Vec<(String, String)> {
+    let chief = context.id(project.id, "chief");
+    let mut said: Vec<(String, String)> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| message.kind == "note" && message.body.starts_with(prefix))
+        .map(|message| (message.state, message.body))
+        .collect();
+    said.reverse();
+    said
+}
+
+fn refuse_login(context: &Context, member: &str) {
+    context.adapter.refuse(
+        member,
+        exhausted(Some(&now(context)), Some(&after(context, 20 * 60_000))),
+    );
+}
+
+fn holder(context: &Context, project: i64, number: i64) -> String {
+    let session = context
+        .task(project, number)
+        .task
+        .assignee
+        .unwrap_or_else(|| panic!("T-{number} has no assignee"));
+    let owner = context
+        .project(project)
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == session)
+        .and_then(|participant| participant.member_id)
+        .expect("a session of a member");
+    context
+        .project(project)
+        .participants
+        .into_iter()
+        .find(|participant| participant.id == owner)
+        .expect("its member")
+        .handle
+}
+
+#[test]
+fn a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once() {
+    let context = Context::new();
+    let project = project_of(
+        &context,
+        "app",
+        &[("zeus", &["worker"], "standard"), ("hera", &["reviewer"], "standard")],
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // The chief is busy: what it is written waits queued.
+    context.adapter.with("chief", |agent| agent.settled = false);
+    // A review is created while a reviewer is seated; none is left before dispatch.
+    let review = open(&context, &project, "reviewer", "standard", None);
+    context.ledger.borrow_mut().remove_member(project.id, "hera").unwrap();
+    context.pass().unwrap();
+    let first = notes(&context, &project, &format!("T-{review} waits for"));
+    assert_eq!(first.len(), 1, "{first:?}");
+    // The person pauses and resumes the task before the chief had the note.
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project.id, review, Some("human"), None)
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project.id, review, Some("human"), "Go on")
+        .unwrap();
+    let after_resume = notes(&context, &project, &format!("T-{review} waits for"));
+    assert_eq!(
+        after_resume.iter().filter(|(state, _)| state == "cancelled").count(),
+        1,
+        "the resume withdrew the note: {after_resume:?}"
+    );
+    context.pass().unwrap();
+    let told_again = notes(&context, &project, &format!("T-{review} waits for"));
+    assert_eq!(
+        told_again.iter().filter(|(state, _)| state != "cancelled").count(),
+        1,
+        "the next pass queues one note: {told_again:?}"
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        notes(&context, &project, &format!("T-{review} waits for")).len(),
+        told_again.len(),
+        "the pass after tells nothing"
+    );
+    // The chief rests: it receives that one note.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let given = notes(&context, &project, &format!("T-{review} waits for"));
+    assert_eq!(
+        given.iter().filter(|(state, _)| state == "delivered" || state == "read").count(),
+        1,
+        "{given:?}"
+    );
+}
+
+#[test]
+fn the_note_of_where_a_task_fell_stays_queued_through_the_assignment_that_follows_it() {
+    let context = Context::new();
+    let project = project_of(
+        &context,
+        "app",
+        &[("zeus", &["tester"], "complex"), ("anubis", &["tester"], "standard")],
+    );
+    let number = open(&context, &project, "tester", "complex", None);
+    context.ledger.borrow_mut().remove_member(project.id, "zeus").unwrap();
+    context.pass().unwrap();
+    assert!(context.task(project.id, number).task.assignee.is_some());
+    let said = notes(&context, &project, &format!("T-{number} asked for"));
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_ne!(
+        said[0].0, "cancelled",
+        "the assignment's withdrawal of the wait notes keeps the fall's: {said:?}"
+    );
+    assert!(said[0].1.contains("@anubis"), "it names the holder: {:?}", said[0].1);
+}
+
+/// A second project with an open task and a free member: every pass must end well and give
+/// that task out, whatever the first project's sweep did.
+fn second_project(context: &Context) -> (ProjectView, i64) {
+    let project = project_of(context, "other", &[("ares", &["worker"], "standard")]);
+    let task = open(context, &project, "worker", "standard", None);
+    (project, task)
+}
+
+#[test]
+fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_pass() {
+    let context = Context::new();
+    let project = project_of(&context, "app", &[("zeus", &["worker"], "standard")]);
+    backup_of(&context, project.id, "zeus", "gaia", &["worker"]);
+    let (other, other_task) = second_project(&context);
+    let work = open(&context, &project, "worker", "standard", None);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(holder(&context, project.id, work), "zeus");
+    // The member's tier is edited while it holds the task; its backup follows.
+    context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".to_owned()),
+                tier: "complex".to_owned(),
+            },
+        )
+        .unwrap();
+    refuse_login(&context, "zeus");
+    // Every pass ends well, and the second project's task is given out.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let task = context.task(project.id, work).task;
+    assert_eq!(task.state, "paused", "the first task stays in its member's window, held");
+    assert!(task.held_until.is_some());
+    assert_eq!(holder(&context, project.id, work), "zeus");
+    assert!(
+        context.task(other.id, other_task).task.assignee.is_some(),
+        "the second project's task was given out"
+    );
+}
+
+#[test]
+fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
+    let context = Context::new();
+    let project = project_of(
+        &context,
+        "app",
+        &[
+            ("hera", &["researcher", "reviewer"], "critical"),
+            ("ares", &["advisor"], "critical"),
+        ],
+    );
+    backup_of(&context, project.id, "hera", "gaia", &["researcher"]);
+    backup_of(&context, project.id, "ares", "luna", &["advisor"]);
+    let (other, other_task) = second_project(&context);
+    let research = open(&context, &project, "researcher", "critical", Some("important-question"));
+    let review = open(&context, &project, "reviewer", "critical", Some("critical-review"));
+    let advice = open(&context, &project, "advisor", "critical", Some("hard-problem"));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    for number in [research, review, advice] {
+        assert!(context.task(project.id, number).task.assignee.is_some(), "T-{number} is at work");
+    }
+    let windows_before = context.project(project.id).participants.len();
+    // What the update and an older fall leave behind: a research task with no tier, and an
+    // advisor's at Critical with no purpose.
+    {
+        let ledger = context.ledger.borrow();
+        let db = ledger.sqlite();
+        db.execute(
+            "UPDATE task SET tier = NULL, purpose = NULL WHERE number = ?",
+            [research],
+        )
+        .unwrap();
+        db.execute("UPDATE task SET purpose = NULL WHERE number = ?", [advice]).unwrap();
+    }
+    refuse_login(&context, "hera");
+    refuse_login(&context, "ares");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    // The research task and the advisor's stay held in their members' windows, none
+    // released and no new window opened for them.
+    assert_eq!(holder(&context, project.id, research), "hera");
+    assert_eq!(holder(&context, project.id, advice), "ares");
+    // The review, at Critical with its purpose, starts over in its backup's new window, its
+    // critical line first.
+    assert_eq!(holder(&context, project.id, review), "gaia");
+    let brief = context
+        .inbox(context.id(project.id, &context.task(project.id, review).task.assignee.unwrap()))
+        .into_iter()
+        .find(|message| message.kind == "task")
+        .expect("its brief")
+        .body;
+    assert!(brief.starts_with("Critical work: critical-review."), "{brief}");
+    assert_eq!(
+        context.project(project.id).participants.len(),
+        windows_before + 1,
+        "one new window, for the review alone"
+    );
+    assert!(context.task(other.id, other_task).task.assignee.is_some());
+}
+
+#[test]
+fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the_edit_that_names_critical() {
+    let context = Context::new();
+    let project = project_of(&context, "app", &[("calliope", &["reviewer"], "standard")]);
+    backup_of(&context, project.id, "calliope", "gaia", &["reviewer"]);
+    let (other, other_task) = second_project(&context);
+    let review = open(&context, &project, "reviewer", "standard", None);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let first_window = context.task(project.id, review).task.assignee.unwrap();
+    let delivered: Vec<String> = context
+        .inbox(context.id(project.id, &first_window))
+        .into_iter()
+        .filter(|message| message.kind == "task")
+        .map(|message| message.body)
+        .collect();
+    // The only reviewer and its backup are moved to Critical; the login is refused.
+    context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            project.id,
+            "calliope",
+            &MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("calliope".to_owned()),
+                tier: "critical".to_owned(),
+            },
+        )
+        .unwrap();
+    refuse_login(&context, "calliope");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(holder(&context, project.id, review), "calliope", "the task stays held");
+    // The person's Reassign puts it on the board, where it waits, told the way on once.
+    context
+        .ledger
+        .borrow_mut()
+        .release_task(project.id, review, "by @human")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let said = notes(&context, &project, &format!("T-{review} waits for"));
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].1.contains(&format!(
+            "cf task edit T-{review} --tier critical --purpose <purpose>"
+        )),
+        "{}",
+        said[0].1
+    );
+    // An edit of its brief is still refused: a window had it.
+    let refused = context
+        .ledger
+        .borrow_mut()
+        .edit_task_with(
+            project.id,
+            review,
+            "chief",
+            &TaskEdit {
+                body: Some("Another brief".to_owned()),
+                ..TaskEdit::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(refused.code(), Some("already-given"));
+    // The edit that only routes is taken, and the same task reaches the Critical window.
+    context
+        .ledger
+        .borrow_mut()
+        .edit_task_with(
+            project.id,
+            review,
+            "chief",
+            &TaskEdit {
+                tier: Some("critical".to_owned()),
+                purpose: Some("critical-review".to_owned()),
+                ..TaskEdit::default()
+            },
+        )
+        .expect("the edit that only routes");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(holder(&context, project.id, review), "gaia");
+    let window = context.task(project.id, review).task.assignee.unwrap();
+    let brief = context
+        .inbox(context.id(project.id, &window))
+        .into_iter()
+        .find(|message| message.kind == "task")
+        .expect("its brief")
+        .body;
+    assert!(brief.starts_with("Critical work: critical-review."), "{brief}");
+    // The first window's delivered brief is as it was.
+    let now: Vec<String> = context
+        .inbox(context.id(project.id, &first_window))
+        .into_iter()
+        .filter(|message| message.kind == "task")
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(now, delivered);
+    assert!(context.task(other.id, other_task).task.assignee.is_some());
+    let _ = HoldKind::Quota;
+}

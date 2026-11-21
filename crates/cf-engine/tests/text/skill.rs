@@ -132,6 +132,35 @@ fn a_member_named_by_its_model_is_read_off_the_project_with_no_model_beside_its_
     );
 }
 
+/// A backup holds no slot: the chief's table lists the members, never their backups.
+#[test]
+fn lists_the_members_without_their_backups() {
+    use cf_engine::roles::staff_of;
+    use serde_json::json;
+
+    use super::support::{participant_of, project_of};
+    let row = |id: i64, handle: &str, backup_of: Option<i64>| {
+        let mut row = json!({
+            "id": id, "projectId": 1, "handle": handle, "role": "worker", "roles": ["worker"],
+            "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high",
+            "modelName": "claude-opus-5-5", "designer": false,
+            "createdAt": "2026-11-08T10:00:00.000Z", "tier": "standard",
+        });
+        if let Some(owner) = backup_of {
+            row["backupOf"] = json!(owner);
+        }
+        row
+    };
+    let project = project_of(
+        [row(3, "zeus", None), row(4, "hera", Some(3))]
+            .iter()
+            .map(participant_of)
+            .collect(),
+    );
+    let names: Vec<String> = staff_of(&project).into_iter().map(|member| member.name).collect();
+    assert_eq!(names, ["zeus"], "hera is zeus's backup and holds no slot");
+}
+
 /// A design task has no tier (`--design`, no tier), so the chief's table says none of an image
 /// designer, which the project reads without one; any other member with none is refused
 /// as it was.
@@ -196,14 +225,14 @@ fn an_image_designer_is_read_off_the_project_with_no_tier() {
 /// The table says each role by its name (spec new-roles, FD-04): the frontend designer and the
 /// image designer are never one word, and a member that holds only roles with no tier says none.
 #[test]
-fn says_each_role_by_its_name_and_none_for_a_member_of_roles_with_no_tier() {
+fn says_each_role_by_its_name_and_none_for_the_image_designer_alone() {
     let untiered = |handle: &str, roles: &[&str]| StaffRow {
         work_tier: None,
         ..staff_row(handle, roles, WorkTier::Light)
     };
     let table = team_table(&[
-        untiered("iris", &["frontend"]),
-        untiered("daedalus", &["architect", "researcher"]),
+        staff_row("iris", &["frontend"], WorkTier::Standard),
+        staff_row("daedalus", &["architect", "researcher"], WorkTier::Complex),
         staff_row("zeus", &["worker", "integrator"], WorkTier::Standard),
         untiered("codex-default", &["designer"]),
     ])
@@ -211,8 +240,8 @@ fn says_each_role_by_its_name_and_none_for_a_member_of_roles_with_no_tier() {
     assert_eq!(
         table.lines().skip(2).collect::<Vec<_>>(),
         [
-            "| iris (Opus · high) | frontend designer | none |",
-            "| daedalus (Opus · high) | architect, researcher | none |",
+            "| iris (Opus · high) | frontend designer | Standard work |",
+            "| daedalus (Opus · high) | architect, researcher | Complex work |",
             "| zeus (Opus · high) | worker, integrator | Standard work |",
             "| codex-default (Opus · high) | image designer | none |",
         ]

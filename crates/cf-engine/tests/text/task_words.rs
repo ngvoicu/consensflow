@@ -13,18 +13,19 @@ use serde_json::json;
 
 use super::support::{found, MEMBER_BANS};
 
-/// A project at /work/app: apollo its chief, zeus a critical worker, diana a
-/// standard one.
+/// A project at /work/app: apollo its chief, zeus a critical advisor (a Critical role that
+/// changes no file: a worker has no Critical slot), diana a standard worker, daedalus a
+/// critical architect.
 fn world() -> (tempfile::TempDir, Ledger, i64) {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
-    let member = |agent: &str, tier: &str| NewMember {
+    let member = |agent: &str, role: &str, tier: &str| NewMember {
         model: None,
         effort: None,
         model_name: Some(agent.into()),
         harness: "claude-code".into(),
         designer: false,
-        roles: vec!["worker".into()],
+        roles: vec![role.into()],
         tier: tier.into(),
     };
     let project = ledger
@@ -37,7 +38,11 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
                 effort: None,
                 model_name: None,
             },
-            staff: vec![member("zeus", "critical"), member("diana", "standard")],
+            staff: vec![
+                member("zeus", "advisor", "critical"),
+                member("diana", "worker", "standard"),
+                member("daedalus", "architect", "critical"),
+            ],
             gate: false,
             wake_up: None,
             specs: None,
@@ -64,10 +69,11 @@ fn id_of(ledger: &Ledger, project: i64, handle: &str) -> i64 {
         .id
 }
 
-/// A task of the `worker` pool at `tier` is opened in `project`; its number.
+/// A task of the `pool` at `tier` is opened in `project`; its number.
 fn add_task(
     ledger: &mut Ledger,
     project: i64,
+    pool: &str,
     tier: &str,
     purpose: Option<&str>,
     body: &str,
@@ -77,7 +83,7 @@ fn add_task(
             project,
             &NewTask {
                 from: "chief".into(),
-                pool: Some("worker".into()),
+                pool: Some(pool.into()),
                 tier: Some(tier.into()),
                 purpose: purpose.map(str::to_owned),
                 body: body.into(),
@@ -111,6 +117,7 @@ fn a_critical_task_s_lead_says_the_task_changes_no_project_file_and_answers_to_t
     let task = add_task(
         &mut ledger,
         project,
+        "advisor",
         "critical",
         Some("hard-problem"),
         "Why is it slow?",
@@ -120,6 +127,27 @@ fn a_critical_task_s_lead_says_the_task_changes_no_project_file_and_answers_to_t
     assert_eq!(
         assigned.message.unwrap().body,
         "Critical work: hard-problem. It changes no project file: return analysis, evidence and recommendations to the chief.\n\nWhy is it slow?"
+    );
+}
+
+/// The architect's critical lead does not forbid its own work: it writes design files and the
+/// code's frame, nothing that runs, so "no project file" would forbid it what it is for.
+#[test]
+fn the_architect_s_critical_lead_allows_its_documents_and_every_other_role_keeps_the_rule() {
+    let (_dir, mut ledger, project) = world();
+    let task = add_task(
+        &mut ledger,
+        project,
+        "architect",
+        "critical",
+        Some("architecture"),
+        "Design the queue",
+    );
+    let daedalus = id_of(&ledger, project, "daedalus");
+    let assigned = ledger.assign_task(project, task, daedalus).unwrap();
+    assert_eq!(
+        assigned.message.unwrap().body,
+        "Critical work: architecture. It writes nothing that runs (documents, contracts, the code's frame): return them and its findings to the chief.\n\nDesign the queue"
     );
 }
 
@@ -135,6 +163,7 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
     let task = add_task(
         &mut ledger,
         project,
+        "advisor",
         "critical",
         Some("hard-problem"),
         "Why is it slow?",
@@ -192,7 +221,7 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
     );
 
     // The tell an open task keeps in its brief for whichever window takes it.
-    let told = add_task(&mut ledger, project, "standard", None, "Parser");
+    let told = add_task(&mut ledger, project, "worker", "standard", None, "Parser");
     added.push(
         ledger
             .tell_open(project, told, "chief", "Prefer the fast path")
@@ -202,7 +231,7 @@ fn the_words_consensflow_adds_to_a_task_hold_the_member_texts_bans() {
 
     // The rows a session that ended kept, folded into the brief its task goes
     // back to the board with.
-    let moved = add_task(&mut ledger, project, "standard", None, "Loader");
+    let moved = add_task(&mut ledger, project, "worker", "standard", None, "Loader");
     let assigned = ledger
         .assign_task(project, moved, id_of(&ledger, project, "diana"))
         .unwrap();

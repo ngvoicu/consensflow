@@ -42,19 +42,9 @@ pub enum Role {
 }
 
 /// The pools whose tasks and members take no tier, as the product's roles' table has them
-/// (`cf_ledger::roles`; a test of this crate holds the two together): a member of these alone
-/// is added with none, and the daemon refuses one.
-pub const POOLS_WITHOUT_TIER: [&str; 5] = [
-    "frontend",
-    "architect",
-    "researcher",
-    "integrator",
-    "designer",
-];
-
-/// The tier the daemon keeps a member of roles with no tier in: the lowest, which decides
-/// nothing.
-pub const NO_TIER: &str = "light";
+/// (`cf_ledger::roles`; a test of this crate holds the two together): the image designer's
+/// alone. Every other role has tiers, and each extra seat is added at [`TIER`].
+pub const POOLS_WITHOUT_TIER: [&str; 1] = ["designer"];
 
 impl Role {
     /// Every position, in the order the design's table has them.
@@ -94,13 +84,9 @@ impl Role {
             .is_some_and(|pool| !POOLS_WITHOUT_TIER.contains(&pool))
     }
 
-    /// The tier its member is staff at: [`TIER`], or [`NO_TIER`] for a role with none.
+    /// The tier its member is staff at: [`TIER`], which every seat's role has a slot at.
     pub fn tier(self) -> &'static str {
-        if self.tiered() {
-            TIER
-        } else {
-            NO_TIER
-        }
+        TIER
     }
 
     /// Its name, as the evidence says it (and as the ledger names a member's role).
@@ -758,11 +744,11 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("besides the five twice"));
-        // Never in the square, and staff with no tier.
+        // Never in the square, and staff at a tier.
         for role in Role::EXTRA {
             assert!(!Role::ALL.contains(&role));
-            assert!(role.is_extra() && !role.tiered(), "{}", role.name());
-            assert_eq!(role.tier(), NO_TIER);
+            assert!(role.is_extra() && role.tiered(), "{}", role.name());
+            assert_eq!(role.tier(), TIER);
             assert_eq!(Role::named(role.name()), Some(role));
         }
         assert!(Role::ALL.iter().all(|role| !role.is_extra()));
@@ -786,7 +772,7 @@ mod tests {
         assert_eq!(ours, table);
         let mut untiered: Vec<&str> = cf_ledger::roles::all()
             .iter()
-            .filter(|role| !role.tiered)
+            .filter(|role| !role.tiered())
             .map(|role| role.id)
             .collect();
         untiered.sort_unstable();

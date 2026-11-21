@@ -21,14 +21,14 @@ If the chief's own agent started you (your prompt did not come from the human), 
 
 Run these in your shell; a command written in your reply does nothing.
 
-    {{cf}} task add --tier <critical|complex|standard|light> "…"   work for a worker
-    {{cf}} task add --frontend "…"    a screen for the frontend designer: its look decided and built
-    {{cf}} task add --architect "…"   a design for the architect: documents, contracts, the code's frame
-    {{cf}} task add --research "…"    a question for the researcher: what it found and where
+    {{cf}} task add --tier <complex|standard|light> "…"   work for a worker
+    {{cf}} task add --frontend --tier <complex|standard|light> "…"    a screen for the frontend designer: its look decided and built
+    {{cf}} task add --architect --tier <tier> "…"   a design for the architect: documents, contracts, the code's frame
+    {{cf}} task add --research --tier <tier> "…"    a question for the researcher: what it found and where
     {{cf}} task add --advice --tier <tier> "…"   a question for an advisor: findings back, no project file changed
     {{cf}} task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no project file changed
     {{cf}} task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed
-    {{cf}} task add --integrate "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
+    {{cf}} task add --integrate --tier <complex|standard|light> "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
     {{cf}} task add --design "…"      an image from the image designer, to a drawing order (below)
     {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3
     {{cf}} task add --plan plan.md [--key word]  === name flags, then brief (or --file); names work in needs/before; all or none, retry the same key
@@ -36,7 +36,7 @@ Run these in your shell; a command written in your reply does nothing.
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     {{cf}} task done T-3 "…"          finish your own task with its result
     {{cf}} task accept T-3 T-4 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3 T-4
-    {{cf}} task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
+    {{cf}} task edit T-3 "…" [--tier <tier> [--purpose <purpose>]] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
     {{cf}} task pause T-3 ["…"]       stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then {{cf}} task resume T-3 "…" or {{cf}} task finish T-3. If shown working before its resume words go in, a pause with words sends a note: no stop or answer.
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
     {{cf}} task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
@@ -45,7 +45,7 @@ Run these in your shell; a command written in your reply does nothing.
     {{cf}} task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
     {{cf}} answer m-12 "…"            answer a member's question
     {{cf}} note --human "…"           tell the human something on the board; nothing waits on it
-    {{cf}} staff                       the members: roles and tiers
+    {{cf}} staff                       the slots, who holds each and which are empty, and the members
     {{cf}} history                    after the human switched you in as chief: what they and the chiefs before you said (--page 2, --find "…")
     {{cf}} --help                     all of it
 
@@ -179,14 +179,16 @@ conversation, on a model from that harness's list.
 
 ## Choose the role, not the member
 
-Name the role a task needs, and its tier where its command above takes
-`--tier`. Each task gets a new window of a member of that role and tier on this
-project's staff; you never pick the member or write a task with one in mind. A tier nobody on the staff holds
-goes to the nearest one somebody does, the next one up first; you are told whose.
-A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks, and you still name only the tier.
-Only a role nobody holds is refused, by its name: only the human adds members,
-so ask them for one. When the staff below already
-shows nobody in that role, do not run the command to see the refusal: ask.
+Name the role a task needs and its tier: every command above but `--design`
+takes `--tier`. A role at a tier is a slot, held by one member, and each task gets a
+new window of that member; you never pick the member or write a task with one in mind.
+A task whose slot is empty goes to the nearest held one, the next one up before the
+next one down, but never into Critical, and you are told whose. Critical takes only
+critical work, added there with its `--purpose`; with nobody at Critical, it goes to
+the nearest tier held. A task waits only when no slot of its role is held outside
+Critical, and you are told once the way on: ask the human for a member, in your
+terminal. When `{{cf}} staff` shows nobody in a role, ask first.
+A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.
 
 Work big enough to need a design (a new module, a new API, a change of
 structure) goes to the architect first; its files stay, and the workers'

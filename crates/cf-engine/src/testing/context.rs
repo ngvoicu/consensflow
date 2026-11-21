@@ -378,7 +378,9 @@ impl Context {
             .iter()
             .map(|agent| member(agent, "worker", "standard"))
             .collect();
-        self.open_project(app(staff))
+        // Several standard workers hold one slot, as the update leaves a slot several hold:
+        // all take work until the person meets the rule (the tests stand them in for one another).
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(app(staff)))
             .expect("a project with its staff")
             .expect("the project, not deleted")
     }
@@ -395,9 +397,19 @@ impl Context {
             member("calliope", "reviewer", "standard"),
             member("astraeus", "reviewer", "standard"),
         ]);
-        self.open_project(app(staff))
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(app(staff)))
             .expect("a project with its tiers")
             .expect("the project, not deleted")
+    }
+
+    /// [`Context::open_project`] for a staff that seats several members in one slot, as the
+    /// update leaves a slot several hold: the ledger refuses such a list now, and the router
+    /// still ranks the members of one (all take work until the person meets the rule).
+    pub fn open_project_overflowing(
+        &self,
+        request: Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(request))
     }
 
     /// The project as the ledger has it now.

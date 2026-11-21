@@ -853,6 +853,16 @@ pub fn seat_in_slot(
 }
 
 impl crate::Ledger {
+    /// [`crate::Ledger::add_member`] into a slot another member holds, as the update leaves a
+    /// slot several hold: for a kit staff whose subject is not its slots.
+    pub fn add_member_overflowing(
+        &mut self,
+        project: i64,
+        member: &crate::NewMember,
+    ) -> Result<crate::ParticipantView, crate::LedgerError> {
+        crate::staff::slots::overflow::allowing(|| self.add_member(project, member))
+    }
+
     /// [`crate::Ledger::create_project`] for a kit staff that seats several members in one
     /// slot, as the update leaves a slot several hold: the ledger refuses such a list now.
     /// For a staff whose subject is not its slots.
