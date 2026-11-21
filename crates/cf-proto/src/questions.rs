@@ -12,6 +12,12 @@ use serde_json::Value;
 /// both have it.
 pub const ASKED_THEN_END_THE_TURN: &str = "The answer arrives as a message; end your turn now.";
 
+/// The field of a question request that says when its asking process began, in
+/// milliseconds since the epoch on the machine's own clock. `cf ask`, `cf hook`
+/// and the Codex broker stamp it, and the ledger binds the question to the
+/// holding its window had at that moment.
+pub const ASKED_AT: &str = "askedAt";
+
 /// One question in the board's shape. Its texts are what the harness gave,
 /// passed through as they came; one it did not give is left out.
 #[derive(Debug, Clone, PartialEq, Serialize)]

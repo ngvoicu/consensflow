@@ -31,9 +31,15 @@ fn puts_the_questions_on_the_board_and_polls_until_the_answer_comes() {
         ),
     ]);
     let board = Board::new(Some(&api.url), "tok");
-    let answer = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        .unwrap()
-        .unwrap();
+    let answer = ask_the_board_until(
+        &board,
+        &one_question(),
+        &Asking::at(1_790_000_000_123),
+        DOOR_WAIT,
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(answer.picks(0), ["SQLite".to_string()]);
     assert!(answer.picks(1).is_empty());
 
@@ -41,7 +47,7 @@ fn puts_the_questions_on_the_board_and_polls_until_the_answer_comes() {
     assert_eq!(received[0].path, "/api/questions");
     assert_eq!(
         received[0].json(),
-        Some(json!({ "questions": [{
+        Some(json!({ "askedAt": 1_790_000_000_123_i64, "questions": [{
             "question": "Which database?",
             "header": "Database",
             "options": [
@@ -65,6 +71,7 @@ fn asks_for_no_more_than_the_wait_that_is_left_and_gives_up_after_it() {
     let gone = ask_the_board_until(
         &board,
         &one_question(),
+        &Asking::now(),
         Duration::from_millis(300),
         &AtomicBool::new(false),
     )
@@ -95,7 +102,9 @@ fn a_raised_stop_ends_the_wait_once_the_poll_in_hand_returns() {
     let board = Board::new(Some(&api.url), "tok");
     let stop = AtomicBool::new(false);
     let asked = std::thread::scope(|scope| {
-        let asking = scope.spawn(|| ask_the_board_until(&board, &one_question(), DOOR_WAIT, &stop));
+        let asking = scope.spawn(|| {
+            ask_the_board_until(&board, &one_question(), &Asking::now(), DOOR_WAIT, &stop)
+        });
         // Up while the first poll is held at the board.
         while api.received().len() < 2 {
             std::thread::sleep(Duration::from_millis(5));
@@ -111,7 +120,13 @@ fn a_raised_stop_ends_the_wait_once_the_poll_in_hand_returns() {
 fn a_stop_up_before_the_question_is_asked_posts_nothing() {
     let api = scripted(vec![reply(201, json!({ "message": { "id": 4 } }))]);
     let board = Board::new(Some(&api.url), "tok");
-    let asked = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(true));
+    let asked = ask_the_board_until(
+        &board,
+        &one_question(),
+        &Asking::now(),
+        DOOR_WAIT,
+        &AtomicBool::new(true),
+    );
     assert_eq!(asked.unwrap(), None);
     assert!(api.received().is_empty());
 }
@@ -134,6 +149,7 @@ fn a_poll_whose_reply_was_lost_is_asked_again_and_gets_the_answer_the_board_clai
     let answer = ask_retrying(
         &board,
         &one_question(),
+        &Asking::now(),
         DOOR_WAIT,
         &AtomicBool::new(false),
         &QUICK,
@@ -169,7 +185,14 @@ fn a_board_that_stays_out_of_reach_is_asked_four_times_more_and_then_the_dialog_
     let api = scripted(replies);
     let board = Board::new(Some(&api.url), "tok");
     let stop = AtomicBool::new(false);
-    let asked = ask_retrying(&board, &one_question(), DOOR_WAIT, &stop, &QUICK);
+    let asked = ask_retrying(
+        &board,
+        &one_question(),
+        &Asking::now(),
+        DOOR_WAIT,
+        &stop,
+        &QUICK,
+    );
     // What `ask` makes of it is the harness's own dialog.
     assert!(asked.unwrap_err().is_unreachable());
     assert_eq!(api.received().len(), 6, "the question, and five polls");
@@ -192,6 +215,7 @@ fn polls_that_fail_once_each_between_answers_never_add_up_to_the_end_of_the_door
     let answer = ask_retrying(
         &board,
         &one_question(),
+        &Asking::now(),
         DOOR_WAIT,
         &AtomicBool::new(false),
         &QUICK,
@@ -211,6 +235,7 @@ fn the_question_is_put_once_whatever_comes_of_it_and_a_refusal_or_an_unreadable_
     let lost = ask_retrying(
         &board,
         &one_question(),
+        &Asking::now(),
         DOOR_WAIT,
         &AtomicBool::new(false),
         &QUICK,
@@ -227,6 +252,7 @@ fn the_question_is_put_once_whatever_comes_of_it_and_a_refusal_or_an_unreadable_
     let refused = ask_retrying(
         &board,
         &one_question(),
+        &Asking::now(),
         DOOR_WAIT,
         &AtomicBool::new(false),
         &QUICK,
@@ -239,8 +265,14 @@ fn the_question_is_put_once_whatever_comes_of_it_and_a_refusal_or_an_unreadable_
 fn a_refused_question_is_a_refusal_whose_reason_points_the_model_to_cf_ask() {
     let api = scripted(vec![reply(409, json!({ "message": "T-3 was cancelled" }))]);
     let board = Board::new(Some(&api.url), "tok");
-    let refused = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        .unwrap_err();
+    let refused = ask_the_board_until(
+        &board,
+        &one_question(),
+        &Asking::now(),
+        DOOR_WAIT,
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
     assert!(refused.is_refusal());
     assert_eq!(
         refusal_reason(&refused, &CfWord::bare()),
@@ -266,7 +298,7 @@ fn a_door_the_board_shut_is_refused_in_the_boards_own_words_and_any_other_refusa
     ]);
     let board = Board::new(Some(&api.url), "tok");
     let stop = AtomicBool::new(false);
-    let asked = |board: &Board| ask(board, &one_question(), DOOR_WAIT, &stop);
+    let asked = |board: &Board| ask(board, &one_question(), &Asking::now(), DOOR_WAIT, &stop);
     assert_eq!(asked(&board), Reply::Refused(closed.to_owned()));
     assert_eq!(
         asked(&board),
@@ -413,8 +445,14 @@ fn an_answer_it_cannot_read_is_no_refusal() {
         reply(200, json!({ "question": {} })),
     ]);
     let board = Board::new(Some(&api.url), "tok");
-    let unread = ask_the_board_until(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        .unwrap_err();
+    let unread = ask_the_board_until(
+        &board,
+        &one_question(),
+        &Asking::now(),
+        DOOR_WAIT,
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
     assert!(!unread.is_refusal());
 }
 
@@ -463,9 +501,13 @@ fn a_refusal_says_to_ask_with_the_cf_the_window_was_given_as_its_shell_takes_it(
     ] {
         let board = board_of(&env(word)).unwrap();
         assert_eq!(board.cf().as_str(), word);
-        let Reply::Refused(reason) =
-            ask(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        else {
+        let Reply::Refused(reason) = ask(
+            &board,
+            &one_question(),
+            &Asking::now(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+        ) else {
             panic!("not refused");
         };
         assert!(reason.contains(said), "{reason}");
@@ -503,9 +545,13 @@ fn a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_
             json!({ "error": code, "message": "The task left this turn" }),
         )]);
         let board = Board::new(Some(&api.url), "tok");
-        let Reply::Refused(words) =
-            ask(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
-        else {
+        let Reply::Refused(words) = ask(
+            &board,
+            &one_question(),
+            &Asking::now(),
+            DOOR_WAIT,
+            &AtomicBool::new(false),
+        ) else {
             panic!("expected refusal")
         };
         assert!(
@@ -513,4 +559,48 @@ fn a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_
             "{code}: {words}"
         );
     }
+}
+
+#[test]
+fn a_question_asked_again_with_the_same_asking_keeps_its_stamp_and_its_board_question() {
+    let api = scripted(vec![
+        reply(201, json!({ "message": { "id": 12 } })),
+        reply(200, json!({ "question": {}, "answer": null })),
+        reply(
+            200,
+            json!({ "question": {}, "answer": { "id": 13, "choices": [["SQLite"]] } }),
+        ),
+    ]);
+    let board = Board::new(Some(&api.url), "tok");
+    let asking = Asking::at(1_790_000_000_456);
+    assert_eq!(asking.posted(), None);
+    // The first copy puts it and its wait runs out; the copy that follows it is
+    // the same question, polled again, never posted twice.
+    let first = ask_the_board_until(
+        &board,
+        &one_question(),
+        &asking,
+        Duration::ZERO,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(first, None);
+    assert_eq!(asking.posted(), Some(12));
+    let again = ask_the_board_until(
+        &board,
+        &one_question(),
+        &asking.clone(),
+        DOOR_WAIT,
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(again.id(), Some(13));
+    let posts: Vec<_> = api
+        .received()
+        .into_iter()
+        .filter(|received| received.method == "POST")
+        .collect();
+    assert_eq!(posts.len(), 1, "one question on the board");
+    assert_eq!(posts[0].json().unwrap()["askedAt"], 1_790_000_000_456_i64);
 }

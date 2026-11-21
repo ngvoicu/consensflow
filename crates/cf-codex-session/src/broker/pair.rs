@@ -27,7 +27,7 @@ use super::transport::{
     MAX_FRAME,
 };
 use super::Shared;
-use crate::questions::{Asked, REQUEST_USER_INPUT};
+use crate::questions::{Asked, RequestKey, REQUEST_USER_INPUT};
 
 /// Frames held in the order they came, up to [`MAX_FRAME`] bytes.
 #[derive(Default)]
@@ -398,6 +398,13 @@ impl Pair {
         } else {
             None
         };
+        // A request the turn or Codex has ended is not replayed: its stamp goes.
+        if let (true, Some(thread)) = (turn_over, thread) {
+            self.shared.stamps.borrow_mut().end_turn_of(thread);
+        }
+        if let Some(request) = resolved {
+            self.shared.stamps.borrow_mut().resolve(request);
+        }
         for held in self.held.borrow().iter() {
             let turn_ended = turn_over && thread.is_some() && held.thread.as_deref() == thread;
             if turn_ended || resolved.is_some_and(|request| *request == held.request) {
@@ -428,6 +435,11 @@ impl Pair {
         let this = Rc::clone(self);
         let wait = self.shared.question_wait;
         let ending = Ending::new();
+        // The request's own stamp: when Codex's request first reached this
+        // broker, and the question it made on the board, whichever pair
+        // received it and whatever RPC id it came under.
+        let key = asked.key(&id, params);
+        let asking = self.shared.stamps.borrow_mut().of(key.clone(), &id);
         self.held.borrow_mut().push(Held {
             thread: params
                 .and_then(|params| params.get("threadId"))
@@ -440,24 +452,29 @@ impl Pair {
         // board is still polled for the question has its poll end at the next
         // request, and an answer the board claimed meanwhile is still given back.
         self.shared.spawn(async move {
-            let (asking, polling, raised) = (
+            let (putting, polling, raised) = (
                 asked.clone(),
                 Arc::clone(&board),
                 Arc::clone(&ending.raised),
             );
             let outcome =
-                tokio::task::spawn_blocking(move || asking.ask(&polling, wait, &raised)).await;
+                tokio::task::spawn_blocking(move || putting.ask(&polling, &asking, wait, &raised))
+                    .await;
             let ended = ending.is_raised();
             match (outcome, ended) {
                 (Ok(Reply::Answered(answer)), false) => {
-                    this.hand_over(&asked.answered(&id, &answer), answer, board, ending);
+                    this.hand_over(&asked.answered(&id, &answer), answer, board, ending, key);
                     return;
                 }
                 (Ok(Reply::Answered(answer)), true) => acknowledge(board, answer, false).await,
                 (Ok(Reply::Refused(reason)), false) => {
+                    this.shared.stamps.borrow_mut().settle(&key);
                     this.answer_codex(&asked.refused(&id, &reason));
                 }
-                (Ok(Reply::Unanswered) | Err(_), false) => this.forward(&this.tui, text),
+                (Ok(Reply::Unanswered) | Err(_), false) => {
+                    this.shared.stamps.borrow_mut().settle(&key);
+                    this.forward(&this.tui, text);
+                }
                 (_, true) => {}
             }
             this.release(&ending);
@@ -480,6 +497,7 @@ impl Pair {
         answer: Answer,
         board: Arc<Board>,
         ending: Rc<Ending>,
+        key: RequestKey,
     ) {
         let frame = Message::Text(Utf8Bytes::from(response.to_string()));
         let written = match self.native.send_unless(frame, Arc::clone(&ending.raised)) {
@@ -498,7 +516,11 @@ impl Pair {
                 () = ending.wait() => false,
             };
             this.release(&ending);
-            acknowledge(board, answer, handed && !ending.is_raised()).await;
+            let received = handed && !ending.is_raised();
+            if received {
+                this.shared.stamps.borrow_mut().settle(&key);
+            }
+            acknowledge(board, answer, received).await;
         });
     }
 

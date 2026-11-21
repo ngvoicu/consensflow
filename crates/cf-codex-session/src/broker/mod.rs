@@ -44,6 +44,7 @@ use tokio::net::TcpListener;
 use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::endpoint::Upstream;
+use crate::questions::Stamps;
 use control::{Asked, Control};
 use pair::Pair;
 use selection::{ClientId, Selection};
@@ -96,6 +97,8 @@ struct Shared {
     question_wait: Duration,
     log_home: Option<PathBuf>,
     state: RefCell<Selection>,
+    /// The questions put to the board, kept across the reconnects of their pairs.
+    stamps: RefCell<Stamps>,
     control: RefCell<Option<Rc<Control>>>,
     /// The TUI connections' proxies, to end them when the broker closes.
     pairs: RefCell<HashMap<ClientId, Weak<Pair>>>,
@@ -130,6 +133,7 @@ impl Broker {
             question_wait,
             log_home,
             state: RefCell::new(Selection::new(fresh_bypass, role, shell_env)),
+            stamps: RefCell::new(Stamps::default()),
             control: RefCell::new(None),
             pairs: RefCell::new(HashMap::new()),
             tasks: RefCell::new(Vec::new()),
