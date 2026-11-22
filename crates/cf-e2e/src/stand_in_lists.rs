@@ -3,8 +3,7 @@
 //! a stand-in that listed nothing had a bypass in the daemon's own code to stand in for it;
 //! now the stand-ins answer, as the harnesses do, and a model nobody lists is refused.
 //!
-//! A stand-in lists `fake`, `fake-2` and `fake-chief`, the models the rig's roster seats its
-//! stand-ins on, and what the roster of the case in the rig's folder (`stand-ins.json`, the
+//! A stand-in lists every model of [`MODELS`], the ones the rig's stand-ins play, and what the roster of the case in the rig's folder (`stand-ins.json`, the
 //! case's own and never the daemon's) seats on its harness: a
 //! member of the stand-in harness is named by its model, so it runs on the name of its agent.
 //! A model of the roster that names an effort (`gpt-6-astra` at `medium`) lists it, and the rest
@@ -15,8 +14,31 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-/// The models the roster of a rig seats its stand-ins on.
-pub const STAND_IN_MODELS: [&str; 3] = ["fake", "fake-2", "fake-chief"];
+/// The models the rig's stand-ins play, the one list (K3 step 8, T-1997 finding 6): the roster's
+/// two (`fake`, `fake-2`), the chief's (`fake-chief`), and the member a fresh rig seats, asked for
+/// by its own name (`worker`). The Claude shim, the stand-in programs, the choice of a live run's
+/// installations, the preflight and the stand-ins' own lists all ask [`seat_of`].
+pub const MODELS: [&str; 4] = ["fake", "fake-2", "fake-chief", "worker"];
+
+/// Who plays a seat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seat {
+    /// The rig's stand-in, of whichever kind the seat is shaped as.
+    StandIn,
+    /// The harness of the seat's kind.
+    Harness,
+}
+
+/// Who plays a seat of `kind` on `model`: the stand-in where the model is one of [`MODELS`],
+/// whatever the kind; the harness otherwise. A model that only begins as one (`fake-3`) is the
+/// harness's.
+pub fn seat_of(_kind: &str, model: &str) -> Seat {
+    if MODELS.contains(&model) {
+        Seat::StandIn
+    } else {
+        Seat::Harness
+    }
+}
 
 /// The stand-in Codex's model the cases name without writing it in the roster: `maia`, GPT-6
 /// Astra at `medium` (`rig::project::stand_in`). Codex lists it at the efforts a case may pick.
@@ -46,7 +68,7 @@ pub fn listed(kind: &str, consensflow_home: &Path) -> Vec<Listed> {
 
 /// [`listed`] for the roster `roster` (none where the rig has written none).
 pub fn of_roster(kind: &str, roster: Option<&Value>) -> Vec<Listed> {
-    let mut models: Vec<Listed> = STAND_IN_MODELS
+    let mut models: Vec<Listed> = MODELS
         .iter()
         .map(|id| Listed {
             id: (*id).to_owned(),
@@ -77,7 +99,7 @@ pub fn of_roster(kind: &str, roster: Option<&Value>) -> Vec<Listed> {
         let model = row["model"].as_str();
         let named = row["id"]
             .as_str()
-            .filter(|_| model.is_none_or(|model| STAND_IN_MODELS.contains(&model)));
+            .filter(|_| model.is_none_or(|model| seat_of(kind, model) == Seat::StandIn));
         for id in model.into_iter().chain(named) {
             match models.iter_mut().find(|listed| listed.id == id) {
                 Some(listed) => {
@@ -182,12 +204,12 @@ mod tests {
     fn a_rig_with_no_roster_lists_the_models_the_stand_ins_run_on() {
         assert_eq!(
             ids(&of_roster("claude-code", None)),
-            ["fake", "fake-2", "fake-chief"]
+            ["fake", "fake-2", "fake-chief", "worker"]
         );
         // Codex also lists the model of `maia`, whom cases name without writing her down.
         assert_eq!(
             ids(&of_roster("codex", None)),
-            ["fake", "fake-2", "fake-chief", "gpt-6-astra"]
+            ["fake", "fake-2", "fake-chief", "worker", "gpt-6-astra"]
         );
     }
 
@@ -202,12 +224,12 @@ mod tests {
         ]});
         assert_eq!(
             ids(&of_roster("claude-code", Some(&roster))),
-            ["fake", "fake-2", "fake-chief", "chief", "mybuilder"]
+            ["fake", "fake-2", "fake-chief", "worker", "chief", "mybuilder"]
         );
         let codex = of_roster("codex", Some(&roster));
         assert_eq!(
             ids(&codex),
-            ["fake", "fake-2", "fake-chief", "gpt-6-astra", "zed"]
+            ["fake", "fake-2", "fake-chief", "worker", "gpt-6-astra", "zed"]
         );
         let astra = codex
             .iter()

@@ -18,6 +18,9 @@ pub struct Check {
     pub what: String,
     pub ok: bool,
     pub detail: String,
+    /// Whether the check could not be made, and why is its detail: it fails nothing, is counted
+    /// and printed, and a release names it as not checked (K3, the Admin look).
+    pub unavailable: bool,
 }
 
 impl Check {
@@ -38,14 +41,28 @@ impl Check {
             what: what.to_owned(),
             ok,
             detail: detail.into(),
+            unavailable: false,
         }
     }
 
-    /// Its line: `ok   claude  one line  sent and recorded whole`.
+    /// A check of `who` that could not be made, because `why`: it fails nothing, and is counted
+    /// and printed as not checked.
+    pub fn unavailable(who: &str, what: &str, why: impl Into<String>) -> Self {
+        Self {
+            unavailable: true,
+            ..Self::new(who, what, true, why)
+        }
+    }
+
+    /// Its line: `ok   claude  one line  sent and recorded whole`; `n/a` for one not made.
     fn line(&self, who: usize, what: usize) -> String {
         format!(
             "{} {:<who$}  {:<what$}  {}",
-            if self.ok { "ok  " } else { "FAIL" },
+            match (self.unavailable, self.ok) {
+                (true, _) => "n/a ",
+                (false, true) => "ok  ",
+                (false, false) => "FAIL",
+            },
             self.who,
             self.what,
             cut(&self.detail, DETAIL)
@@ -89,7 +106,30 @@ pub fn verdict(checks: &[Check]) -> Result {
 /// ones that did not hold ([`verdict`]).
 pub fn conclude(log: &Log, title: &str, checks: &[Check]) -> Result {
     log.report(title, &table(checks));
+    let unavailable = not_checked(checks);
+    if !unavailable.is_empty() {
+        log.say(unavailable);
+    }
     verdict_of(log, checks)
+}
+
+/// The line that counts the checks that could not be made, which a release names as not
+/// checked: empty where every check was made.
+pub fn not_checked(checks: &[Check]) -> String {
+    let unavailable: Vec<String> = checks
+        .iter()
+        .filter(|check| check.unavailable)
+        .map(|check| format!("{} {}", check.who, check.what))
+        .collect();
+    if unavailable.is_empty() {
+        return String::new();
+    }
+    format!(
+        "{} of {} checks were not checked (unavailable): {}",
+        unavailable.len(),
+        checks.len(),
+        unavailable.join(", ")
+    )
 }
 
 /// [`verdict`] for the run `log`: where every check held, the run came to a pass
@@ -126,6 +166,21 @@ mod tests {
         assert!(!ended.lease_has_passed());
         assert!(ended.passing::<(), &str>(Ok(())).is_ok());
         assert!(ended.lease_has_passed());
+    }
+
+    #[test]
+    fn an_unavailable_check_fails_nothing_and_is_counted_and_printed_as_not_checked() {
+        let checks = vec![
+            Check::passed("claude", "the look", "2.1.330"),
+            Check::unavailable("muse", "the look", "the look would run Muse outside its sandbox"),
+        ];
+        assert!(verdict(&checks).is_ok());
+        assert!(table(&checks).contains("n/a  muse"), "{}", table(&checks));
+        assert_eq!(
+            not_checked(&checks),
+            "1 of 2 checks were not checked (unavailable): muse the look"
+        );
+        assert_eq!(not_checked(&checks[..1]), "");
     }
 
     fn sample() -> Vec<Check> {

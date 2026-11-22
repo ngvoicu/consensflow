@@ -55,13 +55,7 @@ pub const STAND_IN_SECOND_MODEL: &str = "fake-2";
 /// of a roster against the harness's list all ask here, so that a row the shim routes to the
 /// stand-in is never one the preflight asks the real harness's catalogue for.
 pub fn is_stand_in_model(model: &str) -> bool {
-    [
-        STAND_IN_CHIEF_MODEL,
-        STAND_IN_WORKER_MODEL,
-        STAND_IN_MEMBER_MODEL,
-        STAND_IN_SECOND_MODEL,
-    ]
-    .contains(&model)
+    crate::stand_in_lists::seat_of("claude-code", model) == crate::stand_in_lists::Seat::StandIn
 }
 
 /// The harness an agent (a roster row, or what a window is asked for) runs on,
@@ -70,7 +64,9 @@ pub fn is_stand_in_model(model: &str) -> bool {
 pub fn harness_of(agent: &Value) -> Option<Harness> {
     let kind = agent["kind"].as_str()?;
     // A fake model is the rig's stand-in, of whichever kind it is shaped as (T-1207).
-    if is_stand_in_model(agent["model"].as_str()?) {
+    if crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)
+        == crate::stand_in_lists::Seat::StandIn
+    {
         return None;
     }
     Harness::ALL
@@ -1834,5 +1830,34 @@ mod tests {
         let unread = parse(None, None).unwrap().on_machine(Some("zeewin2"), None);
         assert_eq!(unread.of(Harness::Pi).name, cheap_pi);
         assert!(!unread.line().contains("usage credits"));
+    }
+
+    /// T-1997 finding 6: every model the stand-ins play is the stand-in's, of every kind, to every
+    /// one that asks: the seat, the harness a live run installs, the preflight against a
+    /// harness's catalogue, and the stand-ins' own lists.
+    #[test]
+    fn every_stand_in_model_of_every_kind_is_the_stand_ins_to_all_who_ask() {
+        use crate::stand_in_lists::{of_roster, seat_of, Seat, MODELS};
+        for kind in ["claude-code", "codex", "devin", "pi", "muse"] {
+            for model in MODELS {
+                let row = json!({ "id": "x", "kind": kind, "model": model });
+                assert_eq!(seat_of(kind, model), Seat::StandIn, "{kind} {model}");
+                assert_eq!(harness_of(&row), None, "{kind} {model}: a harness is installed");
+                let mut asked = Vec::new();
+                validate_rows(std::slice::from_ref(&row), |harness| {
+                    asked.push(harness);
+                    Ok(Vec::new())
+                })
+                .unwrap();
+                assert!(asked.is_empty(), "{kind} {model}: the real catalogue was asked");
+                let listed = of_roster(kind, Some(&json!({ "agents": [row] })));
+                assert!(
+                    listed.iter().any(|listed| listed.id == model),
+                    "{kind} {model}: the stand-in does not list it"
+                );
+            }
+            // A model that only begins as one is the harness's.
+            assert_eq!(seat_of(kind, "fake-3"), Seat::Harness);
+        }
     }
 }

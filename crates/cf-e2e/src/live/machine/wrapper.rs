@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::path;
-use crate::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL, STAND_IN_WORKER_MODEL};
 use crate::live::ask;
 use crate::process::own_var;
 use crate::Result;
@@ -100,17 +99,12 @@ fn check_names(names: &[String]) -> Result {
     Ok(())
 }
 
-/// The model words that are the stand-in's whatever seats a run names: the three of
-/// [`crate::live::agents`] and the rig's second fake model.
+/// The model words that are the stand-in's whatever seats a run names: the one list of them
+/// ([`crate::stand_in_lists::MODELS`]).
 fn stand_in_words(names: &[String]) -> Vec<String> {
-    [
-        STAND_IN_WORKER_MODEL,
-        STAND_IN_CHIEF_MODEL,
-        STAND_IN_MEMBER_MODEL,
-        "fake-2",
-    ]
-    .into_iter()
-    .map(str::to_owned)
+    crate::stand_in_lists::MODELS
+        .into_iter()
+        .map(str::to_owned)
     .chain(names.iter().cloned())
     .fold(Vec::new(), |mut words, word| {
         if !words.contains(&word) {
@@ -371,7 +365,7 @@ mod tests {
         // The stand-in's window is as it was: it has no server of the harness's.
         assert!(
             script
-                .contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
+                .contains("fake | fake-2 | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -390,7 +384,7 @@ mod tests {
         );
         assert!(
             script
-                .contains("fake | fake-chief | worker | fake-2) exec '/the/fake-agent' \"$@\" ;;"),
+                .contains("fake | fake-2 | fake-chief | worker) exec '/the/fake-agent' \"$@\" ;;"),
             "{script}"
         );
         assert!(
@@ -758,7 +752,7 @@ mod tests {
         // A word that is the model of a stand-in, as the shell script reads it.
         assert!(
             text.contains(
-                "const fake = lists || process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-chief' || word === 'worker' || word === 'fake-2')"
+                "const fake = lists || process.argv.slice(2).some((word) => word === 'fake' || word === 'fake-2' || word === 'fake-chief' || word === 'worker')"
             ),
             "{text}"
         );

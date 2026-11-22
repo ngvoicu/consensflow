@@ -34,10 +34,11 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
             let asked = Cell::new(false);
             let record = with_record_homes(harness, &env, || {
                 asked.set(true);
-                Some(ask::Record::default())
+                Ok(Some(ask::Record::default()))
             });
+            // Refused, and said so: never a record of nothing.
             assert!(
-                record.is_none() && !asked.get(),
+                record.is_err() && !asked.get(),
                 "harness-ask reached a missing or foreign home"
             );
         }
@@ -80,7 +81,7 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
         let asked = Cell::new(false);
         let _ = with_record_homes(harness, &env, || {
             asked.set(true);
-            None
+            Ok(None)
         });
         assert!(asked.get(), "a run-owned {harness:?} home was refused");
     }
@@ -96,7 +97,7 @@ fn kit_round3_window_record_refuses_linked_out_record_roots() {
     let asked = Cell::new(false);
     let _ = with_record_homes(Harness::Codex, &env, || {
         asked.set(true);
-        None
+        Ok(None)
     });
     assert!(!asked.get());
 }
@@ -112,7 +113,7 @@ fn kit_round3_window_record_refuses_a_link_inside_codex_sessions() {
     let asked = Cell::new(false);
     let _ = with_record_homes(Harness::Codex, &env, || {
         asked.set(true);
-        None
+        Ok(None)
     });
     assert!(!asked.get(), "a linked-out Codex session was accepted");
 }

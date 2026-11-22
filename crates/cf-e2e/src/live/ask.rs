@@ -387,22 +387,35 @@ pub struct Record {
 
 /// What the record of the conversation `session` of a harness of the kind
 /// `kind` (`claude-code`, `devin`…) says, read in the places `env` names. None
-/// where it says nothing: no record of the conversation, or one that cannot be
-/// read.
+/// where the harness has written nothing of it yet; an error where the record could not be
+/// read, which is never taken for an empty one (T-1997 finding 7).
 pub fn records(kind: &str, session: &str, env: &[(String, String)]) -> Result<Option<Record>> {
     let answer = question(&json!({
         "op": "records", "kind": kind, "session": session, "env": env_object(env),
     }))?;
-    Ok(record_of(&answer))
+    record_of(&answer)
 }
 
-/// The record an answer to `records` holds.
-fn record_of(answer: &Value) -> Option<Record> {
+/// The record an answer to `records` holds, by the state the read came to (`read`): held, absent
+/// (none), or failed (an error, as is an answer that says none of the three).
+fn record_of(answer: &Value) -> Result<Option<Record>> {
     let reading = &answer["reading"];
-    if reading["unknown"] == true {
-        return None;
+    match answer["read"].as_str() {
+        Some("held") => {}
+        Some("absent") => return Ok(None),
+        Some("failed") => {
+            return Err(Error::Daemon(format!(
+                "the harness's record could not be read: {}",
+                reading["reason"].as_str().unwrap_or("no reason given")
+            )))
+        }
+        _ => {
+            return Err(Error::Daemon(format!(
+                "harness-ask's answer to a record read says neither held, absent nor failed: {answer}"
+            )))
+        }
     }
-    Some(Record {
+    Ok(Some(Record {
         items: reading["items"]
             .as_array()
             .map(|items| items.iter().map(Item::of).collect())
@@ -418,7 +431,7 @@ fn record_of(answer: &Value) -> Option<Record> {
         jobs_pending: reading["jobsPending"].as_u64().unwrap_or_default(),
         jobs_retired: reading["jobsRetired"].as_u64().unwrap_or_default(),
         monitors_noticed: reading["monitorsNoticed"].as_u64().unwrap_or_default(),
-    })
+    }))
 }
 
 /// The harness's own window on a new conversation, as the app opens it.
@@ -772,6 +785,7 @@ mod tests {
     fn a_record_is_its_items_whether_the_turn_is_settled_and_what_it_says_of_the_turn() {
         let answer = json!({
             "settled": true,
+            "read": "held",
             "reading": {
                 "items": [
                     { "id": "u1", "role": "user", "text": "Hello" },
@@ -782,7 +796,7 @@ mod tests {
                 "quota": null,
             },
         });
-        let record = record_of(&answer).unwrap();
+        let record = record_of(&answer).unwrap().unwrap();
         assert_eq!(
             record.items,
             [
@@ -803,12 +817,11 @@ mod tests {
         assert!(record.settled);
         assert_eq!(record.settlement, "settled");
         // A conversation the harness kept no record of is none.
-        let unknown =
-            json!({ "settled": true, "reading": { "unknown": true, "reason": "no file" } });
-        assert_eq!(record_of(&unknown), None);
+        let unknown = json!({ "settled": true, "read": "absent", "reading": { "unknown": true, "reason": "no file" } });
+        assert_eq!(record_of(&unknown).unwrap(), None);
         // A turn that is still going is not settled.
-        let going = json!({ "settled": false, "reading": { "items": [], "settlement": { "state": "in-flight" } } });
-        let going = record_of(&going).unwrap();
+        let going = json!({ "settled": false, "read": "held", "reading": { "items": [], "settlement": { "state": "in-flight" } } });
+        let going = record_of(&going).unwrap().unwrap();
         assert!(!going.settled && going.items.is_empty());
         assert_eq!(going.settlement, "in-flight");
     }
@@ -836,5 +849,16 @@ mod tests {
         assert_eq!(start_of(&Value::Null), None);
         let bare = start_of(&json!({ "command": "codex" })).unwrap();
         assert!(bare.args.is_empty() && bare.env.is_empty() && bare.prompt.is_none());
+    }
+
+    /// T-1997 finding 7: a read that failed is an error, and never a record of no rows; an
+    /// answer that says no state is one too.
+    #[test]
+    fn a_failed_read_is_an_error_and_never_rows() {
+        let failed = json!({ "settled": true, "read": "failed", "reading": { "unknown": true, "reason": "unreadable: denied" } });
+        let refused = record_of(&failed).unwrap_err().to_string();
+        assert!(refused.contains("unreadable: denied"), "{refused}");
+        let unsaid = json!({ "settled": true, "reading": { "unknown": true, "reason": "x" } });
+        assert!(record_of(&unsaid).is_err());
     }
 }

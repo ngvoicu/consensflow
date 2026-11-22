@@ -287,6 +287,9 @@ const AUDIT: &str = "CF_LIVE_AUDIT";
 const AUDIT_FILE: &str = "CF_LIVE_AUDIT_FILE";
 /// The variable the run hands the folders it made to a program it starts by (`cf_e2e::door::MADE_ROOTS`).
 const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
+/// The variables the run hands its protected roots to a program it starts by, the file and the
+/// digest of what was written in it (`cf_e2e::door::account`).
+const PROTECTED: [&str; 2] = ["CF_LIVE_PROTECTED_FILE", "CF_LIVE_PROTECTED_DIGEST"];
 
 /// Where a say-only run says what it would have done: the file `CF_LIVE_AUDIT_FILE` names, or
 /// one of this run's own in the temp folder. None where the run is not say-only.
@@ -555,9 +558,15 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
     for (name, value) in &asked.vars {
         invocation = invocation.var(name, value);
     }
-    // The folders a run may write below are the ones it makes: the variable that hands them to a
-    // program the run starts is never a person's to set (`cf_e2e::door::MADE_ROOTS`).
-    invocation.without(MADE_ROOTS)
+    // The folders a run may write below are the ones it makes, and the roots it never writes in
+    // are the ones its first process reads of the account: the variables that hand them to a
+    // program the run starts are never a person's to set (`cf_e2e::door::MADE_ROOTS`,
+    // `cf_e2e::door::account`).
+    PROTECTED
+        .into_iter()
+        .fold(invocation.without(MADE_ROOTS), |invocation, name| {
+            invocation.without(name)
+        })
 }
 
 /// The variable that names the folder `cf` and the pane host were built in before the run
