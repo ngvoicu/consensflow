@@ -47,6 +47,10 @@ pub(super) async fn ask(
         },
         caller.question_holding,
         caller.question_launch_task,
+        // When the asking process began, on the machine's own clock.
+        body.get(cf_proto::questions::ASKED_AT)
+            .and_then(Value::as_i64)
+            .filter(|at| *at > 0),
     )?;
     (context.kick)();
     Ok(Answer::created(

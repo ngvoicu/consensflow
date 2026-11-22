@@ -102,12 +102,17 @@ const STAFF_ON_ITS_OWN_MODEL: &str = "`cf staff` says the model, its name and th
 /// `cf task list` says it after the role in each lane's head.
 const LANE_RUNS_ON: &str = "a lane of the board says the model and effort its participant runs on, and `cf task list` says it in the lane's head, where Node's said the handle and role alone";
 
+/// A question is placed by the moment its asking began (N2): a window whose task was cancelled
+/// or accepted, and that asks afresh, is asking as the session, and the board takes it.
+const ASKED_AFTER_THE_END: &str = "a question `cf ask` stamps after its window's task was cancelled or accepted is the session's own and is taken, where Node refused it as the ended task's";
+
 /// `cf task add` given no tier prints the usage whose lines name each role's tiers: the worker,
 /// the frontend designer and the integrator have no Critical (critical work is not coding), and
 /// the roles Node gave no tier have one now.
 const USAGE_NAMES_EACH_ROLES_TIERS: &str = "`cf task add` with no tier prints a usage that names each role's tiers (a worker is complex, standard or light; the frontend designer, the architect, the researcher and the integrator take a tier too), where Node's said the roles with no tier took none";
 
 const DEPARTED: &[Departed] = &[
+    ("cf-board-005", ASKED_AFTER_THE_END),
     ("cf-board-014", LANE_RUNS_ON),
     ("cf-board-016", LANE_RUNS_ON),
     ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),

@@ -18,10 +18,20 @@ use crate::tasks::{no_longer_failed, no_longer_waiting};
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
 
+/// What a holding's end says between its closing and the reading of the clock that
+/// dates it, within one write.
+pub(crate) const ENDING: i64 = -1;
+
 pub(crate) struct Store {
     pub(crate) db: Connection,
     pub(crate) question_run: String,
     clock: Box<dyn Clock>,
+    /// What the clock last said, in ms: the time a holding's bounds are kept at
+    /// without a reading of their own.
+    last_ms: Option<i64>,
+    /// A holding ended in this operation and waits for the operation's next
+    /// reading of the clock to say when ([`ENDING`]).
+    ending: bool,
     names: Box<dyn FnMut() -> String>,
     /// Told every event as it is logged.
     trace: Box<dyn FnMut(&Event)>,
@@ -38,6 +48,8 @@ impl Store {
             db,
             question_run: crate::holding::initial_run(),
             clock,
+            last_ms: None,
+            ending: false,
             names,
             trace,
         }
@@ -60,7 +72,10 @@ impl Store {
         }
         self.db.execute_batch("BEGIN IMMEDIATE")?;
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
-            Ok(Ok(value)) => match self.db.execute_batch("COMMIT") {
+            Ok(Ok(value)) => match self
+                .settle_ends_unread()
+                .and_then(|()| self.db.execute_batch("COMMIT"))
+            {
                 Ok(()) => Ok(value),
                 Err(cause) => {
                     let _ = self.db.execute_batch("ROLLBACK");
@@ -68,14 +83,26 @@ impl Store {
                 }
             },
             Ok(Err(cause)) => {
+                self.ending = false;
                 let _ = self.db.execute_batch("ROLLBACK");
                 Err(cause)
             }
             Err(unwound) => {
+                self.ending = false;
                 let _ = self.db.execute_batch("ROLLBACK");
                 panic::resume_unwind(unwound)
             }
         }
+    }
+
+    /// An operation that never read the clock after a holding ended dates its end by
+    /// the reading before it.
+    fn settle_ends_unread(&mut self) -> rusqlite::Result<()> {
+        if self.ending {
+            let at = self.last_ms.unwrap_or_default();
+            self.settle_ends(at);
+        }
+        Ok(())
     }
 
     /// A batch is one visible operation: do not send its tentative events to
@@ -114,7 +141,42 @@ impl Store {
 
     /// The time now, as the ledger writes it: one reading of the clock.
     pub(crate) fn at(&mut self) -> String {
-        iso(self.clock.now_ms())
+        iso(self.now_ms())
+    }
+
+    /// The time now in milliseconds: one reading of the clock.
+    pub(crate) fn now_ms(&mut self) -> i64 {
+        let now = self.clock.now_ms();
+        self.last_ms = Some(now);
+        self.settle_ends(now);
+        now
+    }
+
+    /// A holding that ended in this operation has the operation's next reading
+    /// of the clock for its end, which an event of the same operation makes: the
+    /// ledger reads the clock no more often for it.
+    pub(crate) fn end_with_next_reading(&mut self) {
+        self.ending = true;
+    }
+
+    fn settle_ends(&mut self, at: i64) {
+        if std::mem::take(&mut self.ending) {
+            // A failed write here fails the operation's own writes too.
+            let _ = self.db.execute(
+                "UPDATE question_holding SET ended_at = ?1 WHERE ended_at = ?2",
+                rusqlite::params![at, ENDING],
+            );
+        }
+    }
+
+    /// The time the clock last said, in milliseconds, with no reading of its own:
+    /// the operation that sets a holding's bounds has read the clock for its events
+    /// already, and a ledger's replay counts its readings. A clock not yet read is read.
+    pub(crate) fn recent_ms(&mut self) -> i64 {
+        match self.last_ms {
+            Some(at) => at,
+            None => self.now_ms(),
+        }
     }
 
     /// A project's row, or a refusal naming the id.

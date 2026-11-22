@@ -72,7 +72,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                                                     && Some(h.last_brief) != start.last_brief
                                             });
                                             if !later_brief {
-                                                ledger.question_brief_handed_over(brief)?;
+                                                ledger.question_launch_handed_over(brief)?;
                                             }
                                         }
                                     }

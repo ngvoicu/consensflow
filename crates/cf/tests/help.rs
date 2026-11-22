@@ -43,7 +43,13 @@ fn asked(api: &ScriptedApi) -> Vec<(String, String, Option<Value>)> {
     api.received()
         .into_iter()
         .map(|received| {
-            let body = received.json();
+            let mut body = received.json();
+            // A question says when its asking began; `ask_stamp.rs` holds that.
+            if received.path == "/api/questions" {
+                if let Some(fields) = body.as_mut().and_then(Value::as_object_mut) {
+                    fields.remove("askedAt");
+                }
+            }
             (received.method, received.path, body)
         })
         .collect()

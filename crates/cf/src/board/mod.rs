@@ -17,9 +17,10 @@ mod words;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
+use cf_base::time::{Clock, SystemClock};
 use cf_board::{Board, BoardError};
 use cf_proto::cf_word::CfWord;
-use cf_proto::questions::ASKED_THEN_END_THE_TURN;
+use cf_proto::questions::{ASKED_AT, ASKED_THEN_END_THE_TURN};
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
@@ -436,6 +437,8 @@ fn ask(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
+    // The asking begins here: the board places the question by this moment.
+    let asked_at = SystemClock.now_ms();
     let words = split(rest, ASK);
     if words.asks_for_help() {
         return Ok(help_of(&["ask"]));
@@ -450,7 +453,9 @@ fn ask(
         brief::brief_of(&words, given, input)?,
         "cf ask \"your question\"",
     )?;
-    let message = posted(board, "/api/questions", body_of(question))?;
+    let mut body = body_of(question);
+    body.insert(ASKED_AT.into(), asked_at.into());
+    let message = posted(board, "/api/questions", body)?;
     let text = format!(
         "m-{} asked @{}. {}",
         js::text(message.get("id")),

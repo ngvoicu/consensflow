@@ -18,12 +18,14 @@
 //! as it is.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
+use cf_base::time::{Clock, SystemClock};
 use cf_proto::cf_word::CfWord;
-use cf_proto::questions::{Answer, Question, Reply};
+use cf_proto::questions::{Answer, Question, Reply, ASKED_AT};
 use serde_json::{json, Value};
 
 use crate::{Board, BoardError};
@@ -40,13 +42,55 @@ pub fn board_of(env: &Env) -> Option<Board> {
     Some(Board::new(Some(url), &token.to_string_lossy()).with_cf(crate::cf_in(env)))
 }
 
+/// Where one question comes from: when its asking began, and the question the
+/// board already holds for it. The board binds a question to the holding its
+/// window had at that moment, so the door that first receives a request stamps
+/// it, and a request asked again (the Codex broker's, after a reconnect) keeps
+/// its stamp and its board question: the cell is shared by every copy.
+#[derive(Debug, Clone)]
+pub struct Asking {
+    asked_at: i64,
+    posted: Arc<Mutex<Option<u64>>>,
+}
+
+impl Asking {
+    /// A question whose asking begins now.
+    pub fn now() -> Self {
+        Self::at(SystemClock.now_ms())
+    }
+
+    /// A question whose asking began at `asked_at` (ms since the epoch).
+    pub fn at(asked_at: i64) -> Self {
+        Self {
+            asked_at,
+            posted: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// When the asking began.
+    pub fn asked_at(&self) -> i64 {
+        self.asked_at
+    }
+
+    /// The board's question for this asking, once it has been put there.
+    pub fn posted(&self) -> Option<u64> {
+        *self.posted.lock().unwrap_or_else(|held| held.into_inner())
+    }
+}
+
 /// Puts `questions` on the board and waits up to `wait` for the chief's
 /// answer, or until `stop` is raised: what came of it. A door the board
 /// shut (the task was stopped) is told so in the board's own words, which
 /// the window hands to its model as they are; any other refusal is wrapped in
 /// what points the model to `ask`, started by the window's own `cf` ([`Board::cf`]).
-pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicBool) -> Reply {
-    match ask_the_board_until(board, questions, wait, stop) {
+pub fn ask(
+    board: &Board,
+    questions: &[Question],
+    asking: &Asking,
+    wait: Duration,
+    stop: &AtomicBool,
+) -> Reply {
+    match ask_the_board_until(board, questions, asking, wait, stop) {
         Ok(Some(answer)) => Reply::Answered(answer),
         Err(cause) if cause.code() == Some(DOOR_CLOSED) => Reply::Refused(cause.to_string()),
         Err(cause)
@@ -141,10 +185,11 @@ fn refusal_reason(cause: &BoardError, cf: &CfWord) -> String {
 fn ask_the_board_until(
     board: &Board,
     questions: &[Question],
+    asking: &Asking,
     wait: Duration,
     stop: &AtomicBool,
 ) -> Result<Option<Answer>, BoardError> {
-    ask_retrying(board, questions, wait, stop, &POLL_RETRIES)
+    ask_retrying(board, questions, asking, wait, stop, &POLL_RETRIES)
 }
 
 /// [`ask_the_board_until`], a poll that gets no answer asked again after each
@@ -152,6 +197,7 @@ fn ask_the_board_until(
 fn ask_retrying(
     board: &Board,
     questions: &[Question],
+    asking: &Asking,
     wait: Duration,
     stop: &AtomicBool,
     retries: &[Duration],
@@ -159,12 +205,29 @@ fn ask_retrying(
     if stop.load(Ordering::Relaxed) {
         return Ok(None);
     }
-    let posted = board.post("/api/questions", &json!({ "questions": questions }))?;
-    let id = posted
-        .value()
-        .pointer("/message/id")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| posted.lacks("message id"))?;
+    // The cell is held through the request: a copy of this asking that comes
+    // while it is on its way waits for it, and finds the question made.
+    let mut cell = asking
+        .posted
+        .lock()
+        .unwrap_or_else(|held| held.into_inner());
+    let id = match *cell {
+        Some(id) => id,
+        None => {
+            let posted = board.post(
+                "/api/questions",
+                &json!({ "questions": questions, ASKED_AT: asking.asked_at }),
+            )?;
+            let id = posted
+                .value()
+                .pointer("/message/id")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| posted.lacks("message id"))?;
+            *cell = Some(id);
+            id
+        }
+    };
+    drop(cell);
     let until = Instant::now().checked_add(wait);
     let mut lost = 0;
     loop {

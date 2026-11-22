@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use cf_base::env::Env;
 use cf_base::js;
-use cf_board::door::{self, DOOR_WAIT};
+use cf_board::door::{self, Asking, DOOR_WAIT};
 use cf_board::Board;
 use cf_harness::{claude, devin, muse};
 use cf_proto::questions::{Answer, Question, Reply};
@@ -28,6 +28,8 @@ pub fn run(
     input: &mut dyn Read,
     out: &mut dyn Write,
 ) -> io::Result<u8> {
+    // The asking begins here: the board places the question by this moment.
+    let asking = Asking::now();
     let mut handed: Option<(Board, Answer)> = None;
     let said = match harness {
         Some(tool @ ("claude" | "devin")) => {
@@ -38,7 +40,7 @@ pub fn run(
             let wait = question_wait(env);
             let given = RefCell::new(None);
             let ask = |questions: &[Question]| {
-                let reply = door::ask(&board, questions, wait, &AtomicBool::new(false));
+                let reply = door::ask(&board, questions, &asking, wait, &AtomicBool::new(false));
                 if let Reply::Answered(answer) = &reply {
                     *given.borrow_mut() = Some(answer.clone());
                 }
@@ -181,6 +183,27 @@ mod tests {
             ("POST", "/api/answers/6/receipt")
         );
         assert_eq!(received[2].json(), Some(json!({ "received": true })));
+    }
+
+    #[test]
+    fn a_question_is_stamped_with_the_moment_its_hook_began() {
+        use cf_base::time::{Clock, SystemClock};
+        let board = scripted(vec![
+            reply(201, json!({ "message": { "id": 5 } })),
+            reply(409, json!({ "error": "door-closed", "message": "shut" })),
+        ]);
+        let before = SystemClock.now_ms();
+        let (_, status) = run_claude(&board, &[]);
+        let after = SystemClock.now_ms();
+        assert_eq!(status, 0);
+        let received = board.received();
+        let at = received[0].json().unwrap()["askedAt"]
+            .as_i64()
+            .expect("a stamp");
+        assert!(
+            (before..=after).contains(&at),
+            "{before} <= {at} <= {after}"
+        );
     }
 
     #[test]

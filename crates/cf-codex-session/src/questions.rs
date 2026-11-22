@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use cf_base::js;
 use cf_base::json::js_order;
-use cf_board::door::ask;
+use cf_board::door::{ask, Asking};
 use cf_board::Board;
 use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Map, Value};
@@ -71,8 +71,94 @@ impl Asked {
     /// Puts the questions on the board and waits up to `wait` for the answer,
     /// or until `stop` is raised. Blocks: the caller runs it where blocking is
     /// fine, and everything else goes on meanwhile.
-    pub(crate) fn ask(&self, board: &Board, wait: Duration, stop: &AtomicBool) -> Reply {
-        ask(board, &self.questions, wait, stop)
+    pub(crate) fn ask(
+        &self,
+        board: &Board,
+        asking: &Asking,
+        wait: Duration,
+        stop: &AtomicBool,
+    ) -> Reply {
+        ask(board, &self.questions, asking, wait, stop)
+    }
+
+    /// What names Codex's request across a reconnect of its pair, where its RPC
+    /// id changes: the thread, turn and item it names. A request that names no
+    /// item is known by the id it came under and its questions.
+    pub(crate) fn key(&self, id: &Value, params: Option<&Value>) -> RequestKey {
+        let named = |field: &str| {
+            params
+                .and_then(|params| params.get(field))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let item = named("itemId");
+        let anonymous = item.is_none().then(|| {
+            format!(
+                "{id}\u{0}{}",
+                serde_json::to_string(&self.questions).unwrap_or_default()
+            )
+        });
+        RequestKey {
+            thread: named("threadId"),
+            turn: named("turnId"),
+            item,
+            anonymous,
+        }
+    }
+}
+
+/// Which native request a question is: the same one, replayed after its pair's
+/// reconnect, has the same key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RequestKey {
+    thread: Option<String>,
+    turn: Option<String>,
+    item: Option<String>,
+    anonymous: Option<String>,
+}
+
+/// The requests the broker has put to the board and not settled, for its whole
+/// lifetime: each keeps when it was first received and the question it made
+/// there, so a replay of it after a reconnect is the same question, asked at the
+/// same moment. A broker that restarts loses them.
+#[derive(Default)]
+pub(crate) struct Stamps {
+    held: Vec<(RequestKey, Value, Asking)>,
+}
+
+/// The most requests it holds: the oldest goes first.
+const MOST_HELD: usize = 64;
+
+impl Stamps {
+    /// The asking of the request `key`, which began now where it is new; `id` is
+    /// the RPC id it came under this time.
+    pub(crate) fn of(&mut self, key: RequestKey, id: &Value) -> Asking {
+        if let Some((_, current, asking)) = self.held.iter_mut().find(|(held, ..)| *held == key) {
+            *current = id.clone();
+            return asking.clone();
+        }
+        if self.held.len() >= MOST_HELD {
+            self.held.remove(0);
+        }
+        let asking = Asking::now();
+        self.held.push((key, id.clone(), asking.clone()));
+        asking
+    }
+
+    /// The request `key` is settled: Codex has its answer.
+    pub(crate) fn settle(&mut self, key: &RequestKey) {
+        self.held.retain(|(held, ..)| held != key);
+    }
+
+    /// The turn on `thread` is over.
+    pub(crate) fn end_turn_of(&mut self, thread: &str) {
+        self.held
+            .retain(|(key, ..)| key.thread.as_deref() != Some(thread));
+    }
+
+    /// Codex says the request it knows as `id` is resolved.
+    pub(crate) fn resolve(&mut self, id: &Value) {
+        self.held.retain(|(_, current, _)| current != id);
     }
 }
 
@@ -144,6 +230,30 @@ mod tests {
     }
 
     #[test]
+    fn a_request_replayed_under_another_rpc_id_has_the_stamp_of_its_first_receipt() {
+        let mut first = request();
+        first["params"]["turnId"] = json!("turn-1");
+        first["params"]["itemId"] = json!("item-1");
+        let mut replay = first.clone();
+        replay["id"] = json!("ask-9");
+        let mut stamps = Stamps::default();
+        let key = |request: &Value| asked(request).key(&request["id"], request.get("params"));
+        let begun = stamps.of(key(&first), &first["id"]);
+        std::thread::sleep(Duration::from_millis(5));
+        let again = stamps.of(key(&replay), &replay["id"]);
+        assert_eq!(begun.asked_at(), again.asked_at());
+        // Another item of the same id is another request, asked afresh.
+        let mut other = first.clone();
+        other["params"]["itemId"] = json!("item-2");
+        let apart = stamps.of(key(&other), &other["id"]);
+        assert!(apart.asked_at() > begun.asked_at());
+        // A request settled is forgotten; its replay would be new.
+        stamps.settle(&key(&first));
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(stamps.of(key(&first), &first["id"]).asked_at() > apart.asked_at());
+    }
+
+    #[test]
     fn answers_a_refused_question_with_the_reason_under_every_id() {
         let params = json!({ "questions": [{ "id": "a" }, { "id": "b" }] });
         let asked = Asked::read(Some(&params)).unwrap();
@@ -208,8 +318,12 @@ mod tests {
             ),
         ]);
         let board = Board::new(Some(&api.url), "window-token");
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         let Reply::Answered(answer) = outcome else {
             panic!("{outcome:?}");
         };
@@ -227,8 +341,12 @@ mod tests {
             json!({ "error": "bad-questions", "message": "questions: one to 4 questions" }),
         )]);
         let board = Board::new(Some(&api.url), "window-token");
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         assert_eq!(
             outcome,
             Reply::Refused(
@@ -249,8 +367,12 @@ mod tests {
             ("CONSENSFLOW_TOKEN", ""),
         ]);
         let board = cf_board::door::board_of(&env).unwrap();
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         assert!(
             matches!(&outcome, Reply::Refused(reason) if reason.contains("unknown participant")),
             "{outcome:?}"
@@ -263,7 +385,7 @@ mod tests {
         let gone = Board::new(Some("http://127.0.0.1:9"), "t");
         let quick = AtomicBool::new(false);
         assert_eq!(
-            asked(&request()).ask(&gone, Duration::from_secs(5), &quick),
+            asked(&request()).ask(&gone, &Asking::now(), Duration::from_secs(5), &quick),
             Reply::Unanswered
         );
 
@@ -273,7 +395,7 @@ mod tests {
         ]);
         let board = Board::new(Some(&api.url), "t");
         assert_eq!(
-            asked(&request()).ask(&board, Duration::from_millis(50), &quick),
+            asked(&request()).ask(&board, &Asking::now(), Duration::from_millis(50), &quick),
             Reply::Unanswered
         );
         quick.store(true, Ordering::Relaxed);
