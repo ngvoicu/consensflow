@@ -13,9 +13,8 @@ pub fn flush(file: &File) -> io::Result<()> {
 }
 
 /// `from` renamed over `to`, and the rename flushed through the folder: on
-/// Unix the folder is synced after the rename, on Windows the move is made
-/// with write-through (`MOVEFILE_WRITE_THROUGH`), which returns once it is on
-/// the disk.
+/// Unix the folder is synced after the rename, on Windows the folder is opened
+/// for writing with backup semantics and flushed.
 pub fn rename_durably(from: &Path, to: &Path) -> io::Result<()> {
     rename_through(from, to)
 }
@@ -32,24 +31,20 @@ fn rename_through(from: &Path, to: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 fn rename_through(from: &Path, to: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Foundation::GENERIC_WRITE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    std::fs::rename(from, to)?;
+    let folder = match to.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
     };
-    let wide = |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain([0]).collect() };
-    let (from, to) = (wide(from), wide(to));
-    // SAFETY: both are NUL-terminated and live across the call.
-    let moved = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if moved == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    // A folder is opened for writing, with backup semantics, to flush its entries.
+    std::fs::OpenOptions::new()
+        .access_mode(GENERIC_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(folder)?
+        .sync_all()
 }
 
 #[cfg(test)]
