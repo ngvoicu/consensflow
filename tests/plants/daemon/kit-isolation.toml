@@ -739,3 +739,13 @@ find = '''        if self.harness == Harness::Muse {
 replace = '''        if false {
             return self
                 .command'''
+
+[[plant]]
+name = "K3 doors: the judge opens and closes a file it judges"
+meant = "the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/identity.rs"
+find = '''        let found = fs::metadata(path)?;'''
+replace = '''        let found = fs::File::open(path)?.metadata()?;'''

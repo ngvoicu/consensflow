@@ -443,3 +443,55 @@ fn a_child_adds_to_the_audit_file_the_run_made_and_to_no_file_put_at_its_path_si
     assert!(stopped.is_err());
     assert_eq!(fs::read_to_string(&file).unwrap(), "another's");
 }
+
+// ---- The judge opens nothing of a file it judges (round 2 of T-2007). ----
+
+/// A whole-file write lock of `file`'s, as SQLite takes its locks (`fcntl`): whether it was
+/// taken.
+#[cfg(unix)]
+fn write_lock(file: &fs::File) -> bool {
+    use std::os::fd::AsRawFd;
+    // SAFETY: the structure is plain data, zeroed, then set for a whole-file write lock.
+    #[allow(unsafe_code)]
+    let mut lock: nix::libc::flock = unsafe { std::mem::zeroed() };
+    lock.l_type = nix::libc::F_WRLCK as _;
+    lock.l_whence = nix::libc::SEEK_SET as _;
+    nix::fcntl::fcntl(file.as_raw_fd(), nix::fcntl::FcntlArg::F_SETLK(&lock)).is_ok()
+}
+
+/// The stand-in Devin's store crashed under load (SIGBUS, `Bus error: 10`) when the judge looked
+/// at its WAL and shared-memory files: an open and a close of a file by the judge (its probe of
+/// the volume's case, a made file's identity) drops every `fcntl` lock its process holds on that
+/// file, SQLite's among them; another connection then takes the store for unused and resets the
+/// shared memory the first has mapped. The judge reads what a file is without opening it, and a
+/// lock its process holds on the file it judges is held after.
+#[cfg(unix)]
+#[test]
+fn the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges() {
+    const CHILD: &str = "CF_T2007_LOCK_CHILD";
+    if let Some(file) = crate::process::own_var(CHILD) {
+        let open = fs::OpenOptions::new().read(true).write(true).open(file).unwrap();
+        assert!(!write_lock(&open), "the parent's lock was gone");
+        return;
+    }
+    let root = made("k3-lock-").unwrap();
+    let file = root.path().join("sessions.db-shm");
+    super::write(&file, "shared memory").unwrap();
+    let held = fs::OpenOptions::new().read(true).write(true).open(&file).unwrap();
+    assert!(write_lock(&held));
+    for act in [Act::Write, Act::Remove, Act::Rename] {
+        let _ = judge(&file, act);
+    }
+    let _ = super::writable(&file, false);
+    let ran = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "door::k3_tests::the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges",
+        std::time::Duration::from_secs(60),
+    )
+    .inheriting_env()
+    .var(CHILD, &file)
+    .run()
+    .unwrap();
+    assert_eq!(ran.code, Some(0), "{ran}");
+    drop(held);
+}

@@ -35,11 +35,30 @@ pub fn of_file(file: &fs::File) -> io::Result<String> {
     }
 }
 
-/// The identity of what `path` leads to: a file or a folder.
+/// The identity of what `path` leads to: a file or a folder. On Unix it is read without opening
+/// the file: a close of any descriptor of a file drops every `fcntl` lock the process holds on it,
+/// and a database's (SQLite's, on its WAL and shared memory) with them. The stand-in Devin's store
+/// then took its shared memory for unused, and the next read of its mapping ended the window with
+/// SIGBUS (T-2007 round 2). Windows' locks are the handle's own, which a handle opened and closed
+/// here does not touch.
 pub fn of_path(path: &Path) -> io::Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let found = fs::metadata(path)?;
+        Ok(format!("{}:{}", found.dev(), found.ino()))
+    }
+    #[cfg(windows)]
+    {
+        of_path_opened(path)
+    }
+}
+
+/// [`of_path`] by a handle opened for it, where the system gives a file's identity only so.
+#[cfg(windows)]
+fn of_path_opened(path: &Path) -> io::Result<String> {
     let mut open = fs::OpenOptions::new();
     open.read(true);
-    #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt as _;
         // A folder is opened only with the flag that asks for it (`FILE_FLAG_BACKUP_SEMANTICS`).
