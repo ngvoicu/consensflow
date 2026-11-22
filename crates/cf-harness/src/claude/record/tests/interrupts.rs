@@ -27,6 +27,11 @@ fn live(name: &str) -> Vec<Value> {
         "stopped-in-the-stop-hook" => {
             include_str!("../../../../tests/fixtures/claude/stopped-in-the-stop-hook.jsonl")
         }
+        "interrupted-with-background-agent" => {
+            include_str!(
+                "../../../../tests/fixtures/claude/interrupted-with-background-agent.jsonl"
+            )
+        }
         other => panic!("no fixture {other}"),
     };
     text.replace("$SESSION", SESSION)
@@ -259,6 +264,44 @@ fn an_interrupt_in_a_stop_hook_that_names_no_message_ends_the_turn_and_its_answe
         ],
         "the answer is not complete: the interrupt cut the turn, and a result is a complete answer"
     );
+}
+
+#[test]
+fn a_recorded_interrupt_with_a_background_agent_ends_the_turn_without_a_pending_count() {
+    let records = live("interrupted-with-background-agent");
+    let stop = records
+        .iter()
+        .position(|record| {
+            record["message"]["content"]
+                .as_array()
+                .is_some_and(|blocks| {
+                    blocks
+                        .iter()
+                        .any(|block| block["text"] == "[Request interrupted by user for tool use]")
+                })
+        })
+        .expect("the interrupt the live run recorded");
+    let typed = records
+        .iter()
+        .position(|record| record["message"]["content"] == "Reply with OK.")
+        .expect("the next human prompt");
+    assert!(typed > stop);
+    assert!(records[..=stop]
+        .iter()
+        .all(|record| { record["subtype"] != "turn_duration" }));
+
+    let interrupted = looked_at(&records[..=stop]);
+    assert_eq!(interrupted.settlement, Settlement::Settled);
+    assert!(!interrupted.in_flight);
+    assert_eq!(interrupted.pending.agents, 0, "the record has no count");
+
+    let next_turn = looked_at(&records[..=typed]);
+    assert_eq!(next_turn.settlement, Settlement::InFlight);
+    assert!(next_turn.in_flight);
+    assert!(next_turn
+        .items
+        .iter()
+        .any(|item| { item.role == Role::User && item.text.as_ref() == "Reply with OK." }));
 }
 
 #[test]

@@ -459,6 +459,221 @@ fn a_refusal_is_cleared_by_the_next_prompt_and_by_nothing_else() {
     assert_eq!(log.quota(), None);
 }
 
+fn quota_end(session: &str) -> String {
+    line(&json!({"sessionId": session, "cause": "quota_exhausted",
+        "errorMessage": "Your daily usage quota has been exhausted."}))
+}
+
+fn working(session: &str) -> String {
+    line(
+        &json!({"sessionId": session, "update": {"sessionUpdate": "session_info_update",
+        "_meta": {"cognition.ai/statusEnum": "working"}}}),
+    )
+}
+
+#[test]
+fn a_turn_after_a_quota_refusal_retires_the_old_refusal() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    assert!(log.quota().is_some());
+    log.append(&format!(
+        "{}{}",
+        working("s"),
+        line(&json!({"sessionId": "s", "cause": "error", "errorMessage": "I/O error"}))
+    ));
+    assert_eq!(
+        log.quota(),
+        None,
+        "the failed turn is after the quota refusal"
+    );
+}
+
+#[test]
+fn replacing_a_wire_keeps_a_refusal_before_a_later_turn_retired() {
+    let log = Log::new();
+    log.write(&format!("{}{}{}", shows("s"), quota_end("s"), working("s")));
+    assert_eq!(log.quota(), None);
+    let replacement = log.wire.path().with_extension("new");
+    fs::copy(log.wire.path(), &replacement).unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    assert_eq!(
+        log.wire.read(EPOCH_MS + MINUTE).unwrap().quota.as_deref(),
+        None
+    );
+}
+
+#[test]
+fn the_same_quota_line_in_a_replacement_keeps_its_time_but_a_new_line_does_not() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    let first = log.wire.read(EPOCH_MS).unwrap().quota.unwrap();
+    let replacement = log.wire.path().with_extension("new");
+    fs::copy(log.wire.path(), &replacement).unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    let reread = log.wire.read(EPOCH_MS + MINUTE).unwrap().quota.unwrap();
+    assert!(
+        Arc::ptr_eq(&first, &reread),
+        "the same line is the same refusal"
+    );
+    log.append(&format!("{}{}", working("s"), quota_end("s")));
+    let fresh = log.wire.read(EPOCH_MS + 2 * MINUTE).unwrap().quota.unwrap();
+    assert!(!Arc::ptr_eq(&first, &fresh));
+    assert_eq!(*fresh, exhausted_at(EPOCH_MS + 2 * MINUTE, None));
+}
+
+#[test]
+fn a_replacement_with_a_new_identical_refusal_dates_the_new_line() {
+    let log = Log::new();
+    let old = format!("{}{}", shows("s"), quota_end("s"));
+    log.write(&old);
+    let first = log.wire.read(EPOCH_MS).unwrap().quota.unwrap();
+    let replacement = log.wire.path().with_extension("new");
+    fs::write(
+        &replacement,
+        format!("{old}{}{}", working("s"), quota_end("s")),
+    )
+    .unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    let fresh = log.wire.read(EPOCH_MS + MINUTE).unwrap().quota.unwrap();
+    assert!(!Arc::ptr_eq(&first, &fresh));
+    assert_eq!(*fresh, exhausted_at(EPOCH_MS + MINUTE, None));
+}
+
+#[test]
+fn a_quota_line_in_a_changed_prefix_is_not_assumed_to_be_the_same() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    let first = log.wire.read(EPOCH_MS).unwrap().quota.unwrap();
+    let replacement = log.wire.path().with_extension("new");
+    fs::write(&replacement, format!("{}{}", shows("t"), quota_end("s"))).unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    let fresh = log.wire.read(EPOCH_MS + MINUTE).unwrap().quota.unwrap();
+    assert!(!Arc::ptr_eq(&first, &fresh));
+    assert_eq!(*fresh, exhausted_at(EPOCH_MS + MINUTE, None));
+}
+
+#[test]
+fn a_fresh_refusal_at_an_old_position_after_truncation_is_new() {
+    let log = Log::new();
+    let old = format!("{}{}", shows("s"), quota_end("s"));
+    log.write(&old);
+    let first = log.wire.read(EPOCH_MS).unwrap().quota.unwrap();
+    let replacement = log.wire.path().with_extension("new");
+    fs::write(&replacement, shows("s")).unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    log.wire.read(EPOCH_MS + MINUTE).unwrap();
+    fs::write(&replacement, old).unwrap();
+    fs::rename(&replacement, log.wire.path()).unwrap();
+    let fresh = log.wire.read(EPOCH_MS + 2 * MINUTE).unwrap().quota.unwrap();
+    assert!(!Arc::ptr_eq(&first, &fresh));
+    assert_eq!(*fresh, exhausted_at(EPOCH_MS + 2 * MINUTE, None));
+}
+
+#[test]
+fn replacement_keeps_the_date_of_each_existing_devin_quota_shape() {
+    let error = line(&json!({"jsonrpc": "2.0", "id": 2,
+        "error": {"code": -32011, "message": "Quota exhausted."}}));
+    for refusal in [quota_end("s"), error, says("Usage limit reached")] {
+        let log = Log::new();
+        log.write(&format!("{}{refusal}", shows("s")));
+        let first = log.wire.read(EPOCH_MS).unwrap().quota.unwrap();
+        let replacement = log.wire.path().with_extension("new");
+        fs::copy(log.wire.path(), &replacement).unwrap();
+        fs::rename(&replacement, log.wire.path()).unwrap();
+        let reread = log.wire.read(EPOCH_MS + MINUTE).unwrap().quota.unwrap();
+        assert!(Arc::ptr_eq(&first, &reread), "{refusal}");
+        log.append(&refusal);
+        let fresh = log.wire.read(EPOCH_MS + 2 * MINUTE).unwrap().quota.unwrap();
+        assert!(!Arc::ptr_eq(&first, &fresh), "{refusal}");
+    }
+}
+
+#[test]
+fn a_fresh_refusal_in_the_next_turn_is_kept() {
+    let log = Log::new();
+    log.write(&format!(
+        "{}{}{}{}",
+        shows("s"),
+        quota_end("s"),
+        working("s"),
+        quota_end("s")
+    ));
+    assert_eq!(log.quota(), Some(exhausted_at(EPOCH_MS, None)));
+}
+
+#[test]
+fn work_in_the_same_turn_does_not_clear_its_refusal() {
+    let log = Log::new();
+    log.write(&format!(
+        "{}{}{}",
+        shows("s"),
+        working("s"),
+        says("Usage limit reached")
+    ));
+    assert!(log.quota().is_some());
+    log.append(&says("Still working."));
+    assert!(log.quota().is_some());
+}
+
+#[test]
+fn the_existing_turn_openings_all_retire_the_preceding_quota() {
+    let said_back = line(&json!({"sessionId": "s", "update": {
+        "sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "Go on"},
+        "_meta": {"cognition.ai/eventType": "user_message", "cognition.ai/clientMessageId": "new"}}}));
+    let streamed = line(&json!({"sessionId": "s", "update": {
+        "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Looking"},
+        "_meta": {"cognition.ai/streamingMessageId": "new"}}}));
+    let steps = line(&json!({"sessionId": "s", "steps": [
+        {"kind": "prompt", "userMessageId": "new", "summary": "Go on"}]}));
+    for opening in [working("s"), said_back, streamed, steps] {
+        let log = Log::new();
+        log.write(&format!(
+            "{}{}{}",
+            shows("s"),
+            line(&json!({"sessionId": "s", "steps": []})),
+            quota_end("s")
+        ));
+        assert!(log.quota().is_some());
+        log.append(&opening);
+        assert_eq!(log.quota(), None, "opening {opening}");
+    }
+}
+
+#[test]
+fn replay_and_instant_lines_do_not_retire_a_quota() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    let replay = line(&json!({"sessionId": "s", "update": {
+        "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Old"},
+        "_meta": {"cognition.ai/timestamp": 10}}}));
+    let instant = line(&json!({"sessionId": "s", "update": {
+        "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Command"},
+        "_meta": {"cognition.ai/instant": true}}}));
+    log.append(&format!("{replay}{instant}"));
+    assert!(log.quota().is_some());
+}
+
+#[test]
+fn a_refusal_on_a_line_that_opens_a_turn_is_kept() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    log.append(&says("The rate limiter is tested."));
+    assert!(
+        log.quota().is_some(),
+        "the existing rate-limit word reading is unchanged"
+    );
+}
+
+#[test]
+fn a_line_that_both_opens_and_ends_a_later_turn_retires_the_old_quota() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), quota_end("s")));
+    log.append(&line(&json!({"sessionId": "s", "cause": "error",
+        "update": {"sessionUpdate": "session_info_update",
+            "_meta": {"cognition.ai/statusEnum": "working"}}})));
+    assert_eq!(log.quota(), None);
+}
+
 #[test]
 fn a_prompt_refused_by_its_code_its_kind_or_its_words_is_exhausted() {
     for (error, resets) in [

@@ -1,6 +1,6 @@
 //! Devin's wire log of one launch, as its adapter follows it: the conversation
 //! the window shows, the permission mode that conversation is in, and Devin's
-//! word on its quota, a refusal after the latest prompt: in its message text
+//! word on its quota, a refusal after the latest turn began: in its message text
 //! ("Reached overall message rate limit … reset in 35 minutes", "Usage limit
 //! reached", "Quota exhausted"), or as the prompt's own error. The log only
 //! grows, so each look reads what was appended since the last; one that was
@@ -73,6 +73,13 @@ pub(super) struct Said {
 /// How much of a log a look reads at a time when it reads again what it has read.
 const CHUNK: u64 = 64 * 1_024;
 
+/// The last quota line's position and the value dated when it was first read.
+#[derive(Clone)]
+struct QuotaLine {
+    number: u64,
+    quota: Arc<Quota>,
+}
+
 /// What the lookers have read of a log.
 #[derive(Default)]
 struct State {
@@ -90,9 +97,12 @@ struct State {
     read: DefaultHasher,
     /// What follows its last newline: a line still being written.
     carry: String,
+    /// Complete lines consumed, including malformed ones.
+    lines: u64,
     shown: Option<String>,
     mode: Option<String>,
     quota: Option<Arc<Quota>>,
+    quota_line: Option<QuotaLine>,
     /// The conversations its lines name.
     naming: Naming,
     /// The turns the log says of each session.
@@ -136,14 +146,32 @@ impl WireLog {
             .map_err(|error| FileError::call(error, "fstat", None).to_string())?;
         let (size, written) = (metadata.len(), mtime_ms(&metadata).ok());
         let identity = identity(&file).ok();
-        if state.offset > 0 && state.replaced(&mut file, size, identity, written, at_ms)? {
-            state.offset = 0;
-            state.read = DefaultHasher::default();
-            state.carry.clear();
-            state.mode = None;
-            state.naming.read_anew();
-            state.turns.read_anew();
-        }
+        let replayed_quota =
+            if state.offset > 0 && state.replaced(&mut file, size, identity, written, at_ms)? {
+                // An identical old prefix is the same evidence, even if a replacement
+                // file made us read it again. Keep the quota line's original date so
+                // a released hold is not immediately re-created by the reread.
+                let replayed = if size >= state.offset
+                    && hash_of(&mut file, state.offset)? == state.read.finish()
+                {
+                    state.quota_line.clone()
+                } else {
+                    None
+                };
+                // The reread records the last quota that is actually in this
+                // file; an older file's position must not name a later refusal.
+                state.quota_line = None;
+                state.offset = 0;
+                state.read = DefaultHasher::default();
+                state.carry.clear();
+                state.lines = 0;
+                state.mode = None;
+                state.naming.read_anew();
+                state.turns.read_anew();
+                replayed
+            } else {
+                None
+            };
         if state.written != written {
             state.since_ms = at_ms;
         }
@@ -158,8 +186,16 @@ impl WireLog {
             let text = format!("{}{}", state.carry, String::from_utf8_lossy(&appended));
             let mut lines: Vec<&str> = text.split('\n').collect();
             state.carry = lines.pop().unwrap_or_default().to_owned();
-            for line in lines {
-                state.follow(line, at_ms, &self.zone)?;
+            let first = state.lines;
+            state.lines += lines.len() as u64;
+            for (index, line) in lines.into_iter().enumerate() {
+                state.follow(
+                    line,
+                    first + index as u64,
+                    at_ms,
+                    &self.zone,
+                    replayed_quota.as_ref(),
+                )?;
             }
         }
         Ok(state.said())
@@ -250,11 +286,24 @@ impl State {
     }
 
     /// What one line of the log says: a line that is no JSON says nothing.
-    fn follow(&mut self, line: &str, at_ms: i64, zone: &TimeZone) -> Result<(), String> {
+    fn follow(
+        &mut self,
+        line: &str,
+        number: u64,
+        at_ms: i64,
+        zone: &TimeZone,
+        replayed: Option<&QuotaLine>,
+    ) -> Result<(), String> {
         let Ok(event) = from_slice_lossy(line.as_bytes()) else {
             return Ok(());
         };
-        self.turns.follow(&event);
+        // The next turn makes the prior quota line history. Use the record's own
+        // turn boundaries, including on a reread of a replaced wire, so later
+        // ordinary failures are not paired with that old refusal. A refusal on
+        // this very line is read below, after the old one is cleared.
+        if self.turns.follow(&event) {
+            self.quota = None;
+        }
         self.naming
             .follow(&event)
             .map_err(|_| UNREADABLE.to_owned())?;
@@ -280,13 +329,19 @@ impl State {
             })
             .and_then(|update| update.get("content")?.get("text")?.as_str());
         if let Some(text) = text.filter(|text| REFUSAL.is_match(text)) {
-            self.quota = Some(exhausted(text, at_ms, zone)?);
+            self.refused(text, number, at_ms, zone, replayed)?;
         }
         // Or a refusal of the prompt itself, as Devin 3000.11 writes one: a
         // JSON-RPC error, "Quota exhausted." (-32011, resource_exhausted), the
         // error object itself in the binary of Devin 3000.11.92, the newest seen.
         if let Some(refused) = event.get("error").filter(|error| refuses(error)) {
-            self.quota = Some(exhausted(&words(refused.get("message"))?, at_ms, zone)?);
+            self.refused(
+                &words(refused.get("message"))?,
+                number,
+                at_ms,
+                zone,
+                replayed,
+            )?;
         }
         // Or the turn's own end for it, as Devin wrote it on a Pro plan
         // (2026-10-03): cause quota_exhausted, its words in errorMessage
@@ -294,8 +349,33 @@ impl State {
         // in the binary of Devin 3000.11.92, the newest seen, among the causes
         // a turn ends with.
         if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted") {
-            self.quota = Some(exhausted(&words(event.get("errorMessage"))?, at_ms, zone)?);
+            self.refused(
+                &words(event.get("errorMessage"))?,
+                number,
+                at_ms,
+                zone,
+                replayed,
+            )?;
         }
+        Ok(())
+    }
+
+    /// Keep the old value only for the same line in an identical prefix; an
+    /// appended refusal, including one with identical words, is dated anew.
+    fn refused(
+        &mut self,
+        text: &str,
+        number: u64,
+        at_ms: i64,
+        zone: &TimeZone,
+        replayed: Option<&QuotaLine>,
+    ) -> Result<(), String> {
+        let quota = match replayed.filter(|old| old.number == number) {
+            Some(old) => Arc::clone(&old.quota),
+            None => exhausted(text, at_ms, zone)?,
+        };
+        self.quota = Some(Arc::clone(&quota));
+        self.quota_line = Some(QuotaLine { number, quota });
         Ok(())
     }
 }

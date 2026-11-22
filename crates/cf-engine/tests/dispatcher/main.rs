@@ -67,6 +67,11 @@ mod decided_results;
 mod deleted_sessions;
 mod deliveries;
 mod designer_images;
+#[allow(dead_code)]
+#[path = "../../../cf-harness/tests/launch/devin/fixtures.rs"]
+mod devin_fixture;
+mod devin_old_quota;
+mod exit_keeps_answer;
 mod exit_overdue;
 mod exit_proof;
 mod exit_unsettled;

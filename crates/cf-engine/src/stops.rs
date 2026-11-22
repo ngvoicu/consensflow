@@ -508,6 +508,9 @@ impl Dispatcher {
     fn pay(&self, record: &Record, stop: &Stop) {
         let unstopped = {
             let mut part = record.window.borrow_mut();
+            if part.stopped != Some((stop.task_id, stop.seq)) {
+                part.stop_paid_at = Some(self.now());
+            }
             part.stopped = Some((stop.task_id, stop.seq));
             part.interrupted = None;
             part.unstopped.take()

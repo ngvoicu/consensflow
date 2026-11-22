@@ -186,12 +186,16 @@ const roleOf = (task, roles) => task.pool ?? roles[0]
 export const rowTasks = (lane, board) =>
   [
     ...lane.tasks.map((task) => {
+      let shown = task
       if (task.state === 'waiting' && lane.activity?.state === 'working') {
-        return { ...task, questionPending: true }
+        shown = { ...shown, questionPending: true }
+      } else if (task.state === 'working' && lane.held?.task === task.number) {
+        shown = { ...shown, held: lane.held }
       }
-      return task.state === 'working' && lane.held?.task === task.number
-        ? { ...task, held: lane.held }
-        : task
+      if (lane.resumeWait?.task === task.number) {
+        shown = { ...shown, resumeWait: lane.resumeWait }
+      }
+      return shown
     }),
     ...board.open
       .filter((task) => task.requester === lane.participant.handle)
@@ -1685,7 +1689,7 @@ export class BoardView {
     if (task.held) card.dataset.pending = 'background'
     card.setAttribute(
       'aria-label',
-      `T-${task.number}, ${task.title}, ${stateLabel(task)}, from ${who(task.requester)}`,
+      `T-${task.number}, ${task.title}, ${stateLabel(task)}${task.resumeWait ? `, resume waits: ${task.resumeWait.reason}` : ''}, from ${who(task.requester)}`,
     )
     const elapsed = stateAge(task.stateSince)
     const status = element('span', 'card-status')
@@ -1702,6 +1706,9 @@ export class BoardView {
     // What it waits on is said on the card itself: the window's lamp says it rests.
     if (task.held) {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
+    }
+    if (task.resumeWait) {
+      where.append(' · ', element('span', 'card-held', `resume waits: ${task.resumeWait.reason}`))
     }
     card.append(
       element('span', 'card-number', `T-${task.number}`),
@@ -1794,6 +1801,7 @@ export class TaskDrawer {
       now = Date.now(),
       terminal = null,
       held = null,
+      resumeWait = null,
       backupOf = null,
       waitingMember = null,
     },
@@ -1815,7 +1823,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]

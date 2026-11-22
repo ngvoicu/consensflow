@@ -14,6 +14,156 @@
 page-acks = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "writes each message to its terminal|acknowledges what comes for a window"]
 app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
 app-page-reloads = ["cargo", "xtask", "app", "test", "page_reloads"]
+tiny-output = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "tiny_read"]
+tiny-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cursor_query"]
+
+[[plant]]
+name = "tiny read: a queued byte keeps the whole read buffer"
+meant = "a_one_byte_read_does_not_keep_an_eight_kibibyte_allocation"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "                bytes: buffer[..byte_count].to_vec(),"
+replace = '''                bytes: {
+                    let mut bytes = Vec::with_capacity(8 * 1024);
+                    bytes.extend_from_slice(&buffer[..byte_count]);
+                    bytes
+                },'''
+
+[[plant]]
+name = "tiny read: waiting reads are never joined"
+meant = "tiny_read_queued_burst_is_joined_in_order_before_the_exit"
+runs = ["tiny-output"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "    while joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
+replace = "    while false && joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
+
+[[plant]]
+name = "tiny read: joined reads reverse their order"
+meant = "tiny_read_batches_obey_the_bound_and_keep_the_last_sequence"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        message.bytes.extend_from_slice(&next.bytes);"
+replace = "        drop(message.bytes.splice(0..0, next.bytes.iter().copied()));"
+
+[[plant]]
+name = "tiny read: a joined message acknowledges only its first read"
+meant = "tiny_read_batches_obey_the_bound_and_keep_the_last_sequence"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        message.seq = next.seq;"
+replace = "        let _ = next.seq;"
+
+[[plant]]
+name = "tiny read: joined reads hide a screen change"
+meant = "tiny_read_batch_keeps_each_screens_change_boundary"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        feed(&next.bytes);"
+replace = "        // A later read does not reach the screen."
+
+[[plant]]
+name = "tiny read: the first ready read waits for a batch"
+meant = "tiny_read_queued_first_byte_is_published_before_later_screen_work"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''        feed(&message.bytes);
+        publish(message);'''
+replace = '''        pending = Some(message);
+        if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
+            publish(batch);
+        }'''
+
+[[plant]]
+name = "tiny read: screen work before a batch is unbounded"
+meant = "tiny_read_batch_limits_how_many_screen_updates_precede_publication"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4;"
+replace = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4096;"
+
+[[plant]]
+name = "tiny read: a batch grows during screen work"
+meant = "tiny_read_batch_does_not_grow_while_its_screen_is_fed"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    let mut size = message.bytes.len();
+    let mut joined = Vec::new();'''
+replace = '''    feed(&message.bytes);
+    let mut size = message.bytes.len();
+    let mut joined = Vec::new();'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    feed(&message.bytes);
+    for next in joined {'''
+replace = '''    for next in joined {'''
+
+[[plant]]
+name = "tiny cursor: a frame gets at most one reply"
+meant = "every_cursor_query_in_a_joined_frame_gets_a_reply"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/cursor.rs"
+find = '''        complete
+    }
+
+    pub(super) fn unfinished'''
+replace = '''        complete.min(1)
+    }
+
+    pub(super) fn unfinished'''
+
+[[plant]]
+name = "tiny cursor: a query cannot cross frames"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/cursor.rs"
+find = "        let mut complete = 0;"
+replace = "        self.matched = 0;\n        let mut complete = 0;"
+
+[[plant]]
+name = "tiny cursor: a prefix crosses generations"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                        let key = (pane.clone(), generation);"
+replace = "                        let key = (pane.clone(), 0);"
+
+[[plant]]
+name = "tiny cursor: an exited window keeps its prefix"
+meant = "a_split_cursor_query_is_kept_for_its_own_window_and_generation"
+runs = ["tiny-cursor"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                    seen.cursor_queries.remove(&(id.to_owned(), generation));"
+replace = "                    let _ = (id, generation);"
 
 [[plant]]
 name = "page acks: each message waits for the one before it to be drawn"

@@ -413,10 +413,7 @@ mod tests {
             ),
             (
                 "/bin/sh",
-                vec![
-                    "-c",
-                    "cd ~/Projects/ngvoicu/consensflow-trees/x && cargo test",
-                ],
+                vec!["-c", "cd ~/Projects/example/worktrees/x && cargo test"],
             ),
             ("/bin/sh", vec!["-c", &format!("ditto '{own}' /tmp/copy")]),
             (

@@ -80,6 +80,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
@@ -92,6 +93,7 @@ replace = '''
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         self.record_quota(record, observed.quota.clone());
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 replace = '''
         self.record_quota(record, observed.quota.clone());
@@ -101,6 +103,7 @@ replace = '''
             .filter(|quota| quota.level() == cf_harness::records::Level::Low)
             .map(|quota| self.reset_of(Some(quota)));
         self.record_of(owner.id).quota.borrow_mut().low_until = low;
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 
 [[plant]]
@@ -138,6 +141,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
@@ -150,6 +154,7 @@ replace = '''
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         self.record_quota(record, observed.quota.clone());
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 replace = '''
         self.record_quota(record, observed.quota.clone());
@@ -159,6 +164,7 @@ replace = '''
             .filter(|quota| quota.level() == cf_harness::records::Level::Low)
             .map(|quota| self.reset_of(Some(quota)));
         self.record_of(owner.id).quota.borrow_mut().low_until = low;
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 
 [[plant]]
@@ -196,6 +202,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
@@ -208,6 +215,7 @@ replace = '''
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         self.record_quota(record, observed.quota.clone());
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 replace = '''
         self.record_quota(record, observed.quota.clone());
@@ -217,6 +225,7 @@ replace = '''
             .filter(|quota| quota.level() == cf_harness::records::Level::Low)
             .map(|quota| self.reset_of(Some(quota)));
         self.record_of(owner.id).quota.borrow_mut().low_until = low;
+        self.tell_drift(project, participant, record, &observed)?;
 '''
 
 [[plant]]

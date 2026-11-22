@@ -167,14 +167,14 @@ find = "        format!(\"{text} A pause or finish may withdraw it first and nam
 replace = "        format!(\"{text} A pause or finish may withdraw it first and name it.{}\", &sent[..0]),"
 
 [[plant]]
-name = "briefs: a resume or a reopening says nothing of the words it sent"
+name = "briefs: a reopening or tell says nothing of the words it sent"
 meant = "the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_ending_is_dropped"
 runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    let sent = if (briefed || action == \"pause\") && !text.is_empty() {"
-replace = "    let sent = if false && (briefed || action == \"pause\") && !text.is_empty() {"
+find = "    let sent = if (briefed || action == \"pause\") && action != \"resume\" && !text.is_empty() {"
+replace = "    let sent = if false && (briefed || action == \"pause\") && action != \"resume\" && !text.is_empty() {"
 
 [[plant]]
 name = "briefs: a last word longer than the reply shows is shown whole"

@@ -1,12 +1,11 @@
 # Muse Code session logs of a real model: provenance
 
 `contributor-full-run.jsonl` is the parent session's whole log of T-705's live run
-(MUS-02, 2026-10-26), copied unchanged from
-`consensflow-trees/.runs/muse-research/fixtures/contributor-full-run/session.jsonl`,
-where its README, the per-case manifests and the run's ledger are. Muse Code
+(MUS-02, 2026-10-26), copied unchanged from the recording archive, with its README,
+the per-case manifests and the run's ledger. Muse Code
 1.4.13-R6996.1 in its TUI, in a pty, on a synthetic throwaway project, launched
 `--model muse-spark-1.3-contributor --reasoning-effort minimal` (contributor mode on,
-allowed for tests by Gabriel, 2026-10-26 18:54; Meta may train on what such a model
+allowed for tests by the owner, 2026-10-26 18:54; Meta may train on what such a model
 sees, so nothing in it is the owner's), with an isolated config and data folder. The
 tester scrubbed it structurally: paths, UUIDs, opaque ids, pids and long context
 become consistent placeholders (`00000000-0000-4000-8000-…`, `<PROJECT>`,
@@ -47,9 +46,8 @@ window quit (126).
 T-801 (Phoebus, 2026-10-27) recorded six shapes on Muse 1.4.13-R6996.1,
 `muse-spark-1.3` at `minimal`, contributor mode off, `--yolo`, each in a throwaway home
 and project, scrubbed by `cargo xtask scrub-muse-session` and then T-705's identity
-scrubber (paths, uuids, call ids, sockets as placeholders). Copied unchanged from
-`consensflow-trees/.runs/muse-research/fixtures/t-shapes/<case>/session.jsonl`, where
-each case's README, argv, actions, usage, hooks and screens are. The line numbers below
+scrubber (paths, uuids, call ids, sockets as placeholders). Copied unchanged from the
+recording archive, with each case's README, argv, actions, usage, hooks and screens. The line numbers below
 are physical lines, as `src/muse/record/tests/shapes.rs` reads them.
 
 - `monitor-outlives-turn.jsonl`: a monitor armed (75, `work.v2.monitor.`); the turn ends
@@ -78,8 +76,7 @@ are physical lines, as `src/muse/record/tests/shapes.rs` reads them.
   the model's.
 
 `pasted-brief.jsonl` is the worker's session log of T-1000's live run of
-`cargo xtask live paste-screen muse` (2026-10-31, kept in
-`consensflow-trees/.runs/T-1000-muse-paste-screen/sessions/`): Muse Code 1.4.14 on
+`cargo xtask live paste-screen muse` (2026-10-31, kept with its session recordings): Muse Code 1.4.14 on
 `muse-spark-1.3` at `minimal`, contributor mode off, `--yolo`, in the live kit's
 throwaway home. The engine pasted a task brief of 41 lines (2,184 characters); Muse's
 box folded it, and the log says so: the user's intent (line 15, sequence 16) holds

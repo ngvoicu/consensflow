@@ -3,7 +3,8 @@ user identifiers replaced by `[scrubbed]`:
 
 - `media-library-prompt.ndjson`: the three tccd lines (`AUTHREQ_CTX`, `AUTHREQ_ATTRIBUTION`, `AUTHREQ_PROMPTING`)
   of a real Apple Music dialog, raised for `ls ~/Music/Music` run in a window of a stand-in app
-  (`dev.ngvoicu.tccprobe`, its pid 22911; `ls` is 22913). `log show --style ndjson`.
+  (`dev.example.tccprobe` is a placeholder bundle id, its pid 22911; `ls` is 22913).
+  `log show --style ndjson`.
 - `own-client-prompt.ndjson`: a real Downloads dialog raised for a bare program that was its own
   responsible process (no `responsible` in the attribution; pid 57904).
 - `background-queries.ndjson`: the queries sandboxd made for `ls ~/Music/Music` in a Background
