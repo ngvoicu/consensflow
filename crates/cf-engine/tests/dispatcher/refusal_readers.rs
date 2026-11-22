@@ -194,7 +194,11 @@ fn refusal_of_claude() -> Value {
 fn a_claude_refusal_stays_unless_a_prompt_of_its_own_branch_follows_it() {
     let refusal = refusal_of_claude();
     let a = refusal["uuid"].clone();
-    held("claude-code", "the refusal alone", &[refusal.clone()]);
+    held(
+        "claude-code",
+        "the refusal alone",
+        std::slice::from_ref(&refusal),
+    );
     // The refused turn's own prompt, written late, with the chain that names it after it.
     let mut late = refusal.clone();
     late["parentUuid"] = json!("x2");
