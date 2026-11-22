@@ -142,6 +142,9 @@ pub struct FakeAgent {
     /// Interrupted, its turn ends in its record and its status stays busy: the
     /// look reads it over, not settled (a Claude whose background agents run).
     pub busy_when_interrupted: bool,
+    /// The interrupt that ended it was the in-generation one, not the tool-use one:
+    /// its prompt is not recorded taking words, so the words wait (`busy_when_interrupted`).
+    pub interrupted_in_generation: bool,
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
@@ -712,6 +715,14 @@ impl FakeAdapter {
     pub fn busy_with_agents_until_interrupted(&self, handle: &str) {
         self.busy(handle);
         self.with(handle, |agent| agent.busy_when_interrupted = true);
+    }
+
+    /// As [`Self::busy_with_agents_until_interrupted`], but the interrupt is the one that
+    /// cuts the model's writing: no recording shows the prompt taking words with background
+    /// work, so on every platform the words wait for the window to rest.
+    pub fn busy_with_agents_until_interrupted_in_generation(&self, handle: &str) {
+        self.busy_with_agents_until_interrupted(handle);
+        self.with(handle, |agent| agent.interrupted_in_generation = true);
     }
 
     /// The harness refuses the turn as `refuse` says, and the look still does not
@@ -1308,6 +1319,7 @@ impl Asked {
             begun: Vec::new(),
             over: Over::No,
             busy_when_interrupted: false,
+            interrupted_in_generation: false,
             cannot_tell_a_cut: false,
             ended_in_abort: false,
             opening: None,

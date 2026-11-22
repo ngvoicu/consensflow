@@ -593,6 +593,8 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         takes_words: agent.settled
             || (cfg!(target_os = "macos")
                 && agent.busy_when_interrupted
+                && !agent.interrupted_in_generation
+                && !agent.shared
                 && agent.over == Over::Held),
         over: agent.over,
         waiting,

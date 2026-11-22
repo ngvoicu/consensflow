@@ -128,3 +128,33 @@ fn a_switch_now_goes_at_once_whatever_the_chief_left_running() {
     assert_eq!(harness(&context, project.id), "codex");
     assert_eq!(context.host.killed().len(), 1);
 }
+
+#[test]
+fn a_switch_after_the_turn_waits_while_the_chief_takes_words_after_an_interrupt_with_agents_running(
+) {
+    // Claude Code on the Mac after Escape in a tool use: the interrupted turn writes no
+    // count of the agents, the status stays busy, and the prompt takes words
+    // (`Observed::takes_words`) though the window is not settled. A switch closes the
+    // window, and the agents end with it.
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.busy_with_agents_until_interrupted("chief");
+    context.adapter.with("chief", |agent| {
+        agent.over = cf_harness::contract::Over::Held;
+    });
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, false)
+        .unwrap();
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert!(context.host.killed().is_empty(), "the window is open");
+    assert_eq!(harness(&context, project.id), "claude-code");
+    assert_eq!(
+        context.dispatcher.pending_switch(chief),
+        Some(to("codex", "astraeus"))
+    );
+}

@@ -3,8 +3,8 @@
 # intake page; Claude Code 2.1.329's recording, T-1857). `Observed::takes_words` is what
 # every delivery gate reads in place of `settled`; results, stops and the rest keep
 # `settled`. The adapter is `crates/cf-harness/src/claude/adapter.rs` and `stopped.rs`; the
-# gates are `crates/cf-engine/src/dispatcher.rs` (the step's `free`; a launch's first message reads it
-# too, and no test reaches that gate: a new window has no record ending in an interrupt) and `pacing.rs` (the fresh look before a paste). The tests are
+# gates are `crates/cf-engine/src/dispatcher.rs` (the step's `free`; a launch's first message keeps `settled`, with no test of its own)
+# and `pacing.rs` (the fresh look before a paste). The tests are
 # `crates/cf-harness/tests/launch/claude/agents.rs` (the recording at its prefixes, the
 # other interrupts, the shared record) and `crates/cf-engine/tests/dispatcher/
 # nothing_to_stop.rs` (the immediate resume, the result that is not taken).
@@ -21,6 +21,8 @@
 [run]
 harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents::"]
 engine-dispatcher-nothing-to-stop = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "nothing_to_stop::"]
+
+engine-dispatcher-switching-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_agents::"]
 
 [[plant]]
 name = "claude interrupt words: without the second's stand of the interrupt's end"
@@ -101,3 +103,13 @@ runs = ["engine-dispatcher-nothing-to-stop"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = "        if !observed.settled {\n            self.tell_lost("
 replace = "        if !observed.takes_words {\n            self.tell_lost("
+
+[[plant]]
+name = "claude interrupt words: the chief's switch closes a window that only takes words"
+meant = "a_switch_after_the_turn_waits_while_the_chief_takes_words_after_an_interrupt_with_agents_running"
+runs = ["engine-dispatcher-switching-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = "if !observed.settled || observed.agents_pending() {"
+replace = "if observed.agents_pending() {"

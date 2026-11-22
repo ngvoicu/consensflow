@@ -1875,10 +1875,10 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
-            if !drawing
-                && observed.takes_words
-                && observed.waiting.is_none()
-                && project.state == "open"
+            // A launch's first message keeps `settled`: a window opened again on a record that
+            // ends in the old process's interrupt has a new Claude whose busy status says
+            // nothing of its prompt (T-1985).
+            if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.hand_first(&held).await })

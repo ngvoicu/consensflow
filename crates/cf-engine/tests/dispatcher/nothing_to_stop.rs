@@ -381,7 +381,9 @@ fn a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human() {
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.resume_task(project, 1, "Go on with the parser");
     context.pass().unwrap();
@@ -457,7 +459,9 @@ fn a_resume_long_after_a_paid_pause_gets_a_chance_to_arrive_before_any_wait_noti
 fn a_resume_sent_late_in_the_two_minutes_is_told_when_the_paid_stops_clock_reaches_them() {
     let context = Context::new();
     let project = working(&context);
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -475,7 +479,9 @@ fn resume_words_still_waiting_when_the_member_goes_out_tell_the_chief_the_quota_
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.resume_task(project, 1, "Go on with the parser");
     context.pass().unwrap();
@@ -502,7 +508,9 @@ fn a_later_pause_and_resume_has_its_own_single_wait_notice() {
     let context = Context::new();
     let project = working(&context);
     for words in ["First direction", "Second direction"] {
-        context.adapter.busy_with_agents_until_interrupted("zeus");
+        context
+            .adapter
+            .busy_with_agents_until_interrupted_in_generation("zeus");
         context.pause_task(project, 1);
         context.resume_task(project, 1, words);
         context.pass().unwrap();
