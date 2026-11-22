@@ -97,34 +97,19 @@ pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String) -> Valu
     }
 }
 
-/// The event that tells the page that is current what a departed page's typing
-/// may have lost: one window's `id` and `generation`.
+/// The event that tells the page that is current that typing may not have reached a
+/// window: its `id` and `generation`, and the `loss` number the page confirms.
 pub(crate) const PANE_INPUT_LOST_EVENT: &str = "pane-input-lost";
 
-/// What the page before this one issued, window by window: its last numbers.
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PriorPageArgs {
-    page_id: String,
-    issued: Vec<IssuedArgs>,
-}
-
-#[derive(serde::Deserialize)]
-struct IssuedArgs {
-    id: String,
-    generation: u64,
-    sequence: u64,
-}
-
-/// Tells the page what the host gives up on of its input: the windows whose
-/// typing a departed page lost, and a line for the app's log.
+/// Tells the page what the host gives up on of its input: the windows whose typing may
+/// not have arrived, and a line for the app's log.
 pub(crate) struct PageInputObserver<R: Runtime>(pub AppHandle<R>);
 
 impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
-    fn lost(&self, key: &cf_panes::pty::PaneKey) {
+    fn lost(&self, key: &cf_panes::pty::PaneKey, loss: u64) {
         if let Err(error) = self.0.emit(
             PANE_INPUT_LOST_EVENT,
-            json!({"id":key.id,"generation":key.generation}),
+            json!({"id":key.id,"generation":key.generation,"loss":loss}),
         ) {
             crate::diag::say(format!(
                 "could not tell the page its typing was lost: {error}"
@@ -137,7 +122,8 @@ impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
     }
 }
 
-/// The page has told the person what was lost in these windows: the notices are done.
+/// The page has told the person what was lost in these windows, up to the numbers it gives:
+/// those notices are done.
 #[tauri::command]
 pub fn pane_lost_told<R: Runtime>(
     app: AppHandle<R>,
@@ -151,7 +137,7 @@ pub fn pane_lost_told<R: Runtime>(
     let mut told = Vec::with_capacity(keys.len());
     for each in keys {
         match pane_key(&each.id, each.generation) {
-            Ok(key) => told.push(key),
+            Ok(key) => told.push((key, each.loss)),
             Err(error) => return json!({"ok":false,"error":error}),
         }
     }
@@ -165,36 +151,18 @@ pub fn pane_lost_told<R: Runtime>(
 pub struct LostArgs {
     id: String,
     generation: u64,
+    loss: u64,
 }
 
-/// The page becomes current. It hands over what the pages before it issued, so
-/// that its own calls go in after that page's; the windows whose typing was
-/// lost while no page was current come back, for it to say so.
+/// The page becomes current. The windows whose typing may not have reached them come back,
+/// for it to say so.
 #[tauri::command]
-pub fn pane_page_activate<R: Runtime>(
-    app: AppHandle<R>,
-    page_id: String,
-    priors: Option<Vec<PriorPageArgs>>,
-) -> Value {
+pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
     let state = app.state::<AppRuntime>();
-    let mut said = Vec::new();
-    for prior in priors.unwrap_or_default() {
-        let mut issued = Vec::with_capacity(prior.issued.len());
-        for each in prior.issued {
-            match pane_key(&each.id, each.generation) {
-                Ok(key) => issued.push((key, each.sequence)),
-                Err(error) => return json!({"ok":false,"error":error}),
-            }
-        }
-        said.push(cf_panes::input_queue::PriorPage {
-            page_id: prior.page_id,
-            issued,
-        });
-    }
-    match state.inputs.activate_page(&page_id, &said) {
+    match state.inputs.activate_page(&page_id) {
         Ok(lost) => json!({
             "ok":true,
-            "lost":lost.iter().map(|key| json!({"id":key.id,"generation":key.generation})).collect::<Vec<_>>(),
+            "lost":lost.iter().map(|(key, loss)| json!({"id":key.id,"generation":key.generation,"loss":loss})).collect::<Vec<_>>(),
         }),
         Err(error) => json!({"ok":false,"error":error}),
     }
@@ -225,9 +193,12 @@ fn enqueue_page_text<R: Runtime>(
             // order must not wait for this one.
             if let Ok(key) = pane_key(&call.id, call.generation) {
                 let state = app.state::<AppRuntime>();
-                let _ = state
+                if let Ok(loss) = state
                     .inputs
-                    .refuse_page_sequence(&call.page_id, &key, call.sequence);
+                    .refuse_page_sequence(&call.page_id, &key, call.sequence)
+                {
+                    return json!({"ok":false,"error":error,"loss":loss});
+                }
             }
             json!({"ok":false,"error":error})
         }
@@ -253,9 +224,12 @@ fn enqueue_page_call<R: Runtime>(
     } else {
         InputWork::Typed(bytes)
     };
-    match inputs.enqueue_page(&call.page_id, key, call.sequence, work, !reply) {
+    match inputs.enqueue_page_told(&call.page_id, key, call.sequence, work, !reply) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
-        Err(error) => json!({"ok":false,"error":error}),
+        Err(refusal) => match refusal.loss {
+            Some(loss) => json!({"ok":false,"error":refusal.error,"loss":loss}),
+            None => json!({"ok":false,"error":refusal.error}),
+        },
     }
 }
 
@@ -315,7 +289,7 @@ pub fn pane_input_skip<R: Runtime>(
     };
     let state = app.state::<AppRuntime>();
     match state.inputs.skip_page_sequence(&page_id, &key, sequence) {
-        Ok(()) => json!({"ok":true}),
+        Ok(loss) => json!({"ok":true,"loss":loss}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -618,6 +592,20 @@ mod tests {
     /// A page call as the page makes it: the command's JSON arguments, with the
     /// bytes as base64 text and their length. A test may give a list of bytes
     /// and have both made, or give its own `length` and `bytes` text.
+    /// An answer without the number of the loss the host recorded for it: it counts the notices
+    /// the host has made so far, which a test of something else does not.
+    #[cfg(unix)]
+    fn without_loss(mut answer: Value) -> Value {
+        if let Some(object) = answer.as_object_mut() {
+            assert!(
+                object.get("loss").is_none_or(Value::is_u64),
+                "a loss is a number: {answer}"
+            );
+            object.remove("loss");
+        }
+        answer
+    }
+
     #[cfg(unix)]
     fn ipc_request(command: &str, mut args: Value) -> tauri::webview::InvokeRequest {
         use base64::Engine as _;
@@ -1130,10 +1118,10 @@ mod tests {
         };
 
         assert_eq!(
-            invoke(
+            without_loss(invoke(
                 "pane_input_enqueue",
                 json!({"id":key.id,"generation":1,"sequence":1,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
-            ),
+            )),
             json!({
                 "ok":false,
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
@@ -1151,10 +1139,10 @@ mod tests {
         .enumerate()
         {
             assert_eq!(
-                invoke(
+                without_loss(invoke(
                     "pane_input_enqueue",
                     json!({"id":key.id,"generation":1,"sequence":number + 2,"length":length,"bytes":bytes}),
-                ),
+                )),
                 json!({"ok":false,"error":error})
             );
         }
@@ -1173,10 +1161,10 @@ mod tests {
             json!({"ok":false,"error":"pane-input-sequence-stale"})
         );
         assert_eq!(
-            invoke(
+            without_loss(invoke(
                 "pane_input_skip",
                 json!({"id":key.id,"generation":1,"sequence":7})
-            ),
+            )),
             json!({"ok":true})
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
@@ -1302,10 +1290,10 @@ mod tests {
         let mut over = sent.clone();
         over.push(b'x');
         assert_eq!(
-            invoke(
+            without_loss(invoke(
                 "pane_input_enqueue",
                 json!({"id":key.id,"generation":1,"sequence":1,"length":over.len(),"bytes":text(&over)}),
-            ),
+            )),
             json!({
                 "ok":false,
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
@@ -1416,18 +1404,13 @@ mod tests {
         };
         assert_eq!(call("s:1", 2, b"B")["ok"], true);
         assert_eq!(call("s:1", 3, b"C")["ok"], true);
-        // Navigation begins; the next page announces itself and hands over what the one
-        // before issued, and types at once.
+        // Navigation begins; the next page announces itself and types at once.
         inputs.end_page().unwrap();
         assert_eq!(
             invoke("pane_page_prepare", json!({"pageId":"s:2"}))["ok"],
             true
         );
-        let activated = invoke(
-            "pane_page_activate",
-            json!({"pageId":"s:2","priors":[{"pageId":"s:1","issued":[
-                {"id":key.id,"generation":1,"sequence":3}]}]}),
-        );
+        let activated = invoke("pane_page_activate", json!({"pageId":"s:2"}));
         assert_eq!(activated["ok"], true, "{activated:?}");
         assert_eq!(call("s:2", 1, b"D")["ok"], true);
         thread::sleep(hold);
@@ -1476,7 +1459,7 @@ mod tests {
             !notices.is_empty()
                 && notices
                     .iter()
-                    .all(|each| *each == json!({"id":"reloaded","generation":1})),
+                    .all(|each| each["id"] == "reloaded" && each["generation"] == 1),
             "{notices:?}"
         );
     }
@@ -1692,7 +1675,7 @@ mod tests {
                 json!({"ok":true})
             );
             assert_eq!(
-                pane_page_activate(handle.clone(), page.to_string(), None)["ok"],
+                pane_page_activate(handle.clone(), page.to_string())["ok"],
                 true
             );
             let subscribed = tauri::async_runtime::block_on(subscribe_output(
@@ -1798,7 +1781,7 @@ mod tests {
             json!({"ok":true})
         );
         assert_eq!(
-            pane_page_activate(app.handle().clone(), "new-page".into(), None)["ok"],
+            pane_page_activate(app.handle().clone(), "new-page".into())["ok"],
             true
         );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(

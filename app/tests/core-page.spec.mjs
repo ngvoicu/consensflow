@@ -933,6 +933,9 @@ async function open(page, given = model()) {
       if (command === 'pane_page_activate' && window.__paneActivateHook) {
         return window.__paneActivateHook(args)
       }
+      if (command === 'pane_lost_told' && window.__paneLostToldHook) {
+        return window.__paneLostToldHook(args)
+      }
       if (command === 'pane_input_wait' && window.__paneWaitHook) {
         return window.__paneWaitHook(args)
       }
@@ -4894,17 +4897,10 @@ test('what is typed while a call is unanswered is handed over at once, numbered'
   await expect
     .poll(() => page.evaluate(() => window.__names.map(([sequence]) => sequence)))
     .toEqual([1, 2, 3])
-  const names = await page.evaluate(() => window.__names)
-  const id = await page.evaluate(
-    () => window.__calls.find(([n]) => n === 'pane_input_enqueue')[1].id,
-  )
-  for (const [sequence, name] of names) {
-    expect(name).toMatch(
-      new RegExp(
-        `^consensflow-page-v1:[0-9a-f-]{36}:1\\|\\{"o":\\[\\["${id}",\\d+,${sequence}\\]\\],"p":\\[\\]\\}$`,
-      ),
-    )
-  }
+  // Nothing of the numbers is kept in the page's name: the host keeps the order, and a page
+  // that follows hands nothing over.
+  for (const [, name] of await page.evaluate(() => window.__names))
+    expect(name).toMatch(/^consensflow-page-v1:[0-9a-f-]{36}:1$/)
 })
 
 test('a full window refuses a key once, with its words, and the typing after it goes in', async ({
@@ -4936,9 +4932,10 @@ test('a full window refuses a key once, with its words, and the typing after it 
 // The host as it keeps a window's order (P4-B), outside the page so that it outlives a reload:
 // calls are written in the numbers of their page, a call that comes early waits for the ones
 // before it, a number that never comes is given up after the bound, a page that has gone is
-// heard for the bound and its calls go in before the next page's, and what is lost of it is
-// told to the page that is current. It counts what it was given.
-function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = {}) {
+// heard for the bound and the next page's calls for a window wait until it has closed, and
+// every loss it knows of is kept, numbered, until a page says it has told the person. It
+// counts what it was given. Nothing is handed over from page to page.
+function orderedHost({ bound = 1500, hold = () => null, holdSkip = () => null } = {}) {
   const st = {
     received: '',
     current: null,
@@ -4946,11 +4943,17 @@ function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = 
     serials: new Map(),
     left: new Map(),
     lanes: new Map(),
-    pendingLost: [],
+    losses: new Map(),
+    nextLoss: 0,
     told: [],
+    acks: [],
     tell: async () => {},
   }
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const split = (key) => ({
+    id: key.slice(0, key.lastIndexOf(':')),
+    generation: Number(key.slice(key.lastIndexOf(':') + 1)),
+  })
   const laneOf = (key, page) => {
     if (!st.lanes.has(key)) st.lanes.set(key, [])
     const lanes = st.lanes.get(key)
@@ -4962,7 +4965,6 @@ function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = 
         passed: 0,
         parked: new Map(),
         until: st.left.has(page) ? st.left.get(page) + bound : null,
-        issued: null,
       }
       lanes.push(lane)
       lanes.sort((a, b) => a.serial - b.serial)
@@ -4970,52 +4972,45 @@ function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = 
     return lane
   }
   const lost = (key) => {
-    const [id, generation] = [
-      key.slice(0, key.lastIndexOf(':')),
-      Number(key.slice(key.lastIndexOf(':') + 1)),
-    ]
+    st.nextLoss += 1
+    st.losses.set(key, st.nextLoss)
     st.told.push(key)
-    if (st.current === null) st.pendingLost.push({ id, generation })
-    else void st.tell({ id, generation })
-  }
-  const giveUp = (lane, key, upto, departed) => {
-    if (upto <= lane.passed) return
-    lane.passed = upto
-    if (departed) lost(key)
+    if (st.current !== null) void st.tell({ ...split(key), loss: st.nextLoss })
+    return st.nextLoss
   }
   const pump = () => {
     const now = Date.now()
     for (const [key, lanes] of st.lanes) {
       let blocked = false
       for (const lane of [...lanes]) {
-        const departed = lane.page !== st.current
         const forced = lane.until !== null && now >= lane.until
         for (;;) {
           if (lane.parked.size === 0) break
           const first = Math.min(...lane.parked.keys())
-          const call = lane.parked.get(first)
           if (first > lane.passed + 1) {
-            if (forced || now >= call.deadline) {
-              giveUp(lane, key, first - 1, departed)
+            const expired = Math.max(
+              0,
+              ...[...lane.parked].filter(([, call]) => call.deadline <= now).map(([n]) => n),
+            )
+            if (forced || expired >= first) {
+              lane.passed = first - 1
+              lost(key)
               continue
             }
             break
           }
           if (blocked) break
+          const call = lane.parked.get(first)
           lane.parked.delete(first)
           lane.passed = first
           if (call.text !== undefined) st.received += call.text
         }
         if (blocked) continue
-        if (lane.until !== null) {
-          const outstanding = lane.issued === null ? 0 : Math.max(0, lane.issued - lane.passed)
-          if (forced && lane.parked.size === 0) {
-            if (outstanding > 0) giveUp(lane, key, lane.issued, departed)
-            lanes.splice(lanes.indexOf(lane), 1)
-            continue
-          }
-          if (!(lane.parked.size === 0 && lane.issued !== null && outstanding === 0)) blocked = true
+        if (lane.until !== null && now >= lane.until && lane.parked.size === 0) {
+          lanes.splice(lanes.indexOf(lane), 1)
+          continue
         }
+        if (lane.until !== null) blocked = true
       }
     }
   }
@@ -5030,6 +5025,12 @@ function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = 
     },
     get told() {
       return st.told
+    },
+    get acks() {
+      return st.acks
+    },
+    get unshown() {
+      return [...st.losses.keys()]
     },
     /** Calls parked, by page, behind numbers that have not come. */
     waiting: (page) =>
@@ -5051,33 +5052,37 @@ function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = 
     },
     handle: async (command, args) => {
       if (command === 'pane_page_activate') {
-        // A page that goes before the host has answered its activation.
-        if (stuck(args)) return new Promise(() => {})
         host.endPage()
         st.current = args.pageId
         st.serial += 1
         st.serials.set(args.pageId, st.serial)
-        for (const prior of args.priors ?? []) {
-          for (const lanes of st.lanes.values())
-            for (const lane of lanes) if (lane.page === prior.pageId) lane.issued ??= 0
-          for (const each of prior.issued) {
-            const lane = laneOf(`${each.id}:${each.generation}`, prior.pageId)
-            lane.issued = Math.max(lane.issued ?? 0, each.sequence)
-          }
-        }
         pump()
-        const pending = st.pendingLost
-        st.pendingLost = []
-        return { ok: true, lost: pending }
+        return {
+          ok: true,
+          lost: [...st.losses].map(([key, loss]) => ({ ...split(key), loss })),
+        }
+      }
+      if (command === 'pane_lost_told') {
+        for (const each of args.keys) {
+          st.acks.push(each)
+          const key = keyOf(each)
+          if ((st.losses.get(key) ?? Infinity) <= each.loss) st.losses.delete(key)
+        }
+        return { ok: true }
       }
       const key = keyOf(args)
       if (command === 'pane_input_skip') {
-        if (!admits(args.pageId)) return { ok: false, error: 'pane-input-stale-page' }
+        const ms = holdSkip(args)
+        if (ms !== null) await (typeof ms === 'number' ? sleep(ms) : ms)
+        if (!admits(args.pageId)) {
+          if (st.left.has(args.pageId)) lost(key)
+          return { ok: false, error: 'pane-input-stale-page' }
+        }
         const lane = laneOf(key, args.pageId)
         if (args.sequence > lane.passed && !lane.parked.has(args.sequence))
           lane.parked.set(args.sequence, { deadline: Date.now() + bound })
         pump()
-        return { ok: true }
+        return { ok: true, loss: lost(key) }
       }
       const ms = hold(args)
       if (ms !== null) await (typeof ms === 'number' ? sleep(ms) : ms)
@@ -5107,14 +5112,12 @@ async function openWithHost(page, host) {
     window.__paneInputHook = (command, args) => window.__host(command, args)
     window.__paneSkipHook = (args) => window.__host('pane_input_skip', args)
     window.__paneActivateHook = (args) => window.__host('pane_page_activate', args)
+    window.__paneLostToldHook = (args) => window.__host('pane_lost_told', args)
   })
   page.on('framenavigated', () => host.endPage())
-  host.onLost(({ id, generation }) =>
+  host.onLost((payload) =>
     page
-      .evaluate((payload) => window.__listeners.get('pane-input-lost')?.({ payload }), {
-        id,
-        generation,
-      })
+      .evaluate((payload) => window.__listeners.get('pane-input-lost')?.({ payload }), payload)
       .catch(() => {}),
   )
   await open(page)
@@ -5141,14 +5144,14 @@ const typeKeys = (page, keys) =>
   page.evaluate((keys) => {
     for (const key of keys) window.__emulators[0].type(key)
   }, keys)
+const firstPage = (args) => args.sequence === 1 && args.pageId.endsWith(':1')
+const sleeps = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 test('a reload loses none of what was typed: A held, B and C sent, D typed at once, all once and in order', async ({
   page,
 }) => {
   const first = held()
-  const host = orderedHost({
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
-  })
+  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
   try {
     await openWithHost(page, host)
     await typeKeys(page, ['A', 'B', 'C'])
@@ -5161,7 +5164,7 @@ test('a reload loses none of what was typed: A held, B and C sent, D typed at on
     await typeKeys(page, ['D'])
     // D, of the new page, waits behind all of them.
     await expect.poll(async () => host.waiting(await pageId())).toBe(1)
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await sleeps(300)
     expect(host.received).toBe('')
     first.release()
     await expect.poll(() => host.received, { timeout: 4000 }).toBe('ABCD')
@@ -5176,19 +5179,20 @@ test('A held past the bound: B, C and D go in, A is refused when it comes, and t
   page,
 }) => {
   const first = held()
-  const host = orderedHost({
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
-  })
+  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
   try {
     await openWithHost(page, host)
     await typeKeys(page, ['A', 'B', 'C'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleeps(200)
     await reloaded(page)
     await typeKeys(page, ['D'])
     await expect.poll(() => host.received, { timeout: 4000 }).toBe('BCD')
     await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
+    // The page said so, by the host's number, and the host forgot it.
+    await expect.poll(() => host.acks.length).toBeGreaterThan(0)
+    await expect.poll(() => host.unshown).toEqual([])
     first.release()
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await sleeps(300)
     expect(host.received, 'A is refused when it comes').toBe('BCD')
   } finally {
     host.stop()
@@ -5224,19 +5228,17 @@ test('a second reload inside the first keeps every page in its order, each once'
   page,
 }) => {
   const first = held()
-  const host = orderedHost({
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
-  })
+  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
   try {
     await openWithHost(page, host)
     await typeKeys(page, ['A', 'B'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleeps(200)
     await reloaded(page)
     await typeKeys(page, ['D'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleeps(200)
     await reloaded(page)
     await typeKeys(page, ['E'])
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await sleeps(300)
     expect(host.received).toBe('')
     first.release()
     await expect.poll(() => host.received, { timeout: 4000 }).toBe('ABDE')
@@ -5251,13 +5253,13 @@ test('a number that never comes, from a page two reloads back, is told to the pa
 }) => {
   const first = held()
   const host = orderedHost({
-    bound: 5000,
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
+    bound: 3000,
+    hold: (args) => (firstPage(args) ? first.promise : null),
   })
   try {
     await openWithHost(page, host)
     await typeKeys(page, ['A', 'B'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await sleeps(200)
     await reloaded(page)
     await typeKeys(page, ['D'])
     await reloaded(page)
@@ -5269,57 +5271,145 @@ test('a number that never comes, from a page two reloads back, is told to the pa
   }
 })
 
-test("a second reload before the middle page activated keeps the first page's key: AD, not DA", async ({
+test('repeated reloads while the host answers no activation keep the notice until a page has shown it', async ({
   page,
 }) => {
   const first = held()
-  const host = orderedHost({
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
-    stuck: (args) => args.pageId.endsWith(':2'),
-  })
+  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
+  const handle = host.handle
+  host.handle = (command, args) =>
+    command === 'pane_page_activate' && /:[23]$/.test(args.pageId)
+      ? new Promise(() => {})
+      : handle(command, args)
   try {
     await openWithHost(page, host)
-    await typeKeys(page, ['A'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    // The second page is loaded and never gets its activation answered; the third follows.
+    await typeKeys(page, ['A', 'B'])
+    await sleeps(200)
+    // Two pages that load and are never told they are current, then a third.
     await page.reload()
-    await expect.poll(() => page.evaluate(() => window.name)).toMatch(/:2\|/)
     await page.reload()
-    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-    await typeKeys(page, ['D'])
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    expect(host.received).toBe('')
-    first.release()
-    await expect.poll(() => host.received, { timeout: 4000 }).toBe('AD')
-    expect(host.told).toEqual([])
+    await sleeps(1800)
+    await reloaded(page)
+    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS, { timeout: 6000 })
+    await expect.poll(() => host.unshown, { timeout: 4000 }).toEqual([])
   } finally {
     host.stop()
   }
 })
 
-test('the same with the first key never delivered: D goes in after the bound and the page says so', async ({
+test('the limit: a key typed last before a reload that never reached the host is not told', async ({
   page,
 }) => {
   const first = held()
+  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
+  try {
+    await openWithHost(page, host)
+    await typeKeys(page, ['A'])
+    await sleeps(200)
+    // A's call is still on its way when the page goes, and nothing was typed after it: the
+    // host has no number past A to show that it is missing.
+    await reloaded(page)
+    await typeKeys(page, ['D'])
+    await expect.poll(() => host.received, { timeout: 4000 }).toBe('D')
+    await sleeps(2000)
+    expect(host.told).toEqual([])
+    await expect(page.locator('#status')).toHaveText('')
+  } finally {
+    host.stop()
+  }
+})
+
+test("an old page's timeout skip that comes after the reload is told to the page that is current", async ({
+  page,
+}) => {
+  const first = held()
+  const lateSkip = held()
   const host = orderedHost({
-    bound: 4000,
-    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
-    stuck: (args) => args.pageId.endsWith(':2'),
+    hold: (args) => (firstPage(args) ? first.promise : null),
+    holdSkip: (args) => (args.pageId.endsWith(':1') ? lateSkip.promise : null),
   })
   try {
     await openWithHost(page, host)
     await typeKeys(page, ['A'])
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await page.reload()
-    await expect.poll(() => page.evaluate(() => window.name)).toMatch(/:2\|/)
-    await page.reload()
-    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    // The page's own timeout skips A (held in transit), and the page reloads before the skip is answered.
+    await expect
+      .poll(() => page.evaluate(() => window.__calls.some(([name]) => name === 'pane_input_skip')))
+      .toBe(true)
+    await reloaded(page)
     await typeKeys(page, ['D'])
-    await expect.poll(() => host.received, { timeout: 9000 }).toBe('D')
+    await expect.poll(() => host.received).toBe('D')
+    await expect(page.locator('#status')).toHaveText('')
+    lateSkip.release()
     await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
   } finally {
     host.stop()
   }
+})
+
+test("a refusal that came with its loss's number is confirmed once the page has said it, and the host's own event for it says nothing more", async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = (_command, args) =>
+      args.sequence === 1
+        ? { ok: false, error: "the pane's input queue is full", loss: 7 }
+        : { ok: true, ticket: `t-${args.sequence}` }
+    window.__emulators[0].type('A')
+  })
+  const words =
+    'This window is still taking in what you sent before, so your last typing was not sent. Wait a moment, then type it again.'
+  await expect(page.locator('#status')).toHaveText(words)
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__calls.filter(([name]) => name === 'pane_lost_told').map(([, args]) => args.keys),
+      ),
+    )
+    .toEqual([[{ id: expect.any(String), generation: expect.any(Number), loss: 7 }]])
+  // The event for the same loss comes: the words stay.
+  await page.evaluate(() => {
+    const [, args] = window.__calls.find(([name]) => name === 'pane_input_enqueue')
+    window.__listeners.get('pane-input-lost')?.({
+      payload: { id: args.id, generation: args.generation, loss: 7 },
+    })
+  })
+  await expect(page.locator('#status')).toHaveText(words)
+})
+
+test('the page confirms only a notice it showed: a window it has let go of is not confirmed', async ({
+  page,
+}) => {
+  await open(page)
+  const told = await page.evaluate(async () => {
+    const { TerminalLink } = await import('/terminal-link.js')
+    const calls = []
+    const reports = []
+    const link = new TerminalLink({
+      invoke: async (command, args) => {
+        calls.push([command, args])
+        return { ok: true }
+      },
+      registry: { retire: () => {} },
+      report: (cause) => reports.push(cause.message),
+      pageId: 'p:1',
+    })
+    link.retire('gone:1')
+    const shown = link.typingLost({ id: 'gone', generation: 1, loss: 3 })
+    const here = link.typingLost({ id: 'here', generation: 1, loss: 4 })
+    // A loss it was told of, and one the host numbered earlier, show once.
+    const again = link.typingLost({ id: 'here', generation: 1, loss: 2 })
+    await link.told([{ id: 'here', generation: 1, loss: 4 }])
+    return { shown, here, again, reports, calls }
+  })
+  expect(told.shown).toBe(false)
+  expect(told.here).toBe(true)
+  expect(told.again).toBe(true)
+  expect(told.reports).toEqual([LOST_TYPING_WORDS])
+  expect(told.calls).toEqual([
+    ['pane_lost_told', { pageId: 'p:1', keys: [{ id: 'here', generation: 1, loss: 4 }] }],
+  ])
 })
 
 // A paste is one call with both of its markers: whole, or not at all.

@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use cf_panes::arbiter::{EnterTiming, InputArbiter};
-use cf_panes::input_queue::{InputQueue, InputWork, PriorPage};
+use cf_panes::input_queue::{InputQueue, InputWork};
 use cf_panes::pty::{PaneKey, PaneTable};
 use cf_panes::validation::MAX_PAGE_INPUT_BYTES;
 use futures_executor::block_on;
@@ -326,15 +326,7 @@ fn a_reload_with_a_held_call_loses_nothing_at_a_real_terminal() {
     admitted(&inputs, "s:1", &key, 2, b"B");
     admitted(&inputs, "s:1", &key, 3, b"C");
     inputs.end_page().unwrap();
-    inputs
-        .begin_page_after(
-            "s:2",
-            &[PriorPage {
-                page_id: "s:1".to_owned(),
-                issued: vec![(key.clone(), 3)],
-            }],
-        )
-        .unwrap();
+    inputs.begin_page("s:2").unwrap();
     let d = admitted(&inputs, "s:2", &key, 1, b"D");
     thread::sleep(Duration::from_millis(300));
     admitted(&inputs, "s:1", &key, 1, b"A");

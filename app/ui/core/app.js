@@ -371,68 +371,16 @@ function showTerminal(participant) {
 // window.name belongs to this webview across reloads, including when storage
 // is unavailable. The ordinal lets the host reject an older subscription
 // that was delayed before it ever reached the host.
-// It also carries, after a `|`, the last number each window's typing was given (`o`) and what
-// the pages before this one issued that no page has handed to the host yet (`p`): the page that
-// follows hands them to the host at its activation, which then knows what a call of those
-// pages may still bring. A page that reloads before it activated passes the earlier ones on.
-const savedPage = /^consensflow-page-v1:([0-9a-f-]{36}):([1-9][0-9]*)(?:\|(.*))?$/is.exec(
-  window.name,
-)
+const savedPage = /^consensflow-page-v1:([0-9a-f-]{36}):([1-9][0-9]*)$/i.exec(window.name)
 const priorPage = savedPage ? Number(savedPage[2]) : 0
 const canAdvancePage =
   savedPage && Number.isSafeInteger(priorPage) && priorPage < Number.MAX_SAFE_INTEGER
 const pageSession = canAdvancePage ? savedPage[1] : crypto.randomUUID()
 const pageNumber = canAdvancePage ? priorPage + 1 : 1
 const pageId = `${pageSession}:${pageNumber}`
-const MAX_PRIOR_PAGES = 8
-/** The pages before this one, as the host is told of them: page, and last numbers by window. */
-let priorPages = canAdvancePage ? readPriors(savedPage) : []
-/** This page's own last numbers, by window. */
-const issuedNumbers = new Map()
-function issuedList(list) {
-  return (Array.isArray(list) ? list : [])
-    .filter(
-      (each) =>
-        Array.isArray(each) &&
-        typeof each[0] === 'string' &&
-        Number.isSafeInteger(each[1]) &&
-        Number.isSafeInteger(each[2]),
-    )
-    .map(([id, generation, sequence]) => ({ id, generation, sequence }))
-}
-function readPriors(saved) {
-  let kept = {}
-  try {
-    kept = JSON.parse(saved[3] ?? '{}') ?? {}
-  } catch {}
-  const earlier = (Array.isArray(kept.p) ? kept.p : [])
-    .filter((each) => typeof each?.page === 'string')
-    .map((each) => ({ pageId: each.page, issued: issuedList(each.o) }))
-  return [...earlier, { pageId: `${saved[1]}:${saved[2]}`, issued: issuedList(kept.o) }].slice(
-    -MAX_PRIOR_PAGES,
-  )
-}
-/** Written before the call it numbers: a reload at any moment leaves the next page the truth. */
-function writePageName() {
-  const state = {
-    o: [...issuedNumbers.values()],
-    p: priorPages.map((each) => ({
-      page: each.pageId,
-      o: each.issued.map(({ id, generation, sequence }) => [id, generation, sequence]),
-    })),
-  }
-  window.name = `consensflow-page-v1:${pageId}|${JSON.stringify(state)}`
-}
-function numberIssued({ id, generation, sequence }) {
-  // A window that is gone for good has no number to keep.
-  if (sequence === null) issuedNumbers.delete(`${id}:${generation}`)
-  else issuedNumbers.set(`${id}:${generation}`, [id, generation, sequence])
-  writePageName()
-}
-writePageName()
+window.name = `consensflow-page-v1:${pageId}`
 const terminals = new TerminalsView(stage, {
   pageId,
-  onIssued: numberIssued,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
     return invoke(command, args)
@@ -1075,18 +1023,6 @@ $('#specs-settings-button').addEventListener('click', () =>
 )
 $('#specs-dialog').addEventListener('close', () => settingsButton.focus())
 
-/** The person has been told: the host may forget the notice (it keeps it until then). */
-async function lostTold(panes) {
-  if (panes.length === 0) return
-  const keys = panes.map(({ id, generation }) => ({ id, generation }))
-  for (let tries = 0; tries < 3; tries += 1) {
-    try {
-      if ((await invoke('pane_lost_told', { pageId, keys }))?.ok !== undefined) return
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 200))
-  }
-}
-
 async function establishPanePage() {
   for (const command of ['pane_page_prepare', 'pane_page_activate']) {
     let failures = 0
@@ -1094,25 +1030,17 @@ async function establishPanePage() {
       let timer
       try {
         const answer = await Promise.race([
-          invoke(
-            command,
-            command === 'pane_page_activate' && priorPages.length > 0
-              ? { pageId, priors: priorPages }
-              : { pageId },
-          ),
+          invoke(command, { pageId }),
           new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error('pane page call timed out')), 1500)
           }),
         ])
         if (answer?.ok === true) {
-          // Typing a page that has gone lost, told while no page was current.
+          // Typing the host knows may not have arrived, told while no page was current: the
+          // host keeps each notice until this page says it has told the person.
           if (command === 'pane_page_activate') {
-            // The host has what the pages before this one issued: the page keeps it no longer.
-            priorPages = []
-            writePageName()
-            const lost = answer.lost ?? []
-            for (const pane of lost) terminals.typingLost(pane)
-            void lostTold(lost)
+            const told = (answer.lost ?? []).filter((loss) => terminals.typingLost(loss))
+            void terminals.told(told)
           }
           break
         }
@@ -1158,8 +1086,7 @@ async function start() {
       })
       await listen('daemon-status', (event) => daemonStatus(event.payload))
       await listen('pane-input-lost', (event) => {
-        terminals.typingLost(event.payload)
-        void lostTold([event.payload])
+        if (terminals.typingLost(event.payload)) void terminals.told([event.payload])
       })
       // A file dropped on a terminal window types its path there.
       await listenForFileDrops({

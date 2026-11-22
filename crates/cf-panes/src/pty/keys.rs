@@ -420,6 +420,85 @@ mod conpty {
         (hex, seen)
     }
 
+    /// What a Node program that reads its terminal raw is given of what the host's input queue
+    /// writes for a page that reloads (P4-B on Windows, the byte order a page can see): the page
+    /// `s:1` sent B and C and its first call (`A`) comes `hold` after the reload began, the page
+    /// `s:2` typed D at once. Every chunk the program was handed, as the characters it read.
+    fn node_reads_a_reload(hold: Duration) -> (String, String) {
+        use crate::input_queue::{InputQueue, InputWork};
+        let node = node().expect("a node.exe on the PATH, which the app's own Windows tests need");
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = InputQueue::new(Arc::clone(&table), Arc::clone(&arbiter));
+        let argv = vec![
+            node.to_string_lossy().into_owned(),
+            "-e".to_owned(),
+            "process.stdin.setRawMode(true); console.log('READY'); \
+             process.stdin.on('data', (d) => console.log('HEX=[' + d.toString('hex') + ']#'))"
+                .to_owned(),
+        ];
+        let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        read_until(&table, &key, &output, "READY");
+        let typed = |text: &[u8]| InputWork::Typed(text.to_vec());
+        inputs.begin_page("s:1").expect("the first page");
+        for (number, text) in [(2, b"B"), (3, b"C")] {
+            inputs
+                .enqueue_page("s:1", key.clone(), number, typed(text), true)
+                .expect("a call of the first page");
+        }
+        inputs.end_page().expect("navigation begins");
+        inputs.begin_page("s:2").expect("the next page");
+        inputs
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .expect("the next page types at once");
+        std::thread::sleep(hold);
+        // Admitted within the bound, or refused after it.
+        let _ = inputs.enqueue_page("s:1", key.clone(), 1, typed(b"A"), true);
+        let mut seen = String::new();
+        let settled = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        inputs.close_and_drain();
+        table.kill(&key).expect("close the pane");
+        let hex: String = seen
+            .match_indices("HEX=[")
+            .filter_map(|(at, _)| {
+                let rest = &seen[at + "HEX=[".len()..];
+                Some(rest.split_once("]#")?.0.to_owned())
+            })
+            .collect();
+        let text = hex
+            .as_bytes()
+            .chunks(2)
+            .filter_map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+            .map(char::from)
+            .collect();
+        (text, seen)
+    }
+
+    /// The reload's order (D4's red 3) at the program's own end, through the shipped console
+    /// host: A's call is on its way when the page goes, B and C had come, the next page typed D
+    /// at once. The program is given A, B, C, D (not D, A).
+    #[test]
+    fn a_reload_with_a_held_call_reaches_a_node_program_as_abcd() {
+        let (text, seen) = node_reads_a_reload(Duration::from_millis(500));
+        assert_eq!(text, "ABCD", "its screen: {seen:?}");
+    }
+
+    /// The same with A held past the bound: B, C and D are given, A is refused when it comes.
+    #[test]
+    fn a_first_call_held_past_the_bound_reaches_a_node_program_as_bcd() {
+        let (text, seen) = node_reads_a_reload(Duration::from_millis(1800));
+        assert_eq!(text, "BCD", "its screen: {seen:?}");
+    }
+
     /// What a terminal answers a program's questions with (xterm.js: an OSC colour ended by ST or
     /// by BEL, a DCS name ended by ST) goes through the pane host's input like a key and reaches a
     /// Node program whole, with the words typed after it: the console host gives the program the

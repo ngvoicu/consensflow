@@ -33,9 +33,10 @@ pub const ORDER_BOUND: Duration = Duration::from_millis(1500);
 const MAX_LANE_SLOTS: usize = 8192;
 #[cfg(test)]
 const MAX_LANE_SLOTS: usize = 64;
-/// How many pages that went the host still knows, and how many closed lanes.
+/// How many pages that went the host still knows.
 const MAX_KNOWN_PAGES: usize = 32;
-const MAX_CLOSED_LANES: usize = 512;
+/// How many windows' unshown notices the host keeps.
+const MAX_PENDING_LOSSES: usize = 512;
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
 const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
 /// The host is stopping, and takes no more input.
@@ -185,9 +186,9 @@ struct InputJob {
     response: oneshot::Sender<InputResponse>,
     /// Held until the job is done, or refused before it was written.
     _reserved: Reserved,
-    /// Told, from the worker, when the job did not go in whole: for a call of
-    /// a page that has gone, the page that is current is told in its place.
-    watch: Option<Box<dyn Fn() + Send>>,
+    /// Answers the call from the worker, under the host's lock, and tells the page
+    /// that is current when a call of a page that has gone did not go in whole.
+    settle: Option<Box<dyn FnOnce(oneshot::Sender<InputResponse>, InputResponse) + Send>>,
 }
 
 impl InputJob {
@@ -200,17 +201,30 @@ impl InputJob {
 /// What the host says of a page's input beyond answering it. It never carries a
 /// byte of what was typed.
 pub trait InputObserver: Send + Sync {
-    /// Typing a departed page handed over, or a number it issued, may not have
-    /// reached this window. Told to the page that is current.
-    fn lost(&self, key: &PaneKey);
+    /// Typing may not have reached this window (loss number `loss`, the window's
+    /// latest): told to the page that is current, which says so and confirms it.
+    fn lost(&self, key: &PaneKey, loss: u64);
     /// A line for the host's own log (R01): a number given up at its bound, a
     /// late call refused, and how late.
     fn say(&self, line: &str);
 }
 
 enum Event {
-    Lost(PaneKey),
+    Lost(PaneKey, u64),
     Say(String),
+}
+
+/// A call the host refused: why, and for the page that is current the loss it recorded.
+#[derive(Debug)]
+pub struct Refusal {
+    pub error: String,
+    pub loss: Option<u64>,
+}
+
+impl From<String> for Refusal {
+    fn from(error: String) -> Self {
+        Self { error, loss: None }
+    }
 }
 
 #[derive(Clone)]
@@ -229,13 +243,6 @@ impl PageInputCompletion {
     pub fn notify_human_once(&self) -> bool {
         self.human && !self.notified.swap(true, Ordering::AcqRel)
     }
-}
-
-/// What a departed page said it had issued, handed over by the page that
-/// follows it when that page activates: for each window, the last number.
-pub struct PriorPage {
-    pub page_id: String,
-    pub issued: Vec<(PaneKey, u64)>,
 }
 
 /// A number of a page's, waiting for the numbers before it.
@@ -270,8 +277,6 @@ struct Lane {
     slots: BTreeMap<u64, Slot>,
     /// Set when the page has gone: its calls are admitted until then.
     until: Option<Instant>,
-    /// What the page said it issued, once the page after it has told the host.
-    issued: Option<u64>,
     /// The last numbers given up at their bound, and when.
     gave_up: VecDeque<(u64, Instant)>,
 }
@@ -288,13 +293,11 @@ struct PageInputState {
     lanes: HashMap<PaneKey, Vec<Lane>>,
     completions: HashMap<String, PageInputCompletion>,
     next_ticket: u64,
-    /// Windows whose typing was lost, until a page says it has told the person.
-    pending_lost: HashSet<PaneKey>,
+    /// By window, the number of its latest loss, until a page says it has told the person.
+    pending_lost: HashMap<PaneKey, u64>,
+    next_loss: u64,
     /// The order the pages that went left in, oldest first.
     left_order: VecDeque<String>,
-    /// What a lane had settled when its page's bound ended.
-    closed: HashMap<(String, PaneKey), u64>,
-    closed_order: VecDeque<(String, PaneKey)>,
     reaper: bool,
 }
 
@@ -317,20 +320,29 @@ impl PageShared {
         let Some(observer) = observer else { return };
         for event in events {
             match event {
-                Event::Lost(key) => observer.lost(&key),
+                Event::Lost(key, loss) => observer.lost(&key, loss),
                 Event::Say(line) => observer.say(&line),
             }
         }
     }
 
-    /// A job of a page that has gone did not go in whole.
-    fn job_failed(&self, page_id: &str, key: &PaneKey) {
+    /// A job's answer. It is given under the host's lock, so that a page which goes at the
+    /// same moment either has it, or is told in its place: a failed call of a page that has
+    /// gone is typing the person never heard of.
+    fn settle(
+        &self,
+        page_id: &str,
+        key: &PaneKey,
+        response: oneshot::Sender<InputResponse>,
+        result: InputResponse,
+    ) {
         let mut events = Vec::new();
         {
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if state.current.as_deref() != Some(page_id) {
+            if result.is_err() && state.current.as_deref() != Some(page_id) {
                 state.lost(key, &mut events);
             }
+            let _ = response.send(result);
         }
         self.flush(events);
     }
@@ -339,24 +351,33 @@ impl PageShared {
 impl PageInputState {
     /// Tell the page that is current that typing of a departed page may be
     /// missing from this window; with none current, at the next activation.
-    fn lost(&mut self, key: &PaneKey, events: &mut Vec<Event>) {
-        // Kept until a page says it has told the person: an event or an answer can be lost.
-        self.pending_lost.insert(key.clone());
-        if self.current.is_some() {
-            events.push(Event::Lost(key.clone()));
-        }
-    }
-
-    fn close_lane(&mut self, page: &str, key: &PaneKey, passed: u64) {
-        let id = (page.to_owned(), key.clone());
-        if self.closed.insert(id.clone(), passed).is_none() {
-            self.closed_order.push_back(id);
-        }
-        while self.closed_order.len() > MAX_CLOSED_LANES {
-            if let Some(old) = self.closed_order.pop_front() {
-                self.closed.remove(&old);
+    fn lost(&mut self, key: &PaneKey, events: &mut Vec<Event>) -> u64 {
+        // Kept until a page says it has told the person, by this number: an event, an answer
+        // or a page can be lost, and a notice told for an earlier loss does not cover this one.
+        self.next_loss += 1;
+        let loss = self.next_loss;
+        self.pending_lost.insert(key.clone(), loss);
+        if self.pending_lost.len() > MAX_PENDING_LOSSES {
+            if let Some(oldest) = self
+                .pending_lost
+                .iter()
+                .min_by_key(|(_, loss)| **loss)
+                .map(|(key, _)| key.clone())
+            {
+                self.pending_lost.remove(&oldest);
             }
         }
+        if self.current.is_some() {
+            events.push(Event::Lost(key.clone(), loss));
+        }
+        loss
+    }
+
+    fn unshown(&self) -> Vec<(PaneKey, u64)> {
+        self.pending_lost
+            .iter()
+            .map(|(key, loss)| (key.clone(), *loss))
+            .collect()
     }
 
     /// Whether a page's calls are admitted: the page is current, or went less
@@ -385,7 +406,6 @@ impl PageInputState {
                         passed: 0,
                         slots: BTreeMap::new(),
                         until,
-                        issued: None,
                         gave_up: VecDeque::new(),
                     },
                 );
@@ -438,7 +458,6 @@ impl PageInputState {
         let mut at = 0;
         let mut blocked = false;
         let mut lost = false;
-        let mut closed: Vec<(String, u64)> = Vec::new();
         while at < lanes.len() {
             let lane = &mut lanes[at];
             let departed = current.as_deref() != Some(lane.page.as_str());
@@ -458,14 +477,7 @@ impl PageInputState {
                         let waited = earliest.map_or(ORDER_BOUND, |earliest| {
                             now.saturating_duration_since(earliest - ORDER_BOUND)
                         });
-                        lane.give_up(
-                            first - 1,
-                            now,
-                            waited,
-                            key,
-                            departed.then_some(&mut lost),
-                            events,
-                        );
+                        lane.give_up(first - 1, now, waited, key, &mut lost, events);
                         continue;
                     }
                     break;
@@ -501,44 +513,19 @@ impl PageInputState {
                 at += 1;
                 continue;
             }
-            let Some(until) = lane.until else {
-                at += 1;
-                continue;
-            };
-            let outstanding = lane
-                .issued
-                .map_or(0, |issued| issued.saturating_sub(lane.passed));
-            if forced && lane.slots.is_empty() {
-                if outstanding > 0 {
-                    let waited = now.saturating_duration_since(until - ORDER_BOUND);
-                    let issued = lane.issued.unwrap_or(lane.passed);
-                    lane.give_up(
-                        issued,
-                        now,
-                        waited,
-                        key,
-                        departed.then_some(&mut lost),
-                        events,
-                    );
-                }
-                // The page is not heard any more: what it settled is kept, small.
-                closed.push((lane.page.clone(), lane.passed));
+            // A page that has gone holds the pages after it until its bound ends: calls of
+            // it may still come, and none of the next page's go in ahead of them.
+            if lane.until.is_some_and(|until| now >= until) && lane.slots.is_empty() {
                 lanes.remove(at);
                 continue;
             }
-            // A page that has issued all it will does not hold the pages after
-            // it. Its lane stays until its bound, so that a repeat of a number
-            // it handed over is refused, not written again.
-            if !(lane.slots.is_empty() && lane.issued.is_some() && outstanding == 0) {
+            if lane.until.is_some() {
                 blocked = true;
             }
             at += 1;
         }
         if lanes.is_empty() {
             self.lanes.remove(key);
-        }
-        for (page, passed) in closed {
-            self.close_lane(&page, key, passed);
         }
         if lost {
             self.lost(key, events);
@@ -563,7 +550,7 @@ impl Lane {
         now: Instant,
         waited: Duration,
         key: &PaneKey,
-        departed: Option<&mut bool>,
+        lost: &mut bool,
         events: &mut Vec<Event>,
     ) {
         if upto <= self.passed {
@@ -584,9 +571,7 @@ impl Lane {
             key.generation,
             waited.as_millis()
         )));
-        if let Some(lost) = departed {
-            *lost = true;
-        }
+        *lost = true;
     }
 }
 
@@ -657,10 +642,9 @@ impl InputQueue {
                     lanes: HashMap::new(),
                     completions: HashMap::new(),
                     next_ticket: 1,
-                    pending_lost: HashSet::new(),
+                    pending_lost: HashMap::new(),
+                    next_loss: 0,
                     left_order: VecDeque::new(),
-                    closed: HashMap::new(),
-                    closed_order: VecDeque::new(),
                     reaper: false,
                 }),
                 wake: Condvar::new(),
@@ -715,6 +699,20 @@ impl InputQueue {
         work: InputWork,
         human: bool,
     ) -> Result<String, String> {
+        self.enqueue_page_told(page_id, key, sequence, work, human)
+            .map_err(|refusal| refusal.error)
+    }
+
+    /// As [`Self::enqueue_page`], and a refusal of the page that is current carries the number
+    /// of the loss the host recorded for it: the page confirms that number once it has said so.
+    pub fn enqueue_page_told(
+        &self,
+        page_id: &str,
+        key: PaneKey,
+        sequence: u64,
+        work: InputWork,
+        human: bool,
+    ) -> Result<String, Refusal> {
         let mut events = Vec::new();
         let result = self.admit(page_id, key, sequence, work, human, &mut events);
         self.page.flush(events);
@@ -731,7 +729,7 @@ impl InputQueue {
         work: InputWork,
         human: bool,
         events: &mut Vec<Event>,
-    ) -> Result<String, String> {
+    ) -> Result<String, Refusal> {
         let mut page = self.state()?;
         // Judged by the time under the lock: a call that waited for it past its page's bound
         // is late, whenever it was sent.
@@ -747,7 +745,7 @@ impl InputQueue {
                 )));
                 page.lost(&key, events);
             }
-            return Err(INPUT_STALE_PAGE.to_string());
+            return Err(INPUT_STALE_PAGE.to_string().into());
         }
         let current = page.current.as_deref() == Some(page_id);
         let lane = page.lane(&key, page_id);
@@ -776,12 +774,12 @@ impl InputQueue {
             if lost {
                 page.lost(&key, events);
             }
-            return Err(INPUT_SEQUENCE_STALE.to_string());
+            return Err(INPUT_SEQUENCE_STALE.to_string().into());
         }
         let refuse = |page: &mut PageInputState,
                       events: &mut Vec<Event>,
                       error: String|
-         -> Result<String, String> {
+         -> Result<String, Refusal> {
             // Final for its number: the order goes on past it. A page that has gone cannot
             // be told, so the page that is current is.
             let lane = page.lane(&key, page_id);
@@ -794,10 +792,13 @@ impl InputQueue {
                 );
             }
             page.pump(&key, now, events);
-            if !current {
-                page.lost(&key, events);
-            }
-            Err(error)
+            // Told whatever page it was: the answer may never reach a page that goes at that
+            // moment, and the page that is current confirms the number once it has said so.
+            let loss = page.lost(&key, events);
+            Err(Refusal {
+                error,
+                loss: current.then_some(loss),
+            })
         };
         if page.lane(&key, page_id).slots.len() >= MAX_LANE_SLOTS {
             return refuse(&mut page, events, InputError::queue_full().to_string());
@@ -854,17 +855,21 @@ impl InputQueue {
                 }
             }
         };
-        let watch: Option<Box<dyn Fn() + Send>> = {
+        let settle: Option<
+            Box<dyn FnOnce(oneshot::Sender<InputResponse>, InputResponse) + Send>,
+        > = {
             let shared = Arc::clone(&self.page);
             let page_id = page_id.to_owned();
             let key = key.clone();
-            Some(Box::new(move || shared.job_failed(&page_id, &key)))
+            Some(Box::new(move |response, result| {
+                shared.settle(&page_id, &key, response, result)
+            }))
         };
         let job = InputJob {
             work,
             response,
             _reserved: reserved,
-            watch,
+            settle,
         };
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
@@ -897,7 +902,7 @@ impl InputQueue {
             .find(|(refused_page, number, _)| refused_page == page_id && *number == sequence)
         {
             page.completions.remove(&ticket);
-            return Err(error.to_string());
+            return Err(error.to_string().into());
         }
         self.watch_bounds(&mut page);
         Ok(ticket)
@@ -907,18 +912,25 @@ impl InputQueue {
     /// answer), and the page will not send it again. Its number is settled
     /// without a write: the original either went in before this or is refused
     /// when it comes late, and the numbers after it go on. A completion the
-    /// page never learned of is dropped.
+    /// page never learned of is dropped. What it may have lost is recorded
+    /// whatever page asks: the number of that loss is the answer, and a page that
+    /// has gone before it could say so leaves it to the page that is current.
     pub fn skip_page_sequence(
         &self,
         page_id: &str,
         key: &PaneKey,
         sequence: u64,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         let mut events = Vec::new();
-        {
+        let loss = {
             let mut page = self.state()?;
             let now = Instant::now();
             if !page.admits(page_id, now) {
+                if page.left_at.contains_key(page_id) {
+                    page.lost(key, &mut events);
+                }
+                drop(page);
+                self.page.flush(events);
                 return Err(INPUT_STALE_PAGE.to_string());
             }
             if sequence == u64::MAX {
@@ -943,40 +955,36 @@ impl InputQueue {
                     && completion.sequence == sequence)
             });
             page.pump(key, now, &mut events);
+            let loss = page.lost(key, &mut events);
             self.watch_bounds(&mut page);
-        }
+            loss
+        };
         self.page.flush(events);
         self.page.wake.notify_all();
-        Ok(())
+        Ok(loss)
     }
 
-    /// The page has told the person: these windows' notices are done.
-    pub fn lost_told(&self, keys: &[PaneKey]) -> Result<(), String> {
+    /// The page has told the person: these windows' notices, up to the number the page
+    /// says, are done. A later loss of the same window stays.
+    pub fn lost_told(&self, told: &[(PaneKey, u64)]) -> Result<(), String> {
         let mut page = self.state()?;
-        for key in keys {
-            page.pending_lost.remove(key);
+        for (key, loss) in told {
+            if page.pending_lost.get(key).is_some_and(|latest| latest <= loss) {
+                page.pending_lost.remove(key);
+            }
         }
         Ok(())
     }
 
     /// A call of the page was refused before the host saw it (its bytes did not decode): the
-    /// number is spent, and a page that has gone is not told, so the page that is current is.
+    /// number is spent, and the loss is recorded as a skip's is.
     pub fn refuse_page_sequence(
         &self,
         page_id: &str,
         key: &PaneKey,
         sequence: u64,
-    ) -> Result<(), String> {
-        self.skip_page_sequence(page_id, key, sequence)?;
-        let mut events = Vec::new();
-        {
-            let mut page = self.state()?;
-            if page.current.as_deref() != Some(page_id) {
-                page.lost(key, &mut events);
-            }
-        }
-        self.page.flush(events);
-        Ok(())
+    ) -> Result<u64, String> {
+        self.skip_page_sequence(page_id, key, sequence)
     }
 
     fn check_page(page: &PageInputState, page_id: &str) -> Result<Option<(String, u64)>, String> {
@@ -1019,27 +1027,22 @@ impl InputQueue {
         Ok(())
     }
 
-    /// The page becomes current. `priors` is what the pages before it say they
-    /// issued, window by window. The windows whose typing was lost are returned,
-    /// for the page to say so, and are kept until it says it has ([`Self::lost_told`]):
-    /// an activation whose answer was lost is asked again.
-    pub fn activate_page(
-        &self,
-        page_id: &str,
-        priors: &[PriorPage],
-    ) -> Result<Vec<PaneKey>, String> {
+    /// The page becomes current. The windows whose typing was lost are returned, each with
+    /// its latest loss's number, for the page to say so, and are kept until it says it has
+    /// ([`Self::lost_told`]): an activation whose answer was lost is asked again.
+    pub fn activate_page(&self, page_id: &str) -> Result<Vec<(PaneKey, u64)>, String> {
         let mut events = Vec::new();
         let lost = {
             let mut page = self.state()?;
             if page.current.as_deref() == Some(page_id) {
-                return Ok(page.pending_lost.iter().cloned().collect());
+                return Ok(page.unshown());
             }
             if !page.pending_pages.remove(page_id) {
                 return Err(INPUT_STALE_PAGE.to_string());
             }
-            self.start_page(&mut page, page_id, priors, &mut events)?;
+            self.start_page(&mut page, page_id, &mut events)?;
             self.watch_bounds(&mut page);
-            page.pending_lost.iter().cloned().collect()
+            page.unshown()
         };
         self.page.flush(events);
         self.page.wake.notify_all();
@@ -1047,25 +1050,16 @@ impl InputQueue {
     }
 
     /// The pane host's own tests can start a page at the subscription boundary.
-    pub fn begin_page(&self, page_id: &str) -> Result<(), String> {
-        self.begin_page_after(page_id, &[]).map(|_| ())
-    }
-
-    /// As [`Self::begin_page`], with what the page before it issued.
-    pub fn begin_page_after(
-        &self,
-        page_id: &str,
-        priors: &[PriorPage],
-    ) -> Result<Vec<PaneKey>, String> {
+    pub fn begin_page(&self, page_id: &str) -> Result<Vec<(PaneKey, u64)>, String> {
         let mut events = Vec::new();
         let lost = {
             let mut page = self.state()?;
             if page.current.as_deref() == Some(page_id) {
-                return Ok(page.pending_lost.iter().cloned().collect());
+                return Ok(page.unshown());
             }
-            self.start_page(&mut page, page_id, priors, &mut events)?;
+            self.start_page(&mut page, page_id, &mut events)?;
             self.watch_bounds(&mut page);
-            page.pending_lost.iter().cloned().collect()
+            page.unshown()
         };
         self.page.flush(events);
         self.page.wake.notify_all();
@@ -1076,7 +1070,6 @@ impl InputQueue {
         &self,
         page: &mut PageInputState,
         page_id: &str,
-        priors: &[PriorPage],
         events: &mut Vec<Event>,
     ) -> Result<(), String> {
         let ordinal = Self::check_page(page, page_id)?;
@@ -1089,50 +1082,6 @@ impl InputQueue {
         let serial = page.next_serial;
         page.next_serial += 1;
         page.serials.insert(page_id.to_owned(), serial);
-        // What the pages before say they issued: a number that has not come yet is waited
-        // for, at most to its page's bound, and one whose page is gone for good is lost. A
-        // page that says nothing has nothing outstanding.
-        for prior in priors {
-            let Some(left) = page.left_at.get(&prior.page_id).copied() else {
-                continue;
-            };
-            for (key, number) in &prior.issued {
-                let existing = page
-                    .lanes
-                    .get(key)
-                    .is_some_and(|lanes| lanes.iter().any(|lane| lane.page == prior.page_id));
-                if existing {
-                    let lane = page.lane(key, &prior.page_id);
-                    lane.issued = Some(lane.issued.map_or(*number, |old| old.max(*number)));
-                    continue;
-                }
-                let passed = page
-                    .closed
-                    .get(&(prior.page_id.clone(), key.clone()))
-                    .copied()
-                    .unwrap_or(0);
-                if *number <= passed {
-                    continue;
-                }
-                if now >= left + ORDER_BOUND {
-                    page.lost(key, events);
-                } else {
-                    page.lane(key, &prior.page_id).issued = Some(*number);
-                }
-            }
-            for lanes in page.lanes.values_mut() {
-                for lane in lanes.iter_mut().filter(|lane| lane.page == prior.page_id) {
-                    lane.issued.get_or_insert(0);
-                }
-            }
-        }
-        if priors.is_empty() {
-            for lanes in page.lanes.values_mut() {
-                for lane in lanes.iter_mut().filter(|lane| lane.until.is_some()) {
-                    lane.issued.get_or_insert(0);
-                }
-            }
-        }
         page.pump_all(now, events);
         Ok(())
     }
@@ -1383,7 +1332,7 @@ impl InputQueue {
             work,
             response,
             _reserved: reserved,
-            watch: None,
+            settle: None,
         };
         match sender.try_send(job) {
             Ok(()) => Ok(receiver),
@@ -1491,18 +1440,19 @@ fn input_worker(
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);
-        if result.is_err() {
-            if let Some(watch) = &job.watch {
-                watch();
-            }
-        }
         let InputJob {
             response,
             _reserved,
+            settle,
             ..
         } = job;
         drop(_reserved);
-        let _ = response.send(result);
+        match settle {
+            Some(settle) => settle(response, result),
+            None => {
+                let _ = response.send(result);
+            }
+        }
     }
 }
 
@@ -1943,8 +1893,9 @@ mod tests {
         inputs
             .enqueue_page("page-two", key, 1, typed(b"E"), true)
             .unwrap();
+        // It goes in once the page that went has been heard for its bound.
         assert!(
-            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"E")
+            matches!(received.recv_timeout(Duration::from_secs(3)).unwrap().work, InputWork::Typed(bytes) if bytes == b"E")
         );
         inputs.close_and_drain();
     }
@@ -2003,16 +1954,16 @@ mod tests {
         inputs.prepare_page("session:1").unwrap();
         inputs.end_page().unwrap();
         assert_eq!(
-            inputs.activate_page("session:1", &[]),
+            inputs.activate_page("session:1"),
             Err(INPUT_STALE_PAGE.to_owned())
         );
         // An old prepare that arrived only after navigation has no activation
         // from its departed page. A new activation retires it too.
         inputs.prepare_page("session:2").unwrap();
         inputs.prepare_page("session:3").unwrap();
-        inputs.activate_page("session:3", &[]).unwrap();
+        inputs.activate_page("session:3").unwrap();
         assert_eq!(
-            inputs.activate_page("session:2", &[]),
+            inputs.activate_page("session:2"),
             Err(INPUT_STALE_PAGE.to_owned())
         );
         assert_eq!(
@@ -2020,7 +1971,7 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs.prepare_page("session:3").unwrap();
-        inputs.activate_page("session:3", &[]).unwrap();
+        inputs.activate_page("session:3").unwrap();
         assert!(inputs.page_is_current("session:3").is_ok());
         inputs.close_and_drain();
     }
@@ -2236,12 +2187,12 @@ mod tests {
     #[derive(Default)]
     struct Observed {
         lines: Mutex<Vec<String>>,
-        lost: Mutex<Vec<PaneKey>>,
+        lost: Mutex<Vec<(PaneKey, u64)>>,
     }
 
     impl InputObserver for Observed {
-        fn lost(&self, key: &PaneKey) {
-            self.lost.lock().unwrap().push(key.clone());
+        fn lost(&self, key: &PaneKey, loss: u64) {
+            self.lost.lock().unwrap().push((key.clone(), loss));
         }
         fn say(&self, line: &str) {
             self.lines.lock().unwrap().push(line.to_owned());
@@ -2319,9 +2270,10 @@ mod tests {
             lines.iter().all(|line| !line.contains("SECRET")),
             "{lines:?}"
         );
-        assert!(
-            observed.lost.lock().unwrap().is_empty(),
-            "the current page shows its own notice"
+        assert_eq!(
+            observed.lost.lock().unwrap().len(),
+            1,
+            "the gap is recorded: the page that is current may not be able to say so"
         );
         inputs.close_and_drain();
     }
@@ -2444,8 +2396,9 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// The reload: A's call is held, B and C came, the page went and the next
-    /// page typed D at once. The host writes A, B, C, D, each once.
+    /// The reload: A's call is held, B and C came, the page went and the next page typed D at
+    /// once. The host writes A, B, C, D, each once: D waits until the departed page's bound is
+    /// over, so that nothing it still sends is written behind it.
     #[test]
     fn a_departed_pages_calls_go_in_before_the_next_pages() {
         let (inputs, key, received, _) = bare();
@@ -2457,33 +2410,27 @@ mod tests {
             .enqueue_page("s:1", key.clone(), 3, typed(b"C"), true)
             .unwrap();
         inputs.end_page().unwrap();
-        inputs
-            .begin_page_after(
-                "s:2",
-                &[PriorPage {
-                    page_id: "s:1".into(),
-                    issued: vec![(key.clone(), 3)],
-                }],
-            )
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs
             .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
             .unwrap();
         thread::sleep(Duration::from_millis(500));
-        assert_eq!(
-            handed(&received),
-            b"",
-            "all wait for A, which the old page issued"
-        );
+        assert_eq!(handed(&received), b"", "all wait for A");
         inputs
             .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
             .unwrap();
-        assert_eq!(handed(&received), b"ABCD");
+        assert_eq!(
+            handed(&received),
+            b"ABC",
+            "the departed page's own calls go in as they are in order"
+        );
+        thread::sleep(ORDER_BOUND);
+        assert_eq!(handed(&received), b"D", "the next page's after its bound");
         inputs.close_and_drain();
     }
 
-    /// The same with A held past the bound: B, C and D go in, A is refused when
-    /// it comes, and the page that is current is told.
+    /// The same with A held past the bound: B, C and D go in, A is refused when it comes, and
+    /// the page that is current is told, before A comes.
     #[test]
     fn a_number_that_never_comes_from_a_departed_page_is_told_to_the_current_page() {
         let (inputs, key, received, _) = bare();
@@ -2495,15 +2442,7 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 3, typed(b"C"), true)
             .unwrap();
-        inputs
-            .begin_page_after(
-                "s:2",
-                &[PriorPage {
-                    page_id: "s:1".into(),
-                    issued: vec![(key.clone(), 3)],
-                }],
-            )
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs
             .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
             .unwrap();
@@ -2511,10 +2450,9 @@ mod tests {
         assert_eq!(handed(&received), b"");
         thread::sleep(Duration::from_millis(800));
         assert_eq!(handed(&received), b"BCD");
-        // The number that never came is told at its bound, before the call comes late.
         let lost = observed.lost.lock().unwrap().clone();
         assert!(
-            !lost.is_empty() && lost.iter().all(|each| each == &key),
+            !lost.is_empty() && lost.iter().all(|(each, _)| each == &key),
             "{lost:?}"
         );
         assert_eq!(
@@ -2534,8 +2472,8 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// A second reload inside the first's bound: every page's calls go in in
-    /// page order, each once.
+    /// A second reload inside the first's bound: every page's calls go in in page order, each
+    /// once, with nothing handed over from page to page.
     #[test]
     fn a_second_reload_inside_the_first_keeps_every_pages_order() {
         let (inputs, key, received, _) = bare();
@@ -2543,27 +2481,11 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
             .unwrap();
-        inputs
-            .begin_page_after(
-                "s:2",
-                &[PriorPage {
-                    page_id: "s:1".into(),
-                    issued: vec![(key.clone(), 2)],
-                }],
-            )
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs
             .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
             .unwrap();
-        inputs
-            .begin_page_after(
-                "s:3",
-                &[PriorPage {
-                    page_id: "s:2".into(),
-                    issued: vec![(key.clone(), 1)],
-                }],
-            )
-            .unwrap();
+        inputs.begin_page("s:3").unwrap();
         inputs
             .enqueue_page("s:3", key.clone(), 1, typed(b"E"), true)
             .unwrap();
@@ -2572,17 +2494,19 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
             .unwrap();
-        assert_eq!(handed(&received), b"ABDE");
-        // A repeat of a number a departed page handed over is refused.
+        assert_eq!(handed(&received), b"AB");
+        thread::sleep(ORDER_BOUND + Duration::from_millis(300));
+        assert_eq!(handed(&received), b"DE");
+        // A repeat of a number a departed page handed over is refused, not written twice.
         assert_eq!(
             inputs.enqueue_page("s:2", key.clone(), 1, typed(b"D"), true),
-            Err(INPUT_SEQUENCE_STALE.to_owned())
+            Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs.close_and_drain();
     }
 
-    /// With no page current when typing is lost, the notice waits for the next
-    /// page's activation.
+    /// With no page current when typing is lost, the notice waits for the next page's
+    /// activation, and stays until the page says it told the person.
     #[test]
     fn typing_lost_with_no_page_current_is_told_at_the_next_activation() {
         let (inputs, key, received, _) = bare();
@@ -2593,28 +2517,42 @@ mod tests {
         inputs.end_page().unwrap();
         thread::sleep(ORDER_BOUND + Duration::from_millis(300));
         assert_eq!(handed(&received), b"B");
-        let lost = inputs
-            .begin_page_after(
-                "s:2",
-                &[PriorPage {
-                    page_id: "s:1".into(),
-                    issued: vec![],
-                }],
-            )
-            .unwrap();
-        assert_eq!(lost, vec![key]);
+        inputs.prepare_page("s:2").unwrap();
+        let lost = inputs.activate_page("s:2").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
+        // The answer was lost at the page, which asks again, and gets the same notice.
+        assert_eq!(inputs.activate_page("s:2").unwrap(), lost);
+        inputs.lost_told(&lost).unwrap();
+        assert!(inputs.activate_page("s:2").unwrap().is_empty());
         inputs.close_and_drain();
     }
 
-    fn prior(page: &str, key: &PaneKey, issued: u64) -> PriorPage {
-        PriorPage {
-            page_id: page.to_owned(),
-            issued: vec![(key.clone(), issued)],
-        }
+    /// The limit: a departed page's last call that never reached the host has no later number
+    /// to show that it was missing, so it cannot be told. The next page's typing goes in after
+    /// the bound, with no notice.
+    #[test]
+    fn the_limit_a_departed_pages_last_call_that_never_came_cannot_be_told() {
+        let (inputs, key, received, _) = bare();
+        let observed = observed(&inputs);
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
+            .unwrap();
+        // Number 2 was typed and never reached the host: nothing came after it.
+        inputs.begin_page("s:2").unwrap();
+        inputs
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .unwrap();
+        thread::sleep(ORDER_BOUND + Duration::from_millis(500));
+        assert_eq!(handed(&received), b"AD");
+        assert!(observed.lost.lock().unwrap().is_empty());
+        assert!(inputs.activate_page("s:2").unwrap().is_empty());
+        inputs.close_and_drain();
     }
 
-    /// Blocker 2: a departed page's key refused (the window holds two 4 MiB pastes), inside
-    /// its grace, is told to the page that is current.
+    /// A departed page's key refused (the window holds two 4 MiB pastes), inside its bound, is
+    /// told to the page that is current.
     #[test]
     fn a_departed_pages_refusal_is_told_to_the_current_page() {
         let (inputs, key, _received, _) = bare();
@@ -2627,48 +2565,61 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 2, InputWork::Typed(big), true)
             .unwrap();
-        inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 3)])
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         assert_eq!(
             inputs.enqueue_page("s:1", key.clone(), 3, typed(b"k"), true),
             Err("the pane's input queue is full".to_owned())
         );
         let lost = observed.lost.lock().unwrap().clone();
-        assert_eq!(
-            lost,
-            vec![key.clone()],
-            "the refusal went back to a page that has gone"
-        );
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key, "the refusal went back to a page that has gone");
         inputs.close_and_drain();
     }
 
-    /// Blocker 3: what was lost stays until a page has it: an activation whose answer was lost
-    /// is retried and gets the same notices.
+    /// A refusal of the page that is current carries its loss's number, and stays recorded when
+    /// the page goes before it has said so: a refusal in transit when navigation begins.
     #[test]
-    fn a_loss_notice_stays_until_a_page_has_it() {
+    fn a_refusal_in_transit_at_navigation_is_told_to_the_next_page() {
         let (inputs, key, _received, _) = bare();
         inputs.begin_page("s:1").unwrap();
-        inputs
-            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
-            .unwrap();
+        let big = vec![b'p'; 4 * 1024 * 1024];
+        for number in 1..=2 {
+            inputs
+                .enqueue_page("s:1", key.clone(), number, InputWork::Typed(big.clone()), true)
+                .unwrap();
+        }
+        let refusal = inputs
+            .enqueue_page_told("s:1", key.clone(), 3, typed(b"k"), true)
+            .unwrap_err();
+        let loss = refusal.loss.expect("the page is current");
         inputs.end_page().unwrap();
-        thread::sleep(ORDER_BOUND + Duration::from_millis(300));
-        inputs.prepare_page("s:2").unwrap();
-        let first = inputs
-            .activate_page("s:2", &[prior("s:1", &key, 2)])
-            .unwrap();
-        assert_eq!(first, vec![key.clone()]);
-        // The answer timed out at the page, which asks again.
-        let again = inputs
-            .activate_page("s:2", &[prior("s:1", &key, 2)])
-            .unwrap();
-        assert_eq!(again, vec![key]);
+        let next = inputs.begin_page("s:2").unwrap();
+        assert_eq!(next, vec![(key.clone(), loss)]);
+        // Told for an earlier number leaves a later loss; told for this one clears it.
+        inputs.lost_told(&[(key.clone(), loss - 1)]).unwrap();
+        assert_eq!(inputs.activate_page("s:2").unwrap(), next);
+        inputs.lost_told(&next).unwrap();
+        assert!(inputs.activate_page("s:2").unwrap().is_empty());
         inputs.close_and_drain();
     }
 
-    /// Blocker 4: a later arrival does not stretch an earlier call's wait. Number 3 comes at 0,
-    /// number 2 at 1,000 ms; at 1,500 ms number 3 has waited its bound.
+    /// A notice told for one loss does not clear a later loss of the window.
+    #[test]
+    fn a_notice_told_clears_only_the_losses_up_to_its_number() {
+        let (inputs, key, _received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        let first = inputs.skip_page_sequence("s:1", &key, 1).unwrap();
+        let second = inputs.skip_page_sequence("s:1", &key, 2).unwrap();
+        assert!(second > first);
+        inputs.lost_told(&[(key.clone(), first)]).unwrap();
+        assert_eq!(inputs.activate_page("s:1").unwrap(), vec![(key.clone(), second)]);
+        inputs.lost_told(&[(key, second)]).unwrap();
+        assert!(inputs.activate_page("s:1").unwrap().is_empty());
+        inputs.close_and_drain();
+    }
+
+    /// A later arrival does not stretch an earlier call's wait. Number 3 comes at 0, number 2
+    /// at 1,000 ms; at 1,500 ms number 3 has waited its bound.
     #[test]
     fn a_later_arrival_does_not_stretch_an_earlier_calls_wait() {
         let (inputs, key, received, _) = bare();
@@ -2685,8 +2636,8 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// Blocker 5: a call that waited for the lock past its page's bound is refused: the time it
-    /// is judged by is taken under the lock.
+    /// A call that waited for the lock past its page's bound is refused: the time it is judged
+    /// by is taken under the lock.
     #[test]
     fn a_call_that_waits_for_the_lock_past_the_bound_is_refused() {
         let (inputs, key, received, _) = bare();
@@ -2695,9 +2646,7 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
             .unwrap();
-        inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 1)])
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         let guard = inputs.page.state.lock().unwrap();
         let caller = {
             let inputs = Arc::clone(&inputs);
@@ -2712,43 +2661,48 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// Blocker 6: a page that activates long after the last one went still has its missing
-    /// number reported, and a number that was written is not reported.
+    /// An old page's timeout skip arrives after the reload, when the old page had no call at the
+    /// host to hold the next page's typing back: the skip is the host's only word of the missing
+    /// key, and the page that is current is told. (That typing can still be written ahead of a
+    /// call that never came is no loss: nothing of the old page's was behind it.)
     #[test]
-    fn a_late_activation_still_reports_what_never_came() {
+    fn a_departed_pages_timeout_skip_is_told_to_the_current_page() {
         let (inputs, key, received, _) = bare();
         inputs.begin_page("s:1").unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs
-            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
             .unwrap();
-        inputs.end_page().unwrap();
-        thread::sleep(ORDER_BOUND + Duration::from_millis(500));
-        assert_eq!(handed(&received), b"A");
-        // Typing 1 came; the page also issued 2, which never did.
-        let lost = inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 2)])
-            .unwrap();
-        assert_eq!(lost, vec![key.clone()]);
-        inputs.lost_told(std::slice::from_ref(&key)).unwrap();
-        inputs.end_page().unwrap();
-        thread::sleep(ORDER_BOUND + Duration::from_millis(500));
-        // And one whose every number came is not reported, however late the page is.
-        let none = inputs
-            .begin_page_after("s:3", &[prior("s:2", &key, 0)])
-            .unwrap();
-        assert!(none.is_empty(), "{none:?}");
+        let loss = inputs.skip_page_sequence("s:1", &key, 1).unwrap();
+        assert_eq!(handed(&received), b"D");
+        assert_eq!(inputs.activate_page("s:2").unwrap(), vec![(key, loss)]);
         inputs.close_and_drain();
     }
 
-    /// Note 9: a departed page's skip does not delete the current page's ticket for the same
-    /// number.
+    /// A gap that expires while the page is still current (its renderer does not answer) is
+    /// recorded, so that the page that recovers is told.
+    #[test]
+    fn a_gap_given_up_before_the_renderer_recovers_is_told_when_it_does() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        thread::sleep(ORDER_BOUND + Duration::from_millis(400));
+        assert_eq!(handed(&received), b"B");
+        inputs.end_page().unwrap();
+        let lost = inputs.begin_page("s:2").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
+        inputs.close_and_drain();
+    }
+
+    /// A departed page's skip does not delete the current page's ticket for the same number.
     #[test]
     fn a_departed_pages_skip_leaves_the_current_pages_ticket() {
         let (inputs, key, _received, _) = bare();
         inputs.begin_page("s:1").unwrap();
-        inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 0)])
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         let ticket = inputs
             .enqueue_page("s:2", key.clone(), 1, typed(b"B"), true)
             .unwrap();
@@ -2757,34 +2711,7 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// Blocker 1: a page that reloaded before it activated hands the one after it what the
-    /// first page issued, and the first page's `A` still goes in before the third page's `D`.
-    #[test]
-    fn a_page_that_never_activated_does_not_lose_the_first_pages_numbers() {
-        let (inputs, key, received, _) = bare();
-        inputs.begin_page("s:1").unwrap();
-        inputs.end_page().unwrap();
-        // s:2 announced itself and went before it activated; s:3 carries what s:1 issued.
-        inputs.prepare_page("s:2").unwrap();
-        inputs.end_page().unwrap();
-        inputs.prepare_page("s:3").unwrap();
-        let lost = inputs
-            .activate_page("s:3", &[prior("s:1", &key, 1), prior("s:2", &key, 0)])
-            .unwrap();
-        assert!(lost.is_empty());
-        inputs
-            .enqueue_page("s:3", key.clone(), 1, typed(b"D"), true)
-            .unwrap();
-        thread::sleep(Duration::from_millis(300));
-        assert_eq!(handed(&received), b"", "D waits for A");
-        inputs
-            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
-            .unwrap();
-        assert_eq!(handed(&received), b"AD");
-        inputs.close_and_drain();
-    }
-
-    /// Blocker 3: a write that failed before the page asked for its answer is told to the next page.
+    /// A write that failed before the page asked for its answer is told to the next page.
     #[test]
     fn a_write_that_failed_before_its_answer_was_fetched_is_told_to_the_next_page() {
         let (inputs, key, received, _) = bare();
@@ -2798,14 +2725,38 @@ mod tests {
             .unwrap();
         inputs.end_page().unwrap();
         inputs.prepare_page("s:2").unwrap();
-        let lost = inputs
-            .activate_page("s:2", &[prior("s:1", &key, 1)])
-            .unwrap();
-        assert_eq!(lost, vec![key]);
+        let lost = inputs.activate_page("s:2").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
         inputs.close_and_drain();
     }
 
-    /// Blocker 2: a window gone from the table with a departed page's call waiting is told.
+    /// A write that fails at the moment the page goes: either the page has the error, or the
+    /// next page is told. The worker answers under the host's lock.
+    #[test]
+    fn a_write_that_fails_as_the_page_goes_is_told_to_the_next_page() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
+            .unwrap();
+        let job = received.try_recv().unwrap();
+        // The page goes before the worker has answered.
+        inputs.end_page().unwrap();
+        let InputJob {
+            response, settle, ..
+        } = job;
+        (settle.expect("a page call settles under the lock"))(
+            response,
+            Err(InputError::Uncertain("test".to_owned())),
+        );
+        let lost = inputs.begin_page("s:2").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
+        inputs.close_and_drain();
+    }
+
+    /// A window gone from the table with a departed page's call waiting is told.
     #[test]
     fn a_departed_pages_waiting_call_refused_at_retirement_is_told() {
         let (inputs, key, _received, _) = bare();
@@ -2813,28 +2764,28 @@ mod tests {
         inputs
             .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
             .unwrap();
-        inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 2)])
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs.retire(&key);
-        assert_eq!(inputs.begin_page_after("s:3", &[]).unwrap(), vec![key]);
+        let lost = inputs.begin_page("s:3").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
         inputs.close_and_drain();
     }
 
-    /// Blocker 2: bytes that did not decode are a refusal like any other.
+    /// Bytes that did not decode are a refusal like any other.
     #[test]
     fn a_departed_pages_undecodable_call_is_told() {
         let (inputs, key, _received, _) = bare();
         inputs.begin_page("s:1").unwrap();
-        inputs
-            .begin_page_after("s:2", &[prior("s:1", &key, 1)])
-            .unwrap();
+        inputs.begin_page("s:2").unwrap();
         inputs.refuse_page_sequence("s:1", &key, 1).unwrap();
-        assert_eq!(inputs.begin_page_after("s:3", &[]).unwrap(), vec![key]);
+        let lost = inputs.begin_page("s:3").unwrap();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].0, key);
         inputs.close_and_drain();
     }
 
-    /// Note 8: what one page holds for one window behind a gap is bounded, whatever the bytes.
+    /// What one page holds for one window behind a gap is bounded, whatever the bytes.
     #[test]
     fn what_a_page_holds_behind_a_gap_is_bounded() {
         let (inputs, key, _received, _) = bare();
@@ -2863,23 +2814,16 @@ mod tests {
         inputs.close_and_drain();
     }
 
-    /// Blocker 6, the other way: typing that was written is not reported lost by a page that
-    /// activates after the grace.
+    /// The host keeps no more notices than its bound.
     #[test]
-    fn a_late_activation_does_not_report_what_was_written() {
-        let (inputs, key, received, _) = bare();
-        inputs.begin_page("s:1").unwrap();
-        inputs
-            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
-            .unwrap();
-        inputs.end_page().unwrap();
-        thread::sleep(ORDER_BOUND + Duration::from_millis(500));
-        assert_eq!(handed(&received), b"A");
-        inputs.prepare_page("s:2").unwrap();
-        let lost = inputs
-            .activate_page("s:2", &[prior("s:1", &key, 1)])
-            .unwrap();
-        assert!(lost.is_empty(), "{lost:?}");
+    fn the_notices_a_host_keeps_are_bounded() {
+        let (inputs, _key, _received, _) = bare();
+        inputs.begin_page("page").unwrap();
+        for window in 0..(MAX_PENDING_LOSSES as u64 + 20) {
+            let key = PaneKey::new(&format!("window-{window}"), 1);
+            inputs.skip_page_sequence("page", &key, 1).unwrap();
+        }
+        assert_eq!(inputs.activate_page("page").unwrap().len(), MAX_PENDING_LOSSES);
         inputs.close_and_drain();
     }
 }

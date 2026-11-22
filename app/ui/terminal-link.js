@@ -65,19 +65,15 @@ export class TerminalLink {
   #sizes = new Map()
   #retired = new Set()
   #failedInputs = new Set()
+  /** By window: the latest loss the person has been told of (the host's own numbers). */
+  #told = new Map()
   #pageId
-  #onIssued
 
-  /**
-   * `onIssued({ id, generation, sequence })` is told each number as it is
-   * issued, before its call: the page keeps them, for the page that follows it.
-   */
-  constructor({ invoke, registry, report, pageId = crypto.randomUUID(), onIssued = () => {} }) {
+  constructor({ invoke, registry, report, pageId = crypto.randomUUID() }) {
     this.#invoke = invoke
     this.#registry = registry
     this.#report = report
     this.#pageId = pageId
-    this.#onIssued = onIssued
   }
 
   /** One message from `subscribe_output`: bytes for one pane, in order. */
@@ -132,12 +128,43 @@ export class TerminalLink {
   }
 
   /**
-   * The host says typing of a page that has gone may not have reached a window:
-   * a call of it was lost, refused or uncertain, or a number never came.
+   * The host says typing may not have reached a window (`loss` is its number for it): a call
+   * of a page that has gone was lost, refused or uncertain, or a number never came. Says so to
+   * the person, and answers whether the person has now been told: a window this page does not
+   * show is not told, and the host keeps the notice for a page that does.
    */
-  typingLost(pane) {
-    const key = paneKey(pane)
-    if (!this.#retired.has(key)) this.#reportInput(key, new Error(LOST_TYPING))
+  typingLost({ id, generation, loss }) {
+    const key = paneKey({ id, generation })
+    if (this.#retired.has(key)) return false
+    if (!Number.isSafeInteger(loss) || loss > (this.#told.get(key) ?? 0)) {
+      this.#reportInput(key, new Error(LOST_TYPING))
+      if (Number.isSafeInteger(loss)) this.#told.set(key, loss)
+    }
+    return true
+  }
+
+  /**
+   * The person has been told of these losses (`{ id, generation, loss }`): the host may forget
+   * them, up to those numbers. It keeps them until then, so a call that gets no answer is
+   * repeated, and a page that goes first leaves them to the next.
+   */
+  async told(losses) {
+    if (losses.length === 0) return
+    const keys = losses.map(({ id, generation, loss }) => ({ id, generation, loss }))
+    for (let tries = 0; tries < 3; tries += 1) {
+      try {
+        const answer = await this.#invoke('pane_lost_told', { pageId: this.#pageId, keys })
+        if (answer?.ok !== undefined) return
+      } catch {}
+      await pause(200)
+    }
+  }
+
+  /** A refusal or a skip said the person was told, with the host's number for what it recorded. */
+  #refusalTold(pane, key, loss) {
+    if (!Number.isSafeInteger(loss) || this.#retired.has(key)) return
+    this.#told.set(key, Math.max(loss, this.#told.get(key) ?? 0))
+    void this.told([{ id: pane.id, generation: pane.generation, loss }])
   }
 
   /** The emulator's size, sent until the live pane accepts it. */
@@ -154,14 +181,8 @@ export class TerminalLink {
   /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
   retire(key) {
     this.#retired.add(key)
-    if (this.#issued.delete(key)) {
-      const at = key.lastIndexOf(':')
-      this.#onIssued({
-        id: key.slice(0, at),
-        generation: Number(key.slice(at + 1)),
-        sequence: null,
-      })
-    }
+    this.#issued.delete(key)
+    this.#told.delete(key)
     this.#sizes.delete(key)
     this.#failedInputs.delete(key)
     this.#registry.retire(key)
@@ -213,7 +234,6 @@ export class TerminalLink {
     }
     const sequence = (this.#issued.get(key) ?? 0) + 1
     this.#issued.set(key, sequence)
-    this.#onIssued({ id: pane.id, generation: pane.generation, sequence })
     try {
       await this.#hand(command, pane, key, sequence, bytes)
     } catch (cause) {
@@ -238,7 +258,8 @@ export class TerminalLink {
   /**
    * A call whose fate is unknown is never sent again: the host moves the pane's
    * count past its number, so the original either went in before this or is
-   * refused when it comes late. The skip itself may be repeated.
+   * refused when it comes late. The skip itself may be repeated. Answers the number of the
+   * loss the host recorded for it.
    */
   async #skip(pane, sequence) {
     let failures = 0
@@ -255,7 +276,7 @@ export class TerminalLink {
           },
           ADMISSION_TIMEOUT_MS,
         )
-        if (typeof answer?.ok === 'boolean') return
+        if (typeof answer?.ok === 'boolean') return answer.loss
       } catch {}
       failures += 1
       if (failures === 5)
@@ -293,12 +314,14 @@ export class TerminalLink {
       void this.#collect(key, answer.ticket)
       return
     }
-    if (typeof answer?.ok !== 'boolean') await this.#skip(pane, sequence)
+    let loss = answer?.loss
+    if (typeof answer?.ok !== 'boolean') loss = await this.#skip(pane, sequence)
     if (this.#retired.has(key)) return
     this.#reportInput(
       key,
       new Error(answer?.error === WINDOW_FULL ? WINDOW_FULL_ADVICE : LOST_TYPING),
     )
+    this.#refusalTold(pane, key, loss)
   }
 
   async #collect(key, ticket) {
