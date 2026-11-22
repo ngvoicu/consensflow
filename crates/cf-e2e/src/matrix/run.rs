@@ -486,6 +486,20 @@ fn record_kinds(
     Ok(handles)
 }
 
+/// The rows of one window's record file. A record that could not be read is an error naming the
+/// window and its harness, never an empty file: an empty `[]` says the session had no items.
+fn record_rows(handle: &str, kind: &str, read: Result<Vec<Item>>) -> Result<Vec<Value>> {
+    let items = read.map_err(|error| {
+        crate::Error::Daemon(format!(
+            "the record of session {handle} ({kind}) could not be read: {error}"
+        ))
+    })?;
+    Ok(items
+        .iter()
+        .map(|item| json!({ "id": item.id, "role": item.role, "text": item.text, "complete": item.complete }))
+        .collect())
+}
+
 /// Each window's own record, as the daemon reads it, a file to each session of the run:
 /// `records/<handle>.json`, its items' roles, words and ends.
 fn records_of(
@@ -498,11 +512,11 @@ fn records_of(
         members.added_handle(agent).map(str::to_owned)
     })?;
     for (handle, kind) in handles {
-        let items = observe::record(members, &snapshot.events, kind, &handle).unwrap_or_default();
-        let rows: Vec<Value> = items
-            .iter()
-            .map(|item| json!({ "id": item.id, "role": item.role, "text": item.text, "complete": item.complete }))
-            .collect();
+        let rows = record_rows(
+            &handle,
+            kind,
+            observe::record(members, &snapshot.events, kind, &handle),
+        )?;
         evidence.json(&format!("records/{handle}.json"), &Value::Array(rows))?;
     }
     Ok(())
@@ -908,6 +922,25 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(twice.contains("started twice"), "{twice}");
+    }
+
+    /// A record that failed to read fails the export; it is not a window with no items.
+    #[test]
+    fn a_record_that_could_not_be_read_fails_the_export_and_is_not_an_empty_file() {
+        let failed = record_rows(
+            "x-amber",
+            "codex",
+            Err(crate::Error::Daemon("reader down".to_owned())),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            failed.contains("x-amber") && failed.contains("codex") && failed.contains("reader down"),
+            "{failed}"
+        );
+        assert!(record_rows("x-amber", "codex", Ok(Vec::new()))
+            .unwrap()
+            .is_empty());
     }
 
     /// A stand-in board ends a scenario at three minutes, and one that waits by design (minutes
