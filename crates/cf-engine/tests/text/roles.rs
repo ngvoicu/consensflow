@@ -377,25 +377,29 @@ fn teach_the_designer_only_the_board_s_commands() {
 }
 
 #[test]
-fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
+fn every_member_ends_its_turn_with_its_result_and_waits_inside_it() {
     let rules = [(
-        "delivery and leftovers",
-        "your answer ends your turn, and your result is delivered once nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
+        "turn end, waiting and leftovers",
+        "This window is for one task. The end of your turn hands in your last message as its result, so end your turn only with a result that stands on its own. Wait inside your turn for work you started, even while it waits its turn. The board holds your result while it sees background work still running; before your last answer, end what you left in the background (a wait loop, a watcher).",
     )];
     let mut missing = Vec::new();
-    for (shell, cf) in [
-        ("POSIX", CfWord::bare()),
+    for (shell, mac, cf) in [
+        ("POSIX", true, CfWord::bare()),
         (
             "PowerShell",
+            false,
             CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
         ),
     ] {
         for role in cf_ledger::roles::ids() {
-            let text = role_instructions(&Env::default(), role, &[], &cf, None)
-                .unwrap()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+            let rendered =
+                role_instructions_on(&Env::default(), role, &[], &cf, None, false, mac).unwrap();
+            let text = if mac {
+                rendered
+            } else {
+                as_windows_console(&rendered)
+            };
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for (name, rule) in rules {
                 if !text.contains(rule) {
                     missing.push(format!("{role} ({shell}): {name}"));
@@ -403,6 +407,9 @@ fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_backgro
             }
             if text.contains("if you are still waiting on background work, say so in a line") {
                 missing.push(format!("{role} ({shell}): still-waiting line"));
+            }
+            if text.contains("your result is delivered once nothing you started is still running") {
+                missing.push(format!("{role} ({shell}): unqualified delivery promise"));
             }
         }
     }
@@ -417,9 +424,9 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         // A window the chief continues (`--after`) comes back on its own conversation, and a
         // pinned window stays open: the text says no more of the window than that it is for one
         // task (T-1435).
-        "This window is for one task. Finish with a result that stands on its own:",
-        // A turn's end does not end background work; the result waits for it.
-        "your result is delivered once nothing you started is still running,",
+        "This window is for one task. The end of your turn hands in your last message as its result,",
+        // Only background work the board sees can hold a result.
+        "The board holds your result while it sees background work still running;",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -1032,8 +1039,8 @@ fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
         assert_eq!(text.matches(&format!("{word} tell ")).count(), 1, "{role}");
         assert_eq!(
             text.matches("end your turn").count(),
-            1,
-            "{role}: said once"
+            2,
+            "{role}: once for asking and once for the result"
         );
         assert!(!text.contains(&format!("{word} note --human")), "{role}");
     }

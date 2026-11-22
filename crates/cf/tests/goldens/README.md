@@ -195,6 +195,8 @@ case's own first word (`T-3 is on the board …` gives `T-3`), and nothing else 
 The daemon's traces that hold the line (`cf-board-004`, `-008`, `-009`, `-010`, `-011`, `-014`,
 `-015`, `-016`, `-017`, `-020`, `-021`, `-022`) are all departed from Node's already, for other
 words (`DEPARTED` in `crates/cf-daemon/tests/api/main.rs`), so they are not edited.
+Resume is an exception since T-1857: its reply says the words are queued, not sent, until the
+window has taken them. A resume returned to the board says the words are in its brief.
 
 The line of a task given to a window says what it waits for (`T-7 [open] blocked by T-1, T-2 ·
 @chief ← @chief: …`), as the line of a task for a tier did (T-957, from T-798). No case of

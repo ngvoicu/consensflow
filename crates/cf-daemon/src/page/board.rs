@@ -10,9 +10,10 @@ use super::Page;
 /// `switching` and `holding`, and, only while a
 /// stop of its task is ignored in every round and the host would not close its
 /// window, `unstopped`, and, only while its task waits on a background job or
-/// agent that its harness wakes its agent for, `held`, and, only while the member of the
-/// lane (itself, or the one its session belongs to) is out because its model is busy for a
-/// moment, `busy`: until when (T-1357; a timed hold reads as a quota by its time alone).
+/// agent that its harness wakes its agent for, `held`; only while its task's resume words
+/// wait, `resumeWait`; and, only while the member of the lane (itself, or the one its
+/// session belongs to) is out because its model is busy for a moment, `busy`: until when
+/// (T-1357; a timed hold reads as a quota by its time alone).
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let board = page.ledger.borrow().board(body.whole("project")?)?;
     let mut shown = serde_json::to_value(&board)?;
@@ -56,6 +57,9 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         // A task that goes on in the background: its card says so.
         if let Some(held) = page.engine.held(id) {
             fields.insert("held".to_owned(), held);
+        }
+        if let Some(wait) = page.engine.resume_wait(id)? {
+            fields.insert("resumeWait".to_owned(), wait);
         }
         // A member out for its busy model, which no press ends: the page says so, and offers
         // no button, for the member's lane and its sessions' alike.

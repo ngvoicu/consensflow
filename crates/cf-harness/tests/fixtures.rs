@@ -8,8 +8,11 @@
 //! `tools/xtask/src/scrub_muse_session`); this holds what they were made for.
 
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
+use flate2::read::MultiGzDecoder;
 use regex::Regex;
 use serde_json::Value;
 
@@ -35,6 +38,24 @@ const PERSONAL: [(&str, &str); 7] = [
     ),
     (r"cse_0[A-Za-z0-9_]{6,}", "cse_01Abcdefg"),
     (r"session_0[A-Za-z0-9_]{6,}", "session_01Abcdefg"),
+];
+
+/// What a screen recording's redraws leave of the owner's folders even when a path is cut
+/// short (`/Users/` and the first letters of a name): the owner's home name, the repository's
+/// namespace and the kit's kept folders. A recording of any harness's window holds none of them.
+const FRAGMENTS: [(&str, &str); 6] = [
+    // The patterns and their samples are spelled in parts, so that this file holds none of the
+    // names it looks for.
+    (r"(?i)gabr[i]el", concat!("/Users/gab", "riel...")),
+    (r"(?i)voic[u]", concat!("...ngvoi", "cu/consens...")),
+    (r"(?i)kit-homes", "/trees/.kit-homes/agy"),
+    (
+        r"(?i)consensflow-trees",
+        concat!("ngvoi", "cu/consensflow-trees/.kit"),
+    ),
+    (r"(?i)agy-mac", "/.kit-homes/agy-mac/.gemini"),
+    // A path cut at its first folder: the start of `/Users`, with nothing after it.
+    (r"/Users?(?:[^A-Za-z0-9_.-]|$)", "/Users\\n"),
 ];
 
 fn folder(harness: &str) -> PathBuf {
@@ -159,6 +180,11 @@ fn fixture_files(folder: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io:
             fixture_files(&entry.path(), files)?;
         } else if kind.is_file() {
             files.push(entry.path());
+        } else if kind.is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "a fixture link cannot be checked: {}",
+                entry.path().display()
+            )));
         }
     }
     Ok(())
@@ -220,6 +246,241 @@ fn all_workspace_fixtures_hold_no_account_user_workspace_ids_or_email() {
             }
             _ => assert!(!check.text(&text), "identity value in {}", path.display()),
         }
+    }
+}
+
+/// Find every fixture directory, including those outside crates' `tests` directories.
+/// Never follow links or descend into generated build and package directories.
+fn fixtures_below(folder: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in fs::read_dir(folder)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() && entry.file_name() == "fixtures" {
+            return Err(std::io::Error::other(format!(
+                "a fixture directory link cannot be checked: {}",
+                entry.path().display()
+            )));
+        }
+        if !kind.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        if name == "fixtures" {
+            fixture_files(&entry.path(), files)?;
+        } else if ![
+            ".git",
+            ".cache",
+            "node_modules",
+            "target",
+            "test-results",
+            "playwright-report",
+        ]
+        .iter()
+        .any(|excluded| name == *excluded)
+        {
+            fixtures_below(&entry.path(), files)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fixture_link_cannot_silently_hide_a_file_or_a_fixture_directory() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("record.txt"), "record").unwrap();
+    let fixtures = root.path().join("case");
+    fs::create_dir(&fixtures).unwrap();
+    symlink(source.join("record.txt"), fixtures.join("link.txt")).unwrap();
+    assert!(fixture_files(&fixtures, &mut Vec::new()).is_err());
+    symlink(&source, root.path().join("fixtures")).unwrap();
+    assert!(fixtures_below(root.path(), &mut Vec::new()).is_err());
+}
+
+/// Unescape ASCII JSON Unicode escapes and optional slash escapes even in prose and
+/// nested strings. The synthetic homes preserve path shapes used by recorded tests.
+fn privacy_text(text: &str) -> String {
+    static ASCII_ESCAPE: OnceLock<Regex> = OnceLock::new();
+    let ascii = ASCII_ESCAPE.get_or_init(|| {
+        Regex::new(r"(?i)\\u00([0-7][0-9a-f])").unwrap_or_else(|error| panic!("{error}"))
+    });
+    ascii
+        .replace_all(text, |capture: &regex::Captures<'_>| {
+            let byte =
+                u8::from_str_radix(&capture[1], 16).unwrap_or_else(|error| panic!("{error}"));
+            char::from(byte).to_string()
+        })
+        .replace(r"\/", "/")
+        .replace("/Users/someone/", "/placeholder/")
+        .replace("/Users/someone-home/", "/placeholder/")
+        .replace("/Users/user/", "/placeholder/")
+        .replace("/Users/me/", "/placeholder/")
+        .replace("$ROOT/home/", "$ROOT/placeholder/")
+}
+
+/// The folder and redraw checks cover every fixture, prose included, and the compressed
+/// replay goldens and inline test screens. List every offending file in one failure.
+#[test]
+fn no_fixture_of_any_harness_holds_a_folder_of_the_owner_or_a_fragment_of_one() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let harness_fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut files = Vec::new();
+    fixtures_below(&root, &mut files).unwrap();
+    fixture_files(
+        &root.join("crates/cf-harness/tests/goldens/records"),
+        &mut files,
+    )
+    .unwrap();
+    files.extend(
+        [
+            "crates/cf-base/src/bundle.rs",
+            "crates/cf-engine/src/shown/mask/tests.rs",
+            "crates/cf-engine/src/shown/screen/tests.rs",
+            "crates/cf-harness/src/shared/compacting/tests.rs",
+        ]
+        .into_iter()
+        .map(|path| root.join(path)),
+    );
+    files.sort();
+    for required in [
+        harness_fixtures.join("claude"),
+        harness_fixtures.join("muse"),
+        harness_fixtures.join("history-items"),
+        root.join("app/tests/fixtures"),
+        root.join("tests/engine/fixtures"),
+        root.join("crates/cf-harness/tests/goldens/records"),
+    ] {
+        assert!(
+            files.iter().any(|path| path.starts_with(&required)),
+            "{} has files",
+            required.display()
+        );
+    }
+    let folders: Vec<(Regex, &str)> = PERSONAL[..4]
+        .iter()
+        .map(|(pattern, _)| (Regex::new(pattern).unwrap(), *pattern))
+        .collect();
+    let fragments: Vec<(Regex, &str)> = FRAGMENTS
+        .iter()
+        .map(|(pattern, _)| (Regex::new(pattern).unwrap(), *pattern))
+        .collect();
+    let mut offences = Vec::new();
+    for path in files {
+        let mut data = Vec::new();
+        if path.extension().is_some_and(|ext| ext == "gz") {
+            MultiGzDecoder::new(fs::File::open(&path).unwrap())
+                .read_to_end(&mut data)
+                .unwrap();
+        } else {
+            data = fs::read(&path).unwrap();
+        }
+        let mut text = privacy_text(&String::from_utf8_lossy(&data));
+        // These exact identities are part of the application and release contracts,
+        // not a person's home or a recorded link to their repository.
+        if path == root.join("crates/cf-panes/tests/fixtures/tcc/app-preflight.ndjson")
+            || path == root.join("crates/cf-base/src/bundle.rs")
+        {
+            text = text.replace(
+                concat!("dev.ngvoi", "cu.consensflow"),
+                "dev.example.consensflow",
+            );
+        }
+        if path == root.join("tests/fixtures/install/make-fixtures.mjs")
+            || path == root.join("tools/cf-release/tests/fixtures/prepare-update/latest.json")
+            || path == root.join("crates/cf-base/src/bundle.rs")
+        {
+            text = text.replace(
+                concat!("https://github.com/ngvoi", "cu/consensflow/releases"),
+                "https://github.com/example/consensflow/releases",
+            );
+        }
+        for (found, pattern) in &folders {
+            if found.is_match(&text) {
+                offences.push(format!("{} matches {pattern}", path.display()));
+            }
+        }
+        for (found, pattern) in &fragments {
+            if found.is_match(&text) {
+                offences.push(format!("{} matches {pattern}", path.display()));
+            }
+        }
+    }
+    assert!(
+        offences.is_empty(),
+        "fixture privacy violations:\n{}",
+        offences.join("\n")
+    );
+}
+
+#[test]
+fn folder_patterns_find_plain_and_json_escaped_paths_but_allow_synthetic_homes() {
+    for (pattern, sample) in &PERSONAL[..4] {
+        let found = Regex::new(pattern).unwrap();
+        assert!(found.is_match(&privacy_text(sample)));
+        assert!(found.is_match(&privacy_text(&sample.replace('/', r"\/"))));
+        assert!(found.is_match(&privacy_text(&sample.replace('/', r"\u002f"))));
+    }
+    let found = Regex::new(PERSONAL[0].0).unwrap();
+    for placeholder in [
+        "/Users/someone/work",
+        r"\/Users\/someone\/work",
+        "/Users/someone-home/work",
+        "/Users/user/work",
+        "/Users/me/work",
+    ] {
+        assert!(!found.is_match(&privacy_text(placeholder)), "{placeholder}");
+    }
+    let linux_home = Regex::new(PERSONAL[1].0).unwrap();
+    assert!(!linux_home.is_match(&privacy_text("$ROOT/home/integrations/devin")));
+    let name = Regex::new(FRAGMENTS[0].0).unwrap();
+    assert!(name.is_match(&privacy_text(concat!(r"g\u0061br", "iel"))));
+}
+
+/// The second reading's probe (T-1885, 15): a home folder mounted below another folder
+/// (`/var/home/…`) is as personal as `/home/…`, which the check refused on main; the placeholder
+/// paths of the fixtures are named so that no home folder is left in them.
+#[test]
+fn a_mounted_home_folder_is_found_as_a_personal_one() {
+    let found = |text: &str| {
+        PERSONAL
+            .iter()
+            .any(|(pattern, _)| Regex::new(pattern).unwrap().is_match(text))
+    };
+    for personal in [
+        "/home/test-person/work",
+        "/var/home/test-person/work",
+        "/mnt/home/test-person/work",
+    ] {
+        assert!(found(personal), "{personal}");
+    }
+    assert!(!found("/kit/kept/.gemini"));
+}
+
+#[test]
+fn what_the_fragment_check_looks_for_is_what_a_cut_redraw_has() {
+    for (pattern, sample) in FRAGMENTS {
+        assert!(
+            Regex::new(pattern).unwrap().is_match(sample),
+            "{pattern} does not find {sample}"
+        );
+    }
+    // Placeholder paths of the fixtures are not found.
+    for clean in ["/work/proj", "/kit/kept/.gemini", "/Users-of-this"] {
+        assert!(
+            !FRAGMENTS
+                .iter()
+                .any(|(p, _)| Regex::new(p).unwrap().is_match(clean)),
+            "{clean}"
+        );
     }
 }
 

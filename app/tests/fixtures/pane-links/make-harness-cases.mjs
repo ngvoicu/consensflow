@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 const WIKI = 'https://en.wikipedia.org/wiki/Function_(mathematics)'
-const GITHUB = 'https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20'
+const GITHUB = 'https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20'
 const BAYES = "https://en.wikipedia.org/wiki/Bayes'_theorem"
 const ENCODED = 'https://example.com/a%28b%29'
 const COMMA = 'https://example.com/a,b^c'

@@ -121,11 +121,11 @@ runs = ["held-typed-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''            note(
-                &requester,
-                format!("{}. The human is told.", said(&counted)),
-            )?;'''
-replace = '''            let _ = requester;'''
+find = '''                note(
+                    &requester,
+                    format!("{}. The human is told.", said(&counted)),
+                )?;'''
+replace = '''                let _ = requester;'''
 
 # --- what the box shows ---
 
