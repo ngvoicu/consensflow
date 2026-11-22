@@ -111,5 +111,5 @@ runs = ["engine-dispatcher-switching-agents"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_switch.rs"
-find = "if !observed.settled || observed.agents_pending() {"
-replace = "if observed.agents_pending() {"
+find = "        if !observed.settled {\n            return Ok(());\n        }\n        if observed.agents_pending() {"
+replace = "        if observed.agents_pending() {"
