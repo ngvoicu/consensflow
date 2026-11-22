@@ -39,8 +39,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "    while joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
-replace = "    while false && joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {"
+find = "    while let Ok(next) = stream.try_recv() {"
+replace = "    for next in std::iter::empty::<PaneOutput>() {"
 
 [[plant]]
 name = "tiny read: joined reads reverse their order"
@@ -63,13 +63,13 @@ find = "        message.seq = next.seq;"
 replace = "        let _ = next.seq;"
 
 [[plant]]
-name = "tiny read: joined reads hide a screen change"
-meant = "tiny_read_batch_keeps_each_screens_change_boundary"
+name = "tiny read: joined reads do not reach the screen"
+meant = "tiny_read_batch_that_changes_the_screen_and_back_changed_nothing"
 runs = ["tiny-output"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "        feed(&next.bytes);"
+find = "        advance(&next.bytes);"
 replace = "        // A later read does not reach the screen."
 
 [[plant]]
@@ -79,22 +79,38 @@ runs = ["tiny-output"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''        feed(&message.bytes);
+find = '''        advance(&message.bytes);
+        settle();
         publish(message);'''
 replace = '''        pending = Some(message);
-        if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
+        if let Some(batch) = next_output(stream, &mut pending, &mut advance) {
+            settle();
             publish(batch);
         }'''
 
 [[plant]]
-name = "tiny read: screen work before a batch is unbounded"
-meant = "tiny_read_batch_limits_how_many_screen_updates_precede_publication"
+name = "tiny read: the screen is hashed after every read of a batch"
+meant = "tiny_read_flood_hashes_the_screen_once_for_each_batch"
 runs = ["tiny-output"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4;"
-replace = "const MAX_OUTPUT_READS_PER_BATCH: usize = 4096;"
+find = "            if let Some(batch) = next_output(stream, &mut pending, &mut advance) {"
+replace = '''            if let Some(batch) = next_output(stream, &mut pending, &mut |bytes: &[u8]| {
+                advance(bytes);
+                settle();
+            }) {'''
+
+[[plant]]
+name = "tiny read: a batch is published without its screen settled"
+meant = "tiny_read_clocks_after_a_batch_say_it_printed_and_whether_the_screen_ends_different"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''            if let Some(batch) = next_output(stream, &mut pending, &mut advance) {
+                settle();'''
+replace = '''            if let Some(batch) = next_output(stream, &mut pending, &mut advance) {'''
 
 [[plant]]
 name = "tiny read: a batch grows during screen work"
@@ -105,13 +121,13 @@ runs = ["tiny-output"]
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''    let mut size = message.bytes.len();
     let mut joined = Vec::new();'''
-replace = '''    feed(&message.bytes);
+replace = '''    advance(&message.bytes);
     let mut size = message.bytes.len();
     let mut joined = Vec::new();'''
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''    feed(&message.bytes);
+find = '''    advance(&message.bytes);
     for next in joined {'''
 replace = '''    for next in joined {'''
 

@@ -32,8 +32,6 @@ use cf_proto::panes::{
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 /// A bound on a page message, even if a pane has much more output waiting.
 const MAX_OUTPUT_MESSAGE_BYTES: usize = 64 * 1024;
-/// A screen update hashes the whole screen, so bound the number before a handoff too.
-const MAX_OUTPUT_READS_PER_BATCH: usize = 4;
 
 /// How long `pane.exit` waits, once a program has closed its terminal, for
 /// the program's exit code to be readable: it closes the terminal a moment
@@ -518,22 +516,20 @@ pub(crate) static EXIT_HANDED: std::sync::Mutex<Option<ExitHanded>> = std::sync:
 #[cfg(test)]
 pub(crate) type ExitHanded = Box<dyn Fn(&PaneKey) + Send>;
 
-/// Join a few reads already waiting. Take them before feeding the screen, so more
-/// reads arriving during screen work cannot extend the batch. The first that would
-/// cross the byte bound is kept for the next handoff. The last sequence acknowledges
-/// every read in the batch.
+/// Join the reads already waiting, up to the byte bound. Take them before advancing the
+/// screen, so more reads arriving during screen work cannot extend the batch. The first
+/// that would cross the byte bound is kept for the next handoff. The last sequence
+/// acknowledges every read in the batch. `advance` takes each read's bytes; the
+/// caller settles the screen once for the batch.
 fn next_output(
     stream: &mpsc::Receiver<PaneOutput>,
     pending: &mut Option<PaneOutput>,
-    mut feed: impl FnMut(&[u8]),
+    mut advance: impl FnMut(&[u8]),
 ) -> Option<PaneOutput> {
     let mut message = pending.take().or_else(|| stream.recv().ok())?;
     let mut size = message.bytes.len();
     let mut joined = Vec::new();
-    while joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {
-        let Ok(next) = stream.try_recv() else {
-            break;
-        };
+    while let Ok(next) = stream.try_recv() {
         if next.bytes.len() > MAX_OUTPUT_MESSAGE_BYTES.saturating_sub(size) {
             *pending = Some(next);
             break;
@@ -541,9 +537,9 @@ fn next_output(
         size += next.bytes.len();
         joined.push(next);
     }
-    feed(&message.bytes);
+    advance(&message.bytes);
     for next in joined {
-        feed(&next.bytes);
+        advance(&next.bytes);
         message.bytes.extend_from_slice(&next.bytes);
         message.seq = next.seq;
     }
@@ -553,9 +549,13 @@ fn next_output(
     Some(message)
 }
 
+/// The pane's reads on to the page, each batch after its screen update: the screen takes
+/// every read (`advance`) and says what changed once per batch (`settle`), for hashing
+/// the whole grid after every read was most of the time a hidden window spent on a flood.
 fn forward_output(
     stream: &mpsc::Receiver<PaneOutput>,
-    mut feed: impl FnMut(&[u8]),
+    mut advance: impl FnMut(&[u8]),
+    mut settle: impl FnMut(),
     mut publish: impl FnMut(PaneOutput),
 ) {
     let mut pending = None;
@@ -563,13 +563,15 @@ fn forward_output(
         // A ready byte goes on after its own screen update, before any work on
         // another read. In particular, a writer that was idle must not wait for
         // reads that arrive while this update is in progress.
-        feed(&message.bytes);
+        advance(&message.bytes);
+        settle();
         publish(message);
         // There is no wait for another read. When output is already queued, join
         // the next few reads before going back to the immediate handoff above.
         if let Ok(next) = stream.try_recv() {
             pending = Some(next);
-            if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
+            if let Some(batch) = next_output(stream, &mut pending, &mut advance) {
+                settle();
                 publish(batch);
             }
         }
@@ -605,10 +607,8 @@ fn stream_to_page(
         } = streamed;
         forward_output(
             &stream,
-            |bytes| {
-                let changed = screen.feed(bytes);
-                printed.note(changed);
-            },
+            |bytes| screen.advance(bytes),
+            || printed.note(screen.settle()),
             |message| output.publish(message.into()),
         );
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
@@ -783,6 +783,7 @@ mod tests {
                     held.recv_timeout(Duration::from_secs(5))
                         .expect("release the screen feed");
                 },
+                || {},
                 |message| {
                     published.send(message).unwrap();
                 },
@@ -819,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn tiny_read_batch_limits_how_many_screen_updates_precede_publication() {
+    fn tiny_read_batch_joins_every_queued_read_up_to_the_byte_bound() {
         let (sender, stream) = std::sync::mpsc::channel();
         let key = PaneKey::new("latency-bound", 1);
         for seq in 1..=4096 {
@@ -834,8 +835,50 @@ mod tests {
         drop(sender);
         let mut fed = 0;
         let first = next_output(&stream, &mut None, |_| fed += 1).unwrap();
-        assert_eq!(fed, 4, "a batch has a fixed bound on screen updates");
+        assert_eq!(fed, 4096, "the screen takes each read of the batch");
         assert_eq!(first.bytes.len(), fed);
+        assert_eq!(first.seq, 4096);
+    }
+
+    /// A flood already queued costs one hash of the grid for each batch it is
+    /// drained in, not one for each read (T-1941: the digest was 3.6 to 4.3 s of a
+    /// 64,000-line flood into a hidden window).
+    #[test]
+    fn tiny_read_flood_hashes_the_screen_once_for_each_batch() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        let key = PaneKey::new("flood", 1);
+        let reads = 2000;
+        for seq in 1..=reads {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: format!("line {seq}\r\n").into_bytes(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let screen = PaneScreen::new(24, 80);
+        let mut batches = 0;
+        let mut bytes = 0;
+        forward_output(
+            &stream,
+            |read| screen.advance(read),
+            || {
+                screen.settle();
+            },
+            |message| {
+                batches += 1;
+                bytes += message.bytes.len();
+            },
+        );
+        assert!(bytes > 16 * 1024, "the flood spans several batches");
+        assert_eq!(
+            screen.digests(),
+            batches,
+            "one digest for each of the {batches} batches of a flood of {reads} reads"
+        );
+        assert!(batches <= 8, "{batches} batches for {bytes} bytes");
     }
 
     #[test]
@@ -928,8 +971,10 @@ mod tests {
         assert_eq!(message.seq, 1);
     }
 
+    /// What a batch of reads shows is compared at its ends: a screen that changed and
+    /// changed back inside one batch changed nothing (T-1941).
     #[test]
-    fn tiny_read_batch_keeps_each_screens_change_boundary() {
+    fn tiny_read_batch_that_changes_the_screen_and_back_changed_nothing() {
         let (sender, stream) = std::sync::mpsc::channel();
         let key = PaneKey::new("screen", 1);
         for (seq, bytes) in [(1, &b"a"[..]), (2, &b"\r \r"[..])] {
@@ -943,15 +988,80 @@ mod tests {
         }
         drop(sender);
         let screen = PaneScreen::new(24, 80);
-        let mut changes = Vec::new();
-        let message = next_output(&stream, &mut None, |bytes| changes.push(screen.feed(bytes)))
-            .expect("batch");
+        let message =
+            next_output(&stream, &mut None, |bytes| screen.advance(bytes)).expect("batch");
         assert_eq!(message.bytes, b"a\r \r");
-        assert_eq!(
-            changes,
-            [true, true],
-            "the screen changed and then changed back"
+        assert!(!screen.settle(), "the screen shows what it showed");
+    }
+
+    /// The quiet clocks the engine reads (`outputQuietMs`, `screenQuietMs`) after a batch
+    /// that drew and erased a line: the pane printed, and its screen showed nothing new.
+    /// After a batch that left a change both moved.
+    #[test]
+    fn tiny_read_clocks_after_a_batch_say_it_printed_and_whether_the_screen_ends_different() {
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let key = PaneKey::new("clocks", 1);
+        let clock = arbiter.register(&key).expect("register clock");
+        let screen = PaneScreen::new(24, 80);
+        let (sender, stream) = std::sync::mpsc::channel();
+        let send = |seq, bytes: &[u8]| {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        };
+        let run = |stream: &mpsc::Receiver<PaneOutput>| {
+            forward_output(
+                stream,
+                |bytes| screen.advance(bytes),
+                || clock.note(screen.settle()),
+                |_| {},
+            );
+        };
+        // The first read of a queue is fed alone; the two after it are one batch.
+        send(1, b"\x1b[0m");
+        send(2, b"flash");
+        send(3, b"\r     \r");
+        drop(sender);
+        run(&stream);
+        let snapshot = arbiter.snapshot(&key).expect("snapshot");
+        assert!(snapshot.output_quiet_ms.is_some(), "it printed");
+        assert_eq!(snapshot.screen_quiet_ms, None, "and showed nothing");
+
+        let (sender, stream) = std::sync::mpsc::channel();
+        for (seq, bytes) in [(4, &b"\x1b[0m"[..]), (5, b"do"), (6, b"ne")] {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        run(&stream);
+        let snapshot = arbiter.snapshot(&key).expect("snapshot");
+        assert!(
+            snapshot.screen_quiet_ms.is_some(),
+            "a change that stays moves it"
         );
+        assert_eq!(screen.tail(3), ["done"]);
+    }
+
+    /// The screen a batch leaves is what a read of it sees, and a change that stays is
+    /// one, as before.
+    #[test]
+    fn tiny_read_batch_that_leaves_the_screen_different_changed_it() {
+        let screen = PaneScreen::new(24, 80);
+        screen.advance(b"a");
+        screen.advance(b"\r\nb");
+        assert!(screen.settle());
+        assert_eq!(screen.tail(5), ["a", "b"]);
+        screen.advance(b"\x1b[31m");
+        assert!(!screen.settle(), "a colour alone shows nothing");
     }
 
     /// Start the page's output thread only after a real pane's burst and exit have
