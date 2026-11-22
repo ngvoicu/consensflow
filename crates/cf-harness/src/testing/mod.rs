@@ -345,6 +345,8 @@ pub struct LocalRecords {
     scanner: RefCell<crate::claude::Scanner>,
     hold: Cell<bool>,
     held: RefCell<VecDeque<HeldLook>>,
+    /// The answers of the holders' scan wait here once taken, as a worker's pending reply does.
+    holders_held: RefCell<Option<Rc<Latch>>>,
 }
 
 /// A look held: the work it belongs to, and the latch that releases it.
@@ -365,6 +367,20 @@ impl LocalRecords {
             scanner: RefCell::default(),
             hold: Cell::new(false),
             held: RefCell::new(VecDeque::new()),
+            holders_held: RefCell::new(None),
+        }
+    }
+
+    /// The holders' scans to come take their answer at once and hand it over only when
+    /// [`LocalRecords::release_holders`] says: a worker's reply that is on its way.
+    pub fn hold_holders(&self) {
+        *self.holders_held.borrow_mut() = Some(Rc::new(Latch::default()));
+    }
+
+    /// Hands over the answers held, and holds no more.
+    pub fn release_holders(&self) {
+        if let Some(latch) = self.holders_held.borrow_mut().take() {
+            latch.open();
         }
     }
 
@@ -405,7 +421,14 @@ impl Records for LocalRecords {
         folder: &'a str,
         session: &'a str,
     ) -> Work<'a, Option<Vec<u32>>> {
-        Box::pin(async move { self.scanner.borrow_mut().holders(folder, session) })
+        let held = self.holders_held.borrow().clone();
+        Box::pin(async move {
+            let answer = self.scanner.borrow_mut().holders(folder, session);
+            if let Some(latch) = held {
+                Flagged(latch).await;
+            }
+            answer
+        })
     }
 
     fn look<'a>(

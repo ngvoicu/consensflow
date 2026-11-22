@@ -4,6 +4,7 @@
 //! needed, a dialog). A file whose process is gone says nothing.
 
 use std::fs;
+use std::io::Read as _;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -73,23 +74,37 @@ pub(super) fn holders(folder: &str, session: &str) -> Option<Vec<u32>> {
     Scanner::default().holders(folder, session)
 }
 
-/// A status file as it stood when it was found to be of no live Claude: its last write and
-/// its size. A file written since is another file.
-type Stamp = (Option<SystemTime>, u64);
+/// The processes a status file named when it was found to be of no live Claude: the number of
+/// its name (`<pid>.json`, the number Claude writes it under) and the one it says. A file is
+/// remembered by those two numbers and by nothing the folder's listing says of it: a listing's
+/// time and size can be older than the file (NTFS), the same under a rewrite (a size that did not
+/// change, a clock that did not move), or a link's own (a target's rewrite leaves it).
+type Gone = (Option<u32>, u32);
 
 /// Claude's statuses, read by one owner that remembers which files it found to be of no live
 /// process (P22-1, T-2029: on Windows each look opened every process a file named, and the
-/// files of ended windows pile up). A file found so is not opened again until it is written:
-/// its process is gone, and a number the system gives another program since begins after the
-/// file was written, which [`read`] already refuses. A look then costs the live Claudes, not
-/// the files. A file that is not found gone (one torn mid-write, one of a status that is no
-/// state) and every file of a live process is read again each look, as it always was.
+/// files of ended windows pile up).
+///
+/// A file so found is not opened again while neither process it names is there. The rule holds
+/// on both platforms because it asks the process and not the file: a Claude that writes a
+/// status file is alive, and one that writes it under a number the system gave anew is alive
+/// at the number its file is named by (`<pid>.json`) and the one it says, so the look finds it
+/// there, forgets what it remembered, and reads the file as main always did, whatever the
+/// listing, the file's times and its size say, on a number reused at once (Windows) too. A
+/// process that begins and writes between two looks is read at the next, as a file written just
+/// after a look always was. A file that is not found gone (one torn mid-write, one of a status
+/// that is no state) and every file of a live process is read each look. A look makes the calls
+/// of the listing and of the files that are not found gone: the live windows'. Asking whether a
+/// number is alive is no file-system call (a signal of no effect on Unix, a handle that fails
+/// at once for a number nobody holds on Windows), and costs microseconds a name.
 #[derive(Debug, Default)]
 pub(crate) struct Scanner {
     /// By folder, the files found of no live process, by name.
-    gone: std::collections::HashMap<String, std::collections::HashMap<String, Stamp>>,
+    gone: std::collections::HashMap<String, std::collections::HashMap<String, Gone>>,
     /// How many status files were opened, for a test to count.
     pub(crate) reads: usize,
+    /// Every call made to the file system: a listing, an open, a metadata call, a read.
+    pub(crate) fs_calls: usize,
 }
 
 /// What one status file says.
@@ -133,6 +148,7 @@ impl Scanner {
 
     /// Each file of a live Claude, in the folder's order; none where the folder cannot be read.
     fn scan(&mut self, folder: &str) -> Option<Vec<Seen>> {
+        self.fs_calls += 1;
         let listed = entries(Path::new(folder)).ok()?;
         let remembered = self.gone.entry(folder.to_owned()).or_default();
         let mut found = Vec::new();
@@ -142,19 +158,28 @@ impl Scanner {
             if !is_status_file(&name) {
                 continue;
             }
-            // Where the system lists a file it has its time and size (Windows), or a call
-            // each (Unix): neither opens the file, nor its process.
-            let meta = entry.metadata().ok();
-            let written = meta.as_ref().and_then(|meta| meta.modified().ok());
-            let stamp = (written, meta.as_ref().map_or(0, fs::Metadata::len));
-            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp) {
-                present.insert(name, *held);
-                continue;
+            if let Some(held) = remembered.get(&name) {
+                if held.0.is_none_or(|named| !cf_process::alive(named))
+                    && !cf_process::alive(held.1)
+                {
+                    present.insert(name, *held);
+                    continue;
+                }
             }
             self.reads += 1;
-            let Ok(bytes) = fs::read(entry.path()) else {
+            self.fs_calls += 1;
+            let Ok(mut file) = fs::File::open(entry.path()) else {
                 continue;
             };
+            let mut bytes = Vec::new();
+            self.fs_calls += 1;
+            if file.read_to_end(&mut bytes).is_err() {
+                continue;
+            }
+            // The time of the file whose bytes were read, taken after them: the target of a
+            // link, and no older than the content.
+            self.fs_calls += 1;
+            let written = file.metadata().ok().and_then(|meta| meta.modified().ok());
             match read(&bytes, written) {
                 Read::Live(pid, status) => {
                     let parked = from_slice_lossy(&bytes)
@@ -165,8 +190,9 @@ impl Scanner {
                         parked,
                     });
                 }
-                Read::Gone => {
-                    present.insert(name, stamp);
+                Read::Gone(pid) => {
+                    let named = name.strip_suffix(".json").and_then(|stem| stem.parse().ok());
+                    present.insert(name, (named, pid));
                 }
                 Read::Nothing => {}
             }
@@ -218,10 +244,10 @@ fn read(bytes: &[u8], written: Option<SystemTime>) -> Read {
         return Read::Nothing;
     };
     if !cf_process::alive(pid) {
-        return Read::Gone;
+        return Read::Gone(pid);
     }
     if written.is_some_and(|written| cf_process::began_after(pid, written + SLACK)) {
-        return Read::Gone;
+        return Read::Gone(pid);
     }
     let state = match row.get("status").and_then(Value::as_str) {
         Some("busy") => State::Working,
@@ -246,8 +272,8 @@ fn read(bytes: &[u8], written: Option<SystemTime>) -> Read {
 enum Read {
     /// The file of a live Claude.
     Live(u32, Status),
-    /// The file of a process that is gone (or that a later program's number took).
-    Gone,
+    /// The file of a process that is gone (or that a later program's number took): its number.
+    Gone(u32),
     /// A file that says nothing of a Claude, whatever its process.
     Nothing,
 }

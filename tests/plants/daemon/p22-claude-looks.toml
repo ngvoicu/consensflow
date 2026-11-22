@@ -2,10 +2,11 @@
 # not the status files Claude Code has kept (P22-1, T-2029, T-2038). The scan of the status
 # folder is the records worker's (`Records::claude_statuses`, `claude_holders`, in
 # crates/cf-harness/src/records/thread.rs); what it found of no live process it does not open
-# again until the file is written (crates/cf-harness/src/claude/status.rs, `Scanner`).
+# again while the processes it names are not there (crates/cf-harness/src/claude/status.rs, `Scanner`).
 
 [run]
 p22-off-thread = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "off_thread"]
+p22-stale = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "holders_answer"]
 p22-status = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::status::"]
 
 [[plant]]
@@ -20,20 +21,73 @@ replace = '        let statuses = crate::claude::scan_statuses(&self.statuses);'
 
 [[plant]]
 name = 'p22: every status file is read again at each look'
-meant = "a_look_costs_the_live_windows_not_the_files_of_ended_ones"
+meant = "a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone"
 runs = ["p22-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp) {'
-replace = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp && false) {'
+find = '            if let Some(held) = remembered.get(&name) {'
+replace = '            if let Some(held) = remembered.get(&name).filter(|_| false) {'
 
 [[plant]]
-name = 'p22: a status file found gone stays gone though it is written'
-meant = "a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_look"
+name = 'p22: a status file found gone stays gone whatever is written, the cache keyed as the listing says'
+meant = "a_live_file_rewritten_in_place_is_never_skipped_whatever_its_listing_says"
 runs = ["p22-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp) {'
-replace = '            if let Some(held) = remembered.get(&name).filter(|_| true) {'
+find = """                if held.0.is_none_or(|named| !cf_process::alive(named))
+                    && !cf_process::alive(held.1)
+                {"""
+replace = """                if true {"""
+
+[[plant]]
+name = 'p22: a status link whose target was rewritten is judged by the link, not the file read'
+meant = "a_status_link_whose_target_is_rewritten_is_read_as_the_target"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = "            let written = file.metadata().ok().and_then(|meta| meta.modified().ok());"
+replace = "            let written = fs::symlink_metadata(entry.path()).ok().and_then(|meta| meta.modified().ok());"
+
+[[plant]]
+name = 'p22: a metadata call of each listed file is made and not counted'
+meant = "every_file_system_call_of_the_scan_is_counted"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = """            if let Some(held) = remembered.get(&name) {"""
+replace = """            let _ = entry.metadata();
+            if let Some(held) = remembered.get(&name) {"""
+
+[[plant]]
+name = 'p22: a metadata call of each listed file is made and counted'
+meant = "a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = """            if let Some(held) = remembered.get(&name) {"""
+replace = """            self.fs_calls += 1;
+            let _ = entry.metadata();
+            if let Some(held) = remembered.get(&name) {"""
+
+[[plant]]
+name = 'p22: the answer on holders is used though the window followed another conversation'
+meant = "a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_not_shared"
+runs = ["p22-stale"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """            if generation != self.generation.get() {
+                continue;
+            }
+            return holders"""
+replace = """            return holders"""
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                if generation == self.generation.get() {\n                    if shares {"
+replace = "                if generation == self.generation.get() || true {\n                    if shares {"

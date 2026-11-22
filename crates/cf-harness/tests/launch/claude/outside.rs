@@ -333,3 +333,53 @@ fn a_claude_that_showed_the_conversation_before_the_window_opened_is_never_taken
     let window = window(&home.adapter(), &request);
     assert!(finished(window.observe()).unwrap().shared);
 }
+
+const OTHER: &str = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+/// A holders' answer asked for one conversation is used for that one alone (P22-1, T-2052): the
+/// reply of the worker comes after a window has followed another conversation.
+#[test]
+fn a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_not_shared() {
+    use std::task::{Context, Poll, Waker};
+
+    let home = Home::new();
+    let env = home.env();
+    let time: Rc<dyn cf_harness::seams::Time> = Rc::new(cf_harness::testing::ManualTime::new(0));
+    let records = Rc::new(cf_harness::testing::LocalRecords::new(
+        env.clone(),
+        Rc::clone(&time),
+    ));
+    let fakes = Fakes::new(&env);
+    let services = cf_harness::seams::Services {
+        records: Rc::clone(&records) as Rc<dyn Records>,
+        ..fakes.services(&env, Path::new(&home.root))
+    };
+    let adapter = ClaudeAdapter::new(&services);
+    let window = window(&adapter, &Request::resumed(SESSION));
+    // Two Claudes show the conversation the window was on: its own and the human's.
+    let outside = OtherProcess::start();
+    home.status(SESSION, &json!({ "status": "idle" }), outside.pid());
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    records.hold_holders();
+    let mut look = window.observe();
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+    assert!(look.as_mut().poll(&mut context).is_pending(), "the answer is on its way");
+    // The window follows another conversation, which only its own Claude shows.
+    window.follow(OTHER);
+    home.status(OTHER, &json!({ "status": "idle" }), me());
+    fs::remove_file(path::join(&[
+        home.var("CLAUDE_CONFIG_DIR"),
+        "sessions",
+        &format!("{}.json", outside.pid()),
+    ]))
+    .unwrap();
+    records.release_holders();
+    let stale = match look.as_mut().poll(&mut context) {
+        Poll::Ready(look) => look,
+        Poll::Pending => panic!("released"),
+    };
+    drop(stale);
+    let observed = finished(window.observe()).unwrap();
+    assert!(!observed.shared, "one Claude shows the conversation the window follows");
+}

@@ -315,14 +315,17 @@ fn a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_loo
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().to_string_lossy().into_owned();
     let mut scanner = Scanner::default();
-    let gone = json!({ "pid": ended_pid(), "sessionId": "S", "status": "idle" });
-    write(dir.path(), "7.json", &gone);
+    // Claude names its file by its process: the number of a live one is its file's.
+    let name = format!("{}.json", me());
+    let dead = ended_pid();
+    let gone = json!({ "pid": dead, "sessionId": "S", "status": "idle" });
+    write(dir.path(), &format!("{dead}.json"), &gone);
     assert_eq!(scanner.statuses(&folder), []);
     assert_eq!(scanner.statuses(&folder), []);
     assert_eq!(scanner.reads, 1, "found gone: not opened again");
-    // The number taken by a live Claude that writes the file anew.
+    // The number taken by a live Claude that writes its file.
     let live = json!({ "pid": me(), "sessionId": "S", "status": "busy", "extra": "longer" });
-    write(dir.path(), "7.json", &live);
+    write(dir.path(), &name, &live);
     let now = State::Working;
     assert_eq!(
         scanner.statuses(&folder),
@@ -336,17 +339,141 @@ fn a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_loo
     );
     let after = scanner.reads;
     let idle = json!({ "pid": me(), "sessionId": "S", "status": "idle", "extra": "longer" });
-    write(dir.path(), "7.json", &idle);
+    write(dir.path(), &name, &idle);
     assert_eq!(scanner.holders(&folder, "S"), Some(vec![me()]));
     assert_eq!(
         scanner.reads,
         after + 1,
         "a live window's file is read each look"
     );
-    fs::remove_file(dir.path().join("7.json")).unwrap();
+    fs::remove_file(dir.path().join(&name)).unwrap();
+    assert_eq!(scanner.holders(&folder, "S"), Some(vec![]));
+    fs::remove_file(dir.path().join(format!("{dead}.json"))).unwrap();
     assert_eq!(scanner.holders(&folder, "S"), Some(vec![]));
     assert!(
         scanner.gone[&folder].is_empty(),
         "a file no longer listed is forgotten"
     );
+}
+
+/// What one warm look at a folder costs the file system, in every call it makes.
+fn warm_calls(dir: &Path) -> usize {
+    let folder = dir.to_string_lossy().into_owned();
+    let mut scanner = Scanner::default();
+    let _ = scanner.statuses(&folder);
+    let before = scanner.fs_calls;
+    let _ = scanner.statuses(&folder);
+    scanner.fs_calls - before
+}
+
+#[test]
+fn a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone() {
+    let alone = tempfile::tempdir().unwrap();
+    let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
+    write(alone.path(), &format!("{}.json", me()), &own);
+    let beside = tempfile::tempdir().unwrap();
+    write(beside.path(), &format!("{}.json", me()), &own);
+    let gone = ended_pid();
+    for number in 0..512 {
+        let row = json!({ "pid": gone, "sessionId": "OLD", "status": "idle" });
+        write(beside.path(), &format!("{}.json", 100_000 + number), &row);
+    }
+    assert_eq!(
+        warm_calls(beside.path()),
+        warm_calls(alone.path()),
+        "512 files of ended windows add no call: every metadata call and open counts"
+    );
+}
+
+#[test]
+fn a_live_file_rewritten_in_place_is_never_skipped_whatever_its_listing_says() {
+    // The file of a process found gone, then the number taken by a live Claude that writes the
+    // file anew with the same byte count, and a time the listing cannot tell from the old one
+    // (NTFS lists a stale time; a clock that has not moved): no stamp is a word on the file.
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let mut scanner = Scanner::default();
+    let file = dir.path().join(format!("{}.json", me()));
+    let dead = ended_pid();
+    let gone = format!(r#"{{"pid":{dead},"sessionId":"S","status":"idle"}}"#);
+    let live = format!(r#"{{"pid":{},"sessionId":"S","status":"busy"}}"#, me());
+    // The same byte count: pids of one width, and "idle" as long as "busy".
+    assert_eq!(gone.len(), live.len(), "pids {dead} and {}", me());
+    fs::write(&file, gone).unwrap();
+    let stamp = fs::metadata(&file).unwrap().modified().unwrap();
+    assert_eq!(scanner.statuses(&folder), []);
+    fs::write(&file, live).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(stamp)
+        .unwrap();
+    let found = scanner.statuses(&folder);
+    assert_eq!(found.len(), 1, "a live process's file is read: {found:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_status_link_whose_target_is_rewritten_is_read_as_the_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target");
+    fs::write(&target, r#"{"pid":999999,"sessionId":"S","status":"idle"}"#).unwrap();
+    let folder = dir.path().join("sessions");
+    fs::create_dir(&folder).unwrap();
+    let link = folder.join(format!("{}.json", me()));
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    // The link is older than the live process, which a target's rewrite does not change.
+    let hour_ago = nix::sys::time::TimeSpec::new(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            - 3600,
+        0,
+    );
+    nix::sys::stat::utimensat(
+        None,
+        &link,
+        &hour_ago,
+        &hour_ago,
+        nix::sys::stat::UtimensatFlags::NoFollowSymlink,
+    )
+    .unwrap();
+    let folder = folder.to_string_lossy().into_owned();
+    let mut scanner = Scanner::default();
+    assert_eq!(scanner.holders(&folder, "S"), Some(Vec::new()));
+    fs::write(
+        &target,
+        format!(r#"{{"pid":{},"sessionId":"S","status":"busy"}}"#, me()),
+    )
+    .unwrap();
+    assert_eq!(scanner.holders(&folder, "S"), Some(vec![me()]));
+}
+
+/// The count above is every call only while every call is counted: each file-system call of the
+/// scan sits beside a count of it (the metadata call too: the first count of this look, T-2052,
+/// left it out and read 2 where a look made 1,026).
+#[test]
+fn every_file_system_call_of_the_scan_is_counted() {
+    let source = include_str!("../status.rs");
+    let from = source.find("    fn scan(&mut self").unwrap();
+    let to = source[from..].find("\n/// How much later").unwrap() + from;
+    let scan = &source[from..to];
+    let calls: usize = [
+        "entries(",
+        "File::open(",
+        "read_to_end(",
+        ".metadata(",
+        "fs::read(",
+        "fs::metadata(",
+        ".file_type(",
+        "read_link(",
+        "canonicalize(",
+        "exists(",
+    ]
+    .iter()
+    .map(|call| scan.matches(call).count())
+    .sum();
+    assert_eq!(calls, scan.matches("fs_calls += 1").count(), "{scan}");
 }

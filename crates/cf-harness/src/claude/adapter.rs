@@ -355,6 +355,7 @@ impl Adapter for ClaudeAdapter {
                     time: Rc::clone(&self.time),
                     statuses,
                     session: RefCell::new(session),
+                    generation: Cell::new(0),
                     pid: Cell::new(None),
                     claude_pid: Cell::new(None),
                     asked: RefCell::new(None),
@@ -464,6 +465,10 @@ struct ClaudeWindow {
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
     session: RefCell<String>,
+    /// How many times the window has followed a conversation: what a scan's answer was asked
+    /// for, and is used only while it stands (P22-1, T-2052: a worker's reply for the
+    /// conversation the window left must not mark the one it shows now).
+    generation: Cell<u64>,
     /// The pane's own child, once the host named it.
     pid: Cell<Option<u32>>,
     /// The Claude whose status first named the window's conversation.
@@ -563,7 +568,14 @@ impl ClaudeWindow {
     /// human's outside ConsensFlow or the program before the window's, however
     /// Claude's statuses are listed (T-800).
     async fn status(&self) -> Option<Status> {
-        let statuses = self.records.claude_statuses(&self.statuses).await;
+        let statuses = loop {
+            let generation = self.generation.get();
+            let statuses = self.records.claude_statuses(&self.statuses).await;
+            // An answer is the conversation's it was asked for: after a follow, ask again.
+            if generation == self.generation.get() {
+                break statuses;
+            }
+        };
         let of = |pid: u32| {
             statuses
                 .iter()
@@ -586,16 +598,24 @@ impl ClaudeWindow {
 
     /// Whether another Claude than the window's shows its conversation now: one
     /// that showed it before the window was opened, or a second beside the
-    /// window's own. Which of two is the window's need not be known.
+    /// window's own. Which of two is the window's need not be known. The answer of a scan
+    /// is used for the conversation it was asked for, while the window shows it.
     async fn shares(&self) -> bool {
-        let session = self.session.borrow().clone();
-        self.records
-            .claude_holders(&self.statuses, &session)
-            .await
-            .is_some_and(|holders| {
+        loop {
+            let generation = self.generation.get();
+            let session = self.session.borrow().clone();
+            let holders = self
+                .records
+                .claude_holders(&self.statuses, &session)
+                .await;
+            if generation != self.generation.get() {
+                continue;
+            }
+            return holders.is_some_and(|holders| {
                 let before = self.before.borrow();
                 holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
-            })
+            });
+        }
     }
 
     /// Whether `status` names another conversation than the window's.
@@ -643,6 +663,7 @@ impl Window for ClaudeWindow {
 
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());
+        self.generation.set(self.generation.get() + 1);
         // What was pressed for was a turn of the conversation the window left,
         // and so was the turn its record had open.
         *self.asked.borrow_mut() = None;
@@ -903,10 +924,19 @@ impl Window for ClaudeWindow {
             // a transcript its look had read before the status came back
             // could be older than the status. The status is read off the engine's
             // thread (P22-1), awaited before the transcript is asked for.
-            let live = self.status().await;
-            if self.shares().await {
-                self.shared.set(true);
-            }
+            // A look that a follow overtook begins again: its status and its answer on holders
+            // are of the conversation the window left.
+            let live = loop {
+                let generation = self.generation.get();
+                let live = self.status().await;
+                let shares = self.shares().await;
+                if generation == self.generation.get() {
+                    if shares {
+                        self.shared.set(true);
+                    }
+                    break live;
+                }
+            };
             let session = self.session.borrow().clone();
             let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
