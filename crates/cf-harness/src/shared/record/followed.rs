@@ -115,8 +115,8 @@ impl<P: Parser> Followed<P> {
             && self
                 .file
                 .as_deref()
-                .and_then(zstd::plain_sibling)
-                .is_some_and(|plain| plain.is_file())
+                .and_then(zstd::existing_plain_sibling)
+                .is_some()
         {
             current = None;
         }

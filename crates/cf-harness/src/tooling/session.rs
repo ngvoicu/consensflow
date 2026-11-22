@@ -172,7 +172,7 @@ fn rollouts_under(folder: &Path, depth: usize, since_ms: i64, found: &mut Vec<(i
         } else if kind.is_file()
             && name.starts_with("rollout-")
             && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
-            && !zstd::plain_sibling(&path).is_some_and(|plain| plain.is_file())
+            && zstd::existing_plain_sibling(&path).is_none()
         {
             let written = kind
                 .modified()

@@ -1,6 +1,7 @@
 # T-1973: the reader must choose the compressed form for a cold Codex rollout.
 [run]
 codex-zstd-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib"]
+codex-zstd-link = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "a_compressed_rollout_does_not_follow_a_plain_sibling_symlink"]
 
 [[plant]]
 name = "codex zstd: read a compressed rollout as plain bytes"
@@ -12,3 +13,14 @@ prepare = [["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records
 file = "crates/cf-harness/src/shared/record/followed.rs"
 find = "let read = if self.zstd && zstd::is_rollout(&file) {"
 replace = "let read = if false && self.zstd && zstd::is_rollout(&file) {"
+
+[[plant]]
+name = "codex zstd: follow a plain sibling symlink"
+meant = "a_compressed_rollout_does_not_follow_a_plain_sibling_symlink"
+runs = ["codex-zstd-link"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/zstd.rs"
+find = "std::fs::symlink_metadata(&plain)"
+replace = "std::fs::metadata(&plain)"

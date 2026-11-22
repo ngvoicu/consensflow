@@ -68,11 +68,7 @@ pub(crate) fn sessions(env: &Env) -> Result<PathBuf, String> {
 /// record is read from it, as Node's was.
 pub(crate) fn transcript(session: &str, env: &Env) -> Result<Option<PathBuf>, String> {
     let found = find_file(&sessions(env)?, &|name| name.contains(session), DEPTH);
-    Ok(found.map(|file| {
-        zstd::plain_sibling(&file)
-            .filter(|plain| plain.is_file())
-            .unwrap_or(file)
-    }))
+    Ok(found.map(|file| zstd::existing_plain_sibling(&file).unwrap_or(file)))
 }
 
 /// Whether Codex kept the rollout of the thread `session`: a file under its

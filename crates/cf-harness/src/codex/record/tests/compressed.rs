@@ -173,3 +173,30 @@ fn a_follower_changes_form_and_prefers_the_plain_sibling_when_both_exist() {
         .any(|item| &*item.text == "a newer result"));
     assert_eq!(read(&env), *next);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_compressed_rollout_does_not_follow_a_plain_sibling_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let (_home, env, plain) = home();
+    let other = tempfile::tempdir().unwrap();
+    let outside = other.path().join("outside.jsonl");
+    fs::write(&outside, b"{}").unwrap();
+    fs::write(plain.with_extension("jsonl.zst"), COMPRESSED).unwrap();
+    symlink(&outside, &plain).unwrap();
+    let reading = read(&env);
+    let Reading::Known(record) = reading else {
+        panic!("{reading:?}")
+    };
+    assert!(record
+        .items
+        .iter()
+        .any(|item| &*item.text == "T1937-OFFLINE-RESULT"));
+    fs::remove_file(&plain).unwrap();
+    let mut reader = super::super::reader(SESSION, &env);
+    let options = Options::default();
+    let before = reader.look(&options, 1_800_000_000_000);
+    symlink(&outside, &plain).unwrap();
+    assert_eq!(reader.look(&options, 1_800_000_000_001), before);
+}

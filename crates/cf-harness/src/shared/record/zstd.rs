@@ -13,12 +13,18 @@ pub(crate) fn is_rollout(file: &Path) -> bool {
         .is_some_and(|name| name.to_string_lossy().ends_with(".jsonl.zst"))
 }
 
-/// The uncompressed sibling Codex may publish before it removes the compressed one.
-pub(crate) fn plain_sibling(file: &Path) -> Option<std::path::PathBuf> {
+/// The regular uncompressed sibling Codex may publish before removing the
+/// compressed one. The finder ignores symlinks; preference must do so too.
+pub(crate) fn existing_plain_sibling(file: &Path) -> Option<std::path::PathBuf> {
     if !is_rollout(file) {
         return None;
     }
-    Some(file.with_extension(""))
+    let plain = file.with_extension("");
+    std::fs::symlink_metadata(&plain)
+        .ok()?
+        .file_type()
+        .is_file()
+        .then_some(plain)
 }
 
 /// At most a 128 MiB decoder window, larger than Codex's level-3 writer needs.
