@@ -172,6 +172,28 @@ fn given_as(message: &str, id: i64) -> String {
     format!("{opening}\n… ({length} characters; read all of it with: cf inbox read m-{id})")
 }
 
+/// Whether `text` holds the body of message `id` as ConsensFlow gives it to a window: whole, or
+/// its opening, its length and the command that reads all of it, which is the window's own `cf`
+/// (a bare `cf`, or the absolute path of the window's, quoted where it holds a space) followed by
+/// `inbox read m-<id>`.
+fn window_has(text: &str, body: &str, id: i64) -> bool {
+    let bare = given_as(body, id);
+    let Some(cut) = bare.rfind(" cf inbox read m-") else {
+        return text.contains(&bare);
+    };
+    let prefix = &bare[..cut + 1];
+    let tail = format!(" inbox read m-{id})");
+    text.match_indices(prefix).any(|(at, _)| {
+        let line = text[at + prefix.len()..].lines().next().unwrap_or_default();
+        let Some(command) = line.strip_suffix(&tail) else {
+            return false;
+        };
+        let program = command.trim().trim_matches('"');
+        let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
+        matches!(name.to_lowercase().as_str(), "cf" | "cf.exe")
+    })
+}
+
 /// What one task of a worker showed.
 #[derive(Debug, Default)]
 struct Seen {
@@ -369,14 +391,13 @@ fn judge(
         given.len() == 1,
         format!("{} of {} user messages", given.len(), users.len()),
     );
-    let expected = stored.as_ref().map(|(id, body)| given_as(body, *id));
     let whole = given.first().is_some_and(|text| {
         marker
             .as_deref()
             .is_some_and(|marker| text.contains(marker))
-            && expected
-                .as_deref()
-                .is_some_and(|expected| text.contains(expected))
+            && stored
+                .as_ref()
+                .is_some_and(|(id, body)| window_has(text, body, *id))
     });
     account.check(
         &format!("{step}: whole, its header and every line"),
@@ -544,6 +565,42 @@ mod tests {
         assert_eq!(unwrapped(&wrapped), given);
         assert_eq!(unwrapped(given), given);
         assert_eq!(unwrapped("  plain  "), "plain");
+    }
+
+    /// T-1937: the window reads the rest of a long message with its own `cf` (an absolute path,
+    /// quoted where it holds a space), not a bare one; the opening, the length and the message's
+    /// own id still have to be exactly right.
+    #[test]
+    fn a_long_message_is_found_in_a_window_whatever_cf_command_it_names() {
+        let long = "x".repeat(OPENING + 5);
+        let tail = |command: &str, id: i64, length: usize| {
+            format!(
+                "{}\n… ({length} characters; read all of it with: {command} inbox read m-{id})",
+                "x".repeat(OPENING)
+            )
+        };
+        for command in [
+            "cf",
+            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            r"C:\Program Files\ConsensFlow\cf.exe",
+            r#""C:\Program Files\ConsensFlow\cf.exe""#,
+        ] {
+            let window = format!("header\n{}\nafter", tail(command, 4, OPENING + 5));
+            assert!(window_has(&window, &long, 4), "{command}");
+        }
+        // Not another message's id, another length, a cut opening, or no command at all.
+        assert!(!window_has(&tail("cf", 5, OPENING + 5), &long, 4));
+        assert!(!window_has(&tail("cf", 4, OPENING + 6), &long, 4));
+        assert!(!window_has(
+            &tail("cf", 4, OPENING + 5).replacen('x', "", 1),
+            &long,
+            4
+        ));
+        assert!(!window_has(&tail("", 4, OPENING + 5), &long, 4));
+        assert!(!window_has(&tail("rm", 4, OPENING + 5), &long, 4));
+        // A short message is whole or it is not there.
+        assert!(window_has("a short one", "short", 1));
+        assert!(!window_has("a shirt one", "short", 1));
     }
 
     #[test]
