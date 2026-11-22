@@ -68,13 +68,15 @@ runs = ["pane-input-reconcile"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '                lane.passed = first;\n                if let Slot::Parked { job, sender, .. } = slot {'
-replace = '                let _ = first;\n                if let Slot::Parked { job, sender, .. } = slot {'
+find = '''                lane.passed = first;
+                if let Slot::Parked { job, sender, .. } = slot {'''
+replace = '''                let _ = first;
+                if let Slot::Parked { job, sender, .. } = slot {'''
 
 [[plant]]
 name = "pane input retry: a refused admission leaves its number open"
-meant = "a_refused_admission_is_final_for_its_number"
-runs = ["pane-input-final", "pane-input-capacity"]
+meant = "unanswered_page_input_is_bounded_until_a_new_page"
+runs = ["pane-input-capacity", "pane-input-final"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"

@@ -2360,14 +2360,15 @@ mod tests {
         assert_eq!(handed(&received), b"");
         thread::sleep(Duration::from_millis(800));
         assert_eq!(handed(&received), b"BCD");
-        assert_eq!(
-            inputs.enqueue_page("s:1", key.clone(), 1, typed(b"A"), true),
-            Err(INPUT_STALE_PAGE.to_owned())
-        );
+        // The number that never came is told at its bound, before the call comes late.
         let lost = observed.lost.lock().unwrap().clone();
         assert!(
             !lost.is_empty() && lost.iter().all(|each| each == &key),
             "{lost:?}"
+        );
+        assert_eq!(
+            inputs.enqueue_page("s:1", key.clone(), 1, typed(b"A"), true),
+            Err(INPUT_STALE_PAGE.to_owned())
         );
         assert!(
             observed
