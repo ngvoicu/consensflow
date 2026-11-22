@@ -39,7 +39,10 @@ fn a_rig_for_a_codex_gives_its_windows_its_login_and_the_folders_it_needs_after_
     // The command's folder follows the stand-in's, and the system's follow it.
     let codex = Installed::at(Harness::Codex, &command, login.path());
     let (home, plain) = windows_of(&codex)?;
-    assert_eq!(home, text(&login));
+    // Its login is read where the run's isolation puts it, never from the person's home: an
+    // install that has no isolation is given the rig's own Codex folder (K3 review T-1978, 2).
+    assert_ne!(home, text(&login));
+    assert!(home.ends_with(".codex"), "{home}");
     assert!(plain[0].ends_with("fake-bin"), "{plain:?}");
     assert_eq!(plain[1], text(&installed), "{plain:?}");
     assert!(plain.len() > 2, "the system's folders follow: {plain:?}");

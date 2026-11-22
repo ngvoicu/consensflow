@@ -269,7 +269,15 @@ fn a_claude_that_updates_itself_unless_it_is_told_not_to_leaves_the_launcher_alo
     let data = data.to_string_lossy().into_owned();
     let was = owner.points(".local/bin/claude")?;
 
-    let told = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT).var("XDG_DATA_HOME", &data))?;
+    // The windows' own home is the rig's; the control gives them the owner's by the case's own
+    // word (a variable the case names wins over the rig's), which is where an updater that was not
+    // told would reach.
+    let owners = owner.home.path().to_string_lossy().into_owned();
+    let told = Rig::start(
+        live::rig(&[owner.claude()], FAKE_AGENT)
+            .var("XDG_DATA_HOME", &data)
+            .var("HOME", &owners),
+    )?;
     run_updater(&told, &script)?;
     assert_eq!(owner.points(".local/bin/claude")?, was);
     told.close()?;
@@ -279,6 +287,7 @@ fn a_claude_that_updates_itself_unless_it_is_told_not_to_leaves_the_launcher_alo
     let untold = Rig::start(
         live::rig(&[owner.claude()], FAKE_AGENT)
             .var("XDG_DATA_HOME", &data)
+            .var("HOME", &owners)
             .unset("DISABLE_AUTOUPDATER")
             .unset("DISABLE_UPDATES"),
     )?;

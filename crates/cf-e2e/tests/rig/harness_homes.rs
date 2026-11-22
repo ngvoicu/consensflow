@@ -161,9 +161,12 @@ fn a_rig_that_clears_the_environment_still_runs_each_harness_on_a_home_of_the_ru
         assert!(!at.starts_with(home), "{name} is {}", at.display());
         assert!(at.is_dir(), "{name} is {}", at.display());
     }
-    // The owner's home is the windows' all the same (their project folders are below it), and
-    // none of the variables a harness reads its login by names it.
-    assert_eq!(named(&rig, "HOME"), home);
+    // The owner's home is where the windows' project folders are below, and no variable a program
+    // finds a home by names it: the windows' own `HOME` is the rig's (K3 review T-1978, 2).
+    assert_eq!(rig.project_home().map(PathBuf::from).as_deref(), Some(home));
+    let own = named(&rig, "HOME");
+    assert!(!own.starts_with(home), "HOME is {}", own.display());
+    assert!(own.is_dir(), "HOME is {}", own.display());
     // The homes hold the logins (a key, a Codex login) and nothing else of the owner's.
     let pi = named(&rig, "PI_CODING_AGENT_DIR");
     assert!(fs::read_to_string(pi.join("auth.json"))?.contains("sk-or-OWNERS"));
