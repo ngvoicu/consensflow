@@ -390,8 +390,8 @@ runs = ["login-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/renew.rs"
-find = '''    forget(records, folder.path());'''
-replace = ''''''
+find = '''    let leftover = forget(records, folder.path(), &baseline);'''
+replace = '''    let leftover: Option<String> = None;'''
 
 [[plant]]
 name = "matrix: Claude Code's renewal names no record to take away"
