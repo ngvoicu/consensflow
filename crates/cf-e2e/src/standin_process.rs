@@ -366,6 +366,32 @@ fn temp_parent_is_outside(parent: &Path, forbidden: &[PathBuf]) -> Result<(), St
     }
 }
 
+/// Roots a test adds to the protected ones, for the case that shows the door refuses a place in
+/// one (the inherited ones are the account's own and cannot be made up).
+#[cfg(test)]
+pub(crate) static TEST_PROTECTED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Refuses `place` where it is, by where it resolves, inside a harness home, login store or
+/// Keychain folder of the account the process was started in: the door asks this before it makes a
+/// folder to write in, the temporary parent included (K3, T-1979).
+pub(crate) fn refuse_protected_place(place: &Path) -> std::io::Result<()> {
+    #[allow(unused_mut)]
+    let mut forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .cloned()
+        .unwrap_or_else(inherited_harness_homes);
+    #[cfg(test)]
+    forbidden.extend(
+        TEST_PROTECTED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .cloned(),
+    );
+    temp_parent_is_outside(place, &forbidden)
+        .map_err(|why| std::io::Error::new(std::io::ErrorKind::PermissionDenied, why))
+}
+
 /// An inherited path, made absolute without reading it.
 #[allow(clippy::disallowed_methods)]
 fn inherited_path(name: &str) -> Option<PathBuf> {
@@ -956,6 +982,28 @@ mod tests {
             );
         }
         assert!(safe_path_entry(&home.join("Library/Caches/x"), &held));
+    }
+
+    /// The door makes no folder of the run's in a place inside a protected root, whatever made
+    /// the place the parent: through a link, or by a `..`.
+    #[cfg(unix)]
+    #[test]
+    fn the_door_makes_no_folder_inside_a_protected_home() {
+        let root = crate::door::made("door-protected-").unwrap();
+        let held = root.path().join("owner/.claude");
+        crate::door::make_dir(&held).unwrap();
+        let link = root.path().join("tmp-link");
+        std::os::unix::fs::symlink(&held, &link).unwrap();
+        super::TEST_PROTECTED.lock().unwrap().push(held.clone());
+        let direct = crate::door::made_in(&held.join("tmp"), "h-");
+        let through = crate::door::made_in(&link.join("sub/../tmp"), "h-");
+        super::TEST_PROTECTED.lock().unwrap().retain(|path| path != &held);
+        for refused in [direct, through] {
+            let error = refused.expect_err("a folder was made inside a protected root");
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        }
+        assert!(!held.join("tmp").exists());
+        assert!(std::fs::read_dir(&held).unwrap().next().is_none());
     }
 
     #[cfg(unix)]

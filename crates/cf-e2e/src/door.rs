@@ -836,6 +836,8 @@ pub fn make_place(place: &Path) -> io::Result<()> {
 pub fn made_in(parent: &Path, prefix: &str) -> io::Result<Made> {
     // A say-only run whose audit file cannot be used stops before it makes a folder.
     Door::init();
+    // Judged by where the parent resolves, before anything is made there.
+    crate::standin_process::refuse_protected_place(parent)?;
     make_place(parent)?;
     let folder = tempfile::Builder::new()
         .prefix(prefix)
