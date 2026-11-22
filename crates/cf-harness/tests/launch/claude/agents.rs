@@ -383,3 +383,117 @@ fn a_turn_under_way_is_never_over_and_a_window_at_rest_is_settled_and_no_more() 
         }
     }
 }
+
+/// The records Claude Code 2.1.329 wrote on the Mac (T-1857) for a turn whose agent
+/// ran on after the Escape: the interrupt for a tool use is line 36, and a line the
+/// human typed at the prompt opens a turn at 38, 1.697 s later, while the background
+/// agent's command still ran. Its status stayed busy all through.
+fn recorded_interrupt(lines: usize) -> Vec<String> {
+    include_str!("../../fixtures/claude/interrupted-with-background-agent.jsonl")
+        .replace("$SESSION", SESSION)
+        .split_inclusive('\n')
+        .take(lines)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether the Mac's prompt takes words after that interrupt, as Claude Code did there.
+const MAC: bool = cfg!(target_os = "macos");
+
+#[test]
+fn a_mac_window_busy_with_a_background_agent_takes_words_once_the_tool_use_interrupt_has_stood() {
+    // N23: the status says busy for the agent, so the look is not settled, and the
+    // words that resume the task waited until the human typed. The recording shows the
+    // prompt takes a typed line there; the second's stand (`Over::Held`) is the engine's.
+    let timed = Timed::on(&recorded_interrupt(36), Some("busy"));
+    let first = timed.look_at(0);
+    assert!(!first.takes_words && !first.settled);
+    assert_eq!(first.over, Over::Pending);
+    let early = timed.look_at(HOLD - 1);
+    assert!(!early.takes_words, "not before the interrupt's end stood");
+    let held = timed.look_at(HOLD);
+    assert!(!held.settled, "the result still waits for the agent");
+    assert_eq!(held.over, Over::Held);
+    assert_eq!(held.takes_words, MAC, "only the Mac's prompt was recorded");
+    assert!(!held.shared && held.waiting.is_none());
+
+    // The line typed at 38 opens a turn: it takes no more, and neither do the lines
+    // that follow it.
+    for lines in [38, 40] {
+        timed.home.transcript(SESSION, &recorded_interrupt(lines));
+        for ms in [HOLD + 1_700, 4 * HOLD] {
+            let observed = timed.look_at(ms);
+            assert!(
+                !observed.takes_words && !observed.settled && observed.over == Over::No,
+                "a turn under way ({lines} lines, {ms} ms)"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_window_takes_no_words_after_an_interrupt_in_generation_nor_after_a_refusal_whatever_its_status_says(
+) {
+    // The interrupt while the model writes has no recording with background work, and a
+    // turn a refusal ended is T-604's: main's gate holds for both.
+    let in_generation: Vec<String> = recorded_interrupt(36)
+        .into_iter()
+        .map(|line| line.replace(" for tool use]", "]"))
+        .collect();
+    assert!(in_generation
+        .last()
+        .unwrap()
+        .contains("[Request interrupted by user]"));
+    for (said, lines) in [
+        ("in generation", in_generation),
+        ("refused", refused()),
+        ("the in-generation interrupt of T-604", interrupted()),
+    ] {
+        let timed = Timed::on(&lines, Some("busy"));
+        for ms in [0, HOLD, 4 * HOLD] {
+            let observed = timed.look_at(ms);
+            assert!(!observed.takes_words, "{said} at {ms} ms");
+            assert!(!observed.settled, "{said} at {ms} ms");
+        }
+    }
+}
+
+#[test]
+fn a_window_that_another_claude_shows_takes_no_words_after_the_interrupt_whatever_either_status_says(
+) {
+    // T-1904's case: another Claude on the same conversation can write that interrupt
+    // while this window's own turn runs, and the record cannot tell whose it is. The flag
+    // stays set once it is raised.
+    let timed = Timed::on(&recorded_interrupt(35), Some("busy"));
+    let before = timed.look_at(0);
+    assert!(!before.shared && !before.takes_words);
+    let other = OtherProcess::start();
+    timed
+        .home
+        .status(SESSION, &json!({ "status": "idle" }), other.pid());
+    timed.home.transcript(SESSION, &recorded_interrupt(36));
+    for ms in [1_100, 4_200] {
+        let observed = timed.look_at(ms);
+        assert!(observed.shared, "{ms} ms");
+        assert!(!observed.takes_words, "{ms} ms");
+    }
+    drop(other);
+    let after = timed.look_at(6_000);
+    assert!(after.shared && !after.takes_words, "the flag stays");
+}
+
+#[test]
+fn a_window_that_says_idle_or_a_shell_takes_words_when_it_is_settled_and_no_other_time() {
+    for word in ["idle", "shell"] {
+        let timed = Timed::on(&interrupted(), Some(word));
+        let observed = timed.look_at(HOLD);
+        assert!(observed.settled && observed.takes_words, "{word}");
+    }
+    for lines in [turn(None)[..2].to_vec(), turn(Some(2))] {
+        let timed = Timed::on(&lines, Some("busy"));
+        for ms in [0, HOLD] {
+            let observed = timed.look_at(ms);
+            assert_eq!(observed.takes_words, observed.settled, "{ms} ms");
+        }
+    }
+}

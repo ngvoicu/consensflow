@@ -59,6 +59,7 @@ pub(crate) fn observed_from(reading: Arc<Reading>, live: Option<Arc<Quota>>) -> 
     Observed {
         reading: Some(reading),
         settled,
+        takes_words: settled,
         over: Over::No,
         waiting: None,
         failed,
@@ -90,6 +91,7 @@ pub(crate) fn dialog_waiting(reading: Option<&Reading>) -> Option<Waiting> {
 pub(crate) fn switched_to(observed: Observed, session: String) -> Observed {
     Observed {
         settled: false,
+        takes_words: false,
         over: Over::No,
         waiting: None,
         switched: Some(session),
