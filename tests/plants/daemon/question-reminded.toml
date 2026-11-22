@@ -3,6 +3,7 @@
 # eligibility is read where a reminder is written and where it is admitted.
 [run]
 question-reminded-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "closed_wait::"]
+question-reminded-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "closed_wait_inbox"]
 question-reminded-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1924_"]
 
 [[plant]]
@@ -140,3 +141,56 @@ runs = ["question-reminded-ledger"]
 file = "crates/cf-ledger/src/waiting_questions.rs"
 find = "SELECT b.question_id, b.question_id, ?1 FROM question_binding b"
 replace = "SELECT b.question_id, (SELECT COALESCE(MAX(id), 0) FROM message), ?1 FROM question_binding b"
+
+[[plant]]
+name = "question reminded: the inbox serves a reminder without withdrawing a stale one first"
+meant = "q2_the_inbox_serves_no_stale_reminder"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = "        .withdraw_stale_reminders(caller.participant.id)?;\n    // Digits"
+replace = "        .withdraw_stale_reminders(-1)?;\n    // Digits"
+
+[[plant]]
+name = "question reminded: a receipt is taken of a stale reminder"
+meant = "a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        crate::waiting_questions::withdraw_stale(store, recipient)?;\n"
+replace = ""
+
+[[plant]]
+name = "question reminded: a wait's rows stay when its project is deleted"
+meant = "a_project_with_a_recorded_wait_is_deleted_with_it"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "REFERENCES message(id) ON DELETE CASCADE,"
+replace = "REFERENCES message(id),"
+
+[[plant]]
+name = "question reminded: the migration takes a quotation for the notice"
+meant = "the_migration_takes_no_members_quotation_for_the_closure_notice"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "' closed when ') = 1)) AS note"
+replace = "' closed when ') > 0)) AS note"
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "instr(n.body, '@' || s.handle || '''s question m-' || q.id"
+replace = "instr(n.body, 'question m-' || q.id"
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "CASE WHEN count(*) = 1 THEN min(n.id) END"
+replace = "min(n.id)"
+
+[[plant]]
+name = "question reminded: the migration takes the first of two matching notices"
+meant = "the_migration_skips_a_closure_notice_it_cannot_tell_from_another"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "CASE WHEN count(*) = 1 THEN min(n.id) END"
+replace = "min(n.id)"

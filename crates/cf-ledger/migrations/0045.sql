@@ -9,31 +9,43 @@
 --   reminder_id  the closed question's own reminder cursor; the open question's
 --                (question_reminder) is not reused.
 CREATE TABLE question_wait (
-  question_id INTEGER PRIMARY KEY REFERENCES message(id),
+  question_id INTEGER PRIMARY KEY REFERENCES message(id) ON DELETE CASCADE,
   after_id INTEGER NOT NULL,
-  note_id INTEGER REFERENCES message(id),
+  note_id INTEGER REFERENCES message(id) ON DELETE SET NULL,
   first_read_at TEXT,
-  reminder_id INTEGER REFERENCES message(id)
+  reminder_id INTEGER REFERENCES message(id) ON DELETE SET NULL
 );
 CREATE INDEX question_wait_note ON question_wait(note_id);
 CREATE INDEX question_wait_reminder ON question_wait(reminder_id);
 
 -- The waits an earlier build left (`closed = 2`): a row only where the ledger
--- itself names the note, by the answer's own reason (`returned in m-N`), or by
--- ConsensFlow's own sentence for that question and task, to the chief.
+-- itself names the note, as that build wrote it, and names it once:
+--  - a returned answer's note, by the answer's own reason (`returned in m-N`),
+--    whose first line is the writer's (`Your answer m-A to m-Q did not reach its
+--    window.`), written by ConsensFlow itself;
+--  - the closed-question note, whose first line is the writer's sentence for that
+--    member, question and task (`@handle's question m-Q on T-N closed when `),
+--    taskless, to the chief, from ConsensFlow or, at the gate, from the member.
+-- A member's own words quoting either sentence are neither; two notes that both
+-- fit name nothing.
 WITH named AS (
   SELECT b.question_id AS question_id,
          COALESCE(
            (SELECT n.id FROM message a JOIN message n ON n.id = CAST(substr(a.reason, 15) AS INTEGER)
               WHERE a.reply_to = b.question_id AND a.kind = 'answer' AND a.reason LIKE 'returned in m-%'
-                AND n.kind = 'note' AND n.project_id = q.project_id
+                AND n.kind = 'note' AND n.project_id = q.project_id AND n.sender_id IS NULL
+                AND n.reply_to IS NULL
+                AND instr(n.body, 'Your answer m-' || a.id || ' to m-' || q.id || ' did not reach its window.') = 1
               ORDER BY a.id LIMIT 1),
-           (SELECT n.id FROM message n JOIN participant c ON c.id = n.recipient_id
+           (SELECT CASE WHEN count(*) = 1 THEN min(n.id) END
+              FROM message n JOIN participant c ON c.id = n.recipient_id
               WHERE n.kind = 'note' AND n.project_id = q.project_id AND c.role = 'chief'
-                AND instr(n.body, 'question m-' || b.question_id || ' on T-' || t.number || ' closed when ') > 0
-              ORDER BY n.id LIMIT 1)) AS note
+                AND n.task_id IS NULL AND n.reply_to IS NULL AND n.urgent = 0 AND n.id > q.id
+                AND (n.sender_id IS NULL OR n.sender_id = q.sender_id)
+                AND instr(n.body, '@' || s.handle || '''s question m-' || q.id || ' on T-' || t.number || ' closed when ') = 1)) AS note
   FROM question_binding b
   JOIN message q ON q.id = b.question_id
+  JOIN participant s ON s.id = q.sender_id
   JOIN task t ON t.id = b.task_id
   WHERE b.closed = 2)
 INSERT INTO question_wait(question_id, after_id, note_id)

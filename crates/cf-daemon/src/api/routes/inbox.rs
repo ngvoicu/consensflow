@@ -21,6 +21,10 @@ pub(super) async fn handle(
     caller: &Caller,
     _request: Request,
 ) -> Result<Answer, Failure> {
+    context
+        .ledger
+        .borrow_mut()
+        .withdraw_stale_reminders(caller.participant.id)?;
     let messages = context
         .ledger
         .borrow()
@@ -28,6 +32,11 @@ pub(super) async fn handle(
     let waits = Waits::now(context, caller)?;
     let summaries = messages
         .iter()
+        .filter(|message| {
+            !(message.state == "cancelled"
+                && message.sender.is_none()
+                && message.reason.as_deref() == Some(cf_ledger::STALE_REASON))
+        })
         .map(|message| value(&waits.summary(message)))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Answer::ok(json!({ "messages": summaries })))

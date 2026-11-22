@@ -388,6 +388,34 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
         .exists([reminder])?)
 }
 
+/// Each unhanded reminder to `recipient`, queued or begun, whose question no longer
+/// waits is withdrawn, as at admission.
+pub(crate) fn withdraw_stale(store: &mut Store, recipient: i64) -> Result<Vec<i64>, LedgerError> {
+    let pending: Vec<(i64, i64)> = store
+        .db
+        .prepare(
+            "SELECT m.id, m.project_id FROM message m
+             WHERE m.recipient_id = ? AND m.kind = 'note' AND m.sender_id IS NULL
+               AND m.state IN ('queued', 'delivering') AND m.handed_at IS NULL
+               AND (m.id IN (SELECT reminder_id FROM question_wait)
+                 OR m.id IN (SELECT reminder_id FROM question_reminder))
+             ORDER BY m.id",
+        )?
+        .query_map([recipient], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut withdrawn = Vec::new();
+    for (id, project) in pending {
+        if stale_reminder(store, id)? {
+            crate::messages::withdraw_each(store, project, &[id], STALE_REASON)?;
+            withdrawn.push(id);
+        }
+    }
+    Ok(withdrawn)
+}
+
+/// Why a reminder whose question no longer waits is withdrawn.
+pub const STALE_REASON: &str = "its question no longer waits";
+
 #[cfg(test)]
 mod tests {
     use super::{holding_join, is_open};

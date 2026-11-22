@@ -321,6 +321,14 @@ impl Ledger {
         crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
     }
 
+    /// Withdraws each unhanded reminder of `recipient` whose wait no longer allows
+    /// it, as transport does at admission, before the inbox lists it, serves its
+    /// text or takes a receipt of it: the ones it withdrew.
+    pub fn withdraw_stale_reminders(&mut self, recipient: i64) -> Result<Vec<i64>, LedgerError> {
+        self.store
+            .write(|store| crate::waiting_questions::withdraw_stale(store, recipient))
+    }
+
     /// One message, or none.
     pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
         self.store.message(id)

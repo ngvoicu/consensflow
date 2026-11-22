@@ -88,5 +88,5 @@ pub use tasks::{
     SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
-pub use waiting_questions::QuestionWait;
+pub use waiting_questions::{QuestionWait, STALE_REASON};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

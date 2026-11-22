@@ -23,6 +23,11 @@ pub(super) async fn handle(
     _request: Request,
     id: &str,
 ) -> Result<Answer, Failure> {
+    // A reminder whose question no longer waits is withdrawn, and shown to none.
+    context
+        .ledger
+        .borrow_mut()
+        .withdraw_stale_reminders(caller.participant.id)?;
     // Digits past what a message's number holds name no message.
     let found = match id.parse::<i64>() {
         Ok(number) => context.ledger.borrow().message(number)?,
@@ -34,6 +39,9 @@ pub(super) async fn handle(
         message.project_id == caller.project.id
             && (Some(message.recipient.as_str()) == handle || message.sender.as_deref() == handle)
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
+            && !(message.state == "cancelled"
+                && message.sender.is_none()
+                && message.reason.as_deref() == Some(cf_ledger::STALE_REASON))
     });
     let until = match &visible {
         Some(message) => Waits::now(context, caller)?.until(message),

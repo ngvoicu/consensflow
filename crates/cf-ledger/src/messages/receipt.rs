@@ -536,6 +536,7 @@ pub(crate) fn receive_read(
     cf: &CfWord,
 ) -> Result<usize, LedgerError> {
     store.write(|store| {
+        crate::waiting_questions::withdraw_stale(store, recipient)?;
         let mut received = 0;
         let mut tasks = Vec::new();
         for id in ids {
