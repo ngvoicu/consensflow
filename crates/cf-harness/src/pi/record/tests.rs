@@ -8,6 +8,7 @@ mod drawn;
 mod evidence_files;
 mod last_call;
 mod looks;
+mod recordings;
 mod steps;
 
 use std::fs::{self, File};

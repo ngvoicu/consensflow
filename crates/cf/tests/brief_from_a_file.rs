@@ -40,7 +40,15 @@ fn posted(api: &ScriptedApi) -> Vec<(String, Option<Value>)> {
         .into_iter()
         .filter(|received| received.method == "POST")
         .map(|received| {
-            let body = received.json();
+            let mut body = received.json();
+            // A question says when its asking began; the words are the file's.
+            if received.path == "/api/questions" {
+                let stamp = body
+                    .as_mut()
+                    .and_then(|body| body.as_object_mut())
+                    .and_then(|fields| fields.remove("askedAt"));
+                assert!(stamp.is_some_and(|at| at.as_i64().is_some_and(|at| at > 0)));
+            }
             (received.path, body)
         })
         .collect()

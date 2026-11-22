@@ -1028,6 +1028,13 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
+    /// The window's prompt takes words now: what every delivery gate reads in place of
+    /// `settled`. It equals `settled` for every harness and platform but one case of
+    /// Claude Code on the Mac, a turn an interrupt for a tool use ended while its
+    /// background work runs: the status says busy, the record says over, and the
+    /// prompt takes a typed line (`claude::adapter`). Results, stops and the rest of the
+    /// engine keep `settled`.
+    pub takes_words: bool,
     /// Whether the turn the window was last in is over by its harness's own
     /// record, though its live status kept the look from reading it `settled`
     /// ([`Over`]). A harness whose `settled` is its record's word says no.

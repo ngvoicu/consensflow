@@ -1,0 +1,6 @@
+{"timestamp":"2026-11-22T00:00:00.000Z","type":"session_meta","payload":{"id":"00000000-0000-4000-8000-000000000001","cwd":"/synthetic"}}
+{"timestamp":"2026-11-22T00:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-t1937"}}
+{"timestamp":"2026-11-22T00:00:01.000Z","type":"turn_context","payload":{"model":"synthetic-model","effort":"low","cwd":"/synthetic"}}
+{"timestamp":"2026-11-22T00:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"msg_t1937","phase":"final_answer","content":[{"type":"output_text","text":"T1937-OFFLINE-RESULT","annotations":[]}],"internal_chat_message_metadata_passthrough":{"turn_id":"turn-t1937"}}}
+{"timestamp":"2026-11-22T00:00:02.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-t1937","item":{"type":"AgentMessage","id":"msg_t1937","phase":"final_answer","content":[{"type":"Text","text":"T1937-OFFLINE-RESULT"}]}}}
+{"timestamp":"2026-11-22T00:00:03.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-t1937","last_agent_message":"T1937-OFFLINE-RESULT"}}

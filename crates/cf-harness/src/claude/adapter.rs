@@ -950,8 +950,9 @@ impl Window for ClaudeWindow {
             };
             // What the record says of the failure and the quota is the one place's
             // (`observed_from`); what Claude's own status says of the window is set on it.
-            let observed = |settled, over, waiting, took_back, at_prompt| Observed {
+            let observed = |settled, takes_words, over, waiting, took_back, at_prompt| Observed {
                 settled,
+                takes_words,
                 over,
                 waiting,
                 took_back,
@@ -960,9 +961,10 @@ impl Window for ClaudeWindow {
                 ..observed_from(Arc::clone(&reading), None)
             };
             Ok(match live {
-                Some(live) if self.elsewhere(&live) => {
-                    switched_to(observed(false, Over::No, None, false, false), live.session)
-                }
+                Some(live) if self.elsewhere(&live) => switched_to(
+                    observed(false, false, Over::No, None, false, false),
+                    live.session,
+                ),
                 live => {
                     // Claude's own status is the word on whether the window
                     // is at its prompt: a new window has no transcript until
@@ -1012,7 +1014,28 @@ impl Window for ClaudeWindow {
                     // once it has stood a moment.
                     let at_rest = at_prompt && (settled || empty || left) || by_press;
                     let over = self.held_over(settled && !at_rest);
-                    observed(at_rest, over, waiting, by_press, at_prompt)
+                    // On the Mac, the prompt of a window whose turn an interrupt for a
+                    // tool use ended takes a typed line while a background agent still
+                    // runs and the status says busy (recorded on 2.1.329, T-1857). The
+                    // interrupt's end must have stood (`Over::Held`), the record not be
+                    // another program's too, and no count be written. It is no word for
+                    // results or stops: `settled` stays what it was. Where nothing
+                    // recorded it (Windows, another end of a turn), the words wait.
+                    let after_interrupt = cfg!(target_os = "macos")
+                        && working
+                        && settled
+                        && !agents
+                        && over == Over::Held
+                        && !self.shared.get()
+                        && stopped::ends_in_tool_use_interrupt(&reading);
+                    observed(
+                        at_rest,
+                        at_rest || after_interrupt,
+                        over,
+                        waiting,
+                        by_press,
+                        at_prompt,
+                    )
                 }
             })
         })

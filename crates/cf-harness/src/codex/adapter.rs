@@ -587,6 +587,7 @@ impl Window for CodexWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
+                    takes_words: false,
                     over: Over::No,
                     waiting: None,
                     failed: false,
@@ -635,6 +636,7 @@ impl Window for CodexWindow {
                             .is_some_and(|open| open.still(&reading))
                         {
                             observed.settled = true;
+                            observed.takes_words = true;
                         }
                         observed
                     } else {

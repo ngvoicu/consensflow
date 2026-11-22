@@ -22,6 +22,9 @@ pub struct Caller {
     pub question_holding: Option<WindowHolding>,
     /// The task whose brief this window was launched with, if any.
     pub question_launch_task: Option<(i64, i64)>,
+    /// The last brief of a holding that was the window's before this token was
+    /// made, which the token was not given: its process asks in no turn of it.
+    pub question_idle_generation: Option<i64>,
 }
 
 /// The window behind `request`: 401 `unauthorized` for a request with no
@@ -48,6 +51,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
     match (project, participant) {
         (Some(project), Some(participant)) => {
             let mut question_launch_task = None;
+            let mut question_idle_generation = None;
             let question_holding = if request.method == hyper::Method::POST
                 && request.path == "/api/questions"
                 && participant.role != "chief"
@@ -72,7 +76,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                                                     && Some(h.last_brief) != start.last_brief
                                             });
                                             if !later_brief {
-                                                ledger.question_brief_handed_over(brief)?;
+                                                ledger.question_launch_handed_over(brief)?;
                                             }
                                         }
                                     }
@@ -119,6 +123,15 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                         question_launch_task = None;
                     }
                 }
+                // A token made beside a holding it was not given, in a window launched with
+                // no brief: its process held no task. Whatever briefs reach the window
+                // after, a question it asked before them is the session's.
+                question_idle_generation = match identity.question_start {
+                    Some(start) if start.launch_brief.is_none() && start.task_in_hand.is_none() => {
+                        start.last_brief
+                    }
+                    _ => None,
+                };
                 holding.filter(|h| match identity.question_start {
                     Some(start) => {
                         start.last_brief != Some(h.last_brief)
@@ -134,6 +147,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                 participant,
                 question_holding,
                 question_launch_task,
+                question_idle_generation,
             })
         }
         _ => Err(Failure::refuse(

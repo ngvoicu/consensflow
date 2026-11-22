@@ -353,6 +353,10 @@ mod tests {
     /// the corpus borrows reads it; the line is taken out again before the file is hashed.
     const T1423_BEGUN: &str = "                    begun: Vec::new(),\n";
 
+    /// What T-1927 added to the same literal: the look says the window takes no words
+    /// (`Observed::takes_words`, I1). Nothing the corpus borrows reads it either.
+    const T1927_TAKES_WORDS: &str = "                    takes_words: false,\n";
+
     /// What T-1328 changed in `claude/adapter.rs`: `default_model` answers `NoDefault` where it
     /// answered a `String`, and the import of it. Nothing the corpus borrows reads either; each is
     /// taken back to the release head's text before the file is hashed.
@@ -389,6 +393,7 @@ mod tests {
                 .replace(T1595_CLOSING.0, T1595_CLOSING.1)
         } else if file == "muse/window.rs" {
             text.replacen(T1423_BEGUN, "", 1)
+                .replacen(T1927_TAKES_WORDS, "", 1)
         } else {
             text.to_owned()
         }

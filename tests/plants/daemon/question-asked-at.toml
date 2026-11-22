@@ -1,0 +1,131 @@
+# Q1 (N2): a member's question belongs to the holding its window had when its asking began.
+# `cf ask`, `cf hook` and the Codex broker stamp `askedAt`; the ledger places the question by it
+# (`placed_at`), from each holding's begin and end and the one it replaced, kept in `question_holding`.
+#
+# Every name holds `question asked at`, so `npm run plants:daemon -- "question asked at"` runs them all.
+
+[[plant]]
+name = "question asked at: the holding of the arrival again, the stamp unread"
+meant = "q1_a_taskless_turns_late_question_stays_the_sessions_and_a_fresh_one_is_the_tasks"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "            let selected = if let Some(at) = asked_at {"
+replace = "            let selected = if let Some(at) = asked_at.filter(|_| false) {"
+
+[[plant]]
+name = "question asked at: a stamp at the begin is still the earlier holding's"
+meant = "q1_a_stamp_at_the_begin_is_the_new_holdings_and_one_from_the_future_is_the_arrival"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if began.is_none_or(|began| at >= began) {"
+replace = "    if began.is_none_or(|began| at > began) {"
+
+[[plant]]
+name = "question asked at: a launch holding begins when the request comes, not at its admission"
+meant = "q1_a_launch_token_request_before_the_hosts_acknowledgement_is_the_launch_tasks"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "        Some(at) => Some(at),\n        None if launched => None,"
+replace = "        Some(_) => Some(store.now_ms()),\n        None if launched => None,"
+
+[[plant]]
+name = "question asked at: the holding replaced is not kept beside its successor"
+meant = "q1_the_earlier_tasks_question_in_the_gap_and_after_the_take_is_refused_where_it_is"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "                Some(task),\n                began_at,"
+replace = "                None::<i64>,\n                began_at,"
+
+[[plant]]
+name = "question asked at: a holding's end is not read"
+meant = "q1_after_an_acceptance_a_new_ask_is_taskless_and_a_late_one_keeps_its_409"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            Some(ended) if at >= ended => Placed::Taskless,"
+replace = "            Some(ended) if false && at >= ended => Placed::Taskless,"
+
+[[plant]]
+name = "question asked at: a question of the replaced holding is bound to the new one"
+meant = "q1_a_question_in_a_refused_hand_overs_attempt_goes_back_to_the_holding_it_was_asked_in"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "                    rusqlite::params![message.id, task, first],"
+replace = "                    rusqlite::params![message.id, rusqlite::types::Null, first],"
+
+[[plant]]
+name = "question asked at: the daemon drops the stamp"
+meant = "q1_a_taskless_turns_late_question_stays_the_sessions_and_a_fresh_one_is_the_tasks"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "            .filter(|at| *at > 0),"
+replace = "            .filter(|at| *at > 0)\n            .filter(|_| false),"
+
+[[plant]]
+name = "question asked at: a late report of the brief dates its holding again"
+meant = "q1_a_late_positive_report_of_the_brief_leaves_a_cancelled_holding_its_known_bounds"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    if own.is_none() {"
+replace = "    if true {"
+
+[[plant]]
+name = "question asked at: an idle token's own generation is placed by its dates"
+meant = "q1_an_idle_token_asking_while_its_previous_generation_resumes_is_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "        if generation == last_brief {"
+replace = "        if false && generation == last_brief {"
+
+[[plant]]
+name = "question asked at: a failed end-date write is swallowed"
+meant = "q1_a_failed_end_date_write_fails_the_cancel"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "                self.end_failed.get_or_insert(cause);"
+replace = "                let _ = cause;"
+
+[[plant]]
+name = "question asked at: an idle question after a later brief is placed by the holding's old begin"
+meant = "q1_an_idle_question_stays_the_sessions_across_a_follow_up_brief_to_its_window"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            .is_some_and(|admitted| at < admitted)"
+replace = "            .is_some_and(|admitted| false && at < admitted)"
+
+[[plant]]
+name = "question asked at: the daemon names no generation for an idle token"
+meant = "q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrives_first"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        start.last_brief\n                    }"
+replace = "                        start.last_brief.filter(|_| false)\n                    }"
+
+[[plant]]
+name = "question asked at: the broker stamps a request with no moment"
+meant = "a_question_is_stamped_when_the_broker_first_receives_the_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_question_is_stamped"]]
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "        let begun = Asking::now();"
+replace = "        let begun = Asking::at(1);"
+
+[[plant]]
+name = "question asked at: the daemon drops the generation of a holding a Resume made"
+meant = "q1_a_fresh_idle_window_beside_a_holding_a_resume_made_asks_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        start.last_brief\n                    }"
+replace = "                        start.last_brief.filter(|brief| *brief > 0)\n                    }"

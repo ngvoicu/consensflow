@@ -33,10 +33,10 @@ impl Grid {
         let (col, cols) = (self.col, self.cols);
         let row = &mut self.cells[self.row];
         for _ in 0..count.min(cols - col) {
-            row.cells.insert(col, ' ');
-            row.cells.pop();
-            row.styled.insert(col, false);
-            row.styled.pop();
+            row.cells_mut().insert(col, ' ');
+            row.cells_mut().pop();
+            row.styled_mut().insert(col, false);
+            row.styled_mut().pop();
         }
     }
 
@@ -45,10 +45,10 @@ impl Grid {
         let (col, cols) = (self.col, self.cols);
         let row = &mut self.cells[self.row];
         let count = count.min(cols - col);
-        row.cells.drain(col..col + count);
-        row.cells.extend(std::iter::repeat_n(' ', count));
-        row.styled.drain(col..col + count);
-        row.styled.extend(std::iter::repeat_n(false, count));
+        row.cells_mut().drain(col..col + count);
+        row.cells_mut().extend(std::iter::repeat_n(' ', count));
+        row.styled_mut().drain(col..col + count);
+        row.styled_mut().extend(std::iter::repeat_n(false, count));
     }
 
     /// `CSI X`: characters at the cursor blanked where they are.
