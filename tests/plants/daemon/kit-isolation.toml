@@ -133,12 +133,8 @@ runs = ["ki-lib-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''    for name in ["HOME", "USERPROFILE"] {
-        vars.push((name.to_owned(), text(&home)));
-    }'''
-replace = '''    for name in ["HOME", "USERPROFILE"] {
-        vars.push((name.to_owned(), lookup(name).unwrap_or_default()));
-    }'''
+find = '''            vars.push((name.to_owned(), text(&value)));'''
+replace = '''            vars.push((name.to_owned(), lookup(name).unwrap_or_else(|| text(&value))));'''
 
 [[plant]]
 name = "K3 round 3: a new file under a link is judged by its words, not its parent's folder"
@@ -248,8 +244,8 @@ runs = ["ki-lib-process"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
-find = '''                .envs(machine_vars(std::env::vars_os()));'''
-replace = '''                .envs(std::env::vars_os());'''
+find = '''            command.env_clear().envs(machine_vars(std::env::vars_os()));'''
+replace = '''            command.env_clear().envs(std::env::vars_os());'''
 
 [[plant]]
 name = "K3 round 3: a window is given the person's home as its own"
