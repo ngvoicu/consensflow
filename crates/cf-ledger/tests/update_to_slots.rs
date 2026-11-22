@@ -209,9 +209,11 @@ fn built() -> Built {
             (34,1,'pallas-1','designer','[\"designer\"]','codex','critical','2026-11-01',33);
          -- a backup of ares that was replaced, and its window, closed: history
          INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,backup_of,left_at) VALUES
-            (26,1,'ares-old','worker','[\"worker\"]','claude-code','critical','2026-10-01',20,'2026-10-20');
+            (26,1,'ares-old','worker','[\"worker\"]','claude-code','critical','2026-10-01',20,'2026-10-20'),
+            (28,1,'iris-old','frontend','[\"frontend\"]','claude-code',NULL,'2026-10-01',10,'2026-10-20');
          INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,member_id,left_at) VALUES
-            (27,1,'ares-old-1','worker','[\"worker\"]','claude-code','critical','2026-10-01',26,'2026-10-20');
+            (27,1,'ares-old-1','worker','[\"worker\"]','claude-code','critical','2026-10-01',26,'2026-10-20'),
+            (29,1,'iris-old-1','frontend','[\"frontend\"]','claude-code',NULL,'2026-10-01',28,'2026-10-20');
          INSERT INTO task(id,project_id,number,title,body,requester_id,assignee_id,state,pool,tier,purpose,created_at,updated_at) VALUES
             (60,1,1,'Work','Work',2,24,'working','worker','critical','hard-problem','2026-11-01','2026-11-01'),
             (61,1,2,'Draw','Draw',2,34,'working','designer',NULL,NULL,'2026-11-01','2026-11-01'),
@@ -290,7 +292,13 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
     for history in ["ares-old", "ares-old-1"] {
         assert_eq!(now[history].as_deref(), Some("critical"), "{history}");
     }
-    for kept in ["ares-old", "ares-old-1"] {
+    for history in ["iris-old", "iris-old-1"] {
+        assert_eq!(
+            now[history], None,
+            "{history}: a tierless frontend backup that left"
+        );
+    }
+    for kept in ["ares-old", "ares-old-1", "iris-old", "iris-old-1"] {
         assert_eq!(now[kept], was[kept], "{kept}");
     }
     // A Critical architect and reviewer, with its backup, keeps its slots.
