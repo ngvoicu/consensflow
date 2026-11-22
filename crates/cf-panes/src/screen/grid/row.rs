@@ -49,14 +49,13 @@ impl Row {
         &mut self.styled
     }
 
-    /// Blank the cells from `from` up to `to`, leaving the kept digest where nothing
-    /// was there to blank.
+    /// Blank the cells from `from` up to `to`. A fill that is not empty drops the kept
+    /// digest, whatever was there: looking first to keep it for a row already blank made
+    /// each erase of a big screen scan every row, and a read of erases four times as
+    /// long (T-2022).
     pub(super) fn blank_cells(&mut self, from: usize, to: usize) {
         let to = to.min(self.cells.len());
-        if from < to
-            && (self.cells[from..to].iter().any(|cell| *cell != ' ')
-                || self.styled[from..to].iter().any(|styled| *styled))
-        {
+        if from < to {
             self.kept.set(None);
             self.cells[from..to].fill(' ');
             self.styled[from..to].fill(false);

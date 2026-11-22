@@ -16,6 +16,7 @@ app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
 app-page-reloads = ["cargo", "xtask", "app", "test", "page_reloads"]
 tiny-output = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "tiny_read"]
 screen-digest = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "screen::"]
+erase-enter = ["cargo", "test", "--offline", "--release", "-p", "cf-panes", "--lib", "--", "--ignored", "tiny_read_the_enter"]
 tiny-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cursor_query"]
 
 [[plant]]
@@ -337,3 +338,19 @@ replace = '''    let changed = screen.feed(bytes);
     if bytes != b"x" {
         printed.note(changed);
     }'''
+
+[[plant]]
+name = "kept digest: a fill looks at every blank cell first"
+meant = "tiny_read_the_enter_goes_after_the_last_of_the_queued_erase_reads"
+runs = ["erase-enter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid/row.rs"
+find = '''        if from < to {
+            self.kept.set(None);'''
+replace = '''        if from < to {
+            let _ = std::hint::black_box(
+                self.cells[from..to].iter().any(|cell| *cell != ' ')
+                    || self.styled[from..to].iter().any(|styled| *styled),
+            );
+            self.kept.set(None);'''

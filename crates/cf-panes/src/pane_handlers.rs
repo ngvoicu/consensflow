@@ -1019,6 +1019,78 @@ mod tests {
         assert_eq!(at_publication, [None], "a resize alone shows nothing");
     }
 
+    /// A read of a big screen that is only erases, as a full-screen program's redraws are:
+    /// `2048` of them in 8 KiB (T-2022: a scan of every blank row per erase made a read take
+    /// four times as long, and the paste's Enter went during it).
+    fn erase_read(erases: usize) -> Vec<u8> {
+        b"\x1b[2J".repeat(erases)
+    }
+
+    /// The paste's Enter, by the host's own wait at the app's 120 ms, goes after the last of
+    /// the reads queued behind the window's echo, on the biggest screen the model keeps:
+    /// each read of erases stamps the output clock as it ends, and none takes as long as the
+    /// quiet the wait asks for. Wall clocks and an optimized build: one read takes about
+    /// 60 ms, and 230 ms when each erase scanned every blank row first (T-1941 round 3,
+    /// T-2022); a debug build's fill is slower than a scan.
+    #[test]
+    #[ignore = "optimized builds only: cargo test --release -p cf-panes --lib -- --ignored tiny_read_the_enter"]
+    fn tiny_read_the_enter_goes_after_the_last_of_the_queued_erase_reads() {
+        let reads_each = 2048;
+        let arbiter = InputArbiter::new(crate::arbiter::EnterTiming::fixed(0));
+        let key = PaneKey::new("erases", 1);
+        let printed = arbiter.register(&key).expect("register clock");
+        let (sender, stream) = std::sync::mpsc::channel();
+        let heavy = erase_read(reads_each);
+        let mut reads: Vec<&[u8]> = vec![b"echo"];
+        reads.extend((0..8).map(|_| heavy.as_slice()));
+        for (seq, bytes) in reads.iter().enumerate() {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq: seq as u64 + 1,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (echoed, echo) = std::sync::mpsc::sync_channel(0);
+        let (go, ready) = std::sync::mpsc::sync_channel(0);
+        let forwarding = {
+            let (printed, completed) = (Arc::clone(&printed), Arc::clone(&completed));
+            thread::spawn(move || {
+                let screen = PaneScreen::new(400, 1000);
+                forward_output(
+                    &stream,
+                    |bytes| {
+                        took_in(&screen, &printed, bytes);
+                        completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    },
+                    |message| {
+                        if message.seq == 1 {
+                            echoed.send(()).unwrap();
+                            ready.recv().unwrap();
+                        }
+                    },
+                );
+            })
+        };
+        echo.recv_timeout(Duration::from_secs(30)).unwrap();
+        let wait = crate::headless::ENTER;
+        let pasted = std::time::Instant::now() - Duration::from_millis(20);
+        go.send(()).unwrap();
+        let started = std::time::Instant::now();
+        wait.wait_released(&printed, pasted);
+        let released_after = started.elapsed();
+        let done = completed.load(std::sync::atomic::Ordering::SeqCst);
+        forwarding.join().unwrap();
+        println!("erase reads of {reads_each}: released {released_after:?} after the echo with {done} of 9 reads taken in");
+        assert_eq!(
+            done, 9,
+            "the Enter went while a read was still being taken in"
+        );
+    }
+
     #[test]
     fn tiny_read_batch_does_not_grow_while_its_screen_is_fed() {
         let (sender, stream) = std::sync::mpsc::channel();
