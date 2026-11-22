@@ -586,8 +586,34 @@ fn plain_absolute(folder: &Path) -> bool {
     folder.is_absolute()
 }
 
+/// The real path of a protected root, kept: a root is one folder for the life of the process, and
+/// walking a path that is not there costs a system call for each of its parts (on Windows, a
+/// good many milliseconds: the door asks this for every folder it makes).
+fn real_of_root(home: &Path) -> PathBuf {
+    static KEPT: OnceLock<Mutex<std::collections::HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let kept = KEPT.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(real) = kept
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(home)
+    {
+        return real.clone();
+    }
+    let real = real_of(home);
+    kept.lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(home.to_path_buf(), real.clone());
+    real
+}
+
 fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
-    !forbidden.iter().any(|home| may_reach(folder, home))
+    // The folder's account of itself once, whatever the number of roots.
+    let (settled_folder, real_folder) = (settled(folder), real_of(folder));
+    !forbidden.iter().any(|home| {
+        spelled_inside(folder, home)
+            || spelled_inside(&settled_folder, &settled(home))
+            || spelled_inside(&real_folder, &real_of_root(home))
+    })
 }
 
 /// Whether an inherited harness-home directory may be inspected by discovery.
