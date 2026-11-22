@@ -61,8 +61,23 @@ const el = (tag, className, text) => {
 };
 let HARNESS_ROWS = [];
 const UPDATES = new Map();
+// The newest look wins: each request has a number, and a row from a response is shown only if
+// no response of a later request has shown that harness's row. The Admin answers in the order it
+// likes, and a Refresh never joins a look in flight.
+let LOOKS = 0;
+const SHOWN = new Map();
+function showRows(rows, look) {
+  const byId = new Map(HARNESS_ROWS.map(row => [row.id, row]));
+  for (const row of rows) {
+    if ((SHOWN.get(row.id) || 0) > look) continue;
+    SHOWN.set(row.id, look);
+    byId.set(row.id, row);
+  }
+  HARNESS_ROWS = [...byId.values()];
+}
 async function updateHarness(id, button) {
   const note = document.querySelector('#check-note');
+  const look = ++LOOKS;
   note.textContent = 'Updating ' + id + '… this can take a minute.';
   button.disabled = true;
   try {
@@ -70,7 +85,7 @@ async function updateHarness(id, button) {
     if (!response.ok) throw new Error('The update could not be started');
     const { result } = await response.json();
     UPDATES.set(id, result);
-    HARNESS_ROWS = HARNESS_ROWS.map(row => row.id === id ? result.harness : row);
+    showRows([result.harness], look);
     renderHarnesses();
     note.textContent = '';
   } catch (error) {
@@ -80,13 +95,14 @@ async function updateHarness(id, button) {
 }
 async function checkHarnesses(id = null, button = null) {
   const note = document.querySelector('#check-note');
+  const look = ++LOOKS;
   note.textContent = 'Checking…';
   if (button) button.disabled = true;
   try {
     const response = await fetch('/api/harnesses/check', { method: 'POST', headers, body: JSON.stringify({ ...(id ? { id } : {}), refresh: button !== null }) });
     if (!response.ok) throw new Error('Harness check failed');
     const { harnesses } = await response.json();
-    HARNESS_ROWS = id ? HARNESS_ROWS.map(row => row.id === id ? harnesses[0] : row) : harnesses;
+    showRows(harnesses, look);
     renderHarnesses();
     note.textContent = '';
   } catch (error) {

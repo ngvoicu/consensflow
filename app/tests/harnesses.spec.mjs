@@ -51,6 +51,60 @@ test('tested versions and installed release tell one consistent story', async ({
   expect.soft(codexText).not.toContain('This version is newer')
 })
 
+test('an older check response never replaces what a later look already showed', async ({ page }) => {
+  const html = readFileSync(
+    new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
+    'utf8',
+  )
+  const row = (id, reason) => ({
+    id,
+    installed: true,
+    path: `/test/${id}`,
+    checkedAt: 0,
+    version: { state: 'checked', value: '1.0.0' },
+    update: { state: 'current', value: '1.0.0', source: 'x', command: null },
+    tested: { newest: '2.0.0', oldest: null, release: null, beyond: false },
+    setup: { state: 'update-required', reason },
+  })
+  const held = []
+  await page.route('http://order.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      held.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+      return
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  const answer = (at, rows) => held[at].route.fulfill({ json: { harnesses: rows } })
+  await page.goto('http://order.test/harnesses')
+  await expect.poll(() => held.length).toBe(1)
+  // Check all begins while the opening look is still out: it is the newer.
+  await page.locator('#check-all').click()
+  await expect.poll(() => held.length).toBe(2)
+  expect(held[1].body.refresh).toBe(true)
+  await answer(1, [row('codex', 'NEW codex'), row('devin', 'NEW devin')])
+  await expect(page.getByText('NEW codex')).toBeVisible()
+  // The older response arrives last, and changes nothing.
+  await answer(0, [row('codex', 'OLD codex'), row('devin', 'OLD devin')])
+  await page.waitForTimeout(150)
+  await expect(page.getByText('NEW codex')).toBeVisible()
+  await expect(page.getByText('NEW devin')).toBeVisible()
+  await expect(page.getByText('OLD codex')).toHaveCount(0)
+  await expect(page.getByText('OLD devin')).toHaveCount(0)
+  // A row's own look, begun after an all-harness look that has not ended, wins for that
+  // row and for it alone.
+  await page.locator('#check-all').click()
+  await expect.poll(() => held.length).toBe(3)
+  await page.getByRole('button', { name: 'Check again' }).first().click()
+  await expect.poll(() => held.length).toBe(4)
+  expect(held[3].body.id).toBe('codex')
+  await answer(3, [row('codex', 'ROW codex')])
+  await expect(page.getByText('ROW codex')).toBeVisible()
+  await answer(2, [row('codex', 'ALL codex'), row('devin', 'ALL devin')])
+  await expect(page.getByText('ALL devin')).toBeVisible()
+  await expect(page.getByText('ROW codex')).toBeVisible()
+  await expect(page.getByText('ALL codex')).toHaveCount(0)
+})
+
 test('Harnesses loads the bundled Geist in standalone and framed views', async ({
   page,
   browserName,
