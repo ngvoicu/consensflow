@@ -6,8 +6,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use cf_ledger::{
-    open_ledger, Ledger, MemberEdit, NewChief, NewMember, NewNote, NewProject, NewTask, Options,
-    PlanTask, ProjectView, TaskEdit, TaskPlaced,
+    open_ledger, Ledger, MemberEdit, NewChief, NewMember, NewProject, NewTask, Options, PlanTask,
+    ProjectView, TaskEdit, TaskPlaced,
 };
 use serde_json::json;
 
@@ -742,28 +742,54 @@ fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_ea
 }
 
 #[test]
-fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief() {
+fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief_and_the_window_gets_it(
+) {
     for gate in [false, true] {
         let (_dir, mut ledger) = ledger();
+        // Only a standard reviewer: no Critical slot of its role is held.
         let mut make = request(vec![
             member("zeus", &["worker"], "standard"),
-            member("hera", &["reviewer"], "critical"),
+            member("hera", &["reviewer"], "standard"),
         ]);
         make.gate = gate;
         let project = ledger.create_project(&make).expect("a project");
-        // A review queued for its window at Critical: given by tier, then the purpose changes
-        // where it keeps its tier.
         let task = ledger
-            .create_task(
-                project.id,
-                &work("reviewer", "critical", Some("critical-review")),
-            )
+            .create_task(project.id, &work("reviewer", "standard", None))
             .unwrap()
             .task
             .number;
         let hera = id(&ledger, project.id, "hera");
         let moved = ledger.assign_task(project.id, task, hera).unwrap();
         let message = moved.message.expect("its brief").id;
+        let first_line = ledger.message(message).unwrap().unwrap().body;
+        assert!(!first_line.starts_with("Critical work"), "{first_line}");
+        // The task is asked at Critical with its purpose, an edit that only routes: its brief,
+        // not yet in the window, is rewritten, and the window it is for stays.
+        ledger
+            .edit_task_with(
+                project.id,
+                task,
+                "chief",
+                &TaskEdit {
+                    tier: Some("critical".into()),
+                    purpose: Some("critical-review".into()),
+                    ..TaskEdit::default()
+                },
+            )
+            .expect("the edit that only routes");
+        let body = ledger.message(message).unwrap().unwrap();
+        assert_eq!(
+            body.state,
+            if gate { "gated" } else { "queued" },
+            "the brief waits for its window, or for the human's gate"
+        );
+        assert!(
+            body.body.starts_with("Critical work: critical-review."),
+            "{} (gate {gate}, {})",
+            body.body,
+            body.state
+        );
+        // The purpose then changes where the task keeps its tier: the line is rewritten again.
         ledger
             .edit_task_with(
                 project.id,
@@ -776,23 +802,31 @@ fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief() 
                 },
             )
             .expect("a purpose, a tier alone: taken");
-        let body = ledger.message(message).unwrap().unwrap();
-        assert_eq!(
-            body.state,
-            if gate { "gated" } else { "queued" },
-            "the brief waits for its window, or for the human's gate"
-        );
+        // The brief goes on to its window, through the gate where there is one.
+        if gate {
+            ledger.approve_message(message, "human").expect("passed on");
+        }
+        ledger.begin_delivery(message).expect("on its way");
+        ledger
+            .confirm_delivery(message, Some(&json!({ "item": "i-1" })))
+            .expect("pasted");
+        let delivered = ledger.message(message).unwrap().unwrap();
+        assert_eq!(delivered.state, "delivered", "gate {gate}");
         assert!(
-            body.body.starts_with("Critical work: hard-problem."),
-            "{} (gate {gate}, {})",
-            body.body,
-            body.state
+            delivered.body.starts_with("Critical work: hard-problem."),
+            "the window got the critical line first (gate {gate}): {}",
+            delivered.body
         );
-        let _ = NewNote {
-            from: None,
-            to: String::new(),
-            task: None,
-            body: String::new(),
-        };
+        assert_eq!(
+            ledger
+                .task(project.id, task)
+                .unwrap()
+                .unwrap()
+                .task
+                .assignee
+                .as_deref(),
+            moved.task.assignee.as_deref(),
+            "the original window keeps the task"
+        );
     }
 }

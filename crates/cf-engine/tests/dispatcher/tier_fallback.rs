@@ -246,13 +246,26 @@ fn the_edit_that_sends_it_to_critical_with_its_purpose_gives_it_to_the_critical_
 
 #[test]
 fn a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical_holder() {
-    // A task from before, at Critical with no purpose (main's fall put it there), behind a need,
-    // beside a Critical advisor alone: it may not take that slot, waits, and goes to a
-    // standard advisor once one joins.
+    // A task from before, at Critical with no purpose (main's fall put it there), behind a need
+    // on a task at work, beside a Critical advisor alone: once the need is accepted it may not
+    // take that slot, waits, and goes to a standard advisor once one joins.
     let context = Context::new();
     let project = project_of(&context, &[("zeus", "advisor", "critical")]);
     let first = open(&context, &project, "advisor", "critical");
-    let behind = open(&context, &project, "advisor", "light");
+    let behind = context
+        .create_task(
+            project.id,
+            NewTask {
+                from: "chief".to_owned(),
+                pool: Some("advisor".to_owned()),
+                tier: Some("light".to_owned()),
+                needs: vec![first as u64],
+                body: "Do the work after it".to_owned(),
+                ..NewTask::default()
+            },
+        )
+        .task
+        .number;
     context
         .ledger
         .borrow()
@@ -262,6 +275,28 @@ fn a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical
             [behind],
         )
         .unwrap();
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    let blocked = context.task(project.id, behind);
+    assert_eq!(blocked.task.blocked_by, vec![first], "a real need");
+    assert!(blocked.task.assignee.is_none(), "it waits behind its need");
+    assert!(context.task(project.id, first).task.assignee.is_some());
+    // The prerequisite finishes and is accepted: only now is the task free to go.
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(project.id, first, "The first is done")
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project.id, first, "chief")
+        .unwrap();
+    assert!(
+        context.task(project.id, behind).task.blocked_by.is_empty(),
+        "the accepted need no longer holds it"
+    );
     for _ in 0..4 {
         context.pass().unwrap();
     }
@@ -274,7 +309,6 @@ fn a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical
         ),
         (Some("critical"), false, "open")
     );
-    assert!(context.task(project.id, first).task.assignee.is_some());
     assert_eq!(waits(&context, &project).len(), 1, "told once");
     context
         .ledger

@@ -222,14 +222,106 @@ fn the_note_of_where_a_task_fell_stays_queued_through_the_assignment_that_follow
         "it names the holder: {:?}",
         said[0].1
     );
+    // The chief rests and receives it: the note that was kept is the one that reaches it.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let given = notes(&context, &project, &format!("T-{number} asked for"));
+    assert_eq!(given.len(), 1, "{given:?}");
+    assert!(
+        given[0].0 == "delivered" || given[0].0 == "read",
+        "the chief received the fall note: {given:?}"
+    );
+    assert!(given[0].1.contains("@anubis"), "{given:?}");
 }
 
-/// A second project with an open task and a free member: every pass must end well and give
-/// that task out, whatever the first project's sweep did.
-fn second_project(context: &Context) -> (ProjectView, i64) {
-    let project = project_of(context, "other", &[("ares", &["worker"], "standard")]);
-    let task = open(context, &project, "worker", "standard", None);
-    (project, task)
+#[test]
+fn a_task_that_waited_for_a_slot_and_then_fell_to_a_joiner_withdraws_its_wait_note_and_tells_the_chief_where_it_went(
+) {
+    let context = Context::new();
+    // Only a Critical tester: a task asked at complex waits, told the way on.
+    let project = project_of(&context, "app", &[("zeus", &["tester"], "critical")]);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // The chief is busy: what it is written waits queued.
+    context.adapter.with("chief", |agent| agent.settled = false);
+    let number = open(&context, &project, "tester", "complex", None);
+    context.pass().unwrap();
+    let waited = notes(&context, &project, &format!("T-{number} waits for"));
+    assert_eq!(waited.len(), 1, "{waited:?}");
+    assert_eq!(waited[0].0, "queued", "{waited:?}");
+    assert!(context.task(project.id, number).task.assignee.is_none());
+    // A standard tester joins: the same task falls to it.
+    context
+        .ledger
+        .borrow_mut()
+        .add_member(
+            project.id,
+            &NewMember {
+                harness: "claude-code".to_owned(),
+                model: None,
+                effort: None,
+                model_name: Some("anubis".to_owned()),
+                designer: false,
+                roles: vec!["tester".to_owned()],
+                tier: "standard".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(holder(&context, project.id, number), "anubis");
+    let waited = notes(&context, &project, &format!("T-{number} waits for"));
+    assert!(
+        waited.iter().all(|(state, _)| state == "cancelled"),
+        "the wait note is withdrawn once the task has a holder: {waited:?}"
+    );
+    let fell = notes(&context, &project, &format!("T-{number} asked for"));
+    assert_eq!(fell.len(), 1, "{fell:?}");
+    assert_ne!(fell[0].0, "cancelled", "{fell:?}");
+    assert!(fell[0].1.contains("@anubis"), "{fell:?}");
+    // The chief rests: it receives the fall note, and never the wait note.
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let fell = notes(&context, &project, &format!("T-{number} asked for"));
+    assert!(
+        fell[0].0 == "delivered" || fell[0].0 == "read",
+        "the chief received the named fall note: {fell:?}"
+    );
+    let waited = notes(&context, &project, &format!("T-{number} waits for"));
+    assert!(
+        waited.iter().all(|(state, _)| state == "cancelled"),
+        "{waited:?}"
+    );
+}
+
+/// A second project with a free member: every pass must end well and give out its task,
+/// whatever the first project's sweep did. Its task is given ([`second_task`]) just before
+/// the pass that is the first project's decisive one, so that no ordinary pass before it has
+/// already given it out: a pass that stopped at the first project would leave it open.
+fn second_project(context: &Context) -> ProjectView {
+    project_of(context, "other", &[("ares", &["worker"], "standard")])
+}
+
+/// The second project's open task, created now.
+fn second_task(context: &Context, other: &ProjectView) -> i64 {
+    let task = open(context, other, "worker", "standard", None);
+    assert!(
+        context.task(other.id, task).task.assignee.is_none(),
+        "the second project's task is open until the pass"
+    );
+    task
+}
+
+/// After one pass, the second project's task is given out, which a pass that ended at the
+/// first project's refusal would not have done.
+fn second_was_given_out(context: &Context, other: &ProjectView, task: i64) {
+    assert!(
+        context.task(other.id, task).task.assignee.is_some(),
+        "the second project's task was given out in that same pass"
+    );
 }
 
 #[test]
@@ -237,7 +329,7 @@ fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_
     let context = Context::new();
     let project = project_of(&context, "app", &[("zeus", &["worker"], "standard")]);
     backup_of(&context, project.id, "zeus", "gaia", &["worker"]);
-    let (other, other_task) = second_project(&context);
+    let other = second_project(&context);
     let work = open(&context, &project, "worker", "standard", None);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -259,8 +351,9 @@ fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_
         )
         .unwrap();
     refuse_login(&context, "zeus");
-    // Every pass ends well, and the second project's task is given out.
-    context.pass().unwrap();
+    // One pass ends well on both sides: the first task is held in its member's window, and the
+    // second project's task, created just now, is given out.
+    let other_task = second_task(&context, &other);
     context.pass().unwrap();
     let task = context.task(project.id, work).task;
     assert_eq!(
@@ -269,10 +362,9 @@ fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_
     );
     assert!(task.held_until.is_some());
     assert_eq!(holder(&context, project.id, work), "zeus");
-    assert!(
-        context.task(other.id, other_task).task.assignee.is_some(),
-        "the second project's task was given out"
-    );
+    second_was_given_out(&context, &other, other_task);
+    context.pass().unwrap();
+    assert_eq!(holder(&context, project.id, work), "zeus");
 }
 
 #[test]
@@ -288,7 +380,7 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
     );
     backup_of(&context, project.id, "hera", "gaia", &["researcher"]);
     backup_of(&context, project.id, "ares", "luna", &["advisor"]);
-    let (other, other_task) = second_project(&context);
+    let other = second_project(&context);
     let research = open(
         &context,
         &project,
@@ -335,7 +427,10 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
     }
     refuse_login(&context, "hera");
     refuse_login(&context, "ares");
-    for _ in 0..3 {
+    let other_task = second_task(&context, &other);
+    context.pass().unwrap();
+    second_was_given_out(&context, &other, other_task);
+    for _ in 0..2 {
         context.pass().unwrap();
     }
     // The research task and the advisor's stay held in their members' windows, none
@@ -363,7 +458,7 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
         windows_before + 1,
         "one new window, for the review alone"
     );
-    assert!(context.task(other.id, other_task).task.assignee.is_some());
+    second_was_given_out(&context, &other, other_task);
 }
 
 #[test]
@@ -372,7 +467,7 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
     let context = Context::new();
     let project = project_of(&context, "app", &[("calliope", &["reviewer"], "standard")]);
     backup_of(&context, project.id, "calliope", "gaia", &["reviewer"]);
-    let (other, other_task) = second_project(&context);
+    let other = second_project(&context);
     let review = open(&context, &project, "reviewer", "standard", None);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -455,7 +550,15 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
             },
         )
         .expect("the edit that only routes");
-    for _ in 0..3 {
+    let other_task = second_task(&context, &other);
+    context.pass().unwrap();
+    second_was_given_out(&context, &other, other_task);
+    assert_eq!(
+        holder(&context, project.id, review),
+        "gaia",
+        "the same pass put the task in its Critical window"
+    );
+    for _ in 0..2 {
         context.pass().unwrap();
     }
     assert_eq!(holder(&context, project.id, review), "gaia");
@@ -478,7 +581,7 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
         .map(|message| message.body)
         .collect();
     assert_eq!(now, delivered);
-    assert!(context.task(other.id, other_task).task.assignee.is_some());
+    second_was_given_out(&context, &other, other_task);
     let _ = HoldKind::Quota;
 }
 

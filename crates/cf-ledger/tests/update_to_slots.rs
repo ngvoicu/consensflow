@@ -217,6 +217,9 @@ fn built() -> Built {
             (61,1,2,'Draw','Draw',2,34,'working','designer',NULL,NULL,'2026-11-01','2026-11-01'),
             (62,1,3,'Wait','Wait',2,NULL,'open','reviewer','standard',NULL,'2026-11-01','2026-11-01');
          INSERT INTO task_need(task_id,needs_id) VALUES (62,60);
+         -- T-1's brief, queued for its window
+         INSERT INTO message(id,project_id,recipient_id,sender_id,kind,task_id,body,state,attempts,created_at) VALUES
+            (80,1,24,2,'task',60,'Work','queued',0,'2026-11-01');
          INSERT INTO conversation(id,participant_id,harness,started_at) VALUES (70,24,'claude-code','2026-11-01');",
     )
     .unwrap();
@@ -383,4 +386,73 @@ fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_fin
         .unwrap();
     let refused = ledger.check_taker(1, 1, luna).unwrap_err();
     assert_eq!(refused.code(), Some("not-a-candidate"));
+}
+
+/// A question the moved backup's window asks, and the follow-up of the task it finishes: after
+/// the update the chief's answer returns the task to the same window, and the follow-up is
+/// bound to that window, as before the update.
+#[test]
+fn a_question_the_moved_backups_window_asked_is_answered_and_the_follow_up_goes_to_that_window() {
+    use cf_ledger::{NewQuestion, NewTask};
+    let (dir, _before, _) = built();
+    let mut ledger = open(&dir);
+    // The window takes its brief in, as it does after an update.
+    ledger.begin_delivery(80).expect("its delivery begins");
+    ledger
+        .confirm_delivery(80, Some(&serde_json::json!({ "item": "i-1" })))
+        .expect("its delivery is confirmed");
+    let asked = ledger
+        .ask(
+            1,
+            &NewQuestion {
+                from: Some("luna-1".into()),
+                to: "chief".into(),
+                body: Some("Which format?".into()),
+                task: Some(1),
+                ..NewQuestion::default()
+            },
+        )
+        .expect("the window asks");
+    assert_eq!(
+        ledger.task(1, 1).unwrap().unwrap().task.state,
+        "waiting",
+        "the task waits for the answer"
+    );
+    let chief: i64 = ledger
+        .sqlite()
+        .query_row(
+            "SELECT id FROM participant WHERE project_id = 1 AND handle = 'chief'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    ledger
+        .answer(asked.id, chief, Some(&serde_json::json!("JSON")), None)
+        .expect("the answer");
+    let resumed = ledger.task(1, 1).unwrap().unwrap().task;
+    assert_eq!(resumed.state, "working", "the answer sets it going again");
+    assert_eq!(
+        resumed.assignee.as_deref(),
+        Some("luna-1"),
+        "in the same window"
+    );
+    ledger.record_result(1, 1, "Done").unwrap();
+    ledger.accept_task(1, 1, "chief").unwrap();
+    let follow = ledger
+        .create_task(
+            1,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(1),
+                body: "Follow up".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("the follow-up")
+        .task;
+    assert_eq!(
+        follow.assignee.as_deref(),
+        Some("luna-1"),
+        "bound to the window of the task it follows: {follow:?}"
+    );
 }

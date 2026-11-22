@@ -211,16 +211,18 @@ replace = '''
 
 [[plant]]
 name = "staff slots: a plan's sections are checked for their tier before its key is looked up"
-meant = "a_keyed_plan_an_earlier_version_took_replays_its_saved_answer_and_a_fresh_key_refuses_it"
+meant = "a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_still_replays"
 runs = ["ss-daemon-routes-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-        if task.tier.is_some() || task.to.is_some() || task.after.is_some() {
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::read_json(value)
 '''
 replace = '''
-        if true {
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::from_json(value)
 '''
 
 [[plant]]
@@ -239,7 +241,7 @@ replace = '''
 
 [[plant]]
 name = "staff slots: a purpose edit rewrites a queued brief and not a gated one"
-meant = "a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief"
+meant = "a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief_and_the_window_gets_it"
 runs = ["ss-ledger-slots"]
 
 [[plant.edit]]
@@ -298,10 +300,73 @@ runs = ["ss-ledger-slots"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
-                     OR member_id IN (SELECT id FROM participant WHERE backup_of = ?2)",
+                     OR member_id IN (SELECT id FROM participant
+                                       WHERE backup_of = ?2 AND left_at IS NULL)",
 '''
 replace = '''
                      OR 0",
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves the windows of a backup that was replaced"
+meant = "edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                                       WHERE backup_of = ?2 AND left_at IS NULL)",
+'''
+replace = '''
+                                       WHERE backup_of = ?2)",
+'''
+
+[[plant]]
+name = "staff slots: the update moves a replaced backup of a member it moves (step 1)"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+     AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
+'''
+replace = '''
+     AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
+'''
+
+[[plant]]
+name = "staff slots: the update moves a replaced backup of a member it moves (step 2)"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+                  WHERE r.value IN ('worker', 'frontend', 'integrator'))
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
+'''
+replace = '''
+                  WHERE r.value IN ('worker', 'frontend', 'integrator'))
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
 '''
 
 [[plant]]

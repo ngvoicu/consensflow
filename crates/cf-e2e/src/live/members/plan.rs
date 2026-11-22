@@ -44,13 +44,15 @@ pub fn stand_in_worker() -> Value {
 
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
-/// check that needs one harness's question tool must land on that harness. There are
-/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
+/// check that needs one harness's question tool must land on that harness. A member
+/// is a worker, and the staff has one slot to a tier (a worker is offered complex,
+/// standard and light, never critical): three tiers for five harnesses, so Devin and
+/// Codex share one, and Pi and Muse another, and no check seats two of a pair.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
         Harness::Pi | Harness::Muse => "standard",
-        Harness::Devin | Harness::Codex => "critical",
+        Harness::Devin | Harness::Codex => "light",
     }
 }
 
@@ -292,10 +294,22 @@ mod tests {
     fn each_harness_has_a_work_tier_of_its_own_but_devin_and_codex_and_pi_and_muse_that_share_one()
     {
         let tiers: Vec<&str> = Harness::ALL.into_iter().map(tier).collect();
-        assert_eq!(
-            tiers,
-            ["complex", "standard", "critical", "critical", "standard"]
-        );
+        assert_eq!(tiers, ["complex", "standard", "light", "light", "standard"]);
+    }
+
+    /// A member of a check is a worker, and the staff has no Critical slot of a worker's: a
+    /// harness given one stops the case at the member's add (`tier-not-offered`).
+    #[test]
+    fn each_harnesss_work_tier_is_a_slot_the_staff_offers_a_worker_and_asks_no_purpose() {
+        for harness in Harness::ALL {
+            let tier = tier(harness);
+            assert!(
+                cf_ledger::roles::offers("worker", tier),
+                "{} at {tier}: a worker is not offered it",
+                harness.name()
+            );
+            assert_eq!(tier_flag(tier), ["--tier", tier]);
+        }
     }
 
     #[test]
@@ -312,7 +326,7 @@ mod tests {
     fn a_member_is_the_agent_of_its_harnesss_cheap_model_in_its_tier_and_may_have_another_id() {
         let devin = member(Harness::Devin);
         assert_eq!(devin["id"], "live-devin");
-        assert_eq!(devin["workTier"], "critical");
+        assert_eq!(devin["workTier"], "light");
         assert_eq!(devin["effort"], "medium");
         let reviewer = member_as(Harness::Devin, "bench-reviewer");
         assert_eq!(reviewer["id"], "bench-reviewer");
