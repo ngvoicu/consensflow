@@ -93,9 +93,9 @@ runs = ["goon-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
-find = '''                .any(|found| !negated(&paragraph[..found.start()]))
+find = '''            .any(|found| !negated(&paragraph[..found.start()]))
 '''
-replace = '''                .any(|found| !negated(&paragraph[..found.start()]) || true)
+replace = '''            .any(|found| !negated(&paragraph[..found.start()]) || true)
 '''
 
 [[plant]]
