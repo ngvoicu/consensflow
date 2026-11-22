@@ -72,7 +72,6 @@ fn env_with(
         "LANG",
         "TMPDIR",
         "SHELL",
-        "HOME",
         "SystemRoot",
         "WINDIR",
         "ComSpec",
@@ -86,6 +85,12 @@ fn env_with(
         "CONSENSFLOW_HOME".to_owned(),
         json!(scratch.join("consensflow")),
     );
+    // A home of the run's own for every variable a program finds one by, then what the harness's
+    // plan says over it: a plan that names only its own folder (Codex's `CODEX_HOME`) leaves the
+    // read with no `HOME` of the caller's (K3 review T-1978, 2).
+    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")) {
+        vars.insert(name.to_owned(), json!(value));
+    }
     for (name, value) in home {
         vars.insert(name, Value::String(value));
     }
@@ -217,6 +222,28 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A harness whose plan names only its own folder (Codex's `CODEX_HOME`) is read on the run's
+    /// own home for the rest, never the caller's `HOME`, profile, AppData or XDG folders.
+    #[test]
+    fn a_read_whose_plan_names_only_its_own_folder_has_no_home_of_the_callers() {
+        let machine = |name: &str| match name {
+            "HOME" | "USERPROFILE" | "APPDATA" | "LOCALAPPDATA" | "XDG_CONFIG_HOME"
+            | "HOMEDRIVE" | "HOMEPATH" => Some(format!("/the-callers/{name}")),
+            "PATH" => Some("p".to_owned()),
+            _ => None,
+        };
+        let plan = vec![("CODEX_HOME".to_owned(), "/scratch/home/.codex".to_owned())];
+        let env = env_with(&machine, plan, Path::new("/scratch"));
+        assert_eq!(env["HOME"], "/scratch/home");
+        assert_eq!(env["USERPROFILE"], "/scratch/home");
+        assert_eq!(env["XDG_CONFIG_HOME"], "/scratch/home/.config");
+        assert_eq!(env["CODEX_HOME"], "/scratch/home/.codex");
+        assert!(
+            !env.to_string().contains("the-callers"),
+            "a variable of the caller's reached the read: {env}"
+        );
+    }
 
     /// T-1937: a Windows Codex given no `SystemRoot` gets a stale model list with no default
     /// (0.170.0 and 0.171.0 alike); with it, a fresh one. The read is given the system's own

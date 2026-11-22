@@ -91,7 +91,7 @@ fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
     let ran = Run::new(executable)
         .args(prefix)
         .input(format!("{body}\n"))
-        .inheriting_env()
+        .machine_env()
         .run()?;
     answered(name, ran.code, &ran.stdout)
 }
