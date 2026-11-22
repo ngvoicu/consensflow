@@ -214,6 +214,8 @@ mod tests {
             ("HOME", at("/owner").as_str()),
             ("CARGO_MANIFEST_DIR", at("/checkout/crates/cf-e2e").as_str()),
             ("CARGO_PKG_NAME", "cf-e2e"),
+            // Cargo gives a test this one, which a toolchain prefix (`CARGO_TARGET_`) would take.
+            ("CARGO_TARGET_TMPDIR", at("/checkout/target/tmp").as_str()),
             ("CONSENSFLOW_TOKEN", "board"),
             ("CONSENSFLOW_URL", "http://127.0.0.1:1/"),
             ("CARGO_TARGET_DIR", at("/checkout/target").as_str()),
@@ -238,6 +240,7 @@ mod tests {
         for gone in [
             "CARGO_MANIFEST_DIR",
             "CARGO_PKG_NAME",
+            "CARGO_TARGET_TMPDIR",
             "CONSENSFLOW_TOKEN",
             "CONSENSFLOW_URL",
             "AWS_SECRET",

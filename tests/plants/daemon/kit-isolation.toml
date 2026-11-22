@@ -49,9 +49,9 @@ runs = ["ki-lib-standin"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/standin_process.rs"
-find = '''        || spelled_inside(&real_of(folder), &real_of(home))
-}'''
-replace = '''}'''
+find = '''            || spelled_inside(&settled_folder, &settled(home))
+            || spelled_inside(&real_folder, &real_of_root(home))'''
+replace = '''            || spelled_inside(&settled_folder, &settled(home))'''
 
 [[plant]]
 name = "K3: an owner's own process counts as the run's"
