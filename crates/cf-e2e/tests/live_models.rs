@@ -54,9 +54,31 @@ fn named() -> Result<Vec<Harness>> {
 /// What `harness` is read with: the run's search path and shell, ConsensFlow's home in
 /// `scratch`, and the variables of the home the kit gives the harness's windows.
 fn env(installed: &Installed, scratch: &Path) -> Result<Value> {
+    Ok(env_with(&own_var, installed.home_vars()?, scratch))
+}
+
+/// [`env`], where the machine's variables are `lookup`'s and the home's are `home`.
+fn env_with(
+    lookup: &dyn Fn(&str) -> Option<String>,
+    home: Vec<(String, String)>,
+    scratch: &Path,
+) -> Value {
     let mut vars = serde_json::Map::new();
-    for name in ["PATH", "USER", "LANG", "TMPDIR", "SHELL", "HOME"] {
-        if let Some(value) = own_var(name) {
+    // `SystemRoot` and the system's other variables, which Codex on Windows needs to give a fresh
+    // list and a default (T-1937); a machine without them has none to give.
+    for name in [
+        "PATH",
+        "USER",
+        "LANG",
+        "TMPDIR",
+        "SHELL",
+        "HOME",
+        "SystemRoot",
+        "WINDIR",
+        "ComSpec",
+        "PATHEXT",
+    ] {
+        if let Some(value) = lookup(name) {
             vars.insert(name.to_owned(), Value::String(value));
         }
     }
@@ -64,10 +86,10 @@ fn env(installed: &Installed, scratch: &Path) -> Result<Value> {
         "CONSENSFLOW_HOME".to_owned(),
         json!(scratch.join("consensflow")),
     );
-    for (name, value) in installed.home_vars()? {
+    for (name, value) in home {
         vars.insert(name, Value::String(value));
     }
-    Ok(Value::Object(vars))
+    Value::Object(vars)
 }
 
 /// What one harness's list came to.
@@ -190,4 +212,35 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
         }
     }
     report::conclude(&log, "what each harness's list came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T-1937: a Windows Codex given no `SystemRoot` gets a stale model list with no default
+    /// (0.170.0 and 0.171.0 alike); with it, a fresh one. The read is given the system's own
+    /// variables, and the run's home still wins over the machine's.
+    #[test]
+    fn a_models_read_is_given_the_windows_system_variables_the_machine_has() {
+        let machine = |name: &str| match name {
+            "SystemRoot" => Some(r"C:\Windows".to_owned()),
+            "WINDIR" => Some(r"C:\Windows".to_owned()),
+            "ComSpec" => Some(r"C:\Windows\system32\cmd.exe".to_owned()),
+            "PATHEXT" => Some(".EXE;.CMD".to_owned()),
+            "PATH" => Some("p".to_owned()),
+            "HOME" => Some("the-callers-home".to_owned()),
+            _ => None,
+        };
+        let home = vec![("HOME".to_owned(), "the-runs-home".to_owned())];
+        let env = env_with(&machine, home, Path::new("/scratch"));
+        for name in ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT"] {
+            assert!(env[name].is_string(), "{name} was left out: {env}");
+        }
+        assert_eq!(env["HOME"], "the-runs-home");
+        assert!(
+            env["TEMP"].is_null(),
+            "a variable the machine lacks is not made up"
+        );
+    }
 }
