@@ -34,6 +34,27 @@ fn other_first_person_ways_to_say_it() {
 }
 
 #[test]
+fn the_wordings_a_review_found_missing_end_to_wait() {
+    // T-1974's finding 4, and T-50's m-2283.
+    waits("The landing runs in the background with a 2-hour timeout. I'll wait for it to finish.");
+    waits("I'm going to check them at the next wakeup.");
+    waits("I'll stop here and continue when the run ends.");
+    waits("Waiting for the build turn; will report when it finishes.");
+    waits("I will wait until the gate ends.");
+    waits("I am going to resume when it reports.");
+}
+
+#[test]
+fn a_wait_for_something_that_is_no_work_of_the_members_is_a_result() {
+    is_a_result("I'll wait for the review.");
+    is_a_result("I'll wait for your go.");
+    is_a_result("The runner will report when it finishes.");
+    is_a_result("It is going to resume when the rig ends.");
+    is_a_result("I'm not editing anything in the tree while it runs.");
+    is_a_result("I won't wait for it to finish.");
+}
+
+#[test]
 fn waits_only_the_last_paragraph_decides() {
     let wait = "I'll check them at the next wakeup.";
     waits(&format!("All of it is written.\n\n{wait}"));

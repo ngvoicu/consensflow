@@ -164,3 +164,64 @@ file = "crates/cf-engine/src/turn_end.rs"
 find = '''        if pending.retired == 0
             && ends_to_wait'''
 replace = '''        if ends_to_wait'''
+
+[[plant]]
+name = "go on note: a wait for work to finish is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''        &*WAITS_FOR_ITS_END,
+'''
+replace = ''''''
+
+[[plant]]
+name = "go on note: only I'll and I will go on, not I'm going to"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''i(?:'ll| will| am going to|'m going to)'''
+replace = '''i(?:'ll| will)'''
+
+[[plant]]
+name = "go on note: a clause with no I is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''|(?:^|[;:,.] ?|\band )will)'''
+replace = ''')'''
+
+[[plant]]
+name = "go on note: a stop before going on is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''const BEFORE: &str = "(?:(?:stop|pause|wait) here and |wait and )?";'''
+replace = '''const BEFORE: &str = "";'''
+
+[[plant]]
+name = "go on note: any wait is a wait for work, the review's too"
+meant = "a_wait_for_something_that_is_no_work_of_the_members_is_a_result"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''wait (?:for [^.!?\\n]{0,60} to (?:finish|end|complete|report)\\b|until'''
+replace = '''wait (?:for [^.!?\\n]{0,60}|until'''
+
+[[plant]]
+name = "go on note: the note does not ask for the words whole"
+meant = "a_short_result_the_reading_misfired_on_keeps_its_words_when_the_member_repeats_it"
+runs = ["goon-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = "repeat them whole as your answer"
+replace = "answer with them"

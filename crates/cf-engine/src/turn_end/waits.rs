@@ -44,6 +44,13 @@ pub(crate) const GO_ON_NOTE_BEGINS: &str =
 /// What the member's own work does that it goes on for.
 const GO: &str = "(?:check|continue|resume|pick (?:it |this |them )?(?:back )?up|go on|carry on|come back|report|finish|return)";
 
+/// Who goes on: "I'll", "I will", "I'm going to", or a clause that leaves the "I" out
+/// ("Waiting for the build turn; will report when it finishes").
+const WHO: &str = r"(?:\bi(?:'ll| will| am going to|'m going to)|(?:^|[;:,.] ?|\band )will)";
+
+/// What a member may do before it goes on: "I'll stop here and continue when the run ends".
+const BEFORE: &str = "(?:(?:stop|pause|wait) here and |wait and )?";
+
 /// The first person ends its turn to wait.
 #[allow(clippy::expect_used)]
 static ENDS_TO_WAIT: LazyLock<Regex> = LazyLock::new(|| {
@@ -57,9 +64,19 @@ static ENDS_TO_WAIT: LazyLock<Regex> = LazyLock::new(|| {
 #[allow(clippy::expect_used)]
 static GOES_ON_WHEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"\bi(?:'ll| will) {GO}\b[^.!?\n]{{0,80}}\b(?:when|once|after|until|at the next|as soon as)\b"
+        r"{WHO} {BEFORE}{GO}\b[^.!?\n]{{0,80}}\b(?:when|once|after|until|at the next|as soon as)\b"
     ))
     .expect("goes-on-when pattern")
+});
+
+/// "I'll wait for it to finish", "I will wait until the gate ends": a wait for work that ends,
+/// not "I'll wait for the review".
+#[allow(clippy::expect_used)]
+static WAITS_FOR_ITS_END: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\bi(?:'ll| will) wait (?:for [^.!?\n]{0,60} to (?:finish|end|complete|report)\b|until [^.!?\n]{0,60}\b(?:finish|end|complete|report)(?:e?s)?\b)",
+    )
+    .expect("waits-for-its-end pattern")
 });
 
 /// "Once the run ends, I'll continue."
@@ -75,19 +92,24 @@ static WHEN_ENDS_GOES_ON: LazyLock<Regex> = LazyLock::new(|| {
 /// work.
 pub(crate) fn ends_to_wait(words: &str) -> bool {
     let paragraph = plain(&last_paragraph(&without_blocks(words)));
-    [&*ENDS_TO_WAIT, &*GOES_ON_WHEN, &*WHEN_ENDS_GOES_ON]
-        .into_iter()
-        .any(|pattern| {
-            pattern
-                .find_iter(&paragraph)
-                .any(|found| !negated(&paragraph[..found.start()]))
-        })
+    [
+        &*ENDS_TO_WAIT,
+        &*GOES_ON_WHEN,
+        &*WAITS_FOR_ITS_END,
+        &*WHEN_ENDS_GOES_ON,
+    ]
+    .into_iter()
+    .any(|pattern| {
+        pattern
+            .find_iter(&paragraph)
+            .any(|found| !negated(&paragraph[..found.start()]))
+    })
 }
 
 /// The note that sends the member on: the first words are [`GO_ON_NOTE_BEGINS`].
 pub(crate) fn go_on_note(number: i64) -> String {
     format!(
-        "{GO_ON_NOTE_BEGINS}. T-{number}: the end of your turn is its result, and nothing wakes you when your own work ends, so those words were taken for no result. Go on now: wait for your work inside this turn (check it, again and again, until it ends), and end the turn with the result. If your last words were the result, answer with them."
+        "{GO_ON_NOTE_BEGINS}. T-{number}: the end of your turn is its result, and nothing wakes you when your own work ends, so those words were taken for no result. Go on now: wait for your work inside this turn (check it, again and again, until it ends), and end the turn with the result. If your last words were the result, repeat them whole as your answer."
     )
 }
 

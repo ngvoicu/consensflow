@@ -228,3 +228,28 @@ fn a_wait_for_the_chief_is_still_a_question_and_a_finished_report_is_a_result() 
         assert_eq!(go_on_notes(&context, &tiers), Vec::<String>::new());
     }
 }
+
+/// T-1974's finding 2: the reading misfires on a short result, and the member answers the note
+/// by repeating it whole, as the note asks: the result keeps its words.
+#[test]
+fn a_short_result_the_reading_misfired_on_keeps_its_words_when_the_member_repeats_it() {
+    let context = Context::new();
+    let words = "The branch is pushed and not landed. I'll finish the cleanup once you accept it.";
+    let tiers = ended_on(&context, words);
+    assert_eq!(
+        go_on_notes(&context, &tiers).len(),
+        1,
+        "the misfire: one note"
+    );
+    assert!(
+        given(&context, "zeus")
+            .last()
+            .is_some_and(|text| text.contains("repeat them whole as your answer")),
+        "the note asks for the words whole"
+    );
+    context.adapter.answer("zeus", words);
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results(&context, &tiers), [words]);
+}
