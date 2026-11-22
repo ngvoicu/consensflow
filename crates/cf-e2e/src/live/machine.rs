@@ -130,6 +130,67 @@ impl Harness {
     }
 }
 
+/// What a version read of an installed CLI is given: the machine's search path and system
+/// variables as `lookup` has them, and the kit's own folders (`scratch`) for every variable that
+/// says where a home, a login or a setting is, `CLAUDE_CONFIG_DIR` being `config` where a run has
+/// one of its own. Never the machine's `HOME`, `APPDATA`, a harness's home or the XDG folders.
+fn probe_vars(
+    lookup: &dyn Fn(&str) -> Option<String>,
+    scratch: &Path,
+    config: Option<&Path>,
+) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = [
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "WINDIR",
+        "ComSpec",
+        "SYSTEMDRIVE",
+        "LANG",
+        "USER",
+        "LOGNAME",
+        "USERNAME",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+    ]
+    .into_iter()
+    .filter_map(|name| Some((name.to_owned(), lookup(name)?)))
+    .collect();
+    let home = scratch.join("home");
+    let text = |path: &Path| path.to_string_lossy().into_owned();
+    let drive = text(&home);
+    let (letter, rest) = if drive.as_bytes().get(1) == Some(&b':') {
+        drive.split_at(2)
+    } else {
+        ("", drive.as_str())
+    };
+    vars.extend([
+        ("HOMEDRIVE".to_owned(), letter.to_owned()),
+        ("HOMEPATH".to_owned(), rest.to_owned()),
+    ]);
+    for name in ["HOME", "USERPROFILE"] {
+        vars.push((name.to_owned(), text(&home)));
+    }
+    for (name, below) in [
+        ("APPDATA", "AppData/Roaming"),
+        ("LOCALAPPDATA", "AppData/Local"),
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_DATA_HOME", ".local/share"),
+        ("XDG_STATE_HOME", ".local/state"),
+        ("XDG_CACHE_HOME", ".cache"),
+        ("CODEX_HOME", ".codex"),
+        ("PI_CODING_AGENT_DIR", ".pi/agent"),
+    ] {
+        vars.push((name.to_owned(), text(&home.join(below))));
+    }
+    vars.push((
+        "CLAUDE_CONFIG_DIR".to_owned(),
+        text(&config.map_or_else(|| home.join(".claude"), Path::to_path_buf)),
+    ));
+    vars
+}
+
 /// A harness installed on this machine, as its windows run it: its command,
 /// the home its login is read from, and the folder of Node, which one that npm
 /// installed needs on the `PATH` to start (on Windows its command is a shim
@@ -306,16 +367,23 @@ impl Installed {
         } else {
             "--version"
         };
-        // Keep the ordinary probe's environment, but give Claude parity its own config.
-        // Launchers that update themselves (Muse's, hourly) are told not to.
-        let mut probe = Run::new(&self.command).arg(word).inheriting_env().vars(
-            super::launcher::updates_off_of(self.harness)
-                .iter()
-                .copied(),
+        // The program is asked on the kit's own folders, never the machine's: a version read of
+        // an installed CLI may read or write its settings and its home (T-1957). The machine's
+        // search path and system variables are all it is given of the machine.
+        let scratch = crate::door::made("consensflow-live-version-").ok();
+        let Some(scratch) = scratch else {
+            return "unknown".to_owned();
+        };
+        let mut probe = Run::new(&self.command).arg(word).vars(
+            probe_vars(&own_var, scratch.path(), config)
+                .into_iter()
+                .chain(
+                    super::launcher::updates_off_of(self.harness)
+                        .iter()
+                        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+                ),
         );
-        if let Some(config) = config {
-            probe = probe.var("CLAUDE_CONFIG_DIR", config);
-        }
+        let _ = &mut probe;
         let ran = probe.run().ok().filter(|ran| ran.code == Some(0));
         let line = ran
             .as_ref()

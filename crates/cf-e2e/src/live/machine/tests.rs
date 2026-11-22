@@ -1050,3 +1050,53 @@ fn the_rig_s_muse_on_windows_is_the_stand_in_cargo_built_beside_the_tests() {
         Path::new("/t/target/debug").join(format!("muse-stand-in{exe}"))
     );
 }
+
+/// T-1957: a version read is given the machine's search path and system variables and the kit's
+/// own folders for every home, login and settings variable; the owner's are never its own.
+#[test]
+fn a_version_read_is_given_the_kits_folders_and_never_the_machines_homes() {
+    let machine = |name: &str| match name {
+        "PATH" => Some("/usr/bin".to_owned()),
+        "SystemRoot" => Some(r"C:\Windows".to_owned()),
+        "HOME"
+        | "USERPROFILE"
+        | "APPDATA"
+        | "LOCALAPPDATA"
+        | "CODEX_HOME"
+        | "XDG_DATA_HOME"
+        | "PI_CODING_AGENT_DIR"
+        | "CLAUDE_CONFIG_DIR" => Some(format!("/the-owners/{name}")),
+        _ => None,
+    };
+    let scratch = Path::new("/scratch/run");
+    let vars = probe_vars(&machine, scratch, None);
+    let get = |name: &str| {
+        vars.iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| Path::new(v))
+    };
+    assert_eq!(get("PATH"), Some(Path::new("/usr/bin")));
+    assert_eq!(get("SystemRoot"), Some(Path::new(r"C:\Windows")));
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "CODEX_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        "PI_CODING_AGENT_DIR",
+        "CLAUDE_CONFIG_DIR",
+    ] {
+        let value = get(name).unwrap_or_else(|| panic!("{name} is not given: {vars:?}"));
+        assert!(value.starts_with(scratch), "{name} = {}", value.display());
+    }
+    // A run's own Claude config is the one it names.
+    let own = Path::new("/run/claude-config");
+    let with = probe_vars(&machine, scratch, Some(own));
+    assert!(with
+        .iter()
+        .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && Path::new(v) == own));
+}

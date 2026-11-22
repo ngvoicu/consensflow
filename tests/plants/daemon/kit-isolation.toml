@@ -134,3 +134,17 @@ find = '''const MACHINE: [&str; 11] = [
 replace = '''const MACHINE: [&str; 12] = [
     "PATH",
     "HOME",'''
+
+[[plant]]
+name = "K3: a version read is given the machine's home"
+meant = "a_version_read_is_given_the_kits_folders_and_never_the_machines_homes"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    for name in ["HOME", "USERPROFILE"] {
+        vars.push((name.to_owned(), text(&home)));
+    }'''
+replace = '''    for name in ["HOME", "USERPROFILE"] {
+        vars.push((name.to_owned(), lookup(name).unwrap_or_default()));
+    }'''
