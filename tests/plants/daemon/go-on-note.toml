@@ -106,9 +106,11 @@ runs = ["goon-lib"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
 find = '''    let paragraph = plain(&last_paragraph(&without_blocks(words)));
-    [&*ENDS_TO_WAIT'''
+    [
+        &*ENDS_TO_WAIT'''
 replace = '''    let paragraph = plain(&without_blocks(words));
-    [&*ENDS_TO_WAIT'''
+    [
+        &*ENDS_TO_WAIT'''
 
 [[plant]]
 name = "go on note: the member's turn-ending words are not read"
@@ -117,8 +119,9 @@ runs = ["goon-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
-find = '''    [&*ENDS_TO_WAIT, &*GOES_ON_WHEN, &*WHEN_ENDS_GOES_ON]'''
-replace = '''    [&*GOES_ON_WHEN, &*WHEN_ENDS_GOES_ON]'''
+find = '''        &*ENDS_TO_WAIT,
+'''
+replace = ''''''
 
 [[plant]]
 name = "go on note: a going on at a later time is not read"
@@ -127,8 +130,11 @@ runs = ["goon-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
-find = '''    [&*ENDS_TO_WAIT, &*GOES_ON_WHEN, &*WHEN_ENDS_GOES_ON]'''
-replace = '''    [&*ENDS_TO_WAIT]'''
+find = '''        &*GOES_ON_WHEN,
+        &*WAITS_FOR_ITS_END,
+        &*WHEN_ENDS_GOES_ON,
+'''
+replace = ''''''
 
 [[plant]]
 name = "go on note: quoted words are the member's own"
@@ -138,9 +144,11 @@ runs = ["goon-lib"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
 find = '''    let paragraph = plain(&last_paragraph(&without_blocks(words)));
-    [&*ENDS_TO_WAIT'''
+    [
+        &*ENDS_TO_WAIT'''
 replace = '''    let paragraph = last_paragraph(words).to_lowercase();
-    [&*ENDS_TO_WAIT'''
+    [
+        &*ENDS_TO_WAIT'''
 
 [[plant]]
 name = "go on note: the interim line before the note is kept in the result"
@@ -213,8 +221,8 @@ runs = ["goon-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/waits.rs"
-find = '''wait (?:for [^.!?\\n]{0,60} to (?:finish|end|complete|report)\\b|until'''
-replace = '''wait (?:for [^.!?\\n]{0,60}|until'''
+find = '''wait (?:for [^.!?\n]{0,60} to (?:finish|end|complete|report)\b|until'''
+replace = '''wait (?:for [^.!?\n]{0,60}|until'''
 
 [[plant]]
 name = "go on note: the note does not ask for the words whole"
