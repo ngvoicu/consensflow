@@ -39,6 +39,8 @@ tokio = { workspace = true, features = ["net", "sync", "time"] }
 toml.workspace = true
 url.workspace = true
 uuid.workspace = true
+# Codex's cold rollouts are Zstandard-compressed; the reader streams them.
+zstd = { version = "0.13.3", default-features = false }
 
 [features]
 # The fakes of `testing`, for tests of other crates and of this one's

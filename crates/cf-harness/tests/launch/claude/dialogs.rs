@@ -11,6 +11,7 @@ fn waiting(reason: Option<&str>) -> Observed {
     Observed {
         reading: None,
         settled: false,
+        takes_words: false,
         over: Over::No,
         waiting: reason.map(|reason| Waiting {
             reason: Some(reason.to_owned()),

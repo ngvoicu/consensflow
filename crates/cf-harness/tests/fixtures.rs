@@ -375,6 +375,25 @@ fn no_fixture_of_any_harness_holds_a_folder_of_the_owner_or_a_fragment_of_one() 
         .collect();
     let mut offences = Vec::new();
     for path in files {
+        if path.extension().is_some_and(|ext| ext == "zst") {
+            // The sibling is scanned below. Verify the compressed fixture is
+            // exactly that scrubbed text without buffering its decoded contents.
+            let mut plain = fs::File::open(path.with_extension("")).unwrap();
+            let mut decoded =
+                zstd::stream::read::Decoder::new(fs::File::open(&path).unwrap()).unwrap();
+            let mut actual = [0_u8; 8192];
+            let mut expected = [0_u8; 8192];
+            loop {
+                let count = decoded.read(&mut actual).unwrap();
+                if count == 0 {
+                    assert_eq!(plain.read(&mut expected).unwrap(), 0, "{}", path.display());
+                    break;
+                }
+                plain.read_exact(&mut expected[..count]).unwrap();
+                assert_eq!(&actual[..count], &expected[..count], "{}", path.display());
+            }
+            continue;
+        }
         let mut data = Vec::new();
         if path.extension().is_some_and(|ext| ext == "gz") {
             MultiGzDecoder::new(fs::File::open(&path).unwrap())

@@ -131,4 +131,34 @@ impl Ancestry {
         }
         false
     }
+
+    /// Whether the record at `user` is a descendant of the record that claims `ancestor`,
+    /// by the parents of the records read so far, all of this session: positive evidence
+    /// that it was written after that record on the same branch. A chain with a gap, or
+    /// one that never reaches it, is no evidence.
+    pub(super) fn descends_from(&mut self, user: Option<usize>, ancestor: &str) -> bool {
+        let Some(user) = user else {
+            return false;
+        };
+        let mut seen = HashSet::new();
+        let mut at = user;
+        loop {
+            let place = &self.places[at];
+            if !place.own || !seen.insert(at) {
+                return false;
+            }
+            let parent = place.parent_uuid.clone();
+            let Some(parent) = parent else {
+                return false;
+            };
+            if *parent == *ancestor {
+                self.lookup(Some(ancestor));
+                return true;
+            }
+            match self.lookup(Some(&parent)) {
+                Some(next) => at = next,
+                None => return false,
+            }
+        }
+    }
 }

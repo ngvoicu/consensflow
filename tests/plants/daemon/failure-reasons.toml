@@ -257,13 +257,10 @@ runs = ["failure-reason-pi"]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
 find = '''
-                self.open_tools.clear();
-                self.failed = false;
-                self.failure = None;
+                        failure: self.failure.take(),
 '''
 replace = '''
-                self.open_tools.clear();
-                self.failed = false;
+                        failure: self.failure.clone(),
 '''
 
 [[plant]]

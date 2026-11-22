@@ -99,6 +99,7 @@ fn look(items: Vec<Item>) -> Observed {
             beside: Vec::new(),
         }))),
         settled: true,
+        takes_words: true,
         over: Over::No,
         waiting: None,
         failed: false,

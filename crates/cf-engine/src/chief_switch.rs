@@ -263,6 +263,11 @@ impl Dispatcher {
                 }
             }
         }
+        // A window that takes words after an interrupt while agents run is not settled: its
+        // interrupted turn counts none of them, and the close would end them.
+        if !observed.settled {
+            return Ok(());
+        }
         if observed.agents_pending() {
             return Ok(());
         }

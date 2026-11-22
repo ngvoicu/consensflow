@@ -565,6 +565,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         return Observed {
             reading: reading(agent.records.get(session).cloned().unwrap_or_default()),
             settled: false,
+            takes_words: false,
             over: Over::No,
             waiting: None,
             failed: agent.failed,
@@ -586,6 +587,15 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
     Observed {
         reading: reading(agent.items.clone()),
         settled: agent.settled,
+        // As Claude's adapter says it (`claude::adapter`): the Mac's window whose turn an
+        // interrupt ended while background work keeps its status busy takes words once the
+        // interrupt's end has stood, though it is not settled.
+        takes_words: agent.settled
+            || (cfg!(target_os = "macos")
+                && agent.busy_when_interrupted
+                && !agent.interrupted_in_generation
+                && !agent.shared
+                && agent.over == Over::Held),
         over: agent.over,
         waiting,
         failed: agent.failed,

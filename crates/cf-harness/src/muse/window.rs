@@ -382,6 +382,7 @@ impl Window for MuseWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
+                    takes_words: false,
                     over: Over::No,
                     waiting: None,
                     failed: false,
