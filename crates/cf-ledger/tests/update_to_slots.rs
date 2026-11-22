@@ -1,4 +1,4 @@
-//! The update to the staff as slots (migration 0044, `architecture/staff-slots.md` section 3) on
+//! The update to the staff as slots (migration 0045, `architecture/staff-slots.md` section 3) on
 //! ledgers of the version before: it changes members' tiers and nothing else, rests nobody, and
 //! tells the human of a Critical member it moved, once.
 
@@ -207,6 +207,11 @@ fn built() -> Built {
             (24,1,'luna-1','worker','[\"worker\"]','claude-code','critical','2026-11-01',22),
             (25,1,'ares-1','worker','[\"worker\"]','claude-code','critical','2026-11-01',20),
             (34,1,'pallas-1','designer','[\"designer\"]','codex','critical','2026-11-01',33);
+         -- a backup of ares that was replaced, and its window, closed: history
+         INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,backup_of,left_at) VALUES
+            (26,1,'ares-old','worker','[\"worker\"]','claude-code','critical','2026-10-01',20,'2026-10-20');
+         INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,member_id,left_at) VALUES
+            (27,1,'ares-old-1','worker','[\"worker\"]','claude-code','critical','2026-10-01',26,'2026-10-20');
          INSERT INTO task(id,project_id,number,title,body,requester_id,assignee_id,state,pool,tier,purpose,created_at,updated_at) VALUES
             (60,1,1,'Work','Work',2,24,'working','worker','critical','hard-problem','2026-11-01','2026-11-01'),
             (61,1,2,'Draw','Draw',2,34,'working','designer',NULL,NULL,'2026-11-01','2026-11-01'),
@@ -275,6 +280,14 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
     assert_eq!(tier("quietly"), Some("complex"), "the other project's");
     // An image designer's row is left as it is, whatever tier an old Add member stored.
     for kept in ["pygmalion", "galatea", "pallas", "pallas-1", "departed"] {
+        assert_eq!(now[kept], was[kept], "{kept}");
+    }
+    // A backup that was replaced and its closed window are history: the update leaves their
+    // tier as it was, and the member's current backup and windows move.
+    for history in ["ares-old", "ares-old-1"] {
+        assert_eq!(now[history].as_deref(), Some("critical"), "{history}");
+    }
+    for kept in ["ares-old", "ares-old-1"] {
         assert_eq!(now[kept], was[kept], "{kept}");
     }
     // A Critical architect and reviewer, with its backup, keeps its slots.

@@ -65,6 +65,28 @@ impl NewTask {
     /// it; who gives it, a participant by name and the task followed up are
     /// the caller's, given as text and a number.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
+        let task = Self::read_json(value)?;
+        task.check_given()?;
+        Ok(task)
+    }
+
+    /// A plan's section as [`from_json`](Self::from_json) reads it, but with no check of its
+    /// role, tier or purpose against the staff: a plan's key is looked up first, so a plan an
+    /// earlier version took still replays its saved answer, and the checks run only where the
+    /// task is given (`create_task`).
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::read_json(value)
+    }
+
+    /// The tier and purpose said, as `create_task` checks them, for a task that names its work.
+    fn check_given(&self) -> Result<(), LedgerError> {
+        if self.tier.is_some() || self.to.is_some() || self.after.is_some() {
+            self.check_work()?;
+        }
+        Ok(())
+    }
+
+    fn read_json(value: &Value) -> Result<Self, LedgerError> {
         let body = model::parse_text(value.get("body"), "body", MAX_BODY)?;
         let numbers = |field: &str| match value.get(field) {
             None => Ok(Vec::new()),
@@ -102,11 +124,6 @@ impl NewTask {
             needs,
             before,
         };
-        // A tier left out is asked for where the task is given (`create_task`), after a plan's
-        // key is looked up.
-        if task.tier.is_some() || task.to.is_some() || task.after.is_some() {
-            task.check_work()?;
-        }
         Ok(task)
     }
 

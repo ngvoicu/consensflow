@@ -76,7 +76,7 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
         own_hands, 1,
         "migration 0039 preserves the own-hands setting"
     );
-    // Migration 0044 gives the tierless frontend designer its home tier, and nothing else.
+    // Migration 0045 gives the tierless frontend designer its home tier, and nothing else.
     let mut old_rows = old_rows;
     old_rows[0].2 = Some("standard".to_owned());
     assert_eq!(

@@ -11,7 +11,8 @@
 -- to complex, since Critical has no coding. Any Critical slot of its other roles that no
 -- other member holds is empty then; the event says which.
 --
--- Each change moves the member, its sessions, its backup and its backup's sessions, and is
+-- Each change moves the member, its sessions, its current backup and that backup's sessions (a
+-- backup that was replaced, and the windows it left, are history and keep their tier), and is
 -- logged as `member.settled` (handle, from, to, step and, for step 2, the slots that
 -- emptied). The human is told of step 2's moves once, by the first open (`open_ledger`).
 CREATE TEMP TABLE settled AS
@@ -29,8 +30,8 @@ CREATE TEMP TABLE settled AS
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
+      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
 UPDATE participant SET tier = (SELECT r.tier FROM settled_rows r WHERE r.id = participant.id LIMIT 1)
  WHERE id IN (SELECT id FROM settled_rows);
 INSERT INTO event (project_id, at, kind, data)
@@ -61,8 +62,8 @@ CREATE TEMP TABLE settled AS
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
+      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
 UPDATE participant SET tier = (SELECT r.tier FROM settled_rows r WHERE r.id = participant.id LIMIT 1)
  WHERE id IN (SELECT id FROM settled_rows);
 INSERT INTO event (project_id, at, kind, data)

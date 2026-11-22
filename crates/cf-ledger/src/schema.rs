@@ -56,7 +56,7 @@ pub const MIGRATIONS: [&str; 44] = [
     include_str!("../migrations/0041.sql"),
     include_str!("../migrations/0042.sql"),
     include_str!("../migrations/0043.sql"),
-    include_str!("../migrations/0044.sql"),
+    include_str!("../migrations/0045.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -208,7 +208,7 @@ mod tests {
             "5474b8f792571bdeb9d878e007c7f6bea77302631426f7fb5f8ad40ab2b0df59",
             "6dc804588d6b156b184773d4ed178827880749f4ad1e47380a2006407b796bc3",
             "1cf8ebe2c486a4327f449110753c1e4d3eea6d56cb99f77f214a1c90f0ec0fe6",
-            "45d460c6b960d3c4e15102ee0d329b9ba4c971f607b8a2f01c1644e48f06ad61",
+            "d9a0869804e79338eb358053b7daed88a9aa79cf9e1c5cc75a91028d13a7b066",
         ];
         // A migration added with no hash would pass by the zip below unpinned.
         assert_eq!(

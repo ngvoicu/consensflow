@@ -93,7 +93,7 @@ meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_
 runs = ["ss-ledger-update"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0044.sql"
+file = "crates/cf-ledger/migrations/0045.sql"
 find = '''
      AND (p.tier IS NULL OR p.tier = 'light')
 '''
@@ -107,7 +107,7 @@ meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_
 runs = ["ss-ledger-update"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0044.sql"
+file = "crates/cf-ledger/migrations/0045.sql"
 find = '''
      AND p.tier = 'critical'
 '''

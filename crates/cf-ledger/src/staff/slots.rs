@@ -177,7 +177,7 @@ pub(crate) fn not_offered_for(pool: &str, tier: &str) -> LedgerError {
 }
 
 /// What the update made of members at Critical, told to the human once: each project where
-/// migration 0044's step 2 moved a member gets one note naming each moved member and the
+/// migration 0045's step 2 moved a member gets one note naming each moved member and the
 /// Critical slots that emptied. The moves told are marked by an event naming them
 /// (`member.settled.told`), so a later open sends nothing. Step 1 tells nobody.
 pub(crate) fn note_settled_moves(store: &mut Store) -> Result<(), LedgerError> {

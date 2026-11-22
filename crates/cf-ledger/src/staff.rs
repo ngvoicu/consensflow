@@ -381,11 +381,13 @@ pub(crate) fn edit_member(
             ],
         )?;
         if member.backup_of.is_none() {
-            // The backup, and the windows it has open: each at the member's new tier.
+            // The current backup, and the windows it has open: each at the member's new tier; one that
+            // was replaced, and its windows, are history.
             store.db.execute(
                 "UPDATE participant SET tier = ?1
                   WHERE (backup_of = ?2 AND left_at IS NULL)
-                     OR member_id IN (SELECT id FROM participant WHERE backup_of = ?2)",
+                     OR member_id IN (SELECT id FROM participant
+                                       WHERE backup_of = ?2 AND left_at IS NULL)",
                 params![tier, member.id],
             )?;
         }

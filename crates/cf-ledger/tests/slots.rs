@@ -362,6 +362,73 @@ fn edit_member_carries_the_new_tier_to_its_backups_open_windows() {
     assert_eq!(tiers.len(), 3);
 }
 
+/// A backup that was replaced, and the window it left closed, are history: Edit on the owner
+/// moves the current backup and its windows, and leaves the departed pair at the tier it had.
+#[test]
+fn edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let old = ledger
+        .add_backup(project.id, "zeus", &member("hera", &["worker"], "standard"))
+        .expect("a backup");
+    fn window(ledger: &cf_ledger::Ledger, project: i64, handle: &str, of: i64) {
+        ledger
+            .sqlite()
+            .execute(
+                "INSERT INTO participant (project_id, handle, role, roles, harness, tier, created_at, member_id)
+                 VALUES (?, ?, 'worker', '[\"worker\"]', 'claude-code', 'standard', 'now', ?)",
+                rusqlite::params![project, handle, of],
+            )
+            .unwrap();
+    }
+    window(&ledger, project.id, "hera-1", old.id);
+    // The backup is replaced: it leaves, and its window stays closed behind it.
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET left_at = '2026-10-20' WHERE id = ? OR member_id = ?",
+            [old.id, old.id],
+        )
+        .unwrap();
+    let current = ledger
+        .add_backup(project.id, "zeus", &member("gaia", &["worker"], "standard"))
+        .expect("the new backup");
+    window(&ledger, project.id, "gaia-1", current.id);
+    ledger
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
+                tier: "light".into(),
+            },
+        )
+        .expect("the tier moves");
+    let tier = |handle: &str| -> Option<String> {
+        ledger
+            .sqlite()
+            .query_row(
+                "SELECT tier FROM participant WHERE project_id = ? AND handle = ?",
+                rusqlite::params![project.id, handle],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    for moved in ["zeus", "gaia", "gaia-1"] {
+        assert_eq!(tier(moved).as_deref(), Some("light"), "{moved}");
+    }
+    for history in ["hera", "hera-1"] {
+        assert_eq!(
+            tier(history).as_deref(),
+            Some("standard"),
+            "{history} left before the edit"
+        );
+    }
+}
+
 #[test]
 fn a_purpose_is_taken_only_with_critical_at_add_as_at_edit() {
     let (_dir, mut ledger) = ledger();

@@ -244,7 +244,7 @@ fn create_plan(
                     format!("no task T-{} in this project", js::number_text(number)),
                 ));
             }
-            let task = NewTask::from_json(&given(caller, &part, after)?)?;
+            let task = NewTask::from_json_for_plan(&given(caller, &part, after)?)?;
             if part.get("self") == Some(&Value::Bool(true))
                 && task.needs.is_empty()
                 && task.before.is_empty()

@@ -1077,6 +1077,85 @@ async fn a_keyed_plan_an_earlier_version_took_replays_its_saved_answer_and_a_fre
     assert_ne!(status, 200, "{said}");
 }
 
+/// Keeps a plan under a key as an earlier version did: the ledger's own fingerprint of its
+/// sections and of the file, and the answer as `[name, number]`.
+fn keep_plan_under_key(scene: &Scene, key: &str, plan: &Value, task: cf_ledger::NewTask) {
+    use sha2::{Digest, Sha256};
+    let sections = [cf_ledger::PlanTask {
+        name: "only".to_owned(),
+        task,
+        needs: Vec::new(),
+        before: Vec::new(),
+    }];
+    let source = serde_json::to_string(&json!({ "plan": plan["plan"], "source": null })).unwrap();
+    let route = format!("{:x}", Sha256::digest(source.as_bytes()));
+    let fingerprint = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(&sections[..], route)).unwrap())
+    );
+    scene
+        .context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute(
+            "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, ?, ?, '[[\"only\", 7]]')",
+            rusqlite::params![scene.project.id, key, fingerprint],
+        )
+        .unwrap();
+}
+
+/// A plan an earlier version took with a tier the staff now refuses (Light advice with a purpose,
+/// Critical work for a role with no Critical slot) replays its saved answer: the key is looked up
+/// before any role, tier or purpose is checked, a changed file under it is `key-used`, and the
+/// same file under a fresh key is refused for what it asks.
+#[tokio::test]
+async fn a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_still_replays() {
+    for (section, pool, purpose, tier, refusal) in [
+        (
+            json!({ "name": "only", "advice": true, "tier": "light",
+                    "purpose": "important-question", "body": "Ask\n" }),
+            "advisor",
+            "important-question",
+            "light",
+            "purpose-without-critical",
+        ),
+        (
+            json!({ "name": "only", "tier": "critical", "purpose": "hard-problem",
+                    "body": "Work\n" }),
+            "worker",
+            "hard-problem",
+            "critical",
+            "tier-not-offered",
+        ),
+    ] {
+        let scene = scene();
+        let plan = json!({ "key": "old", "plan": [section.clone()] });
+        let fresh = json!({ "key": "fresh", "plan": [section.clone()] });
+        let (status, said) = stc_post(&scene, &fresh).await;
+        assert_eq!(status, 400, "{said}");
+        assert_eq!(said["error"], refusal, "{said}");
+        let task = cf_ledger::NewTask {
+            from: "chief".to_owned(),
+            pool: Some(pool.to_owned()),
+            tier: Some(tier.to_owned()),
+            purpose: Some(purpose.to_owned()),
+            body: section["body"].as_str().unwrap().to_owned(),
+            ..cf_ledger::NewTask::default()
+        };
+        keep_plan_under_key(&scene, "old", &plan, task);
+        let (status, replayed) = stc_post(&scene, &plan).await;
+        assert_eq!(status, 200, "{refusal}: {replayed}");
+        assert_eq!(replayed["tasks"][0]["task"]["number"], 7, "{replayed}");
+        assert_eq!(scene.kicks.get(), 0, "no second task and no wake-up");
+        let mut changed = plan.clone();
+        changed["plan"][0]["body"] = json!("Another\n");
+        let (status, said) = stc_post(&scene, &changed).await;
+        assert_eq!(status, 409, "{refusal}: {said}");
+        assert_eq!(said["error"], "key-used", "{said}");
+    }
+}
+
 #[tokio::test]
 async fn stc_three_sections_resolve_a_plan_name() {
     let scene = scene();
