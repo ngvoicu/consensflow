@@ -22,6 +22,323 @@ fn look(command: &str, folder: &str, version: Response<Said>, release: Told) -> 
 }
 
 #[test]
+fn a3_review_devin_setup_keeps_the_original_reading_beside_the_proved_release() {
+    let release = crate::devin::declared::NEWEST_TESTED;
+    let mut setups = Vec::new();
+    for separator in ["\n", "\r\n"] {
+        let said =
+            format!("workspace launcher 1.0.0{separator}devin {release} (053434014dbd){separator}");
+        let fixture = look("devin", "bin", says(&said), Ok(release.to_owned()));
+        let row = fixture.row("devin", false);
+        assert_eq!(row.version.value(), Some(release));
+        assert_eq!(json_of(&row)["tested"]["release"], release);
+        assert_eq!(json_of(&row)["update"]["state"], "current");
+        setups.push(row.setup.clone());
+    }
+    let required = Some(Setup::UpdateRequired {
+        reason: format!(
+            "Devin {} or newer is required. Update Devin before opening a pane.",
+            crate::devin::minimum_version()
+        ),
+    });
+    assert_eq!(setups, vec![required.clone(), required]);
+
+    // The inverse separates the legacy setup verdict from the proved release too.
+    let fixture = look(
+        "devin",
+        "bin",
+        says("workspace launcher 9999.0.0\ndevin 0.0.1 (053434014dbd)\n"),
+        Ok("0.0.2".to_owned()),
+    );
+    let row = fixture.row("devin", false);
+    assert_eq!(row.setup, Some(Setup::Ready));
+    assert_eq!(row.version.value(), Some("0.0.1"));
+    assert_eq!(json_of(&row)["tested"]["release"], "0.0.1");
+    assert_eq!(json_of(&row)["update"]["state"], "available");
+}
+
+#[test]
+fn a3_review_muse_setup_keeps_the_original_reading_beside_the_proved_release() {
+    let said = "workspace launcher 1.0.0\r\nMuse Code 1.4.14 (1.4.14-R7309.1)\r\n";
+    let fixture = look("muse", "bin", says(said), Ok("1.4.14-R7309.1".to_owned()));
+    let row = fixture.row("muse", false);
+    assert_eq!(row.version.value(), Some("1.4.14-R7309.1"));
+    assert_eq!(json_of(&row)["tested"]["release"], "1.4.14-R7309.1");
+    assert_eq!(json_of(&row)["update"]["state"], "current");
+    assert_eq!(
+        row.setup,
+        Some(Setup::UpdateRequired {
+            reason: crate::muse::version::required()
+        })
+    );
+
+    let said = "workspace launcher 9999.0.0\nMuse Code 1.4.12 (1.4.12-R6000)\n";
+    let fixture = look("muse", "bin", says(said), Ok("1.4.13-R6996.1".to_owned()));
+    let row = fixture.row("muse", false);
+    assert_eq!(row.version.value(), Some("1.4.12-R6000"));
+    assert_eq!(json_of(&row)["update"]["state"], "available");
+    assert_eq!(row.setup, Some(Setup::Ready));
+}
+
+#[test]
+fn a3_review_muse_unreadable_build_uses_the_original_fallback() {
+    let newest = crate::muse::declared::NEWEST_TESTED;
+    let semver = newest.split_once("-R").unwrap().0;
+    let mut rows = Vec::new();
+    for build in ["4294967296.1", "4294967295.4294967296"] {
+        let said = format!("Muse Code {semver} ({semver}-R{build})");
+        let fixture = look("muse", "bin", says(&said), Ok(newest.to_owned()));
+        let row = json_of(&fixture.row("muse", false));
+        rows.push(json!({
+            "version": row["version"]["value"],
+            "release": row["tested"]["release"],
+            "beyond": row["tested"]["beyond"],
+            "update": row["update"]["state"],
+        }));
+    }
+    let fallback =
+        json!({"version": semver, "release": null, "beyond": false, "update": "current"});
+    assert_eq!(rows, vec![fallback.clone(), fallback]);
+
+    for line in [
+        "Muse Code 4294967296.4.23 (4294967296.4.23-R1.1)",
+        "Muse Code 1.4294967296.23 (1.4294967296.23-R1.1)",
+        "Muse Code 1.4.4294967296 (1.4.4294967296-R1.1)",
+    ] {
+        assert!(crate::muse::declared::release(line).is_none(), "{line}");
+    }
+
+    let valid = format!("{semver}-R4294967295.4294967295");
+    let said = format!("Muse Code {semver} ({valid})");
+    let fixture = look("muse", "bin", says(&said), Ok(valid.clone()));
+    let row = json_of(&fixture.row("muse", false));
+    assert_eq!(row["tested"]["release"], valid);
+    assert_eq!(row["version"]["value"], valid);
+    assert_eq!(row["update"]["state"], "current");
+    assert!(crate::muse::declared::pin_release(&format!("{semver}-R4294967296.1")).is_none());
+}
+
+#[test]
+fn a3_review_claude_installer_round_trips_its_text_feed() {
+    use crate::admin::{feed::release_version, release_source, Format};
+    use cf_base::env::Env;
+
+    let fixture = Fixture::in_env(|root| {
+        let text = |folder: &str| root.join(folder).to_string_lossy().into_owned();
+        Env::from_vars([
+            ("HOME", text("home")),
+            ("USERPROFILE", text("home")),
+            ("PATH", text("home/.local/share/claude/versions")),
+            ("CONSENSFLOW_HOME", text("consensflow")),
+            ("CLAUDE_CONFIG_DIR", text("home/.claude")),
+        ])
+    });
+    let executable = fixture.install("home/.local/share/claude/versions", "claude");
+    let newest = crate::claude::declared::NEWEST_TESTED;
+    let source = release_source(Harness::Claude, &executable.to_string_lossy(), &fixture.env);
+    assert_eq!(source.format, Format::Text);
+    // The installer's channel supplies plain text, not an npm JSON document.
+    let body = format!("{newest}\r\n");
+    let feed = release_version(source.format, &body);
+    assert_eq!(feed.as_deref(), Ok(newest));
+    fixture.capture.says(
+        "claude --version",
+        &format!("workspace launcher 1.0.0\n{newest} (Claude Code)\n"),
+    );
+    fixture.latest.says(Harness::Claude, &feed.unwrap());
+    let row = json_of(&fixture.row("claude", false));
+    assert_eq!(row["tested"]["newest"], newest);
+    assert_eq!(row["tested"]["release"], newest);
+    assert_eq!(row["tested"]["beyond"], false);
+    assert_eq!(row["version"]["value"], newest);
+    assert_eq!(row["update"]["state"], "current");
+    assert!(row["update"]["source"]
+        .as_str()
+        .unwrap()
+        .ends_with("/latest"));
+}
+
+#[test]
+fn a3_every_installed_row_names_its_tested_range() {
+    for command in ["claude", "codex", "pi", "devin", "muse"] {
+        let fixture = look(command, "bin", says("unusual"), Ok("9.9.9".to_owned()));
+        let row = json_of(&fixture.row(command, false));
+        let (newest, oldest) = match command {
+            "claude" => (
+                crate::claude::declared::NEWEST_TESTED,
+                Some(crate::claude::declared::OLDEST_TESTED.to_owned()),
+            ),
+            "codex" => (crate::codex::declared::NEWEST_TESTED, None),
+            "pi" => (
+                crate::pi::declared::NEWEST_TESTED,
+                Some(crate::pi::declared::OLDEST_TESTED.to_owned()),
+            ),
+            "devin" => (
+                crate::devin::declared::NEWEST_TESTED,
+                Some(crate::devin::minimum_version()),
+            ),
+            "muse" => (
+                crate::muse::declared::NEWEST_TESTED,
+                Some(crate::muse::version::minimum()),
+            ),
+            _ => unreachable!(),
+        };
+        assert_eq!(row["tested"]["newest"], newest, "{command}");
+        assert_eq!(row["tested"]["oldest"], json!(oldest), "{command}");
+        assert_eq!(row["tested"]["release"], json!(null), "{command}");
+        assert_eq!(row["tested"]["beyond"], false, "{command}");
+    }
+}
+
+fn a3_release_cases(command: &str, own: &str, release: &str) {
+    for (said, expected) in [
+        (own.to_owned(), Some(release)),
+        (
+            format!("workspace launcher 1.0.0\r\n{own}\r\n"),
+            Some(release),
+        ),
+        (format!("{own}\nworkspace launcher 1.0.0\n"), Some(release)),
+        (format!("workspace launcher 1.0.0 {own}"), None),
+        (format!(" {own}"), None),
+        (format!("{own} trailing text"), None),
+        (format!("{own}\n{own}"), None),
+        ("workspace launcher 1.0.0".to_owned(), None),
+    ] {
+        let fixture = look(command, "bin", says(&said), Ok(release.to_owned()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(
+            row["tested"]["release"],
+            json!(expected),
+            "{command}: {said:?}"
+        );
+    }
+}
+
+#[test]
+fn a3_claude_release_requires_one_whole_native_line() {
+    a3_release_cases("claude", "9999.0.2 (Claude Code)", "9999.0.2");
+}
+
+#[test]
+fn a3_codex_release_requires_one_whole_native_line() {
+    a3_release_cases("codex", "codex-cli 9999.0.2", "9999.0.2");
+}
+
+#[test]
+fn a3_pi_release_requires_one_whole_native_line() {
+    a3_release_cases("pi", "9999.0.2", "9999.0.2");
+}
+
+#[test]
+fn a3_devin_release_requires_one_whole_native_line() {
+    a3_release_cases("devin", "devin 9999.0.2 (053434014dbd)", "9999.0.2");
+}
+
+#[test]
+fn a3_muse_release_requires_one_whole_native_line() {
+    a3_release_cases(
+        "muse",
+        "Muse Code 9999.0.2 (9999.0.2-R7400.1)",
+        "9999.0.2-R7400.1",
+    );
+    for invalid in [
+        "Muse Code 1.4.14 (1.4.15-R7400.1)",
+        "Muse Code 1.4.14 (1.4.14)",
+        "Muse Code 1.4.14-beta (1.4.14-R7400.1)",
+        "1.4.14-R7400.1",
+    ] {
+        let fixture = look(
+            "muse",
+            "bin",
+            says(invalid),
+            Ok("1.4.14-R7400.1".to_owned()),
+        );
+        let row = json_of(&fixture.row("muse", false));
+        assert_eq!(row["tested"]["release"], json!(null), "{invalid}");
+        assert_eq!(row["tested"]["beyond"], false, "{invalid}");
+    }
+}
+
+#[test]
+fn a3_release_round_trip_keeps_the_feed_and_display_in_agreement() {
+    use crate::admin::feed::release_version;
+    use crate::admin::source::Format;
+
+    for (command, own, release) in [
+        ("claude", "9999.0.2 (Claude Code)", "9999.0.2"),
+        ("codex", "codex-cli 9999.0.2", "9999.0.2"),
+        ("pi", "9999.0.2", "9999.0.2"),
+        ("devin", "devin 9999.0.2 (053434014dbd)", "9999.0.2"),
+        (
+            "muse",
+            "Muse Code 9999.0.2 (9999.0.2-R7309.1)",
+            "9999.0.2-R7309.1",
+        ),
+    ] {
+        let feed = release_version(Format::Npm, &json!({"version": release}).to_string()).unwrap();
+        let said = format!("workspace launcher 1.0.0\n{own}\n");
+        let fixture = look(command, "bin", says(&said), Ok(feed.clone()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(row["tested"]["release"], feed, "{command}");
+        assert_eq!(row["version"]["value"], feed, "{command}");
+        assert_eq!(row["update"]["state"], "current", "{command}: {row}");
+    }
+
+    // Use each actual declaration as the feed and CLI release. A future bump
+    // changes neither this test nor the scenario goldens.
+    for command in ["claude", "codex", "pi", "devin", "muse"] {
+        let newest = json_of(&Fixture::new().row(command, false))["tested"]["newest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let own = match command {
+            "claude" => format!("{newest} (Claude Code)"),
+            "codex" => format!("codex-cli {newest}"),
+            "pi" => newest.clone(),
+            "devin" => format!("devin {newest} (053434014dbd)"),
+            "muse" => format!(
+                "Muse Code {} ({newest})",
+                newest.split_once("-R").unwrap().0
+            ),
+            _ => unreachable!(),
+        };
+        let feed = release_version(Format::Npm, &json!({"version": newest}).to_string()).unwrap();
+        let fixture = look(command, "bin", says(&own), Ok(feed.clone()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(row["tested"]["newest"], feed, "{command}");
+        assert_eq!(row["tested"]["release"], feed, "{command}");
+        assert_eq!(row["tested"]["beyond"], false, "{command}");
+        assert_eq!(row["version"]["value"], feed, "{command}");
+        assert_eq!(row["update"]["state"], "current", "{command}");
+    }
+}
+
+#[test]
+fn a3_two_muse_builds_of_one_semver_are_distinct_releases() {
+    for (build, feed, state) in [
+        ("R7309.1", "1.4.14-R7400.1", "available"),
+        ("R7400.1", "1.4.14-R7309.1", "current"),
+    ] {
+        let said = format!("Muse Code 1.4.14 (1.4.14-{build})");
+        let fixture = look("muse", "bin", says(&said), Ok(feed.to_owned()));
+        let row = json_of(&fixture.row("muse", false));
+        assert_eq!(row["update"]["state"], state, "{said}: {row}");
+    }
+}
+
+#[test]
+fn a3_threshold_and_wrapper_advice_use_the_proved_release() {
+    for (own, expected) in [("0.0.1", false), ("9999.0.2", true)] {
+        let said = format!("workspace launcher 1.0.0\n{own} (Claude Code)");
+        let fixture = look("claude", "bin", says(&said), Ok(own.to_owned()));
+        let row = json_of(&fixture.row("claude", false));
+        assert_eq!(row["tested"]["beyond"], expected, "{row}");
+        assert_eq!(row["version"]["value"], own, "{row}");
+        assert_eq!(row["update"]["state"], "current", "{row}");
+    }
+}
+
+#[test]
 fn a_cli_that_says_no_version_or_fails_to_is_told_why_and_never_a_guess() {
     for (answer, version) in [
         (
@@ -167,6 +484,7 @@ fn a_row_says_its_fields_in_the_order_node_builds_them() {
             "checkedAt",
             "version",
             "update",
+            "tested",
             "setup",
             "distribution"
         ]
@@ -270,6 +588,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
             value: "1.4.13-R6996.1".to_owned()
         }
     );
+    assert_eq!(json_of(&row)["tested"]["release"], "1.4.13-R6996.1");
     assert!(
         fixture.capture.take_ran().is_empty(),
         "the launcher's own --version checks for an update"
@@ -313,7 +632,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
     assert_eq!(
         row.version,
         Version::Checked {
-            value: "1.4.13".to_owned()
+            value: "1.4.13-R6996.1".to_owned()
         }
     );
     assert_eq!(row.setup, Some(Setup::Ready));

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use cf_proto::agents::Harness;
 use serde::{Serialize, Serializer};
 
-use crate::pi;
+use crate::{claude, codex, devin, muse, pi};
 
 /// What is known of one harness's CLI.
 #[derive(Debug, Serialize)]
@@ -22,6 +22,7 @@ pub struct Row {
     pub checked_at: i64,
     pub version: Version,
     pub update: Update,
+    pub tested: Tested,
     /// Whether a window can be opened on the CLI: Devin's always.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup: Option<Setup>,
@@ -30,6 +31,60 @@ pub struct Row {
     /// The extension made for the CLI (Pi's alone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<Extension>,
+}
+
+/// The releases tested with ConsensFlow and the installed release, when proved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Tested {
+    pub newest: &'static str,
+    pub oldest: Option<String>,
+    pub release: Option<String>,
+    pub beyond: bool,
+}
+
+impl Tested {
+    pub(super) fn of(harness: Harness, release: Option<&str>) -> Self {
+        let (newest, oldest) = match harness {
+            Harness::Claude => (
+                claude::declared::NEWEST_TESTED,
+                Some(claude::declared::OLDEST_TESTED.to_owned()),
+            ),
+            Harness::Codex => (codex::declared::NEWEST_TESTED, None),
+            Harness::Pi => (
+                pi::declared::NEWEST_TESTED,
+                Some(pi::declared::OLDEST_TESTED.to_owned()),
+            ),
+            Harness::Devin => (
+                devin::declared::NEWEST_TESTED,
+                Some(devin::minimum_version()),
+            ),
+            Harness::Muse => (
+                muse::declared::NEWEST_TESTED,
+                Some(muse::version::minimum()),
+            ),
+        };
+        Self::with_newest(harness, newest, oldest, release)
+    }
+
+    fn with_newest(
+        harness: Harness,
+        newest: &'static str,
+        oldest: Option<String>,
+        release: Option<&str>,
+    ) -> Self {
+        let beyond = release
+            .and_then(|release| match harness {
+                Harness::Muse => muse::version::newer(Some(newest), release),
+                _ => super::version::newer(Some(newest), release),
+            })
+            .unwrap_or(false);
+        Self {
+            newest,
+            oldest,
+            release: release.map(str::to_owned),
+            beyond,
+        }
+    }
 }
 
 /// What the CLI said to `--version`.

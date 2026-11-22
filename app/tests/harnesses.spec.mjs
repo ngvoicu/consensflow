@@ -1,8 +1,55 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
+
+test('tested versions and installed release tell one consistent story', async ({ page }) => {
+  const html = readFileSync(
+    new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
+    'utf8',
+  )
+  const row = (id, installed, release, beyond) => ({
+    id,
+    installed,
+    path: installed ? `/test/${id}` : null,
+    checkedAt: 0,
+    version: installed ? { state: 'checked', value: '1.0.0' } : { state: 'not-installed' },
+    update: { state: installed ? 'current' : 'not-checked' },
+    tested: { newest: '2.0.0', oldest: null, release, beyond },
+  })
+  await page.route('http://a3.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({
+        json: {
+          harnesses: [
+            row('claude', true, '9999.0.2', true),
+            row('pi', true, '0.0.1', false),
+            row('codex', false, null, false),
+          ],
+        },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://a3.test/harnesses')
+  const rows = page.locator('.host')
+  await expect(rows).toHaveCount(3)
+  const claude = rows.filter({ has: page.getByText('claude', { exact: true }) })
+  const claudeText = await claude.innerText()
+  expect.soft(claudeText).toContain('Version 9999.0.2, up to date')
+  expect.soft(claudeText).toContain('Tested up to 2.0.0.')
+  expect.soft(claudeText).toContain('This version is newer and has not been checked yet.')
+  const pi = rows.filter({ has: page.getByText('pi', { exact: true }) })
+  const piText = await pi.innerText()
+  expect.soft(piText).toContain('Version 0.0.1, up to date')
+  expect.soft(piText).toContain('Tested up to 2.0.0.')
+  expect.soft(piText).not.toContain('This version is newer')
+  const codex = rows.filter({ has: page.getByText('codex', { exact: true }) })
+  const codexText = await codex.innerText()
+  expect.soft(codexText).not.toContain('Tested up to')
+  expect.soft(codexText).not.toContain('This version is newer')
+})
 
 test('Harnesses loads the bundled Geist in standalone and framed views', async ({
   page,

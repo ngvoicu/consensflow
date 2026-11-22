@@ -13,6 +13,7 @@ fn row(version: Version, update: Update) -> Row {
         checked_at: 7,
         version,
         update,
+        tested: Tested::of(Harness::Codex, None),
         setup: None,
         distribution: Distribution::Unlooked,
         extension: None,
@@ -25,6 +26,16 @@ fn release() -> Release {
         source: "https://feed".to_owned(),
         command: None,
     }
+}
+
+#[test]
+fn a3_threshold_takes_the_declared_bound_and_compares_muse_builds() {
+    let tested =
+        |harness, newest, release| Tested::with_newest(harness, newest, None, Some(release));
+    assert!(tested(Harness::Claude, "98.1.326", "98.1.330").beyond);
+    assert!(!tested(Harness::Claude, "98.1.330", "98.1.330").beyond);
+    assert!(tested(Harness::Muse, "1.4.14-R7309.1", "1.4.14-R7400.1").beyond);
+    assert!(!tested(Harness::Muse, "1.4.14-R7400.1", "1.4.14-R7309.1").beyond);
 }
 
 #[test]
@@ -97,7 +108,10 @@ fn a_row_leaves_out_what_was_never_looked_at_and_writes_null_for_what_was_not_fo
     let text = |row: &Row| serde_json::to_string(row).unwrap();
     assert_eq!(
         text(&found),
-        r#"{"id":"codex","path":"/bin/codex","installed":true,"checkedAt":7,"version":{"state":"checked","value":"1.0.0"},"update":{"state":"current","value":"1.0.1","source":"https://feed","command":null}}"#
+        format!(
+            r#"{{"id":"codex","path":"/bin/codex","installed":true,"checkedAt":7,"version":{{"state":"checked","value":"1.0.0"}},"update":{{"state":"current","value":"1.0.1","source":"https://feed","command":null}},"tested":{}}}"#,
+            serde_json::to_string(&found.tested).unwrap()
+        )
     );
     found.distribution = Distribution::Unrecognized;
     assert!(text(&found).ends_with(r#""distribution":null}"#));
@@ -105,9 +119,10 @@ fn a_row_leaves_out_what_was_never_looked_at_and_writes_null_for_what_was_not_fo
     found.setup = Some(Setup::Ready);
     found.extension = Some(Extension::unverified("/ext.mjs".to_owned()));
     assert!(
-        text(&found).ends_with(
-            r#""update":{"state":"current","value":"1.0.1","source":"https://feed","command":null},"setup":{"state":"ready"},"distribution":"Homebrew","extension":{"state":"installed-unverified","path":"/ext.mjs"}}"#
-        ),
+        text(&found).ends_with(&format!(
+            r#""update":{{"state":"current","value":"1.0.1","source":"https://feed","command":null}},"tested":{},"setup":{{"state":"ready"}},"distribution":"Homebrew","extension":{{"state":"installed-unverified","path":"/ext.mjs"}}}}"#,
+            serde_json::to_string(&found.tested).unwrap()
+        )),
         "{}",
         text(&found)
     );

@@ -20,6 +20,14 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **Tested releases on the Admin row (T-1968).** Both platform scenarios now
+  include `tested` after `update`, including on missing harnesses. The installed
+  release is read only from the CLI's own complete version line (or Muse's pin),
+  and a recognized release is also the displayed and compared version. The
+  scenario runner masks `tested.newest` as `<newest tested>` so a declaration
+  bump does not rewrite the recordings. The threshold and the feed/CLI/declaration
+  round trip have separate assertions; the other recorded fields are unchanged.
+
 - **T-1715 shorter adapter text.** In each of the Darwin and Windows launch
   recordings, 88 recorded role files use the shorter Codex introduction and 88
   recorded child configuration files use its shorter identity/board sentence.
