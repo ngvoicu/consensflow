@@ -60,9 +60,14 @@ async fn every_harness_is_checked_in_the_order_the_page_lists_them() {
     assert_eq!(rows[1]["tested"]["release"], Value::Null);
     assert_eq!(rows[1]["tested"]["beyond"], false);
     assert_eq!(
+        body["updating"],
+        serde_json::json!([]),
+        "no update is running"
+    );
+    assert_eq!(
         rows[1].to_string(),
         format!(
-            r#"{{"id":"claude","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}},"tested":{}}}"#,
+            r#"{{"id":"claude","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}},"tested":{},"stamp":1}}"#,
             rows[1]["tested"]
         )
     );
@@ -90,7 +95,7 @@ async fn a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_wh
     assert_eq!(
         body["harnesses"].to_string(),
         format!(
-            r#"[{{"id":"claude","path":{},"installed":true,"checkedAt":{EPOCH_MS},"version":{{"state":"checked","value":"2.1.0"}},"update":{{"state":"available","value":"2.2.0","source":"https://registry.npmjs.org/@anthropic-ai/claude-code/latest","command":null}},"tested":{},"distribution":null}}]"#,
+            r#"[{{"id":"claude","path":{},"installed":true,"checkedAt":{EPOCH_MS},"version":{{"state":"checked","value":"2.1.0"}},"update":{{"state":"available","value":"2.2.0","source":"https://registry.npmjs.org/@anthropic-ai/claude-code/latest","command":null}},"tested":{},"distribution":null,"stamp":1}}]"#,
             Value::from(installed.to_string_lossy().as_ref()),
             body["harnesses"][0]["tested"]
         )

@@ -61,29 +61,63 @@ const el = (tag, className, text) => {
 };
 let HARNESS_ROWS = [];
 const UPDATES = new Map();
-// The newest look wins: each request has a number, and a row from a response is shown only if
-// no response of a later request has shown that harness's row. The Admin answers in the order it
-// likes, and a Refresh never joins a look in flight.
-let LOOKS = 0;
+// The newest look wins: the daemon stamps each row with the number its look took when it began
+// (one counter per harness), and a row is shown only if no row of a later look has shown that
+// harness's. Whatever order the answers arrive in, and across a reload (a new page takes what the
+// daemon says first, and the stamps order the rest).
 const SHOWN = new Map();
-function showRows(rows, look) {
+function showRows(rows) {
   const byId = new Map(HARNESS_ROWS.map(row => [row.id, row]));
   for (const row of rows) {
-    if ((SHOWN.get(row.id) || 0) > look) continue;
-    SHOWN.set(row.id, look);
+    const stamp = row.stamp ?? 0;
+    if ((SHOWN.get(row.id) ?? -1) > stamp) continue;
+    SHOWN.set(row.id, stamp);
     byId.set(row.id, row);
   }
   HARNESS_ROWS = [...byId.values()];
 }
 // The status line is the newest operation's: an older one that ends later writes nothing.
+let LOOKS = 0;
 let SAID = 0;
 function say(look, text) {
   if (look < SAID) return;
   SAID = look;
   document.querySelector('#check-note').textContent = text;
 }
-// One update at a time for a harness: its button stays disabled through every redraw.
+// One update at a time for a harness: the daemon refuses a second, and its button stays disabled
+// through every redraw. An update the daemon is running that this page did not begin (another tab,
+// or this page before a reload) is watched until it ends.
 const UPDATING = new Set();
+const WATCHED = new Set();
+async function post(path, body, failed) {
+  const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (response.ok) return response.json();
+  let words = null;
+  try { words = (await response.json()).message; } catch (error) { /* no words */ }
+  throw new Error(words || failed);
+}
+function watchUpdate(id, words = 'Updating ' + id + '… this can take a minute.') {
+  if (WATCHED.has(id)) return;
+  WATCHED.add(id);
+  UPDATING.add(id);
+  const look = ++LOOKS;
+  say(look, words);
+  renderHarnesses();
+  const poll = async () => {
+    let running = true;
+    try {
+      const { harnesses, updating } = await post('/api/harnesses/check', { id, refresh: false }, 'Harness check failed');
+      showRows(harnesses);
+      running = updating.includes(id);
+    } catch (error) { /* try again */ }
+    if (running) return setTimeout(poll, 2000);
+    WATCHED.delete(id);
+    UPDATING.delete(id);
+    say(look, '');
+    renderHarnesses();
+  };
+  setTimeout(poll, 2000);
+}
 async function updateHarness(id, button) {
   if (UPDATING.has(id)) return;
   UPDATING.add(id);
@@ -91,31 +125,30 @@ async function updateHarness(id, button) {
   say(look, 'Updating ' + id + '… this can take a minute.');
   button.disabled = true;
   try {
-    const response = await fetch('/api/harnesses/update', { method: 'POST', headers, body: JSON.stringify({ id }) });
-    if (!response.ok) throw new Error('The update could not be started');
-    const { result } = await response.json();
+    const { result } = await post('/api/harnesses/update', { id }, 'The update could not be started');
     UPDATES.set(id, result);
-    // Its row was looked at after the install, which is now: it takes a number of its own.
-    showRows([result.harness], ++LOOKS);
+    showRows([result.harness]);
     say(look, '');
   } catch (error) {
+    if (/already running/.test(error.message)) {
+      UPDATING.delete(id);
+      return watchUpdate(id, error.message + ': this page shows it when it ends.');
+    }
     say(look, error.message + ' — try again.');
-  } finally {
-    UPDATING.delete(id);
-    renderHarnesses();
   }
+  UPDATING.delete(id);
+  renderHarnesses();
 }
 async function checkHarnesses(id = null, button = null) {
   const look = ++LOOKS;
   say(look, 'Checking…');
   if (button) button.disabled = true;
   try {
-    const response = await fetch('/api/harnesses/check', { method: 'POST', headers, body: JSON.stringify({ ...(id ? { id } : {}), refresh: button !== null }) });
-    if (!response.ok) throw new Error('Harness check failed');
-    const { harnesses } = await response.json();
-    showRows(harnesses, look);
+    const { harnesses, updating } = await post('/api/harnesses/check', { ...(id ? { id } : {}), refresh: button !== null }, 'Harness check failed');
+    showRows(harnesses);
     renderHarnesses();
     say(look, '');
+    for (const running of updating || []) if (!UPDATING.has(running)) watchUpdate(running);
   } catch (error) {
     say(look, error.message + ' — try checking again.');
   } finally { if (button) button.disabled = false; }

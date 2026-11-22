@@ -191,3 +191,53 @@ replace = '''
                 }
                 inspect::unfinished(harness, path, checked_at)
 '''
+
+# The daemon decides which look is newest (T-2074): the stamp is taken when a look begins, and
+# one update of a harness runs at a time, whichever page asks.
+[[plant]]
+name = "harness window: the stamp is taken at the answer"
+meant = "a_look_begun_later_has_the_higher_stamp_whatever_order_the_answers_arrive_in"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let stamped = (look, Rc::clone(&row));
+'''
+replace = '''
+    let answered = {
+        let mut looks = inner.looks.borrow_mut();
+        let counted = looks.entry(harness).or_insert(0);
+        *counted += 1;
+        *counted
+    };
+    let stamped = (answered, Rc::clone(&row));
+'''
+
+[[plant]]
+name = "harness window: the install lock is left out"
+meant = "a_second_update_of_a_harness_is_refused_in_words_while_the_first_runs"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/update.rs"
+find = '''
+        if !inner.updating.borrow_mut().insert(harness) {
+'''
+replace = '''
+        if inner.updating.borrow_mut().insert(harness) && false {
+'''
+
+[[plant]]
+name = "harness window: the daemon does not say an update is running"
+meant = "a_second_update_of_a_harness_is_refused_in_words_while_the_first_runs"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+            updating: self.updating(),
+'''
+replace = '''
+            updating: Vec::new(),
+'''

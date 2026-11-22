@@ -26,6 +26,7 @@ pub(super) mod npm_windows;
 mod real;
 #[cfg(windows)]
 mod real_windows;
+mod stamps;
 pub(super) mod standalone;
 
 /// An admin over a throwaway home, on a clock and with programs and feeds the

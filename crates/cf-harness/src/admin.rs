@@ -16,8 +16,8 @@
 //! a launch checks (Codex, Devin, Muse Code) is the launch's own check, called at every
 //! look and kept by nothing here: what keeps an answer is the launch's map of probes.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -66,7 +66,19 @@ pub trait Capture {
 
 /// An inspection begun, which every call asking for the same harness while
 /// it runs shares.
-type Pending = Shared<LocalBoxFuture<'static, Rc<Row>>>;
+type Pending = Shared<LocalBoxFuture<'static, Stamped>>;
+
+/// A row with its stamp: the number its look took when it began, from one counter per harness.
+/// A look begun later has a higher one, whatever the order the answers arrive in.
+pub type Stamped = (u64, Rc<Row>);
+
+/// What the page is told of the harnesses: their rows, each with its stamp, and the
+/// harnesses whose update is running now, whichever page began it.
+#[derive(Debug)]
+pub struct Observed {
+    pub rows: Vec<Stamped>,
+    pub updating: Vec<Harness>,
+}
 
 /// How long a row may take: at this time it is answered with what it has.
 const ROW_LIMIT: Duration = Duration::from_secs(40);
@@ -81,10 +93,13 @@ struct Inner {
     probes: Rc<Probes>,
     processes: Rc<dyn Processes>,
     /// The row each harness was last looked at for, with the number of the look that made it.
-    cache: RefCell<HashMap<Harness, (u64, Rc<Row>)>>,
+    cache: RefCell<HashMap<Harness, Stamped>>,
     pending: RefCell<HashMap<Harness, (u64, Pending)>>,
-    /// The number of the last look begun: the newest look's answer is the one kept.
-    looks: Cell<u64>,
+    /// The number of the last look begun of each harness, taken when the look begins and not
+    /// when it is answered: the newest look's row is the one kept and the one the page shows.
+    looks: RefCell<HashMap<Harness, u64>>,
+    /// The harnesses whose update is running: a second update of one is refused.
+    updating: RefCell<HashSet<Harness>>,
 }
 
 /// Looks at the harnesses' CLIs and updates them.
@@ -159,7 +174,8 @@ impl HarnessAdmin {
                 processes,
                 cache: RefCell::new(HashMap::new()),
                 pending: RefCell::new(HashMap::new()),
-                looks: Cell::new(0),
+                looks: RefCell::new(HashMap::new()),
+                updating: RefCell::new(HashSet::new()),
             }),
         }
     }
@@ -170,6 +186,17 @@ impl HarnessAdmin {
     /// and the CLI's path is the same. Every harness is looked at at once.
     /// `Unknown harness` for a name that is none.
     pub async fn check(&self, id: Option<&str>, refresh: bool) -> Result<Vec<Rc<Row>>, String> {
+        Ok(self
+            .observe(id, refresh)
+            .await?
+            .rows
+            .into_iter()
+            .map(|(_, row)| row)
+            .collect())
+    }
+
+    /// [`check`](Self::check), each row with its stamp and the updates that are running.
+    pub async fn observe(&self, id: Option<&str>, refresh: bool) -> Result<Observed, String> {
         let harnesses = match id {
             None => known_harnesses().to_vec(),
             Some(name) => vec![Harness::from_name(name).ok_or("Unknown harness")?],
@@ -177,14 +204,28 @@ impl HarnessAdmin {
         let looks = harnesses
             .into_iter()
             .map(|harness| self.look(harness, refresh));
-        Ok(join_all(looks).await)
+        let rows = join_all(looks).await;
+        Ok(Observed {
+            rows,
+            updating: self.updating(),
+        })
+    }
+
+    /// The harnesses whose update is running, in the order they are listed in.
+    pub fn updating(&self) -> Vec<Harness> {
+        let running = self.inner.updating.borrow();
+        known_harnesses()
+            .iter()
+            .copied()
+            .filter(|harness| running.contains(harness))
+            .collect()
     }
 
     /// One harness's row: the one kept, the inspection that is running, or an
     /// inspection begun now. A harness whose launch checks its CLI has its verdict
     /// asked at every look, whatever is kept of the rest; a refresh forgets what the
     /// launches kept of the CLI and does not join a look in flight.
-    async fn look(&self, harness: Harness, refresh: bool) -> Rc<Row> {
+    async fn look(&self, harness: Harness, refresh: bool) -> Stamped {
         let inner = &self.inner;
         let path =
             harness_path(harness, &inner.env).map(|found| found.to_string_lossy().into_owned());
@@ -193,8 +234,8 @@ impl HarnessAdmin {
             .cache
             .borrow()
             .get(&harness)
-            .map(|(_, row)| Rc::clone(row))
-            .filter(|row| row.path == path && now - row.checked_at < KEPT_MS);
+            .map(|(stamp, row)| (*stamp, Rc::clone(row)))
+            .filter(|(_, row)| row.path == path && now - row.checked_at < KEPT_MS);
         let checked = inspect::checks(harness);
         if !refresh && !checked {
             if let Some(row) = kept {
@@ -216,15 +257,19 @@ impl HarnessAdmin {
                 inner.probes.forget(std::path::Path::new(path));
             }
         }
-        let look = inner.looks.get() + 1;
-        inner.looks.set(look);
+        let look = {
+            let mut looks = inner.looks.borrow_mut();
+            let next = looks.entry(harness).or_insert(0);
+            *next += 1;
+            *next
+        };
         let begun = inspection(
             Rc::clone(inner),
             harness,
             path,
             now,
             look,
-            kept.filter(|_| checked && !refresh),
+            kept.map(|(_, row)| row).filter(|_| checked && !refresh),
         )
         .boxed_local()
         .shared();
@@ -253,7 +298,7 @@ async fn inspection(
     checked_at: i64,
     look: u64,
     kept: Option<Rc<Row>>,
-) -> Rc<Row> {
+) -> Stamped {
     let work = inspect::inspect(&inner, harness, path.clone(), checked_at, kept.as_deref());
     let kept = kept.is_some();
     let mut cut = false;
@@ -271,6 +316,7 @@ async fn inspection(
         work.await
     };
     let row = Rc::new(row);
+    let stamped = (look, Rc::clone(&row));
     let mut cache = inner.cache.borrow_mut();
     let stale = cache.get(&harness).is_some_and(|(held, _)| *held > look);
     // A row cut short has no feed's answer, and one made over a kept feed is no new
@@ -278,7 +324,7 @@ async fn inspection(
     if !stale && !cut && !kept {
         cache.insert(harness, (look, Rc::clone(&row)));
     }
-    row
+    stamped
 }
 
 #[cfg(test)]

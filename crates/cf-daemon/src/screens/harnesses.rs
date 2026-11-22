@@ -23,6 +23,15 @@ fn known(id: Option<&Value>) -> Result<Harness, String> {
         .ok_or_else(|| UNKNOWN.to_owned())
 }
 
+/// A row as the page reads it: its fields and its `stamp`, the number its look took when it began.
+fn stamped(row: &impl serde::Serialize, stamp: u64) -> Value {
+    let mut row = serde_json::to_value(row).unwrap_or(Value::Null);
+    if let Some(fields) = row.as_object_mut() {
+        fields.insert("stamp".to_owned(), json!(stamp));
+    }
+    row
+}
+
 impl Screens {
     /// `POST /api/harnesses/check`: every harness's row, or the one `id` names;
     /// a row kept less than five minutes is answered as it was, unless `refresh`
@@ -33,15 +42,27 @@ impl Screens {
             .map(|id| known(Some(id)))
             .transpose()?;
         let refresh = property(body, "refresh")? == Some(&Value::Bool(true));
-        let harnesses = self.admin.check(id.map(Harness::as_str), refresh).await?;
-        Ok(Answer::ok(json!({ "harnesses": harnesses })))
+        let observed = self.admin.observe(id.map(Harness::as_str), refresh).await?;
+        let harnesses: Vec<Value> = observed
+            .rows
+            .iter()
+            .map(|(stamp, row)| stamped(row.as_ref(), *stamp))
+            .collect();
+        Ok(Answer::ok(
+            json!({ "harnesses": harnesses, "updating": observed.updating }),
+        ))
     }
 
     /// `POST /api/harnesses/update`: the harness `id` names, brought to its latest
     /// release the way it was installed, and what became of it.
     pub(super) async fn update_harness(&self, body: &Value) -> Result<Answer, String> {
         let id = known(property(body, "id")?)?;
-        let result = self.admin.update(id.as_str()).await?;
+        let (result, stamp) = self.admin.update_stamped(id.as_str()).await?;
+        let mut result = serde_json::to_value(&result).map_err(|error| error.to_string())?;
+        if let Some(row) = result.get_mut("harness") {
+            row.as_object_mut()
+                .map(|row| row.insert("stamp".to_owned(), json!(stamp)));
+        }
         Ok(Answer::ok(json!({ "result": result })))
     }
 }

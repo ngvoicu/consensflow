@@ -56,8 +56,9 @@ test('an older check response never replaces what a later look already showed', 
     new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
     'utf8',
   )
-  const row = (id, reason) => ({
+  const row = (id, reason, stamp) => ({
     id,
+    stamp,
     installed: true,
     path: `/test/${id}`,
     checkedAt: 0,
@@ -81,10 +82,10 @@ test('an older check response never replaces what a later look already showed', 
   await page.locator('#check-all').click()
   await expect.poll(() => held.length).toBe(2)
   expect(held[1].body.refresh).toBe(true)
-  await answer(1, [row('codex', 'NEW codex'), row('devin', 'NEW devin')])
+  await answer(1, [row('codex', 'NEW codex', 2), row('devin', 'NEW devin', 2)])
   await expect(page.getByText('NEW codex')).toBeVisible()
   // The older response arrives last, and changes nothing.
-  await answer(0, [row('codex', 'OLD codex'), row('devin', 'OLD devin')])
+  await answer(0, [row('codex', 'OLD codex', 1), row('devin', 'OLD devin', 1)])
   await page.waitForTimeout(150)
   await expect(page.getByText('NEW codex')).toBeVisible()
   await expect(page.getByText('NEW devin')).toBeVisible()
@@ -97,9 +98,9 @@ test('an older check response never replaces what a later look already showed', 
   await page.getByRole('button', { name: 'Check again' }).first().click()
   await expect.poll(() => held.length).toBe(4)
   expect(held[3].body.id).toBe('codex')
-  await answer(3, [row('codex', 'ROW codex')])
+  await answer(3, [row('codex', 'ROW codex', 4)])
   await expect(page.getByText('ROW codex')).toBeVisible()
-  await answer(2, [row('codex', 'ALL codex'), row('devin', 'ALL devin')])
+  await answer(2, [row('codex', 'ALL codex', 3), row('devin', 'ALL devin', 3)])
   await expect(page.getByText('ALL devin')).toBeVisible()
   await expect(page.getByText('ROW codex')).toBeVisible()
   await expect(page.getByText('ALL codex')).toHaveCount(0)
@@ -384,8 +385,9 @@ const harnessesHtml = () =>
     new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
     'utf8',
   )
-const updateRow = (version, update, reason) => ({
+const updateRow = (version, update, reason, stamp) => ({
   id: 'codex',
+  stamp,
   installed: true,
   path: '/test/codex',
   checkedAt: 0,
@@ -404,7 +406,7 @@ const updated = {
   after: '0.171.0',
   command: 'brew upgrade codex',
   output: '',
-  harness: updateRow('0.171.0', current),
+  harness: updateRow('0.171.0', current, undefined, 3),
 }
 const failedUpdate = (output) => ({
   id: 'codex',
@@ -414,62 +416,164 @@ const failedUpdate = (output) => ({
   command: 'brew upgrade codex',
   output,
   reason: 'brew failed',
-  harness: updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue'),
+  harness: updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 3),
 })
 
+// T-2056 blocker 1 and T-2072 finding 6: the page shows the row of the latest look, whichever
+// answer arrives last. The daemon stamps each row when its look begins: the check begun during an
+// update looked before the install ended, the update's own look after it, and a Refresh made
+// after that is the latest of all.
 for (const scope of ['row', 'all']) {
   for (const checkFirst of [true, false]) {
-    test(`a ${scope} check during an update leaves the updated row (${checkFirst ? 'check' : 'update'} answered first)`, async ({
-      page,
-    }) => {
-      const html = harnessesHtml()
-      const checks = []
-      const updates = []
-      await page.route('http://upd.test/**', (route) => {
-        const path = new URL(route.request().url()).pathname
-        if (path === '/api/harnesses/check') {
-          checks.push({ route, body: JSON.parse(route.request().postData() || '{}') })
-          return
-        }
-        if (path === '/api/harnesses/update') {
-          updates.push(route)
-          return
-        }
-        return route.fulfill({ contentType: 'text/html', body: html })
-      })
-      await page.goto('http://upd.test/harnesses')
-      await expect.poll(() => checks.length).toBe(1)
-      await checks[0].route.fulfill({
-        json: { harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue')] },
-      })
-      await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
-      await expect.poll(() => updates.length).toBe(1)
-      if (scope === 'all') await page.locator('#check-all').click()
-      else await page.getByRole('button', { name: 'Check again' }).click()
-      await expect.poll(() => checks.length).toBe(2)
-      const staleCheck = () =>
-        checks[1].route.fulfill({
+    for (const later of ['update', 'check']) {
+      test(`a ${scope} check during an update shows the later look (${later}'s), ${checkFirst ? 'check' : 'update'} answered first`, async ({
+        page,
+      }) => {
+        const html = harnessesHtml()
+        const checks = []
+        const updates = []
+        await page.route('http://upd.test/**', (route) => {
+          const path = new URL(route.request().url()).pathname
+          if (path === '/api/harnesses/check') {
+            checks.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+            return
+          }
+          if (path === '/api/harnesses/update') {
+            updates.push(route)
+            return
+          }
+          return route.fulfill({ contentType: 'text/html', body: html })
+        })
+        await page.goto('http://upd.test/harnesses')
+        await expect.poll(() => checks.length).toBe(1)
+        await checks[0].route.fulfill({
           json: {
-            harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue')],
+            harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 1)],
           },
         })
-      const finishUpdate = () => updates[0].fulfill({ json: { result: updated } })
-      if (checkFirst) {
-        await staleCheck()
-        await finishUpdate()
-      } else {
-        await finishUpdate()
-        await staleCheck()
-      }
-      const codex = page.locator('.host').first()
-      await expect(codex).toContainText('Updated 0.150.0 → 0.171.0')
-      await page.waitForTimeout(150)
-      await expect(codex).toContainText('Version 0.171.0, up to date')
-      await expect(codex).not.toContainText('no native queue')
-      await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
-    })
+        await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
+        await expect.poll(() => updates.length).toBe(1)
+        if (scope === 'all') await page.locator('#check-all').click()
+        else await page.getByRole('button', { name: 'Check again' }).click()
+        await expect.poll(() => checks.length).toBe(2)
+        // The update's own look began at stamp 3 and read a transient refusal; the Refresh,
+        // later at stamp 4, read the CLI passing. Or the Refresh began first, at stamp 2.
+        const result =
+          later === 'update'
+            ? updated
+            : {
+                ...updated,
+                harness: updateRow('0.171.0', current, 'Codex 0.171.0 has no native queue', 3),
+              }
+        const checkRow =
+          later === 'update'
+            ? updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 2)
+            : updateRow('0.171.0', current, undefined, 4)
+        const answerCheck = () => checks[1].route.fulfill({ json: { harnesses: [checkRow] } })
+        const finishUpdate = () => updates[0].fulfill({ json: { result } })
+        if (checkFirst) {
+          await answerCheck()
+          await finishUpdate()
+        } else {
+          await finishUpdate()
+          await answerCheck()
+        }
+        const codex = page.locator('.host').first()
+        await expect(codex).toContainText('Updated 0.150.0 → 0.171.0')
+        await page.waitForTimeout(150)
+        await expect(codex).toContainText('Version 0.171.0, up to date')
+        await expect(codex).not.toContainText('no native queue')
+        await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
+      })
+    }
   }
 }
+
+// T-2072 finding 7: a reload during an update. The daemon says the install is running: the page
+// shows it, offers no second install, and shows the row the daemon has when it ends.
+test('a page opened while an update runs shows it and takes the row when it ends', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  const checks = []
+  const updates = []
+  await page.route('http://reload.test/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/harnesses/check') {
+      checks.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+      return
+    }
+    if (path === '/api/harnesses/update') {
+      updates.push(route)
+      return
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://reload.test/harnesses')
+  await expect.poll(() => checks.length).toBe(1)
+  await checks[0].route.fulfill({
+    json: {
+      harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 1)],
+      updating: ['codex'],
+    },
+  })
+  const codex = page.locator('.host').first()
+  await expect(page.getByRole('status')).toContainText('Updating codex')
+  await expect(codex.getByRole('button', { name: /^Update to/ })).toBeDisabled()
+  // It asks the daemon again until the install ends, and the row it gets then is shown.
+  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(2)
+  await checks[1].route.fulfill({
+    json: {
+      harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 1)],
+      updating: ['codex'],
+    },
+  })
+  await expect(codex.getByRole('button', { name: /^Update to/ })).toBeDisabled()
+  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(3)
+  await checks[2].route.fulfill({
+    json: { harnesses: [updateRow('0.171.0', current, undefined, 3)], updating: [] },
+  })
+  await expect(codex).toContainText('Version 0.171.0, up to date')
+  await expect(codex).not.toContainText('no native queue')
+  await expect(page.getByRole('status')).toHaveText('')
+  expect(updates.length).toBe(0)
+})
+
+test('a second page that asks for an update the daemon refuses shows its words and waits for the first', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  const checks = []
+  let updates = 0
+  await page.route('http://tab.test/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/harnesses/check') {
+      checks.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+      return
+    }
+    if (path === '/api/harnesses/update') {
+      updates += 1
+      return route.fulfill({
+        status: 500,
+        json: { error: 'internal', message: 'an update of Codex is already running' },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://tab.test/harnesses')
+  await expect.poll(() => checks.length).toBe(1)
+  await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available, undefined, 1)] } })
+  await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
+  await expect(page.getByRole('status')).toContainText('an update of Codex is already running')
+  await expect(page.getByRole('button', { name: /^Update to/ })).toBeDisabled()
+  expect(updates).toBe(1)
+  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(2)
+  await checks[1].route.fulfill({
+    json: { harnesses: [updateRow('0.171.0', current, undefined, 3)], updating: [] },
+  })
+  await expect(page.locator('.host').first()).toContainText('Version 0.171.0, up to date')
+  expect(updates).toBe(1)
+})
 
 test('a redraw during an update does not offer a second update, and an older outcome never replaces a later one', async ({
   page,
@@ -498,16 +602,17 @@ test('a redraw during an update does not offer a second update, and an older out
     checkedAt: 0,
     version: { state: 'checked', value: '1.0.0' },
     update: { state: 'current', value: '1.0.0', command: null },
+    stamp: 1,
     distribution: 'npm',
     tested: { newest: null, oldest: null, release: null, beyond: false },
   }
-  await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available), piRow] } })
+  await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available, undefined, 1), piRow] } })
   await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
   await expect.poll(() => updates.length).toBe(1)
   // Pi's check ends while Codex's installer runs: the redraw offers no second Codex update.
   await page.locator('.host').nth(1).getByRole('button', { name: 'Check again' }).click()
   await expect.poll(() => checks.length).toBe(2)
-  await checks[1].route.fulfill({ json: { harnesses: [piRow] } })
+  await checks[1].route.fulfill({ json: { harnesses: [{ ...piRow, stamp: 2 }] } })
   await page.waitForTimeout(150)
   const button = page.locator('.host').first().getByRole('button', { name: /^Update to/ })
   await expect(button).toBeDisabled()
@@ -538,12 +643,12 @@ test('an older check that succeeds does not clear the error of a later update th
   })
   await page.goto('http://err.test/harnesses')
   await expect.poll(() => checks.length).toBe(1)
-  await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available)] } })
+  await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available, undefined, 1)] } })
   await page.locator('#check-all').click()
   await expect.poll(() => checks.length).toBe(2)
   await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
   await expect(page.getByRole('status')).toContainText('The update could not be started')
-  await checks[1].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available)] } })
+  await checks[1].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available, undefined, 2)] } })
   await page.waitForTimeout(150)
   await expect(page.getByRole('status')).toContainText('The update could not be started')
 })

@@ -33,9 +33,21 @@ impl HarnessAdmin {
     /// `Unknown harness`; one installed in a way that is not recognized is
     /// said `unsupported`, and nothing is run.
     pub async fn update(&self, id: &str) -> Result<Outcome, String> {
-        let inner = &self.inner;
+        Ok(self.update_stamped(id).await?.0)
+    }
+
+    /// [`update`](Self::update), with the stamp of the look made after the install. One
+    /// update of a harness runs at a time, whichever page asks: a second is refused in words
+    /// while the first runs, and the daemon says it is running (`observe`'s `updating`).
+    pub async fn update_stamped(&self, id: &str) -> Result<(Outcome, u64), String> {
         let harness = Harness::from_name(id).ok_or("Unknown harness")?;
-        let row = self.look(harness, false).await;
+        let _running = Running::begin(&self.inner, harness)?;
+        self.update_running(harness).await
+    }
+
+    async fn update_running(&self, harness: Harness) -> Result<(Outcome, u64), String> {
+        let inner = &self.inner;
+        let (first, row) = self.look(harness, false).await;
         if !row.installed {
             return Err(format!("{} is not installed", name(harness)));
         }
@@ -43,15 +55,18 @@ impl HarnessAdmin {
         let source = release_source(harness, &executable, &inner.env);
         let argv = source.update.unwrap_or_default();
         let Some((run, arguments)) = argv.split_first() else {
-            return Ok(Outcome::Unsupported {
-                id: harness,
-                state: Ended::Unsupported,
-                reason: format!(
-                    "ConsensFlow does not recognize how {} was installed here: update it the way you installed it.",
-                    name(harness)
-                ),
-                harness: row,
-            });
+            return Ok((
+                Outcome::Unsupported {
+                    id: harness,
+                    state: Ended::Unsupported,
+                    reason: format!(
+                        "ConsensFlow does not recognize how {} was installed here: update it the way you installed it.",
+                        name(harness)
+                    ),
+                    harness: row,
+                },
+                first,
+            ));
         };
         let before = row.version.value().map(str::to_owned);
         let command = argv.join(" ");
@@ -67,7 +82,7 @@ impl HarnessAdmin {
                 (format!("{}{}", failed.stdout, failed.stderr), Some(reason))
             }
         };
-        let after = self.look(harness, true).await;
+        let (stamp, after) = self.look(harness, true).await;
         let now = after.version.value().map(str::to_owned);
         // `after.version.value !== before`, where an unrecognized version is
         // `undefined` after and `null` before: never equal to anything.
@@ -78,16 +93,41 @@ impl HarnessAdmin {
         } else {
             Ended::Updated
         };
-        Ok(Outcome::Ran {
-            id: harness,
-            state,
-            before,
-            after: now,
-            command,
-            output: last_of(&written),
-            reason: failure,
-            harness: after,
-        })
+        Ok((
+            Outcome::Ran {
+                id: harness,
+                state,
+                before,
+                after: now,
+                command,
+                output: last_of(&written),
+                reason: failure,
+                harness: after,
+            },
+            stamp,
+        ))
+    }
+}
+
+/// An update of one harness, running: it is let go of when the update ends or its call is
+/// dropped, and while it holds, no other update of that harness begins.
+struct Running<'a> {
+    inner: &'a super::Inner,
+    harness: Harness,
+}
+
+impl<'a> Running<'a> {
+    fn begin(inner: &'a super::Inner, harness: Harness) -> Result<Self, String> {
+        if !inner.updating.borrow_mut().insert(harness) {
+            return Err(format!("an update of {} is already running", name(harness)));
+        }
+        Ok(Self { inner, harness })
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.inner.updating.borrow_mut().remove(&self.harness);
     }
 }
 
