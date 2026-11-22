@@ -20,6 +20,17 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **T-1986 Codex's launch survives a slow first start.** Node's launch gave Codex's
+  app-server ten seconds from its spawn to answer both requests. Rust gives it ten
+  seconds for the reply to `initialize` and then sixty for the read of the
+  configuration, asks the whole dialogue once more after either silence, and says in
+  the refusal which of the two it was (a protocol error is refused at once, in Node's
+  words, never asked again). In each of the Darwin and Windows launch recordings the
+  two scenarios of a silent app-server (`says nothing in ten seconds`, `answers
+  initialize and then nothing`) were edited by hand: a second scripted child, a second
+  `advance`, and the records of those steps as the Rust launch plays them; their first
+  record is Node's own, but for the read's timer of 60000 in place of 10000.
+
 - **T-1715 shorter adapter text.** In each of the Darwin and Windows launch
   recordings, 88 recorded role files use the shorter Codex introduction and 88
   recorded child configuration files use its shorter identity/board sentence.
