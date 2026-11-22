@@ -14,7 +14,9 @@
 //! stays open with what it left running, nobody is told it did not stop, and the
 //! words that send the task on go into the same window once it rests.
 
-use cf_engine::testing::{Context, Made};
+use cf_engine::testing::Context;
+#[cfg(target_os = "macos")]
+use cf_engine::testing::Made;
 use std::rc::Rc;
 
 use cf_harness::contract::{Held, Over, Pane, Readiness, Waiting};
