@@ -22,7 +22,7 @@ find = '''
         Err(refused) if refused.read => Setup::UpdateRequired {
 '''
 replace = '''
-        Ok(()) | Err(_) if true => Setup::Ready,
+        Ok(()) | Err(_) => Setup::Ready,
         Err(refused) if refused.read => Setup::UpdateRequired {
 '''
 

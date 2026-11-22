@@ -114,11 +114,30 @@ impl World {
     /// The CLI, installed.
     fn install(&self, command: &str) -> PathBuf {
         let at = self.bin.join(command);
-        if command == "muse" && cfg!(windows) {
-            fs::write(at.with_extension("exe"), "").unwrap();
-            return at.with_extension("exe");
+        // Scripted programs run nothing: on Windows the file is the `.exe` a PATH finds.
+        if cfg!(windows) {
+            let exe = at.with_extension("exe");
+            fs::write(&exe, "").unwrap();
+            return exe;
         }
         fake_executable(&at)
+    }
+
+    /// The installed `command` is another file's worth: its size and time are not what they were.
+    fn rewrite(&self, command: &str, extra: &str) {
+        let at = self.install_path(command);
+        let mut text = fs::read_to_string(&at).unwrap_or_default();
+        text.push_str(extra);
+        fs::write(&at, text).unwrap();
+    }
+
+    fn install_path(&self, command: &str) -> PathBuf {
+        let at = self.bin.join(command);
+        if cfg!(windows) {
+            at.with_extension("exe")
+        } else {
+            at
+        }
     }
 
     fn answer(&self, program: &str, answer: Result<String, Failed>) {
@@ -561,7 +580,7 @@ fn a_look_at_a_codex_with_no_queue_asks_each_question_once_and_the_next_look_ask
     );
     // The Codex gains its queue: a look with refresh asks both again, and a prepare none.
     world.always("codex queue --help", Ok(FLAGS.to_owned()));
-    fs::write(world.bin.join("codex"), "#!/bin/sh\nexit 0\n# updated\n").unwrap();
+    world.rewrite("codex", "# updated\n");
     assert_eq!(world.look(true).setup, Some(Setup::Ready));
     let ran = world.ran();
     assert_eq!(
@@ -588,11 +607,7 @@ fn a_changed_file_behind_the_same_path_is_seen_at_the_next_look_and_no_verdict_i
     ));
     // The file behind the path is changed for a Codex with its queue.
     world.always("codex queue --help", Ok(FLAGS.to_owned()));
-    fs::write(
-        world.bin.join("codex"),
-        "#!/bin/sh\nexit 0\n# a newer Codex\n",
-    )
-    .unwrap();
+    world.rewrite("codex", "# a newer Codex\n");
     world.prepare().ok();
     assert_eq!(
         world.look(false).setup,
