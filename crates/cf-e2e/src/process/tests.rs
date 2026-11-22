@@ -138,6 +138,56 @@ fn a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back() {
     assert!(required_from(&[], false, false, &caller).is_empty());
 }
 
+/// A child given the machine's variables has the search path and the system's, and no home of
+/// the account that starts it, nor a harness's folder, nor an XDG one.
+#[test]
+fn a_machine_environment_holds_the_machine_and_nothing_of_the_account() {
+    let caller: Vec<(OsString, OsString)> = [
+        ("PATH", "/usr/bin"),
+        ("SystemRoot", "C:\\Windows"),
+        ("TMPDIR", "/var/folders/x"),
+        ("LANG", "en_US.UTF-8"),
+        ("HOME", "/Users/owner"),
+        ("USERPROFILE", "C:\\Users\\owner"),
+        ("HOMEDRIVE", "C:"),
+        ("HOMEPATH", "\\Users\\owner"),
+        ("APPDATA", "C:\\Users\\owner\\AppData\\Roaming"),
+        ("XDG_CONFIG_HOME", "/Users/owner/.config"),
+        ("CODEX_HOME", "/Users/owner/.codex"),
+        ("CLAUDE_CONFIG_DIR", "/Users/owner/.claude"),
+        ("PI_CODING_AGENT_DIR", "/Users/owner/.pi/agent"),
+        ("CFFIXED_USER_HOME", "/Users/owner"),
+        ("CONSENSFLOW_HOME", "/x"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (OsString::from(k), OsString::from(v)))
+    .collect();
+    let names: Vec<String> = machine_vars(caller)
+        .into_iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["PATH", "SystemRoot", "TMPDIR", "LANG"]);
+}
+
+/// A run on the machine's environment starts with that and its own variables: a program that
+/// prints its environment shows no home the case did not name.
+#[cfg(unix)]
+#[test]
+fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
+    let ran = Run::new("/usr/bin/env")
+        .machine_env()
+        .var("HOME", "/the/kits/home")
+        .run()
+        .unwrap();
+    assert!(ran.stdout.lines().any(|line| line == "HOME=/the/kits/home"));
+    for name in ["CODEX_HOME=", "CLAUDE_CONFIG_DIR=", "XDG_CONFIG_HOME=", "USERPROFILE="] {
+        assert!(
+            !ran.stdout.lines().any(|line| line.starts_with(name)),
+            "{name} reached the child"
+        );
+    }
+}
+
 #[test]
 fn a_run_says_how_it_ended_and_what_it_printed_and_said() {
     let ran = |code, timed_out| Ran {

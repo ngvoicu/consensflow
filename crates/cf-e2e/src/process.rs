@@ -219,6 +219,8 @@ pub struct Run {
     vars: Vec<(OsString, OsString)>,
     removed: Vec<OsString>,
     inherit: bool,
+    /// Only what the machine is ([`Run::machine_env`]).
+    machine: bool,
     finding_programs: bool,
     cwd: Option<PathBuf>,
     limit: Option<Duration>,
@@ -226,6 +228,53 @@ pub struct Run {
     own_group: bool,
     /// The bundle the release ships, where the run has leave to start it ([`Run::shipped`]).
     shipped: Option<PathBuf>,
+}
+
+/// Whether the variable `name` says what the machine is, and nothing of whose account runs on
+/// it: where programs are, what the system is called, the temporary folders, the language.
+/// (Names are not case-sensitive on Windows.)
+pub fn is_machine_variable(name: &str) -> bool {
+    const MACHINE: [&str; 28] = [
+        "PATH",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432",
+        "ALLUSERSPROFILE",
+        "PUBLIC",
+        "COMPUTERNAME",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "OS",
+        "USERNAME",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "TERM",
+        "SHELL",
+    ];
+    let upper = name.to_ascii_uppercase();
+    MACHINE.contains(&upper.as_str()) || upper == "LC_ALL" || upper == "LC_CTYPE"
+}
+
+/// The machine's variables among `all` ([`is_machine_variable`]).
+pub fn machine_vars(
+    all: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    all.into_iter()
+        .filter(|(name, _)| name.to_str().is_some_and(is_machine_variable))
+        .collect()
 }
 
 fn board_variable(name: &OsStr) -> bool {
@@ -254,6 +303,7 @@ impl Run {
             vars: Vec::new(),
             removed: Vec::new(),
             inherit: false,
+            machine: false,
             finding_programs: false,
             cwd: None,
             limit: Some(LIMIT),
@@ -353,6 +403,18 @@ impl Run {
     #[must_use]
     pub fn inheriting_env(mut self) -> Self {
         self.inherit = true;
+        self
+    }
+
+    /// With what the machine is of the test's own environment and nothing of the account: the
+    /// search path, the system's variables and the temporary folders ([`is_machine_variable`]),
+    /// never a home, a profile, a harness's folder or an XDG one. The program's home is what its
+    /// case names (`vars`), by name; a case that names none leaves the program with none of the
+    /// caller's (K3: every child the live kit starts is given the kit's homes, never the
+    /// owner's).
+    #[must_use]
+    pub fn machine_env(mut self) -> Self {
+        self.machine = true;
         self
     }
 
@@ -457,7 +519,11 @@ impl Run {
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
         cf_process::hold_only_the_streams(&mut command);
-        if !self.inherit {
+        if self.machine {
+            command
+                .env_clear()
+                .envs(machine_vars(std::env::vars_os()));
+        } else if !self.inherit {
             command
                 .env_clear()
                 .envs(required_on_windows(&self.vars, self.finding_programs));
