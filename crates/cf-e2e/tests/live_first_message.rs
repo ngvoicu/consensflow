@@ -150,17 +150,35 @@ fn unwrapped(text: &str) -> &str {
         .map_or(inner, |end| inner[..end].trim_end())
 }
 
-/// How long a message's body may be before ConsensFlow cuts what it pastes
+/// How much of a long message's body ConsensFlow keeps when it cuts what it pastes
 /// (`delivery_text`'s `OPENING`, in UTF-16 units): the rest is read with `cf inbox read`.
+/// Where the cut falls is the product's own (`delivery_text::fits_whole`).
 const OPENING: usize = 15_000;
 
-/// The body of the message `id` as ConsensFlow gives it to a window: whole, or its
-/// opening and where to read all of it, as it was given on a command line too.
-fn given_as(message: &str, id: i64) -> String {
-    let length = message.encode_utf16().count();
-    if length <= OPENING {
+/// The commands the window's `cf` may be named by in what it is given: the path of the rig's
+/// own `cf` as the product's formatter writes it for a POSIX shell and for PowerShell (quoted
+/// where it holds a space), or the bare word where no path is known. No other program.
+fn cf_words_of(path: &std::path::Path) -> Vec<String> {
+    use cf_proto::cf_word::{CfWord, Shell};
+    let raw = path.to_string_lossy().into_owned();
+    let mut words = vec![CfWord::bare().as_str().to_owned()];
+    for spelled in [raw.clone(), raw.replace('\\', "/")] {
+        for shell in [Shell::Posix, Shell::PowerShell] {
+            words.push(CfWord::new(&spelled, shell).as_str().to_owned());
+        }
+    }
+    words.sort();
+    words.dedup();
+    words
+}
+
+/// The body of the message `id` as ConsensFlow gives it to a window whose `cf` is called
+/// `cf`: whole where the product sends it whole, else its opening and where to read all of it.
+fn given_as(message: &str, id: i64, cf: &str) -> String {
+    if cf_engine::delivery_text::fits_whole(message) {
         return message.to_owned();
     }
+    let length = message.encode_utf16().count();
     let mut units = 0;
     let opening: String = message
         .chars()
@@ -169,29 +187,18 @@ fn given_as(message: &str, id: i64) -> String {
             units <= OPENING
         })
         .collect();
-    format!("{opening}\n… ({length} characters; read all of it with: cf inbox read m-{id})")
+    format!("{opening}\n… ({length} characters; read all of it with: {cf} inbox read m-{id})")
 }
 
 /// Whether `text` holds the body of message `id` as ConsensFlow gives it to a window: whole, or
-/// its opening, its length and the command that reads all of it, which is the window's own `cf`
-/// (a bare `cf`, or the absolute path of the window's, quoted where it holds a space) followed by
-/// `inbox read m-<id>`.
-fn window_has(text: &str, body: &str, id: i64) -> bool {
-    let bare = given_as(body, id);
-    let Some(cut) = bare.rfind(" cf inbox read m-") else {
-        return text.contains(&bare);
-    };
-    let prefix = &bare[..cut + 1];
-    let tail = format!(" inbox read m-{id})");
-    text.match_indices(prefix).any(|(at, _)| {
-        let line = text[at + prefix.len()..].lines().next().unwrap_or_default();
-        let Some(command) = line.strip_suffix(&tail) else {
-            return false;
-        };
-        let program = command.trim().trim_matches('"');
-        let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
-        matches!(name.to_lowercase().as_str(), "cf" | "cf.exe")
-    })
+/// its opening, its length and the command that reads all of it, spelled with one of `cf_words`.
+fn window_has(text: &str, body: &str, id: i64, cf_words: &[String]) -> bool {
+    if cf_engine::delivery_text::fits_whole(body) {
+        return text.contains(body);
+    }
+    cf_words
+        .iter()
+        .any(|cf| text.contains(&given_as(body, id, cf)))
 }
 
 /// What one task of a worker showed.
@@ -369,6 +376,7 @@ fn judge(
         format!("{:?}", seen.matched),
     );
     let stored = message_with(members, number, word)?;
+    let cf_words = cf_words_of(members.rig().cf());
     let marker = stored
         .as_ref()
         .map(|(id, _)| format!("[ConsensFlow m-{id} "));
@@ -397,7 +405,7 @@ fn judge(
             .is_some_and(|marker| text.contains(marker))
             && stored
                 .as_ref()
-                .is_some_and(|(id, body)| window_has(text, body, *id))
+                .is_some_and(|(id, body)| window_has(text, body, *id, &cf_words))
     });
     account.check(
         &format!("{step}: whole, its header and every line"),
@@ -567,51 +575,80 @@ mod tests {
         assert_eq!(unwrapped("  plain  "), "plain");
     }
 
-    /// T-1937: the window reads the rest of a long message with its own `cf` (an absolute path,
-    /// quoted where it holds a space), not a bare one; the opening, the length and the message's
-    /// own id still have to be exactly right.
+    /// The window reads the rest of a long message with its own `cf`, as the product's
+    /// formatter writes it; the opening, the length and the message's own id are exactly right,
+    /// and no other program is taken for it (K3 review T-1978, 8).
     #[test]
-    fn a_long_message_is_found_in_a_window_whatever_cf_command_it_names() {
-        let long = "x".repeat(OPENING + 5);
+    fn a_long_message_is_found_in_a_window_by_the_cf_command_the_product_wrote() {
+        let long = "x".repeat(OPENING + 1_001);
+        let length = OPENING + 1_001;
         let tail = |command: &str, id: i64, length: usize| {
             format!(
                 "{}\n… ({length} characters; read all of it with: {command} inbox read m-{id})",
                 "x".repeat(OPENING)
             )
         };
-        for command in [
-            "cf",
+        for path in [
             "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "/Users/some one/Library/Application Support/ConsensFlow/cf",
             r"C:\Program Files\ConsensFlow\cf.exe",
-            r#""C:\Program Files\ConsensFlow\cf.exe""#,
         ] {
-            let window = format!("header\n{}\nafter", tail(command, 4, OPENING + 5));
-            assert!(window_has(&window, &long, 4), "{command}");
+            let words = cf_words_of(std::path::Path::new(path));
+            for shell in [cf_proto::cf_word::Shell::Posix, cf_proto::cf_word::Shell::PowerShell] {
+                let command = cf_proto::cf_word::CfWord::new(path, shell);
+                let window = format!("header\n{}\nafter", tail(command.as_str(), 4, length));
+                assert!(
+                    window_has(&window, &long, 4, &words),
+                    "{}",
+                    command.as_str()
+                );
+            }
         }
-        // Not another message's id, another length, a cut opening, or no command at all.
-        assert!(!window_has(&tail("cf", 5, OPENING + 5), &long, 4));
-        assert!(!window_has(&tail("cf", 4, OPENING + 6), &long, 4));
+        let words = cf_words_of(std::path::Path::new("/opt/consensflow/cf"));
+        assert!(window_has(&tail("cf", 4, length), &long, 4, &words));
+        // Not another message's id, another length, a cut opening, no command at all, nor another
+        // program, one of the same name in another folder included.
+        assert!(!window_has(&tail("cf", 5, length), &long, 4, &words));
+        assert!(!window_has(&tail("cf", 4, length + 1), &long, 4, &words));
         assert!(!window_has(
-            &tail("cf", 4, OPENING + 5).replacen('x', "", 1),
+            &tail("cf", 4, length).replacen('x', "", 1),
             &long,
-            4
+            4,
+            &words
         ));
-        assert!(!window_has(&tail("", 4, OPENING + 5), &long, 4));
-        assert!(!window_has(&tail("rm", 4, OPENING + 5), &long, 4));
+        assert!(!window_has(&tail("", 4, length), &long, 4, &words));
+        assert!(!window_has(&tail("rm", 4, length), &long, 4, &words));
+        assert!(!window_has(&tail("/tmp/evil/cf", 4, length), &long, 4, &words));
+        assert!(!window_has(&tail("\"/opt/consensflow/cf\"", 4, length), &long, 4, &words));
         // A short message is whole or it is not there.
-        assert!(window_has("a short one", "short", 1));
-        assert!(!window_has("a shirt one", "short", 1));
+        assert!(window_has("a short one", "short", 1, &words));
+        assert!(!window_has("a shirt one", "short", 1, &words));
+    }
+
+    /// A body the product sends whole is whole in the window: 15,500 and 16,000 units are not
+    /// cut, 16,001 is (the production boundary, not a copy of it).
+    #[test]
+    fn a_body_the_product_delivers_whole_is_not_expected_cut() {
+        let words = cf_words_of(std::path::Path::new("/opt/consensflow/cf"));
+        for units in [OPENING + 500, 16_000] {
+            let body = "y".repeat(units);
+            assert!(window_has(&format!("[h]\n{body}"), &body, 4, &words));
+            assert_eq!(given_as(&body, 4, "cf"), body);
+        }
+        let over = "y".repeat(16_001);
+        assert_ne!(given_as(&over, 4, "cf"), over);
+        assert!(!window_has(&over, &over, 4, &words));
     }
 
     #[test]
     fn a_long_message_is_given_as_its_opening_and_where_to_read_all_of_it() {
-        assert_eq!(given_as("short", 4), "short");
-        let long = "x".repeat(OPENING + 5);
-        let given = given_as(&long, 4);
+        assert_eq!(given_as("short", 4, "cf"), "short");
+        let long = "x".repeat(16_001);
+        let given = given_as(&long, 4, "cf");
         assert!(given.starts_with(&"x".repeat(OPENING)));
         assert!(given.ends_with(&format!(
             "\n… ({} characters; read all of it with: cf inbox read m-4)",
-            OPENING + 5
+            16_001
         )));
         assert!(!given.contains(&"x".repeat(OPENING + 1)));
     }
