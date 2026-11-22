@@ -9,6 +9,10 @@ ki-lib-standin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standi
 ki-lib-matrix = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
 ki-lib-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::tests"]
 ki-lib-renew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::renew"]
+ki-lib-members = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members"]
+ki-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests"]
+ki-test-first-message = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_first_message"]
+ki-test-models = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_models"]
 
 
 [[plant]]
@@ -34,19 +38,6 @@ runs = ["ki-lib-wrapper"]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
 find = '''.chain(names.iter().cloned())'''
 replace = '''.chain(names.iter().take(0).cloned())'''
-
-[[plant]]
-name = "K3: a path through a link and a `..` is taken for what its words say"
-meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
-runs = ["ki-lib-standin"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''    if let Ok(found) = std::fs::canonicalize(path) {
-        return found;
-    }
-    let settled = settled(path);'''
-replace = '''    let settled = settled(path);'''
 
 [[plant]]
 name = "K3: a link into a harness home is a safe path"
@@ -148,3 +139,282 @@ find = '''    for name in ["HOME", "USERPROFILE"] {
 replace = '''    for name in ["HOME", "USERPROFILE"] {
         vars.push((name.to_owned(), lookup(name).unwrap_or_default()));
     }'''
+
+[[plant]]
+name = "K3 round 3: a new file under a link is judged by its words, not its parent's folder"
+meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''                out.push(name);
+                if let Ok(found) = std::fs::canonicalize(&out) {
+                    out = found;
+                }'''
+replace = '''                out.push(name);'''
+
+[[plant]]
+name = "K3 round 3: the protected roots lack the Gemini folder"
+meant = "the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''        ".gemini",
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: a temporary parent in a protected home is allowed"
+meant = "a_temporary_parent_inside_a_protected_home_is_refused_before_a_home_is_made"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    if safe_path_entry(parent, forbidden) {
+        Ok(())'''
+replace = '''    if true {
+        Ok(())'''
+
+[[plant]]
+name = "K3 round 3: the door makes folders in a protected root"
+meant = "the_door_makes_no_folder_inside_a_protected_home"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    crate::standin_process::refuse_protected_place(parent)?;
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: a record that could not be read is an empty file"
+meant = "a_record_that_could_not_be_read_fails_the_export_and_is_not_an_empty_file"
+runs = ["ki-lib-matrix"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''    let items = read.map_err(|error| {'''
+replace = '''    let items = read.or_else(|_| -> Result<Vec<Item>> { Ok(Vec::new()) }).map_err(|error| {'''
+
+[[plant]]
+name = "K3 round 3: the long-brief check accepts the bare command alone"
+meant = "a_long_message_is_found_in_a_window_by_the_cf_command_the_product_wrote"
+runs = ["ki-test-first-message"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_first_message.rs"
+find = '''        .any(|cf| text.contains(&given_as(body, id, cf)))'''
+replace = '''        .any(|_| text.contains(&given_as(body, id, "cf")))'''
+
+[[plant]]
+name = "K3 round 3: the long-brief check cuts a body the product sends whole"
+meant = "a_body_the_product_delivers_whole_is_not_expected_cut"
+runs = ["ki-test-first-message"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_first_message.rs"
+find = '''    if cf_engine::delivery_text::fits_whole(message) {
+        return message.to_owned();'''
+replace = '''    if message.encode_utf16().count() <= OPENING {
+        return message.to_owned();'''
+
+[[plant]]
+name = "K3 round 3: a named home on Windows is given the caller's drive and path back"
+meant = "a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    let home_named = names("HOME") || names("USERPROFILE");'''
+replace = '''    let home_named = false;'''
+
+[[plant]]
+name = "K3 round 3: the machine's variables hold HOME"
+meant = "a_machine_environment_holds_the_machine_and_nothing_of_the_account"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        "LANG",
+        "TERM",'''
+replace = '''        "HOME",
+        "TERM",'''
+
+[[plant]]
+name = "K3 round 3: a machine-env run inherits the caller's environment"
+meant = "a_machine_env_run_is_given_the_homes_its_case_names_and_no_other"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''                .envs(machine_vars(std::env::vars_os()));'''
+replace = '''                .envs(std::env::vars_os());'''
+
+[[plant]]
+name = "K3 round 3: a window is given the person's home as its own"
+meant = "a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_own_home"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        vec![(crate::rig::PROJECT_HOME.to_owned(), person)]'''
+replace = '''        vec![("HOME".to_owned(), person)]'''
+
+[[plant]]
+name = "K3 round 3: a standalone program is given no profile of the run's own"
+meant = "an_install_started_outside_a_rig_is_given_the_runs_profile_by_both_its_readers"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''                let vars = isolation.standalone_vars()?;'''
+replace = '''                let vars = isolation.vars()?;'''
+
+[[plant]]
+name = "K3 round 3: a plan that names nothing is given a home all the same"
+meant = "a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        if named.is_empty() {
+            return Ok(Vec::new());
+        }
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: a models read is given the caller's home"
+meant = "a_read_whose_plan_names_only_its_own_folder_has_no_home_of_the_callers"
+runs = ["ki-test-models"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_models.rs"
+find = '''    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")) {'''
+replace = '''    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")).into_iter().take(0) {'''
+
+[[plant]]
+name = "K3 round 3: a version read has no private runtime folder"
+meant = "a_version_read_is_given_the_kits_folders_and_never_the_machines_homes"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    vars.push(("XDG_RUNTIME_DIR".to_owned(), text(&home.join(".run"))));
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: fake-2 is the real Claude's again"
+meant = "a_fake_model_is_the_stand_ins_and_no_harness_of_the_machine"
+runs = ["ki-lib-members"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        STAND_IN_SECOND_MODEL,
+    ]
+    .contains(&model)'''
+replace = '''    ]
+    .contains(&model)'''
+
+[[plant]]
+name = "K3 round 3: the roster preflight lacks WINDIR"
+meant = "the_roster_preflight_is_given_the_windows_system_variables_a_program_starts_by"
+runs = ["ki-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    "WINDIR",
+    "ComSpec",
+];'''
+replace = '''    "ComSpec",
+    "ComSpec",
+];'''
+
+[[plant]]
+name = "K3 round 3: the renewal inherits the caller's environment"
+meant = "the_renewal_is_given_the_accounts_home_by_name_and_nothing_of_the_callers"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        .machine_env()
+        .vars(account.iter().cloned())'''
+replace = '''        .inheriting_env()
+        .vars(account.iter().cloned())'''
+
+[[plant]]
+name = "K3 round 3: a record that was there before is taken away"
+meant = "a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if there_before {'''
+replace = '''        if false && there_before {'''
+
+[[plant]]
+name = "K3 round 3: a link at the record is taken away"
+meant = "a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        } else if is_link(&path) {'''
+replace = '''        } else if false && is_link(&path) {'''
+
+[[plant]]
+name = "K3 round 3: the test machine is anywhere"
+meant = "what_uses_the_accounts_login_store_is_refused_off_a_test_machine_and_says_why"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {'''
+replace = '''    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {
+        if detected.is_none() {
+            return Ok(Self("anywhere".to_owned()));
+        }'''
+
+[[plant]]
+name = "K3 round 3: the managed Pi copy takes a link"
+meant = "the_managed_pi_is_copied_whole_and_a_link_or_a_launcher_naming_the_owner_is_refused"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''            if kind.is_symlink() {'''
+replace = '''            if false && kind.is_symlink() {'''
+
+[[plant]]
+name = "K3 round 3: the managed Pi copy takes a launcher naming the owner"
+meant = "the_managed_pi_is_copied_whole_and_a_link_or_a_launcher_naming_the_owner_is_refused"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''            if names_owner {'''
+replace = '''            if false && names_owner {'''
+
+[[plant]]
+name = "K3 round 3: a Pi version is read on the caller's environment"
+meant = "a_pi_launcher_is_asked_its_version_on_the_kits_home_and_not_the_callers_environment"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''        .machine_env()
+        .vars(home.iter().cloned())'''
+replace = '''        .inheriting_env()
+        .vars(home.iter().cloned())'''
+
+[[plant]]
+name = "K3 round 3: a look refreshes every harness"
+meant = "a_look_asks_for_the_one_harness_it_reports"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''    json!({ "id": harness.name(), "refresh": true })'''
+replace = '''    json!({ "refresh": true })'''
