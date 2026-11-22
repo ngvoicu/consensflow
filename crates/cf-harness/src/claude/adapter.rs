@@ -286,7 +286,7 @@ impl Adapter for ClaudeAdapter {
             // The Claudes that show the conversation before this window exists:
             // none of them is the window's.
             let holders = if resumable {
-                status::holders(&statuses, &session)
+                self.records.claude_holders(&statuses, &session).await
             } else {
                 Some(Vec::new())
             };
@@ -562,8 +562,8 @@ impl ClaudeWindow {
     /// it before the window opened (`before`): that Claude is another's, the
     /// human's outside ConsensFlow or the program before the window's, however
     /// Claude's statuses are listed (T-800).
-    fn status(&self) -> Option<Status> {
-        let statuses = status::statuses(&self.statuses);
+    async fn status(&self) -> Option<Status> {
+        let statuses = self.records.claude_statuses(&self.statuses).await;
         let of = |pid: u32| {
             statuses
                 .iter()
@@ -587,12 +587,15 @@ impl ClaudeWindow {
     /// Whether another Claude than the window's shows its conversation now: one
     /// that showed it before the window was opened, or a second beside the
     /// window's own. Which of two is the window's need not be known.
-    fn shares(&self) -> bool {
-        let session = self.session.borrow();
-        status::holders(&self.statuses, &session).is_some_and(|holders| {
-            let before = self.before.borrow();
-            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
-        })
+    async fn shares(&self) -> bool {
+        let session = self.session.borrow().clone();
+        self.records
+            .claude_holders(&self.statuses, &session)
+            .await
+            .is_some_and(|holders| {
+                let before = self.before.borrow();
+                holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
+            })
     }
 
     /// Whether `status` names another conversation than the window's.
@@ -802,7 +805,11 @@ impl Window for ClaudeWindow {
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
-            if self.status().is_some_and(|live| self.elsewhere(&live)) {
+            if self
+                .status()
+                .await
+                .is_some_and(|live| self.elsewhere(&live))
+            {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
             let snapshot = pane::snapshot(host, pane)
@@ -892,12 +899,12 @@ impl Window for ClaudeWindow {
             // Claude's status first, then the conversation, which is then
             // never older than Claude's word: the order Node's reads finish
             // in when Claude's few small status files are read before a
-            // transcript is. Kept from Node on purpose until the status read
-            // leaves the event thread (3.5): Node started both at once, and
+            // transcript is. Kept from Node on purpose: Node started both at once, and
             // a transcript its look had read before the status came back
-            // could be older than the status.
-            let live = self.status();
-            if self.shares() {
+            // could be older than the status. The status is read off the engine's
+            // thread (P22-1), awaited before the transcript is asked for.
+            let live = self.status().await;
+            if self.shares().await {
                 self.shared.set(true);
             }
             let session = self.session.borrow().clone();

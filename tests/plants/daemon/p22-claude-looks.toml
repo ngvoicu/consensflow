@@ -1,0 +1,39 @@
+# A look at a Claude Code window leaves the engine's thread, and costs the live windows and
+# not the status files Claude Code has kept (P22-1, T-2029, T-2038). The scan of the status
+# folder is the records worker's (`Records::claude_statuses`, `claude_holders`, in
+# crates/cf-harness/src/records/thread.rs); what it found of no live process it does not open
+# again until the file is written (crates/cf-harness/src/claude/status.rs, `Scanner`).
+
+[run]
+p22-off-thread = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "off_thread"]
+p22-status = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::status::"]
+
+[[plant]]
+name = 'p22: the status scan runs on the engine thread again'
+meant = "a_status_scan_held_at_a_gate_stops_no_timer_and_no_answer_of_the_engine"
+runs = ["p22-off-thread"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '        let statuses = self.records.claude_statuses(&self.statuses).await;'
+replace = '        let statuses = crate::claude::scan_statuses(&self.statuses);'
+
+[[plant]]
+name = 'p22: every status file is read again at each look'
+meant = "a_look_costs_the_live_windows_not_the_files_of_ended_ones"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp) {'
+replace = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp && false) {'
+
+[[plant]]
+name = 'p22: a status file found gone stays gone though it is written'
+meant = "a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_look"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = '            if let Some(held) = remembered.get(&name).filter(|held| **held == stamp) {'
+replace = '            if let Some(held) = remembered.get(&name).filter(|_| true) {'

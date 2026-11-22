@@ -35,6 +35,8 @@ mod compact_cancelled;
 mod compaction_window;
 mod dialogs;
 mod moves;
+#[cfg(unix)]
+mod off_thread;
 mod outside;
 mod private_folders;
 mod prompt_suggestion_off;

@@ -341,6 +341,8 @@ pub struct LocalRecords {
     env: Env,
     time: Rc<dyn Time>,
     cache: RefCell<Cache>,
+    /// What Claude's statuses read so far remember, as the worker's does.
+    scanner: RefCell<crate::claude::Scanner>,
     hold: Cell<bool>,
     held: RefCell<VecDeque<HeldLook>>,
 }
@@ -360,6 +362,7 @@ impl LocalRecords {
             env,
             time,
             cache: RefCell::new(cache),
+            scanner: RefCell::default(),
             hold: Cell::new(false),
             held: RefCell::new(VecDeque::new()),
         }
@@ -390,6 +393,21 @@ impl LocalRecords {
 }
 
 impl Records for LocalRecords {
+    fn claude_statuses<'a>(
+        &'a self,
+        folder: &'a str,
+    ) -> Work<'a, Vec<(u32, crate::contract::ProcessStatus)>> {
+        Box::pin(async move { self.scanner.borrow_mut().statuses(folder) })
+    }
+
+    fn claude_holders<'a>(
+        &'a self,
+        folder: &'a str,
+        session: &'a str,
+    ) -> Work<'a, Option<Vec<u32>>> {
+        Box::pin(async move { self.scanner.borrow_mut().holders(folder, session) })
+    }
+
     fn look<'a>(
         &'a self,
         harness: Harness,

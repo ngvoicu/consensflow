@@ -263,3 +263,90 @@ fn a_status_file_whose_number_a_later_program_took_names_no_claude() {
     assert_eq!(holders(&folder, "S"), Some(vec![pid]));
     drop(left);
 }
+
+/// A pid no process holds: a child that was started and has ended.
+#[allow(clippy::disallowed_methods)] // The test starts what it ends.
+fn ended_pid() -> u32 {
+    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
+    if cfg!(windows) {
+        child.args(["/c", "exit"]);
+    }
+    let mut child = child.spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+
+#[test]
+fn a_look_costs_the_live_windows_not_the_files_of_ended_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let gone = ended_pid();
+    for number in 0..512 {
+        let row = json!({ "pid": gone, "sessionId": "OLD", "status": "idle" });
+        write(dir.path(), &format!("{}.json", 100_000 + number), &row);
+    }
+    let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
+    write(dir.path(), &format!("{}.json", me()), &own);
+    let folder = dir.path().to_string_lossy().into_owned();
+    let mut scanner = Scanner::default();
+    let first = scanner.statuses(&folder);
+    assert_eq!(
+        first,
+        [(
+            me(),
+            Status {
+                session: "S".into(),
+                state: State::Working
+            }
+        )]
+    );
+    let after_first = scanner.reads;
+    let second = scanner.statuses(&folder);
+    assert_eq!(second, first);
+    assert_eq!(
+        scanner.reads - after_first,
+        1,
+        "the second look opens the one live window's file, not the 512 of ended ones"
+    );
+}
+
+#[test]
+fn a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_look() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let mut scanner = Scanner::default();
+    let gone = json!({ "pid": ended_pid(), "sessionId": "S", "status": "idle" });
+    write(dir.path(), "7.json", &gone);
+    assert_eq!(scanner.statuses(&folder), []);
+    assert_eq!(scanner.statuses(&folder), []);
+    assert_eq!(scanner.reads, 1, "found gone: not opened again");
+    // The number taken by a live Claude that writes the file anew.
+    let live = json!({ "pid": me(), "sessionId": "S", "status": "busy", "extra": "longer" });
+    write(dir.path(), "7.json", &live);
+    let now = State::Working;
+    assert_eq!(
+        scanner.statuses(&folder),
+        [(
+            me(),
+            Status {
+                session: "S".into(),
+                state: now
+            }
+        )]
+    );
+    let after = scanner.reads;
+    let idle = json!({ "pid": me(), "sessionId": "S", "status": "idle", "extra": "longer" });
+    write(dir.path(), "7.json", &idle);
+    assert_eq!(scanner.holders(&folder, "S"), Some(vec![me()]));
+    assert_eq!(
+        scanner.reads,
+        after + 1,
+        "a live window's file is read each look"
+    );
+    fs::remove_file(dir.path().join("7.json")).unwrap();
+    assert_eq!(scanner.holders(&folder, "S"), Some(vec![]));
+    assert!(
+        scanner.gone[&folder].is_empty(),
+        "a file no longer listed is forgotten"
+    );
+}
