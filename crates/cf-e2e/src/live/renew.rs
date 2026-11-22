@@ -494,7 +494,12 @@ fn forget(
             let _ = door.remove_record(&record);
         }
     }
-    (!refused.is_empty()).then(|| format!("the renewal's record was not taken away: {}", refused.join("; ")))
+    (!refused.is_empty()).then(|| {
+        format!(
+            "the renewal's record was not taken away: {}",
+            refused.join("; ")
+        )
+    })
 }
 
 /// The words Claude Code is started with: the print mode on the model of the run, and nothing

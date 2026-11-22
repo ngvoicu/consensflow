@@ -935,7 +935,9 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(
-            failed.contains("x-amber") && failed.contains("codex") && failed.contains("reader down"),
+            failed.contains("x-amber")
+                && failed.contains("codex")
+                && failed.contains("reader down"),
             "{failed}"
         );
         assert!(record_rows("x-amber", "codex", Ok(Vec::new()))

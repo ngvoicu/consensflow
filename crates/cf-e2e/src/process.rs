@@ -520,9 +520,7 @@ impl Run {
         // pipes: one left another's would hold it to its end.
         cf_process::hold_only_the_streams(&mut command);
         if self.machine {
-            command
-                .env_clear()
-                .envs(machine_vars(std::env::vars_os()));
+            command.env_clear().envs(machine_vars(std::env::vars_os()));
         } else if !self.inherit {
             command
                 .env_clear()

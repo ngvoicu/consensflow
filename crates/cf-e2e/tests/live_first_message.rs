@@ -594,7 +594,10 @@ mod tests {
             r"C:\Program Files\ConsensFlow\cf.exe",
         ] {
             let words = cf_words_of(std::path::Path::new(path));
-            for shell in [cf_proto::cf_word::Shell::Posix, cf_proto::cf_word::Shell::PowerShell] {
+            for shell in [
+                cf_proto::cf_word::Shell::Posix,
+                cf_proto::cf_word::Shell::PowerShell,
+            ] {
                 let command = cf_proto::cf_word::CfWord::new(path, shell);
                 let window = format!("header\n{}\nafter", tail(command.as_str(), 4, length));
                 assert!(
@@ -618,8 +621,18 @@ mod tests {
         ));
         assert!(!window_has(&tail("", 4, length), &long, 4, &words));
         assert!(!window_has(&tail("rm", 4, length), &long, 4, &words));
-        assert!(!window_has(&tail("/tmp/evil/cf", 4, length), &long, 4, &words));
-        assert!(!window_has(&tail("\"/opt/consensflow/cf\"", 4, length), &long, 4, &words));
+        assert!(!window_has(
+            &tail("/tmp/evil/cf", 4, length),
+            &long,
+            4,
+            &words
+        ));
+        assert!(!window_has(
+            &tail("\"/opt/consensflow/cf\"", 4, length),
+            &long,
+            4,
+            &words
+        ));
         // A short message is whole or it is not there.
         assert!(window_has("a short one", "short", 1, &words));
         assert!(!window_has("a shirt one", "short", 1, &words));

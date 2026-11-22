@@ -955,7 +955,10 @@ mod tests {
         assert!(!safe_path_entry(&fresh, std::slice::from_ref(&forbidden)));
         assert!(!super::same_or_inside(&fresh, &run));
         let fresh_deep = link.join("nowhere/../fresh.json");
-        assert!(!safe_path_entry(&fresh_deep, std::slice::from_ref(&forbidden)));
+        assert!(!safe_path_entry(
+            &fresh_deep,
+            std::slice::from_ref(&forbidden)
+        ));
         // A link to the folder above the home: the home is below it.
         let above = run.join("above");
         std::os::unix::fs::symlink(&owner, &above).unwrap();
@@ -997,7 +1000,10 @@ mod tests {
         super::TEST_PROTECTED.lock().unwrap().push(held.clone());
         let direct = crate::door::made_in(&held.join("tmp"), "h-");
         let through = crate::door::made_in(&link.join("sub/../tmp"), "h-");
-        super::TEST_PROTECTED.lock().unwrap().retain(|path| path != &held);
+        super::TEST_PROTECTED
+            .lock()
+            .unwrap()
+            .retain(|path| path != &held);
         for refused in [direct, through] {
             let error = refused.expect_err("a folder was made inside a protected root");
             assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);

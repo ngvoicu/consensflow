@@ -98,9 +98,7 @@ pub fn stand_in_seats(roster: &[Value]) -> Vec<String> {
         .iter()
         .filter(|row| {
             row["kind"] == "claude-code"
-                && row["model"]
-                    .as_str()
-                    .is_some_and(agents::is_stand_in_model)
+                && row["model"].as_str().is_some_and(agents::is_stand_in_model)
         })
         .filter_map(|row| row["id"].as_str().map(str::to_owned))
         .collect()

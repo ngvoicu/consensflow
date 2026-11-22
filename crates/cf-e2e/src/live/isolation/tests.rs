@@ -346,8 +346,17 @@ fn a_standalone_codex_is_given_a_profile_of_the_runs_own_beside_its_codex_home()
             .map(|(_, value)| value.clone())
     };
     let made = isolation.made_at(at(NOW)).unwrap();
-    assert_eq!(get("CODEX_HOME"), Some(made.join("codex").to_string_lossy().into_owned()));
-    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA", "LOCALAPPDATA"] {
+    assert_eq!(
+        get("CODEX_HOME"),
+        Some(made.join("codex").to_string_lossy().into_owned())
+    );
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "XDG_CONFIG_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    ] {
         let value = get(name).unwrap_or_else(|| panic!("{name} is not given: {vars:?}"));
         assert!(
             Path::new(&value).starts_with(&made),
@@ -358,6 +367,34 @@ fn a_standalone_codex_is_given_a_profile_of_the_runs_own_beside_its_codex_home()
     assert!(vars
         .iter()
         .all(|(_, value)| !value.starts_with(owner.home.path().to_string_lossy().as_ref())));
+}
+
+/// The same through the install a case asks (`home_outside_a_rig`, `home_vars`): the profile is
+/// the run's own, not the caller's, beside Codex's folder.
+#[test]
+fn an_install_started_outside_a_rig_is_given_the_runs_profile_by_both_its_readers() {
+    let owner = Owner::new();
+    let install = crate::live::machine::Installed::at(
+        Harness::Codex,
+        "/codex/bin/codex",
+        owner.home.path().join(".codex"),
+    )
+    .with_isolation(std::sync::Arc::new(owner.codex()));
+    for vars in [
+        install.home_outside_a_rig().unwrap(),
+        install.home_vars().unwrap(),
+    ] {
+        let home = vars
+            .iter()
+            .find(|(name, _)| name == "HOME")
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| panic!("no HOME: {vars:?}"));
+        assert!(
+            !Path::new(&home).starts_with(owner.home.path()),
+            "HOME is the caller's: {home}"
+        );
+        assert!(vars.iter().any(|(name, _)| name == "CODEX_HOME"));
+    }
 }
 
 #[test]

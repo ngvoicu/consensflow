@@ -134,7 +134,10 @@ fn a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back() {
         assert_eq!(got, vec!["SYSTEMROOT"], "{named:?}: {got:?}");
     }
     let none = given(&[]);
-    assert!(none.contains(&"HOMEDRIVE") && none.contains(&"HOMEPATH"), "{none:?}");
+    assert!(
+        none.contains(&"HOMEDRIVE") && none.contains(&"HOMEPATH"),
+        "{none:?}"
+    );
     assert!(required_from(&[], false, false, &caller).is_empty());
 }
 
@@ -180,7 +183,12 @@ fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
         .run()
         .unwrap();
     assert!(ran.stdout.lines().any(|line| line == "HOME=/the/kits/home"));
-    for name in ["CODEX_HOME=", "CLAUDE_CONFIG_DIR=", "XDG_CONFIG_HOME=", "USERPROFILE="] {
+    for name in [
+        "CODEX_HOME=",
+        "CLAUDE_CONFIG_DIR=",
+        "XDG_CONFIG_HOME=",
+        "USERPROFILE=",
+    ] {
         assert!(
             !ran.stdout.lines().any(|line| line.starts_with(name)),
             "{name} reached the child"

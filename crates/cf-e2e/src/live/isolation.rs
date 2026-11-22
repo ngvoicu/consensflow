@@ -1256,7 +1256,11 @@ impl Isolation {
         crate::door::make_dir(&profile)?;
         let mut vars: Vec<(String, String)> = crate::standin_process::home_vars(&profile)
             .into_iter()
-            .filter(|(name, _)| !named.iter().any(|(given, _)| given.eq_ignore_ascii_case(name)))
+            .filter(|(name, _)| {
+                !named
+                    .iter()
+                    .any(|(given, _)| given.eq_ignore_ascii_case(name))
+            })
             .map(|(name, value)| (name.to_owned(), value.to_string_lossy().into_owned()))
             .collect();
         vars.extend(named);

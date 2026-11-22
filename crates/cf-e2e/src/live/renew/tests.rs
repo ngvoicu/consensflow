@@ -334,13 +334,33 @@ mod running {
         let scratch = tempfile::tempdir().unwrap();
         let log = scratch.path().join("log");
         let seen = scratch.path().join("env");
-        let program = stand_in(scratch.path(), &log, &format!("env > '{}'", seen.display()), 0);
+        let program = stand_in(
+            scratch.path(),
+            &log,
+            &format!("env > '{}'", seen.display()),
+            0,
+        );
         let account = account_vars(Path::new("/the/test/account"));
-        assert_eq!(one_shot(Harness::Pi, &program, &[], &account).unwrap(), None);
+        assert_eq!(
+            one_shot(Harness::Pi, &program, &[], &account).unwrap(),
+            None
+        );
         let env = fs::read_to_string(&seen).unwrap();
-        assert!(env.lines().any(|line| line == "HOME=/the/test/account"), "{env}");
-        for name in ["CODEX_HOME=", "CLAUDE_CONFIG_DIR=", "XDG_CONFIG_HOME=", "PI_CODING_AGENT_DIR=", "CFFIXED_USER_HOME="] {
-            assert!(!env.lines().any(|line| line.starts_with(name)), "{name} reached it: {env}");
+        assert!(
+            env.lines().any(|line| line == "HOME=/the/test/account"),
+            "{env}"
+        );
+        for name in [
+            "CODEX_HOME=",
+            "CLAUDE_CONFIG_DIR=",
+            "XDG_CONFIG_HOME=",
+            "PI_CODING_AGENT_DIR=",
+            "CFFIXED_USER_HOME=",
+        ] {
+            assert!(
+                !env.lines().any(|line| line.starts_with(name)),
+                "{name} reached it: {env}"
+            );
         }
     }
 

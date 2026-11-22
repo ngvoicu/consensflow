@@ -350,7 +350,10 @@ fn no_install_gives_its_window_a_profile_variable_of_the_persons() {
         let vars = install.login(&machine);
         assert_eq!(
             vars,
-            [("CF_KIT_PROJECT_HOME".to_owned(), "/the/persons/home".to_owned())],
+            [(
+                "CF_KIT_PROJECT_HOME".to_owned(),
+                "/the/persons/home".to_owned()
+            )],
             "{harness:?}"
         );
     }
@@ -462,7 +465,13 @@ fn a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_
         debug.contains("(\"CF_KIT_PROJECT_HOME\", \"/home/me\")"),
         "{debug}"
     );
-    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CODEX_HOME"] {
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "CODEX_HOME",
+    ] {
         assert!(
             !debug.contains(&format!("(\"{name}\", \"/home/me")),
             "{name} is the person's: {debug}"

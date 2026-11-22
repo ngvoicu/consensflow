@@ -181,16 +181,18 @@ fn row(answer: &Value, harness: Harness) -> Option<&Value> {
         .find(|row| row["id"] == harness.name())
 }
 
+/// What a look at one harness asks: that harness only, looked at again.
+fn check_body(harness: Harness) -> Value {
+    json!({ "id": harness.name(), "refresh": true })
+}
+
 /// The look: a row for each harness, held to what its program says itself.
 fn look(admin: &Admin, harnesses: &[Harness], log: &Log) -> Result<Vec<Check>> {
     let mut checks = Vec::new();
     for &harness in harnesses {
         // Only the harness asked for is looked at: an unscoped refresh would run every
         // harness's CLI of the machine, which this run reports nothing of.
-        let answer = admin.post(
-            "/api/harnesses/check",
-            &json!({ "id": harness.name(), "refresh": true }),
-        )?;
+        let answer = admin.post("/api/harnesses/check", &check_body(harness))?;
         let found = log.found(harness)?;
         let expected = found.version();
         let shown = row(&answer, harness).cloned().unwrap_or(Value::Null);
@@ -239,9 +241,8 @@ fn copy_managed_pi(from: &Path, to: &Path) -> Result {
     let mut pending = vec![(from.to_path_buf(), to.to_path_buf())];
     while let Some((source, target)) = pending.pop() {
         cf_e2e::door::make_dir(&target)?;
-        let entries = std::fs::read_dir(&source).map_err(|why| {
-            Error::Daemon(format!("could not read {}: {why}", source.display()))
-        })?;
+        let entries = std::fs::read_dir(&source)
+            .map_err(|why| Error::Daemon(format!("could not read {}: {why}", source.display())))?;
         for entry in entries.flatten() {
             let path = entry.path();
             let kind = entry.file_type().map_err(|why| {
@@ -269,8 +270,8 @@ fn copy_managed_pi(from: &Path, to: &Path) -> Result {
                 )));
             }
             let text = String::from_utf8_lossy(&bytes);
-            let names_owner = text.contains(&owner)
-                || (!owner_home.is_empty() && text.contains(&owner_home));
+            let names_owner =
+                text.contains(&owner) || (!owner_home.is_empty() && text.contains(&owner_home));
             if names_owner {
                 return Err(Error::Daemon(format!(
                     "{} names the owner's own folder: a copy of it would run the owner's installation, so the update is not run",
@@ -376,20 +377,39 @@ mod tests {
 
     /// K3 review T-1978, 1: the update runs on a copy of the managed installation in the kit's own
     /// home, and a copy that would lead out of it, or run the owner's installation, is refused.
+    /// A look at some harnesses asks for those and no other (an unscoped refresh runs every
+    /// harness's CLI of the machine).
+    #[test]
+    fn a_look_asks_for_the_one_harness_it_reports() {
+        for harness in Harness::ALL {
+            let body = check_body(harness);
+            assert_eq!(body["id"], harness.name());
+            assert_eq!(body["refresh"], true);
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_managed_pi_is_copied_whole_and_a_link_or_a_launcher_naming_the_owner_is_refused() {
         let root = cf_e2e::door::made("managed-pi-").unwrap();
         let owner_bin = root.path().join("owner/.pi/agent/bin");
         cf_e2e::door::make_dir(&owner_bin).unwrap();
-        cf_e2e::door::write_executable(owner_bin.join("pi"), "#!/bin/sh\nexec node \"$(dirname \"$0\")/pi.js\" \"$@\"\n").unwrap();
+        cf_e2e::door::write_executable(
+            owner_bin.join("pi"),
+            "#!/bin/sh\nexec node \"$(dirname \"$0\")/pi.js\" \"$@\"\n",
+        )
+        .unwrap();
         cf_e2e::door::write(owner_bin.join("pi.js"), "console.log('1.0.0')").unwrap();
         let to = root.path().join("kit/home/.pi/agent/bin");
         copy_managed_pi(&owner_bin, &to).unwrap();
         assert!(to.join("pi.js").is_file());
         use std::os::unix::fs::PermissionsExt;
         assert_ne!(
-            std::fs::metadata(to.join("pi")).unwrap().permissions().mode() & 0o111,
+            std::fs::metadata(to.join("pi"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
             0,
             "the launcher lost its mode"
         );
@@ -401,13 +421,20 @@ mod tests {
             format!("#!/bin/sh\nexec {}/pi.js\n", naming.display()),
         )
         .unwrap();
-        let refused = copy_managed_pi(&naming, &root.path().join("kit2/pi")).unwrap_err().to_string();
-        assert!(refused.contains("names the owner's own folder"), "{refused}");
+        let refused = copy_managed_pi(&naming, &root.path().join("kit2/pi"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("names the owner's own folder"),
+            "{refused}"
+        );
         // A link in it leads out.
         let linked = root.path().join("owner3/.pi/agent/bin");
         cf_e2e::door::make_dir(&linked).unwrap();
         cf_e2e::door::symlink(&owner_bin, linked.join("out")).unwrap();
-        let refused = copy_managed_pi(&linked, &root.path().join("kit3/pi")).unwrap_err().to_string();
+        let refused = copy_managed_pi(&linked, &root.path().join("kit3/pi"))
+            .unwrap_err()
+            .to_string();
         assert!(refused.contains("is a link"), "{refused}");
     }
 
@@ -465,10 +492,8 @@ mod tests {
         // the machine on top of them (`Run`'s own merge) is never the owner's drive or path.
         assert_eq!(get("HOMEDRIVE"), Some("K:"));
         assert_eq!(get("HOMEPATH"), Some("\\kit\\home"));
-        let child_vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = vars
-            .iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect();
+        let child_vars: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+            vars.iter().map(|(k, v)| (k.into(), v.into())).collect();
         let merged = cf_e2e::process::required_from(&child_vars, true, true, &|name| {
             owner(name).map(Into::into)
         });

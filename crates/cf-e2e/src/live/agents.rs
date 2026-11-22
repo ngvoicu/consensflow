@@ -698,9 +698,9 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
         }
     }
     let mut env: BTreeMap<String, String> = READ_MACHINE
-    .into_iter()
-    .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
-    .collect();
+        .into_iter()
+        .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
+        .collect();
     for name in names {
         env.insert(
             (*name).to_owned(),
@@ -732,7 +732,9 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
         env.insert("USERPROFILE".to_owned(), owned_home.to_owned());
     }
     if cfg!(windows) {
-        if let Some((drive, path)) = crate::standin_process::drive_and_path(std::path::Path::new(owned_home)) {
+        if let Some((drive, path)) =
+            crate::standin_process::drive_and_path(std::path::Path::new(owned_home))
+        {
             env.entry("HOMEDRIVE".to_owned()).or_insert(drive);
             env.entry("HOMEPATH".to_owned()).or_insert(path);
         }
