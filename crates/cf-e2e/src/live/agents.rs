@@ -648,6 +648,22 @@ fn list_route(
     }
 }
 
+/// What a direct read of a harness's models is given of the machine: the search path and the
+/// system's variables Windows needs to start a program (`SystemRoot` and `WINDIR` both).
+const READ_MACHINE: [&str; 11] = [
+    "PATH",
+    "PATHEXT",
+    "USER",
+    "LANG",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SHELL",
+    "SystemRoot",
+    "WINDIR",
+    "ComSpec",
+];
+
 /// The environment a direct read of `harness`'s models is given: only what `home` says of the
 /// run-owned folders its isolation names, never a folder that is not the run's.
 fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<String, String>> {
@@ -681,18 +697,7 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
             )));
         }
     }
-    let mut env: BTreeMap<String, String> = [
-        "PATH",
-        "PATHEXT",
-        "USER",
-        "LANG",
-        "TMPDIR",
-        "TEMP",
-        "TMP",
-        "SHELL",
-        "SystemRoot",
-        "ComSpec",
-    ]
+    let mut env: BTreeMap<String, String> = READ_MACHINE
     .into_iter()
     .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
     .collect();
@@ -725,6 +730,12 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
     env.insert("HOME".to_owned(), owned_home.to_owned());
     if !env.contains_key("USERPROFILE") {
         env.insert("USERPROFILE".to_owned(), owned_home.to_owned());
+    }
+    if cfg!(windows) {
+        if let Some((drive, path)) = crate::standin_process::drive_and_path(std::path::Path::new(owned_home)) {
+            env.entry("HOMEDRIVE".to_owned()).or_insert(drive);
+            env.entry("HOMEPATH".to_owned()).or_insert(path);
+        }
     }
     Ok(env)
 }
@@ -1164,6 +1175,15 @@ mod tests {
         .run()
         .unwrap();
         assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
+    }
+
+    /// K3 review T-1978, 2: the roster preflight's environment names `WINDIR` beside `SystemRoot`
+    /// and the command interpreter, as every other direct read of the kit does.
+    #[test]
+    fn the_roster_preflight_is_given_the_windows_system_variables_a_program_starts_by() {
+        for name in ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "PATH"] {
+            assert!(READ_MACHINE.contains(&name), "{name}");
+        }
     }
 
     /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a

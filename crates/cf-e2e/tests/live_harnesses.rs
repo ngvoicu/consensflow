@@ -8,11 +8,13 @@
 //!   program is, and the version the program says when the run asks it itself.
 //! - **The update** (`POST /api/harnesses/update`, which runs the CLI's own updater to its
 //!   end): only where it is asked for, with `--update pi`, and only of a Pi that its own
-//!   installer made, which `pi update` brings to its latest release: the daemon is given
-//!   that Pi's folder first on its `PATH`, the row it shows must be that program, and the
-//!   update must come to `updated` or `unchanged`, never `failed`, with the version it says
-//!   after the one the program says when the run asks it again. On Windows this is a `.cmd`
-//!   that starts Node and an installer, the longest tree this crate starts.
+//!   installer made, which `pi update` brings to its latest release. The update runs on a **copy**
+//!   of that installation made in the kit's own home (refused where a link is in it or a file
+//!   names the owner's folder): the daemon is given the copy's folder first on its `PATH`, the
+//!   row it shows must be that program, and the update must come to `updated` or `unchanged`,
+//!   never `failed`, with the version it says after the one the program says when the run asks it
+//!   again. The owner's launcher is read to be copied and never started. On Windows this is a
+//!   `.cmd` that starts Node and an installer, the longest tree this crate starts.
 //!
 //! Every program the daemon starts for this runs in a job of its own (cf-process); this is
 //! what shows, on the real CLIs, that none of them needs to leave one (T-353).
@@ -96,7 +98,11 @@ struct Admin {
 impl Admin {
     /// Starts the daemon, with `first` first on its `PATH` where there is one.
     fn start(first: Option<&Path>, patience: Duration) -> Result<Self> {
-        let home = Home::new()?;
+        Self::start_in(Home::new()?, first, patience)
+    }
+
+    /// [`Admin::start`] on `home`, which the case has already put what it needs in.
+    fn start_in(home: Home, first: Option<&Path>, patience: Duration) -> Result<Self> {
         let vars = daemon_vars(
             home.vars()
                 .into_iter()
@@ -152,11 +158,13 @@ fn named() -> Result<Vec<Harness>> {
 }
 
 /// The first line Pi's launcher `program` says to `--version`, or why it said none: told, as every
-/// Pi the kit starts is, to install nothing ([`launcher::updates_off_of`]).
-fn says(program: &Path) -> String {
+/// Pi the kit starts is, to install nothing ([`launcher::updates_off_of`]), and given the machine's
+/// variables and the kit's home `home` by name, never the caller's environment.
+fn says(program: &Path, home: &[(String, String)]) -> String {
     Run::new(program)
         .arg("--version")
-        .inheriting_env()
+        .machine_env()
+        .vars(home.iter().cloned())
         .vars(launcher::updates_off_of(Harness::Pi).iter().copied())
         .run()
         .ok()
@@ -175,9 +183,14 @@ fn row(answer: &Value, harness: Harness) -> Option<&Value> {
 
 /// The look: a row for each harness, held to what its program says itself.
 fn look(admin: &Admin, harnesses: &[Harness], log: &Log) -> Result<Vec<Check>> {
-    let answer = admin.post("/api/harnesses/check", &json!({ "refresh": true }))?;
     let mut checks = Vec::new();
     for &harness in harnesses {
+        // Only the harness asked for is looked at: an unscoped refresh would run every
+        // harness's CLI of the machine, which this run reports nothing of.
+        let answer = admin.post(
+            "/api/harnesses/check",
+            &json!({ "id": harness.name(), "refresh": true }),
+        )?;
         let found = log.found(harness)?;
         let expected = found.version();
         let shown = row(&answer, harness).cloned().unwrap_or(Value::Null);
@@ -198,7 +211,8 @@ fn look(admin: &Admin, harnesses: &[Harness], log: &Log) -> Result<Vec<Check>> {
     Ok(checks)
 }
 
-/// The folder Pi's own installer keeps its launcher in, in the user's home.
+/// The folder Pi's own installer keeps its launcher in, in the user's home: where a copy is made
+/// from, never a place anything runs from.
 fn managed_pi() -> Option<PathBuf> {
     let home = own_var("USERPROFILE").or_else(|| own_var("HOME"))?;
     let folder = Path::new(&home).join(".pi").join("agent").join("bin");
@@ -206,19 +220,107 @@ fn managed_pi() -> Option<PathBuf> {
     launcher.is_file().then_some(folder)
 }
 
-/// The update of a Pi its own installer made: it must come to `updated` or `unchanged`.
+/// How much a managed Pi's launcher folder may be: a launcher and what it starts, not a tree.
+const COPY_LIMIT: u64 = 256 * 1024 * 1024;
+
+/// Copies the files of the managed installation `from` into `to`, a folder of the run's own, so
+/// that the update this run asks for lands in a copy and never in the owner's installation.
+/// Refused, with nothing run, where a link is among them (it would lead out of the copy), where
+/// it is too large to be a launcher, or where a file names the owner's folder (a launcher that
+/// starts the program by its absolute path would run the owner's installation, not the copy).
+fn copy_managed_pi(from: &Path, to: &Path) -> Result {
+    let owner = from.to_string_lossy().into_owned();
+    let owner_home = from
+        .ancestors()
+        .nth(3)
+        .map(|home| home.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut total = 0u64;
+    let mut pending = vec![(from.to_path_buf(), to.to_path_buf())];
+    while let Some((source, target)) = pending.pop() {
+        cf_e2e::door::make_dir(&target)?;
+        let entries = std::fs::read_dir(&source).map_err(|why| {
+            Error::Daemon(format!("could not read {}: {why}", source.display()))
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let kind = entry.file_type().map_err(|why| {
+                Error::Daemon(format!("could not read {}: {why}", path.display()))
+            })?;
+            if kind.is_symlink() {
+                return Err(Error::Daemon(format!(
+                    "{} is a link: a copy of the managed Pi would lead out of the run's own folder; the update is not run",
+                    path.display()
+                )));
+            }
+            let to_path = target.join(entry.file_name());
+            if kind.is_dir() {
+                pending.push((path, to_path));
+                continue;
+            }
+            let bytes = std::fs::read(&path).map_err(|why| {
+                Error::Daemon(format!("could not read {}: {why}", path.display()))
+            })?;
+            total += bytes.len() as u64;
+            if total > COPY_LIMIT {
+                return Err(Error::Daemon(format!(
+                    "{} is more than a launcher: the update is not run",
+                    from.display()
+                )));
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            let names_owner = text.contains(&owner)
+                || (!owner_home.is_empty() && text.contains(&owner_home));
+            if names_owner {
+                return Err(Error::Daemon(format!(
+                    "{} names the owner's own folder: a copy of it would run the owner's installation, so the update is not run",
+                    path.display()
+                )));
+            }
+            // What the owner's file can run, the copy can run (a launcher is its mode).
+            #[cfg(unix)]
+            let executable = {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(&path).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+            };
+            #[cfg(not(unix))]
+            let executable = false;
+            if executable {
+                cf_e2e::door::write_executable(&to_path, &bytes)?;
+            } else {
+                cf_e2e::door::write(&to_path, &bytes)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The update of a Pi its own installer made: it must come to `updated` or `unchanged`. Run on a
+/// copy of that installation made in the kit's own home ([`copy_managed_pi`]), by the daemon of that
+/// home and nothing of the owner's: the owner's launcher is not started, not even to read a version.
 fn update_pi(log: &Log) -> Result<Vec<Check>> {
-    let Some(folder) = managed_pi() else {
+    let Some(source) = managed_pi() else {
         return Ok(vec![Check::failed(
             "pi",
             "the update",
             "this machine has no Pi made by Pi's own installer (<home>/.pi/agent/bin)",
         )]);
     };
+    let home = Home::new()?;
+    let folder = home.root().join("home/.pi/agent/bin");
+    copy_managed_pi(&source, &folder)?;
     let launcher = folder.join(if cfg!(windows) { "pi.cmd" } else { "pi" });
-    let admin = Admin::start(Some(&folder), UPDATES)?;
-    let before = says(&launcher);
-    log.say(format!("pi (managed) is {} ({before})", launcher.display()));
+    let kit_home: Vec<(String, String)> = home
+        .vars()
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value.to_string_lossy().into_owned()))
+        .collect();
+    let admin = Admin::start_in(home, Some(&folder), UPDATES)?;
+    let before = says(&launcher, &kit_home);
+    log.say(format!(
+        "pi (managed, a copy in the run's own home) is {} ({before})",
+        launcher.display()
+    ));
     let seen = admin.post(
         "/api/harnesses/check",
         &json!({ "id": "pi", "refresh": true }),
@@ -229,7 +331,7 @@ fn update_pi(log: &Log) -> Result<Vec<Check>> {
         .is_some_and(|path| Path::new(path).starts_with(&folder));
     let updated = admin.post("/api/harnesses/update", &json!({ "id": "pi" }))?;
     let result = &updated["result"];
-    let after = says(&launcher);
+    let after = says(&launcher, &kit_home);
     let state = result["state"].as_str().unwrap_or("none").to_owned();
     let said_after = result["after"].as_str().unwrap_or_default();
     let held = first
@@ -238,7 +340,7 @@ fn update_pi(log: &Log) -> Result<Vec<Check>> {
         && !said_after.is_empty()
         && after.contains(said_after);
     let detail = format!(
-        "the row's program was the managed one: {first}; state {state}, {} -> {}, the program \
+        "the row's program was the run's copy of the managed one: {first}; state {state}, {} -> {}, the program \
          says {before:?} before and {after:?} after; command {}; reason {}",
         result["before"], result["after"], result["command"], result["reason"]
     );
@@ -271,6 +373,59 @@ fn the_admin_page_looks_at_each_harness_as_its_program_says_and_updates_a_manage
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K3 review T-1978, 1: the update runs on a copy of the managed installation in the kit's own
+    /// home, and a copy that would lead out of it, or run the owner's installation, is refused.
+    #[cfg(unix)]
+    #[test]
+    fn the_managed_pi_is_copied_whole_and_a_link_or_a_launcher_naming_the_owner_is_refused() {
+        let root = cf_e2e::door::made("managed-pi-").unwrap();
+        let owner_bin = root.path().join("owner/.pi/agent/bin");
+        cf_e2e::door::make_dir(&owner_bin).unwrap();
+        cf_e2e::door::write_executable(owner_bin.join("pi"), "#!/bin/sh\nexec node \"$(dirname \"$0\")/pi.js\" \"$@\"\n").unwrap();
+        cf_e2e::door::write(owner_bin.join("pi.js"), "console.log('1.0.0')").unwrap();
+        let to = root.path().join("kit/home/.pi/agent/bin");
+        copy_managed_pi(&owner_bin, &to).unwrap();
+        assert!(to.join("pi.js").is_file());
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            std::fs::metadata(to.join("pi")).unwrap().permissions().mode() & 0o111,
+            0,
+            "the launcher lost its mode"
+        );
+        // A launcher that starts the owner's program by its absolute path is not a copy.
+        let naming = root.path().join("owner2/.pi/agent/bin");
+        cf_e2e::door::make_dir(&naming).unwrap();
+        cf_e2e::door::write_executable(
+            naming.join("pi"),
+            format!("#!/bin/sh\nexec {}/pi.js\n", naming.display()),
+        )
+        .unwrap();
+        let refused = copy_managed_pi(&naming, &root.path().join("kit2/pi")).unwrap_err().to_string();
+        assert!(refused.contains("names the owner's own folder"), "{refused}");
+        // A link in it leads out.
+        let linked = root.path().join("owner3/.pi/agent/bin");
+        cf_e2e::door::make_dir(&linked).unwrap();
+        cf_e2e::door::symlink(&owner_bin, linked.join("out")).unwrap();
+        let refused = copy_managed_pi(&linked, &root.path().join("kit3/pi")).unwrap_err().to_string();
+        assert!(refused.contains("is a link"), "{refused}");
+    }
+
+    /// The version a managed Pi says is read with the machine's variables and the kit's home, and
+    /// nothing of the caller's environment.
+    #[cfg(unix)]
+    #[test]
+    fn a_pi_launcher_is_asked_its_version_on_the_kits_home_and_not_the_callers_environment() {
+        let root = cf_e2e::door::made("says-pi-").unwrap();
+        let launcher = root.path().join("pi");
+        cf_e2e::door::write_executable(
+            &launcher,
+            "#!/bin/sh\nif [ -n \"$CODEX_HOME$XDG_CONFIG_HOME$PI_CODING_AGENT_DIR\" ]; then echo caller; else echo \"v$HOME\"; fi\n",
+        )
+        .unwrap();
+        let said = says(&launcher, &[("HOME".to_owned(), "/kit/home".to_owned())]);
+        assert_eq!(said, "v/kit/home");
+    }
 
     /// T-1957: the daemon and what it starts are on the kit's home. The owner's `HOME`,
     /// `USERPROFILE`, `APPDATA`, `CODEX_HOME` and the XDG folders never replace the home's own;
