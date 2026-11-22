@@ -8,7 +8,7 @@ use std::rc::Rc;
 use cf_proto::agents::Harness;
 use serde::{Serialize, Serializer};
 
-use crate::{claude, codex, devin, muse, pi};
+use crate::pi;
 
 /// What is known of one harness's CLI.
 #[derive(Debug, Serialize)]
@@ -44,25 +44,7 @@ pub struct Tested {
 
 impl Tested {
     pub(super) fn of(harness: Harness, release: Option<&str>) -> Self {
-        let (newest, oldest) = match harness {
-            Harness::Claude => (
-                claude::declared::NEWEST_TESTED,
-                Some(claude::declared::OLDEST_TESTED.to_owned()),
-            ),
-            Harness::Codex => (codex::declared::NEWEST_TESTED, None),
-            Harness::Pi => (
-                pi::declared::NEWEST_TESTED,
-                Some(pi::declared::OLDEST_TESTED.to_owned()),
-            ),
-            Harness::Devin => (
-                devin::declared::NEWEST_TESTED,
-                Some(devin::minimum_version()),
-            ),
-            Harness::Muse => (
-                muse::declared::NEWEST_TESTED,
-                Some(muse::version::minimum()),
-            ),
-        };
+        let (newest, oldest) = crate::launch::declared(harness);
         Self::with_newest(harness, newest, oldest, release)
     }
 
@@ -73,10 +55,7 @@ impl Tested {
         release: Option<&str>,
     ) -> Self {
         let beyond = release
-            .and_then(|release| match harness {
-                Harness::Muse => muse::version::newer(Some(newest), release),
-                _ => super::version::newer(Some(newest), release),
-            })
+            .and_then(|release| crate::launch::newer(harness, Some(newest), release))
             .unwrap_or(false);
         Self {
             newest,
@@ -148,8 +127,12 @@ pub struct Release {
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Setup {
     Ready,
-    /// Devin is older than a window needs.
+    /// The launch's check read the CLI and refuses it: the launch's own sentence.
     UpdateRequired {
+        reason: String,
+    },
+    /// The launch's check could not read the CLI: the launch's own sentence.
+    Unchecked {
         reason: String,
     },
 }
@@ -215,7 +198,7 @@ impl Extension {
     }
 
     /// Pi's extension, as it was prepared.
-    pub(super) fn of_pi(prepared: pi::Extension) -> Self {
+    pub(crate) fn of_pi(prepared: pi::Extension) -> Self {
         match prepared {
             pi::Extension::NotInstalled => Self::not_installed(),
             pi::Extension::InstalledUnverified { path } => Self::unverified(path),

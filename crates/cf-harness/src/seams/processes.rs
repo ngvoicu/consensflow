@@ -280,6 +280,18 @@ pub async fn probe(
     answer.map_err(Unanswered::Failed)
 }
 
+impl Probes {
+    /// Lets go of every answer kept for `executable`, as it is on disk, and of the runs
+    /// still in flight for it: the next question is asked again. For a Refresh, which wants
+    /// what the CLI says now. An executable that cannot be resolved has nothing kept.
+    pub fn forget(&self, executable: &Path) {
+        let Ok(file) = std::fs::canonicalize(executable) else {
+            return;
+        };
+        self.asked.borrow_mut().retain(|key, _| key.file != file);
+    }
+}
+
 /// What a check asks a CLI through: the probes kept so far, the programs they run
 /// with, and the environment.
 pub struct Asking<'a> {

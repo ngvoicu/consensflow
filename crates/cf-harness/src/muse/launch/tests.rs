@@ -653,6 +653,26 @@ fn a_pin_with_blank_lines_around_it_is_no_pin_and_the_launcher_decides() {
     }
 }
 
+/// A pin the file ends with a lone carriage return is no pin: its endings are LF, CRLF or
+/// none (T-2009). A leftover 1.4.12 binary beside it does not refuse the launcher, which
+/// says 1.4.24 and is asked.
+#[test]
+fn a_pin_ending_in_a_lone_carriage_return_is_no_pin_and_the_launcher_is_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install(
+        dir.path(),
+        "1.4.12-R6000",
+        &[&binary_name("muse-bin-1.4.12-R6000")],
+    );
+    let pin = Path::new(&launcher).with_file_name(".muse-version");
+    fs::write(&pin, "1.4.12-R6000\r").unwrap();
+    let machine = Machine::new();
+    machine.says(NEW);
+    assert_eq!(machine.pinned(&launcher, &here()).unwrap(), launcher);
+    assert_eq!(machine.ran(), ["muse --version"]);
+    assert_eq!(crate::muse::version::installed(Path::new(&launcher)), None);
+}
+
 /// Two executable names for one dispatcher (a launcher and a Devin that are one file): what
 /// one is asked is kept under the file and its arguments, so the Muse question is never
 /// put through the kept answers, or Devin's next question is given Muse's answer.

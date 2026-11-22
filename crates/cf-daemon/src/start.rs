@@ -329,12 +329,17 @@ async fn run(
     // (`seams::boundary`).
     let processes = Rc::new(SystemProcesses::new(env.clone()));
     let time = Rc::new(DaemonTime::new(Rc::clone(&spawn)));
+    // One map of probed answers for the Admin and for the launches: what a launch
+    // asked of a CLI is what the page shows of it.
+    let probes = Rc::new(Probes::default());
     let screens = Rc::new(Screens {
         token: token.clone(),
         admin: HarnessAdmin::new(
             env.clone(),
             Rc::clone(&time) as _,
             Rc::new(Feed::new(Rc::clone(&time) as _, Rc::new(HttpsFeed::new()))),
+            Rc::clone(&processes) as _,
+            Rc::clone(&probes),
             Rc::clone(&processes) as _,
         ),
     });
@@ -365,7 +370,7 @@ async fn run(
         ports: Rc::new(LoopbackPorts),
         loopback: Rc::new(SystemLoopback),
         processes: Rc::clone(&processes) as _,
-        probes: Rc::new(Probes::default()),
+        probes,
         bundle: options.bundle.clone(),
         zone,
     };

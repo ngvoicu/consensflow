@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::admin::tests::npm_windows::{canonical, lay_npm, lay_npm_cmd};
 use crate::admin::{Capture, HarnessAdmin, Latest, Outcome};
+use crate::seams::processes::{Probes, Processes};
 use crate::seams::{SystemProcesses, SystemTime, Time};
 use crate::testing::ScriptedLatest;
 
@@ -84,6 +85,8 @@ fn an_npm_install_on_windows_is_updated_for_real_through_the_npm_found_told_its_
         Rc::new(SystemTime) as Rc<dyn Time>,
         Rc::clone(&latest) as Rc<dyn Latest>,
         Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Capture>,
+        Rc::new(Probes::default()),
+        Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Processes>,
     );
     let runtime = runtime();
     let row = runtime

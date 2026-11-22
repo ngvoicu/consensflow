@@ -12,9 +12,11 @@
 //! seam serves both, since the daemon gives one `execFile` to both).
 //!
 //! Its answers are kept five minutes, one per harness, and an inspection
-//! begun is shared by every call that asks while it runs.
+//! begun is shared by every call that asks while it runs. The verdict on a CLI
+//! a launch checks (Codex, Devin, Muse Code) is the launch's own check, called at every
+//! look and kept by nothing here: what keeps an answer is the launch's map of probes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -27,7 +29,7 @@ use futures_util::future::{join_all, FutureExt, LocalBoxFuture, Shared};
 
 use crate::contract::Work;
 use crate::detect::{harness_path, known_harnesses};
-use crate::seams::processes::Program;
+use crate::seams::processes::{Probes, Processes, Program};
 use crate::seams::Time;
 
 pub mod feed;
@@ -35,7 +37,7 @@ mod inspect;
 mod row;
 mod source;
 mod update;
-mod version;
+pub(crate) mod version;
 
 pub use row::{Distribution, Ended, Extension, Outcome, Release, Row, Setup, Update, Version};
 pub use source::{release_source, Format, Source};
@@ -66,14 +68,23 @@ pub trait Capture {
 /// it runs shares.
 type Pending = Shared<LocalBoxFuture<'static, Rc<Row>>>;
 
+/// How long a row may take: at this time it is answered with what it has.
+const ROW_LIMIT: Duration = Duration::from_secs(40);
+
 /// What the admin holds, shared with the inspections it begins.
 struct Inner {
     env: Env,
     time: Rc<dyn Time>,
     latest: Rc<dyn Latest>,
     capture: Rc<dyn Capture>,
-    cache: RefCell<HashMap<Harness, Rc<Row>>>,
-    pending: RefCell<HashMap<Harness, Pending>>,
+    /// What the launch's own checks ask through, the map of answers the launches keep.
+    probes: Rc<Probes>,
+    processes: Rc<dyn Processes>,
+    /// The row each harness was last looked at for, with the number of the look that made it.
+    cache: RefCell<HashMap<Harness, (u64, Rc<Row>)>>,
+    pending: RefCell<HashMap<Harness, (u64, Pending)>>,
+    /// The number of the last look begun: the newest look's answer is the one kept.
+    looks: Cell<u64>,
 }
 
 /// Looks at the harnesses' CLIs and updates them.
@@ -86,11 +97,19 @@ pub struct HarnessAdmin {
 struct Clearing<'a> {
     inner: &'a Inner,
     harness: Harness,
+    look: u64,
 }
 
 impl Drop for Clearing<'_> {
     fn drop(&mut self) {
-        self.inner.pending.borrow_mut().remove(&self.harness);
+        // Only its own: a newer look may have taken the place.
+        let mut pending = self.inner.pending.borrow_mut();
+        if pending
+            .get(&self.harness)
+            .is_some_and(|(look, _)| *look == self.look)
+        {
+            pending.remove(&self.harness);
+        }
     }
 }
 
@@ -119,12 +138,16 @@ const PROBE: Limits = Limits {
 
 impl HarnessAdmin {
     /// An admin that looks at the CLIs `env` finds, at the time `time` says,
-    /// asking `latest` for releases and running programs through `capture`.
+    /// asking `latest` for releases and running programs through `capture`. The launches'
+    /// own checks of a CLI are asked through `probes` and `processes`, the map and the
+    /// programs the engine's launches use: an answer a launch has kept is the page's too.
     pub fn new(
         env: Env,
         time: Rc<dyn Time>,
         latest: Rc<dyn Latest>,
         capture: Rc<dyn Capture>,
+        probes: Rc<Probes>,
+        processes: Rc<dyn Processes>,
     ) -> Self {
         Self {
             inner: Rc::new(Inner {
@@ -132,8 +155,11 @@ impl HarnessAdmin {
                 time,
                 latest,
                 capture,
+                probes,
+                processes,
                 cache: RefCell::new(HashMap::new()),
                 pending: RefCell::new(HashMap::new()),
+                looks: Cell::new(0),
             }),
         }
     }
@@ -155,43 +181,107 @@ impl HarnessAdmin {
     }
 
     /// One harness's row: the one kept, the inspection that is running, or an
-    /// inspection begun now.
+    /// inspection begun now. A harness whose launch checks its CLI has its verdict
+    /// asked at every look, whatever is kept of the rest; a refresh forgets what the
+    /// launches kept of the CLI and does not join a look in flight.
     async fn look(&self, harness: Harness, refresh: bool) -> Rc<Row> {
         let inner = &self.inner;
         let path =
             harness_path(harness, &inner.env).map(|found| found.to_string_lossy().into_owned());
         let now = inner.time.wall_ms();
-        if !refresh {
-            let kept = inner.cache.borrow().get(&harness).cloned();
+        let kept = inner
+            .cache
+            .borrow()
+            .get(&harness)
+            .map(|(_, row)| Rc::clone(row))
+            .filter(|row| row.path == path && now - row.checked_at < KEPT_MS);
+        let checked = inspect::checks(harness);
+        if !refresh && !checked {
             if let Some(row) = kept {
-                if row.path == path && now - row.checked_at < KEPT_MS {
-                    return row;
-                }
+                return row;
             }
         }
-        let running = inner.pending.borrow().get(&harness).cloned();
-        if let Some(running) = running {
-            return running.await;
+        if !refresh {
+            let running = inner
+                .pending
+                .borrow()
+                .get(&harness)
+                .map(|(_, run)| run.clone());
+            if let Some(running) = running {
+                return running.await;
+            }
         }
-        let begun = inspection(Rc::clone(inner), harness, path, now)
-            .boxed_local()
-            .shared();
-        inner.pending.borrow_mut().insert(harness, begun.clone());
-        let _clearing = Clearing { inner, harness };
+        if refresh && checked {
+            if let Some(path) = &path {
+                inner.probes.forget(std::path::Path::new(path));
+            }
+        }
+        let look = inner.looks.get() + 1;
+        inner.looks.set(look);
+        let begun = inspection(
+            Rc::clone(inner),
+            harness,
+            path,
+            now,
+            look,
+            kept.filter(|_| checked && !refresh),
+        )
+        .boxed_local()
+        .shared();
+        inner
+            .pending
+            .borrow_mut()
+            .insert(harness, (look, begun.clone()));
+        let _clearing = Clearing {
+            inner,
+            harness,
+            look,
+        };
         begun.await
     }
 }
 
 /// An inspection, whose row is kept when it is done, before any call that
-/// waited for it goes on.
+/// waited for it goes on, unless a newer look has been made since it began. A
+/// row of a harness whose launch checks its CLI is cut at [`ROW_LIMIT`].
 async fn inspection(
     inner: Rc<Inner>,
     harness: Harness,
     path: Option<String>,
     checked_at: i64,
+    look: u64,
+    kept: Option<Rc<Row>>,
 ) -> Rc<Row> {
-    let row = Rc::new(inspect::inspect(&inner, harness, path, checked_at).await);
-    inner.cache.borrow_mut().insert(harness, Rc::clone(&row));
+    let work = inspect::inspect(&inner, harness, path.clone(), checked_at, kept.as_deref());
+    let kept = kept.is_some();
+    let mut cut = false;
+    let row = if inspect::checks(harness) && path.is_some() {
+        let mut work = Box::pin(work);
+        let mut timer = inner.time.sleep(ROW_LIMIT);
+        match futures_util::future::select(work.as_mut(), timer.as_mut()).await {
+            futures_util::future::Either::Left((row, _)) => row,
+            futures_util::future::Either::Right(_) => {
+                // Whatever the launches kept of this CLI is let go, unless a newer look is
+                // asking: a late end of this one takes nothing from the newer.
+                cut = true;
+                let newest = inner.looks.get() == look;
+                if let (true, Some(path)) = (newest, &path) {
+                    inner.probes.forget(std::path::Path::new(path));
+                }
+                inspect::unfinished(harness, path, checked_at)
+            }
+        }
+    } else {
+        work.await
+    };
+    let row = Rc::new(row);
+    let mut cache = inner.cache.borrow_mut();
+    let stale = cache.get(&harness).is_some_and(|(held, _)| *held > look);
+    // A row cut short has no feed's answer, and one made over a kept feed is no new
+    // look at it: neither replaces what is kept.
+    if !stale && !cut && !kept {
+        cache.insert(harness, (look, Rc::clone(&row)));
+    }
     row
 }
 

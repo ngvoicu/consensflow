@@ -11,6 +11,7 @@ use cf_proto::agents::Harness;
 use serde_json::Value;
 
 use crate::admin::{Capture, HarnessAdmin, Latest, Outcome};
+use crate::seams::processes::{Probes, Processes};
 use crate::seams::{SystemProcesses, SystemTime, Time};
 use crate::testing::ScriptedLatest;
 
@@ -62,6 +63,8 @@ fn a_cli_is_asked_its_version_and_updated_for_real_through_the_systems_programs(
         Rc::new(SystemTime) as Rc<dyn Time>,
         Rc::clone(&latest) as Rc<dyn Latest>,
         Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Capture>,
+        Rc::new(Probes::default()),
+        Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Processes>,
     );
     let runtime = runtime();
     let row = runtime
@@ -175,6 +178,8 @@ fn a_standalone_codex_is_updated_through_its_visible_link_and_read_again_from_th
         Rc::new(SystemTime) as Rc<dyn Time>,
         Rc::clone(&latest) as Rc<dyn Latest>,
         Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Capture>,
+        Rc::new(Probes::default()),
+        Rc::new(SystemProcesses::new(Env::from_process())) as Rc<dyn Processes>,
     );
     let runtime = runtime();
     let row = runtime

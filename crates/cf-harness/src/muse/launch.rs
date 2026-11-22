@@ -135,7 +135,7 @@ async fn ask(asking: &Asking<'_>, launcher: &Path) -> Check {
         }
         Err(Unanswered::Failed(failed)) => {
             let why = if failed.killed {
-                "it did not answer in time".to_owned()
+                crate::launch::TIMED_OUT.to_owned()
             } else {
                 failed.message
             };
@@ -155,7 +155,7 @@ async fn ask(asking: &Asking<'_>, launcher: &Path) -> Check {
             verdict: Ok(()),
         },
         None => Check {
-            said: Said::Unanswered("it named no version of Muse Code's own".to_owned()),
+            said: Said::Unanswered(crate::launch::NO_VERSION_NAMED.to_owned()),
             verdict: Ok(()),
         },
     }

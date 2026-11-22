@@ -12,9 +12,13 @@ use cf_proto::agents::Harness;
 use serde_json::Value;
 
 use super::*;
-use crate::testing::{finished, Driver, ManualTime, Response, ScriptedCapture, ScriptedLatest};
+use crate::seams::processes::{Probes, Processes};
+use crate::testing::{
+    finished, CaptureAsProcesses, Driver, ManualTime, Response, ScriptedCapture, ScriptedLatest,
+};
 use crate::testing::{named, EPOCH_MS};
 
+mod launch_check;
 mod looks;
 pub(super) mod npm_windows;
 #[cfg(unix)]
@@ -31,6 +35,8 @@ pub(super) struct Fixture {
     pub(super) capture: Rc<ScriptedCapture>,
     pub(super) latest: Rc<ScriptedLatest>,
     pub(super) admin: Rc<HarnessAdmin>,
+    /// The map of probed answers the admin and its launches share, and the programs they run.
+    pub(super) probes: Rc<Probes>,
     pub(super) root: tempfile::TempDir,
 }
 
@@ -55,11 +61,14 @@ impl Fixture {
         let time = Rc::new(ManualTime::new(EPOCH_MS));
         let capture = Rc::new(ScriptedCapture::default());
         let latest = Rc::new(ScriptedLatest::default());
+        let probes = Rc::new(Probes::default());
         let admin = Rc::new(HarnessAdmin::new(
             env.clone(),
             Rc::clone(&time) as Rc<dyn Time>,
             Rc::clone(&latest) as Rc<dyn Latest>,
             Rc::clone(&capture) as Rc<dyn Capture>,
+            Rc::clone(&probes),
+            Rc::new(CaptureAsProcesses(Rc::clone(&capture))) as Rc<dyn Processes>,
         ));
         Self {
             root,
@@ -68,6 +77,7 @@ impl Fixture {
             capture,
             latest,
             admin,
+            probes,
         }
     }
 
@@ -164,23 +174,23 @@ fn a_name_that_is_no_harness_is_refused_before_anything_is_looked_at() {
 #[test]
 fn a_look_is_kept_and_looked_at_again_when_asked_to() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
+    fixture.install("bin", "claude");
     fixture.capture.answer(
-        "codex --version",
-        [says("codex-cli 99.1.0\n"), says("codex-cli 99.1.0\n")],
+        "claude --version",
+        [says("claude-cli 99.1.0\n"), says("claude-cli 99.1.0\n")],
     );
-    fixture.latest.says(Harness::Codex, "99.2.0");
-    fixture.latest.says(Harness::Codex, "99.2.0");
-    let first = fixture.row("codex", false);
+    fixture.latest.says(Harness::Claude, "99.2.0");
+    fixture.latest.says(Harness::Claude, "99.2.0");
+    let first = fixture.row("claude", false);
     assert_eq!(first.version.value(), Some("99.1.0"));
     assert!(matches!(first.update, Update::Available(_)));
-    let again = fixture.row("codex", false);
+    let again = fixture.row("claude", false);
     assert!(
         Rc::ptr_eq(&first, &again),
         "the row kept, not looked at again"
     );
     assert_eq!(fixture.latest.take_asked().len(), 1);
-    let refreshed = fixture.row("codex", true);
+    let refreshed = fixture.row("claude", true);
     assert!(!Rc::ptr_eq(&first, &refreshed));
     assert_eq!(fixture.latest.take_asked().len(), 1);
     assert_eq!(fixture.capture.take_ran().len(), 2);
@@ -189,20 +199,20 @@ fn a_look_is_kept_and_looked_at_again_when_asked_to() {
 #[test]
 fn a_row_is_kept_five_minutes_from_when_its_look_began_and_no_longer() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
+    fixture.install("bin", "claude");
     fixture
         .capture
-        .answer("codex --version", [says("1.0.0"), says("1.0.0")]);
-    fixture.latest.says(Harness::Codex, "1.0.0");
-    fixture.latest.says(Harness::Codex, "1.0.0");
-    let first = fixture.row("codex", false);
+        .answer("claude --version", [says("1.0.0"), says("1.0.0")]);
+    fixture.latest.says(Harness::Claude, "1.0.0");
+    fixture.latest.says(Harness::Claude, "1.0.0");
+    let first = fixture.row("claude", false);
     fixture.time.settle_at(EPOCH_MS + 299_999);
     assert!(
-        Rc::ptr_eq(&first, &fixture.row("codex", false)),
+        Rc::ptr_eq(&first, &fixture.row("claude", false)),
         "still kept"
     );
     fixture.time.settle_at(EPOCH_MS + 300_000);
-    let second = fixture.row("codex", false);
+    let second = fixture.row("claude", false);
     assert!(!Rc::ptr_eq(&first, &second), "five minutes are over");
     assert_eq!(second.checked_at, EPOCH_MS + 300_000);
 }
@@ -210,28 +220,28 @@ fn a_row_is_kept_five_minutes_from_when_its_look_began_and_no_longer() {
 #[test]
 fn a_look_is_dated_when_it_began_and_kept_from_then() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
+    fixture.install("bin", "claude");
     fixture
         .capture
-        .answer("codex --version", [Response::Held, says("2.0.0")]);
-    fixture.latest.says(Harness::Codex, "2.0.0");
-    fixture.latest.says(Harness::Codex, "2.0.0");
+        .answer("claude --version", [Response::Held, says("2.0.0")]);
+    fixture.latest.says(Harness::Claude, "2.0.0");
+    fixture.latest.says(Harness::Claude, "2.0.0");
     let mut driver = Driver::default();
     let admin = Rc::clone(&fixture.admin);
-    driver.begin(0, async move { admin.check(Some("codex"), false).await });
+    driver.begin(0, async move { admin.check(Some("claude"), false).await });
     assert!(driver.run().is_empty(), "it waits for the version");
     fixture.time.settle_at(EPOCH_MS + 200_000);
     assert!(fixture
         .capture
-        .release("codex --version", Ok(captured("1.0.0"))));
+        .release("claude --version", Ok(captured("1.0.0"))));
     let settled = driver.run();
     let row = Rc::clone(&settled[0].1.as_ref().unwrap()[0]);
     assert_eq!(row.checked_at, EPOCH_MS, "dated by when it began");
     fixture.time.settle_at(EPOCH_MS + 299_999);
-    assert!(Rc::ptr_eq(&row, &fixture.row("codex", false)));
+    assert!(Rc::ptr_eq(&row, &fixture.row("claude", false)));
     fixture.time.settle_at(EPOCH_MS + 300_000);
     assert!(
-        !Rc::ptr_eq(&row, &fixture.row("codex", false)),
+        !Rc::ptr_eq(&row, &fixture.row("claude", false)),
         "kept five minutes from the start, not from the end"
     );
 }
@@ -245,79 +255,123 @@ fn captured(stdout: &str) -> Captured {
 }
 
 #[test]
-fn calls_that_ask_while_a_look_runs_share_it_a_refresh_too() {
+fn calls_that_ask_while_a_look_runs_share_it_and_a_refresh_begins_a_new_one() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
-    fixture.capture.answer("codex --version", [Response::Held]);
-    fixture.latest.says(Harness::Codex, "1.0.1");
+    fixture.install("bin", "claude");
+    fixture
+        .capture
+        .answer("claude --version", [Response::Held, Response::Held]);
+    fixture.latest.says(Harness::Claude, "1.0.1");
+    fixture.latest.says(Harness::Claude, "2.0.1");
     let mut driver = Driver::default();
     for (work, refresh) in [(0, false), (1, false), (2, true)] {
         let admin = Rc::clone(&fixture.admin);
         driver.begin(
             work,
-            async move { admin.check(Some("codex"), refresh).await },
+            async move { admin.check(Some("claude"), refresh).await },
         );
     }
     assert!(driver.run().is_empty());
     assert_eq!(
         fixture.capture.take_ran().len(),
-        1,
-        "one look for the three"
+        2,
+        "one look for the two plain calls, and the refresh's own"
     );
     assert!(fixture
         .capture
-        .release("codex --version", Ok(captured("1.0.0"))));
+        .release("claude --version", Ok(captured("1.0.0"))));
     let settled = driver.run();
-    assert_eq!(settled.len(), 3);
+    assert_eq!(
+        settled.len(),
+        2,
+        "the older look answers the calls that joined it"
+    );
     let first = &settled[0].1.as_ref().unwrap()[0];
-    for (_, rows) in &settled {
-        assert!(
-            Rc::ptr_eq(first, &rows.as_ref().unwrap()[0]),
-            "the same row"
+    assert!(Rc::ptr_eq(first, &settled[1].1.as_ref().unwrap()[0]));
+    assert_eq!(first.version.value(), Some("1.0.0"));
+    assert!(fixture
+        .capture
+        .release("claude --version", Ok(captured("2.0.0"))));
+    let settled = driver.run();
+    assert_eq!(
+        settled[0].1.as_ref().unwrap()[0].version.value(),
+        Some("2.0.0")
+    );
+}
+
+#[test]
+fn an_older_look_ending_last_does_not_take_the_place_of_a_newer_one() {
+    let fixture = Fixture::new();
+    fixture.install("bin", "claude");
+    fixture
+        .capture
+        .answer("claude --version", [Response::Held, Response::Held]);
+    fixture.latest.says(Harness::Claude, "9.0.0");
+    fixture.latest.says(Harness::Claude, "9.0.0");
+    let mut driver = Driver::default();
+    for (work, refresh) in [(0, false), (1, true)] {
+        let admin = Rc::clone(&fixture.admin);
+        driver.begin(
+            work,
+            async move { admin.check(Some("claude"), refresh).await },
         );
     }
-    assert_eq!(fixture.latest.take_asked().len(), 1);
+    assert!(driver.run().is_empty());
+    // The refresh, the newest look, answers first; the older one ends after it.
+    assert!(fixture
+        .capture
+        .release_newest("claude --version", Ok(captured("2.0.0"))));
+    driver.run();
+    assert!(fixture
+        .capture
+        .release("claude --version", Ok(captured("1.0.0"))));
+    driver.run();
+    assert_eq!(
+        fixture.row("claude", false).version.value(),
+        Some("2.0.0"),
+        "the newest look is the one kept"
+    );
 }
 
 #[test]
 fn a_look_that_ended_is_forgotten_so_a_refresh_looks_again() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
+    fixture.install("bin", "claude");
     fixture
         .capture
-        .answer("codex --version", [says("1.0.0"), says("1.0.0")]);
-    fixture.latest.says(Harness::Codex, "1.0.0");
-    fixture.latest.says(Harness::Codex, "1.0.0");
-    fixture.row("codex", false);
+        .answer("claude --version", [says("1.0.0"), says("1.0.0")]);
+    fixture.latest.says(Harness::Claude, "1.0.0");
+    fixture.latest.says(Harness::Claude, "1.0.0");
+    fixture.row("claude", false);
     assert!(fixture.admin.inner.pending.borrow().is_empty());
-    fixture.row("codex", true);
+    fixture.row("claude", true);
     assert_eq!(fixture.capture.take_ran().len(), 2);
 }
 
 #[test]
 fn a_look_given_up_leaves_no_look_running_for_the_next_call_to_wait_on() {
     let fixture = Fixture::new();
-    fixture.install("bin", "codex");
+    fixture.install("bin", "claude");
     fixture
         .capture
-        .answer("codex --version", [Response::Held, says("1.0.0")]);
-    fixture.latest.says(Harness::Codex, "1.0.0");
+        .answer("claude --version", [Response::Held, says("1.0.0")]);
+    fixture.latest.says(Harness::Claude, "1.0.0");
     let mut driver = Driver::default();
     let admin = Rc::clone(&fixture.admin);
-    driver.begin(0, async move { admin.check(Some("codex"), false).await });
+    driver.begin(0, async move { admin.check(Some("claude"), false).await });
     assert!(driver.run().is_empty());
     assert_eq!(fixture.admin.inner.pending.borrow().len(), 1);
     drop(driver);
     assert!(fixture.admin.inner.pending.borrow().is_empty());
-    let row = fixture.row("codex", false);
+    let row = fixture.row("claude", false);
     assert_eq!(row.version.value(), Some("1.0.0"), "looked at afresh");
 }
 
 #[test]
 fn a_cli_that_moved_or_went_is_looked_at_again_whatever_the_time() {
     let fixture = Fixture::new();
-    let first = fixture.install("bin", "codex");
-    let second = fixture.install("later", "codex");
+    let first = fixture.install("bin", "claude");
+    let second = fixture.install("later", "claude");
     let both = std::env::join_paths([first.parent().unwrap(), second.parent().unwrap()]).unwrap();
     let env = Env::from_vars(
         fixture
@@ -332,16 +386,18 @@ fn a_cli_that_moved_or_went_is_looked_at_again_whatever_the_time() {
         Rc::clone(&fixture.time) as Rc<dyn Time>,
         Rc::clone(&fixture.latest) as Rc<dyn Latest>,
         Rc::clone(&fixture.capture) as Rc<dyn Capture>,
+        Rc::clone(&fixture.probes),
+        Rc::new(CaptureAsProcesses(Rc::clone(&fixture.capture))) as Rc<dyn Processes>,
     ));
     fixture.capture.answer(
-        "codex --version",
+        "claude --version",
         [says("1.0.0"), says("2.0.0"), says("3.0.0")],
     );
     for release in ["1.0.0", "2.0.0", "3.0.0"] {
-        fixture.latest.says(Harness::Codex, release);
+        fixture.latest.says(Harness::Claude, release);
     }
     let look = |admin: &Rc<HarnessAdmin>| {
-        finished(Box::pin(admin.check(Some("codex"), false)))
+        finished(Box::pin(admin.check(Some("claude"), false)))
             .unwrap()
             .remove(0)
     };
@@ -367,15 +423,15 @@ fn a_cli_that_moved_or_went_is_looked_at_again_whatever_the_time() {
 #[test]
 fn the_program_asked_for_a_version_runs_in_the_home_with_the_admin_s_environment() {
     let fixture = Fixture::new();
-    let codex = fixture.install("bin", "codex");
-    fixture.capture.answer("codex --version", [says("1.0.0")]);
-    fixture.latest.says(Harness::Codex, "1.0.0");
-    fixture.row("codex", false);
+    let claude = fixture.install("bin", "claude");
+    fixture.capture.answer("claude --version", [says("1.0.0")]);
+    fixture.latest.says(Harness::Claude, "1.0.0");
+    fixture.row("claude", false);
     let ran = fixture.capture.take_ran();
     let [(program, limits)] = &ran[..] else {
         panic!("one program: {ran:?}")
     };
-    assert_eq!(program.executable, codex);
+    assert_eq!(program.executable, claude);
     assert_eq!(program.args, ["--version"]);
     assert_eq!(program.cwd.as_deref(), fixture.env.path("HOME"));
     let given: Vec<_> = program.env.iter().collect();
@@ -387,5 +443,5 @@ fn the_program_asked_for_a_version_runs_in_the_home_with_the_admin_s_environment
             max_buffer: 8192
         }
     );
-    assert_eq!(named(program), "codex --version");
+    assert_eq!(named(program), "claude --version");
 }

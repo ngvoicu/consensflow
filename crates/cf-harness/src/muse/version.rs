@@ -135,8 +135,11 @@ pub(crate) fn installed(executable: &Path) -> Option<String> {
     // The pin's line and its own line ending, and nothing else: blank lines or blanks
     // around it make no pin.
     let text = String::from_utf8(bytes).ok()?;
-    let line = text.strip_suffix('\n').unwrap_or(&text);
-    let line = line.strip_suffix('\r').unwrap_or(line);
+    // The endings are LF, CRLF or none: a lone CR is no ending, and so no pin.
+    let line = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
     Version::line(line).map(|_| line.to_owned())
 }
 

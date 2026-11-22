@@ -21,8 +21,12 @@ fn look(command: &str, folder: &str, version: Response<Said>, release: Told) -> 
     fixture
 }
 
+/// The sentence a launch refuses an older Devin with.
+const DEVIN_REFUSED: &str =
+    "Devin 3000.10.21 or newer is required for complete worker replies. Update Devin before opening this pane.";
+
 #[test]
-fn a3_review_devin_setup_keeps_the_original_reading_beside_the_proved_release() {
+fn a3_review_devin_setup_is_the_launch_s_reading_beside_the_proved_release() {
     let release = crate::devin::declared::NEWEST_TESTED;
     let mut setups = Vec::new();
     for separator in ["\n", "\r\n"] {
@@ -35,15 +39,13 @@ fn a3_review_devin_setup_keeps_the_original_reading_beside_the_proved_release() 
         assert_eq!(json_of(&row)["update"]["state"], "current");
         setups.push(row.setup.clone());
     }
+    // The launch's own check reads the answer as a launch does, wrapper first.
     let required = Some(Setup::UpdateRequired {
-        reason: format!(
-            "Devin {} or newer is required. Update Devin before opening a pane.",
-            crate::devin::minimum_version()
-        ),
+        reason: DEVIN_REFUSED.to_owned(),
     });
     assert_eq!(setups, vec![required.clone(), required]);
 
-    // The inverse separates the legacy setup verdict from the proved release too.
+    // The inverse: the launch's reading is the answer's first number, not the proved release.
     let fixture = look(
         "devin",
         "bin",
@@ -58,30 +60,31 @@ fn a3_review_devin_setup_keeps_the_original_reading_beside_the_proved_release() 
 }
 
 #[test]
-fn a3_review_muse_setup_keeps_the_original_reading_beside_the_proved_release() {
+fn a3_review_muse_setup_is_the_launch_s_reading_of_its_own_line() {
     let said = "workspace launcher 1.0.0\r\nMuse Code 1.4.14 (1.4.14-R7309.1)\r\n";
     let fixture = look("muse", "bin", says(said), Ok("1.4.14-R7309.1".to_owned()));
     let row = fixture.row("muse", false);
     assert_eq!(row.version.value(), Some("1.4.14-R7309.1"));
     assert_eq!(json_of(&row)["tested"]["release"], "1.4.14-R7309.1");
     assert_eq!(json_of(&row)["update"]["state"], "current");
-    assert_eq!(
-        row.setup,
-        Some(Setup::UpdateRequired {
-            reason: crate::muse::version::required()
-        })
-    );
+    // The launch reads Muse's own line, so the wrapper's number before it decides nothing.
+    assert_eq!(row.setup, Some(Setup::Ready));
 
     let said = "workspace launcher 9999.0.0\nMuse Code 1.4.12 (1.4.12-R6000)\n";
     let fixture = look("muse", "bin", says(said), Ok("1.4.13-R6996.1".to_owned()));
     let row = fixture.row("muse", false);
     assert_eq!(row.version.value(), Some("1.4.12-R6000"));
     assert_eq!(json_of(&row)["update"]["state"], "available");
-    assert_eq!(row.setup, Some(Setup::Ready));
+    assert_eq!(
+        row.setup,
+        Some(Setup::UpdateRequired {
+            reason: crate::muse::version::required()
+        })
+    );
 }
 
 #[test]
-fn a3_review_muse_unreadable_build_uses_the_original_fallback() {
+fn a3_review_muse_unreadable_build_names_no_version_as_the_launch_reads_none() {
     let newest = crate::muse::declared::NEWEST_TESTED;
     let semver = newest.split_once("-R").unwrap().0;
     let mut rows = Vec::new();
@@ -96,8 +99,9 @@ fn a3_review_muse_unreadable_build_uses_the_original_fallback() {
             "update": row["update"]["state"],
         }));
     }
-    let fallback =
-        json!({"version": semver, "release": null, "beyond": false, "update": "current"});
+    // The launch's reader names no version of a build it cannot read, and opens: the page
+    // shows what the launch knows, and compares nothing.
+    let fallback = json!({"version": null, "release": null, "beyond": false, "update": "unknown"});
     assert_eq!(rows, vec![fallback.clone(), fallback]);
 
     for line in [
@@ -440,7 +444,7 @@ fn how_a_cli_was_installed_is_said_with_the_command_that_updates_it_the_same_way
 }
 
 #[test]
-fn devin_is_ready_only_from_its_minimum_and_codex_has_no_setup() {
+fn devin_is_ready_only_from_its_minimum_and_codex_is_ready_with_its_queue() {
     for (said, ready) in [
         ("3000.6.14", false),
         ("3000.10.20", false),
@@ -454,15 +458,16 @@ fn devin_is_ready_only_from_its_minimum_and_codex_has_no_setup() {
             Setup::Ready
         } else {
             Setup::UpdateRequired {
-                reason:
-                    "Devin 3000.10.21 or newer is required. Update Devin before opening a pane."
-                        .to_owned(),
+                reason: DEVIN_REFUSED.to_owned(),
             }
         };
         assert_eq!(row.setup, Some(expected), "{said}");
     }
     let fixture = look("codex", "bin", says("1.0.0"), Ok("1.0.0".to_owned()));
-    assert_eq!(fixture.row("codex", false).setup, None);
+    fixture
+        .capture
+        .says("codex queue --help", "--thread <ID> --message <TEXT>");
+    assert_eq!(fixture.row("codex", false).setup, Some(Setup::Ready));
 }
 
 #[test]
@@ -527,6 +532,11 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
         fixture
             .capture
             .says(&format!("{command} --version"), "5.0.0");
+        if command == "codex" {
+            fixture
+                .capture
+                .says("codex queue --help", "--thread --message");
+        }
         fixture
             .latest
             .says(Harness::from_name(command).unwrap(), "5.0.1");
@@ -535,6 +545,7 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
     // update is offered as the others' are, with no command of ours to run it.
     let muse = fixture.install("bin", "muse");
     std::fs::write(muse.with_file_name(".muse-version"), "1.4.13-R1\n").unwrap();
+    fixture.install("bin", "muse-bin-1.4.13-R1");
     fixture.latest.says(Harness::Muse, "1.4.14-R1");
     let rows = fixture.check(None, false);
     let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
@@ -558,6 +569,7 @@ fn every_harness_is_looked_at_at_once_each_asked_its_own_version_and_release() {
         [
             "claude --version",
             "codex --version",
+            "codex queue --help",
             "devin --version",
             "pi --version"
         ]
@@ -580,6 +592,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
     let launcher = fixture.install("home/.local/bin", "muse");
     let line = launcher.parent().unwrap().join(".muse-version");
     std::fs::write(&line, "1.4.13-R6996.1\n").unwrap();
+    fixture.install("home/.local/bin", "muse-bin-1.4.13-R6996.1");
     fixture.latest.says(Harness::Muse, "1.4.13-R6996.2");
     let row = fixture.row("muse", false);
     assert_eq!(
@@ -606,6 +619,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
     assert_eq!(release.command, None);
     // An older one is to be updated, and the release is one.
     std::fs::write(&line, "1.4.12-R6000\n").unwrap();
+    fixture.install("home/.local/bin", "muse-bin-1.4.12-R6000");
     fixture.latest.says(Harness::Muse, "1.4.13-R6996.1");
     let row = fixture.row("muse", true);
     assert_eq!(

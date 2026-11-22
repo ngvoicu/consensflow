@@ -12,10 +12,10 @@ use std::rc::Rc;
 use cf_base::env::Env;
 use cf_harness::admin::feed::{Feed, Network, FETCH_FAILED};
 use cf_harness::admin::{release_source, Capture, HarnessAdmin, Latest};
-use cf_harness::seams::Time;
+use cf_harness::seams::{Probes, Processes, Time};
 use cf_harness::testing::{
-    named, BodyEnding, Delivery, Driver, ManualTime, Response, Said, ScriptedCapture,
-    ScriptedLatest, ScriptedNetwork, Told, EPOCH_MS,
+    named, BodyEnding, CaptureAsProcesses, Delivery, Driver, ManualTime, Response, Said,
+    ScriptedCapture, ScriptedLatest, ScriptedNetwork, Told, EPOCH_MS,
 };
 use cf_process::{CaptureFailed, Captured};
 use cf_proto::agents::Harness;
@@ -217,6 +217,8 @@ impl Play {
             Rc::clone(&time) as Rc<dyn Time>,
             asks,
             Rc::clone(&capture) as Rc<dyn Capture>,
+            Rc::new(Probes::default()),
+            Rc::new(CaptureAsProcesses(Rc::clone(&capture))) as Rc<dyn Processes>,
         ));
         Self {
             root,

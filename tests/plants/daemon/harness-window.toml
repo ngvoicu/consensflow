@@ -1,0 +1,110 @@
+# The Admin page's verdict is the launch's own check (P2, A2, T-1969): one function a harness
+# (`crates/cf-harness/src/launch.rs`, `check`), asked through the map of answers the launches
+# keep, called at every look and kept by nothing in the Admin, with a deadline of 40 seconds
+# a row (`crates/cf-harness/src/admin.rs`, `admin/inspect.rs`). Every name here begins
+# `harness window:`, so `cargo xtask plants daemon harness window` runs them.
+
+[run]
+harness-window-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
+harness-window-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "harness_check::"]
+
+# The row says what the check said: a refusal is the launch's sentence, and nothing is "Ready"
+# where the launch is refused.
+[[plant]]
+name = "harness window: the row's setup is Ready whatever the check said"
+meant = "the_page_says_what_the_launch_says_of_each_answer_a_cli_gives"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+        Ok(()) => Setup::Ready,
+        Err(refused) if refused.read => Setup::UpdateRequired {
+'''
+replace = '''
+        Ok(()) | Err(_) if true => Setup::Ready,
+        Err(refused) if refused.read => Setup::UpdateRequired {
+'''
+
+# One map of answers for the launch and the page: a look through a map of its own asks the
+# queue again after a launch has, and again in the daemon.
+[[plant]]
+name = "harness window: the Admin asks through a map of its own"
+meant = "a_prepare_that_passes_then_a_look_asks_the_queue_once_and_the_version_once"
+runs = ["harness-window-admin", "harness-window-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+    let asking = Asking {
+        probes: &inner.probes,
+'''
+replace = '''
+    let asking = Asking {
+        probes: &crate::seams::processes::Probes::default(),
+'''
+
+# The Admin keeps no verdict: a look inside five minutes shows what a launch gets now.
+[[plant]]
+name = "harness window: the verdict is kept with its row"
+meant = "a_changed_file_behind_the_same_path_is_seen_at_the_next_look_and_no_verdict_is_kept"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+        if !refresh && !checked {
+            if let Some(row) = kept {
+'''
+replace = '''
+        if !refresh {
+            if let Some(row) = kept {
+'''
+
+# A Refresh forgets what the launches kept of the CLI before it asks.
+[[plant]]
+name = "harness window: a refresh forgets nothing"
+meant = "a_refresh_during_a_question_starts_a_new_one_and_does_not_take_the_old_answer"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+        if refresh && checked {
+            if let Some(path) = &path {
+                inner.probes.forget(std::path::Path::new(path));
+            }
+        }
+'''
+replace = ""
+
+# Each row has a deadline: a question that never ends leaves the row unchecked at 40 seconds.
+[[plant]]
+name = "harness window: a row has no deadline"
+meant = "a_question_that_never_ends_leaves_the_row_unchecked_at_40_seconds_and_the_others_whole"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let row = if inspect::checks(harness) && path.is_some() {
+'''
+replace = '''
+    let row = if false && inspect::checks(harness) && path.is_some() {
+'''
+
+# One question for the look: a check that asks its own version beside the page's asks it twice
+# where the first failed early, and its second answer crosses the row's deadline.
+[[plant]]
+name = "harness window: the check asks its own version beside the page's"
+meant = "a_version_that_failed_early_is_not_asked_again_when_the_queue_answers_late"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+        let shared = own_question.then(|| version.clone().boxed_local());
+'''
+replace = '''
+        let shared = None;
+'''

@@ -337,6 +337,10 @@ fn the_look_after_an_update_is_a_fresh_one_not_the_row_kept() {
     fixture
         .capture
         .answer("codex --version", [says("1.0.0"), says("1.0.1")]);
+    fixture.capture.answer(
+        "codex queue --help",
+        [says("--thread --message"), says("--thread --message")],
+    );
     fixture.latest.says(Harness::Codex, "1.0.1");
     fixture.latest.says(Harness::Codex, "1.0.1");
     fixture.capture.says("codex update", "");
@@ -345,9 +349,18 @@ fn the_look_after_an_update_is_a_fresh_one_not_the_row_kept() {
         panic!("it ran")
     };
     assert!(!Rc::ptr_eq(&before, &harness));
-    assert!(
-        Rc::ptr_eq(&harness, &fixture.row("codex", false)),
-        "and kept"
+    // The page asks the launch's check at every look, and the answers the launches keep are
+    // the update's: the next look shows the updated Codex, asking nothing more of it.
+    let next = fixture.row("codex", false);
+    assert_eq!(next.version.value(), harness.version.value());
+    assert_eq!(
+        next.update, harness.update,
+        "the feed's answer is the one kept"
+    );
+    assert_eq!(
+        fixture.latest.take_asked().len(),
+        2,
+        "the feed asked no more"
     );
 }
 
