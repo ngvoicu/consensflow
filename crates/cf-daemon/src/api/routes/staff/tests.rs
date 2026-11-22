@@ -31,20 +31,20 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
         said["members"].to_string(),
         r#"[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]"#
     );
-    // The slots, in the registry's order, each with its holders: 29 tiered and the image
+    // The slots, in the registry's order, each with its holders: 32 tiered and the image
     // designer's one with no tier; the empty ones are there too.
     let slots = said["slots"].as_array().unwrap();
-    assert_eq!(slots.len(), 30);
+    assert_eq!(slots.len(), 33);
     assert_eq!(
-        slots[1],
+        slots[2],
         serde_json::json!({ "role": "worker", "tier": "standard", "holders": ["zeus"] })
     );
     assert_eq!(
-        slots[0],
+        slots[1],
         serde_json::json!({ "role": "worker", "tier": "complex", "holders": [] })
     );
     assert_eq!(
-        slots[29],
+        slots[32],
         serde_json::json!({ "role": "designer", "tier": null, "holders": [] })
     );
     assert_eq!(scene.kicks.get(), 0);
@@ -77,13 +77,13 @@ async fn a_slot_four_members_hold_says_all_four_holders() {
     }
     let (_, said) = staff(&scene, &scene.context).await;
     assert_eq!(
-        said["slots"][1],
+        said["slots"][2],
         serde_json::json!({
             "role": "worker", "tier": "standard",
             "holders": ["zeus", "hera", "ares", "pan"]
         })
     );
-    assert_eq!(said["slots"][2]["holders"], serde_json::json!([]));
+    assert_eq!(said["slots"][3]["holders"], serde_json::json!([]));
 }
 
 #[tokio::test]

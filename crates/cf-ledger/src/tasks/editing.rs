@@ -387,9 +387,6 @@ fn tier_for(
             ))
         }
     };
-    if !roles::offers(pool, wanted) {
-        return Err(crate::staff::slots::not_offered_for(pool, wanted));
-    }
     let purpose = purpose.or(task.purpose.as_deref());
     if wanted == "critical" && !may_take_slot(pool, wanted, purpose) {
         return Err(LedgerError::refused(

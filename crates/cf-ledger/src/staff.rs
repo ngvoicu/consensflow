@@ -36,7 +36,6 @@ pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
     start_session, undecided_results, Giving,
 };
-pub(crate) use slots::note_settled_moves;
 pub(crate) use vacation::{
     bring_back as return_from_vacation, release_unopened, send as send_on_vacation,
 };
@@ -187,7 +186,6 @@ pub(crate) fn add_member(
 ) -> Result<ParticipantView, LedgerError> {
     let roles = member.check()?;
     store.write(|store| {
-        slots::require_offered(&roles, &member.tier)?;
         slots::require_free(store, project_id, None, &roles, &member.tier)?;
         let left = store
             .db
@@ -284,7 +282,6 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             member.tier.clone()
         };
         if let Some(tier) = tier.as_deref().filter(|_| !gained.is_empty()) {
-            slots::require_offered(&gained, tier)?;
             slots::require_free(store, project_id, Some(member.id), &gained, tier)?;
         }
         store.db.execute(
@@ -344,7 +341,6 @@ pub(crate) fn edit_member(
         if member.backup_of.is_none() && member.tier.as_deref() != Some(edit.tier.as_str()) {
             let held: Vec<String> = serde_json::from_str(&member.roles)?;
             if !roles::takes_no_tier(&held) {
-                slots::require_offered(&held, &edit.tier)?;
                 slots::require_free(store, project_id, Some(member.id), &held, &edit.tier)?;
             }
         }

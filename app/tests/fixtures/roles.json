@@ -6,6 +6,7 @@
     "article": "a",
     "tiered": true,
     "tiers": [
+      "critical",
       "complex",
       "standard",
       "light"
@@ -19,6 +20,7 @@
     "article": "a",
     "tiered": true,
     "tiers": [
+      "critical",
       "complex",
       "standard",
       "light"
@@ -102,6 +104,7 @@
     "article": "an",
     "tiered": true,
     "tiers": [
+      "critical",
       "complex",
       "standard",
       "light"

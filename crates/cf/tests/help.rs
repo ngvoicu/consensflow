@@ -75,9 +75,9 @@ const BOARD: [(&[&str], &str); 20] = [
     (
         &["task", "add"],
         concat!(
-            "  cf task add --tier <complex|standard|light> \"…\"\n",
-            "                                    work for a worker of that tier (critical work is not coding)\n",
-            "  cf task add --frontend --tier <complex|standard|light> \"…\"\n",
+            "  cf task add --tier <critical|complex|standard|light> \"…\"\n",
+            "                                    work for a worker of that tier (critical work names its --purpose)\n",
+            "  cf task add --frontend --tier <critical|complex|standard|light> \"…\"\n",
             "                                    work for the frontend designer: screens designed, built\n",
             "                                    and looked at in the project's design language\n",
             "  cf task add --architect --tier <tier> \"…\"\n",
@@ -95,7 +95,7 @@ const BOARD: [(&[&str], &str); 20] = [
             "  cf task add --test --tier <tier> \"…\"\n",
             "                                    a test for a tester of that tier: say what to run\n",
             "                                    and check; results back, no product code changed\n",
-            "  cf task add --integrate --tier <complex|standard|light> \"…\"\n",
+            "  cf task add --integrate --tier <critical|complex|standard|light> \"…\"\n",
             "                                    work for the integrator: merge, check, land and clean up\n",
             "                                    as the project's rules say; no behaviour changed\n",
             "  cf task add --design \"…\"          an image from the image designer: what to draw, what\n",

@@ -1296,8 +1296,8 @@ async fn a_tier_nobody_holds_is_the_nearest_and_the_answer_says_which_and_whose(
         r#"{"tier":"critical"}"#,
     )
     .await;
-    // A worker's task is never critical: coding is not critical work.
-    assert_eq!(refused(&(status, said)).1, "tier-not-offered");
+    // A worker's task may be critical (every role has the slot): it is asked for its purpose.
+    assert_eq!(refused(&(status, said)).1, "purpose-required");
     let (status, said) = post(
         &scene,
         &scene.chief,

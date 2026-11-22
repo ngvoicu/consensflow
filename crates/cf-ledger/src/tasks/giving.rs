@@ -142,9 +142,6 @@ impl NewTask {
             return Ok(None);
         }
         let tier = model::parse_tier(self.tier.as_deref().map(Value::from).as_ref())?;
-        if !roles::offers(pool, tier) {
-            return Err(crate::staff::slots::not_offered_for(pool, tier));
-        }
         if tier != "critical" && self.purpose.is_some() {
             return Err(LedgerError::refused(
                 "purpose-without-critical",

@@ -363,8 +363,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(129), Some(154), None, Some(18)]),
-        (a_windows(), [Some(126), Some(150), None, Some(14)]),
+        (a_mac(), [Some(127), Some(151), None, Some(15)]),
+        (a_windows(), [Some(123), Some(148), None, Some(12)]),
     ] {
         assert_eq!(
             one(

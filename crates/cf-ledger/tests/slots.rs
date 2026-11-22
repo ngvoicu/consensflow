@@ -125,20 +125,14 @@ fn each_write_is_refused_in_the_words_of_the_rule() {
             image("iris"),
         ],
     );
-    // Add: a tier its role has no slot at.
-    let refused = ledger
+    // Add: a worker at Critical is a member like any other (the chief picks the tier of any
+    // job); the slot is then its.
+    ledger
         .add_member(project.id, &member("ares", &["worker"], "critical"))
-        .unwrap_err();
-    assert_eq!(
-        said(refused),
-        (
-            "tier-not-offered".to_owned(),
-            "a worker is complex, standard or light, never critical: critical work is not coding. Pick one of those, or add this model again as a second member".to_owned()
-        )
-    );
+        .expect("a critical worker");
     // Add: a slot another holds.
     let refused = ledger
-        .add_member(project.id, &member("ares", &["worker"], "standard"))
+        .add_member(project.id, &member("gaia", &["worker"], "standard"))
         .unwrap_err();
     assert_eq!(
         said(refused),
@@ -160,29 +154,39 @@ fn each_write_is_refused_in_the_words_of_the_rule() {
     let refused = ledger
         .set_roles(project.id, "hera", &["reviewer", "worker"])
         .unwrap_err();
-    assert_eq!(said(refused).0, "tier-not-offered");
+    assert_eq!(
+        said(refused),
+        (
+            "slot-taken".to_owned(),
+            "the critical worker slot is @ares's: a role and tier holds one member. Pick another tier".to_owned()
+        )
+    );
     ledger
-        .add_member(project.id, &member("ares", &["worker"], "light"))
+        .add_member(project.id, &member("luna", &["worker"], "light"))
         .expect("a light worker");
     ledger
-        .set_roles(project.id, "ares", &["worker", "reviewer"])
+        .set_roles(project.id, "luna", &["worker", "reviewer"])
         .expect("a light reviewer slot is free");
     // Edit to another tier: each role at the new tier.
     let edit = |tier: &str| MemberEdit {
         harness: "claude-code".into(),
         model: None,
         effort: None,
-        model_name: Some("ares".into()),
+        model_name: Some("luna".into()),
         tier: tier.into(),
     };
     let refused = ledger
-        .edit_member(project.id, "ares", &edit("standard"))
+        .edit_member(project.id, "luna", &edit("standard"))
         .unwrap_err();
     assert_eq!(said(refused).0, "slot-taken");
     let refused = ledger
-        .edit_member(project.id, "ares", &edit("critical"))
+        .edit_member(project.id, "luna", &edit("critical"))
         .unwrap_err();
-    assert_eq!(said(refused).0, "tier-not-offered");
+    assert_eq!(
+        said(refused).0,
+        "slot-taken",
+        "hera holds the critical reviewer slot"
+    );
 }
 
 #[test]
@@ -200,14 +204,14 @@ fn new_projects_list_is_checked_whole_as_slots() {
         words,
         "the staff names two standard workers, zeus and diana: a role and tier holds one member"
     );
+    // A list that seats a critical worker and architect is taken: every role has a Critical slot.
     let refused = ledger
-        .create_project(&request(vec![member(
-            "zeus",
-            &["worker", "architect"],
-            "critical",
-        )]))
+        .create_project(&request(vec![
+            member("zeus", &["worker", "architect"], "critical"),
+            member("diana", &["architect"], "critical"),
+        ]))
         .unwrap_err();
-    assert_eq!(said(refused).0, "tier-not-offered");
+    assert_eq!(said(refused).0, "slot-taken");
     let refused = ledger
         .create_project(&request(vec![image("iris"), image("pallas")]))
         .unwrap_err();
@@ -443,20 +447,13 @@ fn a_purpose_is_taken_only_with_critical_at_add_as_at_edit() {
             "a purpose comes with --tier critical".to_owned()
         )
     );
-    // A worker's task is never critical.
-    let refused = ledger
+    // A worker's task may be critical, with its purpose.
+    ledger
         .create_task(
             project.id,
             &work("worker", "critical", Some("architecture")),
         )
-        .unwrap_err();
-    assert_eq!(
-        said(refused),
-        (
-            "tier-not-offered".to_owned(),
-            "a worker's task is complex, standard or light: critical work is not coding".to_owned()
-        )
-    );
+        .expect("critical work for a worker");
     // No tier at all stays an invalid tier.
     let refused = ledger
         .create_task(
@@ -829,4 +826,40 @@ fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief_an
             "the original window keeps the task"
         );
     }
+}
+
+/// Critical work of a role that writes files (a worker's, the frontend designer's, the
+/// integrator's) is coding included (the owner, 2026-11-22): its brief leads with the purpose and
+/// does not forbid it a file, as a reviewer's, advisor's, researcher's and tester's does.
+#[test]
+fn a_critical_brief_of_a_role_that_writes_files_does_not_forbid_it_a_file() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "critical"),
+            member("hera", &["reviewer"], "critical"),
+        ],
+    );
+    let brief = |ledger: &mut Ledger, pool: &str, who: &str, purpose: &str| -> String {
+        let task = ledger
+            .create_task(project.id, &work(pool, "critical", Some(purpose)))
+            .unwrap()
+            .task
+            .number;
+        let holder = id(ledger, project.id, who);
+        let moved = ledger.assign_task(project.id, task, holder).unwrap();
+        ledger
+            .message(moved.message.expect("its brief").id)
+            .unwrap()
+            .unwrap()
+            .body
+    };
+    let worker = brief(&mut ledger, "worker", "zeus", "hard-problem");
+    assert_eq!(worker, "Critical work: hard-problem.\n\nDo the work");
+    let review = brief(&mut ledger, "reviewer", "hera", "critical-review");
+    assert!(
+        review.starts_with("Critical work: critical-review. It changes no project file"),
+        "{review}"
+    );
 }

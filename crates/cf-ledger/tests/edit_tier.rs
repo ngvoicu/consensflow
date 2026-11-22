@@ -225,15 +225,10 @@ fn a_tier_that_is_none_is_refused_and_critical_work_needs_its_purpose() {
     let task = open(&mut ledger, &project, "worker", "standard").number;
     let refused = edit(&mut ledger, &project, task, &to("huge")).expect_err("no such tier");
     assert_eq!(refused.code(), Some("invalid-tier"));
-    // A worker's work is never critical: coding is not critical work.
-    let refused = edit(&mut ledger, &project, task, &to("critical")).expect_err("no slot");
-    assert_eq!(
-        (refused.code(), refused.to_string()),
-        (
-            Some("tier-not-offered"),
-            "a worker's task is complex, standard or light: critical work is not coding".to_owned()
-        )
-    );
+    // A worker's work may be critical, as any role's (the chief picks the tier of any job): it
+    // is asked for its purpose.
+    let refused = edit(&mut ledger, &project, task, &to("critical")).expect_err("no purpose");
+    assert_eq!(refused.code(), Some("purpose-required"));
     // A purpose comes with Critical only.
     let purposed = TaskEdit {
         tier: Some("light".into()),

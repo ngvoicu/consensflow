@@ -74,10 +74,9 @@ impl Role {
     }
 }
 
-/// Every tier, most critical first: the tiers of a role that weighs, checks or designs.
+/// Every tier, most critical first: the tiers of every role but the image designer's, since the
+/// chief picks the tier of any job (the owner, 2026-11-22).
 const ALL_TIERS: &[&str] = &["critical", "complex", "standard", "light"];
-/// The tiers of a role that writes the product's code: Critical has no coding.
-const CODING_TIERS: &[&str] = &["complex", "standard", "light"];
 
 /// The worker: the work itself, given by tier; a task that asks for no role is its.
 pub const WORKER: Role = Role {
@@ -85,7 +84,7 @@ pub const WORKER: Role = Role {
     name: "worker",
     article: "a",
     switch: None,
-    tiers: CODING_TIERS,
+    tiers: ALL_TIERS,
     home: "standard",
     image_agent: false,
     changes_files: true,
@@ -98,7 +97,7 @@ pub const FRONTEND: Role = Role {
     name: "frontend designer",
     article: "a",
     switch: Some("--frontend"),
-    tiers: CODING_TIERS,
+    tiers: ALL_TIERS,
     home: "standard",
     image_agent: false,
     changes_files: true,
@@ -172,7 +171,7 @@ pub const INTEGRATOR: Role = Role {
     name: "integrator",
     article: "an",
     switch: Some("--integrate"),
-    tiers: CODING_TIERS,
+    tiers: ALL_TIERS,
     home: "standard",
     image_agent: false,
     changes_files: true,
@@ -515,16 +514,22 @@ mod tests {
     }
 
     #[test]
-    fn the_staff_is_thirty_slots_and_critical_has_no_coding() {
+    fn the_staff_is_thirty_three_slots_and_every_tiered_role_offers_all_four_tiers() {
         let slots = slots();
-        assert_eq!(slots.len(), 30);
+        assert_eq!(slots.len(), 33);
         assert_eq!(slots.iter().filter(|slot| slot.tier.is_none()).count(), 1);
         assert_eq!(slots.last().map(|slot| slot.role.id), Some("designer"));
-        for role in ["worker", "frontend", "integrator"] {
-            assert_eq!(find(role).unwrap().tiers, ["complex", "standard", "light"]);
-            assert!(!offers(role, "critical"), "{role}");
-        }
-        for role in ["architect", "researcher", "advisor", "reviewer", "tester"] {
+        // The chief picks the tier of any job (the owner, 2026-11-22): no role is held to fewer.
+        for role in [
+            "worker",
+            "frontend",
+            "integrator",
+            "architect",
+            "researcher",
+            "advisor",
+            "reviewer",
+            "tester",
+        ] {
             assert_eq!(
                 find(role).unwrap().tiers,
                 ["critical", "complex", "standard", "light"]

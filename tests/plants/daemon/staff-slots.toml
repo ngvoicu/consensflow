@@ -7,6 +7,7 @@
 
 [run]
 ss-ledger-slots = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "slots"]
+ss-ledger-roles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "roles::"]
 ss-ledger-update = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "update_to_slots"]
 ss-engine-tier = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "tier_fallback::"]
 ss-engine-router = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slot_router::"]
@@ -89,7 +90,7 @@ replace = '''
 
 [[plant]]
 name = "staff slots: the update reads light as a choice"
-meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
 runs = ["ss-ledger-update"]
 
 [[plant.edit]]
@@ -99,20 +100,6 @@ find = '''
 '''
 replace = '''
      AND p.tier IS NULL
-'''
-
-[[plant]]
-name = "staff slots: the update does not move a Critical coder"
-meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
-runs = ["ss-ledger-update"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
-find = '''
-     AND p.tier = 'critical'
-'''
-replace = '''
-     AND p.tier = 'none'
 '''
 
 [[plant]]
@@ -323,7 +310,7 @@ replace = '''
 
 [[plant]]
 name = "staff slots: the update moves a replaced backup of a member it moves (step 1)"
-meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
 runs = ["ss-ledger-update"]
 
 [[plant.edit]]
@@ -338,30 +325,6 @@ CREATE TEMP TABLE settled_rows AS
 '''
 replace = '''
      AND (p.tier IS NULL OR p.tier = 'light')
-   ORDER BY p.id;
-CREATE TEMP TABLE settled_rows AS
-  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
-'''
-
-[[plant]]
-name = "staff slots: the update moves a replaced backup of a member it moves (step 2)"
-meant = "a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows"
-runs = ["ss-ledger-update"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
-find = '''
-                  WHERE r.value IN ('worker', 'frontend', 'integrator'))
-   ORDER BY p.id;
-CREATE TEMP TABLE settled_rows AS
-  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
-'''
-replace = '''
-                  WHERE r.value IN ('worker', 'frontend', 'integrator'))
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
@@ -381,4 +344,40 @@ find = '''
 '''
 replace = '''
             let rule = if false && task.pool.as_deref() == Some(roles::ARCHITECT.id) {
+'''
+
+[[plant]]
+name = "staff slots: a worker's critical brief forbids it a file"
+meant = "a_critical_brief_of_a_role_that_writes_files_does_not_forbid_it_a_file"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''
+                Some(role) if role.changes_files => String::new(),
+'''
+replace = '''
+                Some(role) if role.changes_files && false => String::new(),
+'''
+
+[[plant]]
+name = "staff slots: a worker has no Critical slot"
+meant = "the_staff_is_thirty_three_slots_and_every_tiered_role_offers_all_four_tiers"
+runs = ["ss-ledger-roles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''
+    id: "worker",
+    name: "worker",
+    article: "a",
+    switch: None,
+    tiers: ALL_TIERS,
+'''
+replace = '''
+    id: "worker",
+    name: "worker",
+    article: "a",
+    switch: None,
+    tiers: &["complex", "standard", "light"],
 '''

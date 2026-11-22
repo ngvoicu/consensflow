@@ -1953,7 +1953,7 @@ and 2 idle sessions (`cf task list --all`)";
                 &mut std::io::empty(),
             );
             assert!(
-                matches!(&refused, Err(Failure::Usage(usage)) if usage == ADD_USAGE && usage.contains("<critical|complex|standard|light>") && usage.contains("<complex|standard|light>")),
+                matches!(&refused, Err(Failure::Usage(usage)) if usage == ADD_USAGE && usage.contains("<critical|complex|standard|light>")),
                 "{switch}: not the usage"
             );
             assert!(

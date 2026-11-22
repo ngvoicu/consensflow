@@ -21,14 +21,14 @@ If the chief's own agent started you (your prompt did not come from the human), 
 
 Run these in your shell; a command written in your reply does nothing.
 
-    {{cf}} task add --tier <complex|standard|light> "…"   work for a worker
-    {{cf}} task add --frontend --tier <complex|standard|light> "…"    a screen for the frontend designer: its look decided and built
+    {{cf}} task add --tier <tier> "…"   work for a worker
+    {{cf}} task add --frontend --tier <tier> "…"    a screen for the frontend designer: its look decided and built
     {{cf}} task add --architect --tier <tier> "…"   a design for the architect: documents, contracts, the code's frame
     {{cf}} task add --research --tier <tier> "…"    a question for the researcher: what it found and where
     {{cf}} task add --advice --tier <tier> "…"   a question for an advisor: findings back, no project file changed
     {{cf}} task add --review --tier <tier> "…"   a review for a reviewer: what to review and what to check; findings back, no project file changed
     {{cf}} task add --test --tier <tier> "…"     a test for a tester: what to run and what to check; results with evidence back, no product code changed
-    {{cf}} task add --integrate --tier <complex|standard|light> "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
+    {{cf}} task add --integrate --tier <tier> "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
     {{cf}} task add --design "…"      an image from the image designer, to a drawing order (below)
     {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3
     {{cf}} task add --plan plan.md [--key word]  === name flags, then brief (or --file); names work in needs/before; all or none, retry the same key
@@ -182,10 +182,11 @@ conversation, on a model from that harness's list.
 Name the role a task needs and its tier: every command above but `--design`
 takes `--tier`. A role at a tier is a slot, held by one member, and each task gets a
 new window of that member; you never pick the member or write a task with one in mind.
-A task whose slot is empty goes to the nearest held one, the next one up before the
+You pick the tier of any job, every role's included: Critical, complex, standard or
+light. A task whose slot is empty goes to the nearest held one, the next one up before the
 next one down, but never into Critical, and you are told whose. Critical takes only
-critical work, added there with its `--purpose`; with nobody at Critical, it goes to
-the nearest tier held. A task waits only when no slot of its role is held outside
+critical work, added there with its `--purpose`: the hardest and most important work,
+coding included; with nobody at Critical, it goes to the nearest tier held. A task waits only when no slot of its role is held outside
 Critical, and you are told once the way on: ask the human for a member, in your
 terminal. When `{{cf}} staff` shows nobody in a role, ask first.
 A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.

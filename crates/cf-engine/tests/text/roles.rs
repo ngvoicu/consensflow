@@ -493,7 +493,7 @@ fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_
     let card = section(&text, "Your commands");
     for role in cf_ledger::roles::all() {
         // The card says a role's tiers as the registry has them: `<tier>` for every one, else
-        // the ones it has (the three roles that write code have no Critical).
+        // the ones it has (every role but the image designer has all four).
         let tiers = if role.tiers.len() == 4 {
             "<tier>".to_owned()
         } else {
@@ -530,7 +530,8 @@ fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_im
             "Name the role a task needs and its tier: every command above but `--design` takes `--tier`.",
             "A role at a tier is a slot, held by one member, and each task gets a new window of that member; you never pick the member or write a task with one in mind.",
             "A task whose slot is empty goes to the nearest held one, the next one up before the next one down, but never into Critical, and you are told whose.",
-            "Critical takes only critical work, added there with its `--purpose`; with nobody at Critical, it goes to the nearest tier held.",
+            "You pick the tier of any job, every role's included: Critical, complex, standard or light.",
+            "Critical takes only critical work, added there with its `--purpose`: the hardest and most important work, coding included; with nobody at Critical, it goes to the nearest tier held.",
             "A task waits only when no slot of its role is held outside Critical, and you are told once the way on: ask the human for a member, in your terminal.",
             "A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.",
             // The architect (A3, A5): a design first, and the briefs point to its files.

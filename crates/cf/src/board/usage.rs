@@ -9,7 +9,7 @@ pub fn usage() -> &'static str {
 }
 
 /// What `cf task add` takes, said when it was given too little.
-pub const ADD_USAGE: &str = r#"cf task add --tier <complex|standard|light> "what to do" for a worker (with --frontend for the frontend designer or --integrate for the integrator: the same tiers); --tier <critical|complex|standard|light> with --architect, --research, --advice for an advisor, --review for a reviewer or --test for a tester (critical work names its --purpose); --design takes no tier; or --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board"#;
+pub const ADD_USAGE: &str = r#"cf task add --tier <critical|complex|standard|light> "what to do" for a worker (with --frontend for the frontend designer, --integrate for the integrator, --architect, --research, --advice for an advisor, --review for a reviewer or --test for a tester: the same tiers; critical work names its --purpose); --design takes no tier; or --after T-3, or --self; --needs T-3,T-4 and --before T-9,T-10 order the board"#;
 
 /// How far the lines that go on from a command's line are indented.
 const CONTINUED: usize = 36;
@@ -231,7 +231,7 @@ mod tests {
                 "{line:?} goes on from {owner:?}"
             );
         }
-        assert!(task.contains("of that tier (critical work is not coding)"));
+        assert!(task.contains("of that tier (critical work names its --purpose)"));
         assert!(task.contains("  cf task add --tier standard - <<'BRIEF'"));
     }
 }

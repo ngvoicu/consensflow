@@ -422,17 +422,16 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
 
 /// The four roles of spec new-roles (FD-04) have tiers now (the staff as slots): each is asked
 /// for by its field and a tier, a staff with nobody in it takes the task and it waits for one,
-/// critical work is refused where the role has no Critical slot (the frontend designer's, the
-/// integrator's) and asks for its purpose where it has (the architect's, the researcher's), and a
+/// critical work asks for its purpose in each of them (every role has a Critical slot), and a
 /// tier nobody holds goes to the nearest one somebody does.
 #[tokio::test]
 async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_is_on_the_staff() {
     let scene = scene();
-    for (field, pool, whose, has_critical) in [
-        ("frontend", "frontend", "a frontend designer's", false),
-        ("architect", "architect", "an architect's", true),
-        ("research", "researcher", "a researcher's", true),
-        ("integrate", "integrator", "an integrator's", false),
+    for (field, pool) in [
+        ("frontend", "frontend"),
+        ("architect", "architect"),
+        ("research", "researcher"),
+        ("integrate", "integrator"),
     ] {
         // No tier is asked for the tier.
         let body = format!(r#"{{"{field}":true,"body":"x"}}"#);
@@ -446,25 +445,10 @@ async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_
             ),
             "{body}"
         );
-        // Critical: a role that writes code has no slot there; the others name a purpose.
+        // Critical: every role names a purpose there.
         let critical = format!(r#"{{"{field}":true,"body":"x","tier":"critical"}}"#);
         let answered = post(&scene, &scene.chief, &critical).await;
-        if has_critical {
-            assert_eq!(refused(&answered).1, "purpose-required", "{critical}");
-        } else {
-            assert_eq!(
-                refused(&answered),
-                (
-                    400,
-                    "tier-not-offered",
-                    format!(
-                        "{whose} task is complex, standard or light: critical work is not coding"
-                    )
-                    .as_str()
-                ),
-                "{critical}"
-            );
-        }
+        assert_eq!(refused(&answered).1, "purpose-required", "{critical}");
         // A purpose comes with Critical only.
         let purposed =
             format!(r#"{{"{field}":true,"body":"x","tier":"light","purpose":"architecture"}}"#);
@@ -581,8 +565,8 @@ async fn what_is_wrong_with_the_task_is_said_in_the_order_the_ledger_checks_it()
             r#"{"body":"x","tier":"critical"}"#,
             (
                 400,
-                "tier-not-offered",
-                "a worker's task is complex, standard or light: critical work is not coding",
+                "purpose-required",
+                "critical work names its purpose: critical-review, architecture, hard-problem, important-question",
             ),
         ),
         (
@@ -705,8 +689,8 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
             r#"{"frontend":true,"tier":"critical","purpose":"design","body":"x"}"#,
             (
                 400,
-                "tier-not-offered",
-                "a frontend designer's task is complex, standard or light: critical work is not coding",
+                "purpose-required",
+                "critical work names its purpose: critical-review, architecture, hard-problem, important-question",
             ),
         ),
         (
@@ -1105,8 +1089,8 @@ fn keep_plan_under_key(scene: &Scene, key: &str, plan: &Value, task: cf_ledger::
         .unwrap();
 }
 
-/// A plan an earlier version took with a tier the staff now refuses (Light advice with a purpose,
-/// Critical work for a role with no Critical slot) replays its saved answer: the key is looked up
+/// A plan an earlier version took that the staff now refuses (a purpose at a tier below Critical,
+/// on advice or a review) replays its saved answer: the key is looked up
 /// before any role, tier or purpose is checked, a changed file under it is `key-used`, and the
 /// same file under a fresh key is refused for what it asks.
 #[tokio::test]
@@ -1121,12 +1105,12 @@ async fn a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_
             "purpose-without-critical",
         ),
         (
-            json!({ "name": "only", "tier": "critical", "purpose": "hard-problem",
-                    "body": "Work\n" }),
-            "worker",
-            "hard-problem",
-            "critical",
-            "tier-not-offered",
+            json!({ "name": "only", "review": true, "tier": "standard",
+                    "purpose": "critical-review", "body": "Check\n" }),
+            "reviewer",
+            "critical-review",
+            "standard",
+            "purpose-without-critical",
         ),
     ] {
         let scene = scene();

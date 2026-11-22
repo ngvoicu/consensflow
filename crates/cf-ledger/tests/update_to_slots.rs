@@ -232,8 +232,7 @@ fn built() -> Built {
 }
 
 #[test]
-fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_its_backup_and_windows(
-) {
+fn a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member() {
     let (dir, before, tiers_before) = built();
     let ledger = open(&dir);
     let db = ledger.sqlite();
@@ -241,18 +240,9 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
     // assignee, member, backup link) is as it was.
     let after = kept(db);
     for (at, (was, now)) in before.iter().zip(&after).enumerate() {
-        // The only new rows are the human's note (and the event of it, apart): every row there
-        // was is as it was, and a table that gains none has the same rows.
-        assert_eq!(&now[..was.len()], &was[..], "table {at}");
-        if at != 1 {
-            assert_eq!(now.len(), was.len(), "table {at} gains no row");
-        }
+        // Nothing is added: every row there was is as it was, and nobody is told.
+        assert_eq!(now, was, "table {at}");
     }
-    assert_eq!(
-        after[1].len(),
-        before[1].len() + 2,
-        "a note for each of the two projects"
-    );
     let now: std::collections::BTreeMap<String, Option<String>> = tiers(db).into_iter().collect();
     let was: std::collections::BTreeMap<String, Option<String>> =
         tiers_before.into_iter().collect();
@@ -277,12 +267,11 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
         "a member with a role that had tiers keeps its tier"
     );
     assert_eq!(tier("zeus"), Some("standard"));
-    // Step 2: a Critical member with a coding role moves to complex, with its backup and
-    // the windows of both.
-    for moved in ["ares", "luna", "luna-1", "ares-1", "dion", "sol"] {
-        assert_eq!(tier(moved), Some("complex"), "{moved}");
+    // A Critical member stays Critical whatever roles it holds, with its backup and the windows
+    // of both: every role offers every tier (the owner, 2026-11-22).
+    for kept in ["ares", "luna", "luna-1", "ares-1", "dion", "sol", "quietly"] {
+        assert_eq!(tier(kept), Some("critical"), "{kept}");
     }
-    assert_eq!(tier("quietly"), Some("complex"), "the other project's");
     // An image designer's row is left as it is, whatever tier an old Add member stored.
     for kept in ["pygmalion", "galatea", "pallas", "pallas-1", "departed"] {
         assert_eq!(now[kept], was[kept], "{kept}");
@@ -304,52 +293,13 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_a_critical_coder_with_i
     // A Critical architect and reviewer, with its backup, keeps its slots.
     assert_eq!(tier("ate"), Some("critical"));
     assert_eq!(tier("ate-backup"), Some("critical"));
-    // The update is logged as `member.settled`, with the slots that emptied.
+    // The update is logged as `member.settled` for step 1's moves alone, and tells nobody.
     let settled = events_of(db, "member.settled");
-    let step2: Vec<&Value> = settled.iter().filter(|event| event["step"] == 2).collect();
-    let emptied = |handle: &str| -> Value {
-        step2
-            .iter()
-            .find(|event| event["handle"] == handle)
-            .unwrap_or_else(|| panic!("no move of {handle}"))["emptied"]
-            .clone()
-    };
-    assert_eq!(
-        emptied("ares"),
-        serde_json::json!([]),
-        "a Critical worker alone empties none"
-    );
-    assert_eq!(
-        emptied("dion"),
-        serde_json::json!(["reviewer"]),
-        "the only critical reviewer"
-    );
-    // The human has one note in each project where step 2 moved a member.
-    let notes = |project: i64| -> Vec<String> {
-        db.prepare(
-            "SELECT m.body FROM message m JOIN participant p ON p.id = m.recipient_id
-              WHERE m.project_id = ? AND p.role = 'human' AND m.kind = 'note' ORDER BY m.id",
-        )
-        .unwrap()
-        .query_map([project], |row| row.get::<_, String>(0))
-        .unwrap()
-        .map(Result::unwrap)
-        .collect()
-    };
-    let told = notes(1);
-    assert_eq!(told.len(), 1, "{told:?}");
-    assert!(
-        told[0].contains("The update made @dion complex: a worker is never critical. The critical reviewer slot it held is empty now: add a critical reviewer under Project settings. Until then, critical reviews go to the nearest reviewer held."),
-        "{}",
-        told[0]
-    );
-    assert!(told[0].contains("The update made @ares complex: a worker is never critical."));
-    assert_eq!(notes(2).len(), 1, "the other project too");
+    assert!(!settled.is_empty() && settled.iter().all(|event| event["step"] == 1));
+    assert_eq!(notes_after(&ledger, 1) + notes_after(&ledger, 2), 0);
     drop(ledger);
-    // A second open sends no note.
     let again = open(&dir);
-    assert_eq!(notes_after(&again, 1), 1);
-    assert_eq!(notes_after(&again, 2), 1);
+    assert_eq!(notes_after(&again, 1) + notes_after(&again, 2), 0);
 }
 
 fn notes_after(ledger: &Ledger, project: i64) -> i64 {
@@ -365,11 +315,11 @@ fn notes_after(ledger: &Ledger, project: i64) -> i64 {
 }
 
 #[test]
-fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_finishes_it() {
+fn a_task_a_critical_coder_held_finishes_in_its_window_and_its_critical_backup_may_take_it_anew() {
     let (dir, _before, _) = built();
     let mut ledger = open(&dir);
-    // T-1 is Critical work with its purpose, in the window of the critical worker's backup,
-    // which the update moved to complex: the task keeps its assignment, and finishes there.
+    // T-1 is Critical work with its purpose, in the window of the critical worker's backup: the
+    // task keeps its assignment, and finishes there.
     let finished = ledger
         .record_result(1, 1, "Done in the backup's window")
         .unwrap();
@@ -383,7 +333,7 @@ fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_fin
         )
         .unwrap();
     assert_eq!(window, "luna-1");
-    // The backup, now at complex, may not take that Critical task anew: the sweep's guard.
+    // The backup is still Critical: it may take that Critical task with its purpose anew.
     let luna: i64 = ledger
         .sqlite()
         .query_row(
@@ -392,8 +342,9 @@ fn a_task_a_critical_coder_held_stays_with_its_backup_and_the_backups_window_fin
             |r| r.get(0),
         )
         .unwrap();
-    let refused = ledger.check_taker(1, 1, luna).unwrap_err();
-    assert_eq!(refused.code(), Some("not-a-candidate"));
+    ledger
+        .check_taker(1, 1, luna)
+        .expect("a critical backup takes critical work");
 }
 
 /// A question the moved backup's window asks, and the follow-up of the task it finishes: after

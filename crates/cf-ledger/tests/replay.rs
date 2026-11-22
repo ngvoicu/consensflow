@@ -255,9 +255,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
     ("ledger-tasks-027", 6, WAITED_FOR),
-    ("ledger-tiered-003", 8, NO_CRITICAL_CODING),
     ("ledger-tiered-004", 6, NEVER_REFUSED_FOR_WANT),
-    ("ledger-tiered-012", 7, NO_CRITICAL_CODING),
+    ("ledger-tiered-012", 9, CRITICAL_CODING),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 12, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none"),
 ];
@@ -348,10 +347,10 @@ const UNREACHED: &str =
 // A question answered while queued is read with its answer's receipt and time,
 // and never typed in later (T-260); Node leaves it queued. In the traces above,
 // the earlier answer-state change now precedes that departure.
-/// A worker has no Critical slot: critical work is not coding, and a worker's task at
-/// Critical is refused (`tier-not-offered`), where Node took it.
-const NO_CRITICAL_CODING: &str =
-    "a worker's task at critical is refused (`tier-not-offered`: critical work is not coding), where Node took it";
+/// Critical work of a role that writes files is coding included, so its brief leads with the
+/// purpose and forbids no file, where Node's line forbade coding and edits.
+const CRITICAL_CODING: &str =
+    "a worker's critical brief carries its purpose line alone, where Node's added a rule that forbade coding";
 
 /// A task is never refused for want of a member: it waits for one.
 const NEVER_REFUSED_FOR_WANT: &str =

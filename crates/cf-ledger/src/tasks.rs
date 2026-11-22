@@ -70,12 +70,16 @@ fn delivery_body(task: &TaskRow) -> String {
     match &task.purpose {
         None => task.body.clone(),
         Some(purpose) => {
-            let rule = if task.pool.as_deref() == Some(roles::ARCHITECT.id) {
-                ARCHITECT_RULE
-            } else {
-                CRITICAL_RULE
+            let role = task.pool.as_deref().and_then(roles::find);
+            // The architect writes documents and the code's frame; a role whose work is files
+            // (the worker, the frontend designer, the integrator) is forbidden none, since its
+            // Critical work is coding included; every other role changes no file.
+            let rule = match role {
+                Some(role) if role.id == roles::ARCHITECT.id => format!(" {ARCHITECT_RULE}"),
+                Some(role) if role.changes_files => String::new(),
+                _ => format!(" {CRITICAL_RULE}"),
             };
-            format!("Critical work: {purpose}. {rule}\n\n{}", task.body)
+            format!("Critical work: {purpose}.{rule}\n\n{}", task.body)
         }
     }
 }

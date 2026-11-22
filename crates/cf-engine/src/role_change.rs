@@ -105,10 +105,10 @@
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
 //! harnesses a role goes to by a note, less the room its line takes). With `PATH_ONCE` off,
-//! the measured Mac fixture fits a staff of 129 rows with specs on or 154 without, two roles
+//! the measured Mac fixture fits a staff of 127 rows with specs on or 151 without, two roles
 //! per row and a name of twenty characters with model id and effort. The Windows PowerShell
-//! fixture fits 126 and 150. With the longest rules (8,000 bytes, 150 lines), specs on and even
-//! an empty staff need parts; without specs, 18 Mac rows or 14 Windows rows fit in one read.
+//! fixture fits 123 and 148. With the longest rules (8,000 bytes, 150 lines), specs on and even
+//! an empty staff need parts; without specs, 15 Mac rows or 12 Windows rows fit in one read.
 //! A role longer than that `cf` prints in parts, each within the bound
 //! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
 //! table goes on past a part, its line says so): the first by the command the paste

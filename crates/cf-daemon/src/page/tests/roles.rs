@@ -31,7 +31,7 @@ async fn the_page_reads_the_roles_from_the_table_in_its_order_and_its_tests_read
             assert_eq!(
                 roles[1],
                 json!({ "id": "frontend", "name": "frontend designer", "label": "Frontend designer",
-                    "article": "a", "tiered": true, "tiers": ["complex", "standard", "light"],
+                    "article": "a", "tiered": true, "tiers": ["critical", "complex", "standard", "light"],
                     "imageAgent": false })
             );
             // The architect has a slot at every tier, Critical's first.

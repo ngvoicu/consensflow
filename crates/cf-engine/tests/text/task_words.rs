@@ -14,7 +14,7 @@ use serde_json::json;
 use super::support::{found, MEMBER_BANS};
 
 /// A project at /work/app: apollo its chief, zeus a critical advisor (a Critical role that
-/// changes no file: a worker has no Critical slot), diana a standard worker, daedalus a
+/// changes no file), diana a standard worker, daedalus a
 /// critical architect.
 fn world() -> (tempfile::TempDir, Ledger, i64) {
     let dir = tempfile::tempdir().unwrap();
