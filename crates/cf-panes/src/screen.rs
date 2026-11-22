@@ -54,9 +54,6 @@ pub struct Screen {
     grid: Grid,
     /// The digest of what the screen showed after the last chunk ([`Grid::digest`]).
     shows: u64,
-    /// How many times the grid was hashed, for the test of the flood.
-    #[cfg(test)]
-    digests: usize,
 }
 
 impl Screen {
@@ -66,8 +63,6 @@ impl Screen {
             parser: Parser::default(),
             shows: grid.digest(),
             grid,
-            #[cfg(test)]
-            digests: 0,
         }
     }
 
@@ -77,31 +72,12 @@ impl Screen {
     /// is drawn styled, the alternate screen shown or put away. Colours, the cursor,
     /// and text drawn again over the same text change nothing shown. Limit: a frame
     /// that blanks a line and draws it again, read from the pty in two pieces, shows
-    /// the blank line between them, and that is a change; one fed in a single chunk
-    /// (or advanced in one batch, [`Screen::advance`]) is not.
+    /// the blank line between them, and that is a change.
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        self.advance(bytes);
-        self.settle()
-    }
-
-    /// The program printed `bytes`, and nothing says yet whether that changed what the
-    /// screen shows: the grid is not hashed until [`Screen::settle`]. A host that takes
-    /// a batch of reads off its queue advances for each and settles once (T-1941).
-    pub fn advance(&mut self, bytes: &[u8]) {
         let grid = &mut self.grid;
         for &byte in bytes {
             self.parser
                 .advance(byte, &mut |action| grid.perform(action));
-        }
-    }
-
-    /// Whether what the screen shows differs from what it showed at the last settle (or
-    /// feed). A change that was undone within what was advanced since is none: the
-    /// screen is compared at the ends of the batch, not at each read's.
-    pub fn settle(&mut self) -> bool {
-        #[cfg(test)]
-        {
-            self.digests += 1;
         }
         let shows = self.grid.digest();
         let changed = shows != self.shows;
@@ -172,22 +148,6 @@ impl PaneScreen {
     /// shows changed with them.
     pub fn feed(&self, bytes: &[u8]) -> bool {
         self.locked().feed(bytes)
-    }
-
-    /// The program printed `bytes` ([`Screen::advance`]): not hashed yet.
-    pub fn advance(&self, bytes: &[u8]) {
-        self.locked().advance(bytes);
-    }
-
-    /// Whether the screen changed since the last settle ([`Screen::settle`]).
-    pub fn settle(&self) -> bool {
-        self.locked().settle()
-    }
-
-    /// How many times the grid was hashed.
-    #[cfg(test)]
-    pub(crate) fn digests(&self) -> usize {
-        self.locked().digests
     }
 
     /// The pty has another size now ([`Screen::resize`]).
