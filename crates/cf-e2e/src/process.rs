@@ -615,13 +615,18 @@ impl Run {
 
     /// The program's command, with everything but its streams, on its sealed environment.
     fn command(&self) -> Result<Command> {
+        self.command_on().map(|(command, _)| command)
+    }
+
+    /// [`Run::command`], and the sealed environment it was given.
+    fn command_on(&self) -> Result<(Command, Vec<(OsString, OsString)>)> {
         let env = self.environment()?;
         self.admitted(&env)?;
         let mut command = Command::new(&self.program);
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
         cf_process::hold_only_the_streams(&mut command);
-        command.env_clear().envs(env);
+        command.env_clear().envs(env.iter().map(|(name, value)| (name, value)));
         for arg in &self.args {
             arg.add_to(&mut command);
         }
@@ -635,7 +640,7 @@ impl Run {
                 command.process_group(0);
             }
         }
-        Ok(command)
+        Ok((command, env))
     }
 
     /// Runs the program to its end, or to its limit, and keeps what it left.
@@ -692,9 +697,15 @@ impl Run {
     /// streams are pipes ([`Spawned`]), its input one too unless it was told to
     /// be closed. Ending it is the case's, or its owner's drop.
     pub fn spawn(self) -> Result<Spawned> {
+        self.spawn_on().map(|(spawned, _)| spawned)
+    }
+
+    /// [`Run::spawn`], and the whole environment the program was given, sealed: what a pane
+    /// host's windows are opened over ([`crate::door::window_admitted`]).
+    pub fn spawn_on(self) -> Result<(Spawned, Vec<(OsString, OsString)>)> {
         self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
-        let mut command = self.command()?;
+        let (mut command, env) = self.command_on()?;
         command
             .stdin(match self.input {
                 Input::Closed => Stdio::null(),
@@ -711,7 +722,7 @@ impl Run {
             Input::Bytes(bytes) => Some(bytes),
             Input::Default | Input::Closed => None,
         };
-        Ok(Spawned::new(child, program, first))
+        Ok((Spawned::new(child, program, first), env))
     }
 }
 
@@ -794,7 +805,7 @@ fn set(env: &mut Vec<(OsString, OsString)>, name: &OsStr, value: &OsStr, windows
 
 /// A home of the run's own, for a program whose case names none: made once for this process,
 /// below a folder of the run's, and taken with the run's other folders of the door's at its end.
-fn scratch_home() -> Result<PathBuf> {
+pub(crate) fn scratch_home() -> Result<PathBuf> {
     static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     if let Some(home) = HOME.get() {
         return Ok(home.clone());

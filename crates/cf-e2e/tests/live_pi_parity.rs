@@ -220,9 +220,7 @@ fn written(out: &Path) -> Result<Value> {
 fn bare(rig: &Rig, install: &Installed, folder: &Path, id: &str, out: &Path) -> Result {
     let program = install.command().to_string_lossy().into_owned();
     let argv = ask::program(&[program], rig.environment())?;
-    let opened = rig.host(
-        "pane.open",
-        json!({
+    let opened = rig.open_pane(json!({
             "id": id, "generation": 1, "cwd": folder, "argv": argv,
             "env": { "PROBE_OUT": out }, "dropEnv": [],
             "size": { "rows": 40, "cols": 120 },

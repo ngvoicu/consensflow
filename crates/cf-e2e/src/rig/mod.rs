@@ -66,16 +66,17 @@ pub use route::{Held, Pasted};
 #[cfg(test)]
 pub(crate) use homes::clashing;
 pub(crate) use observe::events_of;
+/// The relay's routers, for the door's tests of its seal.
+#[cfg(all(test, unix))]
+pub(crate) mod route_tests {
+    pub(crate) use super::route::sinks_over;
+}
 
 use homes::Homes;
 use route::Shared;
 use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
-/// The variable by which the live kit tells its rig where the person's home is, for the project
-/// folders of a case and for nothing a program reads its profile by.
-pub const PROJECT_HOME: &str = "CF_KIT_PROJECT_HOME";
-
 const REQUEST: Duration = Duration::from_secs(10);
 
 /// How long the daemon and the pane host each have to end once their input has.
@@ -150,9 +151,20 @@ pub struct Config {
     homes: Option<PathBuf>,
     case: Option<String>,
     judged: bool,
+    /// The person's home, where a live case makes its project folders below: a field of the
+    /// rig's, in no environment ([`Config::project_home`]).
+    project_home: Option<PathBuf>,
 }
 
 impl Config {
+    /// With the project folders of a live case made below `home`, the person's: the rig keeps it
+    /// as a field, and no program of the rig is told it (T-2000 finding 1).
+    #[must_use]
+    pub fn project_home(mut self, home: impl Into<PathBuf>) -> Self {
+        self.project_home = Some(home.into());
+        self
+    }
+
     /// A rig whose windows run `stand_in`, the stand-in for a harness's terminal
     /// program (the `fake-agent` binary of this crate).
     pub fn new(stand_in: impl Into<PathBuf>) -> Self {
@@ -176,6 +188,7 @@ impl Config {
             homes: None,
             case: None,
             judged: false,
+            project_home: None,
         }
     }
 
@@ -463,6 +476,8 @@ pub struct Rig {
     homes: Homes,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
     reports: Option<PathBuf>,
+    /// The person's home a live case's project folders are made below ([`Config::project_home`]).
+    project_home: Option<PathBuf>,
     /// The case that started it, as its report names it ([`Config::case`]).
     case: String,
     /// Whether its case is judged by what it returns, and whether it has failed
@@ -518,11 +533,12 @@ impl Rig {
     }
 
     /// The folder a live case makes its project folders below: the person's home, which the
-    /// kit names for that and for nothing else ([`PROJECT_HOME`]); the rig's own `HOME` where
-    /// none is named. A window's `HOME` is never the person's.
+    /// kit names for that and for nothing else ([`Config::project_home`]); the rig's own `HOME`
+    /// where none is named. It is in no environment, and a window's `HOME` is never the person's.
     pub fn project_home(&self) -> Option<&str> {
-        self.var(PROJECT_HOME)
-            .filter(|home| !home.is_empty())
+        self.project_home
+            .as_deref()
+            .and_then(Path::to_str)
             .or_else(|| self.var("HOME").filter(|home| !home.is_empty()))
     }
 
@@ -580,10 +596,35 @@ impl Rig {
     }
 
     /// What the desktop app asks the pane host: `op` with `body`, answered by
-    /// the body of the response. The app's requests are `n-test-N`.
+    /// the body of the response. The app's requests are `n-test-N`. A window is opened only
+    /// through [`Rig::open_pane`]: `pane.open` is refused here.
     pub fn host(&self, op: &str, body: Value) -> Result<Value> {
+        if op == "pane.open" {
+            return Err(Error::LiveApp(
+                "a window is opened through Rig::open_pane, which judges it first".to_owned(),
+            ));
+        }
         let id = self.shared.next_host_id();
         self.ask(&id, op, &body, self.host.sink(), "the pane host")
+    }
+
+    /// Opens the window `body` asks for (`pane.open`) on the rig's own pane host, the one sender
+    /// of it: only where the environment it will really have (the host's, the request's `env`
+    /// over it, its `dropEnv` out last) holds the seal and its program needs no door of its own
+    /// ([`crate::door::window_admitted`]). A window that does not is not opened, and the refusal
+    /// is the error.
+    pub fn open_pane(&self, body: Value) -> Result<Value> {
+        if let Err(why) = self.shared.window_admitted(&body) {
+            self.shared.seen().refused.push((body.clone(), why.clone()));
+            return Err(Error::LiveApp(format!("the rig refused the window: {why}")));
+        }
+        let id = self.shared.next_host_id();
+        self.ask(&id, "pane.open", &body, self.host.sink(), "the pane host")
+    }
+
+    /// Each window the rig refused to open, by the daemon's request or the case's, and why.
+    pub fn refused_windows(&self) -> Vec<(Value, String)> {
+        self.shared.seen().refused.clone()
     }
 
     fn ask(&self, id: &str, op: &str, body: &Value, to: Option<Sink>, whom: &str) -> Result<Value> {

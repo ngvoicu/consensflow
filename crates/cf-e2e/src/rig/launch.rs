@@ -113,8 +113,8 @@ impl Rig {
         )?;
         let pane_host = bundle::copy_of(cf::pane_host()?, &copies)?;
         let (mut daemon, start_line) = start_daemon(&config, &cf, &env, &root)?;
-        let (mut host, host_output) = start_host(&pane_host, &env)?;
-        let shared = route(&mut daemon, &mut host, host_output)?;
+        let (mut host, host_output, host_env) = start_host(&pane_host, &env)?;
+        let shared = route(&mut daemon, &mut host, host_output, host_env)?;
 
         // The rig owns its home from here on: it goes with it.
         if let Some(scratch) = scratch {
@@ -134,6 +134,7 @@ impl Rig {
             stranger,
             homes,
             reports: config.reports,
+            project_home: config.project_home,
             case,
             judged,
             keep_root: false,
@@ -208,16 +209,18 @@ const HUMAN_KEYS: &str = "CONSENSFLOW_TEST_HUMAN_KEYS";
 
 /// The pane host, started: its handle line read, and what it goes on to say
 /// kept for the routers.
+/// The pane host, started, with the whole environment the door gave it, which every window it
+/// opens is opened over.
 fn start_host(
     pane_host: &Path,
     env: &[(String, String)],
-) -> Result<(Spawned, BufReader<ChildStdout>)> {
-    let mut host = Run::new(pane_host)
+) -> Result<(Spawned, BufReader<ChildStdout>, HostEnvironment)> {
+    let (mut host, host_env) = Run::new(pane_host)
         .vars(env.iter().map(|(name, value)| (name, value)))
         .var(HUMAN_KEYS, "1")
         .finding_programs()
         .cwd(checkout::root())
-        .spawn()?;
+        .spawn_on()?;
     let output = host
         .take_output()
         .ok_or_else(|| Error::Daemon("the pane host has no output".to_owned()))?;
@@ -248,8 +251,11 @@ fn start_host(
         )));
     }
     let rest = rest.ok_or_else(|| Error::Daemon("the pane host's output was lost".to_owned()))?;
-    Ok((host, rest))
+    Ok((host, rest, host_env))
 }
+
+/// The pane host's whole environment, as the door gave it.
+type HostEnvironment = Vec<(std::ffi::OsString, std::ffi::OsString)>;
 
 /// Both have spoken; from here every frame one writes is read, kept and passed
 /// to the other. The daemon's input ends when the pane host's output does.
@@ -257,13 +263,14 @@ fn route(
     daemon: &mut Daemon,
     host: &mut Spawned,
     host_output: BufReader<ChildStdout>,
+    host_env: HostEnvironment,
 ) -> Result<Arc<Shared>> {
     let (Some(to_daemon), Some(to_host)) = (daemon.sink(), host.sink()) else {
         return Err(Error::Daemon(
             "a program of the rig has no input".to_owned(),
         ));
     };
-    let shared = Arc::new(Shared::default());
+    let shared = Arc::new(Shared::over(host_env));
     {
         let (shared, to_host, to_daemon) =
             (Arc::clone(&shared), to_host.clone(), to_daemon.clone());

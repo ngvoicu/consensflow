@@ -184,8 +184,6 @@ pub fn project_home() -> Option<PathBuf> {
 /// What a child the door starts is told of the protection: the file of the roots and its digest,
 /// the file written in a folder this run makes the first time a child is started.
 pub fn child_vars() -> Result<Vec<(String, String)>, String> {
-    static WRITING: Mutex<()> = Mutex::new(());
-    let account = account();
     // A test that adds roots hands its children a file of its own with them: a child keeps the
     // roots of the run and is refused the test's decoys as it is the account's.
     #[cfg(test)]
@@ -195,7 +193,7 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         if !extra.is_empty() {
-            let mut roots = account.roots.clone();
+            let mut roots = account().roots.clone();
             roots.extend(extra);
             let (path, digest) = write_roots(&roots)?;
             return Ok(vec![
@@ -204,6 +202,18 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
             ]);
         }
     }
+    let (path, digest) = own_file()?;
+    Ok(vec![
+        (PROTECTED_FILE.to_owned(), path.to_string_lossy().into_owned()),
+        (PROTECTED_DIGEST.to_owned(), digest),
+    ])
+}
+
+/// The file of the account's roots and the digest of what was written in it, written the first
+/// time it is asked for.
+pub(crate) fn own_file() -> Result<(PathBuf, String), String> {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let account = account();
     if account.file.get().is_none() {
         // One writer at a time; the judge the writing asks reads the file's place unlocked.
         let _writing = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
@@ -211,14 +221,11 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
             let _ = account.file.set(write_roots(&account.roots)?);
         }
     }
-    let (path, digest) = account
+    Ok(account
         .file
         .get()
-        .unwrap_or_else(|| unreachable!("written above"));
-    Ok(vec![
-        (PROTECTED_FILE.to_owned(), path.to_string_lossy().into_owned()),
-        (PROTECTED_DIGEST.to_owned(), digest.clone()),
-    ])
+        .cloned()
+        .unwrap_or_else(|| unreachable!("written above")))
 }
 
 /// Writes `roots` in a new file of a folder this run makes: its path and the digest of what was

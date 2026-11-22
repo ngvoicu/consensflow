@@ -178,9 +178,7 @@ fn has_screen_content(screen: &str) -> bool {
 pub fn claude(rig: &Rig, argv: &[String], folder: &Path) -> Result<&'static str> {
     let id = next_pane_id();
     let pane = json!({ "id": id, "generation": 1 });
-    let opened = rig.host(
-        "pane.open",
-        json!({
+    let opened = rig.open_pane(json!({
             "id": id, "generation": 1, "cwd": folder, "argv": argv, "env": {},
             "size": { "rows": 40, "cols": 120 },
         }),

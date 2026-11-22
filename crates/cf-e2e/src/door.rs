@@ -801,6 +801,33 @@ pub fn sealed(
     )
 }
 
+/// Whether a window the rig's pane host is asked to open (`body`, a `pane.open` request) may
+/// open, on the host's own environment `host` (T-2000 finding 1, T-2002 correction 3): the
+/// environment it will really have holds the seal, and its program, by the file it resolves to on
+/// that environment's search path, is no program with a door of its own and, where it is a
+/// harness's, has the switches that keep it from updating itself. Why not, where it may not.
+pub fn window_admitted(
+    host: &[(std::ffi::OsString, std::ffi::OsString)],
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    let windows = cfg!(windows);
+    let env = spawn::pane_environment(host, body, windows)?;
+    let kit = spawn::kit_vars(host);
+    let env = sealed(env, &kit, windows)?;
+    let program = body["argv"]
+        .get(0)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "the window names no program".to_owned())?;
+    let program = program_in(Path::new(program), &env);
+    match program {
+        spawn::Program::Keychain => {
+            Err("the window's program is the Keychain's utility, which only its door starts".into())
+        }
+        spawn::Program::Cargo => Err("the window's program is cargo, which only its door starts".into()),
+        program => spawn::has_update_switches(&program, &env),
+    }
+}
+
 /// What `program` is ([`spawn::program_of`]), found on the search path `env` gives it where it
 /// is a bare name, by the file it resolves to.
 pub fn program_in(
@@ -1297,6 +1324,8 @@ impl Grounded {
     }
 }
 
+#[cfg(test)]
+mod k3_tests;
 #[cfg(test)]
 mod rule;
 #[cfg(test)]

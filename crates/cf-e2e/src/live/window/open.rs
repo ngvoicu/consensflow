@@ -464,9 +464,7 @@ impl<'a> Open<'a> {
         );
         let drop_env: Vec<String> = start.drop_env.into_iter().chain(self.drop_env).collect();
         let opened_at_ms = jiff::Timestamp::now().as_millisecond();
-        let opened = self.rig.host(
-            "pane.open",
-            open_request(
+        let opened = self.rig.open_pane(open_request(
                 &self.id,
                 &workspace,
                 &argv,

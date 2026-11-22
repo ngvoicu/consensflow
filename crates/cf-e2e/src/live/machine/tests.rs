@@ -342,19 +342,23 @@ fn a_machine_with_no_login_is_told_where_the_harness_keeps_it_and_what_to_do() {
     );
 }
 
+/// T-2000 finding 1: the person's home is where the project folders are below, and in no
+/// environment: no install gives its window a variable of the person's, the kit's own
+/// `CF_KIT_PROJECT_HOME` among them.
 #[test]
 fn no_install_gives_its_window_a_profile_variable_of_the_persons() {
-    let machine = |name: &str| Some(format!("/the-owners/{name}"));
     for harness in Harness::ALL {
         let install = Installed::at(harness, "bin/x", "/the/persons/home");
-        let vars = install.login(&machine);
-        assert_eq!(
-            vars,
-            [(
-                "CF_KIT_PROJECT_HOME".to_owned(),
-                "/the/persons/home".to_owned()
-            )],
-            "{harness:?}"
+        assert_eq!(install.project_home(), Path::new("/the/persons/home"), "{harness:?}");
+        // A rig of Muse makes its launcher's folders, which a stand-in process holds to its own.
+        if harness == Harness::Muse {
+            continue;
+        }
+        let debug = format!("{:?}", rig(&[install], "/the/stand-in"));
+        assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
+        assert!(
+            !debug.contains("(\"HOME\", \"/the/persons/home"),
+            "{debug}"
         );
     }
 }
@@ -445,9 +449,10 @@ fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_th
     // opened below a folder of the rig's own, which macOS spells through the `/var` link of its
     // temporary folder, showed no answer: 2026-10-27), and the windows' own home is not it.
     assert!(
-        debug.contains("(\"CF_KIT_PROJECT_HOME\", \"/home/me\")"),
+        debug.contains("project_home: Some(\"/home/me\")"),
         "{debug}"
     );
+    assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
     assert!(!debug.contains("(\"HOME\", \"/home/me"), "{debug}");
     // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
     assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
@@ -462,9 +467,10 @@ fn a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_
         )));
     let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
     assert!(
-        debug.contains("(\"CF_KIT_PROJECT_HOME\", \"/home/me\")"),
+        debug.contains("project_home: Some(\"/home/me\")"),
         "{debug}"
     );
+    assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
     for name in [
         "HOME",
         "USERPROFILE",

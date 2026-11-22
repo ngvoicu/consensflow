@@ -77,6 +77,20 @@ fn profile_text(path: &str) -> String {
     text.trim_end_matches('\\').to_lowercase()
 }
 
+/// Whether `path` is absolute for a program of the platform: on Windows a drive and a `\`, or a
+/// verbatim or network prefix.
+fn absolute(path: &str, windows: bool) -> bool {
+    if !windows {
+        return Path::new(path).is_absolute();
+    }
+    let bytes = path.as_bytes();
+    path.starts_with(r"\\")
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/'))
+}
+
 /// Seals `vars`, the whole environment a program will have, in the order given (a later value of
 /// the very same name wins): the environment to give it, its home variables by their canonical
 /// names, or why it is refused.
@@ -127,7 +141,7 @@ pub fn seal(
     };
     let run_folder = |name: &str, value: &OsStr| -> Result<(), String> {
         let path = Path::new(value);
-        if value.is_empty() || !path.is_absolute() {
+        if value.is_empty() || !absolute(&value.to_string_lossy(), judges.windows) {
             return Err(format!(
                 "{name} is {}, which is no folder this run made",
                 path.display()
@@ -136,6 +150,13 @@ pub fn seal(
         if !(judges.is_runs)(path) {
             return Err(format!(
                 "{name} is {}, which is no folder this run made",
+                path.display()
+            ));
+        }
+        // A folder below the run's that leads into a store is the store.
+        if (judges.in_protected)(path) {
+            return Err(format!(
+                "{name} is {}, inside a store of a harness or of the account",
                 path.display()
             ));
         }
@@ -343,4 +364,68 @@ pub fn has_update_switches(program: &Program, env: &[(OsString, OsString)]) -> R
         }
     }
     Ok(())
+}
+
+/// The environment a window will really have, as the pane host makes it: its own environment
+/// (`host`), the request's `env` over it, and its `dropEnv` taken out last (`cf-panes`'
+/// `pty::spawn`: removal comes last so that a guarded name cannot be put back by the map); names
+/// in any case on Windows. An error where the request's environment is no map of text, or its
+/// `dropEnv` no list of names.
+pub fn pane_environment(
+    host: &[(OsString, OsString)],
+    body: &serde_json::Value,
+    windows: bool,
+) -> Result<Vec<(OsString, OsString)>, String> {
+    let same = |left: &OsStr, right: &str| {
+        if windows {
+            left.to_string_lossy().eq_ignore_ascii_case(right)
+        } else {
+            left == right
+        }
+    };
+    let mut env = host.to_vec();
+    match &body["env"] {
+        serde_json::Value::Null => {}
+        serde_json::Value::Object(vars) => {
+            for (name, value) in vars {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| format!("the window's variable {name} is no text"))?;
+                env.retain(|(held, _)| !same(held, name));
+                env.push((OsString::from(name), OsString::from(value)));
+            }
+        }
+        other => return Err(format!("the window's environment is no map: {other}")),
+    }
+    match &body["dropEnv"] {
+        serde_json::Value::Null => {}
+        serde_json::Value::Array(names) => {
+            for name in names {
+                let name = name
+                    .as_str()
+                    .ok_or_else(|| format!("a name the window drops is no text: {name}"))?;
+                env.retain(|(held, _)| !same(held, name));
+            }
+        }
+        other => return Err(format!("the names the window drops are no list: {other}")),
+    }
+    Ok(env)
+}
+
+/// The kit's own variables of `env`, as the door gave them to the pane host: a window keeps
+/// each.
+pub fn kit_vars(env: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    env.iter()
+        .filter(|(name, _)| {
+            name.to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with(KIT_PREFIX)
+        })
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect()
 }

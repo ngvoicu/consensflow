@@ -88,12 +88,75 @@ fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
     let prefix = launch
         .as_ref()
         .map_or(&[][..], |launch| launch.prefix.as_slice());
+    // The helper starts programs on the environment its question carries: that environment
+    // leaves the kit here, and is sealed as a window's is, made whole first.
+    question_sealed(&mut body)?;
     let ran = Run::new(executable)
         .args(prefix)
         .input(format!("{body}\n"))
         .machine_env()
         .run()?;
     answered(name, ran.code, &ran.stdout)
+}
+
+/// Seals the environment a question carries (`env`), which `harness-ask` starts the harness's
+/// programs on (T-2000 finding 1, a helper's question): every home it does not name is given
+/// below the home it names, or below a scratch home of the run's; then the seal holds, or the
+/// question is not asked. A variable given null is one the caller removed, and the kit's own
+/// variables are none of a harness's.
+pub fn question_sealed(body: &mut Value) -> Result {
+    let Some(object) = body.get("env").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let windows = cfg!(windows);
+    let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
+    for (name, value) in object {
+        if name
+            .to_ascii_uppercase()
+            .starts_with(crate::door::spawn::KIT_PREFIX)
+        {
+            continue;
+        }
+        match value {
+            Value::Null => {}
+            Value::String(text) => env.push((name.into(), text.into())),
+            other => {
+                return Err(Error::Daemon(format!(
+                    "the question's variable {name} is no text: {other}"
+                )))
+            }
+        }
+    }
+    let named_home = ["HOME", "USERPROFILE"].into_iter().find_map(|wanted| {
+        env.iter()
+            .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(wanted))
+            .map(|(_, value)| PathBuf::from(value))
+            .filter(|home| home.is_absolute() && crate::door::is_made_or_below(home))
+    });
+    let base = match named_home {
+        Some(home) => home,
+        None => crate::process::scratch_home()?,
+    };
+    let missing = crate::door::spawn::missing_homes(&env, &base);
+    env.extend(missing);
+    let sealed = crate::door::sealed(env, &[], windows).map_err(|why| {
+        Error::LiveApp(format!(
+            "the question {} is not asked: {why}",
+            body["op"].as_str().unwrap_or("?")
+        ))
+    })?;
+    body["env"] = Value::Object(
+        sealed
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    json!(value.to_string_lossy()),
+                )
+            })
+            .collect(),
+    );
+    Ok(())
 }
 
 /// Model and usage reads also start Muse; keep those processes on the run's

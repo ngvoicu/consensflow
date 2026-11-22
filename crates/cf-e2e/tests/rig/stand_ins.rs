@@ -56,9 +56,7 @@ fn the_stand_in_agent_a_pane_host_closes_leaves_when_it_is_asked_to_end_and_is_n
     use crate::secs;
 
     let rig = crate::rig()?;
-    let opened = rig.host(
-        "pane.open",
-        json!({
+    let opened = rig.open_pane(json!({
             "id": "closed-1",
             "generation": 1,
             "cwd": "/tmp",

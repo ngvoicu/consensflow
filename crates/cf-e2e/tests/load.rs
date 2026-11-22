@@ -295,9 +295,7 @@ fn a_window_that_prints_for_hours_holds_the_rig_and_its_report_to_a_bound() -> O
     let (daemon, host) = (rig.daemon_pid(), rig.host_pid());
     let done = rig.workspace().join("noise-done");
     let pane = json!({ "id": "noisy-1", "generation": 1 });
-    let opened = rig.host(
-        "pane.open",
-        json!({
+    let opened = rig.open_pane(json!({
             "id": "noisy-1", "generation": 1, "cwd": rig.workspace(),
             "argv": [FAKE_AGENT, "--noise", (mib * 1024 * 1024).to_string(), done],
             "env": {}, "size": { "rows": 24, "cols": 80 },

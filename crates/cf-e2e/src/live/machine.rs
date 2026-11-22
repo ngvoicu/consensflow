@@ -409,20 +409,18 @@ impl Installed {
         folders
     }
 
-    /// What a window of this harness is given of the person's home: the folder the project
-    /// folders are made below ([`crate::rig::PROJECT_HOME`]), and nothing a program reads a
-    /// profile by. The window's own `HOME`, `USERPROFILE`, XDG folders and harness folder are the
-    /// run's (the rig's private home, and the isolation the rig sets last,
-    /// [`Installed::isolation`]): a home-relative lookup of a harness, or of a program it starts,
-    /// never reaches the person's `.claude.json`, `.codex`, `.config`, Keychain files or login
-    /// (K3 review T-1978, 2). Where the project folders are is the kit's to say, not the
-    /// profile's: `machine` is the machine's own environment, which says nothing of it now.
-    fn login(&self, _machine: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        let person = match &self.isolation {
-            Some(isolation) => isolation.owner_home().to_string_lossy().into_owned(),
-            None => self.home.to_string_lossy().into_owned(),
-        };
-        vec![(crate::rig::PROJECT_HOME.to_owned(), person)]
+    /// The person's home, where the project folders of a window of this harness are made below:
+    /// a field of the rig ([`crate::rig::Config::project_home`]) and in no environment. The
+    /// window's own `HOME`, `USERPROFILE`, XDG folders and harness folder are the run's (the
+    /// rig's private home, and the isolation the rig sets last, [`Installed::isolation`]): a
+    /// home-relative lookup of a harness, or of a program it starts, never reaches the person's
+    /// `.claude.json`, `.codex`, `.config`, Keychain files or login (K3 review T-1978, 2; T-2000
+    /// finding 1: `CF_KIT_PROJECT_HOME` was in every window's environment).
+    fn project_home(&self) -> PathBuf {
+        match &self.isolation {
+            Some(isolation) => isolation.owner_home().to_path_buf(),
+            None => self.home.clone(),
+        }
     }
 
     /// A rig whose windows run the stand-in `stand_in` for Claude and find this
@@ -617,9 +615,7 @@ fn rig_keeping_claude_in(
                 config = config.also_on_path(folder);
             }
         }
-        for (name, value) in install.login(&machine) {
-            config = config.var(&name, value);
-        }
+        config = config.project_home(install.project_home());
         if let Some(isolation) = install.isolation() {
             config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
         }
