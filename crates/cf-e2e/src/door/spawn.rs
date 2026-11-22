@@ -81,7 +81,7 @@ fn profile_text(path: &str) -> String {
 /// verbatim or network prefix.
 fn absolute(path: &str, windows: bool) -> bool {
     if !windows {
-        return Path::new(path).is_absolute();
+        return path.starts_with('/');
     }
     let bytes = path.as_bytes();
     path.starts_with(r"\\")
@@ -203,7 +203,7 @@ pub fn seal(
         let parts = std::env::split_paths(value);
         if let Some(inside) = whole
             .chain(parts)
-            .filter(|path| path.is_absolute())
+            .filter(|path| absolute(&path.to_string_lossy(), judges.windows))
             .find(|path| (judges.in_protected)(path))
         {
             return Err(format!(

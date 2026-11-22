@@ -951,7 +951,7 @@ mod tests {
 
     #[test]
     fn the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file() {
-        let home = Path::new("/decoy/owner");
+        let home = Path::new(if cfg!(windows) { r"C:\decoy\owner" } else { "/decoy/owner" });
         let held = personal_harness_homes(home);
         for suffix in [
             "Library/Application Support/Muse/session-name-authority/x",

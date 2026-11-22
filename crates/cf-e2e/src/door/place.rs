@@ -93,6 +93,15 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
         match real(&at) {
             Ok(there) => {
                 absent.reverse();
+                // A name below a file is no place, whatever the system calls its absence (Windows
+                // says a path through a file is not found).
+                if !absent.is_empty() && !there.is_dir() {
+                    return Err(refused(format!(
+                        "{} is a file, and {} is no place below it",
+                        there.display(),
+                        path.display()
+                    )));
+                }
                 return Ok(vec![Resolved { there, absent }]);
             }
             Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}

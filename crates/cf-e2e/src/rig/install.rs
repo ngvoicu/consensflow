@@ -682,7 +682,9 @@ mod tests {
     fn the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it() {
         // Whatever they write there (a socket's folder, a harness's scratch files) is in the
         // folder a plant run gave its test, with the homes and the reports, and goes with it.
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let temp = std::env::temp_dir().to_string_lossy().into_owned();
         let names: &[&str] = if cfg!(windows) {
@@ -764,7 +766,9 @@ mod tests {
     fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {
         use crate::process::Run;
 
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let comspec = var(&env, "ComSpec");
         assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
@@ -956,7 +960,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers() {
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert_eq!(
             var(&env, "PATH"),

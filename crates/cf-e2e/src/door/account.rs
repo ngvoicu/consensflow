@@ -327,14 +327,16 @@ mod tests {
 
     #[test]
     fn the_first_process_makes_its_roots_from_the_table_of_its_own_account() {
+        let base = PathBuf::from(if cfg!(windows) { r"C:\" } else { "/" });
+        let (owner, elsewhere) = (base.join("owner"), base.join("elsewhere").join("codex"));
         let vars: HashMap<&str, OsString> = [
-            ("HOME", OsString::from("/owner")),
-            ("CODEX_HOME", OsString::from("/elsewhere/codex")),
+            ("HOME", owner.clone().into_os_string()),
+            ("CODEX_HOME", elsewhere.clone().into_os_string()),
         ]
         .into();
         let account = account_of(&lookup(&vars)).unwrap();
-        assert!(account.roots.contains(&PathBuf::from("/owner/.codex")));
-        assert!(account.roots.contains(&PathBuf::from("/elsewhere/codex")));
-        assert_eq!(account.home.as_deref(), Some(Path::new("/owner")));
+        assert!(account.roots.contains(&owner.join(".codex")));
+        assert!(account.roots.contains(&elsewhere));
+        assert_eq!(account.home.as_deref(), Some(owner.as_path()));
     }
 }

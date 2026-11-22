@@ -201,26 +201,32 @@ pub fn check_offline(fixture: &Path) -> Result<Ran> {
 mod tests {
     use super::*;
 
+    /// `path` below the root of this platform's paths (`/` or `C:\`).
+    fn at(path: &str) -> String {
+        let base = if cfg!(windows) { "C:" } else { "" };
+        format!("{base}{}", path.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+
     #[test]
     fn cargo_is_given_the_machines_list_the_toolchain_and_a_scratch_home_and_nothing_else() {
         let all: Vec<(OsString, OsString)> = [
-            ("PATH", "/usr/bin"),
-            ("HOME", "/owner"),
-            ("CARGO_MANIFEST_DIR", "/checkout/crates/cf-e2e"),
+            ("PATH", at("/usr/bin").as_str()),
+            ("HOME", at("/owner").as_str()),
+            ("CARGO_MANIFEST_DIR", at("/checkout/crates/cf-e2e").as_str()),
             ("CARGO_PKG_NAME", "cf-e2e"),
             ("CONSENSFLOW_TOKEN", "board"),
             ("CONSENSFLOW_URL", "http://127.0.0.1:1/"),
-            ("CARGO_TARGET_DIR", "/checkout/target"),
+            ("CARGO_TARGET_DIR", at("/checkout/target").as_str()),
             ("RUSTC_BOOTSTRAP", "1"),
             ("RUSTUP_TOOLCHAIN", "1.99.1"),
             ("CARGO_BUILD_JOBS", "4"),
             ("AWS_SECRET", "x"),
-            ("XDG_CONFIG_HOME", "/owner/.config"),
+            ("XDG_CONFIG_HOME", at("/owner/.config").as_str()),
         ]
         .into_iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
         .collect();
-        let env = environment_of(all, Some(Path::new("/owner")), Path::new("/run/home"), &|_| {
+        let env = environment_of(all, Some(Path::new(&at("/owner"))), Path::new(&at("/run/home")), &|_| {
             false
         })
         .unwrap();
@@ -239,15 +245,15 @@ mod tests {
             assert_eq!(get(gone), None, "{gone} reached cargo");
         }
         for (kept, value) in [
-            ("PATH", "/usr/bin"),
-            ("CARGO_TARGET_DIR", "/checkout/target"),
+            ("PATH", at("/usr/bin").as_str()),
+            ("CARGO_TARGET_DIR", at("/checkout/target").as_str()),
             ("RUSTC_BOOTSTRAP", "1"),
             ("RUSTUP_TOOLCHAIN", "1.99.1"),
             ("CARGO_BUILD_JOBS", "4"),
-            ("CARGO_HOME", "/owner/.cargo"),
-            ("RUSTUP_HOME", "/owner/.rustup"),
-            ("HOME", "/run/home"),
-            ("XDG_CONFIG_HOME", "/run/home/.config"),
+            ("CARGO_HOME", at("/owner/.cargo").as_str()),
+            ("RUSTUP_HOME", at("/owner/.rustup").as_str()),
+            ("HOME", at("/run/home").as_str()),
+            ("XDG_CONFIG_HOME", at("/run/home/.config").as_str()),
         ] {
             assert_eq!(get(kept).as_deref(), Some(value), "{kept}");
         }
@@ -255,9 +261,9 @@ mod tests {
 
     #[test]
     fn cargo_is_refused_a_variable_that_names_a_store() {
-        let all = [(OsString::from("CARGO_TARGET_DIR"), OsString::from("/owner/.codex/t"))];
-        let refused = environment_of(all, None, Path::new("/run/home"), &|path| {
-            path.starts_with("/owner/.codex")
+        let all = [(OsString::from("CARGO_TARGET_DIR"), OsString::from(at("/owner/.codex/t")))];
+        let refused = environment_of(all, None, Path::new(&at("/run/home")), &|path| {
+            path.starts_with(at("/owner/.codex"))
         })
         .unwrap_err();
         assert!(refused.contains("CARGO_TARGET_DIR"), "{refused}");

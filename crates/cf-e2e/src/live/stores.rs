@@ -305,6 +305,7 @@ mod tests {
     /// default: a rule that derives a store from the home alone misses each.
     fn decoy() -> HashMap<&'static str, PathBuf> {
         let base = PathBuf::from(if cfg!(windows) { r"D:\decoy" } else { "/decoy" });
+        assert!(base.is_absolute());
         [
             "HOME",
             "USERPROFILE",
@@ -379,13 +380,15 @@ mod tests {
     #[test]
     fn a_windows_home_and_profile_that_differ_are_each_a_default() {
         // Codex reads both (`cf-harness/src/codex/paths.rs`): neither is left out for the other.
-        let vars: HashMap<&'static str, PathBuf> = [
-            ("HOME", PathBuf::from("/one")),
-            ("USERPROFILE", PathBuf::from("/two")),
-        ]
-        .into();
+        let (one, two) = if cfg!(windows) {
+            (r"C:\one", r"C:\two")
+        } else {
+            ("/one", "/two")
+        };
+        let vars: HashMap<&'static str, PathBuf> =
+            [("HOME", PathBuf::from(one)), ("USERPROFILE", PathBuf::from(two))].into();
         let roots = roots_for(&lookup_of(&vars), None);
-        for home in ["/one", "/two"] {
+        for home in [one, two] {
             assert!(roots.iter().any(|root| root.path == Path::new(home).join(".codex")));
         }
     }

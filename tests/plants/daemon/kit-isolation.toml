@@ -464,9 +464,9 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/spawn.rs"
-find = '''            .filter(|path| path.is_absolute())
+find = '''            .filter(|path| absolute(&path.to_string_lossy(), judges.windows))
             .find(|path| (judges.in_protected)(path))'''
-replace = '''            .filter(|path| path.is_absolute())
+replace = '''            .filter(|path| absolute(&path.to_string_lossy(), judges.windows))
             .find(|_| false)'''
 
 [[plant]]
