@@ -331,8 +331,8 @@ mod tests {
         );
     }
 
-    /// A member of roles with no tier (spec new-roles) is asked for with none, which the daemon
-    /// would refuse; one that holds a role with tiers beside them keeps its tier.
+    /// Only the image designer takes no tier (every other role has all four): its member is asked
+    /// for with none; one of any other role keeps its tier.
     #[test]
     fn a_member_of_roles_with_no_tier_is_asked_for_with_none() {
         let row =
@@ -341,15 +341,13 @@ mod tests {
             json!(["frontend"]),
             json!(["architect", "researcher"]),
             json!(["integrator"]),
+            json!(["worker", "integrator"]),
         ] {
-            assert_eq!(
-                body_of(&row, "iris", Some(roles.clone())),
-                json!({ "harness": "pi", "model": "gpt-6-astra", "roles": roles }),
-            );
+            assert_eq!(body_of(&row, "iris", Some(roles))["tier"], "standard");
         }
         assert_eq!(
-            body_of(&row, "iris", Some(json!(["worker", "integrator"])))["tier"],
-            "standard"
+            body_of(&row, "iris", Some(json!(["designer"]))),
+            json!({ "harness": "pi", "roles": ["designer"] }),
         );
     }
 }

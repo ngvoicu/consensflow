@@ -312,6 +312,6 @@ mod tests {
             .iter()
             .map(|row| row["workTier"].as_str().unwrap())
             .collect();
-        assert_eq!(tiers[1..3], ["standard", "light"]);
+        assert_eq!(tiers[1..3], ["standard", "critical"]);
     }
 }
