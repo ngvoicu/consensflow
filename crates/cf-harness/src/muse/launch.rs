@@ -27,7 +27,7 @@ use super::paths;
 use super::version::{self, Version};
 use crate::contract::LaunchId;
 use crate::launch::{Check, Refused, Said};
-use crate::seams::processes::{probe, Asking, Unanswered};
+use crate::seams::processes::{probe_afresh, Asking, Unanswered};
 use crate::shared::launch_files::launch_folder;
 use crate::shared::shell::cf_hook;
 
@@ -70,7 +70,7 @@ pub(crate) struct Pinned {
 ///    ConsensFlow's, or none at all. No program is run.
 /// 3. Anything else (no pin, a pin that names no version, or whose binary is absent): the
 ///    window runs the launcher itself, so the launcher is asked `--version`, with its
-///    update and login off, at every launch: the answer is never kept, as a launcher that
+///    update and login off, at every launch: the answer is never kept, nor shared with another executable name's kept answers, as a launcher that
 ///    is a script may run another Muse the next time with its own file unchanged. A
 ///    version older than ConsensFlow reads is refused; one it reads, or none, opens.
 pub(crate) async fn pinned(asking: &Asking<'_>, executable: &str) -> Pinned {
@@ -121,20 +121,11 @@ fn older() -> Refused {
 
 /// What the launcher's own `--version` says, asked afresh.
 async fn ask(asking: &Asking<'_>, launcher: &Path) -> Check {
-    asking.probes.forget(launcher);
     let mut env = asking.env.clone();
     for (name, value) in version::QUIET {
         env = env.with_var(name, value);
     }
-    let said = match probe(
-        asking.probes,
-        asking.processes,
-        launcher,
-        &["--version"],
-        &env,
-    )
-    .await
-    {
+    let said = match probe_afresh(asking.processes, launcher, &["--version"], &env).await {
         Ok(probed) => probed.stdout,
         Err(Unanswered::Unread(why)) => {
             return Check {

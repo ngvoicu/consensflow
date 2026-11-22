@@ -299,12 +299,21 @@ impl super::Services {
     }
 }
 
-impl Probes {
-    /// Lets go of every answer kept for `executable`: the next question is asked again.
-    pub fn forget(&self, executable: &Path) {
-        let file = std::fs::canonicalize(executable).unwrap_or_else(|_| executable.to_owned());
-        self.asked.borrow_mut().retain(|key, _| key.file != file);
-    }
+/// What the CLI answers to `args`, asked afresh: the run is neither shared nor kept, and
+/// no other question's kept answer is given for it. For a question whose answer is of
+/// this launch alone (a launcher that is a script may run another program the next
+/// time with its own file unchanged), and that must not be stored under the path and
+/// arguments another executable name for the same file is asked by.
+pub async fn probe_afresh(
+    processes: &Rc<dyn Processes>,
+    executable: &Path,
+    args: &[&str],
+    env: &Env,
+) -> Result<Probed, Unanswered> {
+    key(executable, args).map_err(Unanswered::Unread)?;
+    ask(processes, executable, args, env)
+        .await
+        .map_err(Unanswered::Failed)
 }
 
 /// The executable as it is on disk: its real path, which file it is, its
@@ -407,39 +416,6 @@ mod tests {
             .map(|(program, _)| named(program))
             .collect();
         assert_eq!(ran, ["codex --version"], "asked once");
-    }
-
-    #[test]
-    fn a_forgotten_executable_is_asked_again_and_another_is_not() {
-        let dir = tempfile::tempdir().unwrap();
-        let (muse, codex) = (stand_in(dir.path(), "muse"), stand_in(dir.path(), "codex"));
-        let scripted = Rc::new(ScriptedProcesses::default());
-        scripted.always_answer("muse --version", Ok("a".to_owned()));
-        scripted.always_answer("codex --version", Ok("b".to_owned()));
-        let processes: Rc<dyn Processes> = Rc::clone(&scripted) as Rc<dyn Processes>;
-        let probes = Probes::default();
-        let env = Env::default();
-        let ask_both = || {
-            for cli in [&muse, &codex] {
-                let work = probe(&probes, &processes, cli, &["--version"], &env);
-                crate::testing::finished(Box::pin(work)).unwrap();
-            }
-        };
-        ask_both();
-        ask_both();
-        assert_eq!(scripted.take_ran().len(), 2, "both kept");
-        probes.forget(&muse);
-        ask_both();
-        let ran: Vec<String> = scripted
-            .take_ran()
-            .iter()
-            .map(|(program, _)| named(program))
-            .collect();
-        assert_eq!(
-            ran,
-            ["muse --version"],
-            "only the forgotten one is asked again"
-        );
     }
 
     #[test]

@@ -132,8 +132,11 @@ pub(crate) fn installed(executable: &Path) -> Option<String> {
     if bytes.len() as u64 > PIN_BYTES {
         return None;
     }
-    let line = String::from_utf8(bytes).ok()?;
-    let line = line.trim();
+    // The pin's line and its own line ending, and nothing else: blank lines or blanks
+    // around it make no pin.
+    let text = String::from_utf8(bytes).ok()?;
+    let line = text.strip_suffix('\n').unwrap_or(&text);
+    let line = line.strip_suffix('\r').unwrap_or(line);
     Version::line(line).map(|_| line.to_owned())
 }
 
@@ -148,9 +151,10 @@ pub(crate) fn native(said: &str) -> Option<Version> {
     found.next().is_none().then_some(version)
 }
 
-/// The version `line` says if it is wholly Muse's own `--version` line.
+/// The version `line` says if it is wholly Muse's own `--version` line, as it stands: no
+/// blank before it or after it (an indented line is a wrapper's).
 fn native_line(line: &str) -> Option<Version> {
-    let (numbers, build) = line.trim().strip_prefix("Muse Code ")?.split_once(' ')?;
+    let (numbers, build) = line.strip_prefix("Muse Code ")?.split_once(' ')?;
     let build = Version::line(build.strip_prefix('(')?.strip_suffix(')')?)?;
     build.release?;
     (whole_numbers::<3>(numbers)? == build.numbers).then_some(build)

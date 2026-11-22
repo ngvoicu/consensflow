@@ -613,3 +613,86 @@ fn a_pipe_in_the_pin_s_place_is_no_pin_and_is_never_waited_for() {
         drop(held);
     }
 }
+
+#[test]
+fn an_indented_line_after_muse_s_own_is_a_wrapper_s_and_does_not_hide_a_1_4_12() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = bare(dir.path());
+    let machine = Machine::new();
+    machine.says(&format!("{OLD}\n  {NEW}\n"));
+    assert_eq!(machine.pinned(&launcher, &here()).unwrap_err(), REQUIRED);
+    machine.says(&format!("{OLD}\n\t{NEW}"));
+    assert_eq!(machine.pinned(&launcher, &here()).unwrap_err(), REQUIRED);
+}
+
+#[test]
+fn a_pin_with_blank_lines_around_it_is_no_pin_and_the_launcher_decides() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = install(
+        dir.path(),
+        "1.4.12-R6000",
+        &[&binary_name("muse-bin-1.4.12-R6000")],
+    );
+    let pin = Path::new(&launcher).with_file_name(".muse-version");
+    let machine = Machine::new();
+    for text in ["\n1.4.12-R6000\n\n", " 1.4.12-R6000\n", "1.4.12-R6000\n\n"] {
+        fs::write(&pin, text).unwrap();
+        machine.says(NEW);
+        assert_eq!(
+            machine.pinned(&launcher, &here()).unwrap(),
+            launcher,
+            "{text:?}"
+        );
+        assert_eq!(machine.ran(), ["muse --version"], "{text:?}");
+    }
+    // The pin and its own line ending, and the pin alone, are pins.
+    for text in ["1.4.12-R6000\r\n", "1.4.12-R6000\n", "1.4.12-R6000"] {
+        fs::write(&pin, text).unwrap();
+        assert_eq!(machine.pinned(&launcher, &here()).unwrap_err(), REQUIRED);
+        assert!(machine.ran().is_empty(), "{text:?}");
+    }
+}
+
+/// Two executable names for one dispatcher (a launcher and a Devin that are one file): what
+/// one is asked is kept under the file and its arguments, so the Muse question is never
+/// put through the kept answers, or Devin's next question is given Muse's answer.
+#[cfg(unix)]
+#[test]
+fn muse_asked_between_two_devin_probes_gives_devin_no_answer_of_muse_s() {
+    use crate::seams::processes::probe;
+    let dir = tempfile::tempdir().unwrap();
+    let dispatcher = bare(dir.path());
+    let (devin, muse) = (dir.path().join("devin"), dir.path().join("muse-link"));
+    std::os::unix::fs::symlink(&dispatcher, &devin).unwrap();
+    std::os::unix::fs::symlink(&dispatcher, &muse).unwrap();
+    let machine = Machine::new();
+    machine
+        .scripted
+        .always_answer("devin --version", Ok("devin 3000.10.21".to_owned()));
+    machine
+        .scripted
+        .always_answer("muse-link --version", Ok(NEW.to_owned()));
+    let asked = |executable: &Path| {
+        let env = here();
+        let work = probe(
+            &machine.probes,
+            &machine.processes,
+            executable,
+            &["--version"],
+            &env,
+        );
+        finished(Box::pin(work)).unwrap().stdout
+    };
+    assert_eq!(asked(&devin), "devin 3000.10.21");
+    assert!(machine.pinned(&muse.to_string_lossy(), &here()).is_ok());
+    assert_eq!(
+        asked(&devin),
+        "devin 3000.10.21",
+        "Devin's own answer, kept"
+    );
+    assert_eq!(
+        machine.ran(),
+        ["devin --version", "muse-link --version"],
+        "Devin asked once, Muse once"
+    );
+}

@@ -3647,9 +3647,11 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
 find = '''
-    asking.probes.forget(launcher);
+    let said = match probe_afresh(asking.processes, launcher, &["--version"], &env).await {
 '''
-replace = ""
+replace = '''
+    let said = match crate::seams::processes::probe(asking.probes, asking.processes, launcher, &["--version"], &env).await {
+'''
 
 # --- the daemon's stack (T-1360), taken with `cf ui`'s own thread for P2 A1 ---
 
@@ -3694,3 +3696,35 @@ platforms = ["windows"]
 file = "crates/cf-daemon/src/cli.rs"
 find = '''        .stack_size(DAEMON_STACK_BYTES)'''
 replace = '''        .stack_size(1024 * 1024)'''
+
+# P2 A1 round 2: a line of a launcher's answer is matched as it stands: an indented line after
+# Muse's own is a wrapper's, and must not make a second match that hides a 1.4.12.
+[[plant]]
+name = "muse: a launcher's answer is read with its lines trimmed"
+meant = "an_indented_line_after_muse_s_own_is_a_wrapper_s_and_does_not_hide_a_1_4_12"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/version.rs"
+find = '''
+    let (numbers, build) = line.strip_prefix("Muse Code ")?.split_once(' ')?;
+'''
+replace = '''
+    let (numbers, build) = line.trim().strip_prefix("Muse Code ")?.split_once(' ')?;
+'''
+
+# P2 A1 round 2: the pin is its line and its own line ending, nothing trimmed around it.
+[[plant]]
+name = "muse: a pin with blank lines around it is read as a pin"
+meant = "a_pin_with_blank_lines_around_it_is_no_pin_and_the_launcher_decides"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/version.rs"
+find = '''
+    let line = text.strip_suffix('\n').unwrap_or(&text);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+'''
+replace = '''
+    let line = text.trim();
+'''
