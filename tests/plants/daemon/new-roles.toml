@@ -38,7 +38,7 @@ runs = ["nr-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
 find = '''    switch: Some("--frontend"),
-    tiers: CODING_TIERS,'''
+    tiers: ALL_TIERS,'''
 replace = '''    switch: Some("--frontend"),
     tiers: &[],'''
 
@@ -78,7 +78,7 @@ runs = ["nr-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
 find = '''    switch: Some("--integrate"),
-    tiers: CODING_TIERS,'''
+    tiers: ALL_TIERS,'''
 replace = '''    switch: Some("--integrate"),
     tiers: &[],'''
 
