@@ -589,7 +589,8 @@ mod tests {
             )
         };
         for path in [
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            // An installed bundle's shape, named for no app a test may reach.
+            "/Applications/Some Board.app/Contents/Resources/cli/bin/cf",
             "/Users/some one/Library/Application Support/ConsensFlow/cf",
             r"C:\Program Files\ConsensFlow\cf.exe",
         ] {
