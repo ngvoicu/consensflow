@@ -713,3 +713,29 @@ file = "crates/cf-e2e/src/live/stores.rs"
 find = '''    row(Pi, Login, Place::Home(".pi")),
 '''
 replace = ''''''
+
+[[plant]]
+name = "K3 doors: a Windows window is given the caller's APPDATA"
+meant = "a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_has_and_no_others"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''const WINDOWS: [&str; 7] = [
+    "ProgramData",'''
+replace = '''const WINDOWS: [&str; 7] = [
+    "APPDATA",'''
+
+[[plant]]
+name = "K3 doors: Muse is started for its version"
+meant = "a_muse_version_is_read_from_its_version_file_and_no_muse_starts_for_it"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        if self.harness == Harness::Muse {
+            return self
+                .command'''
+replace = '''        if false {
+            return self
+                .command'''

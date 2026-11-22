@@ -60,8 +60,11 @@ fn a_version_probe_is_run_with_the_switches_of_its_harness() {
         ".local/bin/claude",
         "#!/bin/sh\necho \"claude-${DISABLE_AUTOUPDATER:-unset}-${DISABLE_UPDATES:-unset}\"\n",
     );
+    // Muse is not started for its version at all: the file beside its launcher says it
+    // (T-1997 finding 4).
+    home.executable(".local/bin/.muse-version", "1.4.25\n");
     let muse = Installed::at(Harness::Muse, home.path(".local/bin/muse"), home.0.path());
-    assert_eq!(version_of(&muse), "muse-update-off-1");
+    assert_eq!(version_of(&muse), "1.4.25");
     let claude = Installed::at(
         Harness::Claude,
         home.path(".local/bin/claude"),

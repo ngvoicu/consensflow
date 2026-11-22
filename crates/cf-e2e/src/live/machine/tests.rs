@@ -585,11 +585,14 @@ fn the_user_whose_keychain_a_harness_asks_is_the_user_of_the_machine() {
     }
 }
 
+/// T-1997 finding 2: a Windows window has the machine's program folders and description, and
+/// never the caller's `APPDATA` or `LOCALAPPDATA`: those are homes, which the door gives below the
+/// rig's own home.
 #[test]
 fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_has_and_no_others() {
-    // Devin keeps its settings and sessions under APPDATA: a window without it has none.
     let machine = |name: &str| match name {
         "APPDATA" => Some(r"C:\Users\ngvoi\AppData\Roaming".to_owned()),
+        "LOCALAPPDATA" => Some(r"C:\Users\ngvoi\AppData\Local".to_owned()),
         "OS" => Some("Windows_NT".to_owned()),
         "ProgramFiles(x86)" => Some(r"C:\Program Files (x86)".to_owned()),
         "HOME" => Some("not a Windows variable".to_owned()),
@@ -600,10 +603,6 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
         windows_environment(&machine, true),
         [
             (
-                "APPDATA".to_owned(),
-                r"C:\Users\ngvoi\AppData\Roaming".to_owned()
-            ),
-            (
                 "ProgramFiles(x86)".to_owned(),
                 r"C:\Program Files (x86)".to_owned()
             ),
@@ -613,7 +612,7 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     assert!(windows_environment(&|_: &str| None, true).is_empty());
     // Another machine's windows have none of them, whatever its environment holds.
     assert!(windows_environment(&machine, false).is_empty());
-    // What the rig and `process` pass every program is not said again here.
+    // What the rig and `process` pass every program is not said again here, and no home is.
     for passed in [
         "SystemRoot",
         "ComSpec",
@@ -622,16 +621,38 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
         "USERNAME",
         "TEMP",
         "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
     ] {
         assert!(!WINDOWS.contains(&passed), "{passed}");
     }
-    // And a rig has them from the machine's own environment on Windows only.
     let debug = format!("{:?}", rig(&[], "/the/stand-in"));
-    assert_eq!(
-        debug.contains("(\"APPDATA\", "),
-        cfg!(windows) && own_var("APPDATA").is_some(),
-        "{debug}"
-    );
+    assert!(!debug.contains("(\"APPDATA\", "), "{debug}");
+    assert!(!debug.contains("(\"LOCALAPPDATA\", "), "{debug}");
+}
+
+/// T-1997 finding 4, T-2000 finding 2: Muse's version is read from the file beside its launcher
+/// (`.muse-version`), as the product reads it, and no Muse is started for it: a start outside its
+/// file sandbox reaches the owner's stores.
+#[cfg(unix)]
+#[test]
+fn a_muse_version_is_read_from_its_version_file_and_no_muse_starts_for_it() {
+    let root = crate::door::made("muse-version-").unwrap();
+    let started = root.path().join("started");
+    let muse = root.path().join("muse");
+    crate::door::write_executable(
+        &muse,
+        format!("#!/bin/sh\n: > '{}'\necho 9.9.9\n", started.display()),
+    )
+    .unwrap();
+    crate::door::write(root.path().join(".muse-version"), "1.4.25-R9361.1\n").unwrap();
+    let install = Installed::at(Harness::Muse, &muse, root.path());
+    assert_eq!(install.version(), "1.4.25-R9361.1");
+    assert!(!started.exists(), "Muse was started for its version");
+    // With no version file there is no version, and still no start.
+    std::fs::remove_file(root.path().join(".muse-version")).unwrap();
+    assert_eq!(install.version(), "unknown");
+    assert!(!started.exists(), "Muse was started for its version");
 }
 
 // Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a

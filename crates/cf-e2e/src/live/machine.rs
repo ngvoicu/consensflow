@@ -362,6 +362,18 @@ impl Installed {
     }
 
     fn version_with_config(&self, config: Option<&Path>) -> String {
+        // Muse's version is the file beside its launcher, as the product reads it: no Muse is
+        // started for it, for a start outside its file sandbox reaches the owner's stores
+        // (T-1997 finding 4).
+        if self.harness == Harness::Muse {
+            return self
+                .command
+                .parent()
+                .and_then(|folder| crate::files::read_string(&folder.join(".muse-version")).ok())
+                .map(|said| said.trim().to_owned())
+                .filter(|said| !said.is_empty())
+                .unwrap_or_else(|| "unknown".to_owned());
+        }
         let word = if self.harness == Harness::Devin {
             "version"
         } else {
@@ -435,9 +447,7 @@ impl Installed {
 /// the command interpreter, which the rig and `process` pass): the folders the
 /// user's settings and the programs are in, and what Node describes the machine
 /// by. Devin keeps its settings and sessions under `APPDATA`.
-const WINDOWS: [&str; 9] = [
-    "APPDATA",
-    "LOCALAPPDATA",
+const WINDOWS: [&str; 7] = [
     "ProgramData",
     "ProgramFiles",
     "ProgramFiles(x86)",
