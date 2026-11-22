@@ -184,7 +184,11 @@ fn a_batch_file_launcher_with_no_binary_beside_it_is_refused_in_plain_words_and_
 #[test]
 fn an_older_muse_than_consensflow_reads_is_refused_in_the_words_of_the_version_floor() {
     let dir = tempfile::tempdir().unwrap();
-    let launcher = install(dir.path(), "1.4.12-R6000", &["muse-bin-1.4.12-R6000"]);
+    let launcher = install(
+        dir.path(),
+        "1.4.12-R6000",
+        &[&binary_name("muse-bin-1.4.12-R6000")],
+    );
     assert_eq!(
         Machine::new().pinned(&launcher, &here()).unwrap_err(),
         "Muse Code 1.4.13 or newer is required. Update Muse Code before opening a pane."
