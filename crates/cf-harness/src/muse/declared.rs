@@ -21,7 +21,8 @@ pub(crate) fn release(said: &str) -> Option<&str> {
         let caps = LINE.captures(line)?;
         let outer = caps.get(1)?.as_str();
         let inner = caps.get(2)?.as_str();
-        (inner.split_once("-R")?.0 == outer).then_some(inner)
+        (inner.split_once("-R")?.0 == outer && super::version::Version::of(line).is_some())
+            .then_some(inner)
     });
     let only = found.next()?;
     found.next().is_none().then_some(only)
@@ -29,5 +30,5 @@ pub(crate) fn release(said: &str) -> Option<&str> {
 
 /// A pin is a different source from CLI output: it names one build by itself.
 pub(crate) fn pin_release(pin: &str) -> Option<&str> {
-    PIN.is_match(pin).then_some(pin)
+    (PIN.is_match(pin) && super::version::Version::of(pin).is_some()).then_some(pin)
 }

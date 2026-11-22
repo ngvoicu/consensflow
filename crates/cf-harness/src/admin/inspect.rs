@@ -36,13 +36,15 @@ pub(super) async fn inspect(
     let Some(path) = path else {
         return row;
     };
-    let (version, release) = match harness {
+    let (version, release, setup_version) = match harness {
         Harness::Muse => muse_version(inner, &path).await,
         _ => ask_version(inner, &path, &inner.env, harness).await,
     };
     row.version = version;
     row.tested = Tested::of(harness, release.as_deref());
-    row.setup = setup(harness, row.version.value());
+    // Until A2 shares the launch verdict, keep the setup decision on the
+    // original first-number reading, independently of the proved release.
+    row.setup = setup(harness, setup_version.as_deref());
     let source = release_source(harness, &path, &inner.env);
     row.distribution = source
         .distribution
@@ -79,10 +81,11 @@ pub(super) async fn inspect(
 /// and only where there is none what it says to `--version`, asked with its update
 /// and login off. Its `--version` alone checks for an update first, which can
 /// download a new binary and write the install's files (`muse::version`).
-async fn muse_version(inner: &Inner, path: &str) -> (Version, Option<String>) {
+async fn muse_version(inner: &Inner, path: &str) -> (Version, Option<String>, Option<String>) {
     if let Some(value) = muse::version::installed(&PathBuf::from(path)) {
         let release = muse::declared::pin_release(&value).map(str::to_owned);
-        return (Version::Checked { value }, release);
+        let setup_version = Some(value.clone());
+        return (Version::Checked { value }, release, setup_version);
     }
     let quiet = muse::version::QUIET
         .iter()
@@ -98,7 +101,7 @@ async fn ask_version(
     path: &str,
     env: &Env,
     harness: Harness,
-) -> (Version, Option<String>) {
+) -> (Version, Option<String>, Option<String>) {
     let asked = program(env, PathBuf::from(path), vec!["--version".to_owned()]);
     match inner.capture.capture(asked, PROBE).await {
         Ok(said) => {
@@ -109,7 +112,8 @@ async fn ask_version(
                 Harness::Devin => devin::declared::release(&said.stdout),
                 Harness::Muse => muse::declared::release(&said.stdout),
             };
-            let version = match release.or_else(|| version_of(&said.stdout)) {
+            let setup_version = version_of(&said.stdout);
+            let version = match release.or(setup_version) {
                 Some(value) => Version::Checked {
                     value: value.to_owned(),
                 },
@@ -117,7 +121,11 @@ async fn ask_version(
                     reason: "Version output was not recognized".to_owned(),
                 },
             };
-            (version, release.map(str::to_owned))
+            (
+                version,
+                release.map(str::to_owned),
+                setup_version.map(str::to_owned),
+            )
         }
         Err(failed) => (
             Version::Error {
@@ -128,6 +136,7 @@ async fn ask_version(
                 }
                 .to_owned(),
             },
+            None,
             None,
         ),
     }
