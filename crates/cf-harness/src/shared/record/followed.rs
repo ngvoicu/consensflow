@@ -15,8 +15,9 @@ use cf_base::json::from_slice_lossy;
 use serde_json::Value;
 
 use super::cache::{Look, Options};
-use super::jsonl::{read_on_with, Looked, Seen, Stop};
+use super::jsonl::{read_on_with, read_zstd_on_with, Looked, Seen, Stop};
 use super::reading::{Reading, Record};
+use super::zstd;
 
 /// What reads a transcript's records into what they say.
 pub(crate) trait Parser {
@@ -72,6 +73,8 @@ pub(crate) struct Followed<P> {
     /// that found it began: a stat not [`settled`] then may be the same for a
     /// file written again since.
     broken: Option<(Stat, i64, String)>,
+    /// Codex's cold files may be stored compressed.
+    zstd: bool,
 }
 
 /// What a look at a followed transcript read.
@@ -95,13 +98,28 @@ impl<P: Parser> Followed<P> {
             seen: None,
             state: None,
             broken: None,
+            zstd: false,
         }
+    }
+
+    pub(crate) fn with_zstd(mut self) -> Self {
+        self.zstd = true;
+        self
     }
 
     /// A look that began at `now_ms`: none when the harness keeps no transcript
     /// of the conversation.
     pub(crate) fn read(&mut self, now_ms: i64) -> Result<Option<Read<'_, P>>, Stop> {
         let mut current = self.file.as_deref().and_then(|file| stat(file).ok());
+        if self.zstd
+            && self
+                .file
+                .as_deref()
+                .and_then(zstd::plain_sibling)
+                .is_some_and(|plain| plain.is_file())
+        {
+            current = None;
+        }
         if current.is_none() {
             let located = (self.locate)().map_err(Stop::Failed)?;
             if located != self.file {
@@ -126,7 +144,12 @@ impl<P: Parser> Followed<P> {
         self.broken = None;
         loop {
             let state = self.state.get_or_insert_with(|| (self.parse)(&file));
-            let looked = read_on_with(
+            let read = if self.zstd && zstd::is_rollout(&file) {
+                read_zstd_on_with
+            } else {
+                read_on_with
+            };
+            let looked = read(
                 &file,
                 self.seen.as_ref(),
                 now_ms,

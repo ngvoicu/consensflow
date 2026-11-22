@@ -11,7 +11,7 @@
 //! the system names it, T-783).
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -22,6 +22,7 @@ use rusqlite::{params, Params};
 use serde_json::Value;
 
 use crate::shared::record::sqlite::Store;
+use crate::shared::record::{jsonl::MAX_COMPRESSED_LINE, zstd};
 use crate::{codex, devin, muse};
 
 /// How deep under Codex's `sessions` its rollouts are: `YYYY/MM/DD/rollout-….jsonl`.
@@ -168,7 +169,11 @@ fn rollouts_under(folder: &Path, depth: usize, since_ms: i64, found: &mut Vec<(i
         let name = entry.file_name().to_string_lossy().into_owned();
         if kind.is_dir() && depth < DAYS {
             rollouts_under(&path, depth + 1, since_ms, found);
-        } else if kind.is_file() && name.starts_with("rollout-") && name.ends_with(".jsonl") {
+        } else if kind.is_file()
+            && name.starts_with("rollout-")
+            && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+            && !zstd::plain_sibling(&path).is_some_and(|plain| plain.is_file())
+        {
             let written = kind
                 .modified()
                 .ok()
@@ -185,9 +190,18 @@ fn rollouts_under(folder: &Path, depth: usize, since_ms: i64, found: &mut Vec<(i
 /// Only the first line is read: a rollout grows with its conversation.
 fn session_of(rollout: &Path, workspace: &str) -> Option<String> {
     let mut first = String::new();
-    BufReader::new(fs::File::open(rollout).ok()?)
-        .read_line(&mut first)
-        .ok()?;
+    let file = fs::File::open(rollout).ok()?;
+    if zstd::is_rollout(rollout) {
+        // Validate the compressed frame before trusting its head, while keeping
+        // even an unreasonably long metadata line bounded.
+        let decoded = zstd::Decoded::new(file).ok()?;
+        let mut reader = BufReader::new(decoded.take((MAX_COMPRESSED_LINE + 1) as u64));
+        if reader.read_line(&mut first).ok()? > MAX_COMPRESSED_LINE {
+            return None;
+        }
+    } else {
+        BufReader::new(file).read_line(&mut first).ok()?;
+    }
     let meta: Value = serde_json::from_str(&first).ok()?;
     let cwd = meta["payload"]["cwd"].as_str()?;
     (meta["type"] == "session_meta" && real_path(Path::new(cwd)) == real_path(Path::new(workspace)))
