@@ -220,7 +220,7 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
         Run::new(program)
             .args(args)
             .cwd(&folder)
-            .inheriting_env()
+            .machine_env()
             .vars(home),
     )?;
     log.launched(&agents::agent_on(&asked));

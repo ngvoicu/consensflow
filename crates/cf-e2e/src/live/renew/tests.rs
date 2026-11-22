@@ -273,6 +273,28 @@ mod running {
         assert!(!Path::new(folder.trim()).exists(), "{folder}");
     }
 
+    /// The Keychain control, Muse's direct compaction and the renewal use the account that runs
+    /// them: off a test machine they are refused, and say why.
+    #[test]
+    fn what_uses_the_accounts_login_store_is_refused_off_a_test_machine_and_says_why() {
+        let refused = TestMachine::required_by("the Keychain control", None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("the Keychain control")
+                && refused.contains("marked as a test machine")
+                && refused.contains(TEST_MACHINE)
+                && refused.contains("nothing was touched"),
+            "{refused}"
+        );
+        let machine = TestMachine::signalled(Some("zeewin2"));
+        assert_eq!(
+            TestMachine::required_by("x", machine).unwrap().name(),
+            "zeewin2"
+        );
+        assert!(TestMachine::required_by("x", TestMachine::signalled(Some("  "))).is_err());
+    }
+
     /// K3 review T-1978, 9: an entry at the exact record name that is a link, or was there before
     /// the renewal, is the owner's: it is left as it was, its target with it, and said.
     #[test]

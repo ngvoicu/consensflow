@@ -1063,6 +1063,9 @@ fn a_version_read_is_given_the_kits_folders_and_never_the_machines_homes() {
         "XDG_STATE_HOME",
         "XDG_CACHE_HOME",
         "PI_CODING_AGENT_DIR",
+        "PI_CODING_AGENT_SESSION_DIR",
+        "CFFIXED_USER_HOME",
+        "XDG_RUNTIME_DIR",
         "CLAUDE_CONFIG_DIR",
     ] {
         let value = get(name).unwrap_or_else(|| panic!("{name} is not given: {vars:?}"));

@@ -110,7 +110,7 @@ fn scratch_folder() -> Result<(cf_e2e::door::Made, PathBuf)> {
 
 /// The machine's variables a harness started here needs besides its home: where programs are.
 fn machine_vars() -> Vec<(String, String)> {
-    ["PATH", "PATHEXT", "HOME", "USER", "LANG", "TMPDIR", "SHELL"]
+    ["PATH", "PATHEXT", "USER", "LANG", "TMPDIR", "SHELL"]
         .into_iter()
         .filter_map(|name| Some((name.to_owned(), own_var(name)?)))
         .collect()
@@ -188,7 +188,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         Run::new(program)
             .args(rest)
             .cwd(&folder)
-            .inheriting_env()
+            .machine_env()
             .vars(home.clone())
             .closed_input()
             .limit(TURN)
@@ -378,7 +378,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
         let ran = Run::new(program)
             .args(rest)
             .cwd(&folder)
-            .inheriting_env()
+            .machine_env()
             .vars(home.clone())
             .var("DEVIN_COMPACTION_THRESHOLDS", thresholds)
             .closed_input()
@@ -504,6 +504,9 @@ fn muse_compaction_lines(data: &Path) -> Result<Vec<String>> {
 #[ignore = "opt-in: spends Muse's allowance on two short turns; cargo xtask live compaction-routes -- muse"]
 fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
     let log = Log::begin("live compaction-routes muse")?;
+    // Muse's login is in the Keychain of the account that runs it, which this case reads and a
+    // turn of Muse uses: only a test machine with an account of its own (K3, T-1979).
+    cf_e2e::live::renew::TestMachine::required_for("Muse's direct compaction case")?;
     ask::prepare()?;
     let home = machine::home()?;
     let owner_watch = watch_muse_owner(&home)?;
@@ -564,6 +567,7 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             );
         }
         env.insert("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned());
+        env.extend(cf_e2e::live::renew::account_vars(&home));
         if selected.is_none() {
             selected = Some(agents::muse_in_env(&env)?);
         }
@@ -594,7 +598,8 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         let ran = Run::new(program)
             .args(rest)
             .cwd(&folder)
-            .inheriting_env()
+            .machine_env()
+            .vars(cf_e2e::live::renew::account_vars(&home))
             .vars([
                 ("XDG_CONFIG_HOME", scratch.path().join("config")),
                 ("XDG_DATA_HOME", scratch.path().join("data")),

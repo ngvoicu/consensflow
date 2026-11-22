@@ -159,31 +159,15 @@ fn probe_vars(
     .collect();
     let home = scratch.join("home");
     let text = |path: &Path| path.to_string_lossy().into_owned();
-    let drive = text(&home);
-    let (letter, rest) = if drive.as_bytes().get(1) == Some(&b':') {
-        drive.split_at(2)
-    } else {
-        ("", drive.as_str())
-    };
-    vars.extend([
-        ("HOMEDRIVE".to_owned(), letter.to_owned()),
-        ("HOMEPATH".to_owned(), rest.to_owned()),
-    ]);
-    for name in ["HOME", "USERPROFILE"] {
-        vars.push((name.to_owned(), text(&home)));
+    // Every variable a program finds a home by, below the kit's: the same list a stand-in test
+    // process and the Admin daemon are given, so that no variable of it is the machine's
+    // (`CFFIXED_USER_HOME` and the Windows profile's two halves included).
+    for (name, value) in crate::standin_process::home_vars(&home) {
+        if name != "CLAUDE_CONFIG_DIR" {
+            vars.push((name.to_owned(), text(&value)));
+        }
     }
-    for (name, below) in [
-        ("APPDATA", "AppData/Roaming"),
-        ("LOCALAPPDATA", "AppData/Local"),
-        ("XDG_CONFIG_HOME", ".config"),
-        ("XDG_DATA_HOME", ".local/share"),
-        ("XDG_STATE_HOME", ".local/state"),
-        ("XDG_CACHE_HOME", ".cache"),
-        ("CODEX_HOME", ".codex"),
-        ("PI_CODING_AGENT_DIR", ".pi/agent"),
-    ] {
-        vars.push((name.to_owned(), text(&home.join(below))));
-    }
+    vars.push(("XDG_RUNTIME_DIR".to_owned(), text(&home.join(".run"))));
     vars.push((
         "CLAUDE_CONFIG_DIR".to_owned(),
         text(&config.map_or_else(|| home.join(".claude"), Path::to_path_buf)),

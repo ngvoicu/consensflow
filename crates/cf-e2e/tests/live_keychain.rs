@@ -412,6 +412,9 @@ fn line(came: &Came) -> String {
 #[ignore = "opt-in: runs the machine's Claude Code against servers of its own, spends no quota; cargo xtask live keychain"]
 fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_starts_it_and_the_control_does(
 ) -> Result {
+    // The controls make, read and delete an item in the login Keychain of the account that runs
+    // them: only a test machine with an account of its own (K3, T-1979).
+    cf_e2e::live::renew::TestMachine::required_for("the Keychain control")?;
     let log = Log::own_agents("live keychain", "it opens no window and runs no model")?;
     let command = live::command("claude")?;
     let home = live::machine::home()?;
