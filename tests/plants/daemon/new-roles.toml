@@ -142,7 +142,7 @@ replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.val
 
 [[plant]]
 name = "new roles: --integrate is no switch of cf task add"
-meant = "the_four_new_roles_are_asked_for_by_their_switches_and_named_by_their_rows"
+meant = "the_four_new_roles_are_asked_for_by_their_switches_and_a_tier_and_named_by_their_rows"
 runs = ["nr-cf-board"]
 
 [[plant.edit]]
@@ -152,7 +152,7 @@ replace = '''    switch: Some("--integrator"),'''
 
 [[plant]]
 name = "new roles: the daemon's task route reads the architect's field as the frontend's"
-meant = "each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff"
+meant = "each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_is_on_the_staff"
 runs = ["nr-daemon-tasks"]
 
 [[plant.edit]]
@@ -196,7 +196,7 @@ replace = '''                        id'''
 
 [[plant]]
 name = "new roles: the chief's staff table says a role by its id"
-meant = "says_each_role_by_its_name_and_none_for_a_member_of_roles_with_no_tier"
+meant = "says_each_role_by_its_name_and_none_for_the_image_designer_alone"
 runs = ["nr-engine-skill"]
 
 [[plant.edit]]

@@ -702,6 +702,14 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
             ),
         ),
         (
+            r#"{"design":true,"tier":"standard","purpose":"design","body":"x"}"#,
+            (
+                400,
+                "no-tier-for-role",
+                "an image designer's task has no tier: leave out --tier and --purpose",
+            ),
+        ),
+        (
             r#"{"design":true,"purpose":"design","body":"x"}"#,
             (
                 400,
