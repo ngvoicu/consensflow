@@ -583,7 +583,8 @@ impl Ledger {
     /// Place a window request and choose its holding in the same transaction.
     /// `asked_at` is when the asking process began (ms on the ledger's clock),
     /// and binds the question to the window's holding of that moment; without
-    /// it the question is the holding's at its arrival.
+    /// it the question is the holding's at its arrival. `idle_generation` is the
+    /// last brief of a holding the asking token was made beside and not given.
     pub fn ask_from_window(
         &mut self,
         project: i64,
@@ -591,15 +592,16 @@ impl Ledger {
         question: &NewQuestion,
         observed: Option<crate::WindowHolding>,
         launch_task: Option<(i64, i64)>,
-        asked_at: Option<i64>,
+        stamp: crate::QuestionStamp,
     ) -> Result<MessageView, LedgerError> {
+        let (asked_at, idle_generation) = (stamp.asked_at, stamp.idle_generation);
         self.store.write(|store| {
             let current = crate::holding::of(store, window)?;
             let mut replaced = None;
             let selected = if let Some(at) = asked_at {
                 // A stamp later than the arrival counts as the arrival: it is later than
                 // every bound a holding has too, as the arrival is.
-                match crate::holding::placed_at(store, window, at)? {
+                match crate::holding::placed_at(store, window, at, idle_generation)? {
                     crate::holding::Placed::Current => match current {
                         Some(h) if crate::holding::matches(store, window, Some(h.task_id), Some(h.first_brief))? => Some(h),
                         Some(h) => return Err(crate::holding::window_task_refusal(store, window, h.task_id)?),

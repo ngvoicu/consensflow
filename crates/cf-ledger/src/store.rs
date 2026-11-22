@@ -32,6 +32,8 @@ pub(crate) struct Store {
     /// A holding ended in this operation and waits for the operation's next
     /// reading of the clock to say when ([`ENDING`]).
     ending: bool,
+    /// The write that dated a holding's end failed: the operation's commit fails with it.
+    end_failed: Option<rusqlite::Error>,
     names: Box<dyn FnMut() -> String>,
     /// Told every event as it is logged.
     trace: Box<dyn FnMut(&Event)>,
@@ -50,6 +52,7 @@ impl Store {
             clock,
             last_ms: None,
             ending: false,
+            end_failed: None,
             names,
             trace,
         }
@@ -74,6 +77,7 @@ impl Store {
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
             Ok(Ok(value)) => match self
                 .settle_ends_unread()
+                .and_then(|()| self.end_failed.take().map_or(Ok(()), Err))
                 .and_then(|()| self.db.execute_batch("COMMIT"))
             {
                 Ok(()) => Ok(value),
@@ -84,11 +88,13 @@ impl Store {
             },
             Ok(Err(cause)) => {
                 self.ending = false;
+                self.end_failed = None;
                 let _ = self.db.execute_batch("ROLLBACK");
                 Err(cause)
             }
             Err(unwound) => {
                 self.ending = false;
+                self.end_failed = None;
                 let _ = self.db.execute_batch("ROLLBACK");
                 panic::resume_unwind(unwound)
             }
@@ -161,11 +167,13 @@ impl Store {
 
     fn settle_ends(&mut self, at: i64) {
         if std::mem::take(&mut self.ending) {
-            // A failed write here fails the operation's own writes too.
-            let _ = self.db.execute(
+            // A failed write fails the operation: its commit reads the error.
+            if let Err(cause) = self.db.execute(
                 "UPDATE question_holding SET ended_at = ?1 WHERE ended_at = ?2",
                 rusqlite::params![at, ENDING],
-            );
+            ) {
+                self.end_failed.get_or_insert(cause);
+            }
         }
     }
 
