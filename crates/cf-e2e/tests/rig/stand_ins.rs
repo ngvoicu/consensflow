@@ -328,3 +328,71 @@ fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of
     cf_e2e::process::signal(browser, cf_e2e::process::Signal::Kill)?;
     Ok(())
 }
+
+/// K3 (T-2000 finding 1, T-1998's rig case): a window asked with another home, or with `HOME`
+/// taken away, is not opened by the rig's own request; the window opened next writes its real
+/// environment down, and it is the rig's: every home below the rig's, and no person's home
+/// (`CF_KIT_PROJECT_HOME` is gone).
+#[cfg(unix)]
+#[test]
+fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_the_next_has_the_rigs_homes(
+) -> Outcome {
+    let rig = crate::rig()?;
+    // A folder of no run's: the temp folder's parent's, never made.
+    let elsewhere = std::env::temp_dir()
+        .parent()
+        .map(|parent| parent.join(format!("not-the-runs-{}", std::process::id())))
+        .ok_or("the temp folder has no parent")?;
+    let window = |id: &str, extra: serde_json::Value| {
+        let mut body = json!({
+            "id": id,
+            "generation": 1,
+            "cwd": rig.workspace(),
+            "argv": ["/bin/sh", "-c", "sleep 30"],
+            "env": {},
+            "size": { "rows": 24, "cols": 80 },
+            "backlogBytes": 65536,
+        });
+        for (key, value) in extra.as_object().into_iter().flatten() {
+            body[key] = value.clone();
+        }
+        body
+    };
+    let refused = [
+        window("other-home", json!({ "env": { "APPDATA": elsewhere } })),
+        window("no-home", json!({ "dropEnv": ["HOME"] })),
+    ];
+    for body in refused {
+        let id = body["id"].clone();
+        assert!(rig.open_pane(body).is_err(), "{id} was opened");
+    }
+    assert_eq!(rig.refused_windows().len(), 2);
+    let said = rig.workspace().join("window-env.txt");
+    let opened = rig.open_pane(window(
+        "the-next",
+        json!({ "argv": ["/bin/sh", "-c", format!("env > '{}'; sleep 30", said.display())] }),
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    rig.wait_for("the window's environment", crate::secs(10), || {
+        Ok(std::fs::read_to_string(&said).is_ok_and(|text| text.contains("\nHOME=") || text.starts_with("HOME=")))
+    })?;
+    let env = std::fs::read_to_string(&said)?;
+    let root = rig.home().parent().map(Path::to_path_buf).unwrap_or_default();
+    for name in cf_e2e::door::spawn::HOME_VARS {
+        let line = env
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}=")))
+            .ok_or_else(|| format!("{name} is not in the window's environment"))?;
+        let value = &line[name.len() + 1..];
+        let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        assert!(
+            real(Path::new(value)).starts_with(real(&root)) || Path::new(value).starts_with(&root),
+            "{name} is {value}, not below the rig's {}",
+            root.display()
+        );
+    }
+    assert!(!env.contains("CF_KIT_PROJECT_HOME"), "{env}");
+    let _ = rig.close_pane(json!({ "id": "the-next", "generation": 1 }));
+    rig.close()?;
+    Ok(())
+}
