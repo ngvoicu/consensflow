@@ -38,8 +38,11 @@ runs = ["pane-input-reconcile", "pane-input-late", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '            if sequence > lane.passed && !lane.slots.contains_key(&sequence) {'
-replace = '            if false && sequence > lane.passed && !lane.slots.contains_key(&sequence) {'
+find = '''            if sequence > lane.passed
+                && !lane.slots.contains_key(&sequence)'''
+replace = '''            if false
+                && sequence > lane.passed
+                && !lane.slots.contains_key(&sequence)'''
 
 [[plant]]
 name = "pane input retry: admit a number the count has passed"
@@ -80,15 +83,16 @@ runs = ["pane-input-capacity", "pane-input-final"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            page.lane(&key, page_id).slots.insert(
-                sequence,
-                Slot::Void {
-                    deadline: now + ORDER_BOUND,
-                },
-            );
-            page.pump(&key, now, &mut Vec::new());
-            Err(error)'''
-replace = '''            Err(error)'''
+find = '''            let lane = page.lane(&key, page_id);
+            if lane.slots.len() < MAX_LANE_SLOTS {
+                lane.slots.insert(
+                    sequence,
+                    Slot::Void {
+                        deadline: now + ORDER_BOUND,
+                    },
+                );
+            }'''
+replace = '''            let _ = page.lane(&key, page_id);'''
 
 [[plant]]
 name = "pane input retry: a paste over the cap goes in"

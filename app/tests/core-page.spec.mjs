@@ -4900,7 +4900,9 @@ test('what is typed while a call is unanswered is handed over at once, numbered'
   )
   for (const [sequence, name] of names) {
     expect(name).toMatch(
-      new RegExp(`^consensflow-page-v1:[0-9a-f-]{36}:1\\|\\[\\["${id}",\\d+,${sequence}\\]\\]$`),
+      new RegExp(
+        `^consensflow-page-v1:[0-9a-f-]{36}:1\\|\\{"o":\\[\\["${id}",\\d+,${sequence}\\]\\],"p":\\[\\]\\}$`,
+      ),
     )
   }
 })
@@ -4936,7 +4938,7 @@ test('a full window refuses a key once, with its words, and the typing after it 
 // before it, a number that never comes is given up after the bound, a page that has gone is
 // heard for the bound and its calls go in before the next page's, and what is lost of it is
 // told to the page that is current. It counts what it was given.
-function orderedHost({ bound = 1500, hold = () => null } = {}) {
+function orderedHost({ bound = 1500, hold = () => null, stuck = () => false } = {}) {
   const st = {
     received: '',
     current: null,
@@ -5049,15 +5051,17 @@ function orderedHost({ bound = 1500, hold = () => null } = {}) {
     },
     handle: async (command, args) => {
       if (command === 'pane_page_activate') {
+        // A page that goes before the host has answered its activation.
+        if (stuck(args)) return new Promise(() => {})
         host.endPage()
         st.current = args.pageId
         st.serial += 1
         st.serials.set(args.pageId, st.serial)
-        if (args.prior) {
+        for (const prior of args.priors ?? []) {
           for (const lanes of st.lanes.values())
-            for (const lane of lanes) if (lane.page === args.prior.pageId) lane.issued ??= 0
-          for (const each of args.prior.issued) {
-            const lane = laneOf(`${each.id}:${each.generation}`, args.prior.pageId)
+            for (const lane of lanes) if (lane.page === prior.pageId) lane.issued ??= 0
+          for (const each of prior.issued) {
+            const lane = laneOf(`${each.id}:${each.generation}`, prior.pageId)
             lane.issued = Math.max(lane.issued ?? 0, each.sequence)
           }
         }
@@ -5259,6 +5263,59 @@ test('a number that never comes, from a page two reloads back, is told to the pa
     await reloaded(page)
     await typeKeys(page, ['E'])
     await expect.poll(() => host.received, { timeout: 9000 }).toBe('BDE')
+    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
+  } finally {
+    host.stop()
+  }
+})
+
+test("a second reload before the middle page activated keeps the first page's key: AD, not DA", async ({
+  page,
+}) => {
+  const first = held()
+  const host = orderedHost({
+    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
+    stuck: (args) => args.pageId.endsWith(':2'),
+  })
+  try {
+    await openWithHost(page, host)
+    await typeKeys(page, ['A'])
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    // The second page is loaded and never gets its activation answered; the third follows.
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => window.name)).toMatch(/:2\|/)
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await typeKeys(page, ['D'])
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(host.received).toBe('')
+    first.release()
+    await expect.poll(() => host.received, { timeout: 4000 }).toBe('AD')
+    expect(host.told).toEqual([])
+  } finally {
+    host.stop()
+  }
+})
+
+test('the same with the first key never delivered: D goes in after the bound and the page says so', async ({
+  page,
+}) => {
+  const first = held()
+  const host = orderedHost({
+    bound: 4000,
+    hold: (args) => (args.sequence === 1 && args.pageId.endsWith(':1') ? first.promise : null),
+    stuck: (args) => args.pageId.endsWith(':2'),
+  })
+  try {
+    await openWithHost(page, host)
+    await typeKeys(page, ['A'])
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => window.name)).toMatch(/:2\|/)
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await typeKeys(page, ['D'])
+    await expect.poll(() => host.received, { timeout: 9000 }).toBe('D')
     await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
   } finally {
     host.stop()

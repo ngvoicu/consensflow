@@ -154,7 +154,14 @@ export class TerminalLink {
   /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
   retire(key) {
     this.#retired.add(key)
-    this.#issued.delete(key)
+    if (this.#issued.delete(key)) {
+      const at = key.lastIndexOf(':')
+      this.#onIssued({
+        id: key.slice(0, at),
+        generation: Number(key.slice(at + 1)),
+        sequence: null,
+      })
+    }
     this.#sizes.delete(key)
     this.#failedInputs.delete(key)
     this.#registry.retire(key)

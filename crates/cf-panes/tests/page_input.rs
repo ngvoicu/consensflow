@@ -329,10 +329,10 @@ fn a_reload_with_a_held_call_loses_nothing_at_a_real_terminal() {
     inputs
         .begin_page_after(
             "s:2",
-            Some(&PriorPage {
+            &[PriorPage {
                 page_id: "s:1".to_owned(),
                 issued: vec![(key.clone(), 3)],
-            }),
+            }],
         )
         .unwrap();
     let d = admitted(&inputs, "s:2", &key, 1, b"D");

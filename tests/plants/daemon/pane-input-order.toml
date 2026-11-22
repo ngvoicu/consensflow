@@ -3,6 +3,16 @@
 # gone is heard for the bound, and its calls go in before the next page's; what it
 # lost is told to the page that is current. A reply has room of its own (P4-D).
 [run]
+pane-order-refused = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_departed_pages_refusal_is_told_to_the_current_page"]
+pane-order-kept = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_loss_notice_stays_until_a_page_has_it"]
+pane-order-failed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_write_that_failed_before_its_answer_was_fetched_is_told_to_the_next_page"]
+pane-order-own-wait = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_later_arrival_does_not_stretch_an_earlier_calls_wait"]
+pane-order-clock = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_call_that_waits_for_the_lock_past_the_bound_is_refused"]
+pane-order-closed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_late_activation_does_not_report_what_was_written"]
+pane-order-skip = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_departed_pages_skip_leaves_the_current_pages_ticket"]
+pane-order-bounded = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::what_a_page_holds_behind_a_gap_is_bounded"]
+pane-order-retire = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_departed_pages_waiting_call_refused_at_retirement_is_told"]
+pane-order-chain = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a second reload before the middle page"]
 pane-order = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::calls_that_come_out_of_order_reach_the_writer_in_number_order"]
 pane-order-bound = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_number_that_never_comes_holds_what_is_behind_it_for_the_bound_only"]
 pane-order-departed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_departed_pages"]
@@ -87,3 +97,117 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 file = "app/ui/terminal-link.js"
 find = "    this.#onIssued({ id: pane.id, generation: pane.generation, sequence })"
 replace = "    void this.#onIssued"
+
+[[plant]]
+name = "pane input order: a departed page's refusal is not told"
+meant = "a_departed_pages_refusal_is_told_to_the_current_page"
+runs = ["pane-order-refused"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "            if !current {\n                page.lost(&key, events);\n            }\n            Err(error)"
+replace = "            let _ = current;\n            Err(error)"
+
+[[plant]]
+name = "pane input order: an activation retried loses its notices"
+meant = "a_loss_notice_stays_until_a_page_has_it"
+runs = ["pane-order-kept"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            if page.current.as_deref() == Some(page_id) {
+                return Ok(page.pending_lost.iter().cloned().collect());
+            }
+            if !page.pending_pages.remove(page_id) {'''
+replace = '''            if page.current.as_deref() == Some(page_id) {
+                return Ok(Vec::new());
+            }
+            if !page.pending_pages.remove(page_id) {'''
+
+[[plant]]
+name = "pane input order: a write that failed unanswered is not told"
+meant = "a_write_that_failed_before_its_answer_was_fetched_is_told_to_the_next_page"
+runs = ["pane-order-failed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        for key in failed {
+            page.lost(&key, events);
+        }'''
+replace = '''        let _ = failed;'''
+
+[[plant]]
+name = "pane input order: a call waits for the oldest call's bound, not its own"
+meant = "a_later_arrival_does_not_stretch_an_earlier_calls_wait"
+runs = ["pane-order-own-wait"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                .iter()
+                .filter(|(_, slot)| slot.deadline() <= now)'''
+replace = '''                .iter()
+                .take(1)
+                .filter(|(_, slot)| slot.deadline() <= now)'''
+
+[[plant]]
+name = "pane input order: a call is judged by the time before the lock"
+meant = "a_call_that_waits_for_the_lock_past_the_bound_is_refused"
+runs = ["pane-order-clock"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        // is late, whenever it was sent.
+        let now = Instant::now();'''
+replace = '''        // is late, whenever it was sent.
+        let now = Instant::now() - Duration::from_millis(1200);'''
+
+[[plant]]
+name = "pane input order: a closed lane is forgotten"
+meant = "a_late_activation_does_not_report_what_was_written"
+runs = ["pane-order-closed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "        if self.closed.insert(id.clone(), passed).is_none() {"
+replace = "        if self.closed.insert(id.clone(), 0).is_none() {"
+
+[[plant]]
+name = "pane input order: a departed page's skip takes the current page's ticket"
+meant = "a_departed_pages_skip_leaves_the_current_pages_ticket"
+runs = ["pane-order-skip"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "                !(completion.page == page_id\n                    && &completion.key == key"
+replace = "                !(&completion.key == key"
+
+[[plant]]
+name = "pane input order: a page may hold any number of calls behind a gap"
+meant = "what_a_page_holds_behind_a_gap_is_bounded"
+runs = ["pane-order-bounded"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "        if page.lane(&key, page_id).slots.len() >= MAX_LANE_SLOTS {"
+replace = "        if false && page.lane(&key, page_id).slots.len() >= MAX_LANE_SLOTS {"
+
+[[plant]]
+name = "pane input order: a retired window's waiting call is not told"
+meant = "a_departed_pages_waiting_call_refused_at_retirement_is_told"
+runs = ["pane-order-retire"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "            if departed_waiting {"
+replace = "            if false && departed_waiting {"
+
+[[plant]]
+name = "pane input order: the page keeps only its predecessor's numbers"
+meant = "a second reload before the middle page activated keeps the first page's key: AD, not DA"
+runs = ["pane-order-chain"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  return [...earlier, { pageId: `${saved[1]}:${saved[2]}`, issued: issuedList(kept.o) }].slice("
+replace = "  return [{ pageId: `${saved[1]}:${saved[2]}`, issued: issuedList(kept.o) }].slice("

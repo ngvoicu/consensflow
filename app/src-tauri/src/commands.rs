@@ -137,33 +137,61 @@ impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
     }
 }
 
-/// The page becomes current. It hands over what the page before it issued, so
+/// The page has told the person what was lost in these windows: the notices are done.
+#[tauri::command]
+pub fn pane_lost_told<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    keys: Vec<LostArgs>,
+) -> Value {
+    let state = app.state::<AppRuntime>();
+    if state.inputs.page_is_current(&page_id).is_err() {
+        return json!({"ok":false,"error":"pane-input-stale-page"});
+    }
+    let mut told = Vec::with_capacity(keys.len());
+    for each in keys {
+        match pane_key(&each.id, each.generation) {
+            Ok(key) => told.push(key),
+            Err(error) => return json!({"ok":false,"error":error}),
+        }
+    }
+    match state.inputs.lost_told(&told) {
+        Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct LostArgs {
+    id: String,
+    generation: u64,
+}
+
+/// The page becomes current. It hands over what the pages before it issued, so
 /// that its own calls go in after that page's; the windows whose typing was
 /// lost while no page was current come back, for it to say so.
 #[tauri::command]
 pub fn pane_page_activate<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
-    prior: Option<PriorPageArgs>,
+    priors: Option<Vec<PriorPageArgs>>,
 ) -> Value {
     let state = app.state::<AppRuntime>();
-    let prior = match prior {
-        None => None,
-        Some(prior) => {
-            let mut issued = Vec::with_capacity(prior.issued.len());
-            for each in prior.issued {
-                match pane_key(&each.id, each.generation) {
-                    Ok(key) => issued.push((key, each.sequence)),
-                    Err(error) => return json!({"ok":false,"error":error}),
-                }
+    let mut said = Vec::new();
+    for prior in priors.unwrap_or_default() {
+        let mut issued = Vec::with_capacity(prior.issued.len());
+        for each in prior.issued {
+            match pane_key(&each.id, each.generation) {
+                Ok(key) => issued.push((key, each.sequence)),
+                Err(error) => return json!({"ok":false,"error":error}),
             }
-            Some(cf_panes::input_queue::PriorPage {
-                page_id: prior.page_id,
-                issued,
-            })
         }
-    };
-    match state.inputs.activate_page(&page_id, prior.as_ref()) {
+        said.push(cf_panes::input_queue::PriorPage {
+            page_id: prior.page_id,
+            issued,
+        });
+    }
+    match state.inputs.activate_page(&page_id, &said) {
         Ok(lost) => json!({
             "ok":true,
             "lost":lost.iter().map(|key| json!({"id":key.id,"generation":key.generation})).collect::<Vec<_>>(),
@@ -199,7 +227,7 @@ fn enqueue_page_text<R: Runtime>(
                 let state = app.state::<AppRuntime>();
                 let _ = state
                     .inputs
-                    .skip_page_sequence(&call.page_id, &key, call.sequence);
+                    .refuse_page_sequence(&call.page_id, &key, call.sequence);
             }
             json!({"ok":false,"error":error})
         }
@@ -1283,9 +1311,10 @@ mod tests {
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
             })
         );
+        // The refusal spent number 1; the cap's own size goes in at 2.
         let admitted = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":1,"length":sent.len(),"bytes":text(&sent)}),
+            json!({"id":key.id,"generation":1,"sequence":2,"length":sent.len(),"bytes":text(&sent)}),
         );
         assert_eq!(
             admitted["ok"], true,
@@ -1396,8 +1425,8 @@ mod tests {
         );
         let activated = invoke(
             "pane_page_activate",
-            json!({"pageId":"s:2","prior":{"pageId":"s:1","issued":[
-                {"id":key.id,"generation":1,"sequence":3}]}}),
+            json!({"pageId":"s:2","priors":[{"pageId":"s:1","issued":[
+                {"id":key.id,"generation":1,"sequence":3}]}]}),
         );
         assert_eq!(activated["ok"], true, "{activated:?}");
         assert_eq!(call("s:2", 1, b"D")["ok"], true);
