@@ -108,6 +108,9 @@ pub fn start(allow_live_matrix: bool) {
         .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded"));
     let handed = checked_handed_roots(forbidden);
     let parent = process_temp_parent();
+    if let Err(refusal) = temp_parent_is_outside(&parent, forbidden) {
+        panic!("{refusal}");
+    }
     require_audit_file(&parent, &handed, forbidden);
     let fixture_root = fixture_home
         .as_deref()
@@ -285,16 +288,7 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
     .collect();
     for name in ["HOME", "USERPROFILE"] {
         if let Some(home) = inherited_path(name) {
-            for suffix in [
-                ".claude",
-                ".codex",
-                ".pi",
-                ".config/muse",
-                ".config/devin",
-                ".local/share/devin",
-            ] {
-                forbidden.push(home.join(suffix));
-            }
+            forbidden.extend(personal_harness_homes(&home));
         }
     }
     for name in [
@@ -312,6 +306,37 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
         }
     }
     forbidden
+}
+
+/// What an account keeps of its harnesses, the login store and its Keychain, under `home`.
+fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
+    [
+        ".claude",
+        ".claude.json",
+        ".codex",
+        ".pi",
+        ".gemini",
+        ".config/muse",
+        ".config/devin",
+        ".local/share/devin",
+        "Library/Application Support/Muse",
+        "Library/Keychains",
+    ]
+    .into_iter()
+    .map(|suffix| home.join(suffix))
+    .collect()
+}
+
+/// Whether the folder a run would make its homes in is outside every protected one.
+fn temp_parent_is_outside(parent: &Path, forbidden: &[PathBuf]) -> Result<(), String> {
+    if safe_path_entry(parent, forbidden) {
+        Ok(())
+    } else {
+        Err(format!(
+            "stand-in temporary lookup: {} is inside a protected harness home",
+            parent.display()
+        ))
+    }
 }
 
 /// An inherited path, made absolute without reading it.
@@ -480,22 +505,28 @@ fn real_of(path: &Path) -> PathBuf {
     if let Ok(found) = std::fs::canonicalize(path) {
         return found;
     }
-    let settled = settled(path);
-    let mut head = settled.clone();
-    let mut tail = Vec::new();
-    while !head.as_os_str().is_empty() {
-        if let Ok(found) = std::fs::canonicalize(&head) {
-            return tail.iter().rev().fold(found, |path, part| path.join(part));
-        }
-        match head.file_name().map(std::ffi::OsStr::to_owned) {
-            Some(name) => {
-                tail.push(name);
-                head.pop();
+    // In the order the system walks it: each part that is there is followed through its links
+    // before the next one, so a `..` after a link climbs out of what the link ends in. A part
+    // that is not there is appended as it is.
+    use std::path::Component;
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut out = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
             }
-            None => break,
+            Component::CurDir => {}
+            Component::Normal(name) => {
+                out.push(name);
+                if let Ok(found) = std::fs::canonicalize(&out) {
+                    out = found;
+                }
+            }
+            other => out.push(other),
         }
     }
-    settled
+    out
 }
 
 fn plain_absolute(folder: &Path) -> bool {
@@ -654,7 +685,8 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_path_entry;
+    use super::{personal_harness_homes, safe_path_entry, temp_parent_is_outside};
+    use std::path::Path;
 
     #[test]
     fn t1778_standin_home_also_bounds_macos_foundation() {
@@ -851,6 +883,13 @@ mod tests {
             std::slice::from_ref(&forbidden)
         ));
         assert!(!super::same_or_inside(&parent_of_link, &run));
+        // A new file beside a linked folder's real parent: the leaf is not there, the parent is
+        // the harness home by the system's account.
+        let fresh = through.join("../fresh.json");
+        assert!(!safe_path_entry(&fresh, std::slice::from_ref(&forbidden)));
+        assert!(!super::same_or_inside(&fresh, &run));
+        let fresh_deep = link.join("nowhere/../fresh.json");
+        assert!(!safe_path_entry(&fresh_deep, std::slice::from_ref(&forbidden)));
         // A link to the folder above the home: the home is below it.
         let above = run.join("above");
         std::os::unix::fs::symlink(&owner, &above).unwrap();
@@ -859,6 +898,40 @@ mod tests {
         let plain = run.join("home/x");
         assert!(super::same_or_inside(&plain, &run));
         assert!(safe_path_entry(&plain, &[owner.join(".codex")]));
+    }
+
+    #[test]
+    fn the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file() {
+        let home = Path::new("/decoy/owner");
+        let held = personal_harness_homes(home);
+        for suffix in [
+            "Library/Application Support/Muse/session-name-authority/x",
+            "Library/Keychains/login.keychain-db",
+            ".gemini/antigravity-cli/brain",
+            ".claude.json",
+        ] {
+            assert!(
+                !safe_path_entry(&home.join(suffix), &held),
+                "{suffix} is not protected"
+            );
+        }
+        assert!(safe_path_entry(&home.join("Library/Caches/x"), &held));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_temporary_parent_inside_a_protected_home_is_refused_before_a_home_is_made() {
+        let root = crate::door::made("temp-parent-").unwrap();
+        let owner = root.path().join("owner");
+        let held = root.path().join("owner/.codex");
+        crate::door::make_dir(&held).unwrap();
+        let link = root.path().join("tmp-link");
+        std::os::unix::fs::symlink(&held, &link).unwrap();
+        let forbidden = [held.clone()];
+        assert!(temp_parent_is_outside(&held.join("tmp"), &forbidden).is_err());
+        assert!(temp_parent_is_outside(&link, &forbidden).is_err());
+        assert!(temp_parent_is_outside(&link.join("x/../y"), &forbidden).is_err());
+        assert!(temp_parent_is_outside(&owner.join("elsewhere"), &forbidden).is_ok());
     }
 
     /// B19, on Windows: a verbatim spelling is the same folder as its plain one, and a
