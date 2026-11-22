@@ -610,6 +610,17 @@ fn a_refusal_is_taken_out_of_view_only_by_a_prompt_written_after_it_on_its_branc
         json!("<local-command-stdout>Reloaded skills</local-command-stdout>"),
     );
     kept("what a command printed", vec![printed]);
+    // The `!` shell mode: the command typed, and what it printed (T-1988). The shape is
+    // from the reviewer's knowledge of Claude Code, not from a recording; the repo holds none.
+    for (name, words) in [
+        ("shell mode input", "<bash-input>pwd</bash-input>"),
+        (
+            "shell mode output",
+            "<bash-stdout>/tmp</bash-stdout><bash-stderr></bash-stderr>",
+        ),
+    ] {
+        kept(name, vec![user("u2", json!("a1"), json!(words))]);
+    }
     // A sidechain's prompt, another session's prompt, and a prompt whose chain has a gap.
     let prompt = user("u2", json!("a1"), json!("Try again"));
     kept(
