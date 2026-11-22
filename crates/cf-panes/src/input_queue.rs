@@ -2,11 +2,12 @@
 //! pane, and a second for the terminal's replies, the page's numbered input
 //! admitted before it is answered, and why an input did not go in.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
@@ -17,7 +18,15 @@ use crate::pty::{PaneKey, PaneTable};
 use crate::validation::{validate_page_input, INVALID_BODY};
 
 const INPUT_QUEUE_CAPACITY: usize = 1024;
-const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 4 * 1024 * 1024;
+/// What a window holds of the human's pending input: a paste of the largest
+/// size being written, and what is typed behind it.
+const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 8 * 1024 * 1024;
+/// The terminal's replies have room of their own, so that a pending paste never
+/// refuses one.
+const MAX_PENDING_REPLY_BYTES_PER_PANE: usize = 64 * 1024;
+/// How long a call waits in the host for the numbers before it, and how long a
+/// page that has gone is still heard.
+pub const ORDER_BOUND: Duration = Duration::from_millis(1500);
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
 const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
 /// The host is stopping, and takes no more input.
@@ -149,11 +158,50 @@ impl From<ArbiterError> for InputError {
 
 pub type InputResponse = Result<(), InputError>;
 
+/// Bytes counted against a pane's pending input until its worker is done with
+/// them (or the call is refused): given back when this is dropped.
+struct Reserved {
+    counter: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for Reserved {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
 struct InputJob {
     work: InputWork,
     response: oneshot::Sender<InputResponse>,
-    reserved_bytes: usize,
-    pending_bytes: Arc<AtomicUsize>,
+    /// Held until the job is done, or refused before it was written.
+    _reserved: Reserved,
+    /// Told, from the worker, when the job did not go in whole: for a call of
+    /// a page that has gone, the page that is current is told in its place.
+    watch: Option<Box<dyn Fn() + Send>>,
+}
+
+impl InputJob {
+    /// Nothing of it was written.
+    fn refuse(self, error: InputError) {
+        let _ = self.response.send(Err(error));
+    }
+}
+
+/// What the host says of a page's input beyond answering it. It never carries a
+/// byte of what was typed.
+pub trait InputObserver: Send + Sync {
+    /// Typing a departed page handed over, or a number it issued, may not have
+    /// reached this window. Told to the page that is current.
+    fn lost(&self, key: &PaneKey);
+    /// A line for the host's own log (R01): a number given up at its bound, a
+    /// late call refused, and how late.
+    fn say(&self, line: &str);
+}
+
+enum Event {
+    Lost(PaneKey),
+    Say(String),
 }
 
 #[derive(Clone)]
@@ -173,21 +221,365 @@ impl PageInputCompletion {
     }
 }
 
+/// What a departed page said it had issued, handed over by the page that
+/// follows it when that page activates: for each window, the last number.
+pub struct PriorPage {
+    pub page_id: String,
+    pub issued: Vec<(PaneKey, u64)>,
+}
+
+/// A number of a page's, waiting for the numbers before it.
+enum Slot {
+    /// A call that came early. It holds its bytes, and the worker it goes to.
+    Parked {
+        job: InputJob,
+        sender: mpsc::SyncSender<InputJob>,
+        deadline: Instant,
+    },
+    /// A number given up on (the page skipped it) or refused: nothing is
+    /// written for it and the numbers after it go on.
+    Void { deadline: Instant },
+}
+
+impl Slot {
+    fn deadline(&self) -> Instant {
+        match self {
+            Self::Parked { deadline, .. } | Self::Void { deadline } => *deadline,
+        }
+    }
+}
+
+/// One page's numbers for one window.
+struct Lane {
+    page: String,
+    /// The order pages became current in.
+    serial: u64,
+    /// The numbers up to this one are settled: handed to the writer, refused,
+    /// skipped or given up.
+    passed: u64,
+    slots: BTreeMap<u64, Slot>,
+    /// Set when the page has gone: its calls are admitted until then.
+    until: Option<Instant>,
+    /// What the page said it issued, once the page after it has told the host.
+    issued: Option<u64>,
+    /// The last numbers given up at their bound, and when.
+    gave_up: VecDeque<(u64, Instant)>,
+}
+
 struct PageInputState {
     current: Option<String>,
     retired: HashSet<String>,
+    /// Pages that were current, and when each went.
+    left_at: HashMap<String, Instant>,
     pending_pages: HashSet<String>,
     page_ordinals: HashMap<String, u64>,
-    last_sequences: HashMap<PaneKey, u64>,
+    serials: HashMap<String, u64>,
+    next_serial: u64,
+    lanes: HashMap<PaneKey, Vec<Lane>>,
     completions: HashMap<String, PageInputCompletion>,
     next_ticket: u64,
+    /// Windows whose typing was lost while no page was current.
+    pending_lost: HashSet<PaneKey>,
+    reaper: bool,
+}
+
+struct PageShared {
+    state: Mutex<PageInputState>,
+    wake: Condvar,
+    observer: Mutex<Option<Arc<dyn InputObserver>>>,
+}
+
+impl PageShared {
+    fn flush(&self, events: Vec<Event>) {
+        if events.is_empty() {
+            return;
+        }
+        let observer = self
+            .observer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let Some(observer) = observer else { return };
+        for event in events {
+            match event {
+                Event::Lost(key) => observer.lost(&key),
+                Event::Say(line) => observer.say(&line),
+            }
+        }
+    }
+
+    /// A job of a page that has gone did not go in whole.
+    fn job_failed(&self, page_id: &str, key: &PaneKey) {
+        let mut events = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if state.current.as_deref() != Some(page_id) {
+                state.lost(key, &mut events);
+            }
+        }
+        self.flush(events);
+    }
+}
+
+impl PageInputState {
+    /// Tell the page that is current that typing of a departed page may be
+    /// missing from this window; with none current, at the next activation.
+    fn lost(&mut self, key: &PaneKey, events: &mut Vec<Event>) {
+        if self.current.is_some() {
+            events.push(Event::Lost(key.clone()));
+        } else {
+            self.pending_lost.insert(key.clone());
+        }
+    }
+
+    /// Whether a page's calls are admitted: the page is current, or went less
+    /// than the bound ago.
+    fn admits(&self, page_id: &str, now: Instant) -> bool {
+        self.current.as_deref() == Some(page_id)
+            || self
+                .left_at
+                .get(page_id)
+                .is_some_and(|left| now < *left + ORDER_BOUND)
+    }
+
+    fn lane(&mut self, key: &PaneKey, page_id: &str) -> &mut Lane {
+        let serial = self.serials.get(page_id).copied().unwrap_or(0);
+        let until = self.left_at.get(page_id).map(|left| *left + ORDER_BOUND);
+        let lanes = self.lanes.entry(key.clone()).or_default();
+        let at = match lanes.iter().position(|lane| lane.page == page_id) {
+            Some(at) => at,
+            None => {
+                let at = lanes.partition_point(|lane| lane.serial < serial);
+                lanes.insert(
+                    at,
+                    Lane {
+                        page: page_id.to_owned(),
+                        serial,
+                        passed: 0,
+                        slots: BTreeMap::new(),
+                        until,
+                        issued: None,
+                        gave_up: VecDeque::new(),
+                    },
+                );
+                at
+            }
+        };
+        &mut lanes[at]
+    }
+
+    /// The soonest moment something must be settled that nothing else will
+    /// settle: a gap before a call that came, and the end of a departed page.
+    fn next_deadline(&self) -> Option<Instant> {
+        let mut next: Option<Instant> = None;
+        let mut soonest = |at: Instant| next = Some(next.map_or(at, |old| old.min(at)));
+        for lanes in self.lanes.values() {
+            for lane in lanes {
+                if let Some((number, slot)) = lane.slots.iter().next() {
+                    if *number > lane.passed + 1 {
+                        soonest(slot.deadline());
+                    }
+                }
+                if let Some(until) = lane.until {
+                    soonest(until);
+                }
+            }
+        }
+        next
+    }
+
+    /// Hand to the writers what is in order, give up what a bound has passed
+    /// over, and let the pages that follow a departed one go in after it.
+    /// Returns the numbers whose worker refused them, by page.
+    fn pump(
+        &mut self,
+        key: &PaneKey,
+        now: Instant,
+        events: &mut Vec<Event>,
+    ) -> Vec<(String, u64, InputError)> {
+        let current = self.current.clone();
+        let mut refused = Vec::new();
+        let Some(lanes) = self.lanes.get_mut(key) else {
+            return refused;
+        };
+        let mut at = 0;
+        let mut blocked = false;
+        let mut lost = false;
+        while at < lanes.len() {
+            let lane = &mut lanes[at];
+            let departed = current.as_deref() != Some(lane.page.as_str());
+            let forced = lane.until.is_some_and(|until| now >= until);
+            while let Some((first, deadline)) = lane
+                .slots
+                .first_key_value()
+                .map(|(number, slot)| (*number, slot.deadline()))
+            {
+                if first > lane.passed + 1 {
+                    if forced || deadline <= now {
+                        let waited = now.saturating_duration_since(deadline - ORDER_BOUND);
+                        lane.give_up(
+                            first - 1,
+                            now,
+                            waited,
+                            key,
+                            departed.then_some(&mut lost),
+                            events,
+                        );
+                        continue;
+                    }
+                    break;
+                }
+                if blocked {
+                    break;
+                }
+                let Some(slot) = lane.slots.remove(&first) else {
+                    break;
+                };
+                lane.passed = first;
+                if let Slot::Parked { job, sender, .. } = slot {
+                    match sender.try_send(job) {
+                        Ok(()) => {}
+                        Err(mpsc::TrySendError::Full(job)) => {
+                            job.refuse(InputError::queue_full());
+                            refused.push((lane.page.clone(), first, InputError::queue_full()));
+                            lost |= departed;
+                        }
+                        Err(mpsc::TrySendError::Disconnected(job)) => {
+                            let error = InputError::refused(
+                                INPUT_CLOSED,
+                                format!("pane input queue for {} is closed", key.id),
+                            );
+                            job.refuse(error.clone());
+                            refused.push((lane.page.clone(), first, error));
+                            lost |= departed;
+                        }
+                    }
+                }
+            }
+            if blocked {
+                at += 1;
+                continue;
+            }
+            let Some(until) = lane.until else {
+                at += 1;
+                continue;
+            };
+            let outstanding = lane
+                .issued
+                .map_or(0, |issued| issued.saturating_sub(lane.passed));
+            if forced && lane.slots.is_empty() {
+                if outstanding > 0 {
+                    let waited = now.saturating_duration_since(until - ORDER_BOUND);
+                    let issued = lane.issued.unwrap_or(lane.passed);
+                    lane.give_up(
+                        issued,
+                        now,
+                        waited,
+                        key,
+                        departed.then_some(&mut lost),
+                        events,
+                    );
+                }
+                // The page is not heard any more: its numbers can go.
+                lanes.remove(at);
+                continue;
+            }
+            // A page that has issued all it will does not hold the pages after
+            // it. Its lane stays until its bound, so that a repeat of a number
+            // it handed over is refused, not written again.
+            if !(lane.slots.is_empty() && lane.issued.is_some() && outstanding == 0) {
+                blocked = true;
+            }
+            at += 1;
+        }
+        if lanes.is_empty() {
+            self.lanes.remove(key);
+        }
+        if lost {
+            self.lost(key, events);
+        }
+        refused
+    }
+
+    fn pump_all(&mut self, now: Instant, events: &mut Vec<Event>) {
+        let keys: Vec<PaneKey> = self.lanes.keys().cloned().collect();
+        for key in keys {
+            self.pump(&key, now, events);
+        }
+    }
+}
+
+impl Lane {
+    /// Give up the numbers after `passed` up to and including `upto`: they
+    /// never came.
+    fn give_up(
+        &mut self,
+        upto: u64,
+        now: Instant,
+        waited: Duration,
+        key: &PaneKey,
+        departed: Option<&mut bool>,
+        events: &mut Vec<Event>,
+    ) {
+        if upto <= self.passed {
+            return;
+        }
+        let from = self.passed + 1;
+        for number in (from..=upto).rev().take(64) {
+            self.gave_up.push_back((number, now));
+        }
+        while self.gave_up.len() > 64 {
+            self.gave_up.pop_front();
+        }
+        self.passed = upto;
+        events.push(Event::Say(format!(
+            "pane input: gave up numbers {from} to {upto} of page {} for window {} (generation {}): they had not come after {} ms",
+            self.page,
+            key.id,
+            key.generation,
+            waited.as_millis()
+        )));
+        if let Some(lost) = departed {
+            *lost = true;
+        }
+    }
 }
 
 struct InputRoute {
     sender: mpsc::SyncSender<InputJob>,
     /// The terminal's replies, to a worker of their own ([`InputWork::Reply`]).
     replies: mpsc::SyncSender<InputJob>,
+    /// The keys' pending input, and the replies' own.
     pending_bytes: Arc<AtomicUsize>,
+    reply_bytes: Arc<AtomicUsize>,
+}
+
+impl InputRoute {
+    /// Count a call's bytes against the window's keys, or against its replies'
+    /// own room.
+    fn reserve(&self, work: &InputWork) -> Result<Reserved, InputError> {
+        let (counter, limit) = match work {
+            InputWork::Reply(_) => (&self.reply_bytes, MAX_PENDING_REPLY_BYTES_PER_PANE),
+            _ => (&self.pending_bytes, MAX_PENDING_INPUT_BYTES_PER_PANE),
+        };
+        let bytes = work.byte_count();
+        counter
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+                pending.checked_add(bytes).filter(|next| *next <= limit)
+            })
+            .map_err(|_| InputError::queue_full())?;
+        Ok(Reserved {
+            counter: Arc::clone(counter),
+            bytes,
+        })
+    }
+
+    fn sender_for(&self, work: &InputWork) -> &mpsc::SyncSender<InputJob> {
+        match work {
+            InputWork::Reply(_) => &self.replies,
+            _ => &self.sender,
+        }
+    }
 }
 
 /// Every open pane's input, in order: one worker and one bounded queue per
@@ -197,7 +589,7 @@ pub struct InputQueue {
     arbiter: Arc<InputArbiter>,
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
     workers: Mutex<HashMap<PaneKey, Vec<JoinHandle<()>>>>,
-    page: Mutex<PageInputState>,
+    page: Arc<PageShared>,
     accepting: AtomicBool,
 }
 
@@ -208,21 +600,65 @@ impl InputQueue {
             arbiter,
             senders: Mutex::new(HashMap::new()),
             workers: Mutex::new(HashMap::new()),
-            page: Mutex::new(PageInputState {
-                current: None,
-                retired: HashSet::new(),
-                pending_pages: HashSet::new(),
-                page_ordinals: HashMap::new(),
-                last_sequences: HashMap::new(),
-                completions: HashMap::new(),
-                next_ticket: 1,
+            page: Arc::new(PageShared {
+                state: Mutex::new(PageInputState {
+                    current: None,
+                    retired: HashSet::new(),
+                    left_at: HashMap::new(),
+                    pending_pages: HashSet::new(),
+                    page_ordinals: HashMap::new(),
+                    serials: HashMap::new(),
+                    next_serial: 1,
+                    lanes: HashMap::new(),
+                    completions: HashMap::new(),
+                    next_ticket: 1,
+                    pending_lost: HashSet::new(),
+                    reaper: false,
+                }),
+                wake: Condvar::new(),
+                observer: Mutex::new(None),
             }),
             accepting: AtomicBool::new(true),
         }
     }
 
-    /// Admit one numbered call from the active page: a key, a paste whole, or
-    /// a terminal reply. Only a successful admission advances the count.
+    /// Who is told what the host gives up on or refuses of a page's input.
+    pub fn set_observer(&self, observer: Arc<dyn InputObserver>) {
+        *self
+            .page
+            .observer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(observer);
+    }
+
+    fn state(&self) -> Result<MutexGuard<'_, PageInputState>, String> {
+        self.page
+            .state
+            .lock()
+            .map_err(|_| "pane input admission lock is poisoned".to_string())
+    }
+
+    /// Start the clock that settles what a bound passes over, if something
+    /// waits on one.
+    fn watch_bounds(&self, state: &mut PageInputState) {
+        if state.reaper || state.next_deadline().is_none() {
+            return;
+        }
+        state.reaper = true;
+        let shared = Arc::downgrade(&self.page);
+        let spawned = thread::Builder::new()
+            .name("consensflow-input-bounds".to_owned())
+            .spawn(move || bounds_clock(shared));
+        if spawned.is_err() {
+            state.reaper = false;
+        }
+    }
+
+    /// Admit one numbered call from the page: a key, a paste whole, or a
+    /// terminal reply. The host writes a window's calls in the page's number
+    /// order: a call that comes before the ones ahead of it waits, at most the
+    /// bound. A refusal is final for its number: nothing was written, and the
+    /// numbers after it go on.
     pub fn enqueue_page(
         &self,
         page_id: &str,
@@ -231,82 +667,212 @@ impl InputQueue {
         work: InputWork,
         human: bool,
     ) -> Result<String, String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
-        if page.current.as_deref() != Some(page_id) {
+        let now = Instant::now();
+        let mut events = Vec::new();
+        let result = self.admit(page_id, key, sequence, work, human, now, &mut events);
+        self.page.flush(events);
+        self.page.wake.notify_all();
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn admit(
+        &self,
+        page_id: &str,
+        key: PaneKey,
+        sequence: u64,
+        work: InputWork,
+        human: bool,
+        now: Instant,
+        events: &mut Vec<Event>,
+    ) -> Result<String, String> {
+        let mut page = self.state()?;
+        if !page.admits(page_id, now) {
+            if let Some(left) = page.left_at.get(page_id).copied() {
+                let late = now.saturating_duration_since(left + ORDER_BOUND);
+                events.push(Event::Say(format!(
+                    "pane input: refused a call numbered {sequence} of page {page_id} for window {} (generation {}): it came {} ms after its page's bound",
+                    key.id,
+                    key.generation,
+                    late.as_millis()
+                )));
+                page.lost(&key, events);
+            }
             return Err(INPUT_STALE_PAGE.to_string());
         }
-        // The count only goes up. A call at or below it is one the host has
-        // passed, by admitting it or by a skip: it writes nothing, so a late
-        // original can never type a key the page has already given up on.
-        // Anything above it is admitted (a skip that never came would
-        // otherwise leave every later key refused).
-        let passed = page.last_sequences.get(&key).copied().unwrap_or(0);
-        if sequence <= passed {
+        let current = page.current.as_deref() == Some(page_id);
+        let lane = page.lane(&key, page_id);
+        // A call at or below what the lane has settled is a late original after
+        // its skip or its bound, or a repeat: nothing of it is written.
+        if sequence <= lane.passed || lane.slots.contains_key(&sequence) {
+            let late = lane
+                .gave_up
+                .iter()
+                .find(|(number, _)| *number == sequence)
+                .map(|(_, at)| now.saturating_duration_since(*at));
+            let line = match late {
+                Some(late) => format!(
+                    "pane input: refused a late call numbered {sequence} of page {page_id} for window {} (generation {}): its number was given up {} ms ago",
+                    key.id,
+                    key.generation,
+                    late.as_millis()
+                ),
+                None => format!(
+                    "pane input: refused a repeat of call {sequence} of page {page_id} for window {} (generation {})",
+                    key.id, key.generation
+                ),
+            };
+            let lost = late.is_some() && !current;
+            events.push(Event::Say(line));
+            if lost {
+                page.lost(&key, events);
+            }
             return Err(INPUT_SEQUENCE_STALE.to_string());
         }
+        let refuse = |page: &mut PageInputState, error: String| -> Result<String, String> {
+            // Final for its number: the order goes on past it.
+            page.lane(&key, page_id).slots.insert(
+                sequence,
+                Slot::Void {
+                    deadline: now + ORDER_BOUND,
+                },
+            );
+            page.pump(&key, now, &mut Vec::new());
+            Err(error)
+        };
         match &work {
             InputWork::Typed(bytes)
             | InputWork::Write(bytes)
             | InputWork::Reply(bytes)
-            | InputWork::Paste { body: bytes, .. } => validate_page_input(bytes)?,
+            | InputWork::Paste { body: bytes, .. } => {
+                if let Err(error) = validate_page_input(bytes) {
+                    return refuse(&mut page, error);
+                }
+            }
             InputWork::Claim => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
-            return Err("pane-input-ticket-capacity".to_string());
+            return refuse(&mut page, "pane-input-ticket-capacity".to_string());
         }
-        let next_ticket = page
-            .next_ticket
-            .checked_add(1)
-            .ok_or_else(|| "pane-input-ticket-overflow".to_string())?;
-        let receiver = self
-            .submit(key.clone(), work)
-            .map_err(|error| error.to_string())?;
+        let next_ticket = match page.next_ticket.checked_add(1) {
+            Some(next) => next,
+            None => return refuse(&mut page, "pane-input-ticket-overflow".to_string()),
+        };
+        let (response, receiver) = oneshot::channel();
+        let (reserved, sender) = {
+            let senders = self
+                .senders
+                .lock()
+                .map_err(|_| "pane input queue lock is poisoned".to_string());
+            let senders = match senders {
+                Ok(senders) => senders,
+                Err(error) => return refuse(&mut page, error),
+            };
+            if !self.accepting.load(Ordering::Acquire) {
+                drop(senders);
+                return refuse(
+                    &mut page,
+                    InputError::refused(INPUT_CLOSED, "pane input admission is closed").to_string(),
+                );
+            }
+            let Some(route) = senders.get(&key) else {
+                drop(senders);
+                return refuse(&mut page, InputError::from(ArbiterError::Stale).to_string());
+            };
+            match route.reserve(&work) {
+                Ok(reserved) => (reserved, route.sender_for(&work).clone()),
+                Err(error) => {
+                    drop(senders);
+                    return refuse(&mut page, error.to_string());
+                }
+            }
+        };
+        let watch: Option<Box<dyn Fn() + Send>> = {
+            let shared = Arc::clone(&self.page);
+            let page_id = page_id.to_owned();
+            let key = key.clone();
+            Some(Box::new(move || shared.job_failed(&page_id, &key)))
+        };
+        let job = InputJob {
+            work,
+            response,
+            _reserved: reserved,
+            watch,
+        };
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
-        page.last_sequences.insert(key.clone(), sequence);
-        page.completions.insert(
-            ticket.clone(),
-            PageInputCompletion {
-                receiver: async move { wait_for_input(receiver).await }
-                    .boxed()
-                    .shared(),
-                human,
-                key,
-                sequence,
-                notified: Arc::new(AtomicBool::new(false)),
+        if current {
+            page.completions.insert(
+                ticket.clone(),
+                PageInputCompletion {
+                    receiver: async move { wait_for_input(receiver).await }
+                        .boxed()
+                        .shared(),
+                    human,
+                    key: key.clone(),
+                    sequence,
+                    notified: Arc::new(AtomicBool::new(false)),
+                },
+            );
+        }
+        page.lane(&key, page_id).slots.insert(
+            sequence,
+            Slot::Parked {
+                job,
+                sender,
+                deadline: now + ORDER_BOUND,
             },
         );
+        let refused = page.pump(&key, now, events);
+        if let Some((_, _, error)) = refused
+            .into_iter()
+            .find(|(refused_page, number, _)| refused_page == page_id && *number == sequence)
+        {
+            page.completions.remove(&ticket);
+            return Err(error.to_string());
+        }
+        self.watch_bounds(&mut page);
         Ok(ticket)
     }
 
-    /// A call of the active page ended with its fate unknown (a timeout, a
-    /// lost answer), and the page will not send it again. Move the pane's
-    /// count past it: the host keeps the higher of its count and `sequence`,
-    /// so the original either went in before this or is refused as stale when
-    /// it comes late. A completion the page never learned of is dropped.
+    /// A call of the page ended with its fate unknown (a timeout, a lost
+    /// answer), and the page will not send it again. Its number is settled
+    /// without a write: the original either went in before this or is refused
+    /// when it comes late, and the numbers after it go on. A completion the
+    /// page never learned of is dropped.
     pub fn skip_page_sequence(
         &self,
         page_id: &str,
         key: &PaneKey,
         sequence: u64,
     ) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
-        if page.current.as_deref() != Some(page_id) {
-            return Err(INPUT_STALE_PAGE.to_string());
+        let now = Instant::now();
+        let mut events = Vec::new();
+        {
+            let mut page = self.state()?;
+            if !page.admits(page_id, now) {
+                return Err(INPUT_STALE_PAGE.to_string());
+            }
+            if sequence == u64::MAX {
+                return Err("pane-input-sequence-overflow".to_string());
+            }
+            let lane = page.lane(key, page_id);
+            if sequence > lane.passed && !lane.slots.contains_key(&sequence) {
+                lane.slots.insert(
+                    sequence,
+                    Slot::Void {
+                        deadline: now + ORDER_BOUND,
+                    },
+                );
+            }
+            page.completions.retain(|_, completion| {
+                !(&completion.key == key && completion.sequence == sequence)
+            });
+            page.pump(key, now, &mut events);
+            self.watch_bounds(&mut page);
         }
-        if sequence == u64::MAX {
-            return Err("pane-input-sequence-overflow".to_string());
-        }
-        let passed = page.last_sequences.entry(key.clone()).or_insert(0);
-        *passed = (*passed).max(sequence);
-        page.completions
-            .retain(|_, completion| !(&completion.key == key && completion.sequence == sequence));
+        self.page.flush(events);
+        self.page.wake.notify_all();
         Ok(())
     }
 
@@ -341,10 +907,7 @@ impl InputQueue {
     /// A page first announces itself; it cannot write until it receives the
     /// answer and activates. Navigation retires even pending announcements.
     pub fn prepare_page(&self, page_id: &str) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
+        let mut page = self.state()?;
         if page.current.as_deref() == Some(page_id) || page.pending_pages.contains(page_id) {
             return Ok(());
         }
@@ -353,39 +916,101 @@ impl InputQueue {
         Ok(())
     }
 
-    pub fn activate_page(&self, page_id: &str) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
-        if page.current.as_deref() == Some(page_id) {
-            return Ok(());
-        }
-        if !page.pending_pages.remove(page_id) {
-            return Err(INPUT_STALE_PAGE.to_string());
-        }
-        self.start_page(&mut page, page_id)
+    /// The page becomes current. `prior` is what the page before it says it
+    /// issued, window by window. The windows whose typing was lost while no
+    /// page was current are returned, for the page to say so.
+    pub fn activate_page(
+        &self,
+        page_id: &str,
+        prior: Option<&PriorPage>,
+    ) -> Result<Vec<PaneKey>, String> {
+        let mut events = Vec::new();
+        let lost = {
+            let mut page = self.state()?;
+            if page.current.as_deref() == Some(page_id) {
+                return Ok(Vec::new());
+            }
+            if !page.pending_pages.remove(page_id) {
+                return Err(INPUT_STALE_PAGE.to_string());
+            }
+            self.start_page(&mut page, page_id, prior, &mut events)?;
+            self.watch_bounds(&mut page);
+            page.pending_lost.drain().collect()
+        };
+        self.page.flush(events);
+        self.page.wake.notify_all();
+        Ok(lost)
     }
 
     /// The pane host's own tests can start a page at the subscription boundary.
     pub fn begin_page(&self, page_id: &str) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
-        if page.current.as_deref() == Some(page_id) {
-            return Ok(());
-        }
-        self.start_page(&mut page, page_id)
+        self.begin_page_after(page_id, None).map(|_| ())
     }
 
-    fn start_page(&self, page: &mut PageInputState, page_id: &str) -> Result<(), String> {
+    /// As [`Self::begin_page`], with what the page before it issued.
+    pub fn begin_page_after(
+        &self,
+        page_id: &str,
+        prior: Option<&PriorPage>,
+    ) -> Result<Vec<PaneKey>, String> {
+        let mut events = Vec::new();
+        let lost = {
+            let mut page = self.state()?;
+            if page.current.as_deref() == Some(page_id) {
+                return Ok(Vec::new());
+            }
+            self.start_page(&mut page, page_id, prior, &mut events)?;
+            self.watch_bounds(&mut page);
+            page.pending_lost.drain().collect()
+        };
+        self.page.flush(events);
+        self.page.wake.notify_all();
+        Ok(lost)
+    }
+
+    fn start_page(
+        &self,
+        page: &mut PageInputState,
+        page_id: &str,
+        prior: Option<&PriorPage>,
+        events: &mut Vec<Event>,
+    ) -> Result<(), String> {
         let ordinal = Self::check_page(page, page_id)?;
-        self.retire_page(page)?;
+        let now = Instant::now();
+        self.depart(page, now, events);
         if let Some((session, number)) = ordinal {
             page.page_ordinals.insert(session, number);
         }
         page.current = Some(page_id.to_owned());
+        let serial = page.next_serial;
+        page.next_serial += 1;
+        page.serials.insert(page_id.to_owned(), serial);
+        // What the page before says it issued: a number that has not come yet
+        // is waited for, at most to its page's bound. A page that says nothing
+        // has nothing outstanding.
+        let said = prior.map(|prior| (prior.page_id.as_str(), &prior.issued));
+        let departed: Vec<String> = page.left_at.keys().cloned().collect();
+        for departed_page in departed {
+            let issued_by_page = match said {
+                Some((said_page, issued)) if said_page == departed_page => Some(issued),
+                _ => None,
+            };
+            if let Some(issued) = issued_by_page {
+                for (key, number) in issued {
+                    let lane = page.lane(key, &departed_page);
+                    lane.issued = Some(lane.issued.map_or(*number, |old| old.max(*number)));
+                }
+            }
+            let known = issued_by_page.is_some() || prior.is_none();
+            for lanes in page.lanes.values_mut() {
+                for lane in lanes.iter_mut().filter(|lane| lane.page == departed_page) {
+                    if known && lane.issued.is_none() {
+                        lane.issued = Some(0);
+                    }
+                }
+            }
+        }
+        page.pump_all(now, events);
         Ok(())
     }
 
@@ -400,10 +1025,7 @@ impl InputQueue {
         page_id: &str,
         action: impl FnOnce() -> T,
     ) -> Result<T, String> {
-        let page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
+        let page = self.state()?;
         if page.current.as_deref() != Some(page_id) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
@@ -412,27 +1034,38 @@ impl InputQueue {
         Ok(result)
     }
 
-    /// Navigation has begun, before a replacement page subscribes. Delayed
-    /// calls from the departed page may no longer enter a pane.
+    /// Navigation has begun, before a replacement page subscribes. The
+    /// departed page's calls are still admitted, in order, for the bound.
     pub fn end_page(&self) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
-        if page.current.is_some() || !page.pending_pages.is_empty() {
-            self.retire_page(&mut page)?;
+        let mut events = Vec::new();
+        {
+            let mut page = self.state()?;
+            if page.current.is_some() || !page.pending_pages.is_empty() {
+                self.depart(&mut page, Instant::now(), &mut events);
+            }
+            self.watch_bounds(&mut page);
         }
+        self.page.flush(events);
+        self.page.wake.notify_all();
         Ok(())
     }
 
-    fn retire_page(&self, page: &mut PageInputState) -> Result<(), String> {
+    /// The current page has gone: its numbers are admitted until the bound.
+    fn depart(&self, page: &mut PageInputState, now: Instant, events: &mut Vec<Event>) {
         if let Some(previous) = page.current.take() {
-            page.retired.insert(previous);
+            page.retired.insert(previous.clone());
+            page.left_at.insert(previous.clone(), now);
+            for lanes in page.lanes.values_mut() {
+                for lane in lanes.iter_mut().filter(|lane| lane.page == previous) {
+                    lane.until = Some(now + ORDER_BOUND);
+                }
+            }
         }
+        page.left_at
+            .retain(|_, left| now.saturating_duration_since(*left) < Duration::from_secs(60));
         page.retired.extend(std::mem::take(&mut page.pending_pages));
-        page.last_sequences.clear();
         page.completions.clear();
-        Ok(())
+        page.pump_all(now, events);
     }
 
     /// A wait may be repeated until the page has actually received its answer.
@@ -441,10 +1074,7 @@ impl InputQueue {
         page_id: &str,
         ticket: &str,
     ) -> Result<PageInputCompletion, String> {
-        let page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
+        let page = self.state()?;
         if page.current.as_deref() != Some(page_id) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
@@ -456,10 +1086,7 @@ impl InputQueue {
 
     /// The page got the answer and no longer needs to retry the wait.
     pub fn forget_page_completion(&self, page_id: &str, ticket: &str) -> Result<(), String> {
-        let mut page = self
-            .page
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())?;
+        let mut page = self.state()?;
         if page.current.as_deref() != Some(page_id) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
@@ -546,6 +1173,7 @@ impl InputQueue {
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
         Ok(())
@@ -553,9 +1181,8 @@ impl InputQueue {
 
     /// A pane gone from the table, killed or retired when its program ended,
     /// takes its input with it: its queue closes (the worker ends once what
-    /// was queued has gone in or failed), and its page count and arbiter
-    /// state go. They used to stay until the app quit, a parked thread per
-    /// window ever opened.
+    /// was queued has gone in or failed), what waited in order is refused, and
+    /// its page numbers and arbiter state go.
     pub(crate) fn retire(&self, key: &PaneKey) {
         self.senders
             .lock()
@@ -565,8 +1192,14 @@ impl InputQueue {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(key);
-        let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
-        page.last_sequences.remove(key);
+        let mut page = self
+            .page
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(lanes) = page.lanes.remove(key) {
+            refuse_parked(lanes, "pane input queue is closed");
+        }
         page.completions
             .retain(|_, completion| &completion.key != key);
         drop(page);
@@ -592,41 +1225,22 @@ impl InputQueue {
         // A pane the table does not hold has no queue: it was never opened,
         // or it is gone.
         let route = senders.get(&key).ok_or(ArbiterError::Stale)?;
-        let reserved_bytes = work.byte_count();
-        route
-            .pending_bytes
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
-                pending
-                    .checked_add(reserved_bytes)
-                    .filter(|next| *next <= MAX_PENDING_INPUT_BYTES_PER_PANE)
-            })
-            .map_err(|_| InputError::queue_full())?;
+        let reserved = route.reserve(&work)?;
         let (response, receiver) = oneshot::channel();
+        let sender = route.sender_for(&work);
         let job = InputJob {
             work,
             response,
-            reserved_bytes,
-            pending_bytes: Arc::clone(&route.pending_bytes),
-        };
-        let sender = match job.work {
-            InputWork::Reply(_) => &route.replies,
-            _ => &route.sender,
+            _reserved: reserved,
+            watch: None,
         };
         match sender.try_send(job) {
             Ok(()) => Ok(receiver),
-            Err(mpsc::TrySendError::Full(job)) => {
-                job.pending_bytes
-                    .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(InputError::queue_full())
-            }
-            Err(mpsc::TrySendError::Disconnected(job)) => {
-                job.pending_bytes
-                    .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-                Err(InputError::refused(
-                    INPUT_CLOSED,
-                    format!("pane input queue for {} is closed", key.id),
-                ))
-            }
+            Err(mpsc::TrySendError::Full(_)) => Err(InputError::queue_full()),
+            Err(mpsc::TrySendError::Disconnected(_)) => Err(InputError::refused(
+                INPUT_CLOSED,
+                format!("pane input queue for {} is closed", key.id),
+            )),
         }
     }
 
@@ -640,6 +1254,19 @@ impl InputQueue {
             .unwrap_or_else(|error| error.into_inner());
         senders.clear();
         drop(senders);
+        // What waits in order holds a sender to its worker: refuse it, or the
+        // worker never ends.
+        let lanes = std::mem::take(
+            &mut self
+                .page
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .lanes,
+        );
+        for lanes in lanes.into_values() {
+            refuse_parked(lanes, "pane input admission is closed");
+        }
         let workers = std::mem::take(
             &mut *self
                 .workers
@@ -652,6 +1279,51 @@ impl InputQueue {
     }
 }
 
+/// What waited for its turn is refused whole: nothing of it was written.
+fn refuse_parked(lanes: Vec<Lane>, cause: &str) {
+    for lane in lanes {
+        for slot in lane.slots.into_values() {
+            if let Slot::Parked { job, .. } = slot {
+                job.refuse(InputError::refused(INPUT_CLOSED, cause));
+            }
+        }
+    }
+}
+
+/// Settles what a bound passes over, for as long as something waits on one:
+/// a call that came before the ones ahead of it, and a page that has gone.
+fn bounds_clock(shared: Weak<PageShared>) {
+    loop {
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        let mut events = Vec::new();
+        {
+            let mut state = shared
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let now = Instant::now();
+            state.pump_all(now, &mut events);
+            let Some(next) = state.next_deadline() else {
+                state.reaper = false;
+                drop(state);
+                shared.flush(events);
+                return;
+            };
+            let wait = next
+                .saturating_duration_since(now)
+                .clamp(Duration::from_millis(1), Duration::from_millis(500));
+            let (state, _) = shared
+                .wake
+                .wait_timeout(state, wait)
+                .unwrap_or_else(|error| error.into_inner());
+            drop(state);
+        }
+        shared.flush(events);
+    }
+}
+
 fn input_worker(
     jobs: mpsc::Receiver<InputJob>,
     panes: Arc<PaneTable>,
@@ -659,20 +1331,27 @@ fn input_worker(
     key: PaneKey,
 ) {
     for job in jobs {
-        let result = match job.work {
-            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),
-            InputWork::Write(bytes) | InputWork::Reply(bytes) => {
-                arbiter.write(&panes, &key, &bytes)
-            }
+        let result = match &job.work {
+            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, bytes),
+            InputWork::Write(bytes) | InputWork::Reply(bytes) => arbiter.write(&panes, &key, bytes),
             InputWork::Paste { body, read_empty } => {
-                arbiter.write_paste(&panes, &key, &body, read_empty)
+                arbiter.write_paste(&panes, &key, body, *read_empty)
             }
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);
-        job.pending_bytes
-            .fetch_sub(job.reserved_bytes, Ordering::AcqRel);
-        let _ = job.response.send(result);
+        if result.is_err() {
+            if let Some(watch) = &job.watch {
+                watch();
+            }
+        }
+        let InputJob {
+            response,
+            _reserved,
+            ..
+        } = job;
+        drop(_reserved);
+        let _ = response.send(result);
     }
 }
 
@@ -694,18 +1373,19 @@ mod tests {
 
     /// The pane's count: the last number the host has passed.
     fn passed(inputs: &InputQueue, key: &PaneKey) -> u64 {
-        inputs
-            .page
-            .lock()
-            .unwrap()
-            .last_sequences
+        let state = inputs.page.state.lock().unwrap();
+        let current = state.current.clone();
+        state
+            .lanes
             .get(key)
-            .copied()
-            .unwrap_or(0)
+            .and_then(|lanes| {
+                lanes
+                    .iter()
+                    .find(|lane| Some(&lane.page) == current.as_ref())
+            })
+            .map_or(0, |lane| lane.passed)
     }
     use crate::arbiter::EnterTiming;
-    #[cfg(unix)]
-    use std::time::{Duration, Instant};
 
     use crate::arbiter::SanitizeError;
     #[cfg(unix)]
@@ -770,7 +1450,7 @@ mod tests {
         let gone = |key: &PaneKey| {
             !inputs.senders.lock().unwrap().contains_key(key)
                 && !inputs.workers.lock().unwrap().contains_key(key)
-                && !inputs.page.lock().unwrap().last_sequences.contains_key(key)
+                && !inputs.page.state.lock().unwrap().lanes.contains_key(key)
                 && arbiter.snapshot(key).is_err()
         };
 
@@ -1048,6 +1728,7 @@ mod tests {
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
         let typed = |text: &[u8]| InputWork::Typed(text.to_vec());
@@ -1080,9 +1761,9 @@ mod tests {
         inputs
             .enqueue_page("page-one", key.clone(), 3, typed(b"C"), true)
             .unwrap();
-        assert_eq!(inputs.page.lock().unwrap().completions.len(), 2);
+        assert_eq!(inputs.page.state.lock().unwrap().completions.len(), 2);
         inputs.skip_page_sequence("page-one", &key, 3).unwrap();
-        assert_eq!(inputs.page.lock().unwrap().completions.len(), 1);
+        assert_eq!(inputs.page.state.lock().unwrap().completions.len(), 1);
         inputs
             .enqueue_page("page-one", key.clone(), 4, typed(b"D"), true)
             .unwrap();
@@ -1098,15 +1779,12 @@ mod tests {
             "B, skipped before it came, writes nothing"
         );
         inputs.begin_page("page-two").unwrap();
-        assert_eq!(
-            inputs.skip_page_sequence("page-one", &key, 9),
-            Err(INPUT_STALE_PAGE.to_owned())
-        );
-        assert_eq!(passed(&inputs, &key), 0);
+        // The page that went is still heard for the bound, in its own numbers.
         assert_eq!(
             inputs.enqueue_page("page-one", key.clone(), 1, typed(b"A"), true),
-            Err(INPUT_STALE_PAGE.to_owned())
+            Err(INPUT_SEQUENCE_STALE.to_owned())
         );
+        assert_eq!(passed(&inputs, &key), 0);
         assert_eq!(
             inputs.begin_page("page-one"),
             Err(INPUT_STALE_PAGE.to_owned())
@@ -1133,11 +1811,24 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs.end_page().unwrap();
+        // The page that went is heard for the bound (this pane was never opened,
+        // so the call is refused for that), and fenced after it.
         assert_eq!(
             inputs.enqueue_page(
                 "session:2",
                 key.clone(),
                 1,
+                InputWork::Typed(b"A".to_vec()),
+                true
+            ),
+            Err("stale pane generation".to_owned())
+        );
+        thread::sleep(ORDER_BOUND + Duration::from_millis(100));
+        assert_eq!(
+            inputs.enqueue_page(
+                "session:2",
+                key.clone(),
+                2,
                 InputWork::Typed(b"A".to_vec()),
                 true
             ),
@@ -1161,16 +1852,16 @@ mod tests {
         inputs.prepare_page("session:1").unwrap();
         inputs.end_page().unwrap();
         assert_eq!(
-            inputs.activate_page("session:1"),
+            inputs.activate_page("session:1", None),
             Err(INPUT_STALE_PAGE.to_owned())
         );
         // An old prepare that arrived only after navigation has no activation
         // from its departed page. A new activation retires it too.
         inputs.prepare_page("session:2").unwrap();
         inputs.prepare_page("session:3").unwrap();
-        inputs.activate_page("session:3").unwrap();
+        inputs.activate_page("session:3", None).unwrap();
         assert_eq!(
-            inputs.activate_page("session:2"),
+            inputs.activate_page("session:2", None),
             Err(INPUT_STALE_PAGE.to_owned())
         );
         assert_eq!(
@@ -1178,7 +1869,7 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs.prepare_page("session:3").unwrap();
-        inputs.activate_page("session:3").unwrap();
+        inputs.activate_page("session:3", None).unwrap();
         assert!(inputs.page_is_current("session:3").is_ok());
         inputs.close_and_drain();
     }
@@ -1228,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_admission_does_not_consume_a_number() {
+    fn a_refused_admission_is_final_for_its_number() {
         let inputs = InputQueue::new(
             Arc::new(PaneTable::new()),
             Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
@@ -1243,6 +1934,7 @@ mod tests {
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
         let typed = || InputWork::Typed(b"A".to_vec());
@@ -1250,12 +1942,19 @@ mod tests {
             inputs.enqueue_page("page", key.clone(), 1, typed(), true),
             Err("the pane's input queue is full".to_string())
         );
-        assert_eq!(passed(&inputs, &key), 0);
+        // Nothing was written, and the number is spent: the page says so and
+        // goes on with the next.
+        assert_eq!(passed(&inputs, &key), 1);
         assert_eq!(
             inputs.enqueue_page("page", key.clone(), 1, typed(), true),
+            Err(INPUT_SEQUENCE_STALE.to_string())
+        );
+        assert_eq!(
+            inputs.enqueue_page("page", key.clone(), 2, typed(), true),
             Err("the pane's input queue is full".to_string())
         );
-        assert_eq!(inputs.page.lock().unwrap().completions.len(), 0);
+        assert_eq!(passed(&inputs, &key), 2);
+        assert_eq!(inputs.page.state.lock().unwrap().completions.len(), 0);
         inputs.close_and_drain();
     }
 
@@ -1275,6 +1974,7 @@ mod tests {
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
         let ticket = inputs
@@ -1309,6 +2009,7 @@ mod tests {
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
             },
         );
         for sequence in 1..=MAX_PENDING_INPUT_TICKETS as u64 {
@@ -1332,11 +2033,424 @@ mod tests {
             ),
             Err("pane-input-ticket-capacity".to_string())
         );
-        assert_eq!(passed(&inputs, &key), MAX_PENDING_INPUT_TICKETS as u64);
+        // Refused, and its number spent.
+        assert_eq!(passed(&inputs, &key), MAX_PENDING_INPUT_TICKETS as u64 + 1);
         inputs.begin_page("page-two").unwrap();
         assert!(inputs
             .enqueue_page("page-two", key, 1, InputWork::Write(b"x".to_vec()), true)
             .is_ok());
+        inputs.close_and_drain();
+    }
+
+    /// A window whose writers are the test's own: what the host hands over is
+    /// read from the two receivers, and nothing is written anywhere.
+    fn bare() -> (
+        InputQueue,
+        PaneKey,
+        mpsc::Receiver<InputJob>,
+        mpsc::Receiver<InputJob>,
+    ) {
+        let inputs = InputQueue::new(
+            Arc::new(PaneTable::new()),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
+        let key = PaneKey::new("bare-pane", 1);
+        let (sender, received) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        let (replies, received_replies) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+        inputs.senders.lock().unwrap().insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                replies,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+                reply_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        (inputs, key, received, received_replies)
+    }
+
+    fn typed(text: &[u8]) -> InputWork {
+        InputWork::Typed(text.to_vec())
+    }
+
+    fn handed(received: &mpsc::Receiver<InputJob>) -> Vec<u8> {
+        std::iter::from_fn(|| received.try_recv().ok())
+            .flat_map(|job| match &job.work {
+                InputWork::Typed(bytes) | InputWork::Reply(bytes) => bytes.clone(),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct Observed {
+        lines: Mutex<Vec<String>>,
+        lost: Mutex<Vec<PaneKey>>,
+    }
+
+    impl InputObserver for Observed {
+        fn lost(&self, key: &PaneKey) {
+            self.lost.lock().unwrap().push(key.clone());
+        }
+        fn say(&self, line: &str) {
+            self.lines.lock().unwrap().push(line.to_owned());
+        }
+    }
+
+    fn observed(inputs: &InputQueue) -> Arc<Observed> {
+        let observed = Arc::new(Observed::default());
+        inputs.set_observer(observed.clone());
+        observed
+    }
+
+    /// Calls that come as 2, 3, 1 go to the writer as 1, 2, 3: a call that comes
+    /// early waits for the numbers before it, and none is refused as stale.
+    #[test]
+    fn calls_that_come_out_of_order_reach_the_writer_in_number_order() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("page").unwrap();
+        inputs
+            .enqueue_page("page", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        inputs
+            .enqueue_page("page", key.clone(), 3, typed(b"C"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"", "B and C wait for A");
+        inputs
+            .enqueue_page("page", key.clone(), 1, typed(b"A"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"ABC");
+        inputs.close_and_drain();
+    }
+
+    /// A number that never comes holds what is behind it for the bound and no
+    /// longer; the host says so, and refuses the number when it comes late,
+    /// with how late. No byte of what was typed is in what it says.
+    #[test]
+    fn a_number_that_never_comes_holds_what_is_behind_it_for_the_bound_only() {
+        let (inputs, key, received, _) = bare();
+        let observed = observed(&inputs);
+        inputs.begin_page("page").unwrap();
+        let started = Instant::now();
+        inputs
+            .enqueue_page("page", key.clone(), 2, typed(b"SECRET"), true)
+            .unwrap();
+        assert!(received.try_recv().is_err());
+        let job = received
+            .recv_timeout(Duration::from_secs(3))
+            .expect("handed over at the bound");
+        let waited = started.elapsed();
+        assert!(matches!(job.work, InputWork::Typed(ref bytes) if bytes == b"SECRET"));
+        assert!(
+            waited >= Duration::from_millis(1400) && waited < Duration::from_millis(2500),
+            "waited {waited:?}"
+        );
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(
+            inputs.enqueue_page("page", key.clone(), 1, typed(b"A"), true),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
+        );
+        let lines = observed.lines.lock().unwrap().clone();
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("gave up numbers 1 to 1")
+                    && line.contains("had not come after 15")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("late call numbered 1") && line.contains("given up 2")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().all(|line| !line.contains("SECRET")),
+            "{lines:?}"
+        );
+        assert!(
+            observed.lost.lock().unwrap().is_empty(),
+            "the current page shows its own notice"
+        );
+        inputs.close_and_drain();
+    }
+
+    /// A window holds 8 MiB of pending input: a paste of 4 MiB and another
+    /// behind it. The next key is refused, once, with the queue's words, and
+    /// the number after it goes in at once; a key typed after the writer has
+    /// drained goes in.
+    #[test]
+    fn a_full_window_refuses_the_next_key_once_and_goes_on() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("page").unwrap();
+        let big = vec![b'p'; 4 * 1024 * 1024];
+        inputs
+            .enqueue_page("page", key.clone(), 1, InputWork::Typed(big.clone()), true)
+            .unwrap();
+        inputs
+            .enqueue_page("page", key.clone(), 2, InputWork::Typed(big), true)
+            .unwrap();
+        assert_eq!(
+            inputs.enqueue_page("page", key.clone(), 3, typed(b"k"), true),
+            Err("the pane's input queue is full".to_owned())
+        );
+        // The refusal is final for its number, and does not hold the next.
+        assert_eq!(
+            inputs.enqueue_page("page", key.clone(), 3, typed(b"k"), true),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
+        );
+        drop(received.try_recv().unwrap());
+        drop(received.try_recv().unwrap());
+        inputs
+            .enqueue_page("page", key.clone(), 4, typed(b"z"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"z");
+        inputs.close_and_drain();
+    }
+
+    /// A hundred calls of 4 MiB numbered ahead of a missing one: the window
+    /// holds two, and the rest are refused. At the bound the two go in, in
+    /// order.
+    #[test]
+    fn a_hundred_large_calls_ahead_of_a_missing_one_are_refused_past_8_mib() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("page").unwrap();
+        let mut admitted = 0;
+        for number in 2..=101_u64 {
+            let mut body = vec![b'x'; 4 * 1024 * 1024];
+            body[0] = u8::try_from(number).unwrap();
+            if inputs
+                .enqueue_page("page", key.clone(), number, InputWork::Typed(body), true)
+                .is_ok()
+            {
+                admitted += 1;
+            }
+        }
+        assert_eq!(admitted, 2);
+        let first = received.recv_timeout(Duration::from_secs(3)).unwrap();
+        let second = received.recv_timeout(Duration::from_secs(1)).unwrap();
+        let first_byte = |job: &InputJob| match &job.work {
+            InputWork::Typed(bytes) => bytes[0],
+            _ => unreachable!(),
+        };
+        assert_eq!((first_byte(&first), first_byte(&second)), (2, 3));
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            received.try_recv().is_err(),
+            "the refused ones were never handed over"
+        );
+        inputs.close_and_drain();
+    }
+
+    /// A reply has room of its own: a paste of 4 MiB pending, its write held,
+    /// does not refuse it. Its room is 64 KiB.
+    #[test]
+    fn a_reply_is_admitted_while_a_paste_is_pending() {
+        let (inputs, key, received, replies) = bare();
+        inputs.begin_page("page").unwrap();
+        inputs
+            .enqueue_page(
+                "page",
+                key.clone(),
+                1,
+                InputWork::Typed(vec![b'p'; 4 * 1024 * 1024]),
+                true,
+            )
+            .unwrap();
+        inputs
+            .enqueue_page(
+                "page",
+                key.clone(),
+                2,
+                InputWork::Typed(vec![b'p'; 4 * 1024 * 1024]),
+                true,
+            )
+            .unwrap();
+        inputs
+            .enqueue_page(
+                "page",
+                key.clone(),
+                3,
+                InputWork::Reply(b"\x1b[1;1R".to_vec()),
+                false,
+            )
+            .unwrap();
+        let answer = replies.try_recv().unwrap();
+        assert!(matches!(&answer.work, InputWork::Reply(bytes) if bytes == b"\x1b[1;1R"));
+        assert_eq!(
+            inputs.enqueue_page(
+                "page",
+                key.clone(),
+                4,
+                InputWork::Reply(vec![b'r'; 64 * 1024]),
+                false
+            ),
+            Err("the pane's input queue is full".to_owned()),
+            "the replies' 64 KiB hold the first answer, and this one does not fit"
+        );
+        drop(answer);
+        drop(received);
+        inputs.close_and_drain();
+    }
+
+    /// The reload: A's call is held, B and C came, the page went and the next
+    /// page typed D at once. The host writes A, B, C, D, each once.
+    #[test]
+    fn a_departed_pages_calls_go_in_before_the_next_pages() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 3, typed(b"C"), true)
+            .unwrap();
+        inputs.end_page().unwrap();
+        inputs
+            .begin_page_after(
+                "s:2",
+                Some(&PriorPage {
+                    page_id: "s:1".into(),
+                    issued: vec![(key.clone(), 3)],
+                }),
+            )
+            .unwrap();
+        inputs
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .unwrap();
+        thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            handed(&received),
+            b"",
+            "all wait for A, which the old page issued"
+        );
+        inputs
+            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"ABCD");
+        inputs.close_and_drain();
+    }
+
+    /// The same with A held past the bound: B, C and D go in, A is refused when
+    /// it comes, and the page that is current is told.
+    #[test]
+    fn a_number_that_never_comes_from_a_departed_page_is_told_to_the_current_page() {
+        let (inputs, key, received, _) = bare();
+        let observed = observed(&inputs);
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 3, typed(b"C"), true)
+            .unwrap();
+        inputs
+            .begin_page_after(
+                "s:2",
+                Some(&PriorPage {
+                    page_id: "s:1".into(),
+                    issued: vec![(key.clone(), 3)],
+                }),
+            )
+            .unwrap();
+        inputs
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .unwrap();
+        thread::sleep(Duration::from_millis(1000));
+        assert_eq!(handed(&received), b"");
+        thread::sleep(Duration::from_millis(800));
+        assert_eq!(handed(&received), b"BCD");
+        assert_eq!(
+            inputs.enqueue_page("s:1", key.clone(), 1, typed(b"A"), true),
+            Err(INPUT_STALE_PAGE.to_owned())
+        );
+        let lost = observed.lost.lock().unwrap().clone();
+        assert!(
+            !lost.is_empty() && lost.iter().all(|each| each == &key),
+            "{lost:?}"
+        );
+        assert!(
+            observed
+                .lines
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.contains("after its page's bound")),
+            "{:?}",
+            observed.lines.lock().unwrap()
+        );
+        inputs.close_and_drain();
+    }
+
+    /// A second reload inside the first's bound: every page's calls go in in
+    /// page order, each once.
+    #[test]
+    fn a_second_reload_inside_the_first_keeps_every_pages_order() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        inputs
+            .begin_page_after(
+                "s:2",
+                Some(&PriorPage {
+                    page_id: "s:1".into(),
+                    issued: vec![(key.clone(), 2)],
+                }),
+            )
+            .unwrap();
+        inputs
+            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .unwrap();
+        inputs
+            .begin_page_after(
+                "s:3",
+                Some(&PriorPage {
+                    page_id: "s:2".into(),
+                    issued: vec![(key.clone(), 1)],
+                }),
+            )
+            .unwrap();
+        inputs
+            .enqueue_page("s:3", key.clone(), 1, typed(b"E"), true)
+            .unwrap();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(handed(&received), b"");
+        inputs
+            .enqueue_page("s:1", key.clone(), 1, typed(b"A"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"ABDE");
+        // A repeat of a number a departed page handed over is refused.
+        assert_eq!(
+            inputs.enqueue_page("s:2", key.clone(), 1, typed(b"D"), true),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
+        );
+        inputs.close_and_drain();
+    }
+
+    /// With no page current when typing is lost, the notice waits for the next
+    /// page's activation.
+    #[test]
+    fn typing_lost_with_no_page_current_is_told_at_the_next_activation() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("s:1").unwrap();
+        inputs
+            .enqueue_page("s:1", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        inputs.end_page().unwrap();
+        thread::sleep(ORDER_BOUND + Duration::from_millis(300));
+        assert_eq!(handed(&received), b"B");
+        let lost = inputs
+            .begin_page_after(
+                "s:2",
+                Some(&PriorPage {
+                    page_id: "s:1".into(),
+                    issued: vec![],
+                }),
+            )
+            .unwrap();
+        assert_eq!(lost, vec![key]);
         inputs.close_and_drain();
     }
 }

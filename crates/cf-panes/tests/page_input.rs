@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use cf_panes::arbiter::{EnterTiming, InputArbiter};
-use cf_panes::input_queue::{InputQueue, InputWork};
+use cf_panes::input_queue::{InputQueue, InputWork, PriorPage};
 use cf_panes::pty::{PaneKey, PaneTable};
 use cf_panes::validation::MAX_PAGE_INPUT_BYTES;
 use futures_executor::block_on;
@@ -101,7 +101,9 @@ fn a_delayed_old_page_retry_cannot_write_into_the_new_page() {
     let bytes = received.recv_timeout(Duration::from_secs(5)).unwrap();
     inputs.close_and_drain();
     panes.kill(&key).unwrap();
-    assert_eq!(late.unwrap_err(), "pane-input-stale-page");
+    // The page that went is heard for the bound: its repeat of a number it handed over is
+    // refused as a number already passed, and writes nothing.
+    assert_eq!(late.unwrap_err(), "pane-input-sequence-stale");
     assert_eq!(bytes, b"AB");
 }
 
@@ -120,7 +122,9 @@ fn a_new_pages_equal_first_key_is_not_confused_with_a_stale_call() {
     let bytes = received.recv_timeout(Duration::from_secs(5)).unwrap();
     inputs.close_and_drain();
     panes.kill(&key).unwrap();
-    assert_eq!(late.unwrap_err(), "pane-input-stale-page");
+    // The page that went is heard for the bound: its repeat of a number it handed over is
+    // refused as a number already passed, and writes nothing.
+    assert_eq!(late.unwrap_err(), "pane-input-sequence-stale");
     assert_eq!(bytes, b"AAB");
 }
 
@@ -259,11 +263,11 @@ fn a_lost_paste_writes_none_of_itself_even_when_it_comes_late() {
     inputs.close_and_drain();
 }
 
-/// A paste over the cap is refused whole before anything of it is queued,
-/// and its number is not consumed: the next key goes in at the same one.
+/// A paste over the cap is refused whole before anything of it is queued.
+/// The refusal is final for its number, and the next key goes in at the next.
 #[test]
 #[allow(clippy::unwrap_used, reason = "a test step must succeed")]
-fn a_paste_over_the_cap_is_refused_whole_and_keeps_its_number() {
+fn a_paste_over_the_cap_is_refused_whole_and_spends_its_number() {
     let (_panes, inputs, key, received) = recorder(1);
     inputs.begin_page("page").unwrap();
     let refused = inputs.enqueue_page(
@@ -277,10 +281,89 @@ fn a_paste_over_the_cap_is_refused_whole_and_keeps_its_number() {
         refused.unwrap_err(),
         format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes")
     );
-    let next = admitted(&inputs, "page", &key, 1, b"A");
+    let again = inputs.enqueue_page(
+        "page",
+        key.clone(),
+        1,
+        InputWork::Typed(b"x".to_vec()),
+        true,
+    );
+    assert_eq!(again.unwrap_err(), "pane-input-sequence-stale");
+    let next = admitted(&inputs, "page", &key, 2, b"A");
     finished(&inputs, "page", &next);
     assert_eq!(received.recv_timeout(Duration::from_secs(5)).unwrap(), b"A");
     inputs.close_and_drain();
+}
+
+/// Calls that come as 2, 3, 1 reach the program as A, B, C: the first is not refused as stale,
+/// and none overtakes another (D4's red 2, at a real terminal).
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn calls_that_come_out_of_order_reach_the_program_in_order() {
+    let (_panes, inputs, key, received) = recorder(3);
+    inputs.begin_page("page").unwrap();
+    let b = admitted(&inputs, "page", &key, 2, b"B");
+    let c = admitted(&inputs, "page", &key, 3, b"C");
+    let a = admitted(&inputs, "page", &key, 1, b"A");
+    for ticket in [a, b, c] {
+        finished(&inputs, "page", &ticket);
+    }
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"ABC"
+    );
+    inputs.close_and_drain();
+}
+
+/// The reload (D4's red 3, with the real queue and an owned PTY): A's call is on its way when
+/// the page goes, B and C had come, and the next page types D at once. The program reads
+/// A, B, C, D.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_reload_with_a_held_call_loses_nothing_at_a_real_terminal() {
+    let (_panes, inputs, key, received) = recorder(4);
+    inputs.begin_page("s:1").unwrap();
+    admitted(&inputs, "s:1", &key, 2, b"B");
+    admitted(&inputs, "s:1", &key, 3, b"C");
+    inputs.end_page().unwrap();
+    inputs
+        .begin_page_after(
+            "s:2",
+            Some(&PriorPage {
+                page_id: "s:1".to_owned(),
+                issued: vec![(key.clone(), 3)],
+            }),
+        )
+        .unwrap();
+    let d = admitted(&inputs, "s:2", &key, 1, b"D");
+    thread::sleep(Duration::from_millis(300));
+    admitted(&inputs, "s:1", &key, 1, b"A");
+    finished(&inputs, "s:2", &d);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"ABCD"
+    );
+    inputs.close_and_drain();
+}
+
+/// P4-D: a paste of 4 MiB is pending with its write held (the program reads nothing for two
+/// seconds): a terminal reply is admitted, and arrives after all of it.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_reply_is_admitted_behind_a_pending_paste_of_the_cap() {
+    let body = vec![b'p'; MAX_PAGE_INPUT_BYTES - PASTE_OPEN.len() - PASTE_CLOSE.len()];
+    let paste = bracketed(&body);
+    assert_eq!(paste.len(), MAX_PAGE_INPUT_BYTES);
+    let (_panes, inputs, key, received) = recorder_after(2, paste.len() + 1);
+    inputs.begin_page("page").unwrap();
+    let ticket = admitted(&inputs, "page", &key, 1, &paste);
+    thread::sleep(Duration::from_millis(300));
+    let answer = reply(&inputs, &key, 2, b"R").expect("a reply has room of its own");
+    finished(&inputs, "page", &ticket);
+    finished(&inputs, "page", &answer);
+    let bytes = received.recv_timeout(Duration::from_secs(60)).unwrap();
+    inputs.close_and_drain();
+    assert!(bytes[..paste.len()] == paste[..] && bytes[paste.len()] == b'R');
 }
 
 /// The largest paste a window takes goes in whole, in order, with the key

@@ -1,0 +1,89 @@
+# The host writes a window's calls in the order of their numbers (P4-B): a call that
+# comes early waits for the numbers before it, at most the bound; a page that has
+# gone is heard for the bound, and its calls go in before the next page's; what it
+# lost is told to the page that is current. A reply has room of its own (P4-D).
+[run]
+pane-order = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::calls_that_come_out_of_order_reach_the_writer_in_number_order"]
+pane-order-bound = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_number_that_never_comes_holds_what_is_behind_it_for_the_bound_only"]
+pane-order-departed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_departed_pages"]
+pane-order-lost = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_number_that_never_comes_from_a_departed_page_is_told_to_the_current_page"]
+pane-order-reload = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_second_reload_inside_the_first_keeps_every_pages_order"]
+pane-reply-room = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_reply_is_admitted_while_a_paste_is_pending"]
+pane-full = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_full_window_refuses_the_next_key_once_and_goes_on"]
+pane-hundred = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_hundred_large_calls_ahead_of_a_missing_one_are_refused_past_8_mib"]
+pane-numbered = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "what is typed while a call is unanswered"]
+
+[[plant]]
+name = "pane input order: write a call before the numbers ahead of it"
+meant = "calls_that_come_out_of_order_reach_the_writer_in_number_order"
+runs = ["pane-order", "pane-order-bound"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "                if first > lane.passed + 1 {"
+replace = "                if false && first > lane.passed + 1 {"
+
+[[plant]]
+name = "pane input order: a missing number holds what is behind it for ever"
+meant = "a_number_that_never_comes_holds_what_is_behind_it_for_the_bound_only"
+runs = ["pane-order-bound", "pane-order-lost"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "pub const ORDER_BOUND: Duration = Duration::from_millis(1500);"
+replace = "pub const ORDER_BOUND: Duration = Duration::from_secs(3600);"
+
+[[plant]]
+name = "pane input order: the next page goes in before the departed page's calls"
+meant = "a_departed_pages_calls_go_in_before_the_next_pages"
+runs = ["pane-order-departed", "pane-order-reload"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            if !(lane.slots.is_empty() && lane.issued.is_some() && outstanding == 0) {
+                blocked = true;
+            }'''
+replace = '''            let _ = outstanding;'''
+
+[[plant]]
+name = "pane input order: a departed page's lost typing is not told"
+meant = "a_number_that_never_comes_from_a_departed_page_is_told_to_the_current_page"
+runs = ["pane-order-lost"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        if let Some(lost) = departed {
+            *lost = true;
+        }'''
+replace = '''        let _ = departed;'''
+
+[[plant]]
+name = "pane input order: a reply shares the keys' pending input"
+meant = "a_reply_is_admitted_while_a_paste_is_pending"
+runs = ["pane-reply-room"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "            InputWork::Reply(_) => (&self.reply_bytes, MAX_PENDING_REPLY_BYTES_PER_PANE),"
+replace = "            InputWork::Reply(_) => (&self.pending_bytes, MAX_PENDING_INPUT_BYTES_PER_PANE),"
+
+[[plant]]
+name = "pane input order: a window holds 4 MiB of pending input, not 8"
+meant = "a_full_window_refuses_the_next_key_once_and_goes_on"
+runs = ["pane-full", "pane-hundred"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 8 * 1024 * 1024;"
+replace = "const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 4 * 1024 * 1024;"
+
+[[plant]]
+name = "pane input order: the page does not write its numbers in window.name"
+meant = "what is typed while a call is unanswered is handed over at once, numbered"
+runs = ["pane-numbered"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    this.#onIssued({ id: pane.id, generation: pane.generation, sequence })"
+replace = "    void this.#onIssued"

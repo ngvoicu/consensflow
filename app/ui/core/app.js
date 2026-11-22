@@ -371,7 +371,12 @@ function showTerminal(participant) {
 // window.name belongs to this webview across reloads, including when storage
 // is unavailable. The ordinal lets the host reject an older subscription
 // that was delayed before it ever reached the host.
-const savedPage = /^consensflow-page-v1:([0-9a-f-]{36}):([1-9][0-9]*)$/i.exec(window.name)
+// It also carries the last number each window's typing was given, after a `|`: the page
+// that follows hands them to the host, which then knows what a call of this page may still
+// bring.
+const savedPage = /^consensflow-page-v1:([0-9a-f-]{36}):([1-9][0-9]*)(?:\|(.*))?$/is.exec(
+  window.name,
+)
 const priorPage = savedPage ? Number(savedPage[2]) : 0
 const canAdvancePage =
   savedPage && Number.isSafeInteger(priorPage) && priorPage < Number.MAX_SAFE_INTEGER
@@ -379,8 +384,35 @@ const pageSession = canAdvancePage ? savedPage[1] : crypto.randomUUID()
 const pageNumber = canAdvancePage ? priorPage + 1 : 1
 const pageId = `${pageSession}:${pageNumber}`
 window.name = `consensflow-page-v1:${pageId}`
+/** What the page before this one issued: its page, and its last numbers by window. */
+const priorPageIssued = canAdvancePage
+  ? { pageId: `${savedPage[1]}:${savedPage[2]}`, issued: parseIssued(savedPage[3]) }
+  : null
+/** This page's own last numbers, by window. */
+const issuedNumbers = new Map()
+function parseIssued(text) {
+  try {
+    const list = JSON.parse(text ?? '[]')
+    return list
+      .filter(
+        ([id, generation, sequence]) =>
+          typeof id === 'string' &&
+          Number.isSafeInteger(generation) &&
+          Number.isSafeInteger(sequence),
+      )
+      .map(([id, generation, sequence]) => ({ id, generation, sequence }))
+  } catch {
+    return []
+  }
+}
+/** Written before the call it numbers: a reload at any moment leaves the next page the truth. */
+function numberIssued({ id, generation, sequence }) {
+  issuedNumbers.set(`${id}:${generation}`, [id, generation, sequence])
+  window.name = `consensflow-page-v1:${pageId}|${JSON.stringify([...issuedNumbers.values()])}`
+}
 const terminals = new TerminalsView(stage, {
   pageId,
+  onIssued: numberIssued,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
     return invoke(command, args)
@@ -1030,12 +1062,21 @@ async function establishPanePage() {
       let timer
       try {
         const answer = await Promise.race([
-          invoke(command, { pageId }),
+          invoke(
+            command,
+            command === 'pane_page_activate' && priorPageIssued !== null
+              ? { pageId, prior: priorPageIssued }
+              : { pageId },
+          ),
           new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error('pane page call timed out')), 1500)
           }),
         ])
-        if (answer?.ok === true) break
+        if (answer?.ok === true) {
+          // Typing a page that has gone lost, told while no page was current.
+          for (const pane of answer.lost ?? []) terminals.typingLost(pane)
+          break
+        }
         if (answer?.ok === false) {
           report('This page is no longer current. Reload ConsensFlow before typing again.')
           return false
@@ -1077,6 +1118,7 @@ async function start() {
         }, 50)
       })
       await listen('daemon-status', (event) => daemonStatus(event.payload))
+      await listen('pane-input-lost', (event) => terminals.typingLost(event.payload))
       // A file dropped on a terminal window types its path there.
       await listenForFileDrops({
         listen,

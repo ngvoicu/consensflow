@@ -8,6 +8,11 @@ const WAIT_TIMEOUT_MS = 30_000
 const INPUT_RETRY_MS = 100
 const RESTART_INPUT_ADVICE =
   'Check whether your last typing appeared, then restart the project before typing again.'
+const LOST_TYPING = 'Some of your typing may not have reached this window. Check what appeared.'
+// The host's own words for a window that holds all the input it takes (`InputError::queue_full`).
+const WINDOW_FULL = "the pane's input queue is full"
+const WINDOW_FULL_ADVICE =
+  'This window is still taking in what you sent before, so your last typing was not sent. Wait a moment, then type it again.'
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
@@ -37,8 +42,9 @@ function inputBytes(data) {
  * The page's side of the terminals: bytes from the Rust pane host into each
  * pane's emulator (in order, acknowledged only after the emulator committed
  * them), keystrokes and emulator replies back (one call each, a paste whole,
- * each admitted with a number and a ticket, in one order), and the emulator's
- * size into the pane. Pane ownership stays in Rust.
+ * each numbered when it is typed and handed to the host at once; the host
+ * keeps the window's order by the numbers), and the emulator's size into the
+ * pane. Pane ownership stays in Rust.
  *
  * The host stops reading a pane once a window of its output is owed an
  * acknowledgement, and its program then waits on its terminal. So each message
@@ -54,18 +60,24 @@ export class TerminalLink {
   #report
   /** By pane: the last message drawn, the last acknowledged, and whether an acknowledgement is on its way. */
   #acks = new Map()
-  #inputs = new Map()
-  #sequences = new Map()
+  /** By pane: the last number issued to what was typed. */
+  #issued = new Map()
   #sizes = new Map()
   #retired = new Set()
   #failedInputs = new Set()
   #pageId
+  #onIssued
 
-  constructor({ invoke, registry, report, pageId = crypto.randomUUID() }) {
+  /**
+   * `onIssued({ id, generation, sequence })` is told each number as it is
+   * issued, before its call: the page keeps them, for the page that follows it.
+   */
+  constructor({ invoke, registry, report, pageId = crypto.randomUUID(), onIssued = () => {} }) {
     this.#invoke = invoke
     this.#registry = registry
     this.#report = report
     this.#pageId = pageId
+    this.#onIssued = onIssued
   }
 
   /** One message from `subscribe_output`: bytes for one pane, in order. */
@@ -111,16 +123,21 @@ export class TerminalLink {
 
   /** What the human types into a pane. */
   input(pane, data) {
-    return this.#stream('pane_input_enqueue', pane, data).catch((cause) =>
-      this.#reportInput(paneKey(pane), cause),
-    )
+    return this.#send('pane_input_enqueue', pane, data)
   }
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
   reply(pane, data) {
-    return this.#stream('pane_reply_enqueue', pane, data).catch((cause) =>
-      this.#reportInput(paneKey(pane), cause),
-    )
+    return this.#send('pane_reply_enqueue', pane, data)
+  }
+
+  /**
+   * The host says typing of a page that has gone may not have reached a window:
+   * a call of it was lost, refused or uncertain, or a number never came.
+   */
+  typingLost(pane) {
+    const key = paneKey(pane)
+    if (!this.#retired.has(key)) this.#reportInput(key, new Error(LOST_TYPING))
   }
 
   /** The emulator's size, sent until the live pane accepts it. */
@@ -137,8 +154,7 @@ export class TerminalLink {
   /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
   retire(key) {
     this.#retired.add(key)
-    this.#inputs.delete(key)
-    this.#sequences.delete(key)
+    this.#issued.delete(key)
     this.#sizes.delete(key)
     this.#failedInputs.delete(key)
     this.#registry.retire(key)
@@ -172,23 +188,29 @@ export class TerminalLink {
     }
   }
 
-  async #stream(command, pane, data) {
+  /**
+   * What was typed gets its number now, and its call goes at once: nothing
+   * waits in the page for a call before it, so a reload loses none of it. The
+   * host writes a window's calls in the order of their numbers.
+   */
+  async #send(command, pane, data) {
     const key = paneKey(pane)
-    const bytes = inputBytes(data)
-    // Keys and replies go in one order, one admission at a time: each call
-    // finishes its admission before the next one starts.
-    const streams = this.#inputs
-    const previous = streams.get(key)
-    const submit = async () => {
-      if (this.#retired.has(key)) return
-      await this.#chunk(command, pane, bytes)
-    }
-    const stream = previous ? previous.then(submit, submit) : submit()
-    streams.set(key, stream)
+    if (this.#retired.has(key)) return
+    let bytes
     try {
-      await stream
-    } finally {
-      if (streams.get(key) === stream) streams.delete(key)
+      bytes = inputBytes(data)
+    } catch (cause) {
+      // Too large: nothing is sent, and no number is spent.
+      this.#reportInput(key, cause)
+      return
+    }
+    const sequence = (this.#issued.get(key) ?? 0) + 1
+    this.#issued.set(key, sequence)
+    this.#onIssued({ id: pane.id, generation: pane.generation, sequence })
+    try {
+      await this.#hand(command, pane, key, sequence, bytes)
+    } catch (cause) {
+      this.#reportInput(key, cause)
     }
   }
 
@@ -236,14 +258,12 @@ export class TerminalLink {
   }
 
   /**
-   * One call per number, at most once. A refusal means nothing was written, so
-   * the caller may retry the same number. A call that ends unknown (a timeout,
-   * a lost answer) is skipped and its keys may be lost.
+   * One call per number, at most once. A refusal is final for its number:
+   * nothing was written, the person is told, and the numbers after it go on.
+   * A call that ends unknown (a timeout, a lost answer) is skipped and its keys
+   * may be lost.
    */
-  async #admit(command, pane, length, text) {
-    const key = paneKey(pane)
-    if (this.#retired.has(key)) return null
-    const sequence = (this.#sequences.get(key) ?? 0) + 1
+  async #hand(command, pane, key, sequence, bytes) {
     let answer
     try {
       answer = await this.#call(
@@ -253,55 +273,25 @@ export class TerminalLink {
           id: pane.id,
           generation: pane.generation,
           sequence,
-          length,
-          bytes: text,
+          length: bytes.length,
+          bytes: base64Of(bytes),
         },
         ADMISSION_TIMEOUT_MS,
       )
     } catch {}
+    if (this.#retired.has(key)) return
     if (answer?.ok === true && typeof answer.ticket === 'string') {
-      this.#sequences.set(key, sequence)
-      return answer
+      // Completion and its acknowledgement are independent of what is typed
+      // next: a lost wait answer cannot hold later typing.
+      void this.#collect(key, answer.ticket)
+      return
     }
-    if (answer?.ok === false) {
-      if (answer.error === 'pane-input-sequence-stale') this.#sequences.set(key, sequence)
-      return answer
-    }
-    this.#sequences.set(key, sequence)
-    await this.#skip(pane, sequence)
-    return this.#retired.has(key) ? null : { ok: false, error: 'pane-input-lost' }
-  }
-
-  async #chunk(command, pane, bytes) {
-    const key = paneKey(pane)
-    let admitted
-    const text = base64Of(bytes)
-    do {
-      admitted = await this.#admit(command, pane, bytes.length, text)
-      if (admitted === null) return false
-      if (
-        admitted.error !== "the pane's input queue is full" &&
-        admitted.error !== 'pane-input-ticket-capacity'
-      )
-        break
-      // A full queue is a paste still being written at the terminal's pace:
-      // it says nothing until the host reports an uncertain write.
-      await pause(INPUT_RETRY_MS)
-    } while (!this.#retired.has(key))
-    if (this.#retired.has(key)) return false
-    if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
-      // Refused or lost before anything was written: this call's typing is
-      // missing, and what follows goes on.
-      this.#reportInput(
-        key,
-        new Error('Some of your typing may not have reached this window. Check what appeared.'),
-      )
-      return admitted.error !== 'pane-input-stale-page'
-    }
-    // Completion and its acknowledgement are independent of the next
-    // admission: a lost wait answer cannot hold later typing.
-    void this.#collect(key, admitted.ticket)
-    return true
+    if (typeof answer?.ok !== 'boolean') await this.#skip(pane, sequence)
+    if (this.#retired.has(key)) return
+    this.#reportInput(
+      key,
+      new Error(answer?.error === WINDOW_FULL ? WINDOW_FULL_ADVICE : LOST_TYPING),
+    )
   }
 
   async #collect(key, ticket) {

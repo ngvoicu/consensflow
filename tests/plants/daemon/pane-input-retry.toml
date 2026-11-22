@@ -1,44 +1,45 @@
 # Page identities fence late calls, and a call whose fate is unknown is skipped:
-# the pane's count moves past it, so a late original writes nothing and no key
-# is ever typed twice. A paste is one call, whole or not at all, up to a cap.
+# the number is passed, so a late original writes nothing and no key is ever
+# typed twice. A paste is one call, whole or not at all, up to a cap. The host
+# writes a window's calls in the order of their numbers (see pane-input-order).
 [run]
 pane-input-reconcile = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_skipped_call_is_never_written_when_its_original_comes_late"]
 pane-input-late = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives"]
 pane-input-lost-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_lost_paste_writes_none_of_itself_even_when_it_comes_late"]
 pane-input-capacity = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
-pane-input-cap = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"]
+pane-input-final = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_refused_admission_is_final_for_its_number"]
+pane-input-cap = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_over_the_cap_is_refused_whole_and_spends_its_number"]
+pane-input-fence = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::navigation_fences_a_page_before_the_next_subscription"]
 pane-input-whole = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_that_comes_during_a_paste_goes_after_all_of_it"]
 pane-input-length = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "validation::tests::a_page_calls_bytes_are_the_length_it_stated_or_refused"]
-pane-input-cut = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_does_not_consume_its_sequence"]
+pane-input-cut = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_is_final_for_its_sequence"]
 pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
 failed-pane-answer = ["cargo", "test", "--offline", "-p", "app", "commands::tests::a_pty_write_failure_and_later_keys_report_the_failed_pane"]
 failed-pane-notice = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a failed pane input|a late pane refusal|another pane cannot replace failed pane"]
 
 [[plant]]
 name = "pane input retry: let a departed page admit input"
-meant = "a_skipped_call_is_never_written_when_its_original_comes_late"
-runs = ["pane-input-reconcile"]
+meant = "navigation_fences_a_page_before_the_next_subscription"
+runs = ["pane-input-fence"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        if page.current.as_deref() != Some(page_id) {
-            return Err(INPUT_STALE_PAGE.to_string());
-        }
-        // The count only goes up.'''
-replace = '''        if false {
-            return Err(INPUT_STALE_PAGE.to_string());
-        }
-        // The count only goes up.'''
+find = '''        self.current.as_deref() == Some(page_id)
+            || self
+                .left_at
+                .get(page_id)
+                .is_some_and(|left| now < *left + ORDER_BOUND)'''
+replace = '''        true'''
 
 [[plant]]
-name = "pane input retry: a skip leaves the count where it was"
+name = "pane input retry: a skip leaves its number open"
 meant = "a_skipped_call_is_never_written_when_its_original_comes_late"
 runs = ["pane-input-reconcile", "pane-input-late", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '*passed = (*passed).max(sequence);'
-replace = 'let _ = (passed, sequence);'
+find = '            if sequence > lane.passed && !lane.slots.contains_key(&sequence) {'
+replace = '            if false && sequence > lane.passed && !lane.slots.contains_key(&sequence) {'
 
 [[plant]]
 name = "pane input retry: admit a number the count has passed"
@@ -47,8 +48,8 @@ runs = ["pane-input-late", "pane-input-reconcile", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '        if sequence <= passed {'
-replace = '        if false && sequence <= passed {'
+find = '        if sequence <= lane.passed || lane.slots.contains_key(&sequence) {'
+replace = '        if false && (sequence <= lane.passed || lane.slots.contains_key(&sequence)) {'
 
 [[plant]]
 name = "pane input retry: a lost paste written when it comes late"
@@ -57,35 +58,39 @@ runs = ["pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '        if sequence <= passed {'
-replace = '        if sequence <= passed && sequence != 1 {'
+find = '        if sequence <= lane.passed || lane.slots.contains_key(&sequence) {'
+replace = '        if (sequence <= lane.passed && sequence != 1) || lane.slots.contains_key(&sequence) {'
 
 [[plant]]
-name = "pane input retry: forget to advance the admitted count"
+name = "pane input retry: forget to pass a handed-over number"
 meant = "a_skipped_call_is_never_written_when_its_original_comes_late"
 runs = ["pane-input-reconcile"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = 'page.last_sequences.insert(key.clone(), sequence);'
-replace = 'let _ = sequence;'
+find = '                lane.passed = first;\n                if let Slot::Parked { job, sender, .. } = slot {'
+replace = '                let _ = first;\n                if let Slot::Parked { job, sender, .. } = slot {'
 
 [[plant]]
-name = "pane input retry: count a refused admission"
-meant = "unanswered_page_input_is_bounded_until_a_new_page"
-runs = ["pane-input-capacity"]
+name = "pane input retry: a refused admission leaves its number open"
+meant = "a_refused_admission_is_final_for_its_number"
+runs = ["pane-input-final", "pane-input-capacity"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
-            return Err("pane-input-ticket-capacity".to_string());'''
-replace = '''        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
-            page.last_sequences.insert(key.clone(), sequence);
-            return Err("pane-input-ticket-capacity".to_string());'''
+find = '''            page.lane(&key, page_id).slots.insert(
+                sequence,
+                Slot::Void {
+                    deadline: now + ORDER_BOUND,
+                },
+            );
+            page.pump(&key, now, &mut Vec::new());
+            Err(error)'''
+replace = '''            Err(error)'''
 
 [[plant]]
 name = "pane input retry: a paste over the cap goes in"
-meant = "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"
+meant = "a_paste_over_the_cap_is_refused_whole_and_spends_its_number"
 runs = ["pane-input-cap"]
 
 [[plant.edit]]
@@ -94,28 +99,13 @@ find = '    if bytes.len() > MAX_PAGE_INPUT_BYTES {'
 replace = '    if false && bytes.len() > MAX_PAGE_INPUT_BYTES {'
 
 [[plant]]
-name = "pane input retry: a refused paste takes its number"
-meant = "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"
-runs = ["pane-input-cap"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = '''            | InputWork::Paste { body: bytes, .. } => validate_page_input(bytes)?,'''
-replace = '''            | InputWork::Paste { body: bytes, .. } => {
-                if let Err(error) = validate_page_input(bytes) {
-                    page.last_sequences.insert(key.clone(), sequence);
-                    return Err(error);
-                }
-            }'''
-
-[[plant]]
 name = "pane input retry: a paste written in two parts"
 meant = "a_reply_that_comes_during_a_paste_goes_after_all_of_it"
 runs = ["pane-input-whole"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),'''
+find = '''            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, bytes),'''
 replace = '''            InputWork::Typed(bytes) => {
                 let cut = bytes.len().min(32 * 1024);
                 arbiter
@@ -163,24 +153,19 @@ runs = ["pane-input-completion"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            .get(ticket)
+find = '''        let page = self.state()?;
+        if page.current.as_deref() != Some(page_id) {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        page.completions
+            .get(ticket)
             .cloned()'''
-replace = '''            .remove(ticket)'''
-
-[[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = '''    pub fn page_completion(
-        &self,
-        page_id: &str,
-        ticket: &str,
-    ) -> Result<PageInputCompletion, String> {
-        let page = self'''
-replace = '''    pub fn page_completion(
-        &self,
-        page_id: &str,
-        ticket: &str,
-    ) -> Result<PageInputCompletion, String> {
-        let mut page = self'''
+replace = '''        let mut page = self.state()?;
+        if page.current.as_deref() != Some(page_id) {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        page.completions
+            .remove(ticket)'''
 
 [[plant]]
 name = "failed pane notice: a failed write does not say the pane is failed"

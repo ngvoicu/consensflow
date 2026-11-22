@@ -91,6 +91,7 @@ export class TerminalsView {
     {
       invoke,
       pageId,
+      onIssued,
       report,
       createEmulator,
       onChange = () => {},
@@ -117,9 +118,14 @@ export class TerminalsView {
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
       onLink: (url) => void this.#openLink(url),
     })
-    this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId })
+    this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId, onIssued })
     this.#invoke = invoke
     this.#report = report
+  }
+
+  /** The host says a window's typing, from a page that has gone, may not have reached it. */
+  typingLost(pane) {
+    this.#link.typingLost(pane)
   }
 
   /**
