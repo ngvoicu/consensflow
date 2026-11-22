@@ -205,7 +205,7 @@ runs = ["ss-daemon-routes-tasks"]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
     pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
-        Self::read_json(value)
+        Self::read_json(value, false)
 '''
 replace = '''
     pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
@@ -287,8 +287,9 @@ runs = ["ss-ledger-slots"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
-                     OR member_id IN (SELECT id FROM participant
-                                       WHERE backup_of = ?2 AND left_at IS NULL)",
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+                                            WHERE backup_of = ?2 AND left_at IS NULL))",
 '''
 replace = '''
                      OR 0",
@@ -302,10 +303,10 @@ runs = ["ss-ledger-slots"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
-                                       WHERE backup_of = ?2 AND left_at IS NULL)",
+                                            WHERE backup_of = ?2 AND left_at IS NULL))",
 '''
 replace = '''
-                                       WHERE backup_of = ?2)",
+                                            WHERE backup_of = ?2))",
 '''
 
 [[plant]]
@@ -320,16 +321,20 @@ find = '''
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR (p.backup_of = s.id AND p.left_at IS NULL)
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL);
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+      OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
 '''
 replace = '''
      AND (p.tier IS NULL OR p.tier = 'light')
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
-      ON p.id = s.id OR p.member_id = s.id OR p.backup_of = s.id
-      OR p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id);
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+      OR p.backup_of = s.id
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id));
 '''
 
 [[plant]]
@@ -380,4 +385,160 @@ replace = '''
     article: "a",
     switch: None,
     tiers: &["complex", "standard", "light"],
+'''
+
+# Round 4 (T-2013, review T-2004): the key before the rules, closed windows as history, the
+# update's first delivery of a brief written before it, and the sweep's pass.
+
+[[plant]]
+name = "staff slots: a plan's key is looked up only after the rules of now"
+meant = "a_keyed_plan_alpha_13_took_with_a_null_tier_for_a_role_that_had_none_still_replays"
+runs = ["ss-daemon-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+    let replayed = match key {
+'''
+replace = '''
+    let replayed = match None::<&str> {
+'''
+
+[[plant]]
+name = "staff slots: the update moves a closed window of a member it moves"
+meant = "alpha_13s_closed_windows_keep_their_tier_and_the_open_ones_move_with_their_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+'''
+replace = '''
+      ON p.id = s.id OR p.member_id = s.id
+'''
+
+[[plant]]
+name = "staff slots: the update moves a closed window of a current backup"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+'''
+replace = '''
+      OR (1
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves the member's closed windows"
+meant = "a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+              WHERE id = ?2 OR (member_id = ?2 AND left_at IS NULL)",
+'''
+replace = '''
+              WHERE id = ?2 OR member_id = ?2",
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves a closed window of its current backup"
+meant = "edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+'''
+replace = '''
+                     OR (1
+                         AND member_id IN (SELECT id FROM participant
+'''
+
+[[plant]]
+name = "staff slots: a window that comes back keeps the tier it closed with"
+meant = "a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+                tier = COALESCE((SELECT m.tier FROM participant m
+                                  WHERE m.id = participant.member_id), tier)
+'''
+replace = '''
+                tier = tier
+'''
+
+[[plant]]
+name = "staff slots: the update leaves a queued Critical brief of a worker with the line before"
+meant = "a_critical_workers_brief_from_before_the_update_is_delivered_with_the_rule_of_now"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+ WHERE kind = 'task' AND state IN ('queued', 'gated')
+'''
+replace = '''
+ WHERE kind = 'task' AND state IN ('none')
+'''
+
+[[plant]]
+name = "staff slots: the update leaves a gated Critical brief of a worker with the line before"
+meant = "alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+ WHERE kind = 'task' AND state IN ('queued', 'gated')
+'''
+replace = '''
+ WHERE kind = 'task' AND state IN ('queued')
+'''
+
+[[plant]]
+name = "staff slots: the update rewrites a brief that was delivered"
+meant = "alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+ WHERE kind = 'task' AND state IN ('queued', 'gated')
+'''
+replace = '''
+ WHERE kind = 'task' AND state IN ('queued', 'gated', 'delivered')
+'''
+
+[[plant]]
+name = "staff slots: the sweep's refusal of a backup ends the pass"
+meant = "critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .is_err()
+                    {
+                        continue;
+                    }
+'''
+replace = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .map(|_| false)?
+                    {
+                        continue;
+                    }
 '''

@@ -65,17 +65,26 @@ impl NewTask {
     /// it; who gives it, a participant by name and the task followed up are
     /// the caller's, given as text and a number.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
-        let task = Self::read_json(value)?;
+        let task = Self::read_json(value, true)?;
         task.check_given()?;
         Ok(task)
     }
 
-    /// A plan's section as [`from_json`](Self::from_json) reads it, but with no check of its
-    /// role, tier or purpose against the staff: a plan's key is looked up first, so a plan an
-    /// earlier version took still replays its saved answer, and the checks run only where the
-    /// task is given (`create_task`).
+    /// A plan's section as every earlier version read it for its key's fingerprint: its fields,
+    /// with no rule of the staff applied, a tier taken as the text it is (an earlier version's
+    /// `"tier": null`, for a role that had no tier then, is no tier). A plan's key is looked up
+    /// with this before any rule is checked ([`check_plan_section`](Self::check_plan_section)),
+    /// so a plan an earlier version took still replays its saved answer. Wherever the rules
+    /// take a section, it reads the same as [`from_json`](Self::from_json) reads it.
     pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
-        Self::read_json(value)
+        Self::read_json(value, false)
+    }
+
+    /// The rules of now for a plan's section whose key is new: its tier as a tier is read; its
+    /// role, tier and purpose are checked against the staff where the task is given
+    /// (`create_task`).
+    pub fn check_plan_section(value: &Value) -> Result<(), LedgerError> {
+        Self::read_json(value, true).map(|_| ())
     }
 
     /// The tier and purpose said, as `create_task` checks them, for a task that names its work.
@@ -86,7 +95,7 @@ impl NewTask {
         Ok(())
     }
 
-    fn read_json(value: &Value) -> Result<Self, LedgerError> {
+    fn read_json(value: &Value, tier_read: bool) -> Result<Self, LedgerError> {
         let body = model::parse_text(value.get("body"), "body", MAX_BODY)?;
         let numbers = |field: &str| match value.get(field) {
             None => Ok(Vec::new()),
@@ -107,7 +116,8 @@ impl NewTask {
             // ledger's to ask for where the task is given (`check_work`), after a plan's key is
             // looked up: a plan an earlier version took under a key (a section of a role that
             // had no tier) still replays its saved answer.
-            if value.get("tier").is_some()
+            if tier_read
+                && value.get("tier").is_some()
                 && !pool.and_then(Value::as_str).is_some_and(roles::untiered)
             {
                 tier = Some(model::parse_tier(value.get("tier"))?.to_string());

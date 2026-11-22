@@ -27,6 +27,18 @@ impl Ledger {
         tasks::create_plan(&mut self.store, project, tasks, key, fingerprint)
     }
 
+    /// The answer a plan's `key` holds, before any rule is checked: the same plan's saved
+    /// answer, `key-used` for a different one, none for a new key.
+    pub fn replayed_plan(
+        &self,
+        project: i64,
+        tasks: &[PlanTask],
+        key: &str,
+        fingerprint: &str,
+    ) -> Result<Option<PlanCreated>, LedgerError> {
+        tasks::replayed_plan(&self.store, project, tasks, key, fingerprint)
+    }
+
     /// Accept or cancel all of the tasks, or change none.
     pub fn decide_tasks(
         &mut self,

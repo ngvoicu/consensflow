@@ -71,6 +71,9 @@ fn archive(name: &str) -> tempfile::TempDir {
     let bytes: &[u8] = match name {
         "reassign" => include_bytes!("../../cf-daemon/tests/goldens/t1813-alpha10/reassign.db.gz"),
         "backup" => include_bytes!("../../cf-daemon/tests/goldens/t1813-alpha10/backup.db.gz"),
+        // Written by alpha.13's own ledger (`fixtures/t2013-alpha13-writer.rs.txt`, run at
+        // v3.0.7-alpha.13): what the update must carry on, as a person's board has it.
+        "alpha13" => include_bytes!("fixtures/t2013-alpha13.db.gz"),
         _ => panic!("unknown archive"),
     };
     let mut raw = Vec::new();
@@ -214,6 +217,15 @@ fn built() -> Built {
          INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,member_id,left_at) VALUES
             (27,1,'ares-old-1','worker','[\"worker\"]','claude-code','critical','2026-10-01',26,'2026-10-20'),
             (29,1,'iris-old-1','frontend','[\"frontend\"]','claude-code',NULL,'2026-10-01',28,'2026-10-20');
+         -- iris's current backup, and a window each of iris and of it open and one closed: the
+         -- closed windows (the human's End session, at alpha.13's `light`) are history
+         INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,backup_of) VALUES
+            (35,1,'irene','frontend','[\"frontend\"]','claude-code','light','2026-11-01',10);
+         INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,member_id,left_at) VALUES
+            (36,1,'irene-1','frontend','[\"frontend\"]','claude-code','light','2026-11-01',35,NULL),
+            (37,1,'irene-2','frontend','[\"frontend\"]','claude-code','light','2026-11-01',35,'2026-11-10'),
+            (38,1,'iris-2','frontend','[\"frontend\"]','claude-code','light','2026-11-01',10,'2026-11-10'),
+            (39,1,'iris-3','frontend','[\"frontend\"]','claude-code','light','2026-11-01',10,NULL);
          INSERT INTO task(id,project_id,number,title,body,requester_id,assignee_id,state,pool,tier,purpose,created_at,updated_at) VALUES
             (60,1,1,'Work','Work',2,24,'working','worker','critical','hard-problem','2026-11-01','2026-11-01'),
             (61,1,2,'Draw','Draw',2,34,'working','designer',NULL,NULL,'2026-11-01','2026-11-01'),
@@ -289,6 +301,18 @@ fn a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member() {
     }
     for kept in ["ares-old", "ares-old-1", "iris-old", "iris-old-1"] {
         assert_eq!(now[kept], was[kept], "{kept}");
+    }
+    // The member's and its current backup's open windows move with it; their closed windows,
+    // ended by the human before the update, keep the tier they worked at.
+    for moved in ["irene", "irene-1", "iris-3"] {
+        assert_eq!(tier(moved), Some("standard"), "{moved}");
+    }
+    for closed in ["iris-2", "irene-2"] {
+        assert_eq!(
+            tier(closed),
+            Some("light"),
+            "{closed}: a closed window is history"
+        );
     }
     // A Critical architect and reviewer, with its backup, keeps its slots.
     assert_eq!(tier("ate"), Some("critical"));
@@ -413,5 +437,209 @@ fn a_question_the_moved_backups_window_asked_is_answered_and_the_follow_up_goes_
         follow.assignee.as_deref(),
         Some("luna-1"),
         "bound to the window of the task it follows: {follow:?}"
+    );
+    // Its brief is delivered into that window, and the follow-up works there.
+    let brief: i64 = ledger
+        .sqlite()
+        .query_row(
+            "SELECT m.id FROM message m JOIN participant p ON p.id = m.recipient_id
+              WHERE m.task_id = (SELECT id FROM task WHERE project_id = 1 AND number = ?)
+                AND m.kind = 'task' AND m.state = 'queued' AND p.handle = 'luna-1'",
+            [follow.number],
+            |row| row.get(0),
+        )
+        .expect("the follow-up's brief, queued for luna-1");
+    ledger.begin_delivery(brief).expect("its delivery begins");
+    ledger
+        .confirm_delivery(brief, Some(&serde_json::json!({ "item": "i-2" })))
+        .expect("its delivery is confirmed");
+    let follow = ledger.task(1, follow.number).unwrap().unwrap().task;
+    assert_eq!(follow.state, "working", "{follow:?}");
+    assert_eq!(follow.assignee.as_deref(), Some("luna-1"));
+}
+
+/// What alpha.13's own ledger wrote ([`archive`] "alpha13"), counted before the update, so that
+/// a test over it cannot pass on a fixture that lost what it carries.
+fn alpha13() -> tempfile::TempDir {
+    let dir = archive("alpha13");
+    let db = Connection::open(dir.path().join("consensflow.db")).unwrap();
+    let count = |sql: &str| -> i64 { db.query_row(sql, [], |row| row.get(0)).unwrap() };
+    assert_eq!(count("PRAGMA user_version"), 43, "a schema-43 ledger");
+    assert_eq!(
+        count("SELECT count(*) FROM message WHERE kind = 'question' AND state = 'queued'"),
+        1,
+        "the window's question, unanswered"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM task WHERE project_id = 1 AND number = 2 AND state = 'open' AND assignee_id = 6"),
+        1,
+        "the follow-up, bound to the backup's window"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM participant WHERE left_at IS NOT NULL"),
+        2,
+        "the two windows the human ended"
+    );
+    dir
+}
+
+fn handle_tier(ledger: &Ledger, id: i64) -> (String, Option<String>) {
+    ledger
+        .sqlite()
+        .query_row(
+            "SELECT handle, tier FROM participant WHERE id = ?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+}
+
+/// The update moves a member that had no tier to its home, with its current backup and the
+/// windows of both that are open; the windows the human ended keep the tier they worked at.
+#[test]
+fn alpha_13s_closed_windows_keep_their_tier_and_the_open_ones_move_with_their_member() {
+    let dir = alpha13();
+    let ledger = open(&dir);
+    // iris, its backup irene, and irene's open window (T-1's).
+    for moved in [3, 5, 6] {
+        let (handle, tier) = handle_tier(&ledger, moved);
+        assert_eq!(tier.as_deref(), Some("standard"), "@{handle}");
+    }
+    // iris's window and irene's, each ended by the human after its task was accepted.
+    for closed in [7, 8] {
+        let (handle, tier) = handle_tier(&ledger, closed);
+        assert_eq!(tier.as_deref(), Some("light"), "@{handle} is history");
+    }
+}
+
+/// The window's question alpha.13 left unanswered and the follow-up it bound to that window
+/// carry over the update. The question reaches the chief; its window's binding ended with the
+/// engine that held it, so the answer is refused in the words alpha.13 itself gives on this same
+/// file (`question-moved`, read with `t2013-alpha13-writer.rs.txt`'s `answer_on_alpha_13`). The
+/// window then finishes T-1, and once it is accepted the follow-up's brief is delivered into that
+/// same window and its work starts there.
+#[test]
+fn alpha_13s_question_and_bound_follow_up_go_on_in_the_same_window_through_delivery() {
+    let dir = alpha13();
+    let mut ledger = open(&dir);
+    // The engine starts as after the update, and ends what the one before held.
+    ledger.begin_question_engine();
+    ledger.close_questions_of_ended_engine().unwrap();
+    let window = handle_tier(&ledger, 6).0;
+    assert_eq!(
+        ledger.task(1, 1).unwrap().unwrap().task.assignee.as_deref(),
+        Some(window.as_str())
+    );
+    let question = ledger.message(2).unwrap().unwrap();
+    if question.state == "queued" {
+        ledger
+            .begin_delivery(2)
+            .expect("the question's delivery begins");
+        ledger
+            .confirm_delivery(2, Some(&serde_json::json!({ "item": "i-q" })))
+            .expect("the chief has it");
+    }
+    let refused = ledger
+        .answer(2, 2, Some(&serde_json::json!("JSON")), None)
+        .unwrap_err();
+    match refused {
+        cf_ledger::LedgerError::Refused(refusal) => {
+            assert_eq!(refusal.code, "question-moved");
+            assert_eq!(
+                refusal.message,
+                "T-1 is waiting with backup @irene of @iris. Use cf tell T-1 \"…\" for what you meant to answer.",
+                "as alpha.13 says it"
+            );
+        }
+        other => panic!("{other}"),
+    }
+    // The window finishes T-1; the chief accepts it.
+    ledger.record_result(1, 1, "Done").unwrap();
+    ledger.accept_task(1, 1, "chief").unwrap();
+    // The follow-up's brief, queued for the same window, is delivered there, and it works.
+    let follow = ledger.task(1, 2).unwrap().unwrap().task;
+    assert_eq!(
+        follow.assignee.as_deref(),
+        Some(window.as_str()),
+        "{follow:?}"
+    );
+    let brief: i64 = ledger
+        .sqlite()
+        .query_row(
+            "SELECT m.id FROM message m JOIN task t ON t.id = m.task_id
+              WHERE t.project_id = 1 AND t.number = 2 AND m.kind = 'task' AND m.state = 'queued'
+                AND m.recipient_id = 6",
+            [],
+            |row| row.get(0),
+        )
+        .expect("the follow-up's brief, queued for the window");
+    ledger.begin_delivery(brief).expect("its delivery begins");
+    ledger
+        .confirm_delivery(brief, Some(&serde_json::json!({ "item": "i-f" })))
+        .expect("the window has it");
+    let follow = ledger.task(1, 2).unwrap().unwrap().task;
+    assert_eq!(follow.state, "working", "{follow:?}");
+    assert_eq!(follow.assignee.as_deref(), Some(window.as_str()));
+    assert_eq!(handle_tier(&ledger, 6).1.as_deref(), Some("standard"));
+}
+
+/// A Critical worker's brief alpha.13 wrote and had not handed over, queued for its window or
+/// held at the human's gate, is delivered with the rule of now: its purpose alone. A brief that
+/// was delivered keeps what it said, a reviewer's Critical brief still says it changes no
+/// project file, and the Critical task alpha.13 left open is briefed by the rule of now.
+#[test]
+fn alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now() {
+    const BEFORE: &str =
+        "It changes no project file: return analysis, evidence and recommendations to the chief.";
+    let dir = alpha13();
+    let mut ledger = open(&dir);
+    let body = |ledger: &Ledger, id: i64| ledger.message(id).unwrap().unwrap();
+    // T-5's delivered brief: history.
+    assert!(body(&ledger, 7)
+        .body
+        .starts_with(&format!("Critical work: hard-problem. {BEFORE}")));
+    // T-6's, queued: delivered with the purpose alone.
+    ledger.begin_delivery(8).expect("its delivery begins");
+    ledger
+        .confirm_delivery(8, Some(&serde_json::json!({ "item": "i-1" })))
+        .expect("delivered");
+    let queued = body(&ledger, 8);
+    assert_eq!(queued.state, "delivered");
+    assert_eq!(
+        queued.body,
+        "Critical work: hard-problem.\n\nModify a project file"
+    );
+    // The gated project's worker brief: the human passes it on, and it is delivered so.
+    ledger.approve_message(9, "human").expect("passed on");
+    ledger.begin_delivery(9).expect("its delivery begins");
+    ledger
+        .confirm_delivery(9, Some(&serde_json::json!({ "item": "i-2" })))
+        .expect("delivered");
+    let gated = body(&ledger, 9);
+    assert_eq!(gated.state, "delivered");
+    assert_eq!(
+        gated.body,
+        "Critical work: hard-problem.\n\nModify a project file"
+    );
+    // The gated reviewer's: a reviewer changes no file.
+    assert_eq!(
+        body(&ledger, 10).body,
+        format!("Critical work: critical-review. {BEFORE}\n\nReview it")
+    );
+    // T-7, open: given now, briefed by the rule of now.
+    let zeus: i64 = ledger
+        .sqlite()
+        .query_row("SELECT id FROM participant WHERE id = 4", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let brief = ledger
+        .assign_task(1, 7, zeus)
+        .expect("assigned")
+        .message
+        .expect("its brief");
+    assert_eq!(
+        brief.body,
+        "Critical work: hard-problem.\n\nModify another file"
     );
 }

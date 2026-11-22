@@ -324,6 +324,14 @@ fn second_was_given_out(context: &Context, other: &ProjectView, task: i64) {
     );
 }
 
+/// One pass with a second project's task open before it and given out by it: whichever pass
+/// is the first project's refusal or handoff, it is asserted at that very pass.
+fn pass_with_second(context: &Context, other: &ProjectView) {
+    let task = second_task(context, other);
+    context.pass().unwrap();
+    second_was_given_out(context, other, task);
+}
+
 #[test]
 fn a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_pass() {
     let context = Context::new();
@@ -427,18 +435,26 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
     }
     refuse_login(&context, "hera");
     refuse_login(&context, "ares");
-    let other_task = second_task(&context, &other);
-    context.pass().unwrap();
-    second_was_given_out(&context, &other, other_task);
-    for _ in 0..2 {
-        context.pass().unwrap();
+    // The refusal pass: every task stays in its member's window, no window opens, and the
+    // second project's task is given out in it.
+    pass_with_second(&context, &other);
+    for number in [research, review] {
+        assert_eq!(holder(&context, project.id, number), "hera", "T-{number}");
     }
+    assert_eq!(holder(&context, project.id, advice), "ares");
+    assert_eq!(
+        context.project(project.id).participants.len(),
+        windows_before
+    );
+    // The handoff pass: the review, at Critical with its purpose, starts over in its backup's
+    // new window, and the second project's task is given out in the same pass.
+    pass_with_second(&context, &other);
+    assert_eq!(holder(&context, project.id, review), "gaia");
+    pass_with_second(&context, &other);
     // The research task and the advisor's stay held in their members' windows, none
     // released and no new window opened for them.
     assert_eq!(holder(&context, project.id, research), "hera");
     assert_eq!(holder(&context, project.id, advice), "ares");
-    // The review, at Critical with its purpose, starts over in its backup's new window, its
-    // critical line first.
     assert_eq!(holder(&context, project.id, review), "gaia");
     let brief = context
         .inbox(context.id(
@@ -458,7 +474,6 @@ fn critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup() {
         windows_before + 1,
         "one new window, for the review alone"
     );
-    second_was_given_out(&context, &other, other_task);
 }
 
 #[test]
@@ -495,21 +510,29 @@ fn a_task_taken_back_after_its_member_moved_to_critical_waits_and_goes_after_the
         )
         .unwrap();
     refuse_login(&context, "calliope");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(
-        holder(&context, project.id, review),
-        "calliope",
-        "the task stays held"
-    );
-    // The person's Reassign puts it on the board, where it waits, told the way on once.
+    // The refusal pass and the next: the task stays held, and the second project's task is
+    // given out in each.
+    for _ in 0..2 {
+        pass_with_second(&context, &other);
+        assert_eq!(
+            holder(&context, project.id, review),
+            "calliope",
+            "the task stays held"
+        );
+    }
+    // The person's Reassign puts it on the board, where it waits, told the way on once; each
+    // pass ends well for the second project.
     context
         .ledger
         .borrow_mut()
         .release_task(project.id, review, "by @human")
         .unwrap();
     for _ in 0..3 {
-        context.pass().unwrap();
+        pass_with_second(&context, &other);
+        assert!(
+            context.task(project.id, review).task.assignee.is_none(),
+            "T-{review} waits on the board"
+        );
     }
     let said = notes(&context, &project, &format!("T-{review} waits for"));
     assert_eq!(said.len(), 1, "{said:?}");
@@ -649,4 +672,103 @@ fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slo
             .any(|data| data.contains("\"from\":null") && data.contains("\"to\":\"standard\"")),
         "the home tier is logged: {events:?}"
     );
+}
+
+/// A Critical worker's brief that alpha.13 or alpha.14 wrote and had not handed over (queued for
+/// its window, or held at the human's gate) reaches the window after the update with the line
+/// of the rule now: its purpose alone, never "It changes no project file", which would forbid
+/// a worker its coding. The brief is made as those versions made it, the ledger is taken back
+/// to the schema before the update and opened as a start opens it, and the engine delivers it.
+#[test]
+fn a_critical_workers_brief_from_before_the_update_is_delivered_with_the_rule_of_now() {
+    const BEFORE: &str = "Critical work: hard-problem. It changes no project file: return analysis, evidence and recommendations to the chief.";
+    for gate in [false, true] {
+        let context = Context::new();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "apollo" },
+                "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"],
+                            "tier": "critical" }],
+                "gate": gate,
+            }))
+            .unwrap()
+            .expect("the project");
+        let number = context
+            .create_task(
+                project.id,
+                NewTask {
+                    from: "chief".to_owned(),
+                    pool: Some("worker".to_owned()),
+                    tier: Some("critical".to_owned()),
+                    purpose: Some("hard-problem".to_owned()),
+                    body: "Modify a project file".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .task
+            .number;
+        let zeus = context.id(project.id, "zeus");
+        let brief = context
+            .ledger
+            .borrow_mut()
+            .assign_task(project.id, number, zeus)
+            .unwrap()
+            .message
+            .expect("its brief")
+            .id;
+        // The brief as the version before wrote it.
+        context.edit_ledger(|file| {
+            rusqlite::Connection::open(file)
+                .unwrap()
+                .execute(
+                    "UPDATE message SET body = ?1 || char(10) || char(10) || 'Modify a project file'
+                      WHERE id = ?2",
+                    rusqlite::params![BEFORE, brief],
+                )
+                .unwrap();
+        });
+        assert!(context.message(brief).body.starts_with(BEFORE));
+        context.reopen_as_before_the_update();
+        assert_eq!(
+            context.message(brief).state,
+            if gate { "gated" } else { "queued" }
+        );
+        if gate {
+            context
+                .ledger
+                .borrow_mut()
+                .approve_message(brief, "human")
+                .expect("the human passes it on");
+        }
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(context.message(brief).state, "delivered", "gate {gate}");
+        let window = context.task(project.id, number).task.assignee.unwrap();
+        let given: Vec<String> = context
+            .adapter
+            .agent(&window)
+            .items
+            .iter()
+            .filter(|item| item.role == cf_harness::records::Role::User)
+            .map(|item| item.text.to_string())
+            .collect();
+        let brief_given: Vec<&String> = given
+            .iter()
+            .filter(|text| text.contains("Modify a project file"))
+            .collect();
+        assert_eq!(brief_given.len(), 1, "gate {gate}: {given:?}");
+        assert!(
+            brief_given[0].contains("Critical work: hard-problem.\n\nModify a project file"),
+            "gate {gate}: {}",
+            brief_given[0]
+        );
+        assert!(
+            !brief_given[0].contains("changes no project file"),
+            "gate {gate}: {}",
+            brief_given[0]
+        );
+    }
 }

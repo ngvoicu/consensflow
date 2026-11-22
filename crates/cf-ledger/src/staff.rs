@@ -363,7 +363,7 @@ pub(crate) fn edit_member(
             quota::mark_back(store, member.id, "by @human")?;
         }
         store.db.execute(
-            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,
+            "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?,
                     needs_edit = 0
              WHERE id = ? OR member_id = ?",
             params![
@@ -371,19 +371,26 @@ pub(crate) fn edit_member(
                 edit.model,
                 edit.effort,
                 edit.model_name,
-                tier,
                 member.id,
                 member.id
             ],
         )?;
+        // The tier is the slot's: the member and its open windows take it; a closed window
+        // worked at the tier it had, and keeps it (it takes the member's again if it comes back).
+        store.db.execute(
+            "UPDATE participant SET tier = ?1
+              WHERE id = ?2 OR (member_id = ?2 AND left_at IS NULL)",
+            params![tier, member.id],
+        )?;
         if member.backup_of.is_none() {
             // The current backup, and the windows it has open: each at the member's new tier; one that
-            // was replaced, and its windows, are history.
+            // was replaced, its windows, and a closed window of the current one are history.
             store.db.execute(
                 "UPDATE participant SET tier = ?1
                   WHERE (backup_of = ?2 AND left_at IS NULL)
-                     OR member_id IN (SELECT id FROM participant
-                                       WHERE backup_of = ?2 AND left_at IS NULL)",
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+                                            WHERE backup_of = ?2 AND left_at IS NULL))",
                 params![tier, member.id],
             )?;
         }

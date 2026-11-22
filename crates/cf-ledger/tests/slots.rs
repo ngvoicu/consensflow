@@ -398,6 +398,16 @@ fn edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_h
         .add_backup(project.id, "zeus", &member("gaia", &["worker"], "standard"))
         .expect("the new backup");
     window(&ledger, project.id, "gaia-1", current.id);
+    // A closed window of the member itself and one of its current backup: history too.
+    window(&ledger, project.id, "zeus-1", zeus_id(&ledger, project.id));
+    window(&ledger, project.id, "gaia-2", current.id);
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET left_at = '2026-11-20' WHERE project_id = ? AND handle IN ('zeus-1', 'gaia-2')",
+            [project.id],
+        )
+        .unwrap();
     ledger
         .edit_member(
             project.id,
@@ -424,13 +434,104 @@ fn edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_h
     for moved in ["zeus", "gaia", "gaia-1"] {
         assert_eq!(tier(moved).as_deref(), Some("light"), "{moved}");
     }
-    for history in ["hera", "hera-1"] {
+    for history in ["hera", "hera-1", "zeus-1", "gaia-2"] {
         assert_eq!(
             tier(history).as_deref(),
             Some("standard"),
             "{history} left before the edit"
         );
     }
+}
+
+fn zeus_id(ledger: &Ledger, project: i64) -> i64 {
+    id(ledger, project, "zeus")
+}
+
+/// A window the human ended keeps the tier it worked at when its member's tier is edited, and
+/// takes the member's tier when it comes back for a follow-up: an open window is at its slot's.
+#[test]
+fn a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let zeus = zeus_id(&ledger, project.id);
+    let number = ledger
+        .create_task(project.id, &work("worker", "standard", None))
+        .expect("a task")
+        .task
+        .number;
+    let assigned = ledger
+        .assign_task(project.id, number, zeus)
+        .expect("assigned");
+    let brief = assigned.message.expect("its brief").id;
+    ledger.begin_delivery(brief).expect("delivery begins");
+    ledger
+        .confirm_delivery(brief, Some(&json!({ "item": "i-1" })))
+        .expect("delivered");
+    ledger
+        .record_result(project.id, number, "Done")
+        .expect("its result");
+    ledger
+        .accept_task(project.id, number, "chief")
+        .expect("accepted");
+    let window: (String, i64) = ledger
+        .sqlite()
+        .query_row(
+            "SELECT handle, id FROM participant WHERE member_id = ?",
+            [zeus],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    ledger
+        .end_session(project.id, &window.0, "human")
+        .expect("the human ends the window");
+    ledger
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
+                tier: "complex".into(),
+            },
+        )
+        .expect("the tier moves");
+    let tier = |ledger: &Ledger| -> (Option<String>, Option<String>) {
+        ledger
+            .sqlite()
+            .query_row(
+                "SELECT tier, left_at FROM participant WHERE id = ?",
+                [window.1],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    let (closed, left) = tier(&ledger);
+    assert!(left.is_some(), "the window is closed");
+    assert_eq!(
+        closed.as_deref(),
+        Some("standard"),
+        "a closed window is history"
+    );
+    ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(number),
+                body: "Next".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a follow-up");
+    let (open, left) = tier(&ledger);
+    assert!(left.is_none(), "the window came back for its follow-up");
+    assert_eq!(
+        open.as_deref(),
+        Some("complex"),
+        "an open window is at its member's tier"
+    );
 }
 
 #[test]

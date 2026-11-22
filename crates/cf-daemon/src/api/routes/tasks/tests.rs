@@ -1148,6 +1148,53 @@ async fn a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_
     }
 }
 
+/// A plan alpha.13 took for a role that had no tier then (worker's frontend designer, architect,
+/// researcher, integrator), its section saying `"tier": null` as `cf task plan` wrote it, replays
+/// its saved answer: the key is looked up before the tier is read, so the null the role now
+/// refuses is never parsed; the file changed under the key is `key-used`, and under a fresh key
+/// the null is refused as any tier that is no tier.
+#[tokio::test]
+async fn a_keyed_plan_alpha_13_took_with_a_null_tier_for_a_role_that_had_none_still_replays() {
+    for (switch, pool) in [
+        ("research", "researcher"),
+        ("frontend", "frontend"),
+        ("architect", "architect"),
+        ("integrate", "integrator"),
+    ] {
+        let scene = scene();
+        let section = json!({ "name": "only", switch: true, "tier": null, "body": "Do it.\n" });
+        let plan = json!({ "key": "old", "plan": [section.clone()] });
+        let fresh = json!({ "key": "fresh", "plan": [section.clone()] });
+        let (status, said) = stc_post(&scene, &fresh).await;
+        assert_eq!(status, 400, "{pool}: {said}");
+        assert_eq!(said["error"], "invalid-tier", "{pool}: {said}");
+        // As alpha.13 read the section: a role with no tier, so the null was no tier.
+        let task = cf_ledger::NewTask {
+            from: "chief".to_owned(),
+            pool: Some(pool.to_owned()),
+            body: "Do it.\n".to_owned(),
+            ..cf_ledger::NewTask::default()
+        };
+        keep_plan_under_key(&scene, "old", &plan, task);
+        let (status, replayed) = stc_post(&scene, &plan).await;
+        assert_eq!(status, 200, "{pool}: {replayed}");
+        assert_eq!(
+            replayed["tasks"][0]["task"]["number"], 7,
+            "{pool}: {replayed}"
+        );
+        assert_eq!(
+            scene.kicks.get(),
+            0,
+            "{pool}: no second task and no wake-up"
+        );
+        let mut changed = plan.clone();
+        changed["plan"][0]["body"] = json!("Another\n");
+        let (status, said) = stc_post(&scene, &changed).await;
+        assert_eq!(status, 409, "{pool}: {said}");
+        assert_eq!(said["error"], "key-used", "{pool}: {said}");
+    }
+}
+
 #[tokio::test]
 async fn stc_three_sections_resolve_a_plan_name() {
     let scene = scene();

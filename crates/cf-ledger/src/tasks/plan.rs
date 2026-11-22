@@ -96,6 +96,57 @@ fn section(name: &str, error: LedgerError) -> LedgerError {
     }
 }
 
+/// The ledger's fingerprint of a plan: its sections as read and the file's own.
+fn plan_fingerprint(tasks: &[PlanTask], fingerprint: &str) -> Result<String, LedgerError> {
+    let encoded = serde_json::to_vec(&(tasks, fingerprint))?;
+    Ok(format!("{:x}", Sha256::digest(encoded)))
+}
+
+/// The answer saved under `key`, replayed for the same plan; a different plan under it is
+/// `key-used`; none where the key is new.
+fn saved_plan(
+    store: &Store,
+    project: i64,
+    key: &str,
+    fingerprint: &str,
+) -> Result<Option<PlanCreated>, LedgerError> {
+    let existing: Option<(String, String)> = store
+        .db
+        .query_row(
+            "SELECT fingerprint, tasks FROM task_plan_key WHERE project_id = ? AND key = ?",
+            params![project, key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((saved, answer)) = existing else {
+        return Ok(None);
+    };
+    if saved != fingerprint {
+        return Err(LedgerError::refused_with(
+            "key-used",
+            format!("key {key} was already used for a different plan"),
+            409,
+        ));
+    }
+    let saved: Vec<SavedSection> = serde_json::from_str(&answer)?;
+    Ok(Some(PlanCreated {
+        tasks: saved.into_iter().map(PlanSection::from).collect(),
+        repeated: true,
+    }))
+}
+
+/// The answer a plan's key holds, looked up before any rule of now is checked: the same plan
+/// replays it, a different one is `key-used`, a new key is none.
+pub(crate) fn replayed_plan(
+    store: &Store,
+    project: i64,
+    tasks: &[PlanTask],
+    key: &str,
+    fingerprint: &str,
+) -> Result<Option<PlanCreated>, LedgerError> {
+    saved_plan(store, project, key, &plan_fingerprint(tasks, fingerprint)?)
+}
+
 /// The same single-task operations, nested in one outer write. The key and its
 /// answer commit with the tasks: a retry cannot see a partial plan.
 pub(crate) fn create_plan(
@@ -105,23 +156,14 @@ pub(crate) fn create_plan(
     key: Option<&str>,
     fingerprint: &str,
 ) -> Result<PlanCreated, LedgerError> {
-    let encoded = serde_json::to_vec(&(tasks, fingerprint))?;
-    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     store.write_batch(|store| {
         if let Some(key) = key {
             if key.is_empty() || key.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) || key.len() > 256 {
                 return Err(LedgerError::refused("invalid-key", "--key takes one word of at most 256 bytes"));
             }
-            let existing: Option<(String, String)> = store.db.query_row(
-                "SELECT fingerprint, tasks FROM task_plan_key WHERE project_id = ? AND key = ?",
-                params![project, key], |row| Ok((row.get(0)?, row.get(1)?)),
-            ).optional()?;
-            if let Some((saved, answer)) = existing {
-                if saved != fingerprint {
-                    return Err(LedgerError::refused_with("key-used", format!("key {key} was already used for a different plan"), 409));
-                }
-                let saved: Vec<SavedSection> = serde_json::from_str(&answer)?;
-                return Ok(PlanCreated { tasks: saved.into_iter().map(PlanSection::from).collect(), repeated: true });
+            if let Some(saved) = saved_plan(store, project, key, &fingerprint)? {
+                return Ok(saved);
             }
         }
         if tasks.is_empty() {

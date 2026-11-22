@@ -46,7 +46,7 @@ pub(crate) use pausing::{
     unmark_pause, was_relaunched, work_while_resumed,
 };
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
-pub(crate) use plan::{create_plan, decide_tasks};
+pub(crate) use plan::{create_plan, decide_tasks, replayed_plan};
 pub use plan::{PlanCreated, PlanSection, PlanTask};
 
 /// What a paused task's window is told when it goes on: the human's Resume
