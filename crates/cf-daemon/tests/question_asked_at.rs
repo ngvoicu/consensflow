@@ -543,3 +543,104 @@ fn q1_a_failed_end_date_write_fails_the_cancel() {
     let held = w.ledger.question_holding(window).unwrap().unwrap();
     assert_ne!(held.ended_at, Some(-1));
 }
+
+/// A window that held no task when it asked files its question with the session, whatever
+/// brief reaches the window after the asking (review T-1964, finding 3).
+#[tokio::test]
+async fn q1_an_idle_question_stays_the_sessions_across_a_follow_up_brief_to_its_window() {
+    let mut w = world();
+    let (task, session, old) = assignment(&mut w, false);
+    w.deliver(old);
+    let (p, member) = (w.project, w.id(&session));
+    w.ledger.close_question_window(member, None).unwrap();
+    let (c, _dir) = into_context(w);
+    let auth = issued(&c, p, member);
+    let asked_at = latest(&c) + 1;
+    let r = asked(
+        &auth,
+        "Before any brief in this idle window",
+        Some(asked_at),
+    );
+    let caller = caller_of(&c, &r).unwrap();
+    let route = recognize(&r.method, &r.path).unwrap();
+    let next = {
+        let mut l = c.ledger.borrow_mut();
+        assert!(l.resume_question_holding(member, task).unwrap());
+        l.record_result(p, task, "First result").unwrap();
+        l.reopen_task(p, task, "chief", "Continue with a follow-up")
+            .unwrap()
+            .message
+            .unwrap()
+            .id
+    };
+    take(&c, next);
+    let new_stamp = latest(&c) + 1;
+    let response = dispatch(&c, &caller, route, r)
+        .await
+        .unwrap_or_else(|e| e.answer());
+    let Content::Json(body) = response.content else {
+        panic!()
+    };
+    // Authenticated after the follow-up, with the same old stamp.
+    let late_auth = post(
+        &c,
+        asked(&auth, "Same old instant, late arrival", Some(asked_at)),
+    )
+    .await;
+    // Asked in the follow-up's turn: the task's.
+    let fresh = post(
+        &c,
+        asked(&auth, "After the follow-up brief", Some(new_stamp)),
+    )
+    .await;
+    assert_eq!((response.status, stored(&body)), (201, None), "{body}");
+    assert_eq!((late_auth.0, stored(&late_auth.1)), (201, None));
+    assert_eq!((fresh.0, stored(&fresh.1)), (201, Some(task)));
+}
+
+#[tokio::test]
+async fn q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrives_first() {
+    let mut w = world();
+    let (task, session, old) = assignment(&mut w, false);
+    let (p, member) = (w.project, w.id(&session));
+    w.deliver(old);
+    w.ledger.cancel_task(p, task, "human").unwrap();
+    w.edit(|db| {
+        cf_ledger::testing::undo_migration_0044(db).unwrap();
+        db.pragma_update(None, "user_version", 43).unwrap();
+    });
+    let (c, _dir) = into_context(w);
+    let auth = issued(&c, p, member);
+    let asked_at = latest(&c) + 1;
+    let r = asked(&auth, "Idle before a new first brief", Some(asked_at));
+    let caller = caller_of(&c, &r).unwrap();
+    let route = recognize(&r.method, &r.path).unwrap();
+    let next = c
+        .ledger
+        .borrow_mut()
+        .create_task(
+            p,
+            &cf_ledger::NewTask {
+                from: "chief".into(),
+                to: Some(session.clone()),
+                body: "The window's next task".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let brief = next.message.unwrap().id;
+    take(&c, brief);
+    let response = dispatch(&c, &caller, route, r)
+        .await
+        .unwrap_or_else(|e| e.answer());
+    let Content::Json(body) = response.content else {
+        panic!()
+    };
+    let fresh = post(
+        &c,
+        asked(&auth, "The new task's question", Some(handed_at(&c, brief))),
+    )
+    .await;
+    assert_eq!((response.status, stored(&body)), (201, None), "{body}");
+    assert_eq!((fresh.0, stored(&fresh.1)), (201, Some(next.task.number)));
+}

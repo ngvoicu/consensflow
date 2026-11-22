@@ -618,9 +618,10 @@ pub(crate) enum Placed {
 /// and not ended, else none. A holding recorded before begins were kept reaches
 /// back for ever.
 ///
-/// `idle_generation` is the holding the asking window's token found already there
-/// when it was made and was not given (the window ended, or was closed): its process
-/// asks in no turn of that holding, whatever dates it has or lacks.
+/// `idle_generation` is the last brief of the holding the asking window's token found
+/// already there when it was made and was not given (the window ended, or was closed):
+/// its process asks in no turn of that holding, whatever dates it has or lacks, and in
+/// none before the first brief that reached the window after it.
 pub(crate) fn placed_at(
     store: &Store,
     window: i64,
@@ -660,8 +661,30 @@ pub(crate) fn placed_at(
     let Some((_, last_brief, began, ended, prior, prior_began, prior_ended, earlier)) = span else {
         return Ok(Placed::Taskless);
     };
-    if idle_generation == Some(last_brief) {
-        return Ok(Placed::Taskless);
+    if let Some(generation) = idle_generation {
+        if generation == last_brief {
+            return Ok(Placed::Taskless);
+        }
+        // A brief came after the token's window held no task. A question asked before
+        // the first of them reached the window was asked while it was idle, whatever
+        // holding those briefs made since.
+        let first_after: Option<String> = store
+            .db
+            .query_row(
+                "SELECT handed_at FROM message
+                 WHERE recipient_id = ?1 AND kind = 'task' AND id > ?2 AND id <= ?3
+                   AND handed_at IS NOT NULL ORDER BY id LIMIT 1",
+                params![window, generation, last_brief],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if first_after
+            .as_deref()
+            .and_then(cf_base::time::parse)
+            .is_some_and(|admitted| at < admitted)
+        {
+            return Ok(Placed::Taskless);
+        }
     }
     if began.is_none_or(|began| at >= began) {
         return Ok(match ended {

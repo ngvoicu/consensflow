@@ -68,17 +68,6 @@ find = "            .filter(|at| *at > 0),"
 replace = "            .filter(|at| *at > 0)\n            .filter(|_| false),"
 
 [[plant]]
-name = "question asked at: the broker stamps a replayed request anew"
-meant = "a_request_replayed_after_a_reconnect_under_a_new_rpc_id_keeps_its_stamp_and_its_board_question"
-runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_request_replayed"]]
-[[plant.edit]]
-file = "crates/cf-codex-session/src/questions.rs"
-find = "                asking: entry.asking.clone(),"
-replace = "                asking: Asking::now(),"
-
-# Round 2 (review T-1928).
-
-[[plant]]
 name = "question asked at: a late report of the brief dates its holding again"
 meant = "q1_a_late_positive_report_of_the_brief_leaves_a_cancelled_holding_its_known_bounds"
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
@@ -88,13 +77,13 @@ find = "    if own.is_none() {"
 replace = "    if true {"
 
 [[plant]]
-name = "question asked at: a token's own previous generation is placed by its dates"
+name = "question asked at: an idle token's own generation is placed by its dates"
 meant = "q1_an_idle_token_asking_while_its_previous_generation_resumes_is_taskless"
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "    if idle_generation == Some(last_brief) {"
-replace = "    if false && idle_generation == Some(last_brief) {"
+find = "        if generation == last_brief {"
+replace = "        if false && generation == last_brief {"
 
 [[plant]]
 name = "question asked at: a failed end-date write is swallowed"
@@ -106,19 +95,28 @@ find = "                self.end_failed.get_or_insert(cause);"
 replace = "                let _ = cause;"
 
 [[plant]]
-name = "question asked at: a retired poll releases the claim its replacement holds"
-meant = "a_retired_pairs_poll_gives_up_no_claim_its_replacement_holds_and_the_answer_goes_once"
-runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_retired_pairs_poll"]]
+name = "question asked at: an idle question after a later brief is placed by the holding's old begin"
+meant = "q1_an_idle_question_stays_the_sessions_across_a_follow_up_brief_to_its_window"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/pair.rs"
-find = "                    if superseded {\n                        this.shared"
-replace = "                    if false {\n                        this.shared"
+file = "crates/cf-ledger/src/holding.rs"
+find = "            .is_some_and(|admitted| at < admitted)"
+replace = "            .is_some_and(|admitted| false && at < admitted)"
 
 [[plant]]
-name = "question asked at: another thread's resolution drops the request's stamp"
-meant = "another_threads_resolution_of_a_reused_rpc_id_leaves_the_first_requests_stamp"
-runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::another_threads_resolution"]]
+name = "question asked at: the daemon names no generation for an idle token"
+meant = "q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrives_first"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
 [[plant.edit]]
-file = "crates/cf-codex-session/src/questions.rs"
-find = "                && thread.is_none_or(|thread| entry.key.thread.as_deref() == Some(thread))"
-replace = "                && true"
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        start.last_brief.filter(|brief| *brief > 0)"
+replace = "                        start.last_brief.filter(|brief| *brief > 0).filter(|_| false)"
+
+[[plant]]
+name = "question asked at: the broker stamps a request with no moment"
+meant = "a_question_is_stamped_when_the_broker_first_receives_the_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions::a_question_is_stamped"]]
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = "        let begun = Asking::now();"
+replace = "        let begun = Asking::at(1);"

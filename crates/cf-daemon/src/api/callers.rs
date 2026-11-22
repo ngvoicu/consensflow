@@ -123,12 +123,12 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                         question_launch_task = None;
                     }
                 }
-                question_idle_generation = match (identity.question_start, holding) {
-                    (Some(start), Some(h))
-                        if start.last_brief == Some(h.last_brief)
-                            && start.task_in_hand != Some(h.task_id) =>
-                    {
-                        Some(h.last_brief)
+                // A token made beside a holding it was not given, in a window launched with
+                // no brief: its process held no task. Whatever briefs reach the window
+                // after, a question it asked before them is the session's.
+                question_idle_generation = match identity.question_start {
+                    Some(start) if start.launch_brief.is_none() && start.task_in_hand.is_none() => {
+                        start.last_brief.filter(|brief| *brief > 0)
                     }
                     _ => None,
                 };

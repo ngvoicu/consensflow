@@ -613,6 +613,8 @@ fn a_question_is_stamped_when_the_broker_first_receives_the_request() {
         wait(|| board.polls() == 1).await;
         let after = now_ms();
         let posted = board.questions_posted();
+        // Released first: a failing assertion must not leave the held poll to time out.
+        board.release();
         assert_eq!(posted.len(), 1);
         let at = posted[0]["askedAt"].as_i64().expect("a stamp");
         assert!(
@@ -623,17 +625,16 @@ fn a_question_is_stamped_when_the_broker_first_receives_the_request() {
 }
 
 #[test]
-fn a_request_replayed_after_a_reconnect_under_a_new_rpc_id_keeps_its_stamp_and_its_board_question()
-{
+fn a_request_replayed_to_a_reconnected_pair_is_asked_anew_as_it_always_was() {
     run(async {
         let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
         let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
         f.codex.send_json(1, &request_user_input());
         wait(|| board.polls() == 1).await;
-        let first = board.questions_posted();
-        assert_eq!(first.len(), 1);
-        let stamp = first[0]["askedAt"].as_i64().expect("a stamp");
-        // The pair retires; Codex replays the same request to the new one under another id.
+        let stamp = board.questions_posted()[0]["askedAt"]
+            .as_i64()
+            .expect("a stamp");
+        // The pair retires; Codex replays the same request to the next under another id.
         tui.terminate();
         wait(|| !f.codex.is_open(1)).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -644,72 +645,36 @@ fn a_request_replayed_after_a_reconnect_under_a_new_rpc_id_keeps_its_stamp_and_i
         wait(|| board.polls() == 2).await;
         // Released first: a failing assertion must not leave the held polls to time out.
         board.release();
-        assert_eq!(
-            board.questions_posted().len(),
-            1,
-            "the board's question is reused"
-        );
-        wait(|| asked_of(&f, "ask-9").is_some()).await;
-        assert_eq!(
-            asked_of(&f, "ask-9").unwrap()["result"]["answers"]["colour"]["answers"],
-            json!(["red"])
-        );
-        assert_eq!(first[0]["askedAt"].as_i64(), Some(stamp));
-    });
-}
-
-#[test]
-fn a_different_request_reusing_an_old_rpc_id_is_a_new_question_stamped_anew() {
-    run(async {
-        let board = HeldBoard::start(Value::Null);
-        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
-        f.codex.send_json(1, &request_user_input());
-        wait(|| board.polls() == 1).await;
-        let stamp = board.questions_posted()[0]["askedAt"]
-            .as_i64()
-            .expect("a stamp");
-        tui.terminate();
-        wait(|| !f.codex.is_open(1)).await;
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let _again = f.connect().await;
-        // The same RPC id, another item of another turn.
-        let mut other = request_user_input();
-        other["params"]["turnId"] = json!("turn-2");
-        other["params"]["itemId"] = json!("item-2");
-        f.codex.send_json(2, &other);
-        wait(|| board.polls() == 2).await;
         let posted = board.questions_posted();
-        assert_eq!(posted.len(), 2, "a second question");
-        assert!(posted[1]["askedAt"].as_i64().expect("a stamp") > stamp);
+        assert_eq!(posted.len(), 2, "the replay is a question of its own");
+        assert!(posted[1]["askedAt"].as_i64().expect("a stamp") >= stamp);
     });
 }
 
-// ---- Round 2 (review T-1928) ----
-
 #[test]
-fn a_retired_pairs_poll_gives_up_no_claim_its_replacement_holds_and_the_answer_goes_once() {
+fn a_claimed_answer_is_given_back_when_the_retired_pair_and_its_replacement_both_end() {
     run(async {
         let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
         let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
         f.codex.send_json(1, &request_user_input());
         wait(|| board.polls() == 1).await;
-        // The pair retires while its poll is held; Codex replays the request to the next.
         tui.terminate();
         wait(|| !f.codex.is_open(1)).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let _again = f.connect().await;
+        let again = f.connect().await;
         let mut replay = request_user_input();
         replay["id"] = json!("ask-9");
         f.codex.send_json(2, &replay);
         wait(|| board.polls() == 2).await;
-        // Both polls get the one claimed answer.
+        // The replacement goes before the old poll's reply arrives.
+        again.terminate();
+        wait(|| !f.codex.is_open(2)).await;
         board.release();
-        wait(|| asked_of(&f, "ask-9").is_some()).await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        wait(|| board.receipts().len() == 2).await;
         assert_eq!(
             board.receipts(),
-            [json!(true)],
-            "only the replacement says what became of the claim"
+            [json!(false), json!(false)],
+            "every claim is given back, none is left held"
         );
         let natives = f
             .codex
@@ -717,27 +682,6 @@ fn a_retired_pairs_poll_gives_up_no_claim_its_replacement_holds_and_the_answer_g
             .into_iter()
             .filter(|message| message.get("result").is_some())
             .count();
-        assert_eq!(natives, 1, "the answer goes to Codex once");
+        assert_eq!(natives, 0, "no answer is written to Codex");
     });
-}
-
-#[test]
-fn another_threads_resolution_of_a_reused_rpc_id_leaves_the_first_requests_stamp() {
-    let first = request_user_input();
-    let mut other = request_user_input();
-    other["params"]["threadId"] = json!(B);
-    other["params"]["turnId"] = json!("turn-b");
-    other["params"]["itemId"] = json!("item-b");
-    let key = |request: &Value| {
-        crate::questions::Asked::read(request.get("params"))
-            .unwrap()
-            .key(&request["id"], request.get("params"))
-    };
-    let mut stamps = crate::questions::Stamps::default();
-    let begun = stamps.of(key(&first), &first["id"]).asked_at();
-    stamps.of(key(&other), &other["id"]);
-    // B's request is resolved under the RPC id both used.
-    stamps.resolve(&other["id"], Some(B));
-    std::thread::sleep(Duration::from_millis(5));
-    assert_eq!(stamps.of(key(&first), &json!("ask-9")).asked_at(), begun);
 }
