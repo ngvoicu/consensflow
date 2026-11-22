@@ -738,7 +738,7 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 
 #[cfg(test)]
 mod tests {
-    use super::{drive_and_path, personal_harness_homes, safe_path_entry, temp_parent_is_outside};
+    use super::{drive_and_path, personal_harness_homes, safe_path_entry};
     use std::path::Path;
 
     #[test]
@@ -1022,10 +1022,10 @@ mod tests {
         let link = root.path().join("tmp-link");
         std::os::unix::fs::symlink(&held, &link).unwrap();
         let forbidden = [held.clone()];
-        assert!(temp_parent_is_outside(&held.join("tmp"), &forbidden).is_err());
-        assert!(temp_parent_is_outside(&link, &forbidden).is_err());
-        assert!(temp_parent_is_outside(&link.join("x/../y"), &forbidden).is_err());
-        assert!(temp_parent_is_outside(&owner.join("elsewhere"), &forbidden).is_ok());
+        assert!(super::temp_parent_is_outside(&held.join("tmp"), &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&link, &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&link.join("x/../y"), &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&owner.join("elsewhere"), &forbidden).is_ok());
     }
 
     /// B19, on Windows: a verbatim spelling is the same folder as its plain one, and a

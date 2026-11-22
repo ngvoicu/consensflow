@@ -118,28 +118,35 @@ mod tests {
         let home = ScratchHome::new().unwrap();
         let vars = home.vars();
         let names: Vec<_> = vars.iter().map(|(name, _)| *name).collect();
-        assert_eq!(
-            names,
-            [
-                "HOME",
-                "USERPROFILE",
-                "CFFIXED_USER_HOME",
-                "CLAUDE_CONFIG_DIR",
-                "CODEX_HOME",
-                "PI_CODING_AGENT_DIR",
-                "PI_CODING_AGENT_SESSION_DIR",
-                "XDG_CONFIG_HOME",
-                "XDG_DATA_HOME",
-                "XDG_STATE_HOME",
-                "XDG_CACHE_HOME",
-                "APPDATA",
-                "LOCALAPPDATA",
-                "CONSENSFLOW_HOME",
-                "PATH",
-                "CONSENSFLOW_TOOL_FOLDERS",
-                "CONSENSFLOW_BIN_DIR",
-            ]
-        );
+        // On Windows the two halves of the profile path come with the others.
+        let halves: &[&str] = if cfg!(windows) {
+            &["HOMEDRIVE", "HOMEPATH"]
+        } else {
+            &[]
+        };
+        let mut expected = vec![
+            "HOME",
+            "USERPROFILE",
+            "CFFIXED_USER_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "XDG_CACHE_HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+        ];
+        expected.extend_from_slice(halves);
+        expected.extend([
+            "CONSENSFLOW_HOME",
+            "PATH",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_BIN_DIR",
+        ]);
+        assert_eq!(names, expected);
         for (name, value) in &vars {
             assert!(
                 value.starts_with(home.root()),
