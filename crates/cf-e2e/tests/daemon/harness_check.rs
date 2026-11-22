@@ -5,6 +5,8 @@
 //! A Unix case: the stand-in counts by a script, and Windows opens a window on the shape
 //! of an npm shim alone, which cannot count.
 
+#![cfg(unix)]
+
 use cf_e2e::daemon_log::lines_of;
 use cf_e2e::files;
 use cf_e2e::http::Http;
@@ -16,7 +18,6 @@ use crate::Outcome;
 /// The stand-in Codex the rig has.
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 
-#[cfg(unix)]
 #[test]
 fn harness_check_asks_a_codex_its_queue_once_for_a_look_and_the_seat_that_follows() -> Outcome {
     let d = OverBridge::start()?;
