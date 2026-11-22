@@ -447,7 +447,7 @@ mod tests {
         let launcher = root.path().join("pi");
         cf_e2e::door::write_executable(
             &launcher,
-            "#!/bin/sh\nif [ -n \"$CODEX_HOME$XDG_CONFIG_HOME$PI_CODING_AGENT_DIR\" ]; then echo caller; else echo \"v$HOME\"; fi\n",
+            "#!/bin/sh\nif [ -n \"$CARGO_MANIFEST_DIR$CODEX_HOME$XDG_CONFIG_HOME$PI_CODING_AGENT_DIR\" ]; then echo caller; else echo \"v$HOME\"; fi\n",
         )
         .unwrap();
         let said = says(&launcher, &[("HOME".to_owned(), "/kit/home".to_owned())]);
