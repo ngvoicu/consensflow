@@ -80,6 +80,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
@@ -140,6 +141,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
@@ -200,6 +202,7 @@ replace = '''
                 held: Held::Quota,
                 kind: Some(HoldKind::Quota),
                 until: until.unwrap_or_default(),
+                spent: false,
             });
         }
         None
