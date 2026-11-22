@@ -100,6 +100,15 @@ pub fn start(allow_live_matrix: bool) {
         return;
     }
 
+    // The top-level process does not inherit another run's ownership claims nor its roots; a
+    // test's child keeps what that test handed it through the door. The account is read now,
+    // before this process gives itself its stand-in homes.
+    if std::env::var_os("CF_E2E_STAND_IN").is_none() {
+        std::env::remove_var(crate::door::MADE_ROOTS);
+        std::env::remove_var(crate::door::account::PROTECTED_FILE);
+        std::env::remove_var(crate::door::account::PROTECTED_DIGEST);
+    }
+    crate::door::account::begin();
     INHERITED_HOME
         .set(std::env::var_os("HOME"))
         .unwrap_or_else(|_| panic!("inherited HOME selected twice"));
@@ -125,11 +134,6 @@ pub fn start(allow_live_matrix: bool) {
         .set(launchers)
         .unwrap_or_else(|_| panic!("stand-in inherited launcher folders were recorded twice"));
 
-    // The top-level process does not inherit another run's ownership claims.
-    // A test's child retains what that test handed it through the door.
-    if std::env::var_os("CF_E2E_STAND_IN").is_none() {
-        std::env::remove_var(crate::door::MADE_ROOTS);
-    }
     let forbidden = INHERITED_HARNESS_HOMES
         .get()
         .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded"));
@@ -301,56 +305,25 @@ fn fixture_root(home: &Path, temp: &Path, forbidden: &[PathBuf]) -> PathBuf {
     root.to_path_buf()
 }
 
-/// Collect the inherited harness homes without inspecting the filesystem.
-#[allow(clippy::disallowed_methods)] // Read the inherited paths before replacing the environment.
+/// The protected roots of the account the run began in, as the door holds them
+/// ([`crate::door::account`]): the table of stores read on the account's environment by the run's
+/// first process, or the run's file of them in a child. Never built from this process's own
+/// environment once it is a stand-in's.
 fn inherited_harness_homes() -> Vec<PathBuf> {
-    let mut forbidden: Vec<PathBuf> = [
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "PI_CODING_AGENT_DIR",
-        "PI_CODING_AGENT_SESSION_DIR",
-    ]
-    .into_iter()
-    .filter_map(inherited_path)
-    .collect();
-    for name in ["HOME", "USERPROFILE"] {
-        if let Some(home) = inherited_path(name) {
-            forbidden.extend(personal_harness_homes(&home));
-        }
-    }
-    for name in [
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-        "XDG_CACHE_HOME",
-        "APPDATA",
-        "LOCALAPPDATA",
-    ] {
-        if let Some(base) = inherited_path(name) {
-            for harness in ["claude", "codex", "pi", "devin", "muse"] {
-                forbidden.push(base.join(harness));
-            }
-        }
-    }
-    forbidden
+    crate::door::account::protected()
 }
 
-/// What an account keeps of its harnesses, the login store and its Keychain, under `home`.
+/// What the table of stores holds below `home` for an account whose only variable is that home:
+/// for the tests of what a store's spelling reaches.
+#[cfg(test)]
 fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
-    [
-        ".claude",
-        ".claude.json",
-        ".codex",
-        ".pi",
-        ".gemini",
-        ".config/muse",
-        ".config/devin",
-        ".local/share/devin",
-        "Library/Application Support/Muse",
-        "Library/Keychains",
-    ]
+    let home = home.as_os_str().to_owned();
+    crate::live::stores::roots_for(
+        &|name| (name == "HOME").then(|| home.clone()),
+        None,
+    )
     .into_iter()
-    .map(|suffix| home.join(suffix))
+    .map(|root| root.path)
     .collect()
 }
 
@@ -364,32 +337,6 @@ fn temp_parent_is_outside(parent: &Path, forbidden: &[PathBuf]) -> Result<(), St
             parent.display()
         ))
     }
-}
-
-/// Roots a test adds to the protected ones, for the case that shows the door refuses a place in
-/// one (the inherited ones are the account's own and cannot be made up).
-#[cfg(test)]
-pub(crate) static TEST_PROTECTED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-
-/// Refuses `place` where it is, by where it resolves, inside a harness home, login store or
-/// Keychain folder of the account the process was started in: the door asks this before it makes a
-/// folder to write in, the temporary parent included (K3, T-1979).
-pub(crate) fn refuse_protected_place(place: &Path) -> std::io::Result<()> {
-    #[allow(unused_mut)]
-    let mut forbidden = INHERITED_HARNESS_HOMES
-        .get()
-        .cloned()
-        .unwrap_or_else(inherited_harness_homes);
-    #[cfg(test)]
-    forbidden.extend(
-        TEST_PROTECTED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .cloned(),
-    );
-    temp_parent_is_outside(place, &forbidden)
-        .map_err(|why| std::io::Error::new(std::io::ErrorKind::PermissionDenied, why))
 }
 
 /// An inherited path, made absolute without reading it.
@@ -765,7 +712,7 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 #[cfg(test)]
 mod tests {
     use super::{drive_and_path, personal_harness_homes, safe_path_entry};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn the_two_halves_of_a_windows_profile_path_are_of_the_home() {
@@ -790,8 +737,17 @@ mod tests {
         assert_eq!(fixed.as_deref(), Some(home));
     }
 
+    /// A stand-in whose case names no home is given the run's own, by the spawn door, before it
+    /// could search a path with none: no program the door starts is without a home, and none has
+    /// the caller's.
     #[test]
     fn standin_isolation_missing_inherited_home_refuses_before_searching_path() {
+        const CHILD: &str = "CF_T2007_NO_HOME_CHILD";
+        if crate::process::own_var(CHILD).is_some() {
+            let home = crate::door::account::project_home();
+            assert_eq!(home, None, "a child has the person's home");
+            return;
+        }
         let root = crate::door::made("missing-home-").unwrap();
         let path = root.path().join(".codex").join("bin");
         crate::door::make_dir(&path).unwrap();
@@ -801,20 +757,20 @@ mod tests {
             std::time::Duration::from_secs(120),
         )
         .inheriting_env()
-        .arg("--list")
-        .var("PATH", &path)
-        .without("CF_E2E_STAND_IN");
+        .var(CHILD, "1")
+        .var("PATH", &path);
         for (name, _) in super::home_vars(root.path()) {
             command = command.without(name);
         }
+        let env = command.environment().unwrap();
+        let home = env
+            .iter()
+            .find(|(name, _)| name == "HOME")
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("the door gave no HOME");
+        assert!(crate::door::is_made_or_below(&home), "{}", home.display());
         let output = command.run().unwrap();
-        assert_ne!(output.code, Some(0), "missing inherited home was accepted");
-        assert!(
-            output.stderr.contains("stand-in inherited HOME lookup"),
-            "{}{}",
-            output.stdout,
-            output.stderr
-        );
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
     #[test]
@@ -879,11 +835,13 @@ mod tests {
         );
     }
 
+    /// A stand-in told a layout of no run's is not started at all: the spawn door's seal refuses
+    /// a home that is no folder this run made, before the child could look at it.
     #[test]
     fn standin_isolation_fixture_home_must_be_handed_down() {
         let temp = std::env::temp_dir();
         let foreign = temp.parent().unwrap().join("synthetic-foreign-layout");
-        let output = crate::process::case_of(
+        let refused = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
             std::time::Duration::from_secs(120),
@@ -897,16 +855,12 @@ mod tests {
         .var("TMP", foreign.join("temp"))
         .var("TEMP", foreign.join("temp"))
         .run()
-        .unwrap();
-        assert_ne!(output.code, Some(0), "unowned fixture was accepted");
+        .expect_err("a stand-in on a layout of no run's was started");
         assert!(
-            output
-                .stderr
-                .contains("stand-in fixture home lookup: layout not handed down"),
-            "{}{}",
-            output.stdout,
-            output.stderr
+            refused.to_string().contains("which is no folder this run made"),
+            "{refused}"
         );
+        assert!(!foreign.exists(), "the foreign layout was made");
     }
 
     #[test]
@@ -1023,10 +977,10 @@ mod tests {
         crate::door::make_dir(&held).unwrap();
         let link = root.path().join("tmp-link");
         std::os::unix::fs::symlink(&held, &link).unwrap();
-        super::TEST_PROTECTED.lock().unwrap().push(held.clone());
+        crate::door::account::TEST_PROTECTED.lock().unwrap().push(held.clone());
         let direct = crate::door::made_in(&held.join("tmp"), "h-");
         let through = crate::door::made_in(&link.join("sub/../tmp"), "h-");
-        super::TEST_PROTECTED
+        crate::door::account::TEST_PROTECTED
             .lock()
             .unwrap()
             .retain(|path| path != &held);

@@ -28,11 +28,6 @@
 // The one place a program starts and the test's environment is read; see above.
 #![allow(clippy::disallowed_methods)]
 
-// The cargo a test starts: one file for every crate that starts one (`crates/cf-process` holds its
-// cases), included by its path because this crate depends on none of ours for it.
-#[allow(dead_code)] // Only the cargo's name and the list of variables are used here.
-#[path = "../../cf-process/src/nested_cargo.rs"]
-mod nested_cargo;
 mod pid;
 mod spawned;
 #[cfg(test)]
@@ -41,7 +36,7 @@ mod tests;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -228,6 +223,21 @@ pub struct Run {
     own_group: bool,
     /// The bundle the release ships, where the run has leave to start it ([`Run::shipped`]).
     shipped: Option<PathBuf>,
+    /// Which door it is started by: a plain start, a harness's, or one of the door's own
+    /// operations, whose program and words are fixed where it is made.
+    kind: Kind,
+}
+
+/// Which door a program is started by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// [`Run::new`]: any program but a harness's and one that needs a door of its own.
+    Plain,
+    /// [`Run::harness`]: a harness's program, on the run's homes, with its update switches.
+    Harness(&'static str),
+    /// A door operation (cargo, the Keychain's utility): its environment is the operation's own,
+    /// named where it is made, and the seal's homes are not asked of it.
+    Operation(&'static str),
 }
 
 /// Whether the variable `name` says what the machine is, and nothing of whose account runs on
@@ -310,7 +320,29 @@ impl Run {
             input: Input::Default,
             own_group: false,
             shipped: None,
+            kind: Kind::Plain,
         }
+    }
+
+    /// `harness`'s program `program`, started as a harness is: on the run's homes, with the
+    /// switches that keep it from updating or installing anything itself
+    /// ([`crate::door::spawn::update_switches`]). The program must be the harness's, by the file
+    /// it resolves to ([`crate::door::spawn::program_of`]).
+    pub fn harness(harness: &'static str, program: impl AsRef<OsStr>) -> Self {
+        let mut run = Self::new(program);
+        for (name, value) in crate::door::spawn::update_switches(harness) {
+            run = run.var(name, value);
+        }
+        run.kind = Kind::Harness(harness);
+        run
+    }
+
+    /// One of the door's own operations (`name`), on `program` with the environment it names: a
+    /// door module makes it, and nothing else does.
+    pub(crate) fn operation(name: &'static str, program: impl AsRef<OsStr>) -> Self {
+        let mut run = Self::new(program);
+        run.kind = Kind::Operation(name);
+        run
     }
 
     /// With one more word.
@@ -374,28 +406,6 @@ impl Run {
     pub fn without(mut self, name: impl AsRef<OsStr>) -> Self {
         self.removed.push(name.as_ref().to_os_string());
         self
-    }
-
-    /// The cargo a test starts: the test's own environment underneath, but for
-    /// the variables cargo gave the test (`CARGO_MANIFEST_DIR`, `CARGO_PKG_*`...),
-    /// as a shell would start it. With them a build script that watches one (`ring`'s
-    /// does) runs again, and the package and all that is over it are built again,
-    /// in the folder the running build uses (`nested_cargo`, which
-    /// says why and is the one place that names the cargo).
-    #[must_use]
-    pub fn cargo() -> Self {
-        let mut run = Self::new(nested_cargo::CARGO).inheriting_env();
-        if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") && own_var("RUSTC").is_none() {
-            if let Some(compiler) = crate::standin_process::build_compiler() {
-                run = run.var("RUSTC", compiler);
-            }
-        }
-        for (name, _) in std::env::vars_os() {
-            if name.to_str().is_some_and(nested_cargo::given_to_a_test) {
-                run = run.without(name);
-            }
-        }
-        run
     }
 
     /// With the test's own environment underneath its variables, except for
@@ -511,33 +521,107 @@ impl Run {
         cf_base::bundle::command_startable_by_a_test(program, &words).map_err(Error::LiveApp)
     }
 
-    /// The program's command, with everything but its streams.
-    fn command(&self) -> Command {
-        // A say-only run whose audit file cannot be used stops before it starts a program.
-        let audit = crate::door::Door::child_vars();
+    /// The whole environment the program will have, sealed ([`crate::door::spawn::seal`]): what
+    /// its case names over what it is given of the test's (nothing, the machine's, or all of it
+    /// but the board's), the door's own variables last, and every home variable it does not name
+    /// below the home it names, or below a scratch home of the run's where it names none. An
+    /// error where the seal refuses it: nothing starts.
+    pub fn environment(&self) -> Result<Vec<(OsString, OsString)>> {
+        let windows = cfg!(windows);
+        let mut env: Vec<(OsString, OsString)> = if self.machine {
+            machine_vars(std::env::vars_os())
+        } else if !self.inherit {
+            required_on_windows(&self.vars, self.finding_programs)
+                .into_iter()
+                .map(|(name, value)| (OsString::from(name), value))
+                .collect()
+        } else {
+            std::env::vars_os()
+                .filter(|(name, _)| !board_variable(name))
+                .collect()
+        };
+        for (name, value) in &self.vars {
+            set(&mut env, name, value, windows);
+        }
+        for name in &self.removed {
+            env.retain(|(held, _)| !same_name(held, name, windows));
+        }
+        // A program of a say-only run says only, into the same file, whatever its environment;
+        // every program is told the folders the run made so far, the only ones it writes below,
+        // and the roots it never writes in. None of them is a caller's to give.
+        let kit = crate::door::Door::child_vars();
+        for owned in [
+            crate::door::MADE_ROOTS,
+            crate::door::account::PROTECTED_FILE,
+            crate::door::account::PROTECTED_DIGEST,
+        ] {
+            env.retain(|(held, _)| !same_name(held, OsStr::new(owned), windows));
+        }
+        for (name, value) in &kit {
+            set(&mut env, OsStr::new(name), OsStr::new(value), windows);
+        }
+        if let Kind::Operation(_) = self.kind {
+            return Ok(env);
+        }
+        let named_home = ["HOME", "USERPROFILE"].into_iter().find_map(|wanted| {
+            env.iter()
+                .find(|(name, _)| same_name(name, OsStr::new(wanted), windows))
+                .map(|(_, value)| PathBuf::from(value))
+                .filter(|home| home.is_absolute() && crate::door::is_made_or_below(home))
+        });
+        let base = match named_home {
+            Some(home) => home,
+            None => scratch_home()?,
+        };
+        let missing = crate::door::spawn::missing_homes(&env, &base);
+        env.extend(missing);
+        crate::door::sealed(env, &kit, windows).map_err(|why| {
+            Error::LiveApp(format!(
+                "{} is not started: {why}",
+                self.program.to_string_lossy()
+            ))
+        })
+    }
+
+    /// What the program is, by the file it resolves to on the search path `env` gives it, and
+    /// whether its door may start it: a plain start refuses a harness's program and one that needs
+    /// a door of its own; a harness's start refuses any other.
+    fn admitted(&self, env: &[(OsString, OsString)]) -> Result<()> {
+        if let Kind::Operation(_) = self.kind {
+            return Ok(());
+        }
+        let program = crate::door::program_in(Path::new(&self.program), env);
+        match (&self.kind, &program) {
+            (Kind::Plain, crate::door::spawn::Program::Plain) => Ok(()),
+            (Kind::Harness(_), crate::door::spawn::Program::Harness(_)) => {
+                crate::door::spawn::has_update_switches(&program, env).map_err(Error::LiveApp)
+            }
+            (Kind::Harness(harness), _) => Err(Error::LiveApp(format!(
+                "{} is no program of {harness}'s, and is not started as one",
+                self.program.to_string_lossy()
+            ))),
+            (_, other) => Err(Error::LiveApp(format!(
+                "{} is {}, which a plain start does not start: it has a door of its own",
+                self.program.to_string_lossy(),
+                match other {
+                    crate::door::spawn::Program::Harness(harness) => format!("{harness}'s program"),
+                    crate::door::spawn::Program::Keychain => "the Keychain's utility".to_owned(),
+                    crate::door::spawn::Program::Cargo => "cargo".to_owned(),
+                    crate::door::spawn::Program::Plain => String::new(),
+                }
+            ))),
+        }
+    }
+
+    /// The program's command, with everything but its streams, on its sealed environment.
+    fn command(&self) -> Result<Command> {
+        let env = self.environment()?;
+        self.admitted(&env)?;
         let mut command = Command::new(&self.program);
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
         cf_process::hold_only_the_streams(&mut command);
-        if self.machine {
-            command.env_clear().envs(machine_vars(std::env::vars_os()));
-        } else if !self.inherit {
-            command
-                .env_clear()
-                .envs(required_on_windows(&self.vars, self.finding_programs));
-        } else {
-            for (name, _) in std::env::vars_os().filter(|(name, _)| board_variable(name)) {
-                command.env_remove(name);
-            }
-        }
-        command.envs(self.vars.iter().map(|(name, value)| (name, value)));
-        for name in &self.removed {
-            command.env_remove(name);
-        }
-        // A program of a say-only run says only, into the same file, whatever its environment; and
-        // every program is told the folders the run made so far, the only ones it writes below.
-        command.env_remove(crate::door::MADE_ROOTS);
-        command.envs(audit);
+        command.env_clear().envs(env);
         for arg in &self.args {
             arg.add_to(&mut command);
         }
@@ -551,7 +635,7 @@ impl Run {
                 command.process_group(0);
             }
         }
-        command
+        Ok(command)
     }
 
     /// Runs the program to its end, or to its limit, and keeps what it left.
@@ -560,7 +644,7 @@ impl Run {
     pub fn run(self) -> Result<Ran> {
         self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
-        let mut command = self.command();
+        let mut command = self.command()?;
         command
             .stdin(match self.input {
                 Input::Bytes(_) => Stdio::piped(),
@@ -610,7 +694,7 @@ impl Run {
     pub fn spawn(self) -> Result<Spawned> {
         self.startable()?;
         let program = self.program.to_string_lossy().into_owned();
-        let mut command = self.command();
+        let mut command = self.command()?;
         command
             .stdin(match self.input {
                 Input::Closed => Stdio::null(),
@@ -690,6 +774,38 @@ pub fn required_from(
         .filter(|name| !(home_named && ["HOMEDRIVE", "HOMEPATH", "USERPROFILE"].contains(name)))
         .filter_map(|name| lookup(name).map(|value| (name, value)))
         .collect()
+}
+
+/// Whether two names of variables are one: in any case on Windows.
+fn same_name(left: &OsStr, right: &OsStr, windows: bool) -> bool {
+    if windows {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
+}
+
+/// Sets `name` to `value` in `env`, over what it held of that name (in any case on Windows).
+fn set(env: &mut Vec<(OsString, OsString)>, name: &OsStr, value: &OsStr, windows: bool) {
+    env.retain(|(held, _)| !same_name(held, name, windows));
+    env.push((name.to_os_string(), value.to_os_string()));
+}
+
+/// A home of the run's own, for a program whose case names none: made once for this process,
+/// below a folder of the run's, and taken with the run's other folders of the door's at its end.
+fn scratch_home() -> Result<PathBuf> {
+    static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    if let Some(home) = HOME.get() {
+        return Ok(home.clone());
+    }
+    let root = crate::door::made("cf-home-")
+        .map_err(Error::file("make a folder in", &std::env::temp_dir()))?
+        .hand_on();
+    let home = root.join("home");
+    crate::door::make_dir(&home)?;
+    crate::door::account::remove_at_exit(&root);
+    Ok(HOME.get_or_init(|| home).clone())
 }
 
 /// Writes `bytes` to `input` on a thread of its own, and closes it.

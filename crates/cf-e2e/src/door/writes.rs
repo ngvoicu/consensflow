@@ -144,8 +144,9 @@ pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
 /// rename takes `from` away.
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
-    allowed("rename", from, false)?;
-    allowed("rename to", to, false)?;
+    // Both ends: neither may hold a protected root (the roots' own file among them).
+    super::judge(from, super::place::Act::Rename).map_err(Error::file("rename", from))?;
+    super::judge(to, super::place::Act::Rename).map_err(Error::file("rename to", to))?;
     fs::rename(from, to).map_err(Error::file("rename", from))
 }
 
@@ -206,54 +207,67 @@ fn private(path: &Path) -> io::Result<fs::File> {
 }
 
 /// Makes the file `path`, which a caller named for the run to write (`--fixture FILE`, a folder
-/// it asked an export in), as a new one of this run's own: refused, before anything runs, where
-/// anything is there, so that a name a caller reuses is never written over. The file is then a
-/// file this run made, and [`write`] and [`append`] may go on in it. The folder it is in must be
-/// there.
+/// it asked an export in, a rig's failure report), as a new one of this run's own
+/// ([`super::place::Act::Name`]): refused, before anything runs, where anything is there, so
+/// that a name a caller reuses is never written over, and refused inside a protected root. The
+/// folders above it that are not there are made, each new; none of them is the run's. The file is
+/// then a file this run made, by its identity: [`write`] and [`append`] may go on in it while it
+/// is the same file, and a caller that writes it again keeps the handle this returns.
 pub fn made_file(path: impl AsRef<Path>) -> Result<fs::File> {
     // A say-only run whose audit file cannot be used stops before it makes anything.
     super::Door::init();
     let path = path.as_ref();
+    named(path)?;
     let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|failed| {
-            if failed.kind() == io::ErrorKind::AlreadyExists {
-                Error::file("make", path)(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "it is there already: a run makes the file a caller names new and never writes over one, so name another",
-                ))
-            } else {
-                Error::file("make", path)(failed)
-            }
-        })?;
-    super::register(path);
+        .map_err(|failed| there_already(path, failed, "file"))?;
+    super::register_file(path, &file).map_err(Error::file("make", path))?;
     Ok(file)
 }
 
+/// The error of a named make that found something there.
+fn there_already(path: &Path, failed: io::Error, what: &str) -> Error {
+    if failed.kind() == io::ErrorKind::AlreadyExists {
+        Error::file("make", path)(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("it is there already: a run makes the {what} a caller names new and never writes over or into one, so name another"),
+        ))
+    } else {
+        Error::file("make", path)(failed)
+    }
+}
+
+/// Judges `path` as a name a caller gave ([`super::place::Act::Name`]) and makes the folders
+/// above it that are not there, each new.
+fn named(path: &Path) -> Result {
+    if fs::symlink_metadata(path).is_ok() {
+        return Err(there_already(
+            path,
+            io::Error::from(io::ErrorKind::AlreadyExists),
+            "file or folder",
+        ));
+    }
+    super::judge(path, super::place::Act::Name).map_err(Error::file("make", path))?;
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        super::make_missing(parent).map_err(Error::file("make", parent))?;
+    }
+    Ok(())
+}
+
 /// Makes the folder `path`, which a caller named for the run to keep things in (an export, a
-/// reports folder), as a new one of this run's own: refused where anything is there, so that a
-/// name a caller reuses is never written into. The place it is in is made empty where it is not
-/// there ([`super::make_place`]). The folder is then a folder this run made.
+/// reports folder), as a new one of this run's own ([`super::place::Act::Name`]): refused where
+/// anything is there, so that a name a caller reuses is never written into. The folders above it
+/// that are not there are made, each new, and none of them is the run's. The folder is then a
+/// folder this run made.
 pub fn made_dir(path: impl AsRef<Path>) -> Result {
     // A say-only run whose audit file cannot be used stops before it makes anything.
     super::Door::init();
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        super::make_place(parent).map_err(Error::file("make", parent))?;
-    }
-    fs::create_dir(path).map_err(|failed| {
-        if failed.kind() == io::ErrorKind::AlreadyExists {
-            Error::file("make", path)(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "it is there already: a run makes the folder a caller names new and never writes into one, so name another",
-            ))
-        } else {
-            Error::file("make", path)(failed)
-        }
-    })?;
-    super::register(path);
+    named(path)?;
+    fs::create_dir(path).map_err(|failed| there_already(path, failed, "folder"))?;
+    super::register_folder(path);
     Ok(())
 }
 

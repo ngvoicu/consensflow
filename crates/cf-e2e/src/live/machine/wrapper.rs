@@ -501,11 +501,28 @@ mod tests {
         crate::process::Run::new("/bin/sh")
             .arg(&shim)
             .args(words)
-            .var("HOME", "/h")
-            .var("CLAUDE_CONFIG_DIR", "/rig/claude")
+            .var("HOME", home())
+            .var("CLAUDE_CONFIG_DIR", rig_claude())
             .run()
             .unwrap()
             .stdout
+    }
+
+    /// A home of the run's own for the shim's runs: the seal starts no program on another.
+    fn home() -> PathBuf {
+        static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        HOME.get_or_init(|| crate::door::made("cf-wrapper-home-").unwrap().hand_on())
+            .clone()
+    }
+
+    /// The Claude folder a rig gives its windows, in [`home`].
+    fn rig_claude() -> PathBuf {
+        home().join("rig").join("claude")
+    }
+
+    /// `path` as the shell prints it, with its line's end.
+    fn said(path: &Path) -> String {
+        format!("{}\n", path.display())
     }
 
     /// The daemon's read of the models Claude Code lists names no model, and is the stand-in's
@@ -550,7 +567,7 @@ mod tests {
         for model in ["fake", "fake-chief"] {
             assert_eq!(
                 shimmed(&["-c", "echo $CLAUDE_CONFIG_DIR", model]),
-                "/rig/claude\n",
+                said(&rig_claude()),
                 "{model}"
             );
         }
@@ -570,7 +587,7 @@ mod tests {
             let run = crate::process::Run::new("/bin/sh")
                 .arg(&shim)
                 .args(["-c", "echo $CLAUDE_CONFIG_DIR", "fake-chief"])
-                .var("HOME", "/h");
+                .var("HOME", home());
             match config {
                 Some(config) => run.var("CLAUDE_CONFIG_DIR", config),
                 None => run,
@@ -579,8 +596,10 @@ mod tests {
             .unwrap()
             .stdout
         };
-        assert_eq!(run(Some("/run/own config")), "/run/own config\n");
-        assert_eq!(run(None), "\n", "no folder of the shim's own");
+        let own = home().join("own config");
+        assert_eq!(run(Some(own.to_str().unwrap())), said(&own));
+        // No folder of the shim's own: the one the door gives every program below its home.
+        assert_eq!(run(None), said(&home().join(".claude")), "a folder of the shim's own");
     }
 
     #[cfg(unix)]
@@ -613,8 +632,8 @@ mod tests {
             crate::process::Run::new("/bin/sh")
                 .arg(&shim)
                 .args(words)
-                .var("HOME", "/h")
-                .var("CLAUDE_CONFIG_DIR", "/rig/claude")
+                .var("HOME", home())
+                .var("CLAUDE_CONFIG_DIR", rig_claude())
                 .run()
                 .unwrap()
                 .stdout
@@ -627,19 +646,19 @@ mod tests {
         // stand-in is a shell here, which prints the Claude folder it was given).
         assert_eq!(
             run(&["-c", "echo $CLAUDE_CONFIG_DIR", "fake"]),
-            "/rig/claude\n"
+            said(&rig_claude())
         );
         // A run given a Claude config of its own has the stand-in write there, where the
         // daemon reads Claude's records: never in the owner's own (T-432).
         let own = crate::process::Run::new("/bin/sh")
             .arg(&shim)
             .args(["-c", "echo $CLAUDE_CONFIG_DIR", "fake"])
-            .var("HOME", "/h")
-            .var("CLAUDE_CONFIG_DIR", "/run/own")
+            .var("HOME", home())
+            .var("CLAUDE_CONFIG_DIR", home().join("own"))
             .run()
             .unwrap()
             .stdout;
-        assert_eq!(own, "/run/own\n");
+        assert_eq!(own, said(&home().join("own")));
     }
 
     fn strings(words: &[&str]) -> Vec<String> {

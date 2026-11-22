@@ -39,7 +39,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::process::{own_var, Run};
+use crate::process::own_var;
+#[cfg(test)]
+use crate::process::Run;
 use crate::{checkout, files, Error, Result};
 
 /// The variable that names the folder `cf` and the pane host were built in for
@@ -124,6 +126,14 @@ pub fn engine_ask() -> Result<&'static Path> {
     )
 }
 
+/// The cargo a build is made with: the door's ([`crate::door::cargo::build`]), or a fake one a
+/// test of the builds starts in its place.
+enum Cargo {
+    Door,
+    #[cfg(test)]
+    Fake(Run),
+}
+
 /// The folder the run built `cf` and the pane host in before it, where it says one.
 fn given() -> Option<(&'static str, PathBuf)> {
     given_in(BUILT)
@@ -153,7 +163,7 @@ fn built(
 ) -> Result<&'static Path> {
     built_by(
         cell,
-        Run::cargo(),
+        Cargo::Door,
         &checkout::root(),
         (package, bin, more),
         (before, builds_nothing()),
@@ -166,7 +176,7 @@ fn built(
 /// error, and `cargo` is never started.
 fn built_by(
     cell: &'static Built,
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     (package, bin, more): (&str, &str, &[&str]),
     (before, builds_nothing): (Option<(&'static str, PathBuf)>, bool),
@@ -205,7 +215,7 @@ fn taken(variable: &str, folder: &Path, bin: &str) -> std::result::Result<PathBu
 /// machine take turns on a lock in the build folder, so a process that arrives
 /// while another builds waits for it, and finds the program made.
 fn made(
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     package: &str,
     bin: &str,
@@ -265,28 +275,26 @@ fn exe(bin: &str) -> String {
 /// with `cargo` (the program that builds, given its first words if it has any),
 /// and the cargo words `more`, and answers where it is.
 fn build(
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     package: &str,
     bin: &str,
     more: &[&str],
 ) -> std::result::Result<PathBuf, String> {
-    let ran = cargo
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "-p",
-            package,
-            "--bin",
-            bin,
-        ])
-        .args(more)
-        .cwd(root)
-        .inheriting_env()
-        .unlimited()
-        .run()
-        .map_err(|cause| cause.to_string())?;
+    let mut words = vec!["--release", "--locked", "-p", package, "--bin", bin];
+    words.extend(more);
+    let ran = match cargo {
+        Cargo::Door => crate::door::cargo::build(root, &words),
+        #[cfg(test)]
+        Cargo::Fake(fake) => fake
+            .arg("build")
+            .args(&words)
+            .cwd(root)
+            .inheriting_env()
+            .unlimited()
+            .run(),
+    }
+    .map_err(|cause| cause.to_string())?;
     if ran.code != Some(0) {
         return Err(format!("building {bin} did not succeed: {ran}"));
     }
@@ -319,9 +327,9 @@ mod tests {
     /// A `cargo` that is a shell script: run by the shell, since a script that
     /// has just been written and is started while another thread starts a
     /// program of its own may be refused as a file still open for writing.
-    fn cargo(text: &str) -> (tempfile::TempDir, Run) {
+    fn cargo(text: &str) -> (tempfile::TempDir, Cargo) {
         let (folder, file) = script(text);
-        (folder, Run::new("/bin/sh").arg(file))
+        (folder, Cargo::Fake(Run::new("/bin/sh").arg(file)))
     }
 
     #[test]
@@ -402,7 +410,7 @@ mod tests {
     fn a_cargo_that_cannot_be_started_is_a_failed_build() {
         let root = tempfile::tempdir().unwrap();
         let failed = build(
-            Run::new(root.path().join("no-cargo")),
+            Cargo::Fake(Run::new(root.path().join("no-cargo"))),
             root.path(),
             "cf",
             "cf",
@@ -703,7 +711,7 @@ mod tests {
     fn helper_asks_for_the_cf_of_a_run() {
         static CELL: Built = OnceLock::new();
         let root = PathBuf::from(own_var(ROOT).unwrap());
-        let cargo = Run::new("/bin/sh").arg(own_var(CARGO).unwrap());
+        let cargo = Cargo::Fake(Run::new("/bin/sh").arg(own_var(CARGO).unwrap()));
         match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), (None, false)) {
             Ok(path) => {
                 let there: std::result::Result<bool, String> = if own_var(RUN).is_some() {

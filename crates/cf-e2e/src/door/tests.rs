@@ -614,6 +614,8 @@ fn a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_el
                 .env("CF_E2E_DOOR_WRITE_CHILD_HOME", mine.path())
                 .env("CF_E2E_DOOR_WRITE_CHILD_THEIRS", &kept)
                 .envs(handed)
+                // The roots a child must not write in come with the folders it may.
+                .envs(crate::door::account::child_vars().unwrap())
                 .output()
                 .unwrap();
             assert!(

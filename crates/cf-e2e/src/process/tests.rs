@@ -177,21 +177,32 @@ fn a_machine_environment_holds_the_machine_and_nothing_of_the_account() {
 #[cfg(unix)]
 #[test]
 fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
+    let kit = crate::door::made("kits-home-").unwrap();
+    let home = kit.path().join("home");
     let ran = Run::new("/usr/bin/env")
         .machine_env()
-        .var("HOME", "/the/kits/home")
+        .var("HOME", &home)
         .run()
         .unwrap();
-    assert!(ran.stdout.lines().any(|line| line == "HOME=/the/kits/home"));
+    assert!(ran
+        .stdout
+        .lines()
+        .any(|line| line == format!("HOME={}", home.display())));
+    // Every other home is below the one the case named, none the caller's.
     for name in [
         "CODEX_HOME=",
         "CLAUDE_CONFIG_DIR=",
         "XDG_CONFIG_HOME=",
         "USERPROFILE=",
     ] {
+        let line = ran
+            .stdout
+            .lines()
+            .find(|line| line.starts_with(name))
+            .unwrap_or_else(|| panic!("{name} was not given"));
         assert!(
-            !ran.stdout.lines().any(|line| line.starts_with(name)),
-            "{name} reached the child"
+            Path::new(&line[name.len()..]).starts_with(&home),
+            "{line} is not below the case's home"
         );
     }
 }
@@ -380,33 +391,50 @@ mod shell {
         assert_eq!(ran.stdout, "1|unset");
     }
 
+    /// Correction 8 of T-2002: the cargo a test starts is the door's, on a fixed list, whatever
+    /// the test's own environment holds: the variables cargo gave the test and a window's board
+    /// connection (`CONSENSFLOW_*`, set where the suite runs in an agent's window) never reach
+    /// it, and the door's own do.
     #[test]
     fn the_cargo_a_test_starts_is_without_what_cargo_gave_the_test_and_with_the_rest() {
-        let command = Run::cargo().command();
-        let taken: Vec<String> = command
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
+        let root = crate::door::made("cargo-env-").unwrap();
+        let env = crate::door::cargo::environment_of(
+            [
+                ("CARGO_MANIFEST_DIR", "/checkout/crates/cf-e2e"),
+                ("CARGO_PKG_NAME", "cf-e2e"),
+                ("CONSENSFLOW_TOKEN", "board"),
+                ("CONSENSFLOW_PARTICIPANT", "worker"),
+                ("CARGO", "/toolchain/bin/cargo"),
+                ("CARGO_HOME", "/owner/.cargo"),
+                ("CARGO_TARGET_DIR", "/checkout/target"),
+                ("RUSTC_BOOTSTRAP", "1"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            None,
+            root.path(),
+            &|_| false,
+        )
+        .unwrap();
+        let names: Vec<String> = env
+            .iter()
             .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect();
-        // Cargo sets these for the test that runs this (CARGO_CRATE_NAME is for the compiler's).
-        for given in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME"] {
-            assert!(taken.iter().any(|name| name == given), "{given}: {taken:?}");
+        for given in [
+            "CARGO_MANIFEST_DIR",
+            "CARGO_PKG_NAME",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+        ] {
+            assert!(!names.iter().any(|name| name == given), "{given}: {names:?}");
         }
-        // What is the user's or the system's stays: the build the test is part of has it too.
-        for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP"] {
-            assert!(!taken.iter().any(|name| name == kept), "{kept}: {taken:?}");
+        // What is the user's or the system's toolchain stays: the build the test is part of has
+        // it too.
+        for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP", "HOME"] {
+            assert!(names.iter().any(|name| name == kept), "{kept}: {names:?}");
         }
-        // The door also clears inherited roots, or replaces them with this run's own.
-        assert!(command
-            .get_envs()
-            .any(|(name, _)| name == crate::door::MADE_ROOTS));
-        assert!(
-            taken
-                .iter()
-                .all(|name| name == crate::door::MADE_ROOTS || nested_cargo::given_to_a_test(name)),
-            "removed: {taken:?}"
-        );
-        assert_eq!(command.get_program(), nested_cargo::CARGO);
+        // The program is the cargo that built the test.
+        assert_eq!(crate::door::cargo::CARGO, env!("CARGO"));
     }
 
     #[test]

@@ -92,7 +92,8 @@ regex.workspace = true
 rusqlite.workspace = true
 # What a case reads of a command's JSON answer, and the frames of the bridge.
 serde_json.workspace = true
-# The hash of the token the stand-in Codex lets in on loopback.
+# The hash of the token the stand-in Codex lets in on loopback, and of the protected roots a
+# child of the run is handed.
 sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
@@ -147,9 +148,9 @@ nix = { workspace = true, features = ["fs"] }
 
 # The console's raw mode for the stand-in agent, which std does not give; and a handle
 # to a process a live check ends, on which its creation time is read and through which
-# it is ended.
+# it is ended; and a file's identity, which the write door checks a file it made by.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

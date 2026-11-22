@@ -377,7 +377,9 @@ fn one_shot_within(
         source,
     })?;
     let baseline = inventory(records);
-    let ran = Run::new(program)
+    // The renewal's own door: the account's home by name, which no other start is given (it
+    // runs only on a marked test machine, `renew_on_a_test_machine`).
+    let ran = Run::operation("renewal", program)
         .args(words)
         .machine_env()
         .vars(account.iter().cloned())

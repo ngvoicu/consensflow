@@ -450,7 +450,9 @@ mod tests {
     fn standin_isolation_window_path_refuses_a_foreign_harness_home() {
         const CHILD: &str = "CF_T1647_PATH_CHILD";
         const DECOY: &str = "CF_T1647_PATH_DECOY";
-        if let Some(foreign) = crate::process::own_var(DECOY) {
+        if let Some(said) = crate::process::own_var(DECOY) {
+            // Handed in a file of the run's: only `PATH` may name a store.
+            let foreign = files::read_string(std::path::Path::new(&said)).unwrap();
             let root = crate::door::made("window-path-").unwrap();
             let mut env = vec![("PATH".to_owned(), foreign)];
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -473,6 +475,12 @@ mod tests {
             .parent()
             .unwrap()
             .join(format!("synthetic-foreign-harness-{}", std::process::id()));
+        let held = crate::door::made("window-path-decoy-").unwrap();
+        let said = held.path().join("decoy.txt");
+        files::write(&said, decoy.to_string_lossy().as_bytes()).unwrap();
+        // The decoy is one of the run's protected roots, which the child reads from the run's
+        // file and never from its own environment.
+        let protected = crate::door::account::TestRoot::add(&decoy);
         let output = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
@@ -480,10 +488,10 @@ mod tests {
         )
         .inheriting_env()
         .var(CHILD, "1")
-        .var(DECOY, &decoy)
-        .var("CODEX_HOME", &decoy)
+        .var(DECOY, &said)
         .run()
         .unwrap();
+        drop(protected);
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 

@@ -1,0 +1,69 @@
+//! A file's identity as the system holds it (the device and the file's number on Unix, the
+//! volume and the file's index on Windows): what the write door checks a file it made by when it
+//! writes it again, so that a file put at that path since is not taken for the run's (K3,
+//! T-2002 finding 5), and what tells whether two spellings of a name are one file.
+#![allow(unsafe_code)] // Windows' `GetFileInformationByHandle`, which std does not give.
+
+use std::fs;
+use std::io;
+use std::path::Path;
+
+/// The identity of `file`, an open file, as text.
+pub fn of_file(file: &fs::File) -> io::Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let found = file.metadata()?;
+        Ok(format!("{}:{}", found.dev(), found.ino()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle is the open file's own, and the structure is ours to fill.
+        let read = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) };
+        if read == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(format!(
+            "{}:{}:{}",
+            information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow
+        ))
+    }
+}
+
+/// The identity of what `path` leads to: a file or a folder.
+pub fn of_path(path: &Path) -> io::Result<String> {
+    let mut open = fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // A folder is opened only with the flag that asks for it (`FILE_FLAG_BACKUP_SEMANTICS`).
+        open.custom_flags(0x0200_0000);
+    }
+    of_file(&open.open(path)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_is_itself_and_a_file_put_at_its_path_since_is_another() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("report.txt");
+        fs::write(&file, "first").unwrap();
+        let first = of_path(&file).unwrap();
+        assert_eq!(of_path(&file).unwrap(), first);
+        fs::remove_file(&file).unwrap();
+        // A file made at the same path while the first is still open is another file.
+        let held = fs::File::create(folder.path().join("held")).unwrap();
+        fs::write(&file, "second").unwrap();
+        assert_ne!(of_path(&file).unwrap(), first);
+        drop(held);
+    }
+}

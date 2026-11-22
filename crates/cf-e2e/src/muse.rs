@@ -1434,8 +1434,10 @@ mod tests {
 
     #[test]
     fn standin_isolation_muse_search_passes_over_an_inherited_harness_home() {
-        const CHILD_PATH: &str = "CF_T1687_MUSE_SEARCH_PATH";
-        if let Some(path) = crate::process::own_var(CHILD_PATH) {
+        // The search path is handed in a file of the run's: only `PATH` may name a store.
+        const CHILD_PATH: &str = "CF_T1687_MUSE_SEARCH_FILE";
+        if let Some(file) = crate::process::own_var(CHILD_PATH) {
+            let path = std::fs::read_to_string(file).unwrap();
             let found = installed_on(&path, None).unwrap();
             assert_eq!(found.version, "safe");
             return;
@@ -1446,6 +1448,11 @@ mod tests {
         install(&forbidden, "must-not-be-read");
         install(&allowed, "safe");
         let path = std::env::join_paths([&forbidden, &allowed]).unwrap();
+        let said = root.path().join("search-path.txt");
+        files::write(&said, path.to_string_lossy().as_bytes()).unwrap();
+        // The decoy is one of the run's protected roots, which the child reads from the run's
+        // file and never from its own environment.
+        let protected = crate::door::account::TestRoot::add(&forbidden);
         let output = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "muse::tests::standin_isolation_muse_search_passes_over_an_inherited_harness_home",
@@ -1453,10 +1460,10 @@ mod tests {
         )
         .inheriting_env()
         .arg("--nocapture")
-        .var("CODEX_HOME", &forbidden)
-        .var(CHILD_PATH, path)
+        .var(CHILD_PATH, &said)
         .run()
         .unwrap();
+        drop(protected);
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
@@ -1536,10 +1543,12 @@ mod tests {
         let bin = folder.path().join("bin");
         files::make_dir(&bin).unwrap();
         let argv = folder.path().join("argv.log");
+        // A caller's own folders, which the launcher puts the rig's in place of.
+        let caller = folder.path().join("a-home");
         let ran = |launcher: &Path| {
             let ran = crate::process::Run::new(launcher)
-                .var("XDG_CONFIG_HOME", "/a-home/config")
-                .var("XDG_DATA_HOME", "/a-home/data")
+                .var("XDG_CONFIG_HOME", caller.join("config"))
+                .var("XDG_DATA_HOME", caller.join("data"))
                 .run()
                 .unwrap();
             assert_eq!(ran.code, Some(0), "{ran}");
@@ -1581,7 +1590,8 @@ mod tests {
             &dir.path().join("argv.log"),
         )
         .unwrap();
-        let mut run = crate::process::Run::new(dir.path().join("muse-bin-9.9.9"))
+        // Muse's program by its name, started as a harness's is.
+        let mut run = crate::process::Run::harness("muse", dir.path().join("muse-bin-9.9.9"))
             .finding_programs()
             .limit(std::time::Duration::from_secs(20));
         if let Some(ms) = repaint_ms {

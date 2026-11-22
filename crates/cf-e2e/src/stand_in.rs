@@ -186,9 +186,8 @@ mod tests {
         let in_the_way = root.path().join("bin");
         fs::write(&in_the_way, "a file").unwrap();
         let failed = install(&in_the_way, "claude").unwrap_err();
-        assert!(
-            matches!(failed, Error::File { action: "make", .. }),
-            "{failed}"
-        );
+        // Refused where the file would be: a folder of the run's with a file for a folder in it.
+        assert!(matches!(failed, Error::File { .. }), "{failed}");
+        assert!(fs::read_to_string(&in_the_way).unwrap() == "a file");
     }
 }

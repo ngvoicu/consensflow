@@ -71,7 +71,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::process::Run;
     use crate::{cf, checkout};
 
     /// The probe behind the copy (T-581: 17 of 20 builds that found `cf` up to date took it away
@@ -108,21 +107,11 @@ mod tests {
             })
         };
         for _ in 0..20 {
-            let ran = Run::cargo()
-                .args([
-                    "build",
-                    "--offline",
-                    "--release",
-                    "--locked",
-                    "-p",
-                    "cf",
-                    "--bin",
-                    "cf",
-                ])
-                .cwd(checkout::root())
-                .unlimited()
-                .run()
-                .unwrap();
+            let ran = crate::door::cargo::build(
+                &checkout::root(),
+                &["--offline", "--release", "--locked", "-p", "cf", "--bin", "cf"],
+            )
+            .unwrap();
             assert_eq!(ran.code, Some(0), "{ran}");
         }
         stop.store(true, Ordering::Relaxed);

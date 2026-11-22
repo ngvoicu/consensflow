@@ -156,12 +156,9 @@ fn standin_isolation_nested_cargo_finds_its_compiler_without_path() -> Outcome {
     )?;
     cf_e2e::door::make_dir(project.path().join("src"))?;
     cf_e2e::door::write(project.path().join("src/lib.rs"), "pub fn probe() {}\n")?;
-    let output = cf_e2e::process::Run::cargo()
-        .cwd(project.path())
-        .var("PATH", "")
-        .var("CARGO_TARGET_DIR", project.path().join("target"))
-        .args(["check", "--offline", "-j", "4"])
-        .run()?;
+    // The one cargo a rig case starts: the door's fixed check of a fixture of the run's, allowed
+    // where the run builds nothing (`isolated-test-runner.sh` sets CF_E2E_NO_BUILD for the rig).
+    let output = cf_e2e::door::cargo::check_offline(project.path())?;
     assert_eq!(
         output.code,
         Some(0),

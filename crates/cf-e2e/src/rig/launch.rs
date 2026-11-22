@@ -72,7 +72,7 @@ impl Rig {
                 crate::standin_process::require_home(&folder, "rig home allocation lookup");
                 // The place the rig's own folder is made in is made where it is not there, and
                 // is no folder of the run's: only the rig's root below it is.
-                crate::door::make_place(&folder).map_err(Error::file("make", &folder))?;
+                crate::door::allocation_place(&folder).map_err(Error::file("make", &folder))?;
                 super::sweep::homes(&folder);
                 let scratch =
                     crate::door::made_in(&folder, crate::door::RIG_PREFIX).map_err(|source| {

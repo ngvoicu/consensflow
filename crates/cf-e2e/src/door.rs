@@ -63,7 +63,12 @@ use crate::live::members::{
     Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
+pub mod account;
 mod again;
+pub mod cargo;
+pub mod identity;
+pub mod place;
+pub mod spawn;
 mod writes;
 
 pub use again::again_under_audit;
@@ -244,6 +249,13 @@ impl Door {
     pub fn child_vars() -> Vec<(String, String)> {
         let mut vars = Door::audit_vars();
         vars.extend(handed_down());
+        // The roots the child must not write in, which it reads from the run's file and never
+        // builds from its own environment ([`account`]); a run that cannot write them starts
+        // nothing.
+        vars.extend(
+            account::child_vars()
+                .unwrap_or_else(|why| panic!("the run starts no program: {why}")),
+        );
         vars
     }
 
@@ -481,9 +493,11 @@ impl Door {
     /// Takes away `path`, a folder this process made through the door ([`made_in`]): left, and
     /// said, where it is none.
     pub fn remove_made(&self, path: &Path) -> Removed {
-        let known = canonical(path).is_some_and(|real| registry().contains(&real));
-        if !known {
+        if !is_made(path) {
             return Removed::Left(path.to_path_buf(), "it is no folder this run made".into());
+        }
+        if let Err(refused) = judge(path, place::Act::Remove) {
+            return Removed::Left(path.to_path_buf(), refused.to_string());
         }
         if self.says_only() {
             self.say(
@@ -511,22 +525,21 @@ impl Door {
     /// Takes away `path`, under a folder this process made through the door: left, and said,
     /// where it is under none (compared by the real path of what holds it, by whole components).
     pub fn remove_in_made(&self, path: &Path) -> Removed {
-        let Some(real) = path
-            .parent()
-            .and_then(canonical)
-            .zip(path.file_name())
-            .map(|(parent, name)| parent.join(name))
-        else {
+        if path.parent().and_then(canonical).is_none() {
             return Removed::Absent(path.to_path_buf());
-        };
-        let under = registry()
-            .iter()
-            .any(|made| real.starts_with(made) && real != *made);
+        }
+        let judged = judge(path, place::Act::Remove);
+        let under = judged.as_ref().is_ok_and(|real| {
+            registry()
+                .iter()
+                .any(|made| made.file.is_none() && real.starts_with(&made.real) && *real != made.real)
+        });
         if !under {
-            return Removed::Left(
-                path.to_path_buf(),
-                "it is under no folder this run made".into(),
-            );
+            let why = match judged {
+                Err(refused) => refused.to_string(),
+                Ok(_) => "it is under no folder this run made".into(),
+            };
+            return Removed::Left(path.to_path_buf(), why);
         }
         if fs::symlink_metadata(path).is_err() {
             return Removed::Absent(path.to_path_buf());
@@ -686,14 +699,140 @@ pub fn own_stem(stem: &str) -> String {
 /// process of a run cannot tell a person's value from its parent's).
 pub const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
 
+/// What the run made: a folder, or a file with the identity it had when it was made (a file put
+/// at that path since is another, and none of the run's: T-2002 finding 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Entry {
+    real: PathBuf,
+    file: Option<String>,
+}
+
 /// The folders and files this process made through the door, by their real paths, and those its
 /// parent handed to it ([`MADE_ROOTS`]).
 #[allow(clippy::disallowed_methods)] // the door is read before any `main` could hand an Env on
-fn registry() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
-    static MADE: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
-    MADE.get_or_init(|| Mutex::new(roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())))
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+fn registry() -> std::sync::MutexGuard<'static, Vec<Entry>> {
+    static MADE: OnceLock<Mutex<Vec<Entry>>> = OnceLock::new();
+    MADE.get_or_init(|| {
+        Mutex::new(
+            roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())
+                .into_iter()
+                .map(|real| Entry { real, file: None })
+                .collect(),
+        )
+    })
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+}
+
+impl place::Registry for Vec<Entry> {
+    fn is_made_folder(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            made.file.is_none()
+                && place::within(real, &made.real, any_case)
+                && place::within(&made.real, real, any_case)
+                && made.real.is_dir()
+        })
+    }
+
+    fn is_below_made(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            made.file.is_none()
+                && place::within(real, &made.real, any_case)
+                && !place::within(&made.real, real, any_case)
+                && made.real.is_dir()
+        })
+    }
+
+    fn is_made_file(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            made.file.as_ref().is_some_and(|identity| {
+                place::within(real, &made.real, any_case)
+                    && place::within(&made.real, real, any_case)
+                    && identity::of_path(real).is_ok_and(|now| now == *identity)
+            })
+        })
+    }
+}
+
+/// Judges `path` for `act` against the account's protected roots and what this run made: the
+/// place to act on, resolved, or why not ([`place`]).
+pub fn judge(path: &Path, act: place::Act) -> io::Result<PathBuf> {
+    let protected = account::protected();
+    let made = registry().clone();
+    place::judge_with(path, act, &protected, &made)
+}
+
+/// Whether `path` resolves inside a protected root, by any way it resolves, or is spelled inside
+/// one: what the seal asks of every variable but the search path and the homes.
+pub fn inside_protected(path: &Path) -> bool {
+    let protected = account::protected();
+    let ways = place::resolve(path)
+        .map(|ways| ways.iter().map(place::Resolved::whole).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let any_case = cfg!(any(windows, target_os = "macos"));
+    protected.iter().any(|root| {
+        let mut roots = vec![root.clone()];
+        if let Ok(found) = place::resolve(root) {
+            roots.extend(found.iter().map(place::Resolved::whole));
+        }
+        roots.iter().any(|root| {
+            place::within(path, root, any_case)
+                || ways.iter().any(|way| place::within(way, root, any_case))
+        })
+    })
+}
+
+/// Seals `env`, a program's whole environment, for this run ([`spawn::seal`]): its homes must
+/// be folders this run made, no other variable but the search path names a protected root, and
+/// the door's own variables (`kit`) are as the door gave them.
+pub fn sealed(
+    env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    kit: &[(String, String)],
+    windows: bool,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    spawn::seal(
+        env,
+        &spawn::Judges {
+            windows,
+            is_runs: &is_made_or_below,
+            in_protected: &inside_protected,
+            kit,
+        },
+    )
+}
+
+/// What `program` is ([`spawn::program_of`]), found on the search path `env` gives it where it
+/// is a bare name, by the file it resolves to.
+pub fn program_in(
+    program: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> spawn::Program {
+    let windows = cfg!(windows);
+    let get = |wanted: &str| {
+        env.iter()
+            .find(|(name, _)| {
+                if windows {
+                    name.to_string_lossy().eq_ignore_ascii_case(wanted)
+                } else {
+                    name == wanted
+                }
+            })
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+    };
+    let found = if program.components().count() > 1 || program.is_absolute() {
+        Some(program.to_path_buf())
+    } else {
+        crate::process::first_on_path(
+            &program.to_string_lossy(),
+            &get("PATH").unwrap_or_default(),
+            &get("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned()),
+        )
+    };
+    let real = found.as_deref().and_then(canonical);
+    let judged = real.as_deref().or(found.as_deref()).unwrap_or(program);
+    let in_store = inside_protected(judged);
+    let made_by_run = is_made_or_below(judged);
+    spawn::program_of(found.as_deref().unwrap_or(program), real.as_deref(), in_store, made_by_run)
 }
 
 /// The paths `value` hands down ([`MADE_ROOTS`]), each by its real path where it is there: the
@@ -712,9 +851,14 @@ fn roots_handed_down(value: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
 /// The variable that hands this run's folders to a program it starts: none where it made none.
 /// The program's own writers ask the same registry as this process's ([`writable`]); what it
 /// makes itself it cannot hand back, and what this process makes after it started it is not
-/// there.
+/// there. Only folders are handed down: a file the run made is written by the process that made
+/// it.
 pub fn handed_down() -> Vec<(String, String)> {
-    let roots = registry().clone();
+    let roots: Vec<PathBuf> = registry()
+        .iter()
+        .filter(|made| made.file.is_none())
+        .map(|made| made.real.clone())
+        .collect();
     if roots.is_empty() {
         return Vec::new();
     }
@@ -724,47 +868,57 @@ pub fn handed_down() -> Vec<(String, String)> {
     }
 }
 
-/// Registers the file or folder `path` as one this run made.
-fn register(path: &Path) {
+/// Registers the folder `path` as one this run made.
+fn register_folder(path: &Path) {
     let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
     let mut made = registry();
-    if !made.contains(&real) {
-        made.push(real);
+    let entry = Entry { real, file: None };
+    if !made.contains(&entry) {
+        made.push(entry);
     }
+}
+
+/// Registers `file`, open at `path`, as a file this run made, by its identity.
+fn register_file(path: &Path, file: &fs::File) -> io::Result<()> {
+    let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
+    let identity = identity::of_file(file)?;
+    registry().push(Entry {
+        real,
+        file: Some(identity),
+    });
+    Ok(())
 }
 
 /// Forgets `path` as a folder this process made.
 fn forget_made(path: &Path) {
     let real = canonical(path);
-    registry().retain(|made| Some(made) != real.as_ref() && made != path);
+    registry().retain(|made| Some(&made.real) != real.as_ref() && made.real != path);
 }
 
 /// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
 pub fn is_made(path: &Path) -> bool {
-    canonical(path).is_some_and(|real| registry().contains(&real))
+    canonical(path)
+        .is_some_and(|real| registry().iter().any(|made| made.file.is_none() && made.real == real))
 }
 
-/// Whether `path` is a folder this process made through the door, or is below one, by real paths.
+/// Whether `path` is a folder this process made through the door, or is below one, by real paths
+/// (a file this run made counts as below the folder it is in only where that folder is the run's).
 pub fn is_made_or_below(path: &Path) -> bool {
-    real_beneath(path).is_some_and(|real| registry().iter().any(|made| real.starts_with(made)))
+    real_beneath(path).is_some_and(|real| {
+        registry()
+            .iter()
+            .any(|made| made.file.is_none() && real.starts_with(&made.real))
+    })
 }
 
 /// The real path of `path` where it is not there yet: its deepest folder that is there by its
-/// real path, and the rest of the names after it. None where a name is `..`.
+/// real path, and the rest of the names after it ([`place::resolve`]). None where it cannot be
+/// resolved, or where a name is `..`.
 fn real_beneath(path: &Path) -> Option<PathBuf> {
-    let mut rest = Vec::new();
-    let mut at = path.to_path_buf();
-    loop {
-        if let Some(real) = canonical(&at) {
-            return Some(rest.iter().rev().fold(real, |real, name| real.join(name)));
-        }
-        let name = at.file_name()?.to_os_string();
-        if name == ".." {
-            return None;
-        }
-        rest.push(name);
-        at = at.parent()?.to_path_buf();
-    }
+    place::resolve(path)
+        .ok()?
+        .first()
+        .map(place::Resolved::whole)
 }
 
 /// Whether `path` names a place in the kit's live zone: the folder every run puts its projects
@@ -790,45 +944,57 @@ pub fn in_live_zone(path: &Path) -> bool {
     zone(path) || real_beneath(path).is_some_and(|real| zone(&real))
 }
 
-/// Whether a file or folder may be made at `path`: only below a folder this run made through the
-/// door ([`made_in`]) or handed down to this program ([`MADE_ROOTS`]), or as a file this run made
-/// ([`made_file`]), by the real path; the last link of a path is refused, and a path through an earlier
-/// link is taken only where its real place is inside what the run made. Everywhere else is
-/// another run's, a person's, or nobody's: the live folder, the temp folder, a config folder a caller
-/// named. A folder (`folder`) may also be the run's own folder itself, made again.
+/// Whether a file or folder may be made or written at `path` ([`place::Act::Write`]): outside
+/// every protected root, and below a folder this run made through the door ([`made_in`]) or
+/// handed down to this program ([`MADE_ROOTS`]), or a file this run made and is still the same
+/// file, by the real path; the last link of a path is refused. A folder may also be the run's own
+/// folder itself, made again, where `folder` says the caller makes a folder ([`place::Act::Folder`]).
 pub fn writable(path: &Path, folder: bool) -> Result<(), String> {
-    let Some(real) = real_beneath(path) else {
-        return Err("it leads up out of the folder it names".into());
+    let act = if folder {
+        place::Act::Folder
+    } else {
+        place::Act::Write
     };
-    let allowed = registry().iter().any(|made| {
-        if real == *made {
-            // The folder itself may be made again; a file this run made may be written.
-            folder == made.is_dir()
-        } else {
-            real.starts_with(made) && made.is_dir()
-        }
-    });
-    if !allowed {
-        return Err(format!(
-            "{} is below no folder this run made, so it is another run's, a person's, or nobody's",
-            real.display()
-        ));
-    }
-    if fs::symlink_metadata(path).is_ok_and(|found| found.file_type().is_symlink()) {
-        return Err("it is a link, and a write goes through a link to what it leads to".into());
-    }
-    Ok(())
+    judge(path, act)
+        .map(drop)
+        .map_err(|refused| refused.to_string())
 }
 
 /// Makes the place an allocation is made in where it is not there (the live folder of a machine
-/// nobody has run on, the folder of a build's reports before a first run): folders made empty,
-/// and none that is there is changed. It is the one thing the door makes that is no allocation of
-/// the run's, and it is no place to write: [`writable`] says no to it until a folder is made in it.
-pub fn make_place(place: &Path) -> io::Result<()> {
-    if place.is_dir() {
-        return Ok(());
+/// nobody has run on, the folder of a build's reports before a first run), judged as an
+/// allocation ([`place::Act::Allocate`]): refused inside a protected root; each missing folder
+/// made new, one at a time, and none that is there changed. No folder of it is the run's:
+/// [`writable`] says no to it until a folder is made in it.
+pub fn allocation_place(place: &Path) -> io::Result<()> {
+    judge(place, place::Act::Allocate)?;
+    make_missing(place)
+}
+
+/// Makes each folder of `place` that is not there, from the top, each new: a folder that is
+/// there already (made since by another) is taken only where it is a folder and no link.
+fn make_missing(place: &Path) -> io::Result<()> {
+    let mut missing = Vec::new();
+    let mut at = place.to_path_buf();
+    while fs::symlink_metadata(&at).is_err() {
+        missing.push(at.clone());
+        match at.parent() {
+            Some(parent) => at = parent.to_path_buf(),
+            None => break,
+        }
     }
-    fs::create_dir_all(place)
+    for folder in missing.into_iter().rev() {
+        match fs::create_dir(&folder) {
+            Ok(()) => {}
+            Err(failed) if failed.kind() == io::ErrorKind::AlreadyExists => {
+                let found = fs::symlink_metadata(&folder)?;
+                if !found.is_dir() {
+                    return Err(failed);
+                }
+            }
+            Err(failed) => return Err(failed),
+        }
+    }
+    Ok(())
 }
 
 /// A folder of a random name this process made through the door, in `parent`, its name begun
@@ -837,14 +1003,12 @@ pub fn made_in(parent: &Path, prefix: &str) -> io::Result<Made> {
     // A say-only run whose audit file cannot be used stops before it makes a folder.
     Door::init();
     // Judged by where the parent resolves, before anything is made there.
-    crate::standin_process::refuse_protected_place(parent)?;
-    make_place(parent)?;
+    allocation_place(parent)?;
     let folder = tempfile::Builder::new()
         .prefix(prefix)
         .tempdir_in(parent)?
         .keep();
-    let real = canonical(&folder).unwrap_or_else(|| folder.clone());
-    registry().push(real);
+    register_folder(&folder);
     Ok(Made {
         path: folder,
         kept: false,

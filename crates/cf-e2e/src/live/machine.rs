@@ -106,15 +106,22 @@ impl Harness {
     /// there says the machine has been set up for it. Codex's home is its own
     /// folder, which is all there is to look for. Devin's are the places of the
     /// XDG layout; on Windows it keeps its login elsewhere ([`login_places`]).
-    const fn login_marks(self) -> &'static [&'static str] {
+    fn login_marks(self) -> Vec<String> {
         match self {
-            Self::Claude => &[".claude.json", ".claude"],
-            Self::Pi => &[".pi"],
-            Self::Devin => &[".config/devin", ".local/share/devin"],
-            Self::Codex => &[""],
-            // Muse keeps its login's metadata in its config folder and the secret in the
-            // system's keychain, which the run's windows reach by the user's name.
-            Self::Muse => &[".config/muse"],
+            Self::Codex => vec![String::new()],
+            harness => super::stores::login_marks(harness.store()),
+        }
+    }
+
+    /// Whose its stores are, in the table of every store ([`super::stores`]).
+    pub const fn store(self) -> super::stores::Whose {
+        use super::stores::Whose;
+        match self {
+            Self::Claude => Whose::Claude,
+            Self::Pi => Whose::Pi,
+            Self::Devin => Whose::Devin,
+            Self::Codex => Whose::Codex,
+            Self::Muse => Whose::Muse,
         }
     }
 
@@ -1098,7 +1105,7 @@ fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
     let root = live_root(home);
     // The shared folder itself is made empty, if it is not there: the one place a case's live
     // folder makes anything that is not its own, and a person's own `mkdir` makes the same.
-    crate::door::make_place(&root).map_err(Error::file("make", &root))?;
+    crate::door::allocation_place(&root).map_err(Error::file("make", &root))?;
     let own = self::home().is_ok_and(|own| same_place(&live_root(&own), &root));
     POOL.folder(&root, first, own, || {
         crate::door::made_in(&root, &format!("{first}-"))

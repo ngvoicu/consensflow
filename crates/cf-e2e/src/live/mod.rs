@@ -106,6 +106,7 @@ pub mod mcp_server;
 pub mod members;
 pub mod renew;
 pub mod report;
+pub mod stores;
 pub mod trace;
 pub mod tree;
 pub mod who;
