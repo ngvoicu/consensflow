@@ -128,7 +128,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                 // after, a question it asked before them is the session's.
                 question_idle_generation = match identity.question_start {
                     Some(start) if start.launch_brief.is_none() && start.task_in_hand.is_none() => {
-                        start.last_brief.filter(|brief| *brief > 0)
+                        start.last_brief
                     }
                     _ => None,
                 };

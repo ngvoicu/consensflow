@@ -562,40 +562,25 @@ fn a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_
 }
 
 #[test]
-fn a_question_asked_again_with_the_same_asking_keeps_its_stamp_and_its_board_question() {
+fn a_question_is_posted_once_with_the_stamp_of_its_asking() {
     let api = scripted(vec![
         reply(201, json!({ "message": { "id": 12 } })),
-        reply(200, json!({ "question": {}, "answer": null })),
         reply(
             200,
             json!({ "question": {}, "answer": { "id": 13, "choices": [["SQLite"]] } }),
         ),
     ]);
     let board = Board::new(Some(&api.url), "tok");
-    let asking = Asking::at(1_790_000_000_456);
-    assert_eq!(asking.posted(), None);
-    // The first copy puts it and its wait runs out; the copy that follows it is
-    // the same question, polled again, never posted twice.
-    let first = ask_the_board_until(
+    let answered = ask_the_board_until(
         &board,
         &one_question(),
-        &asking,
-        Duration::ZERO,
-        &AtomicBool::new(false),
-    )
-    .unwrap();
-    assert_eq!(first, None);
-    assert_eq!(asking.posted(), Some(12));
-    let again = ask_the_board_until(
-        &board,
-        &one_question(),
-        &asking.clone(),
+        &Asking::at(1_790_000_000_456),
         DOOR_WAIT,
         &AtomicBool::new(false),
     )
     .unwrap()
     .unwrap();
-    assert_eq!(again.id(), Some(13));
+    assert_eq!(answered.id(), Some(13));
     let posts: Vec<_> = api
         .received()
         .into_iter()

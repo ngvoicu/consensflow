@@ -109,8 +109,8 @@ meant = "q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrive
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/callers.rs"
-find = "                        start.last_brief.filter(|brief| *brief > 0)"
-replace = "                        start.last_brief.filter(|brief| *brief > 0).filter(|_| false)"
+find = "                        start.last_brief\n                    }"
+replace = "                        start.last_brief.filter(|_| false)\n                    }"
 
 [[plant]]
 name = "question asked at: the broker stamps a request with no moment"
@@ -120,3 +120,12 @@ runs = [["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broke
 file = "crates/cf-codex-session/src/broker/pair.rs"
 find = "        let begun = Asking::now();"
 replace = "        let begun = Asking::at(1);"
+
+[[plant]]
+name = "question asked at: the daemon drops the generation of a holding a Resume made"
+meant = "q1_a_fresh_idle_window_beside_a_holding_a_resume_made_asks_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        start.last_brief\n                    }"
+replace = "                        start.last_brief.filter(|brief| *brief > 0)\n                    }"

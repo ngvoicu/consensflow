@@ -668,16 +668,22 @@ pub(crate) fn placed_at(
         // A brief came after the token's window held no task. A question asked before
         // the first of them reached the window was asked while it was idle, whatever
         // holding those briefs made since.
-        let first_after: Option<String> = store
-            .db
-            .query_row(
-                "SELECT handed_at FROM message
-                 WHERE recipient_id = ?1 AND kind = 'task' AND id > ?2 AND id <= ?3
-                   AND handed_at IS NOT NULL ORDER BY id LIMIT 1",
-                params![window, generation, last_brief],
-                |r| r.get(0),
-            )
-            .optional()?;
+        // A holding a Resume made has a negative anchor for its generation: no brief of
+        // its own to look after.
+        let first_after: Option<String> = if generation > 0 {
+            store
+                .db
+                .query_row(
+                    "SELECT handed_at FROM message
+                     WHERE recipient_id = ?1 AND kind = 'task' AND id > ?2 AND id <= ?3
+                       AND handed_at IS NOT NULL ORDER BY id LIMIT 1",
+                    params![window, generation, last_brief],
+                    |r| r.get(0),
+                )
+                .optional()?
+        } else {
+            None
+        };
         if first_after
             .as_deref()
             .and_then(cf_base::time::parse)

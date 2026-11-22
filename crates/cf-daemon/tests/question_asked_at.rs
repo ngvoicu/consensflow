@@ -644,3 +644,48 @@ async fn q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrive
     assert_eq!((response.status, stored(&body)), (201, None), "{body}");
     assert_eq!((fresh.0, stored(&fresh.1)), (201, Some(next.task.number)));
 }
+
+/// A fresh window with no task and no brief, beside a holding a Resume made with no brief
+/// (its last brief is a negative anchor): its stamped question is the session's, in every
+/// state of that holding (review T-1991).
+#[tokio::test]
+async fn q1_a_fresh_idle_window_beside_a_holding_a_resume_made_asks_taskless() {
+    for case in [
+        "window ended",
+        "cancelled, end not dated",
+        "cancelled, end dated",
+    ] {
+        let mut w = world();
+        let (task, session, brief) = assignment(&mut w, false);
+        w.deliver(brief);
+        let (p, member) = (w.project, w.id(&session));
+        w.edit(|db| {
+            db.execute("DELETE FROM question_handover", []).unwrap();
+            db.execute("DELETE FROM question_holding", []).unwrap();
+        });
+        assert!(w.ledger.resume_question_holding(member, task).unwrap());
+        let made = w.ledger.question_holding(member).unwrap().unwrap();
+        assert!(made.last_brief < 0, "{made:?}");
+        match case {
+            "window ended" => {
+                w.ledger.close_question_window(member, None).unwrap();
+            }
+            "cancelled, end not dated" => {
+                w.ledger.cancel_task(p, task, "human").unwrap();
+                w.edit(|db| {
+                    db.execute("UPDATE question_holding SET ended_at=NULL", [])
+                        .unwrap();
+                });
+            }
+            _ => {
+                w.ledger.cancel_task(p, task, "human").unwrap();
+            }
+        }
+        let (c, _dir) = into_context(w);
+        let auth = issued(&c, p, member);
+        let (code, plain) = post(&c, asked(&auth, "Unstamped", None)).await;
+        assert_eq!((code, stored(&plain)), (201, None), "{case}: {plain}");
+        let (code, stamped) = post(&c, asked(&auth, "Stamped", Some(latest(&c) + 1))).await;
+        assert_eq!((code, stored(&stamped)), (201, None), "{case}: {stamped}");
+    }
+}
