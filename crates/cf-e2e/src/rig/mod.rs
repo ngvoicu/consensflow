@@ -71,6 +71,10 @@ use route::Shared;
 use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
+/// The variable by which the live kit tells its rig where the person's home is, for the project
+/// folders of a case and for nothing a program reads its profile by.
+pub const PROJECT_HOME: &str = "CF_KIT_PROJECT_HOME";
+
 const REQUEST: Duration = Duration::from_secs(10);
 
 /// How long the daemon and the pane host each have to end once their input has.
@@ -510,6 +514,15 @@ impl Rig {
     /// reads their output.
     pub fn host_pid(&self) -> u32 {
         self.host.id()
+    }
+
+    /// The folder a live case makes its project folders below: the person's home, which the
+    /// kit names for that and for nothing else ([`PROJECT_HOME`]); the rig's own `HOME` where
+    /// none is named. A window's `HOME` is never the person's.
+    pub fn project_home(&self) -> Option<&str> {
+        self.var(PROJECT_HOME)
+            .filter(|home| !home.is_empty())
+            .or_else(|| self.var("HOME").filter(|home| !home.is_empty()))
     }
 
     /// The value of the variable `name` in the environment of the daemon and

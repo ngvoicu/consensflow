@@ -343,50 +343,17 @@ fn a_machine_with_no_login_is_told_where_the_harness_keeps_it_and_what_to_do() {
 }
 
 #[test]
-fn a_window_reads_codexs_login_by_codex_home_and_every_others_by_the_machines_home() {
-    let nothing = |_: &str| None;
-    let codex = Installed::at(Harness::Codex, "bin/codex", "login");
-    assert_eq!(
-        codex.login(&nothing),
-        [("CODEX_HOME".to_owned(), "login".to_owned())]
-    );
-    let pi = Installed::at(Harness::Pi, "bin/pi", "machine");
-    let vars = pi.login(&nothing);
-    let var = |name: &str| {
-        vars.iter()
-            .rev()
-            .find(|(given, _)| given == name)
-            .map(|(_, value)| value.clone())
-    };
-    assert_eq!(var("HOME").as_deref(), Some("machine"));
-    let config = Path::new("machine").join(".config");
-    assert_eq!(
-        var("XDG_CONFIG_HOME").as_deref(),
-        Some(config.to_string_lossy().as_ref())
-    );
-    assert_eq!(var("XDG_DATA_HOME"), None, "the default is below the home");
-    assert_eq!(var("CODEX_HOME"), None);
-    // What the machine names for itself is what its windows read.
-    let machine = |name: &str| match name {
-        "XDG_CONFIG_HOME" => Some("/x/config".to_owned()),
-        "XDG_DATA_HOME" => Some("/x/data".to_owned()),
-        "XDG_CACHE_HOME" => Some(String::new()),
-        _ => None,
-    };
-    let vars = pi.login(&machine);
-    let var = |name: &str| {
-        vars.iter()
-            .rev()
-            .find(|(given, _)| given == name)
-            .map(|(_, value)| value.clone())
-    };
-    assert_eq!(var("XDG_CONFIG_HOME").as_deref(), Some("/x/config"));
-    assert_eq!(var("XDG_DATA_HOME").as_deref(), Some("/x/data"));
-    assert_eq!(
-        var("XDG_CACHE_HOME"),
-        None,
-        "a variable set to nothing is not set"
-    );
+fn no_install_gives_its_window_a_profile_variable_of_the_persons() {
+    let machine = |name: &str| Some(format!("/the-owners/{name}"));
+    for harness in Harness::ALL {
+        let install = Installed::at(harness, "bin/x", "/the/persons/home");
+        let vars = install.login(&machine);
+        assert_eq!(
+            vars,
+            [("CF_KIT_PROJECT_HOME".to_owned(), "/the/persons/home".to_owned())],
+            "{harness:?}"
+        );
+    }
 }
 
 #[test]
@@ -471,28 +438,36 @@ fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_th
             "{owners}: {debug}"
         );
     }
-    // Their home is the windows' all the same: the folders of the project are below it (Devin's
-    // window, opened below a folder of the rig's own, which macOS spells through the `/var` link
-    // of its temporary folder, showed no answer: 2026-10-27).
-    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    // The person's home is where the project folders are below, as before (Devin's window,
+    // opened below a folder of the rig's own, which macOS spells through the `/var` link of its
+    // temporary folder, showed no answer: 2026-10-27), and the windows' own home is not it.
+    assert!(
+        debug.contains("(\"CF_KIT_PROJECT_HOME\", \"/home/me\")"),
+        "{debug}"
+    );
+    assert!(!debug.contains("(\"HOME\", \"/home/me"), "{debug}");
     // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
     assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
 }
 
 #[test]
-fn a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder() {
+fn a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_own_home() {
     let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
         .with_isolation(Arc::new(Isolation::codex(
             Path::new("/home/me"),
             Path::new("/home/me/.codex"),
         )));
     let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
-    // The project folders are below the windows' home: never in the owner's Codex folder.
-    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
     assert!(
-        !debug.contains("(\"HOME\", \"/home/me/.codex\")"),
+        debug.contains("(\"CF_KIT_PROJECT_HOME\", \"/home/me\")"),
         "{debug}"
     );
+    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CODEX_HOME"] {
+        assert!(
+            !debug.contains(&format!("(\"{name}\", \"/home/me")),
+            "{name} is the person's: {debug}"
+        );
+    }
 }
 
 #[test]
@@ -513,7 +488,7 @@ fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its
     );
     assert!(debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
     assert!(
-        debug.contains("(\"CODEX_HOME\", \"/machine/.codex\")"),
+        !debug.contains("(\"CODEX_HOME\", \"/machine/.codex\")"),
         "{debug}"
     );
     // A locale that draws the windows' screens, which no harness's own setup gives them.

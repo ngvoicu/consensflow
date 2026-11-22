@@ -670,8 +670,7 @@ fn said(swept: &Swept) {
 /// files.
 fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
     let home = rig
-        .var("HOME")
-        .filter(|home| !home.is_empty())
+        .project_home()
         .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
     let folder = live_folder_in(Path::new(home), &plan.folder)?;
     for name in ["AGENTS.md", "CLAUDE.md"] {

@@ -409,49 +409,20 @@ impl Installed {
         folders
     }
 
-    /// The variables that make its windows read the machine's login, where the
-    /// rig would have them read its own home's: `machine` says what a variable
-    /// is on this machine.
-    fn login(&self, machine: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        let home = self.home.to_string_lossy().into_owned();
-        // A harness on a home of the run's own finds its login and config by the variables of
-        // that home, which the rig sets last ([`Installed::isolation`]): the person's home is
-        // given it all the same, as the place its project folders are (`~/.consensflow-candidate/
-        // live/…`), and for nothing it reads its login by. (Not a home of the rig's: Devin's
-        // window, opened in a folder below one, which macOS spells through the `/var` link of its
-        // temporary folder, shows no answer, 2026-10-27.)
-        // The person's home is the isolation's, not the folder the login is read from: Codex's
-        // is `~/.codex`, and a Codex window given that for its HOME had its project folders made
-        // in the owner's Codex folder (`~/.codex/.consensflow-candidate/live/…`, T-972).
-        if let Some(isolation) = &self.isolation {
-            let person = isolation.owner_home().to_string_lossy().into_owned();
-            let mut vars = vec![("HOME".to_owned(), person.clone())];
-            if cfg!(windows) {
-                vars.push(("USERPROFILE".to_owned(), person));
-            }
-            return vars;
-        }
-        if self.harness == Harness::Codex {
-            return vec![("CODEX_HOME".to_owned(), home)];
-        }
-        let mut vars = vec![("HOME".to_owned(), home.clone())];
-        if cfg!(windows) {
-            vars.push(("USERPROFILE".to_owned(), home.clone()));
-        }
-        // The rig puts the config folder below its own home: where the machine
-        // keeps it, or where the XDG layout does, is where these read theirs.
-        let config = machine("XDG_CONFIG_HOME")
-            .filter(|folder| !folder.is_empty())
-            .unwrap_or_else(|| self.home.join(".config").to_string_lossy().into_owned());
-        vars.push(("XDG_CONFIG_HOME".to_owned(), config));
-        // The others default below the home, which is the machine's now; one
-        // the machine names is its own.
-        for name in ["XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] {
-            if let Some(folder) = machine(name).filter(|folder| !folder.is_empty()) {
-                vars.push((name.to_owned(), folder));
-            }
-        }
-        vars
+    /// What a window of this harness is given of the person's home: the folder the project
+    /// folders are made below ([`crate::rig::PROJECT_HOME`]), and nothing a program reads a
+    /// profile by. The window's own `HOME`, `USERPROFILE`, XDG folders and harness folder are the
+    /// run's (the rig's private home, and the isolation the rig sets last,
+    /// [`Installed::isolation`]): a home-relative lookup of a harness, or of a program it starts,
+    /// never reaches the person's `.claude.json`, `.codex`, `.config`, Keychain files or login
+    /// (K3 review T-1978, 2). Where the project folders are is the kit's to say, not the
+    /// profile's: `machine` is the machine's own environment, which says nothing of it now.
+    fn login(&self, _machine: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+        let person = match &self.isolation {
+            Some(isolation) => isolation.owner_home().to_string_lossy().into_owned(),
+            None => self.home.to_string_lossy().into_owned(),
+        };
+        vec![(crate::rig::PROJECT_HOME.to_owned(), person)]
     }
 
     /// A rig whose windows run the stand-in `stand_in` for Claude and find this

@@ -395,8 +395,7 @@ impl<'a> Open<'a> {
         let harness = self.install.harness();
         let home = self
             .rig
-            .var("HOME")
-            .filter(|home| !home.is_empty())
+            .project_home()
             .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
         let workspace = live_folder_in(Path::new(home), &self.folder)?;
         let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
