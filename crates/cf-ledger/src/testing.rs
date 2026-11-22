@@ -103,6 +103,19 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
+pub fn undo_migration_0044(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "ALTER TABLE question_handover DROP COLUMN previous_span;
+         ALTER TABLE question_holding DROP COLUMN earlier;
+         ALTER TABLE question_holding DROP COLUMN prior_ended_at;
+         ALTER TABLE question_holding DROP COLUMN prior_began_at;
+         ALTER TABLE question_holding DROP COLUMN prior_task_id;
+         ALTER TABLE question_holding DROP COLUMN ended_at;
+         ALTER TABLE question_holding DROP COLUMN began_at;",
+    )
+}
+
 /// Remove the wait boundary when a fixture reconstructs a ledger before 0043.
 pub fn undo_migration_0043(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(

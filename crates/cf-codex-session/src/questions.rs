@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use cf_base::js;
 use cf_base::json::js_order;
-use cf_board::door::ask;
+use cf_board::door::{ask, Asking};
 use cf_board::Board;
 use cf_proto::questions::{Answer, Question, Reply};
 use serde_json::{json, Map, Value};
@@ -71,8 +71,14 @@ impl Asked {
     /// Puts the questions on the board and waits up to `wait` for the answer,
     /// or until `stop` is raised. Blocks: the caller runs it where blocking is
     /// fine, and everything else goes on meanwhile.
-    pub(crate) fn ask(&self, board: &Board, wait: Duration, stop: &AtomicBool) -> Reply {
-        ask(board, &self.questions, wait, stop)
+    pub(crate) fn ask(
+        &self,
+        board: &Board,
+        asking: &Asking,
+        wait: Duration,
+        stop: &AtomicBool,
+    ) -> Reply {
+        ask(board, &self.questions, asking, wait, stop)
     }
 }
 
@@ -208,8 +214,12 @@ mod tests {
             ),
         ]);
         let board = Board::new(Some(&api.url), "window-token");
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         let Reply::Answered(answer) = outcome else {
             panic!("{outcome:?}");
         };
@@ -227,8 +237,12 @@ mod tests {
             json!({ "error": "bad-questions", "message": "questions: one to 4 questions" }),
         )]);
         let board = Board::new(Some(&api.url), "window-token");
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         assert_eq!(
             outcome,
             Reply::Refused(
@@ -249,8 +263,12 @@ mod tests {
             ("CONSENSFLOW_TOKEN", ""),
         ]);
         let board = cf_board::door::board_of(&env).unwrap();
-        let outcome =
-            asked(&request()).ask(&board, Duration::from_secs(5), &AtomicBool::new(false));
+        let outcome = asked(&request()).ask(
+            &board,
+            &Asking::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        );
         assert!(
             matches!(&outcome, Reply::Refused(reason) if reason.contains("unknown participant")),
             "{outcome:?}"
@@ -263,7 +281,7 @@ mod tests {
         let gone = Board::new(Some("http://127.0.0.1:9"), "t");
         let quick = AtomicBool::new(false);
         assert_eq!(
-            asked(&request()).ask(&gone, Duration::from_secs(5), &quick),
+            asked(&request()).ask(&gone, &Asking::now(), Duration::from_secs(5), &quick),
             Reply::Unanswered
         );
 
@@ -273,7 +291,7 @@ mod tests {
         ]);
         let board = Board::new(Some(&api.url), "t");
         assert_eq!(
-            asked(&request()).ask(&board, Duration::from_millis(50), &quick),
+            asked(&request()).ask(&board, &Asking::now(), Duration::from_millis(50), &quick),
             Reply::Unanswered
         );
         quick.store(true, Ordering::Relaxed);
