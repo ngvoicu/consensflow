@@ -939,6 +939,7 @@ pub(crate) fn return_answer(
     if let Some(task) = task {
         event["task"] = json!(task);
     }
+    crate::waiting_questions::link_note(store, question, notice)?;
     store.log(project, "message.returned", event)?;
     Ok(true)
 }
@@ -1158,6 +1159,9 @@ pub(crate) fn close_project_question(
                            AND a.state NOT IN ('cancelled','failed'))",
         [question], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?)),
     ).optional()?;
+    if wait.is_some() {
+        crate::waiting_questions::begin_wait(store, question)?;
+    }
     let deferred = close_question_deferring(store, question, location, in_flight, end.reason())?;
     if let Some((project, sender, original_chief, handle, number, words, state, received)) = notice
     {
@@ -1177,7 +1181,7 @@ pub(crate) fn close_project_question(
             "@{handle}'s question m-{question} on T-{number} closed when {}.{detail}{way_on}",
             end.reason()
         );
-        queue(
+        let note = queue(
             store,
             project,
             &Queued {
@@ -1189,6 +1193,9 @@ pub(crate) fn close_project_question(
                 ..Queued::default()
             },
         )?;
+        if wait.is_some() {
+            crate::waiting_questions::link_note(store, question, note)?;
+        }
     }
     if let Some(task) = wait {
         store.db.execute(

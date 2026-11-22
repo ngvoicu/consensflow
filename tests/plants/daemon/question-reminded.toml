@@ -1,0 +1,142 @@
+# Q2 (N24): a question a restart or a project Close closed is reminded while its task waits.
+# The wait is a row of `question_wait` (the close's place, the note, the clock, a cursor of its own);
+# eligibility is read where a reminder is written and where it is admitted.
+[run]
+question-reminded-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "closed_wait::"]
+question-reminded-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1924_"]
+
+[[plant]]
+name = "question reminded: a tell still queued is not the chief's action"
+meant = "a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "              AND a.state IN ('queued','gated','delivering','delivered','read'))\";"
+replace = "              AND a.state IN ('delivered','read'))\";"
+
+[[plant]]
+name = "question reminded: acted is counted from the note, not from the close"
+meant = "a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "\"UPDATE question_wait SET note_id = coalesce(note_id, ?1) WHERE question_id = ?2\","
+replace = "\"UPDATE question_wait SET after_id = ?1, note_id = coalesce(note_id, ?1) WHERE question_id = ?2\","
+
+[[plant]]
+name = "question reminded: the clock is the question's own receipt"
+meant = "a_restarted_question_is_a_wait_once_its_note_is_delivered"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "const CLOSED_CLOCK: &str = \"coalesce(w.first_read_at, n.delivered_at)\";"
+replace = "const CLOSED_CLOCK: &str = \"coalesce(w.first_read_at, q.delivered_at)\";"
+
+[[plant]]
+name = "question reminded: the clock is the note's confirmation after an early read"
+meant = "the_clock_starts_at_the_first_inbox_read_of_a_note_still_on_its_way"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "const CLOSED_CLOCK: &str = \"coalesce(w.first_read_at, n.delivered_at)\";"
+replace = "const CLOSED_CLOCK: &str = \"n.delivered_at\";"
+
+[[plant]]
+name = "question reminded: an early read is not stamped"
+meant = "the_clock_starts_at_the_first_inbox_read_of_a_note_still_on_its_way"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        crate::waiting_questions::note_read_early(store, message.id)?;"
+replace = "        let _ = message.id;"
+
+[[plant]]
+name = "question reminded: a closed question's reminder says Answer it"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "                (Some(why), Some(number)) => format!("
+replace = "                (Some(why), Some(number)) if false => format!("
+
+[[plant]]
+name = "question reminded: the open question's cursor is reused"
+meant = "a_closed_questions_reminder_has_a_cursor_of_its_own_and_the_open_ones_link_stays"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            "UPDATE question_wait SET reminder_id = ?1 WHERE question_id = ?2",
+            params![sent.id, id],
+        )?;'''
+replace = '''            "UPDATE question_wait SET reminder_id = ?1 WHERE question_id = ?2",
+            params![sent.id, id],
+        )?;
+        store.db.execute(
+            "INSERT INTO question_reminder(question_id, reminder_id, ended) VALUES (?2, ?1, 0)
+             ON CONFLICT(question_id) DO UPDATE SET reminder_id=excluded.reminder_id",
+            params![sent.id, id],
+        )?;'''
+
+[[plant]]
+name = "question reminded: a task a person paused is reminded"
+meant = "each_end_stops_the_reminders_and_withdraws_a_queued_one"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working')"
+replace = "WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working','paused')"
+
+[[plant]]
+name = "question reminded: no reminder at 30 minutes"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const FIRST_REMINDER_MS: i64 = 30 * 60_000;"
+replace = "const FIRST_REMINDER_MS: i64 = 300 * 60_000;"
+
+[[plant]]
+name = "question reminded: the next is not two hours after"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const REPEAT_REMINDER_MS: i64 = 2 * 60 * 60_000;"
+replace = "const REPEAT_REMINDER_MS: i64 = 20 * 60 * 60_000;"
+
+[[plant]]
+name = "question reminded: a queued reminder is let through after the chief acted"
+meant = "each_end_stops_the_reminders_and_withdraws_a_queued_one"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''reminder.handed_at IS NULL AND NOT EXISTS (
+               SELECT 1 {CLOSED_FROM} AND w.question_id=own.question_id)"'''
+replace = '''reminder.handed_at IS NULL AND 0"'''
+
+[[plant]]
+name = "question reminded: a project that is closed is reminded"
+meant = "a_project_close_writes_none_while_it_lasts_and_its_resume_keeps_the_clock"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "    JOIN project pr ON pr.id=q.project_id AND pr.state='open'"
+replace = "    JOIN project pr ON pr.id=q.project_id"
+
+[[plant]]
+name = "question reminded: a wait an earlier build left is not inserted at its first link"
+meant = "the_first_link_of_a_wait_an_earlier_build_left_inserts_it"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "             WHERE b.question_id = ?2 AND b.closed = 2\","
+replace = "             WHERE b.question_id = ?2 AND 0\","
+
+[[plant]]
+name = "question reminded: an old wait's boundary is not the conservative one"
+meant = "the_first_link_of_a_wait_an_earlier_build_left_inserts_it"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "SELECT b.question_id, b.question_id, ?1 FROM question_binding b"
+replace = "SELECT b.question_id, (SELECT COALESCE(MAX(id), 0) FROM message), ?1 FROM question_binding b"

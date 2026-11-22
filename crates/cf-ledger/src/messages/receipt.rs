@@ -148,6 +148,9 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
     if message.kind == "question" && message.recipient_role == "chief" && !message.urgent {
         crate::waiting_questions::read_early(store, message.id)?;
     }
+    if message.kind == "note" {
+        crate::waiting_questions::note_read_early(store, message.id)?;
+    }
     Ok(())
 }
 

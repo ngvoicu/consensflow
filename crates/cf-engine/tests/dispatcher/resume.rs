@@ -4284,13 +4284,131 @@ fn t1859_unanswered(restart: bool, chief_received: bool) {
         note.contains("cf tell T-2 \"…\"") && note.contains("cf task finish T-2"),
         "{note}"
     );
+    // Q2: the closed question is reminded from the note's receipt, so it is a
+    // wait only once the chief has the note (T-1924).
+    let note = &notices[0];
     context.advance(3 * 60 * 60_000);
-    assert!(context
-        .ledger
-        .borrow()
-        .waiting_questions(project)
-        .unwrap()
-        .is_empty());
+    let waits = context.ledger.borrow().waiting_questions(project).unwrap();
+    assert_eq!(
+        waits.iter().any(|wait| wait.id == question.id),
+        context.message(note.id).delivered_at.is_some(),
+        "{waits:?}"
+    );
+}
+
+/// Q2 (T-1924): the closed question is reminded while its task waits. The first
+/// reminder comes 30 minutes after the chief had the note, the next two hours
+/// after that one arrived, none while one is on its way.
+fn t1924_reminded(restart: bool) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = tiers.id("chief");
+    let question = context.ask(project, "diana-brisk-birch", "chief", 2, "Which dialect?");
+    context.adapter.answer("diana", "I asked the chief.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let after = restart.then(|| quit_and_start(&context));
+    let step = || match &after {
+        Some(after) => after.pass().unwrap(),
+        None => context.pass().unwrap(),
+    };
+    if let Some(after) = &after {
+        after.resume_project(project).unwrap();
+    } else {
+        context.close_project(project).unwrap();
+        context.resume_project(project).unwrap();
+    }
+    for _ in 0..3 {
+        step();
+    }
+    context.adapter.answer("chief", "Noted.");
+    for _ in 0..3 {
+        step();
+    }
+    let why = if restart {
+        "ConsensFlow restarted"
+    } else {
+        "the project closed"
+    };
+    let reminders = |context: &Context| -> Vec<MessageView> {
+        context
+            .ledger
+            .borrow()
+            .sqlite()
+            .prepare("SELECT id FROM message WHERE kind='note' AND instr(body, ' has waited ')>0 AND instr(body, 'since for your words')>0 ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .map(|id| context.message(id.unwrap()))
+            .collect()
+    };
+    let note = context
+        .inbox(chief)
+        .into_iter()
+        .chain(
+            context
+                .ledger
+                .borrow()
+                .sqlite()
+                .prepare("SELECT id FROM message WHERE kind='note' AND instr(body, 'closed when')>0")
+                .unwrap()
+                .query_map([], |row| row.get::<_, i64>(0))
+                .unwrap()
+                .map(|id| context.message(id.unwrap())),
+        )
+        .find(|m| m.kind == "note" && m.body.contains(&format!("question m-{} on T-2", question.id)))
+        .expect("main's one note");
+    let arrived = context
+        .message(note.id)
+        .delivered_at
+        .expect("the chief had the note");
+    let _ = arrived;
+    assert!(reminders(&context).is_empty(), "no reminder with the note");
+    context.advance(29 * 60_000);
+    step();
+    assert!(reminders(&context).is_empty(), "none before 30 minutes");
+    context.advance(90_000);
+    step();
+    let first = reminders(&context);
+    assert_eq!(first.len(), 1, "one reminder at 30 minutes: {first:?}");
+    let body = &first[0].body;
+    assert!(body.contains(&format!("T-2's question m-{} closed when {why}", question.id)), "{body}");
+    assert!(body.contains("has waited 30 minutes since for your words"), "{body}");
+    assert!(body.contains("Tell @diana-brisk-birch with `cf tell T-2 \"…\"`."), "{body}");
+    assert!(!body.contains("Answer it"), "{body}");
+    step();
+    assert_eq!(reminders(&context).len(), 1, "none stacks while one is on its way");
+    context.adapter.answer("chief", "Noted.");
+    for _ in 0..3 {
+        step();
+    }
+    let delivered = context.message(first[0].id).delivered_at.is_some();
+    assert!(delivered, "the first reminder reached the chief");
+    {
+        context.advance(119 * 60_000);
+        step();
+        assert_eq!(reminders(&context).len(), 1, "the next is two hours after it");
+        context.advance(2 * 60_000);
+        step();
+        assert_eq!(reminders(&context).len(), 2, "two hours after the first arrived");
+    }
+    // The chief tells the member: the reminders end.
+    context.ledger.borrow_mut().tell_queued(project, 2, "chief", "Use ANSI").unwrap();
+    context.advance(5 * 60 * 60_000);
+    step();
+    assert_eq!(reminders(&context).len(), 2);
+}
+
+#[test]
+fn t1924_restart_reminds_the_closed_question() {
+    t1924_reminded(true);
+}
+#[test]
+fn t1924_close_and_resume_remind_the_closed_question() {
+    t1924_reminded(false);
 }
 
 #[test]
