@@ -303,10 +303,13 @@ runs = ["ss-ledger-slots"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
                                             WHERE backup_of = ?2 AND left_at IS NULL))",
 '''
 replace = '''
-                                            WHERE backup_of = ?2))",
+                     OR member_id IN (SELECT id FROM participant
+                                       WHERE backup_of = ?2)",
 '''
 
 [[plant]]
