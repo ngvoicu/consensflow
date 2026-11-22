@@ -216,16 +216,16 @@ fn the_steps_of_a_turn_that_stopped_for_a_tool_are_never_complete_and_the_step_t
 }
 
 #[test]
-fn a_step_that_names_no_end_keeps_the_turn_open_and_the_failure_as_it_was() {
+fn a_step_that_names_no_end_keeps_the_turn_open_without_failing_it() {
     let mut stage = Stage::with(&[
         header(),
         user("u1", "go"),
         assistant("a1", "error", "provider down"),
         calling("a2", &json!("c1")),
     ]);
-    // Tool use ends nothing and clears no failure: the file is quiet, the turn open.
+    // Tool use ends nothing: even with a quiet file, the turn is still open.
     let record = stage.at(1_000_000);
-    assert!(record.failed && record.in_flight);
+    assert!(!record.failed && record.in_flight);
     assert_eq!(record.settlement, Settlement::InFlight);
     // A step with no stop reason is no end either.
     stage.write(&[
@@ -235,7 +235,7 @@ fn a_step_that_names_no_end_keeps_the_turn_open_and_the_failure_as_it_was() {
         message("a2", json!({ "role": "assistant", "content": [] })),
     ]);
     let record = stage.at(1_000_000);
-    assert!(record.failed && record.in_flight);
+    assert!(!record.failed && record.in_flight);
     // A user message clears the failure.
     stage.write(&[
         header(),
@@ -262,7 +262,7 @@ fn a_refusal_names_its_quota_and_a_genuine_user_turn_or_the_next_step_clears_it(
         resets_at: Some("2026-09-23T14:13:20.000Z".to_owned()),
     };
     assert_eq!(first.quota.as_deref(), Some(&quota));
-    assert!(first.failed);
+    assert!(!first.failed && first.in_flight);
     // The same object, look after look, until the transcript changes it.
     let again = stage.at(500);
     assert!(Arc::ptr_eq(
@@ -314,7 +314,7 @@ fn pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailabl
             failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
         ]);
         let record = stage.at(0);
-        assert!(record.failed, "{error}");
+        assert!(!record.failed && record.in_flight, "{error}");
         let Some(Quota::Unavailable { at, because }) = record.quota.as_deref() else {
             panic!("{error}: {:?}", record.quota);
         };
@@ -361,7 +361,7 @@ fn a_failure_is_the_text_string_makes_of_it() {
         ),
     ]);
     let record = stage.at(0);
-    assert!(record.failed && record.quota.is_none());
+    assert!(!record.failed && record.in_flight && record.quota.is_none());
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn text_is_the_text_blocks_a_line_each_and_a_user_of_white_space_is_no_turn() {
 fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
     let failed = || failing("a1", &json!("Model gpt-0-nonesuch not found"), &json!(0));
     let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
-    let record = stage.at(0);
+    let record = stage.at(120_000);
     assert!(record.failed);
     assert_eq!(
         record.failure.as_deref(),
@@ -570,7 +570,7 @@ fn a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them() {
             json!({ "role": "assistant", "stopReason": "error", "content": [] }),
         ),
     ]);
-    let record = silent.at(0);
+    let record = silent.at(120_000);
     assert!(record.failed);
     assert_eq!(record.failure, None);
     stage.write(&[header(), user("u1", "go"), failed(), user("u2", "again")]);
@@ -586,7 +586,7 @@ fn a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spel
     let mut stage = Stage::with(&[header(), user("u1", "go"), failed()]);
     // Just written: Pi may be about to retry, so it is at work.
     let record = stage.at(1_000);
-    assert!(record.failed && record.in_flight);
+    assert!(!record.failed && record.in_flight);
     assert_eq!(record.settlement, Settlement::InFlight);
     // Past two retries' worth of quiet it is over, with Pi's words for it kept.
     let record = stage.at(120_000);
@@ -698,7 +698,7 @@ fn a_providers_refusal_for_a_moment_is_busy_and_no_quota() {
             failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
         ]);
         let record = stage.at(0);
-        assert!(record.failed, "{error}");
+        assert!(!record.failed && record.in_flight, "{error}");
         assert_eq!(
             record.quota.as_deref(),
             Some(&Quota::Busy {
@@ -717,7 +717,7 @@ fn a_providers_refusal_for_a_moment_is_busy_and_no_quota() {
         ),
     ]);
     let record = stage.at(0);
-    assert!(record.failed && record.quota.is_none());
+    assert!(!record.failed && record.in_flight && record.quota.is_none());
 }
 
 #[test]
@@ -726,7 +726,8 @@ fn a_second_distinct_refusal_after_a_retry_is_in_view_and_the_first_is_not() {
     let refused = |id: &str| failing(id, &json!("401: Authentication failed"), &json!(null));
     let mut stage = Stage::with(&[header(), user("u1", "work"), refused("a1")]);
     let first = stage.at(0);
-    assert!(first.failed && first.quota.is_some());
+    assert!(!first.failed && first.in_flight && first.quota.is_some());
+    assert!(stage.at(120_000).failed);
     stage.write(&[
         header(),
         user("u1", "work"),
@@ -744,7 +745,8 @@ fn a_second_distinct_refusal_after_a_retry_is_in_view_and_the_first_is_not() {
         refused("a2"),
     ]);
     let second = stage.at(0);
-    assert!(second.failed && second.quota.is_some());
+    assert!(!second.failed && second.in_flight && second.quota.is_some());
+    assert!(stage.at(120_000).failed);
 }
 
 #[test]
@@ -779,13 +781,23 @@ fn a_retry_on_another_branch_than_the_one_pi_is_on_takes_no_refusal_out_of_view(
     let state = |rows: Vec<Value>| {
         let mut stage = Stage::with(&rows);
         let record = stage.at(0);
-        (record.quota.is_some(), record.failed)
+        (
+            record.quota.is_some(),
+            record.failed,
+            stage.at(120_000).failed,
+        )
     };
     // The leaf is the retry's label: the retry is on the path, and the refusal is out of view.
-    assert_eq!(state([base(), vec![label("u2")]].concat()), (false, false));
+    assert_eq!(
+        state([base(), vec![label("u2")]].concat()),
+        (false, false, false)
+    );
     // The leaf is the refused step's label or summary: the retry is on another branch.
-    assert_eq!(state([base(), vec![label("a1")]].concat()), (true, true));
-    assert_eq!(state([base(), vec![summary]].concat()), (true, true));
+    assert_eq!(
+        state([base(), vec![label("a1")]].concat()),
+        (true, false, true)
+    );
+    assert_eq!(state([base(), vec![summary]].concat()), (true, false, true));
     // And with no label at all, the retry is the leaf: it clears.
-    assert_eq!(state(base()), (false, false));
+    assert_eq!(state(base()), (false, false, false));
 }

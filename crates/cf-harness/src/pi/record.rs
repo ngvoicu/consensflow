@@ -555,11 +555,9 @@ impl Session {
         record.lines.places = Some(self.places.clone());
         record.beside = self.beside.clone();
         record.in_flight = in_flight;
-        // A cut/deferred message can be followed by Pi's own continuation. Do not
-        // fail the task until Pi's settlement evidence or the quiet spell says the
-        // agent actually ended. Provider errors keep their existing behaviour.
-        record.failed =
-            self.failed && (self.failure_kind.is_none() || native_settled || can_settle);
+        // Pi may retry a provider error or continue a cut/deferred message itself.
+        // Fail only when its settlement evidence or the quiet spell says it ended.
+        record.failed = self.failed && (native_settled || can_settle);
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.failure_kind = self.failure_kind.map(str::to_owned);
         record.aborted = self.aborted;

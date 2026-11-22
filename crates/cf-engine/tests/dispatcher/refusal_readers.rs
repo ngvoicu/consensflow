@@ -101,6 +101,77 @@ fn working(kind: &str, name: &str, records: &[Value]) {
     );
 }
 
+#[test]
+fn t1958_a_pi_error_during_its_retry_does_not_fail_the_working_task() {
+    // T-1939's native prefix ends at Pi's first refused-connection error. Feed the
+    // real reader's result to a working window and take one real dispatcher pass.
+    let fixture = include_str!(
+        "../../../cf-harness/tests/fixtures/connection-failures/mac-pi-refused-first-error-prefix.jsonl"
+    );
+    let home = tempfile::tempdir().unwrap();
+    let pi = home.path().join("pi");
+    fs::create_dir_all(&pi).unwrap();
+    let file = pi.join(format!("{SESSION}.jsonl"));
+    fs::write(&file, fixture).unwrap();
+    let written = fs::metadata(&file)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let now_ms = i64::try_from(written).unwrap();
+    let env = Env::from_vars([("PI_CODING_AGENT_SESSION_DIR", pi)]);
+    let reading = records::answers(
+        Harness::Pi,
+        SESSION,
+        &env,
+        &Options::default(),
+        &records::zone("UTC").unwrap(),
+        now_ms,
+    );
+    let Reading::Known(read) = &*reading else {
+        panic!("record unreadable: {reading:?}")
+    };
+    assert!(read.in_flight, "the recorded retry must be in flight");
+
+    let c = Context::made(Made {
+        harnesses: vec!["claude-code", "pi"],
+        ..Made::default()
+    });
+    let project = c
+        .open_project(json!({
+            "directory": "/work/app", "name": "Pi retry",
+            "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+            "staff": [{ "agent": "zeus", "harness": "pi", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap();
+    c.give(project.id, "zeus", "Read the record");
+    for _ in 0..5 {
+        c.pass().unwrap();
+    }
+    let working = c.task(project.id, 1).task;
+    assert_eq!(working.state, "working");
+    let window = working.assignee.unwrap();
+    c.adapter.with(&window, |adapter| {
+        adapter.items.extend(read.items.clone());
+        adapter.settled = read.settlement == Settlement::Settled;
+        adapter.failed = read.failed;
+        adapter.quota = read.quota.clone();
+        adapter.failure = read.failure.clone();
+        adapter.failure_kind = read.failure_kind.clone();
+    });
+    c.pass().unwrap();
+    assert_eq!(
+        c.task(project.id, 1).task.state,
+        "working",
+        "Pi's retry must leave the task working (reader failed={}, in_flight={})",
+        read.failed,
+        read.in_flight
+    );
+}
+
 fn text(words: &str) -> Value {
     json!({ "type": "text", "text": words })
 }
