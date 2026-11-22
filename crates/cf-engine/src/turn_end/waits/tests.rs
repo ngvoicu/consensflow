@@ -34,7 +34,7 @@ fn other_first_person_ways_to_say_it() {
 }
 
 #[test]
-fn only_the_last_paragraph_decides() {
+fn waits_only_the_last_paragraph_decides() {
     let wait = "I'll check them at the next wakeup.";
     waits(&format!("All of it is written.\n\n{wait}"));
     is_a_result(&format!("{wait}\n\nNo: it all ran and the head is pushed."));
@@ -50,6 +50,10 @@ fn a_result_is_left_alone() {
     is_a_result("I did not end my turn until it ran; it ran inside the turn.");
     is_a_result("I won't resume when it reports; the work is done.");
     is_a_result("I never check them at the next wakeup.");
+    // A negation before the phrase, in its clause, takes it back.
+    is_a_result("I don't think I'll resume when it reports; it is done.");
+    is_a_result("There is no reason I will check them at the next wakeup.");
+    waits("It did not fail, so I'll resume when it reports.");
     // No first person in the clause: a limit of the reading, as for any other words.
     is_a_result("Ending my turn to wait for the run.");
     is_a_result("The test asserts `I'm ending this turn until it runs.` is read.");

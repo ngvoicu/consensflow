@@ -100,7 +100,7 @@ replace = '''                .any(|found| !negated(&paragraph[..found.start()]) 
 
 [[plant]]
 name = "go on note: the whole words are read, not the last paragraph"
-meant = "only_the_last_paragraph_decides"
+meant = "waits_only_the_last_paragraph_decides"
 runs = ["goon-lib"]
 
 [[plant.edit]]
