@@ -78,7 +78,8 @@ find = '''
 '''
 replace = ""
 
-# Each row has a deadline: a question that never ends leaves the row unchecked at 40 seconds.
+# Each installed row has a deadline: a question that never ends leaves the row unchecked at 40
+# seconds.
 [[plant]]
 name = "harness window: a row has no deadline"
 meant = "a_question_that_never_ends_leaves_the_row_unchecked_at_40_seconds_and_the_others_whole"
@@ -87,10 +88,10 @@ runs = ["harness-window-admin"]
 [[plant.edit]]
 file = "crates/cf-harness/src/admin.rs"
 find = '''
-    let row = if inspect::checks(harness) && path.is_some() {
+    let row = if path.is_some() {
 '''
 replace = '''
-    let row = if false && inspect::checks(harness) && path.is_some() {
+    let row = if false && path.is_some() {
 '''
 
 # One question for the look: a check that asks its own version beside the page's asks it twice
@@ -122,4 +123,71 @@ find = '''
 '''
 replace = '''
     let stale = false;
+'''
+
+# A held Claude Code or Pi version is cut at 40 seconds too: the whole page is answered by then.
+[[plant]]
+name = "harness window: only the harnesses that check have a row deadline"
+meant = "a_held_claude_code_or_pi_version_does_not_keep_the_whole_page_open_past_40_seconds"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let row = if path.is_some() {
+'''
+replace = '''
+    let row = if inspect::checks(harness) && path.is_some() {
+'''
+
+# The probes are told apart by the name a CLI is invoked by: two commands of one launcher file
+# each have their own answer.
+[[plant]]
+name = "harness window: the probes are told apart by the file alone"
+meant = "two_command_names_for_one_dispatcher_each_keep_their_own_version"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+        invoked: invoked(executable),
+'''
+replace = '''
+        invoked: None,
+'''
+
+# A run whose last caller stopped waiting (a look cut at its time) leaves the map: left there,
+# the next look joins it and waits for what never ends.
+[[plant]]
+name = "harness window: a timed-out probe stays in the map"
+meant = "a_version_cut_at_35_seconds_is_not_left_to_hold_the_next_look"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+        if !self.answered && alone {
+'''
+replace = '''
+        if false && !self.answered && alone {
+'''
+
+# A cut lets go of its own probes alone: what a newer launch was answered is kept.
+[[plant]]
+name = "harness window: a cut forgets everything kept of the file"
+meant = "an_old_cut_keeps_what_a_newer_launch_was_answered"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+                cut = true;
+                inspect::unfinished(harness, path, checked_at)
+'''
+replace = '''
+                cut = true;
+                if let Some(path) = &path {
+                    inner.probes.forget(std::path::Path::new(path));
+                }
+                inspect::unfinished(harness, path, checked_at)
 '''

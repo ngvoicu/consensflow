@@ -30,7 +30,10 @@ once, with the reason here and in the commit.
   recorded call. A CLI's `--version` is asked once as the file is on disk, so three scenarios
   (the row kept five minutes, the look dated when it began, the update whose first look is
   older than five minutes) no longer ask for the later answers their effects held: those are
-  dropped. The steps were moved by hand, once, to what the admin now says.
+  dropped. The steps were moved by hand, once, to what the admin now says. A probe whose last
+  caller stopped waiting (a look cut at its time) leaves the map, so a CLI's version a cut look
+  never got is asked again at the next look: the look dated when it began holds a second answer
+  for it, and its step 4 records the second `--version` run (T-2068).
 
 - **Tested releases on the Admin row (T-1968).** Both platform scenarios now
   include `tested` after `update`, including on missing harnesses. The installed

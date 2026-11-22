@@ -23,14 +23,14 @@ use crate::{codex::CodexAdapter, devin::DevinAdapter, muse::MuseAdapter};
 const LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
 /// The sentence a launch refuses a Codex with no native queue.
-fn no_queue(codex: &str) -> String {
+pub(super) fn no_queue(codex: &str) -> String {
     format!(
         "{codex} has no native queue, which ConsensFlow needs to reach its window: update Codex."
     )
 }
 
-const FLAGS: &str = "Usage: codex queue --thread <ID> --message <TEXT>\n";
-const NO_FLAGS: &str = "Usage: codex queue\n";
+pub(super) const FLAGS: &str = "Usage: codex queue --thread <ID> --message <TEXT>\n";
+pub(super) const NO_FLAGS: &str = "Usage: codex queue\n";
 
 /// What a scripted run answers: it ended with `code` and wrote `stdout`.
 fn exits(code: i32, stdout: &str) -> Result<String, Failed> {
@@ -645,7 +645,7 @@ fn a_question_that_failed_and_then_answered_for_a_launch_has_answered_for_the_pa
 }
 
 /// The Codex fixture over the page's own scripted programs, where a test holds an answer.
-fn held_codex() -> Fixture {
+pub(super) fn held_codex() -> Fixture {
     let fixture = Fixture::new();
     fixture.install("bin", "codex");
     fixture.latest.says(Harness::Codex, "0.171.0");
@@ -653,7 +653,12 @@ fn held_codex() -> Fixture {
     fixture
 }
 
-fn begin_look(driver: &mut Driver<Rc<Row>>, fixture: &Fixture, work: usize, refresh: bool) {
+pub(super) fn begin_look(
+    driver: &mut Driver<Rc<Row>>,
+    fixture: &Fixture,
+    work: usize,
+    refresh: bool,
+) {
     let admin = Rc::clone(&fixture.admin);
     driver.begin(work, async move {
         admin.check(Some("codex"), refresh).await.unwrap().remove(0)
@@ -703,7 +708,11 @@ fn a_refresh_during_a_question_starts_a_new_one_and_does_not_take_the_old_answer
 }
 
 /// Moves the clock by `ms`, firing the timers due on the way and running the looks.
-fn advance(fixture: &Fixture, driver: &mut Driver<Rc<Row>>, ms: i64) -> Vec<(usize, Rc<Row>)> {
+pub(super) fn advance(
+    fixture: &Fixture,
+    driver: &mut Driver<Rc<Row>>,
+    ms: i64,
+) -> Vec<(usize, Rc<Row>)> {
     let until = fixture.time.wall_ms() + ms;
     let mut settled = driver.run();
     while fixture.time.fire_next(until) {
@@ -713,7 +722,7 @@ fn advance(fixture: &Fixture, driver: &mut Driver<Rc<Row>>, ms: i64) -> Vec<(usi
     settled
 }
 
-fn cut_off(killed: bool) -> Result<Captured, CaptureFailed> {
+pub(super) fn cut_off(killed: bool) -> Result<Captured, CaptureFailed> {
     Err(CaptureFailed {
         message: "Command failed: x\n".to_owned(),
         code: None,

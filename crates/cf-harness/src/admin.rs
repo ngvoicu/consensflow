@@ -242,8 +242,10 @@ impl HarnessAdmin {
 }
 
 /// An inspection, whose row is kept when it is done, before any call that
-/// waited for it goes on, unless a newer look has been made since it began. A
-/// row of a harness whose launch checks its CLI is cut at [`ROW_LIMIT`].
+/// waited for it goes on, unless a newer look has been made since it began. The row of
+/// any installed harness is cut at [`ROW_LIMIT`], so the page is answered by then whichever
+/// row hangs. What the look asked and did not get is let go of as it is cut (the probes
+/// retire themselves), and what was answered since stays.
 async fn inspection(
     inner: Rc<Inner>,
     harness: Harness,
@@ -255,19 +257,13 @@ async fn inspection(
     let work = inspect::inspect(&inner, harness, path.clone(), checked_at, kept.as_deref());
     let kept = kept.is_some();
     let mut cut = false;
-    let row = if inspect::checks(harness) && path.is_some() {
+    let row = if path.is_some() {
         let mut work = Box::pin(work);
         let mut timer = inner.time.sleep(ROW_LIMIT);
         match futures_util::future::select(work.as_mut(), timer.as_mut()).await {
             futures_util::future::Either::Left((row, _)) => row,
             futures_util::future::Either::Right(_) => {
-                // Whatever the launches kept of this CLI is let go, unless a newer look is
-                // asking: a late end of this one takes nothing from the newer.
                 cut = true;
-                let newest = inner.looks.get() == look;
-                if let (true, Some(path)) = (newest, &path) {
-                    inner.probes.forget(std::path::Path::new(path));
-                }
                 inspect::unfinished(harness, path, checked_at)
             }
         }
