@@ -19,8 +19,8 @@ runs = ["pe-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        if let Err(cause) = self.seams.trace.forget(project) {"
-replace = "        if let Err(cause) = self.seams.trace.forget(project).or(Ok::<(), String>(())) {"
+find = "        if let Err(cause) = self.seams.trace.forget(project).await {"
+replace = "        if let Err(cause) = self.seams.trace.forget(project).await.or(Ok::<(), String>(())) {"
 
 [[plant]]
 name = "purge-entropy: the trace says it forgot when a file could not be read or rewritten"
