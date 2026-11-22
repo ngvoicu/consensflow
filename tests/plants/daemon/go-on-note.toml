@@ -1,0 +1,235 @@
+# A member's turn that ends to wait for its own work is no result: it is sent on once (T-1923, the
+# advice T-1919). On 2026-11-21 two Claude Code workers ended their turns on a line about waiting
+# ("I'll check them at the next wakeup."; "I'm ending this turn until it runs.") with nothing pending
+# that the board could see, and the board took each line for the task's result.
+#
+# The rule (`crates/cf-engine/src/turn_end/waits.rs`), applied in `Dispatcher::collect`
+# (`crates/cf-engine/src/turn_end.rs`) after a question to the chief is read and before the result is
+# recorded: the last paragraph of the member's own words says, in the first person and in English,
+# that it ends its turn to wait, or goes on when or once its own work ends. No result is taken: the
+# window is typed one note, as it rests, and the requester is told nothing. The note is sent once for
+# each delivery of the task (read from the task's thread, so a restart sends no second); a second such
+# end is the result.
+#
+# Each plant takes one rule out again. The names begin with `go on note`, so
+# `cargo xtask plants daemon "go on note"` runs them.
+
+[run]
+goon-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "go_on_note::"]
+goon-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end::waits::"]
+goon-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::a_task_held_for_a_job_at_the_close_is_done_after_the_resume"]
+goon-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_turn_that_ended_to_wait"]
+
+[[plant]]
+name = "go on note: a final answer is never looked at for a wait"
+meant = "a_turn_that_ends_to_wait_is_no_result_and_the_member_is_sent_on_once"
+runs = ["goon-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
+'''
+replace = '''        if false
+            && pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
+'''
+
+[[plant]]
+name = "go on note: the rig's worker that ends to wait is given its interim line as a result"
+meant = "a_claude_code_turn_that_ended_to_wait_is_sent_on_and_its_next_turn_is_the_result"
+runs = ["goon-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
+'''
+replace = '''        if false
+            && pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
+'''
+
+[[plant]]
+name = "go on note: a second such end is sent on again"
+meant = "a_second_such_end_after_the_note_is_the_result"
+runs = ["goon-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if pending.retired == 0
+            && ends_to_wait(&words_of(&answers.final_run))
+            && !go_on_told(&thread, participant)
+        {
+'''
+replace = '''        if pending.retired == 0 && ends_to_wait(&words_of(&answers.final_run)) {
+'''
+
+[[plant]]
+name = "go on note: the note counts for every delivery of the task, not the latest"
+meant = "a_new_delivery_of_the_task_may_be_sent_on_again"
+runs = ["goon-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''        message.id > delivery
+'''
+replace = '''        message.id > 0 + delivery * 0
+'''
+
+[[plant]]
+name = "go on note: a negation does not take a wait back"
+meant = "a_result_is_left_alone"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''            .any(|found| !negated(&paragraph[..found.start()]))
+'''
+replace = '''            .any(|found| !negated(&paragraph[..found.start()]) || true)
+'''
+
+[[plant]]
+name = "go on note: the whole words are read, not the last paragraph"
+meant = "waits_only_the_last_paragraph_decides"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''    let paragraph = plain(&last_paragraph(&without_blocks(words)));
+    [
+        &*ENDS_TO_WAIT'''
+replace = '''    let paragraph = plain(&without_blocks(words));
+    [
+        &*ENDS_TO_WAIT'''
+
+[[plant]]
+name = "go on note: the member's turn-ending words are not read"
+meant = "other_first_person_ways_to_say_it"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''        &*ENDS_TO_WAIT,
+'''
+replace = ''''''
+
+[[plant]]
+name = "go on note: a going on at a later time is not read"
+meant = "the_five_field_sentences_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''        &*GOES_ON_WHEN,
+        &*WAITS_FOR_ITS_END,
+        &*WHEN_ENDS_GOES_ON,
+'''
+replace = ''''''
+
+[[plant]]
+name = "go on note: quoted words are the member's own"
+meant = "a_result_is_left_alone"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''    let paragraph = plain(&last_paragraph(&without_blocks(words)));
+    [
+        &*ENDS_TO_WAIT'''
+replace = '''    let paragraph = last_paragraph(words).to_lowercase();
+    [
+        &*ENDS_TO_WAIT'''
+
+[[plant]]
+name = "go on note: the interim line before the note is kept in the result"
+meant = "a_claude_code_turn_that_ended_to_wait_is_sent_on_and_its_next_turn_is_the_result"
+runs = ["goon-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/earlier_turns.rs"
+find = '''                    _ if message.kind == "note" && is_go_on_note(message) => Why::Note(message.id),
+'''
+replace = ''''''
+
+[[plant]]
+name = "go on note: a job the close retired is sent on, though the resume decided its old answer is the result"
+meant = "a_task_held_for_a_job_at_the_close_is_done_after_the_resume_with_its_answer_and_the_job_said_retired"
+runs = ["goon-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if pending.retired == 0
+            && ends_to_wait'''
+replace = '''        if ends_to_wait'''
+
+[[plant]]
+name = "go on note: a wait for work to finish is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''        &*WAITS_FOR_ITS_END,
+'''
+replace = ''''''
+
+[[plant]]
+name = "go on note: only I'll and I will go on, not I'm going to"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''i(?:'ll| will| am going to|'m going to)'''
+replace = '''i(?:'ll| will)'''
+
+[[plant]]
+name = "go on note: a clause with no I is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''|(?:^|[;:,.] ?|\band )will)'''
+replace = ''')'''
+
+[[plant]]
+name = "go on note: a stop before going on is not read"
+meant = "the_wordings_a_review_found_missing_end_to_wait"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''const BEFORE: &str = "(?:(?:stop|pause|wait) here and |wait and )?";'''
+replace = '''const BEFORE: &str = "";'''
+
+[[plant]]
+name = "go on note: any wait is a wait for work, the review's too"
+meant = "a_wait_for_something_that_is_no_work_of_the_members_is_a_result"
+runs = ["goon-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = '''wait (?:for [^.!?\n]{0,60} to (?:finish|end|complete|report)\b|until'''
+replace = '''wait (?:for [^.!?\n]{0,60}|until'''
+
+[[plant]]
+name = "go on note: the note does not ask for the words whole"
+meant = "a_short_result_the_reading_misfired_on_keeps_its_words_when_the_member_repeats_it"
+runs = ["goon-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/waits.rs"
+find = "repeat them whole as your answer"
+replace = "answer with them"
