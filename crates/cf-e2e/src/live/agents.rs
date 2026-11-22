@@ -47,13 +47,30 @@ pub const STAND_IN_WORKER_MODEL: &str = "fake";
 /// stand-in as well (spec harness-models).
 pub const STAND_IN_MEMBER_MODEL: &str = "worker";
 
+/// The second stand-in model of a roster: the rig lists it beside `fake` (`stand_in_lists`).
+pub const STAND_IN_SECOND_MODEL: &str = "fake-2";
+
+/// Whether `model` is one the rig's stand-in plays (T-1207). The one account of it: the shim
+/// that hands a window to the stand-in, the choice of installations a run needs and the check
+/// of a roster against the harness's list all ask here, so that a row the shim routes to the
+/// stand-in is never one the preflight asks the real harness's catalogue for.
+pub fn is_stand_in_model(model: &str) -> bool {
+    [
+        STAND_IN_CHIEF_MODEL,
+        STAND_IN_WORKER_MODEL,
+        STAND_IN_MEMBER_MODEL,
+        STAND_IN_SECOND_MODEL,
+    ]
+    .contains(&model)
+}
+
 /// The harness an agent (a roster row, or what a window is asked for) runs on,
 /// when it is a real one: the stand-in agent's (a Claude Code agent whose model is
 /// a fake one) are none.
 pub fn harness_of(agent: &Value) -> Option<Harness> {
     let kind = agent["kind"].as_str()?;
     // A fake model is the rig's stand-in, of whichever kind it is shaped as (T-1207).
-    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {
+    if is_stand_in_model(agent["model"].as_str()?) {
         return None;
     }
     Harness::ALL
@@ -526,7 +543,7 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
 
 /// Refuse a named model that this run's isolated harness does not list before
 /// opening a chief or member window, including rows that already name an effort.
-fn validate_rows(
+pub(crate) fn validate_rows(
     rows: &[Value],
     mut read: impl FnMut(Harness) -> std::result::Result<Vec<Listed>, String>,
 ) -> Result {
@@ -732,7 +749,7 @@ fn distance(a: &str, b: &str) -> usize {
 /// for it (Pi's `provider/id`), the efforts it takes from the lowest as the harness orders
 /// them, and whether the harness will not run it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Listed {
+pub(crate) struct Listed {
     name: String,
     efforts: Vec<String>,
     disabled: bool,
