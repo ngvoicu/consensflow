@@ -1237,6 +1237,33 @@ impl Isolation {
     }
 }
 
+impl Isolation {
+    /// The variables of a program of this harness that a case starts itself, outside a rig: the
+    /// plan's own, and for every other variable a program finds a home by (`HOME`, the profile
+    /// and its drive and path, AppData, the XDG folders, the other harnesses' folders) a folder of
+    /// the run's below the home. A plan names only what its harness reads (Codex's `CODEX_HOME`):
+    /// without these the program would run on the caller's home for the rest (K3 review
+    /// T-1978, 2). Never a variable the plan names itself.
+    pub fn standalone_vars(&self) -> Result<Vec<(String, String)>> {
+        let home = self.made_at(jiff::Timestamp::now().as_millisecond())?;
+        let named = self.vars_in(&home);
+        // A plan that names nothing isolates nothing: the program would run on the caller's
+        // home for what it reads its login by (B16), whatever else it is given.
+        if named.is_empty() {
+            return Ok(Vec::new());
+        }
+        let profile = home.join("profile");
+        crate::door::make_dir(&profile)?;
+        let mut vars: Vec<(String, String)> = crate::standin_process::home_vars(&profile)
+            .into_iter()
+            .filter(|(name, _)| !named.iter().any(|(given, _)| given.eq_ignore_ascii_case(name)))
+            .map(|(name, value)| (name.to_owned(), value.to_string_lossy().into_owned()))
+            .collect();
+        vars.extend(named);
+        Ok(vars)
+    }
+}
+
 impl HarnessHome for Isolation {
     fn vars(&self) -> Result<Vec<(String, String)>> {
         let home = self.made_at(jiff::Timestamp::now().as_millisecond())?;

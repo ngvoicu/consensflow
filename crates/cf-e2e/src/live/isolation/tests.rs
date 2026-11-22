@@ -331,6 +331,35 @@ fn codex_login_copy_has_no_refresh_keys_at_any_depth() {
     assert_eq!(copied["openai"]["access"], ACCESS);
 }
 
+/// K3 review T-1978, 2: a program of Codex started outside a rig is given the run's own folder
+/// for the rest of what it finds a home by, not the caller's: Codex's plan names `CODEX_HOME`
+/// alone.
+#[test]
+fn a_standalone_codex_is_given_a_profile_of_the_runs_own_beside_its_codex_home() {
+    let owner = Owner::new();
+    let isolation = owner.codex();
+    let vars = isolation.standalone_vars().unwrap();
+    let get = |name: &str| {
+        vars.iter()
+            .rev()
+            .find(|(given, _)| given == name)
+            .map(|(_, value)| value.clone())
+    };
+    let made = isolation.made_at(at(NOW)).unwrap();
+    assert_eq!(get("CODEX_HOME"), Some(made.join("codex").to_string_lossy().into_owned()));
+    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA", "LOCALAPPDATA"] {
+        let value = get(name).unwrap_or_else(|| panic!("{name} is not given: {vars:?}"));
+        assert!(
+            Path::new(&value).starts_with(&made),
+            "{name} is {value}, outside the run's home {}",
+            made.display()
+        );
+    }
+    assert!(vars
+        .iter()
+        .all(|(_, value)| !value.starts_with(owner.home.path().to_string_lossy().as_ref())));
+}
+
 #[test]
 fn kit_round3_devin_does_not_carry_git_credentials() {
     let owner = Owner::new();

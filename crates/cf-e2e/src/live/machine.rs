@@ -278,7 +278,16 @@ impl Installed {
     /// program that home itself.
     pub fn home_outside_a_rig(&self) -> Result<Vec<(String, String)>> {
         match &self.isolation {
-            Some(isolation) => isolation.vars(),
+            Some(isolation) => {
+                let vars = isolation.standalone_vars()?;
+                if vars.is_empty() {
+                    return Err(Error::Daemon(format!(
+                        "{}'s isolation names no variable of the run's own: a program of it outside a rig would run on the caller's home",
+                        self.harness.name()
+                    )));
+                }
+                Ok(vars)
+            }
             None => Err(Error::Daemon(format!(
                 "{} has no home of the run's own to start a program of it on outside a rig",
                 self.harness.name()
@@ -299,7 +308,7 @@ impl Installed {
             ));
         }
         if let Some(isolation) = &self.isolation {
-            vars.extend(isolation.vars()?);
+            vars.extend(isolation.standalone_vars()?);
         }
         // An empty list reads as "nothing to set", and a program started on it runs on the
         // person's own home: refused, for every harness and both platforms.

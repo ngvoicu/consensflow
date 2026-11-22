@@ -98,6 +98,24 @@ impl TestMachine {
         (!name.is_empty()).then(|| Self(name.to_owned()))
     }
 
+    /// The machine this run is on, where `what` may run: one that is there to test on, whose
+    /// account and login store are its own. `what` uses the login store of the account that
+    /// starts the kit (a Keychain item, a renewed login), which on a machine of the owner's is
+    /// the owner's: there it is refused, and says why (the owner may give it a test identity
+    /// later).
+    pub fn required_for(what: &str) -> Result<Self> {
+        Self::required_by(what, Self::detect())
+    }
+
+    /// [`TestMachine::required_for`] with the machine named: `detected`.
+    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {
+        detected.ok_or_else(|| {
+            Error::Daemon(format!(
+                "{what} uses the login store of the account that runs it, and runs only on a machine marked as a test machine ({TEST_MACHINE}, which the Windows runner gives), with an account of its own: this is not one, so it is refused and nothing was touched"
+            ))
+        })
+    }
+
     /// The machine's name, as the runner calls it.
     pub fn name(&self) -> &str {
         &self.0
@@ -303,8 +321,29 @@ impl Renewal {
 /// [`LIMIT`]. None where it ended well; how it ended where it did not, in what it said and never
 /// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
 /// it could not be run at all.
-pub fn one_shot(harness: Harness, program: &Path, words: &[String]) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, LIMIT, &[])
+pub fn one_shot(
+    harness: Harness,
+    program: &Path,
+    words: &[String],
+    account: &[(String, String)],
+) -> Result<Option<String>> {
+    one_shot_within(harness, program, words, account, LIMIT, &[])
+}
+
+/// What the harness is told of the account it renews for, by name: its home, in every variable a
+/// program finds one by. The test machine's own account, never the caller's environment passed
+/// on: the child has the machine's variables and these, and no other.
+pub fn account_vars(home: &Path) -> Vec<(String, String)> {
+    let text = home.to_string_lossy().into_owned();
+    let mut vars = vec![("HOME".to_owned(), text.clone())];
+    if cfg!(windows) {
+        vars.push(("USERPROFILE".to_owned(), text));
+        if let Some((drive, path)) = crate::standin_process::drive_and_path(home) {
+            vars.push(("HOMEDRIVE".to_owned(), drive));
+            vars.push(("HOMEPATH".to_owned(), path));
+        }
+    }
+    vars
 }
 
 /// [`one_shot`], whose own folder is also taken out of the owner's `records` when it ended: a
@@ -315,9 +354,10 @@ pub fn one_shot_in(
     harness: Harness,
     program: &Path,
     words: &[String],
+    account: &[(String, String)],
     records: &[&Path],
 ) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, LIMIT, records)
+    one_shot_within(harness, program, words, account, LIMIT, records)
 }
 
 /// [`one_shot`], ended after `limit`, and its record in each of `records` taken away. The harness
@@ -327,6 +367,7 @@ fn one_shot_within(
     harness: Harness,
     program: &Path,
     words: &[String],
+    account: &[(String, String)],
     limit: Duration,
     records: &[&Path],
 ) -> Result<Option<String>> {
@@ -335,16 +376,18 @@ fn one_shot_within(
         path: std::env::temp_dir(),
         source,
     })?;
+    let baseline = inventory(records);
     let ran = Run::new(program)
         .args(words)
-        .inheriting_env()
+        .machine_env()
+        .vars(account.iter().cloned())
         .vars(super::launcher::updates_off_of(harness).iter().copied())
         .finding_programs()
         .cwd(folder.path())
         .closed_input()
         .limit(limit)
         .run()?;
-    forget(records, folder.path());
+    let leftover = forget(records, folder.path(), &baseline);
     let said = if ran.timed_out {
         Some(format!("it was ended after {} s", limit.as_secs()))
     } else if ran.code == Some(0) {
@@ -365,27 +408,93 @@ fn one_shot_within(
     };
     // The renewal's own folder goes now, with what the harness left in it: one that stays (a
     // file the harness still holds, on Windows) is said, never left behind in silence (CLN-22).
-    match crate::door::Door::of_run().remove_made(folder.path()) {
+    let own = match crate::door::Door::of_run().remove_made(folder.path()) {
         crate::door::Removed::Left(path, why) => Err(Error::Daemon(format!(
             "the renewal's own folder {} is still there: {why}",
             path.display()
         ))),
         _ => Ok(said),
+    };
+    match leftover {
+        Some(why) => Err(Error::Daemon(why)),
+        None => own,
     }
+}
+
+/// The entries of each folder in `records` as they are before the harness runs: what the
+/// renewal may not take away, whatever its name.
+fn inventory(records: &[&Path]) -> Vec<std::collections::BTreeSet<std::ffi::OsString>> {
+    records
+        .iter()
+        .map(|folder| {
+            std::fs::read_dir(folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.file_name())
+                .collect()
+        })
+        .collect()
+}
+
+/// Whether `path` is a link: a symbolic link anywhere, a junction or other reparse point on
+/// Windows. Whatever it points at is never followed.
+fn is_link(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        return meta.file_attributes() & REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 /// Takes away of each folder in `records` the one entry the harness made there for the folder
 /// `own`, by its whole name ([`crate::door::Record`]: the real path of `own` spelt as Claude Code
-/// spells a folder into a name), through the door. Nothing else of the owner's is touched: an
-/// entry of theirs whose name ends the same is theirs (T-1557, finding 5). One that cannot be
-/// taken away is left (the kit's watch then names it).
-fn forget(records: &[&Path], own: &Path) {
+/// spells a folder into a name), through the door, and only an entry that is a folder of the
+/// harness's making: one that was in the folder before the run (`baseline`, [`inventory`]) or is
+/// a link is the owner's and is left as it was, and said (T-1557, finding 5; K3 review T-1978,
+/// 9). Nothing else of the owner's is touched: an entry of theirs whose name ends the same is
+/// theirs. One that cannot be taken away is left (the kit's watch then names it). Why one was
+/// refused, where one was.
+fn forget(
+    records: &[&Path],
+    own: &Path,
+    baseline: &[std::collections::BTreeSet<std::ffi::OsString>],
+) -> Option<String> {
     let door = crate::door::Door::of_run();
-    for folder in records {
-        if let Some(record) = crate::door::Record::of(folder, own) {
+    let mut refused = Vec::new();
+    for (at, folder) in records.iter().enumerate() {
+        let Some(record) = crate::door::Record::of(folder, own) else {
+            continue;
+        };
+        let path = record.path();
+        let there_before = path
+            .file_name()
+            .zip(baseline.get(at))
+            .is_some_and(|(name, held)| held.contains(name));
+        if there_before {
+            refused.push(format!(
+                "{} was there before the renewal, so it is the owner's and was left",
+                path.display()
+            ));
+        } else if is_link(&path) {
+            refused.push(format!(
+                "{} is a link, not an owned directory, and was left with what it points at",
+                path.display()
+            ));
+        } else {
             let _ = door.remove_record(&record);
         }
     }
+    (!refused.is_empty()).then(|| format!("the renewal's record was not taken away: {}", refused.join("; ")))
 }
 
 /// The words Claude Code is started with: the print mode on the model of the run, and nothing

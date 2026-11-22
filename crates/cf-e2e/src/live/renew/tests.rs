@@ -258,6 +258,7 @@ mod running {
             Harness::Pi,
             &program,
             &["-p".to_owned(), "one word".to_owned(), String::new()],
+            &[],
         )
         .unwrap();
         let written = fs::read_to_string(&log).unwrap();
@@ -270,6 +271,55 @@ mod running {
             "{folder}"
         );
         assert!(!Path::new(folder.trim()).exists(), "{folder}");
+    }
+
+    /// K3 review T-1978, 9: an entry at the exact record name that is a link, or was there before
+    /// the renewal, is the owner's: it is left as it was, its target with it, and said.
+    #[test]
+    fn a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said() {
+        let records = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        fs::write(target.path().join("private"), "keep private").unwrap();
+        let own = tempfile::Builder::new().prefix(FOLDER).tempdir().unwrap();
+        let its = records.path().join(record_name_of(own.path()));
+        // A link at the name, made before the renewal and made during it.
+        let baseline = inventory(&[records.path()]);
+        std::os::unix::fs::symlink(target.path(), &its).unwrap();
+        let said = forget(&[records.path()], own.path(), &baseline).expect("a link is refused");
+        assert!(said.contains("is a link"), "{said}");
+        assert!(its.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(
+            fs::read_to_string(target.path().join("private")).unwrap(),
+            "keep private"
+        );
+        fs::remove_file(&its).unwrap();
+        // A real folder that was there before the renewal began.
+        fs::create_dir_all(its.join("memory")).unwrap();
+        fs::write(its.join("memory/note.md"), "the owner's").unwrap();
+        let baseline = inventory(&[records.path()]);
+        let said = forget(&[records.path()], own.path(), &baseline).expect("a baseline entry");
+        assert!(said.contains("was there before the renewal"), "{said}");
+        assert_eq!(
+            fs::read_to_string(its.join("memory/note.md")).unwrap(),
+            "the owner's"
+        );
+    }
+
+    /// K3 review T-1978, 3 and the class of it: the harness is given the machine's variables and
+    /// the account's home by name, never the caller's environment passed on.
+    #[test]
+    fn the_renewal_is_given_the_accounts_home_by_name_and_nothing_of_the_callers() {
+        let scratch = tempfile::tempdir().unwrap();
+        let log = scratch.path().join("log");
+        let seen = scratch.path().join("env");
+        let program = stand_in(scratch.path(), &log, &format!("env > '{}'", seen.display()), 0);
+        let account = account_vars(Path::new("/the/test/account"));
+        assert_eq!(one_shot(Harness::Pi, &program, &[], &account).unwrap(), None);
+        let env = fs::read_to_string(&seen).unwrap();
+        assert!(env.lines().any(|line| line == "HOME=/the/test/account"), "{env}");
+        for name in ["CODEX_HOME=", "CLAUDE_CONFIG_DIR=", "XDG_CONFIG_HOME=", "PI_CODING_AGENT_DIR=", "CFFIXED_USER_HOME="] {
+            assert!(!env.lines().any(|line| line.starts_with(name)), "{name} reached it: {env}");
+        }
     }
 
     /// CLN-22: the renewal's own folder, with whatever the harness left in it, is taken away when
@@ -289,7 +339,7 @@ mod running {
             outside.display()
         );
         let program = stand_in(scratch.path(), &log, &leaving, 0);
-        assert_eq!(one_shot(Harness::Pi, &program, &[]).unwrap(), None);
+        assert_eq!(one_shot(Harness::Pi, &program, &[], &[]).unwrap(), None);
         let written = fs::read_to_string(&log).unwrap();
         let folder = Path::new(written.split_once('\n').unwrap().1.trim());
         assert!(!folder.exists(), "{}", folder.display());
@@ -303,7 +353,7 @@ mod running {
             scratch.path().join("where").display()
         );
         let program = stand_in(scratch.path(), &log, &holding, 0);
-        let said = one_shot(Harness::Pi, &program, &[])
+        let said = one_shot(Harness::Pi, &program, &[], &[])
             .unwrap_err()
             .to_string();
         let stuck = fs::read_to_string(scratch.path().join("where")).unwrap();
@@ -324,16 +374,16 @@ mod running {
         let printing = format!("echo {SECRET}; echo 'Not   logged in' >&2");
         let program = stand_in(scratch.path(), &log, &printing, 3);
         // It ran and ended badly: how, not an error (the renewal is judged by the login it left).
-        let said = one_shot(Harness::Pi, &program, &[]).unwrap().unwrap();
+        let said = one_shot(Harness::Pi, &program, &[], &[]).unwrap().unwrap();
         assert!(said.contains("it ended 3 (Not logged in)"), "{said}");
         assert!(!said.contains(SECRET), "{said}");
         let silent = stand_in(scratch.path(), &log, "", 1);
-        let said = one_shot(Harness::Pi, &silent, &[]).unwrap().unwrap();
+        let said = one_shot(Harness::Pi, &silent, &[], &[]).unwrap().unwrap();
         assert!(said.contains("it ended 1 (saying nothing)"), "{said}");
         // One that ended well says nothing; one that is no program is the error.
         let well = stand_in(scratch.path(), &log, "", 0);
-        assert_eq!(one_shot(Harness::Pi, &well, &[]).unwrap(), None);
-        assert!(one_shot(Harness::Pi, &scratch.path().join("none"), &[]).is_err());
+        assert_eq!(one_shot(Harness::Pi, &well, &[], &[]).unwrap(), None);
+        assert!(one_shot(Harness::Pi, &scratch.path().join("none"), &[], &[]).is_err());
     }
 
     #[test]
@@ -342,7 +392,7 @@ mod running {
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
-        let said = one_shot_within(Harness::Pi, &program, &[], Duration::from_secs(1), &[])
+        let said = one_shot_within(Harness::Pi, &program, &[], &[], Duration::from_secs(1), &[])
             .unwrap()
             .unwrap();
         assert!(said.contains("it was ended after 1 s"), "{said}");
@@ -434,6 +484,7 @@ fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
     let records = tempfile::tempdir().unwrap();
     let own = tempfile::Builder::new().prefix(FOLDER).tempdir().unwrap();
     let its = records.path().join(record_name_of(own.path()));
+    let baseline = inventory(&[records.path()]);
     std::fs::create_dir_all(its.join("memory")).unwrap();
     let tail = own
         .path()
@@ -445,7 +496,7 @@ fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
     std::fs::create_dir_all(other.join("memory")).unwrap();
     std::fs::write(other.join("memory").join("note.md"), "the owner's").unwrap();
 
-    forget(&[records.path()], own.path());
+    assert_eq!(forget(&[records.path()], own.path(), &baseline), None);
 
     assert!(!its.exists(), "the renewal's own record is left");
     assert!(

@@ -464,6 +464,9 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
     for name in after.conversations.difference(&before.conversations) {
         found.push(format!("~/.claude/projects gained {name}"));
     }
+    for name in before.conversations.difference(&after.conversations) {
+        found.push(format!("~/.claude/projects lost {name}"));
+    }
     let prompts = typed
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -923,6 +926,7 @@ fn claude_renewal(
                 Harness::Claude,
                 &program,
                 &renew::claude_words(&model),
+                &renew::account_vars(&home),
                 &[projects.as_path()],
             )?;
             let changed = owner.changes_since(&before);

@@ -212,7 +212,12 @@ pub fn renewal(
         let records = [agent.join("sessions")];
         let logins = [agent.join("models.json"), agent.join("mcp-auth.json")];
         let before = Seen::look(&files, &records, None, &logins);
-        let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model))?;
+        let mut account = renew::account_vars(&home);
+        account.push((
+            "PI_CODING_AGENT_DIR".to_owned(),
+            agent.to_string_lossy().into_owned(),
+        ));
+        let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model), &account)?;
         let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);
         if changed.is_empty() {
             return Ok(ended);
