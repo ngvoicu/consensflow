@@ -45,6 +45,7 @@ pub(crate) const GO_ON_NOTE_BEGINS: &str =
 const GO: &str = "(?:check|continue|resume|pick (?:it |this |them )?(?:back )?up|go on|carry on|come back|report|finish|return)";
 
 /// The first person ends its turn to wait.
+#[allow(clippy::expect_used)]
 static ENDS_TO_WAIT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"\b(?:i'm|i am|i'll|i will) (?:now |still )?(?:end|ending) (?:this|my|the) turn(?: here)? (?:until|while|to wait|and (?:will )?wait)\b",
@@ -53,6 +54,7 @@ static ENDS_TO_WAIT: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// "I'll resume when it reports."
+#[allow(clippy::expect_used)]
 static GOES_ON_WHEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
         r"\bi(?:'ll| will) {GO}\b[^.!?\n]{{0,80}}\b(?:when|once|after|until|at the next|as soon as)\b"
@@ -61,6 +63,7 @@ static GOES_ON_WHEN: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// "Once the run ends, I'll continue."
+#[allow(clippy::expect_used)]
 static WHEN_ENDS_GOES_ON: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
         r"\b(?:when|once|after|as soon as) [^.!?\n]{{0,60}}\b(?:finish|end|complete|report|run|return|land)(?:e?s)?\b[^.!?\n]{{0,20}}, i(?:'ll| will) {GO}\b"
