@@ -310,6 +310,24 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
     // A home lasts the run, and the next rig starts on it (the next project, the app's restart):
     // it finds the link the last one left, which leads to that rig's Muse.
     let installs = owner.installs();
+    // K3: a real Muse window on a Mac runs only on a machine marked as a test machine; off one the
+    // rig is refused before anything is made.
+    if cfg!(target_os = "macos") && cf_e2e::live::renew::TestMachine::detect().is_none() {
+        let config = live::rig(&installs, FAKE_AGENT).muse_live(muse.clone(), owner.home.path());
+        match Rig::start(config) {
+            Ok(rig) => {
+                rig.close()?;
+                return Err("a live Muse rig started on a Mac off a test machine".into());
+            }
+            Err(refused) => assert!(refused.to_string().contains("test machine"), "{refused}"),
+        }
+        assert_eq!(
+            owner.everything()?,
+            before,
+            "the refused rig changed the owner's homes"
+        );
+        return Ok(());
+    }
     for run in 1..=2 {
         let config = live::rig(&installs, FAKE_AGENT).muse_live(muse.clone(), owner.home.path());
         let rig = Rig::start(config)?;

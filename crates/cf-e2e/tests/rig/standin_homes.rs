@@ -117,17 +117,29 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
         .parent()
         .expect("temporary folder has no parent")
         .join(format!("synthetic-foreign-home-{}", std::process::id()));
-    let mut command = cf_e2e::process::case_of(
-        std::env::current_exe()?,
-        "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
-        std::time::Duration::from_secs(120),
-    )
-    .inheriting_env()
-    .var(CHILD, "1");
+    let case = || {
+        cf_e2e::process::case_of(
+            std::env::current_exe().expect("the test program"),
+            "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .var(CHILD, "1")
+    };
+    // K3: a child named homes of no run's is not started at all; the spawn door's seal refuses it
+    // before it could look at them.
+    let mut command = case();
     for (name, path) in cf_e2e::standin_process::home_vars(&decoy) {
         command = command.var(name, path);
     }
-    let output = command.run()?;
+    let refused = command.run().expect_err("a child on foreign homes was started");
+    assert!(
+        refused.to_string().contains("which is no folder this run made"),
+        "{refused}"
+    );
+    assert!(!decoy.exists(), "the foreign home was made");
+    // A child that inherits the case's environment has the run's homes, every one.
+    let output = case().run()?;
     assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
     Ok(())
 }
