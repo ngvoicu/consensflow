@@ -999,7 +999,7 @@ mod tests {
     /// After a batch that left a change both moved.
     #[test]
     fn tiny_read_clocks_after_a_batch_say_it_printed_and_whether_the_screen_ends_different() {
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        let arbiter = InputArbiter::new(crate::arbiter::EnterTiming::fixed(0));
         let key = PaneKey::new("clocks", 1);
         let clock = arbiter.register(&key).expect("register clock");
         let screen = PaneScreen::new(24, 80);
