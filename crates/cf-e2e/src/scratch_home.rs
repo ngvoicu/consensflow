@@ -148,6 +148,20 @@ mod tests {
         ]);
         assert_eq!(names, expected);
         for (name, value) in &vars {
+            // The drive is the root's own drive, not a folder: with the path it says the home.
+            if *name == "HOMEDRIVE" {
+                continue;
+            }
+            if *name == "HOMEPATH" {
+                let drive = vars.iter().find(|(n, _)| *n == "HOMEDRIVE").unwrap();
+                let joined = format!("{}{}", drive.1.display(), value.display());
+                assert_eq!(
+                    std::path::PathBuf::from(joined),
+                    home.root().join("home"),
+                    "HOMEDRIVE and HOMEPATH say another home"
+                );
+                continue;
+            }
             assert!(
                 value.starts_with(home.root()),
                 "{name} is {}",
