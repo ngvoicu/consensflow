@@ -44,5 +44,5 @@ runs = ["ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/tests/replay.rs"
-find = "    (\"ledger-tiered-012\", 7, NO_CRITICAL_CODING),\n"
+find = "    (\"ledger-tiered-012\", 9, CRITICAL_CODING),\n"
 replace = ""
