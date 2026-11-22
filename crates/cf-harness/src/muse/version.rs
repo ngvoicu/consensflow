@@ -14,6 +14,7 @@
 //! ([`QUIET`]).
 
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 /// The oldest Muse Code whose record ConsensFlow reads: the one it was built on
@@ -108,14 +109,51 @@ pub(crate) fn newer(local: Option<&str>, remote: &str) -> Option<bool> {
     Some(remote.release > local.release)
 }
 
+/// The most bytes of `.muse-version` that are read: a line is 30 at the longest.
+const PIN_BYTES: u64 = 256;
+
 /// The version line in `.muse-version` beside the launcher `executable`, where it
 /// really is (a link is followed): none where there is no such file, or it names no
-/// version.
+/// version. One bounded read: only of a regular file, looked at before it is opened
+/// (a pipe is never opened, which would wait for a writer) and again on the opened
+/// file, at most [`PIN_BYTES`], and the whole of it one line in the pin's form.
 pub(crate) fn installed(executable: &Path) -> Option<String> {
     let real = fs::canonicalize(executable).unwrap_or_else(|_| executable.to_owned());
-    let line = fs::read_to_string(real.parent()?.join(VERSION_FILE)).ok()?;
+    let file = real.parent()?.join(VERSION_FILE);
+    if !fs::metadata(&file).ok()?.is_file() {
+        return None;
+    }
+    let opened = fs::File::open(&file).ok()?;
+    if !opened.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    opened.take(PIN_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > PIN_BYTES {
+        return None;
+    }
+    let line = String::from_utf8(bytes).ok()?;
     let line = line.trim();
-    Version::of(line).map(|_| line.to_owned())
+    Version::line(line).map(|_| line.to_owned())
+}
+
+/// The version a launcher's `--version` says of its own Muse: among the lines of
+/// `said`, exactly one is wholly `Muse Code <n.n.n> (<n.n.n>-R<release>[.<n>])`, the
+/// same three numbers on both sides. No such line, or two, names none; any other line
+/// is passed over, as a wrapper's own is. [`Version::of`] takes the last two words of
+/// the whole answer and is not used on it.
+pub(crate) fn native(said: &str) -> Option<Version> {
+    let mut found = said.lines().filter_map(native_line);
+    let version = found.next()?;
+    found.next().is_none().then_some(version)
+}
+
+/// The version `line` says if it is wholly Muse's own `--version` line.
+fn native_line(line: &str) -> Option<Version> {
+    let (numbers, build) = line.trim().strip_prefix("Muse Code ")?.split_once(' ')?;
+    let build = Version::line(build.strip_prefix('(')?.strip_suffix(')')?)?;
+    build.release?;
+    (whole_numbers::<3>(numbers)? == build.numbers).then_some(build)
 }
 
 /// The oldest Muse ConsensFlow reads, as Muse writes a version: `1.4.13`.

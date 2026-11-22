@@ -68,11 +68,54 @@ impl Root {
         (self.bin().join("asked"), self.bin().join("helper"))
     }
 
+    /// A Muse Code launcher that says `said` to everything it is asked, in the daemon's
+    /// `PATH`, with no pin beside it: the program a Muse chief is run as. On the Mac a
+    /// script; on Windows a batch launcher is refused before any question, so it is the
+    /// workspace's own `cf-shim.exe` copied as `muse.exe`, with `muse.launch` beside it
+    /// naming a `.cmd` that prints the line.
+    #[allow(dead_code)]
+    pub fn muse_launcher_that_says(&self, said: &str) {
+        std::fs::create_dir_all(self.dir.path().join("home")).expect("a home folder");
+        let muse = self
+            .bin()
+            .join(if cfg!(windows) { "muse.exe" } else { "muse" });
+        if cfg!(windows) {
+            std::fs::copy(env!("CARGO_BIN_EXE_cf-shim"), &muse).expect("a shim as muse.exe");
+            let printer = self.bin().join("muse-says.cmd");
+            std::fs::write(&printer, format!("@echo off\r\necho {said}\r\n"))
+                .expect("a printing script");
+            std::fs::write(
+                muse.with_extension("launch"),
+                format!("\"{}\" %*\r\n", printer.display()),
+            )
+            .expect("its launch file");
+        } else {
+            std::fs::write(&muse, format!("#!/bin/sh\necho '{said}'\n")).expect("a stand-in muse");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&muse, std::fs::Permissions::from_mode(0o755))
+                    .expect("made executable");
+            }
+        }
+    }
+
     /// A project that was open when the last daemon ended (the next one starts
     /// it suspended, until the human resumes it), with its chief on a saved
     /// agent, a worker `zeus`, and a question the chief put to zeus: a door's
     /// wait. The project's number, and the question's.
     pub fn open_project_with_a_question(&self) -> (i64, i64) {
+        let (project, question) = self.open_project("claude-code", Some("mybuilder"), true);
+        (project, question.expect("a question"))
+    }
+
+    /// A suspended project whose chief is a Muse Code run as its launcher.
+    #[allow(dead_code)]
+    pub fn open_muse_project(&self) -> i64 {
+        self.open_project("muse", None, false).0
+    }
+
+    fn open_project(&self, harness: &str, model: Option<&str>, asking: bool) -> (i64, Option<i64>) {
         std::fs::create_dir_all(self.home()).expect("the home");
         std::fs::write(
             self.home().join("agents.json"),
@@ -92,8 +135,8 @@ impl Root {
                 directory: workspace.to_string_lossy().into_owned(),
                 name: "app".to_owned(),
                 chief: NewChief {
-                    harness: "claude-code".to_owned(),
-                    model: Some("mybuilder".to_owned()),
+                    harness: harness.to_owned(),
+                    model: model.map(str::to_owned),
                     effort: None,
                     model_name: None,
                 },
@@ -116,19 +159,22 @@ impl Root {
                 own_hands: false,
             })
             .expect("a project");
-        let question = ledger
-            .ask(
-                project.id,
-                &NewQuestion {
-                    from: Some("chief".to_owned()),
-                    to: "zeus".to_owned(),
-                    body: Some("Which?".to_owned()),
-                    ..NewQuestion::default()
-                },
-            )
-            .expect("a question");
+        let question = asking.then(|| {
+            ledger
+                .ask(
+                    project.id,
+                    &NewQuestion {
+                        from: Some("chief".to_owned()),
+                        to: "zeus".to_owned(),
+                        body: Some("Which?".to_owned()),
+                        ..NewQuestion::default()
+                    },
+                )
+                .expect("a question")
+                .id
+        });
         ledger.close().expect("the ledger closed");
-        (project.id, question.id)
+        (project.id, question)
     }
 }
 

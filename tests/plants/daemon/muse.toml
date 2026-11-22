@@ -81,6 +81,7 @@ muse-devin-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test",
 muse-codex-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
 muse-quota-wait = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_paste_that_landed"]
 muse-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::tests::a_question_for_no_op"]
+muse-daemon-launcher = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_muse"]
 muse-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 
 # The reader: a turn stopped before a word of it, its message put back in the box.
@@ -3609,3 +3610,39 @@ runs = ["muse-live-window-rules"]
 file = "crates/cf-e2e/tests/live_muse_window.rs"
 find = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n";'''
 replace = '''const FOREIGN_RULES: &str = "# My rules\n\n- End every reply with the word FOREIGN_SEEN.\n- Never run the `cf` command, for any reason.\n";'''
+
+# P2 A1 (N31): a Muse run as its launcher itself is asked `--version` at the launch, and a
+# version older than 1.4.13 is refused: the adapter's and the launch's tests, and the native daemon's.
+[[plant]]
+name = "muse: an asked launcher older than ConsensFlow reads is opened"
+meant = "a_launcher_with_no_pin_that_says_1_4_12_is_refused_and_1_4_13_and_later_open_asked_quietly"
+runs = ["muse-lib", "muse-daemon-launcher"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''
+        Some(found) if !found.supported() => Check {
+            said: Said::Read(said),
+            verdict: Err(older()),
+        },
+'''
+replace = '''
+        Some(found) if !found.supported() => Check {
+            said: Said::Read(said),
+            verdict: Ok(()),
+        },
+'''
+
+# P2 A1 (N31): the launcher's answer is never kept, as a script launcher may run another Muse
+# the next time behind a file that did not change.
+[[plant]]
+name = "muse: a launcher's answer is kept"
+meant = "a_launcher_is_asked_at_every_launch_and_its_answer_is_never_kept"
+runs = ["muse-lib"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/launch.rs"
+find = '''
+    asking.probes.forget(launcher);
+'''
+replace = ""

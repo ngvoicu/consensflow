@@ -40,3 +40,29 @@ pub(crate) fn background_work(harness: Harness, env: &Env) -> Option<(Vec<PathBu
         Harness::Claude | Harness::Devin | Harness::Pi | Harness::Muse => None,
     }
 }
+
+/// What a launch's check of its CLI came to. The launch opens on `Ok` and fails with
+/// the sentence on `Err`. The Admin page shows the same and judges nothing itself.
+pub struct Check {
+    pub said: Said,
+    pub verdict: Result<(), Refused>,
+}
+
+/// What the check learned of the CLI's version while it checked.
+pub enum Said {
+    /// It asked no version: a pinned Muse binary's name aside.
+    NotAsked,
+    /// What the CLI or its install said: Muse's answer to `--version`, Muse's pin.
+    Read(String),
+    /// It asked and got no answer: why, in the Admin's words.
+    Unanswered(String),
+}
+
+/// A launch's refusal.
+pub struct Refused {
+    /// The sentence the launch fails with, word for word.
+    pub sentence: String,
+    /// True where the CLI was read and an update mends it; false where it could not
+    /// be read.
+    pub read: bool,
+}
