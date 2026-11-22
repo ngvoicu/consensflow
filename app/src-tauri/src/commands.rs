@@ -1121,6 +1121,103 @@ mod tests {
         drop(app);
     }
 
+    /// One emission of the page's terminal is one call (P4-A): exactly the cap of unbracketed
+    /// input is admitted through Tauri's own argument decoding and reaches an owned PTY byte
+    /// for byte, and one byte more is refused whole, writing nothing.
+    #[cfg(unix)]
+    #[test]
+    fn production_ipc_admits_the_cap_of_plain_input_whole_and_refuses_one_byte_more() {
+        use base64::Engine as _;
+
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
+        let key = PaneKey::new("plain-cap", 1);
+        let folder = tempfile::tempdir().expect("a folder for the program's copy");
+        let copy = folder.path().join("received");
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/head -c {} > '{}'; printf done",
+                        MAX_PAGE_INPUT_BYTES,
+                        copy.display()
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the pane");
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader.read_exact(&mut ready).expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![pane_input_enqueue, pane_input_wait])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .expect("command succeeds")
+                .deserialize::<Value>()
+                .expect("command response JSON")
+        };
+        // Every byte value, none of them a paste marker's run, so that nothing in the bytes
+        // is the arbiter's or the terminal's to change.
+        let sent = (0..MAX_PAGE_INPUT_BYTES)
+            .map(|index| ((index * 7 + index / 251) % 256) as u8)
+            .collect::<Vec<u8>>();
+        let text = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+
+        let mut over = sent.clone();
+        over.push(b'x');
+        assert_eq!(
+            invoke(
+                "pane_input_enqueue",
+                json!({"id":key.id,"generation":1,"sequence":1,"length":over.len(),"bytes":text(&over)}),
+            ),
+            json!({
+                "ok":false,
+                "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
+            })
+        );
+        let admitted = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":1,"length":sent.len(),"bytes":text(&sent)}),
+        );
+        assert_eq!(admitted["ok"], true, "the cap's own size is admitted: {admitted:?}");
+        let completed = invoke("pane_input_wait", json!({"ticket":admitted["ticket"]}));
+        assert_eq!(completed["ok"], true);
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).expect("read until the program ends");
+        assert!(rest.ends_with(b"done"), "the program read the whole of it");
+        assert!(
+            std::fs::read(&copy).expect("the program's copy") == sent,
+            "the program read the cap's bytes as sent"
+        );
+
+        drop(webview);
+        drop(app);
+    }
+
     /// The page's terminal answers what the program asked of it (where its cursor is) past
     /// the human's keys held after their paste (T-1048): Codex on Windows asks as a paste comes
     /// and reads none of it until it has the answer, and the page's answer waited behind the

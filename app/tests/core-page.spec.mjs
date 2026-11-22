@@ -4871,11 +4871,20 @@ test('a paste goes in as one call, whole with both markers, however long', async
   expect(call.length).toBe(new TextEncoder().encode(paste).length)
 })
 
-for (const lost of ['before it arrives', 'with its answer lost']) {
-  test(`a paste lost ${lost} is whole or not there at all, never in part`, async ({ page }) => {
+for (const [lost, bracketed] of [
+  ['before it arrives', true],
+  ['with its answer lost', true],
+  ['before it arrives', false],
+  ['with its answer lost', false],
+]) {
+  test(`a ${bracketed ? 'bracketed' : 'plain'} paste lost ${lost} is whole or not there at all, never in part`, async ({
+    page,
+  }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-    const paste = `\x1b[200~echo PASTE_ONLY\r${'p'.repeat(70 * 1024)}\x1b[201~`
+    // The plain one is 71,680 bytes: 32,768 + 32,768 + 6,144 under the old cut.
+    const body = `echo PASTE_ONLY\r${'p'.repeat(71680 - 'echo PASTE_ONLY\r'.length)}`
+    const paste = bracketed ? `\x1b[200~${body}\x1b[201~` : body
     await page.evaluate(
       ({ lost, hostSource, paste }) => {
         const admit = new Function(`return (${hostSource})()`)()
@@ -4901,6 +4910,7 @@ for (const lost of ['before it arrives', 'with its answer lost']) {
       sent: window.__sent,
       skips: window.__paneSkips.map((args) => args.sequence),
     }))
+    if (!bracketed) expect(new TextEncoder().encode(paste).length).toBe(71680)
     expect(result.sent, 'one call for the paste, never sent again').toEqual([1, 2])
     expect(result.skips).toEqual([1])
     await expect(page.locator('#status')).toHaveText(
@@ -4928,6 +4938,29 @@ test('a paste over the cap is refused before anything is sent, and typing goes o
   expect(await page.evaluate(() => window.__sent)).toEqual([])
   await page.evaluate(() => window.__emulators[0].type('Z'))
   await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([[1, 1]])
+})
+
+test('a plain paste of exactly 4 MiB is one call, and one byte more is refused whole', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__sent = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__sent.push([args.sequence, args.length])
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('p'.repeat(4 * 1024 * 1024 + 1))
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This paste is too large to send (over 4 MiB). Paste less of it.',
+  )
+  expect(await page.evaluate(() => window.__sent)).toEqual([])
+  await page.evaluate(() => window.__emulators[0].type('p'.repeat(4 * 1024 * 1024)))
+  await expect
+    .poll(() => page.evaluate(() => window.__sent))
+    .toEqual([[1, 4 * 1024 * 1024]])
 })
 
 test('each page uses a new identity on all its pane input calls', async ({ page }) => {
@@ -5345,14 +5378,13 @@ test('a terminal reply follows the paste admissions without waiting for completi
           .map(([, args]) => args.bytes.length),
       ),
     )
-    .toEqual([32768, 1024, 1])
+    .toEqual([33 * 1024, 1])
   const admissions = await page.evaluate(() =>
     window.__calls.filter(
       ([name]) => name === 'pane_input_enqueue' || name === 'pane_reply_enqueue',
     ),
   )
   expect(admissions.map(([name]) => name)).toEqual([
-    'pane_input_enqueue',
     'pane_input_enqueue',
     'pane_input_enqueue',
     'pane_reply_enqueue',
@@ -18607,7 +18639,9 @@ test('BKV05 a task held in an out member window keeps its quota hold with a back
   await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
 })
 
-test('pane input keeps a long control sequence whole across chunks', async ({ page }) => {
+test('a long control sequence in typed input goes in the one call of its emission', async ({
+  page,
+}) => {
   await open(page)
   await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
@@ -18618,32 +18652,17 @@ test('pane input keeps a long control sequence whole across chunks', async ({ pa
     }
     window.__controlInput = `${'p'.repeat(32760)}\x1b]0;${'q'.repeat(40000)}\x07z`
     window.__emulators[0].type(window.__controlInput)
+    window.__emulators[0].type(`\x1b]0;${'q'.repeat(100 * 1024)}\x07`)
   })
-  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(3)
+  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(2)
   const result = await page.evaluate(() => ({
     lengths: window.__paneChunks.map((bytes) => bytes.length),
-    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks.flat())),
+    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks[0])),
     expected: window.__controlInput,
   }))
-  expect(result.lengths).toEqual([32760, 40005, 1])
+  expect(result.lengths).toEqual([72766, 100 * 1024 + 5])
   expect(result.text).toBe(result.expected)
-})
-
-test('an oversized control sequence is refused before any pane input is sent', async ({ page }) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(() => {
-    window.__paneChunks = []
-    window.__paneInputHook = async (_command, args) => {
-      window.__paneChunks.push(args.bytes)
-      return { ok: true, ticket: `ticket-${args.sequence}` }
-    }
-    window.__emulators[0].type(`\x1b]0;${'q'.repeat(65536)}\x07`)
-  })
-  await expect(page.locator('#status')).toHaveText(
-    'This input contains a control sequence too long to send. Remove that sequence and paste again.',
-  )
-  expect(await page.evaluate(() => window.__paneChunks.length)).toBe(0)
+  await expect(page.locator('#status')).not.toContainText('control sequence')
 })
 
 // T-1789: edit one member alongside another on the same model, with idle and working sessions.

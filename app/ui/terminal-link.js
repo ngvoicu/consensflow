@@ -1,10 +1,8 @@
 import { paneKey } from './term.js'
 
-const INPUT_CHUNK_BYTES = 32 * 1024
 // The largest paste: the host's own cap (`MAX_PAGE_INPUT_BYTES`), checked here
 // too so that a larger one is refused before any of it is sent.
 const MAX_PASTE_BYTES = 4 * 1024 * 1024
-const MAX_CONTROL_BYTES = 64 * 1024
 const ADMISSION_TIMEOUT_MS = 1500
 const WAIT_TIMEOUT_MS = 30_000
 const INPUT_RETRY_MS = 100
@@ -12,8 +10,6 @@ const RESTART_INPUT_ADVICE =
   'Check whether your last typing appeared, then restart the project before typing again.'
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// Find escape sequences before choosing byte cuts, including OSC/DCS strings.
-// A cut may be at either end of a sequence, never inside it.
 /** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
 function base64Of(bytes) {
   let binary = ''
@@ -22,84 +18,19 @@ function base64Of(bytes) {
   return btoa(binary)
 }
 
-function controlSpans(bytes) {
-  const spans = []
-  for (let i = 0; i < bytes.length; i += 1) {
-    if (bytes[i] !== 0x1b) continue
-    const start = i
-    const kind = bytes[++i]
-    if (kind === 0x5b) {
-      while (++i < bytes.length && (bytes[i] < 0x40 || bytes[i] > 0x7e)) {}
-    } else if ([0x5d, 0x50, 0x58, 0x5e, 0x5f].includes(kind)) {
-      while (++i < bytes.length) {
-        if (bytes[i] === 0x07) break
-        if (bytes[i] === 0x1b && bytes[i + 1] === 0x5c) {
-          i += 1
-          break
-        }
-      }
-    } else {
-      while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x2f) i += 1
-    }
-    spans.push({ start, end: Math.min(i + 1, bytes.length) })
-  }
-  return spans
-}
-
-function inputChunks(data) {
+/**
+ * What the emulator emits at once is one call: a paste with its markers, typed
+ * keys, a long control string. Over the host's cap it is refused whole, before
+ * any of it is sent.
+ */
+function inputBytes(data) {
   const bytes = new TextEncoder().encode(data)
-  const spans = controlSpans(bytes)
-  const marker = (span, value) =>
-    span.end - span.start === value.length &&
-    value.every((byte, index) => bytes[span.start + index] === byte)
-  const startMarker = [0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e]
-  const endMarker = [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e]
-  const regions = []
-  let previous = 0
-  let pasteStart = null
-  for (const span of spans) {
-    if (pasteStart === null && marker(span, startMarker)) {
-      if (previous < span.start) regions.push({ start: previous, end: span.start, paste: false })
-      pasteStart = span.start
-    } else if (pasteStart !== null && marker(span, endMarker)) {
-      regions.push({ start: pasteStart, end: span.end, paste: true })
-      previous = span.end
-      pasteStart = null
-    }
+  if (bytes.length > MAX_PASTE_BYTES) {
+    throw new Error(
+      `This paste is too large to send (over ${MAX_PASTE_BYTES / (1024 * 1024)} MiB). Paste less of it.`,
+    )
   }
-  if (pasteStart !== null) regions.push({ start: pasteStart, end: bytes.length, paste: true })
-  else if (previous < bytes.length)
-    regions.push({ start: previous, end: bytes.length, paste: false })
-
-  // A paste goes in as one call, whole with its markers, or not at all: a call
-  // that is lost then loses the paste and never splits it. What is typed is cut
-  // into calls at whole units (a character, an escape sequence).
-  return regions.flatMap((region) => {
-    if (region.paste) {
-      if (region.end - region.start > MAX_PASTE_BYTES) {
-        throw new Error(
-          `This paste is too large to send (over ${MAX_PASTE_BYTES / (1024 * 1024)} MiB). Paste less of it.`,
-        )
-      }
-      return [bytes.subarray(region.start, region.end)]
-    }
-    const chunks = []
-    let start = region.start
-    while (start < region.end) {
-      let end = Math.min(start + INPUT_CHUNK_BYTES, region.end)
-      while (end < region.end && (bytes[end] & 0xc0) === 0x80) end -= 1
-      const crossed = spans.find((span) => span.start < end && span.end > end)
-      if (crossed) end = crossed.start === start ? crossed.end : crossed.start
-      if (end - start > MAX_CONTROL_BYTES || end <= start) {
-        throw new Error(
-          'This input contains a control sequence too long to send. Remove that sequence and paste again.',
-        )
-      }
-      chunks.push(bytes.subarray(start, end))
-      start = end
-    }
-    return chunks
-  })
+  return bytes
 }
 
 /**
@@ -243,16 +174,14 @@ export class TerminalLink {
 
   async #stream(command, pane, data) {
     const key = paneKey(pane)
-    const calls = inputChunks(data)
+    const bytes = inputBytes(data)
     // Keys and replies go in one order, one admission at a time: each call
     // finishes its admission before the next one starts.
     const streams = this.#inputs
     const previous = streams.get(key)
     const submit = async () => {
-      for (const bytes of calls) {
-        if (this.#retired.has(key)) return
-        if (!(await this.#chunk(command, pane, bytes))) return
-      }
+      if (this.#retired.has(key)) return
+      await this.#chunk(command, pane, bytes)
     }
     const stream = previous ? previous.then(submit, submit) : submit()
     streams.set(key, stream)
