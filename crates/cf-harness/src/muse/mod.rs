@@ -4,6 +4,7 @@
 //! has.
 
 mod adapter;
+pub(crate) mod declared;
 pub(crate) mod index;
 pub(crate) mod last_used;
 mod launch;

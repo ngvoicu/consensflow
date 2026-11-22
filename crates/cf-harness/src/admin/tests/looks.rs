@@ -22,6 +22,186 @@ fn look(command: &str, folder: &str, version: Response<Said>, release: Told) -> 
 }
 
 #[test]
+fn a3_every_installed_row_names_its_tested_range() {
+    for command in ["claude", "codex", "pi", "devin", "muse"] {
+        let fixture = look(command, "bin", says("unusual"), Ok("9.9.9".to_owned()));
+        let row = json_of(&fixture.row(command, false));
+        let (newest, oldest) = match command {
+            "claude" => (
+                crate::claude::declared::NEWEST_TESTED,
+                Some(crate::claude::declared::OLDEST_TESTED.to_owned()),
+            ),
+            "codex" => (crate::codex::declared::NEWEST_TESTED, None),
+            "pi" => (
+                crate::pi::declared::NEWEST_TESTED,
+                Some(crate::pi::declared::OLDEST_TESTED.to_owned()),
+            ),
+            "devin" => (
+                crate::devin::declared::NEWEST_TESTED,
+                Some(crate::devin::minimum_version()),
+            ),
+            "muse" => (
+                crate::muse::declared::NEWEST_TESTED,
+                Some(crate::muse::version::minimum()),
+            ),
+            _ => unreachable!(),
+        };
+        assert_eq!(row["tested"]["newest"], newest, "{command}");
+        assert_eq!(row["tested"]["oldest"], json!(oldest), "{command}");
+        assert_eq!(row["tested"]["release"], json!(null), "{command}");
+        assert_eq!(row["tested"]["beyond"], false, "{command}");
+    }
+}
+
+fn a3_release_cases(command: &str, own: &str, release: &str) {
+    for (said, expected) in [
+        (own.to_owned(), Some(release)),
+        (
+            format!("workspace launcher 1.0.0\r\n{own}\r\n"),
+            Some(release),
+        ),
+        (format!("{own}\nworkspace launcher 1.0.0\n"), Some(release)),
+        (format!("workspace launcher 1.0.0 {own}"), None),
+        (format!(" {own}"), None),
+        (format!("{own} trailing text"), None),
+        (format!("{own}\n{own}"), None),
+        ("workspace launcher 1.0.0".to_owned(), None),
+    ] {
+        let fixture = look(command, "bin", says(&said), Ok(release.to_owned()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(
+            row["tested"]["release"],
+            json!(expected),
+            "{command}: {said:?}"
+        );
+    }
+}
+
+#[test]
+fn a3_claude_release_requires_one_whole_native_line() {
+    a3_release_cases("claude", "9999.0.2 (Claude Code)", "9999.0.2");
+}
+
+#[test]
+fn a3_codex_release_requires_one_whole_native_line() {
+    a3_release_cases("codex", "codex-cli 9999.0.2", "9999.0.2");
+}
+
+#[test]
+fn a3_pi_release_requires_one_whole_native_line() {
+    a3_release_cases("pi", "9999.0.2", "9999.0.2");
+}
+
+#[test]
+fn a3_devin_release_requires_one_whole_native_line() {
+    a3_release_cases("devin", "devin 9999.0.2 (053434014dbd)", "9999.0.2");
+}
+
+#[test]
+fn a3_muse_release_requires_one_whole_native_line() {
+    a3_release_cases(
+        "muse",
+        "Muse Code 9999.0.2 (9999.0.2-R7400.1)",
+        "9999.0.2-R7400.1",
+    );
+    for invalid in [
+        "Muse Code 1.4.14 (1.4.15-R7400.1)",
+        "Muse Code 1.4.14 (1.4.14)",
+        "Muse Code 1.4.14-beta (1.4.14-R7400.1)",
+        "1.4.14-R7400.1",
+    ] {
+        let fixture = look(
+            "muse",
+            "bin",
+            says(invalid),
+            Ok("1.4.14-R7400.1".to_owned()),
+        );
+        let row = json_of(&fixture.row("muse", false));
+        assert_eq!(row["tested"]["release"], json!(null), "{invalid}");
+        assert_eq!(row["tested"]["beyond"], false, "{invalid}");
+    }
+}
+
+#[test]
+fn a3_release_round_trip_keeps_the_feed_and_display_in_agreement() {
+    use crate::admin::feed::release_version;
+    use crate::admin::source::Format;
+
+    for (command, own, release) in [
+        ("claude", "9999.0.2 (Claude Code)", "9999.0.2"),
+        ("codex", "codex-cli 9999.0.2", "9999.0.2"),
+        ("pi", "9999.0.2", "9999.0.2"),
+        ("devin", "devin 9999.0.2 (053434014dbd)", "9999.0.2"),
+        (
+            "muse",
+            "Muse Code 9999.0.2 (9999.0.2-R7309.1)",
+            "9999.0.2-R7309.1",
+        ),
+    ] {
+        let feed = release_version(Format::Npm, &json!({"version": release}).to_string()).unwrap();
+        let said = format!("workspace launcher 1.0.0\n{own}\n");
+        let fixture = look(command, "bin", says(&said), Ok(feed.clone()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(row["tested"]["release"], feed, "{command}");
+        assert_eq!(row["version"]["value"], feed, "{command}");
+        assert_eq!(row["update"]["state"], "current", "{command}: {row}");
+    }
+
+    // Use each actual declaration as the feed and CLI release. A future bump
+    // changes neither this test nor the scenario goldens.
+    for command in ["claude", "codex", "pi", "devin", "muse"] {
+        let newest = json_of(&Fixture::new().row(command, false))["tested"]["newest"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let own = match command {
+            "claude" => format!("{newest} (Claude Code)"),
+            "codex" => format!("codex-cli {newest}"),
+            "pi" => newest.clone(),
+            "devin" => format!("devin {newest} (053434014dbd)"),
+            "muse" => format!(
+                "Muse Code {} ({newest})",
+                newest.split_once("-R").unwrap().0
+            ),
+            _ => unreachable!(),
+        };
+        let feed = release_version(Format::Npm, &json!({"version": newest}).to_string()).unwrap();
+        let fixture = look(command, "bin", says(&own), Ok(feed.clone()));
+        let row = json_of(&fixture.row(command, false));
+        assert_eq!(row["tested"]["newest"], feed, "{command}");
+        assert_eq!(row["tested"]["release"], feed, "{command}");
+        assert_eq!(row["tested"]["beyond"], false, "{command}");
+        assert_eq!(row["version"]["value"], feed, "{command}");
+        assert_eq!(row["update"]["state"], "current", "{command}");
+    }
+}
+
+#[test]
+fn a3_two_muse_builds_of_one_semver_are_distinct_releases() {
+    for (build, feed, state) in [
+        ("R7309.1", "1.4.14-R7400.1", "available"),
+        ("R7400.1", "1.4.14-R7309.1", "current"),
+    ] {
+        let said = format!("Muse Code 1.4.14 (1.4.14-{build})");
+        let fixture = look("muse", "bin", says(&said), Ok(feed.to_owned()));
+        let row = json_of(&fixture.row("muse", false));
+        assert_eq!(row["update"]["state"], state, "{said}: {row}");
+    }
+}
+
+#[test]
+fn a3_threshold_and_wrapper_advice_use_the_proved_release() {
+    for (own, expected) in [("0.0.1", false), ("9999.0.2", true)] {
+        let said = format!("workspace launcher 1.0.0\n{own} (Claude Code)");
+        let fixture = look("claude", "bin", says(&said), Ok(own.to_owned()));
+        let row = json_of(&fixture.row("claude", false));
+        assert_eq!(row["tested"]["beyond"], expected, "{row}");
+        assert_eq!(row["version"]["value"], own, "{row}");
+        assert_eq!(row["update"]["state"], "current", "{row}");
+    }
+}
+
+#[test]
 fn a_cli_that_says_no_version_or_fails_to_is_told_why_and_never_a_guess() {
     for (answer, version) in [
         (
@@ -167,6 +347,7 @@ fn a_row_says_its_fields_in_the_order_node_builds_them() {
             "checkedAt",
             "version",
             "update",
+            "tested",
             "setup",
             "distribution"
         ]
@@ -270,6 +451,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
             value: "1.4.13-R6996.1".to_owned()
         }
     );
+    assert_eq!(json_of(&row)["tested"]["release"], "1.4.13-R6996.1");
     assert!(
         fixture.capture.take_ran().is_empty(),
         "the launcher's own --version checks for an update"
@@ -313,7 +495,7 @@ fn muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_quiet_v
     assert_eq!(
         row.version,
         Version::Checked {
-            value: "1.4.13".to_owned()
+            value: "1.4.13-R6996.1".to_owned()
         }
     );
     assert_eq!(row.setup, Some(Setup::Ready));

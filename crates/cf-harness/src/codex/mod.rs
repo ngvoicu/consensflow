@@ -6,6 +6,7 @@
 mod adapter;
 mod channel;
 pub mod computer_use;
+pub(crate) mod declared;
 #[cfg(test)]
 mod fakes;
 mod last_used;

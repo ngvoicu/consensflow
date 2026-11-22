@@ -4,6 +4,7 @@
 
 mod adapter;
 mod channel;
+pub(crate) mod declared;
 mod history;
 pub(crate) mod input_box;
 mod install;

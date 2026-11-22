@@ -54,10 +54,16 @@ async fn every_harness_is_checked_in_the_order_the_page_lists_them() {
     let rows: Vec<&Value> = body["harnesses"].as_array().unwrap().iter().collect();
     let ids: Vec<&str> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
     assert_eq!(ids, ["devin", "claude", "codex", "pi", "muse"]);
+    assert!(rows
+        .iter()
+        .all(|row| row["tested"]["newest"].as_str().is_some()));
+    assert_eq!(rows[1]["tested"]["release"], Value::Null);
+    assert_eq!(rows[1]["tested"]["beyond"], false);
     assert_eq!(
         rows[1].to_string(),
         format!(
-            r#"{{"id":"claude","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}}}}"#
+            r#"{{"id":"claude","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}},"tested":{}}}"#,
+            rows[1]["tested"]
         )
     );
 }
@@ -70,7 +76,7 @@ async fn a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_wh
         rig.capture.says("claude --version", version);
         rig.latest.says(Harness::Claude, release);
     };
-    script("claude 2.1.0\n", "2.2.0");
+    script("2.1.0 (Claude Code)\n", "2.2.0");
     let (status, body) = the_app_asks(
         &rig,
         Method::POST,
@@ -79,11 +85,14 @@ async fn a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_wh
     )
     .await;
     assert_eq!(status, 200);
+    assert_eq!(body["harnesses"][0]["tested"]["release"], "2.1.0");
+    assert_eq!(body["harnesses"][0]["tested"]["beyond"], false);
     assert_eq!(
         body["harnesses"].to_string(),
         format!(
-            r#"[{{"id":"claude","path":{},"installed":true,"checkedAt":{EPOCH_MS},"version":{{"state":"checked","value":"2.1.0"}},"update":{{"state":"available","value":"2.2.0","source":"https://registry.npmjs.org/@anthropic-ai/claude-code/latest","command":null}},"distribution":null}}]"#,
-            Value::from(installed.to_string_lossy().as_ref())
+            r#"[{{"id":"claude","path":{},"installed":true,"checkedAt":{EPOCH_MS},"version":{{"state":"checked","value":"2.1.0"}},"update":{{"state":"available","value":"2.2.0","source":"https://registry.npmjs.org/@anthropic-ai/claude-code/latest","command":null}},"tested":{},"distribution":null}}]"#,
+            Value::from(installed.to_string_lossy().as_ref()),
+            body["harnesses"][0]["tested"]
         )
     );
     assert_eq!(ran(), 1);
@@ -97,7 +106,7 @@ async fn a_check_of_one_harness_is_kept_five_minutes_and_looked_at_again_only_wh
         assert_eq!(status, 200, "{body}");
     }
     assert_eq!(ran(), 0, "kept");
-    script("claude 2.2.0\n", "2.2.0");
+    script("2.2.0 (Claude Code)\n", "2.2.0");
     let (_, body) = the_app_asks(
         &rig,
         Method::POST,

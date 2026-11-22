@@ -449,6 +449,24 @@ fn expected(scenario: &Value, index: usize) -> Value {
     record
 }
 
+/// The declaration may be bumped without rewriting the recorded scenarios.
+fn mask_tested_newest(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(Value::Object(tested)) = object.get_mut("tested") {
+                if tested.contains_key("newest") {
+                    tested.insert("newest".to_owned(), json!("<newest tested>"));
+                }
+            }
+            for child in object.values_mut() {
+                mask_tested_newest(child);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(mask_tested_newest),
+        _ => {}
+    }
+}
+
 /// Plays one scenario, and says each step where Rust answers otherwise than
 /// Node.
 fn play(scenario: &Value) -> Vec<String> {
@@ -457,7 +475,8 @@ fn play(scenario: &Value) -> Vec<String> {
     let mut play = Play::new(scenario, root_of(dir.path()));
     let mut differing = Vec::new();
     for (index, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
-        let actual = play.step(index, step);
+        let mut actual = play.step(index, step);
+        mask_tested_newest(&mut actual);
         let node = expected(scenario, index);
         if text(&actual) != text(&node) {
             differing.push(format!(

@@ -100,13 +100,18 @@ function renderHarness(row) {
   line.append(el('div', null, row.installed ? 'Installed: ' + row.path : 'Not installed'));
   if (row.installed) {
     const update = row.update;
-    const version = row.version.value ? 'Version ' + row.version.value : row.version.reason || 'Version unknown';
+    const installedRelease = row.tested?.release || row.version.value;
+    const version = installedRelease ? 'Version ' + installedRelease : row.version.reason || 'Version unknown';
     const latest = update.state === 'current' ? ', up to date'
       : update.state === 'available' ? ', ' + update.value + ' is out'
       : update.state === 'unknown' ? '; the latest release is ' + update.value
       : update.state === 'error' ? '; could not check for updates: ' + update.reason
       : '';
     line.append(el('div', null, version + latest));
+    if (row.tested?.newest) {
+      line.append(el('div', null, 'Tested up to ' + row.tested.newest + '.'));
+      if (row.tested.beyond) line.append(el('div', null, 'This version is newer and has not been checked yet.'));
+    }
     line.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
     const last = UPDATES.get(row.id);
     if (last) {

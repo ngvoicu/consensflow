@@ -144,7 +144,8 @@ fn harnesses_not_installed_are_listed_in_order_without_running_or_asking_anythin
     assert_eq!(
         serde_json::to_string(&*rows[0]).unwrap(),
         format!(
-            r#"{{"id":"devin","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}}}}"#
+            r#"{{"id":"devin","path":null,"installed":false,"checkedAt":{EPOCH_MS},"version":{{"state":"not-installed"}},"update":{{"state":"not-checked"}},"tested":{}}}"#,
+            serde_json::to_string(&rows[0].tested).unwrap()
         ),
         "no distribution key where nothing was looked at"
     );

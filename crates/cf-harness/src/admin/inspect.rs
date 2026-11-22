@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use cf_base::env::Env;
 use cf_proto::agents::Harness;
 
-use super::row::{Distribution, Extension, Release, Row, Setup, Update, Version};
+use super::row::{Distribution, Extension, Release, Row, Setup, Tested, Update, Version};
 use super::source::release_source;
 use super::version::{newer, version_of};
 use super::{program, Inner, PROBE};
-use crate::{devin, muse, pi};
+use crate::{claude, codex, devin, muse, pi};
 
 /// The row of the harness `harness`, whose CLI is at `path` (none when it is
 /// installed nowhere), the look begun at `checked_at`.
@@ -28,6 +28,7 @@ pub(super) async fn inspect(
         checked_at,
         version: Version::NotInstalled,
         update: Update::NotChecked,
+        tested: Tested::of(harness, None),
         setup: None,
         distribution: Distribution::Unlooked,
         extension: None,
@@ -35,10 +36,12 @@ pub(super) async fn inspect(
     let Some(path) = path else {
         return row;
     };
-    row.version = match harness {
+    let (version, release) = match harness {
         Harness::Muse => muse_version(inner, &path).await,
-        _ => ask_version(inner, &path, &inner.env).await,
+        _ => ask_version(inner, &path, &inner.env, harness).await,
     };
+    row.version = version;
+    row.tested = Tested::of(harness, release.as_deref());
     row.setup = setup(harness, row.version.value());
     let source = release_source(harness, &path, &inner.env);
     row.distribution = source
@@ -76,38 +79,57 @@ pub(super) async fn inspect(
 /// and only where there is none what it says to `--version`, asked with its update
 /// and login off. Its `--version` alone checks for an update first, which can
 /// download a new binary and write the install's files (`muse::version`).
-async fn muse_version(inner: &Inner, path: &str) -> Version {
+async fn muse_version(inner: &Inner, path: &str) -> (Version, Option<String>) {
     if let Some(value) = muse::version::installed(&PathBuf::from(path)) {
-        return Version::Checked { value };
+        let release = muse::declared::pin_release(&value).map(str::to_owned);
+        return (Version::Checked { value }, release);
     }
     let quiet = muse::version::QUIET
         .iter()
         .fold(inner.env.clone(), |env, (name, value)| {
             env.with_var(name, value)
         });
-    ask_version(inner, path, &quiet).await
+    ask_version(inner, path, &quiet, Harness::Muse).await
 }
 
 /// What the CLI at `path` says to `--version`, run in `env`.
-async fn ask_version(inner: &Inner, path: &str, env: &Env) -> Version {
+async fn ask_version(
+    inner: &Inner,
+    path: &str,
+    env: &Env,
+    harness: Harness,
+) -> (Version, Option<String>) {
     let asked = program(env, PathBuf::from(path), vec!["--version".to_owned()]);
     match inner.capture.capture(asked, PROBE).await {
-        Ok(said) => match version_of(&said.stdout) {
-            Some(value) => Version::Checked {
-                value: value.to_owned(),
+        Ok(said) => {
+            let release = match harness {
+                Harness::Claude => claude::declared::release(&said.stdout),
+                Harness::Codex => codex::declared::release(&said.stdout),
+                Harness::Pi => pi::declared::release(&said.stdout),
+                Harness::Devin => devin::declared::release(&said.stdout),
+                Harness::Muse => muse::declared::release(&said.stdout),
+            };
+            let version = match release.or_else(|| version_of(&said.stdout)) {
+                Some(value) => Version::Checked {
+                    value: value.to_owned(),
+                },
+                None => Version::Unknown {
+                    reason: "Version output was not recognized".to_owned(),
+                },
+            };
+            (version, release.map(str::to_owned))
+        }
+        Err(failed) => (
+            Version::Error {
+                reason: if failed.killed {
+                    "Version check timed out"
+                } else {
+                    "Version command failed"
+                }
+                .to_owned(),
             },
-            None => Version::Unknown {
-                reason: "Version output was not recognized".to_owned(),
-            },
-        },
-        Err(failed) => Version::Error {
-            reason: if failed.killed {
-                "Version check timed out"
-            } else {
-                "Version command failed"
-            }
-            .to_owned(),
-        },
+            None,
+        ),
     }
 }
 
