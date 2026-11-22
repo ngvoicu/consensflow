@@ -540,9 +540,10 @@ impl Run {
             // folder of the run's, and any other variable but the search path that names a store
             // of a harness's or of the account, is not handed on (the door gives the run's homes
             // below). A case that names such a variable itself is refused by the seal instead.
+            let roots = crate::door::Roots::now();
             std::env::vars_os()
                 .filter(|(name, _)| !board_variable(name))
-                .filter(|(name, value)| inheritable(name, value))
+                .filter(|(name, value)| inheritable(name, value, &roots))
                 .collect()
         };
         for (name, value) in &self.vars {
@@ -835,7 +836,7 @@ pub fn required_from(
 /// Whether the test's own variable `name` is handed on to a program that inherits the test's
 /// environment ([`Run::inheriting_env`]): not a home of the account's (one that is no folder this
 /// run made), and not another variable but the search path that names a store.
-fn inheritable(name: &OsStr, value: &OsStr) -> bool {
+fn inheritable(name: &OsStr, value: &OsStr, roots: &crate::door::Roots) -> bool {
     let text = name.to_string_lossy().to_ascii_uppercase();
     if text == "PATH" {
         return true;
@@ -846,9 +847,7 @@ fn inheritable(name: &OsStr, value: &OsStr) -> bool {
         .any(|home| *home == text);
     if home {
         let path = Path::new(value);
-        return path.is_absolute()
-            && crate::door::is_made_or_below(path)
-            && !crate::door::inside_protected(path);
+        return path.is_absolute() && crate::door::is_made_or_below(path) && !roots.holds(path);
     }
     if crate::door::spawn::PROFILE_HALVES.contains(&text.as_str()) {
         // Said again by the door from the profile the program is given.
@@ -858,7 +857,7 @@ fn inheritable(name: &OsStr, value: &OsStr) -> bool {
     !whole
         .chain(std::env::split_paths(value))
         .filter(|path| path.is_absolute())
-        .any(|path| crate::door::inside_protected(&path))
+        .any(|path| roots.holds(&path))
 }
 
 /// Whether two names of variables are one: in any case on Windows.

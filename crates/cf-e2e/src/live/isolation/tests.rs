@@ -2544,3 +2544,41 @@ fn a_changed_owner_config_is_a_failure_that_says_who_could_have_written_it() {
     );
     assert!(!said.contains("VALUE-NEVER-SAID"), "{said}");
 }
+
+/// K3 section 1: every store a plan names (a seed's source, a file watched, a records folder) is
+/// inside a row of the table of stores, for an account whose only home is the one the plan was
+/// made for: a plan that names a store the table does not know fails here.
+#[test]
+fn every_store_a_plan_names_is_a_row_of_the_table() {
+    let home = PathBuf::from("/the/account");
+    let lookup = |name: &str| (name == "HOME").then(|| home.clone().into_os_string());
+    let plans = [
+        Plan::codex(&home.join(".codex")),
+        Plan::pi(&home.join(".pi/agent"), None, Duration::from_secs(60)),
+        Plan::muse(&home.join(".config"), &home.join(".local/share")),
+        Plan::devin(&home.join(".config"), &home.join(".local/share")),
+        Plan::devin_on_windows(&home.join("AppData/Roaming")),
+    ];
+    for plan in &plans {
+        let mut named: Vec<&Path> = Vec::new();
+        for seed in &plan.seeds {
+            match seed {
+                Seed::Copy { from, .. } | Seed::PiLogin { from, .. } | Seed::PiProvider { from, .. } => {
+                    named.push(from)
+                }
+                Seed::Fixed { .. } => {}
+            }
+        }
+        named.extend(plan.watched.iter().map(PathBuf::as_path));
+        named.extend(plan.login_watched.iter().map(PathBuf::as_path));
+        named.extend(plan.records.iter().map(PathBuf::as_path));
+        for path in named {
+            assert!(
+                crate::live::stores::in_a_row(path, &lookup).is_some(),
+                "{} is in no row of the table ({})",
+                path.display(),
+                plan.described
+            );
+        }
+    }
+}

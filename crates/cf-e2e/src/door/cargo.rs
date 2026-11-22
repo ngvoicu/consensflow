@@ -146,11 +146,12 @@ fn cargo_in(cwd: &Path) -> Result<Run> {
     crate::door::make_dir(&home)?;
     #[allow(clippy::disallowed_methods)] // The door reads the test's environment for cargo.
     let all = std::env::vars_os();
+    let roots = crate::door::Roots::now();
     let env = environment_of(
         all,
         crate::door::account::project_home().as_deref(),
         &home,
-        &crate::door::inside_protected,
+        &|path| roots.holds(path),
     )
     .map_err(Error::Build)?;
     Ok(Run::operation("cargo", CARGO)

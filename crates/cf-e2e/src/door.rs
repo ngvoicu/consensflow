@@ -120,7 +120,7 @@ pub const STILL_ACTS: &[&str] = &[
     "Claude's dialog case reads the owner's .claude.json before and after to check it stayed unchanged; it keeps a hash and four LSP and hints settings in memory and prints the complete hashes and those settings in its report",
     "Claude's parity case does not read or check the owner's Claude settings, project configuration, history or project folders; it checks the login and its copy, and refuses a login that needs renewal, even on a test machine",
     "for setup, Claude's dialog case recursively copies the owner's official plugin marketplace without links; its parity case uses the kit's copy of the owner's Claude login without its refresh token in a config of the run's own, with a skill and an MCP server of the run's own, and reads no other owner Claude configuration; the run's settings ask Claude not to sync account skills or plugins or fetch account connectors; the login copy stays in a say-only run",
-    "for setup, only when Pi is seated and no Pi model is explicitly named, the kit reads the owner's auth.json once in memory for the run's seed, makes a private discovery copy with refresh-named keys removed, and reads provider names from that copy; the first matching run home reuses the seed after checking that the owner's file metadata stayed unchanged; an explicitly named Pi model skips discovery and its run home reads auth.json in memory to seed its sanitized copy; a later Pi home may also read it again, and a test-machine renewal rereads the login after renewal; a say-only run keeps its sanitized discovery copy as well as its run copies; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config; a live Muse home and its reads, compaction, and direct TUI cases copy the model catalog where present, and seeding its home reads the owner's login in memory and writes only a sanitized copy; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit's seed copies no owner Git file",
+    "for setup, only when Pi is seated and no Pi model is explicitly named, the kit reads the owner's auth.json once in memory for the run's seed, makes a private discovery copy with refresh-named keys removed, and reads provider names from that copy; the first matching run home reuses the seed after checking that the owner's file metadata stayed unchanged; an explicitly named Pi model skips discovery and its run home reads auth.json in memory to seed its sanitized copy; a later Pi home may also read it again, and a test-machine renewal rereads the login after renewal; a say-only run keeps its sanitized discovery copy as well as its run copies; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config; a live Muse home and its reads and direct TUI cases copy the model catalog where present, and seeding its home reads the owner's login in memory and writes only a sanitized copy; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit's seed copies no owner Git file",
     "the Muse window case checks whether the owner's Claude rules file exists and may print its path; the Claude launcher case reads and prints the owner's Claude launcher link target",
 ];
 
@@ -844,24 +844,43 @@ pub fn judge(path: &Path, act: place::Act) -> io::Result<PathBuf> {
     place::judge_with(path, act, &protected, &made)
 }
 
-/// Whether `path` resolves inside a protected root, by any way it resolves, or is spelled inside
-/// one: what the seal asks of every variable but the search path and the homes.
-pub fn inside_protected(path: &Path) -> bool {
-    let protected = account::protected();
-    let ways = place::resolve(path)
-        .map(|ways| ways.iter().map(place::Resolved::whole).collect::<Vec<_>>())
-        .unwrap_or_default();
-    let any_case = cfg!(any(windows, target_os = "macos"));
-    protected.iter().any(|root| {
-        let mut roots = vec![root.clone()];
-        if let Ok(found) = place::resolve(root) {
-            roots.extend(found.iter().map(place::Resolved::whole));
+/// The protected roots as they resolve now, each also as spelled: resolved once for a seal or a
+/// filter that asks of many paths ([`Roots::holds`]), never kept between calls.
+pub struct Roots {
+    roots: Vec<PathBuf>,
+}
+
+impl Roots {
+    /// The account's protected roots, resolved now.
+    pub fn now() -> Roots {
+        let mut roots = Vec::new();
+        for root in account::protected() {
+            if let Ok(found) = place::resolve(&root) {
+                roots.extend(found.iter().map(place::Resolved::whole));
+            }
+            roots.push(root);
         }
-        roots.iter().any(|root| {
+        Roots { roots }
+    }
+
+    /// Whether `path` resolves inside one of them, by any way it resolves, or is spelled inside
+    /// one.
+    pub fn holds(&self, path: &Path) -> bool {
+        let ways = place::resolve(path)
+            .map(|ways| ways.iter().map(place::Resolved::whole).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let any_case = cfg!(any(windows, target_os = "macos"));
+        self.roots.iter().any(|root| {
             place::within(path, root, any_case)
                 || ways.iter().any(|way| place::within(way, root, any_case))
         })
-    })
+    }
+}
+
+/// Whether `path` resolves inside a protected root, by any way it resolves, or is spelled inside
+/// one: what the seal asks of every variable but the search path and the homes.
+pub fn inside_protected(path: &Path) -> bool {
+    Roots::now().holds(path)
 }
 
 /// Seals `env`, a program's whole environment, for this run ([`spawn::seal`]): its homes must
@@ -872,12 +891,13 @@ pub fn sealed(
     kit: &[(String, String)],
     windows: bool,
 ) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    let roots = Roots::now();
     spawn::seal(
         env,
         &spawn::Judges {
             windows,
             is_runs: &is_made_or_below,
-            in_protected: &inside_protected,
+            in_protected: &|path| roots.holds(path),
             kit,
         },
     )

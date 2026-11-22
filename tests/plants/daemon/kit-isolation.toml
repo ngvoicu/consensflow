@@ -668,9 +668,8 @@ runs = ["ki-lib-process"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
-find = '''        return path.is_absolute()
-            && crate::door::is_made_or_below(path)'''
-replace = '''        return path.is_absolute()'''
+find = '''        return path.is_absolute() && crate::door::is_made_or_below(path) && !roots.holds(path);'''
+replace = '''        return path.is_absolute() && !roots.holds(path);'''
 
 [[plant]]
 name = "K3 doors: a plain start starts a harness's program"
@@ -703,3 +702,14 @@ runs = ["ki-lib-door"]
 file = "crates/cf-e2e/src/door.rs"
 find = '''                if std::ffi::OsStr::new(&found) != expected {'''
 replace = '''                if std::ffi::OsStr::new(&found) == expected && found.is_empty() {'''
+
+[[plant]]
+name = "K3 doors: the table has no row for Pi's store"
+meant = "every_store_a_plan_names_is_a_row_of_the_table"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/stores.rs"
+find = '''    row(Pi, Login, Place::Home(".pi")),
+'''
+replace = ''''''
