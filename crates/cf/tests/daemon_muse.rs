@@ -74,7 +74,8 @@ fn a_launcher_that_says_1_4_12_is_refused_before_any_pane_and_the_daemon_still_a
     let said = format!("{seen:?}\n{}", root.log());
     assert!(
         said.contains("Muse Code 1.4.13 or newer is required"),
-        "the refusal is in the daemon's words: {said}"
+        "the refusal is in the daemon's words: {said}; {}",
+        how_it_is(&mut daemon)
     );
     daemon.ping("r-after");
     assert!(answers(&frames, "r-after"), "the daemon answers its API");
@@ -91,4 +92,13 @@ fn answers(frames: &Frames, id: &str) -> bool {
         }
     }
     false
+}
+
+/// Whether the daemon is still there, and what it said on its error stream.
+fn how_it_is(daemon: &mut Daemon) -> String {
+    format!(
+        "the daemon's status: {:?}; its errors: {}",
+        daemon.child.try_wait(),
+        daemon.errors.lock().expect("the errors")
+    )
 }
