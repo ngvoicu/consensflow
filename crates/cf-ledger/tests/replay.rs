@@ -90,7 +90,8 @@ enum Outcome {
 /// (T-1122); and the one that names `BEFORE_SAYS_WHAT_TO_DO`, which the words of
 /// a `--before` refusal for a task in a window moved (T-675); and the 2 that name
 /// `ANSWER_COUNT_SAID`, which the words of the refusal of a choice answer that does not
-/// answer each question once moved (T-637).
+/// answer each question once moved (T-637); and `ledger-messages-002`, whose
+/// refused ask no longer tells the trace its rolled-back task state (T-2040).
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -199,6 +200,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
     ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
+    ("ledger-messages-002", 6, "a refused ask rolls its task's pause back, so the trace is not told the uncommitted `task.state` event; Node told it before the rollback"),
     ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued, ending its task's wait immediately"),
     ("ledger-messages-010", 9, READ_AT_ONCE),
     ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
