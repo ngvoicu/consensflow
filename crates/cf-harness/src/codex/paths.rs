@@ -9,6 +9,7 @@ use cf_proto::specs::Variant;
 use crate::shared::paths::agents_skills;
 use crate::shared::record::find::{find_file, DEPTH};
 use crate::shared::record::home;
+use crate::shared::record::zstd;
 use crate::shared::specmint;
 
 /// Codex's home: `CODEX_HOME`, an empty one too, else `.codex` in the user's
@@ -66,11 +67,8 @@ pub(crate) fn sessions(env: &Env) -> Result<PathBuf, String> {
 /// under its `sessions` folder whose name holds the session, or none. The
 /// record is read from it, as Node's was.
 pub(crate) fn transcript(session: &str, env: &Env) -> Result<Option<PathBuf>, String> {
-    Ok(find_file(
-        &sessions(env)?,
-        &|name| name.contains(session),
-        DEPTH,
-    ))
+    let found = find_file(&sessions(env)?, &|name| name.contains(session), DEPTH);
+    Ok(found.map(|file| zstd::existing_plain_sibling(&file).unwrap_or(file)))
 }
 
 /// Whether Codex kept the rollout of the thread `session`: a file under its
@@ -86,6 +84,7 @@ pub(crate) fn rollout_kept(session: &str, env: &Env) -> Result<bool, String> {
 /// Whether `name` is what Codex names the rollout of the thread `session`:
 /// `rollout-<timestamp>-<session>.jsonl`.
 fn is_rollout_of(name: &str, session: &str) -> bool {
+    let name = name.strip_suffix(".zst").unwrap_or(name);
     name.strip_prefix("rollout-")
         .and_then(|rest| rest.strip_suffix(".jsonl"))
         .and_then(|rest| rest.strip_suffix(session))

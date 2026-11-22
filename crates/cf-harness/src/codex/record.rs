@@ -63,7 +63,8 @@ pub fn reader(session: &str, env: &Env) -> Box<dyn Look + Send> {
         Followed::new(
             Box::new(move || transcript(&locating, &env)),
             Box::new(move |_: &Path| Rollout::new(Arc::clone(&reading))),
-        ),
+        )
+        .with_zstd(),
         format!("codex rollout for {session}"),
     ))
 }
