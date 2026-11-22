@@ -108,6 +108,36 @@ fn windows_is_given_what_it_needs_of_the_tests_where_the_case_names_none_and_oth
     }
 }
 
+/// K3 review T-1978, 3: a case that names a home on Windows is not given the caller's home drive
+/// and path back from the machine; one that names none still is.
+#[test]
+fn a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back() {
+    let caller = |name: &str| match name {
+        "HOMEDRIVE" => Some(OsString::from("Z:")),
+        "HOMEPATH" => Some(OsString::from("\\DecoyProfile")),
+        "USERPROFILE" => Some(OsString::from("Z:\\DecoyProfile")),
+        "SYSTEMROOT" => Some(OsString::from("C:\\Windows")),
+        _ => None,
+    };
+    let given = |vars: &[(&str, &str)]| -> Vec<&'static str> {
+        let vars: Vec<(OsString, OsString)> = vars
+            .iter()
+            .map(|(k, v)| (OsString::from(k), OsString::from(v)))
+            .collect();
+        required_from(&vars, false, true, &caller)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    };
+    for named in [["HOME"], ["USERPROFILE"], ["userprofile"]] {
+        let got = given(&[(named[0], "C:\\kit\\home")]);
+        assert_eq!(got, vec!["SYSTEMROOT"], "{named:?}: {got:?}");
+    }
+    let none = given(&[]);
+    assert!(none.contains(&"HOMEDRIVE") && none.contains(&"HOMEPATH"), "{none:?}");
+    assert!(required_from(&[], false, false, &caller).is_empty());
+}
+
 #[test]
 fn a_run_says_how_it_ended_and_what_it_printed_and_said() {
     let ran = |code, timed_out| Ran {

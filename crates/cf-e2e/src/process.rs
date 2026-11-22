@@ -590,23 +590,41 @@ fn required_on_windows(
     vars: &[(OsString, OsString)],
     finding_programs: bool,
 ) -> Vec<(&'static str, OsString)> {
-    if !cfg!(windows) {
+    required_from(vars, finding_programs, cfg!(windows), &|name| {
+        std::env::var_os(name)
+    })
+}
+
+/// [`required_on_windows`] for a `lookup` of the test's environment, on Windows or not.
+///
+/// Where `vars` name the home (`HOME` or `USERPROFILE`), the caller's profile is not given back
+/// by the two halves it is also written in (`HOMEDRIVE` and `HOMEPATH`), nor by the other of the
+/// pair: a launcher that joins them would reach the caller's profile.
+pub fn required_from(
+    vars: &[(OsString, OsString)],
+    finding_programs: bool,
+    windows: bool,
+    lookup: &dyn Fn(&str) -> Option<OsString>,
+) -> Vec<(&'static str, OsString)> {
+    if !windows {
         return Vec::new();
     }
-    let lookup: &[&str] = if finding_programs {
+    let names = |wanted: &str| {
+        vars.iter()
+            .any(|(given, _)| given.eq_ignore_ascii_case(wanted))
+    };
+    let home_named = names("HOME") || names("USERPROFILE");
+    let lookup_names: &[&str] = if finding_programs {
         &PROGRAM_LOOKUP_ON_WINDOWS
     } else {
         &[]
     };
     REQUIRED_ON_WINDOWS
         .into_iter()
-        .chain(lookup.iter().copied())
-        .filter(|name| {
-            !vars
-                .iter()
-                .any(|(given, _)| given.eq_ignore_ascii_case(name))
-        })
-        .filter_map(|name| std::env::var_os(name).map(|value| (name, value)))
+        .chain(lookup_names.iter().copied())
+        .filter(|name| !names(name))
+        .filter(|name| !(home_named && ["HOMEDRIVE", "HOMEPATH", "USERPROFILE"].contains(name)))
+        .filter_map(|name| lookup(name).map(|value| (name, value)))
         .collect()
 }
 

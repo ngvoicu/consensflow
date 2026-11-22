@@ -289,6 +289,8 @@ mod tests {
         let home = vec![
             ("HOME".to_owned(), "/kit/home".to_owned()),
             ("USERPROFILE".to_owned(), "/kit/home".to_owned()),
+            ("HOMEDRIVE".to_owned(), "K:".to_owned()),
+            ("HOMEPATH".to_owned(), "\\kit\\home".to_owned()),
             ("XDG_CONFIG_HOME".to_owned(), "/kit/home/.config".to_owned()),
         ];
         let vars = daemon_vars(home, &owner, Some(Path::new("/pi/bin"))).unwrap();
@@ -301,15 +303,25 @@ mod tests {
         assert_eq!(get("HOME"), Some("/kit/home"));
         assert_eq!(get("USERPROFILE"), Some("/kit/home"));
         assert_eq!(get("XDG_CONFIG_HOME"), Some("/kit/home/.config"));
-        for name in [
-            "APPDATA",
-            "LOCALAPPDATA",
-            "CODEX_HOME",
-            "XDG_DATA_HOME",
-            "HOMEDRIVE",
-            "HOMEPATH",
-        ] {
+        for name in ["APPDATA", "LOCALAPPDATA", "CODEX_HOME", "XDG_DATA_HOME"] {
             assert_eq!(get(name), None, "{name} is the owner's");
+        }
+        // Both halves of the profile path are the kit's, and what a Windows child is given of
+        // the machine on top of them (`Run`'s own merge) is never the owner's drive or path.
+        assert_eq!(get("HOMEDRIVE"), Some("K:"));
+        assert_eq!(get("HOMEPATH"), Some("\\kit\\home"));
+        let child_vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = vars
+            .iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
+        let merged = cf_e2e::process::required_from(&child_vars, true, true, &|name| {
+            owner(name).map(Into::into)
+        });
+        for (name, value) in &merged {
+            assert!(
+                !value.to_string_lossy().contains("the-owners"),
+                "{name} is the owner's after Run's merge"
+            );
         }
         assert!(
             vars.iter().all(|(_, value)| !value.contains("the-owners")),

@@ -40,9 +40,10 @@ extern "C" fn clean_up() {
     }
 }
 
-/// All variables by which a harness may find its home, under `home`.
-pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 13] {
-    [
+/// All variables by which a harness may find its home, under `home`. On Windows the two halves
+/// of the profile path, `HOMEDRIVE` and `HOMEPATH`, are of the home too.
+pub fn home_vars(home: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut vars = vec![
         ("HOME", home.to_path_buf()),
         ("USERPROFILE", home.to_path_buf()),
         ("CFFIXED_USER_HOME", home.to_path_buf()),
@@ -56,7 +57,33 @@ pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 13] {
         ("XDG_CACHE_HOME", home.join(".cache")),
         ("APPDATA", home.join("AppData/Roaming")),
         ("LOCALAPPDATA", home.join("AppData/Local")),
-    ]
+    ];
+    if cfg!(windows) {
+        if let Some((drive, path)) = drive_and_path(home) {
+            vars.push(("HOMEDRIVE", PathBuf::from(drive)));
+            vars.push(("HOMEPATH", PathBuf::from(path)));
+        }
+    }
+    vars
+}
+
+/// A Windows path as `HOMEDRIVE` and `HOMEPATH` say it: `C:` and `\Users\x`, with the verbatim
+/// prefix taken as the plain one. None for a path with no drive.
+pub fn drive_and_path(home: &Path) -> Option<(String, String)> {
+    let text = home.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let bytes = text.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        let rest = text[2..].replace('/', "\\");
+        let rest = if rest.starts_with('\\') {
+            rest
+        } else {
+            format!("\\{rest}")
+        };
+        Some((text[..2].to_owned(), rest))
+    } else {
+        None
+    }
 }
 
 /// Begin an offline test process. Called from the test binary's constructor,
@@ -685,8 +712,21 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 
 #[cfg(test)]
 mod tests {
-    use super::{personal_harness_homes, safe_path_entry, temp_parent_is_outside};
+    use super::{drive_and_path, personal_harness_homes, safe_path_entry, temp_parent_is_outside};
     use std::path::Path;
+
+    #[test]
+    fn the_two_halves_of_a_windows_profile_path_are_of_the_home() {
+        assert_eq!(
+            drive_and_path(Path::new(r"C:\Users\kit\h-1\home")),
+            Some(("C:".to_owned(), r"\Users\kit\h-1\home".to_owned()))
+        );
+        assert_eq!(
+            drive_and_path(Path::new(r"\\?\D:\run\home")),
+            Some(("D:".to_owned(), r"\run\home".to_owned()))
+        );
+        assert_eq!(drive_and_path(Path::new("/run/home")), None);
+    }
 
     #[test]
     fn t1778_standin_home_also_bounds_macos_foundation() {
