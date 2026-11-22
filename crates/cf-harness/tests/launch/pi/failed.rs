@@ -101,7 +101,7 @@ fn a_window_whose_turn_failed_is_at_work_while_pi_may_retry_and_at_rest_with_its
     // Just failed: Pi may retry, so the window is at work.
     failed_turn(&home, &session, 10_000);
     let observed = finished(window.observe()).unwrap();
-    assert!(observed.failed && !observed.settled, "{observed:?}");
+    assert!(!observed.failed && !observed.settled, "{observed:?}");
 
     // Past two retries' worth of quiet nothing is coming: the turn is over, and failed.
     failed_turn(&home, &session, 121_000);
