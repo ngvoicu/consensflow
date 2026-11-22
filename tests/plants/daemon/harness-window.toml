@@ -108,3 +108,18 @@ find = '''
 replace = '''
         let shared = None;
 '''
+
+# The newest look is the one kept: an older look that ends last does not take its place.
+[[plant]]
+name = "harness window: an older look ending last takes the place of the newer"
+meant = "an_older_look_ending_last_does_not_take_the_place_of_a_newer_one"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let stale = cache.get(&harness).is_some_and(|(held, _)| *held > look);
+'''
+replace = '''
+    let stale = false;
+'''

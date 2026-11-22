@@ -20,6 +20,18 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **The Admin's verdict is the launch's own check (T-1969, P2 A2).** For Codex, Devin and Muse
+  Code a row's `setup` and its version are the launch's check of the CLI, asked through the
+  launches' own map of probes and not through the admin's capture: a probe runs in no folder of
+  its own, with 30 s and 128 KiB (Node's probe took 3 s and 8 KiB, in the home), and a Codex is
+  also asked `queue --help`, which Node's scenarios never scripted. In both platforms'
+  recordings every step that looked at a Codex gained its `setup` (`unchecked`: the scenario
+  scripts no queue), and every step that asked one of the three for its version moved its
+  recorded call. A CLI's `--version` is asked once as the file is on disk, so three scenarios
+  (the row kept five minutes, the look dated when it began, the update whose first look is
+  older than five minutes) no longer ask for the later answers their effects held: those are
+  dropped. The steps were moved by hand, once, to what the admin now says.
+
 - **Tested releases on the Admin row (T-1968).** Both platform scenarios now
   include `tested` after `update`, including on missing harnesses. The installed
   release is read only from the CLI's own complete version line (or Muse's pin),
