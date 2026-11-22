@@ -1,11 +1,12 @@
 # T-1973: the reader must choose the compressed form for a cold Codex rollout.
 [run]
-codex-zstd-reader = ["cargo", "test", "--offline", "-p", "cf-harness"]
+codex-zstd-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib"]
 
 [[plant]]
 name = "codex zstd: read a compressed rollout as plain bytes"
 meant = "compressed_probe_equals_plain_and_replays_the_result"
 runs = ["codex-zstd-reader"]
+prepare = [["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/record/followed.rs"
