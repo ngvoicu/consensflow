@@ -193,9 +193,10 @@ fn enqueue_page_text<R: Runtime>(
             // order must not wait for this one.
             if let Ok(key) = pane_key(&call.id, call.generation) {
                 let state = app.state::<AppRuntime>();
-                if let Ok(loss) = state
-                    .inputs
-                    .refuse_page_sequence(&call.page_id, &key, call.sequence)
+                if let Ok(loss) =
+                    state
+                        .inputs
+                        .refuse_page_sequence(&call.page_id, &key, call.sequence)
                 {
                     return json!({"ok":false,"error":error,"loss":loss});
                 }

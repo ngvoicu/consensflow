@@ -181,6 +181,9 @@ impl Drop for Reserved {
     }
 }
 
+/// How a page's job is answered: by the host, under its lock.
+type Settle = Box<dyn FnOnce(oneshot::Sender<InputResponse>, InputResponse) + Send>;
+
 struct InputJob {
     work: InputWork,
     response: oneshot::Sender<InputResponse>,
@@ -188,7 +191,7 @@ struct InputJob {
     _reserved: Reserved,
     /// Answers the call from the worker, under the host's lock, and tells the page
     /// that is current when a call of a page that has gone did not go in whole.
-    settle: Option<Box<dyn FnOnce(oneshot::Sender<InputResponse>, InputResponse) + Send>>,
+    settle: Option<Settle>,
 }
 
 impl InputJob {
@@ -855,9 +858,7 @@ impl InputQueue {
                 }
             }
         };
-        let settle: Option<
-            Box<dyn FnOnce(oneshot::Sender<InputResponse>, InputResponse) + Send>,
-        > = {
+        let settle: Option<Settle> = {
             let shared = Arc::clone(&self.page);
             let page_id = page_id.to_owned();
             let key = key.clone();
@@ -969,7 +970,11 @@ impl InputQueue {
     pub fn lost_told(&self, told: &[(PaneKey, u64)]) -> Result<(), String> {
         let mut page = self.state()?;
         for (key, loss) in told {
-            if page.pending_lost.get(key).is_some_and(|latest| latest <= loss) {
+            if page
+                .pending_lost
+                .get(key)
+                .is_some_and(|latest| latest <= loss)
+            {
                 page.pending_lost.remove(key);
             }
         }
@@ -2572,7 +2577,10 @@ mod tests {
         );
         let lost = observed.lost.lock().unwrap().clone();
         assert_eq!(lost.len(), 1);
-        assert_eq!(lost[0].0, key, "the refusal went back to a page that has gone");
+        assert_eq!(
+            lost[0].0, key,
+            "the refusal went back to a page that has gone"
+        );
         inputs.close_and_drain();
     }
 
@@ -2585,7 +2593,13 @@ mod tests {
         let big = vec![b'p'; 4 * 1024 * 1024];
         for number in 1..=2 {
             inputs
-                .enqueue_page("s:1", key.clone(), number, InputWork::Typed(big.clone()), true)
+                .enqueue_page(
+                    "s:1",
+                    key.clone(),
+                    number,
+                    InputWork::Typed(big.clone()),
+                    true,
+                )
                 .unwrap();
         }
         let refusal = inputs
@@ -2612,7 +2626,10 @@ mod tests {
         let second = inputs.skip_page_sequence("s:1", &key, 2).unwrap();
         assert!(second > first);
         inputs.lost_told(&[(key.clone(), first)]).unwrap();
-        assert_eq!(inputs.activate_page("s:1").unwrap(), vec![(key.clone(), second)]);
+        assert_eq!(
+            inputs.activate_page("s:1").unwrap(),
+            vec![(key.clone(), second)]
+        );
         inputs.lost_told(&[(key, second)]).unwrap();
         assert!(inputs.activate_page("s:1").unwrap().is_empty());
         inputs.close_and_drain();
@@ -2820,10 +2837,13 @@ mod tests {
         let (inputs, _key, _received, _) = bare();
         inputs.begin_page("page").unwrap();
         for window in 0..(MAX_PENDING_LOSSES as u64 + 20) {
-            let key = PaneKey::new(&format!("window-{window}"), 1);
+            let key = PaneKey::new(format!("window-{window}"), 1);
             inputs.skip_page_sequence("page", &key, 1).unwrap();
         }
-        assert_eq!(inputs.activate_page("page").unwrap().len(), MAX_PENDING_LOSSES);
+        assert_eq!(
+            inputs.activate_page("page").unwrap().len(),
+            MAX_PENDING_LOSSES
+        );
         inputs.close_and_drain();
     }
 }

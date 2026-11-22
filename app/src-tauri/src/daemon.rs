@@ -1499,8 +1499,7 @@ mod tests {
             json!({"ok":true})
         );
         assert_eq!(
-            crate::commands::pane_page_activate(app.handle().clone(), "test-page".into())
-                ["ok"],
+            crate::commands::pane_page_activate(app.handle().clone(), "test-page".into())["ok"],
             true
         );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(
