@@ -684,6 +684,7 @@ fn muse_s_real_window_is_the_smallest_one_measured() {
 
 /// A Muse launcher only, with no pin, that says `said` to `--version`: what its launch
 /// is prepared with, and the programs run to prepare it.
+#[cfg(unix)]
 fn launcher_saying(said: &str) -> (Result<Prepared, String>, Vec<String>) {
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), None);

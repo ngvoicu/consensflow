@@ -432,13 +432,23 @@ fn lay(world: &World, pair: &Pair) {
 }
 
 /// The launch's refusal and the page's verdict of one pair, each in a world of its own.
-fn both(harness: Harness, pair: &Pair) -> (Result<(), String>, Rc<Row>) {
+///
+/// A sentence that names the folder of its world says `$BIN` where it does.
+fn both(harness: Harness, pair: &Pair) -> (Result<(), String>, Rc<Row>, String) {
     let launch = World::new(harness);
     lay(&launch, pair);
-    let prepared = launch.prepare().map(|_| ());
+    let in_launch = launch.bin.to_string_lossy().into_owned();
+    let prepared = launch
+        .prepare()
+        .map(|_| ())
+        .map_err(|sentence| sentence.replace(&in_launch, "$BIN"));
     let page = World::new(harness);
     lay(&page, pair);
-    (prepared, page.look(false))
+    (
+        prepared,
+        page.look(false),
+        page.bin.to_string_lossy().into_owned(),
+    )
 }
 
 #[test]
@@ -452,7 +462,7 @@ fn the_page_says_what_the_launch_says_of_each_answer_a_cli_gives() {
     for (harness, pairs) in tables {
         for pair in pairs {
             rows += 1;
-            let (prepared, row) = both(harness, &pair);
+            let (prepared, row, in_page) = both(harness, &pair);
             let said = format!("{harness:?}: {}", pair.what);
             match (&pair.refusal, &row.setup) {
                 (None, setup) => {
@@ -473,8 +483,8 @@ fn the_page_says_what_the_launch_says_of_each_answer_a_cli_gives() {
                         assert_eq!(shown, sentence, "{said}");
                     }
                     assert_eq!(
-                        prepared.as_ref().unwrap_err(),
-                        shown,
+                        *prepared.as_ref().unwrap_err(),
+                        shown.replace(&in_page, "$BIN"),
                         "{said}: the launch's"
                     );
                 }
