@@ -963,3 +963,39 @@ fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
         .into_owned();
     assert_ne!(git_bash_in(None, &path), Some(other));
 }
+
+/// K3 section 2: a plain start refuses a harness's program, known by its name where it is no file
+/// of the run's, and the Keychain's utility, each before anything starts.
+#[test]
+fn a_plain_start_refuses_a_harness_program_and_the_keychains_utility() {
+    for program in ["codex", "claude", "pi", "devin", "muse", "/usr/bin/security", "cargo"] {
+        let refused = Run::new(program).arg("--version").run().unwrap_err();
+        assert!(
+            refused.to_string().contains("a door of its own"),
+            "{program}: {refused}"
+        );
+    }
+    // A stand-in the run made, named for a harness, is the run's own program.
+    let root = crate::door::made("plain-start-").unwrap();
+    let stand_in = root.path().join("codex");
+    crate::door::write_executable(&stand_in, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    assert_eq!(Run::new(&stand_in).run().unwrap().code, Some(0));
+    // A harness's start of a program that is no harness's is refused too.
+    assert!(Run::harness("codex", "/bin/echo").run().is_err());
+}
+
+/// K3 section 2: a program that inherits the test's environment is not handed a home of the
+/// account's, nor another variable that names a store; the run's own are.
+#[test]
+fn an_inherited_home_of_the_accounts_is_not_handed_on() {
+    let root = crate::door::made("inherited-").unwrap();
+    let store = root.path().join("owner").join(".codex");
+    let _held = crate::door::account::TestRoot::add(&store);
+    assert!(!inheritable(OsStr::new("HOME"), OsStr::new("/the/owners/home")));
+    assert!(inheritable(OsStr::new("HOME"), root.path().as_os_str()));
+    assert!(!inheritable(OsStr::new("HOME"), store.as_os_str()));
+    assert!(!inheritable(OsStr::new("GIT_CONFIG_GLOBAL"), store.join("config").as_os_str()));
+    assert!(inheritable(OsStr::new("PATH"), store.as_os_str()));
+    assert!(inheritable(OsStr::new("LANG"), OsStr::new("en_US.UTF-8")));
+}

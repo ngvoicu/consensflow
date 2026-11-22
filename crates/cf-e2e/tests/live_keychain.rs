@@ -346,7 +346,7 @@ fn run(
     ];
     // The updater is off here as in every run of the kit: the owner's launcher is the guard's.
     vars.extend(updates_off().map(|(name, value)| (name.to_owned(), value.to_owned())));
-    Run::new(claude)
+    Run::harness("claude", claude)
         .args(args)
         .vars(vars)
         .cwd(project)
@@ -373,7 +373,7 @@ fn run(
 /// alone) holds, and the number of entries of each that is an object; never a value.
 fn shape_of(name: &str) -> Vec<String> {
     let user = own_var("USER").unwrap_or_default();
-    let Ok(ran) = keychain::security(
+    let Ok(ran) = keychain::control(
         "live_keychain::shape_of",
         ["find-generic-password", "-s", name, "-a", &user, "-w"],
         Duration::from_secs(60),

@@ -217,7 +217,7 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
         .split_first()
         .ok_or_else(|| Error::Daemon("Codex's app-server has no command line".to_owned()))?;
     let server = AppServer::start(
-        Run::new(program)
+        Run::harness("codex", program)
             .args(args)
             .cwd(&folder)
             .machine_env()

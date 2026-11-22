@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::live::report::Check;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 /// The folder of the reports, from the checkout's root.
 pub const REPORTS: &str = "app/src-tauri/target/live-matrix";
@@ -304,14 +304,12 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     if let Some(folder) = to.parent() {
         crate::door::make_dir(folder)?;
     }
-    // `VACUUM INTO` writes the file itself, so the write is asked of the guard first.
-    files::guard(to)?;
-    let source = rusqlite::Connection::open(&clone).map_err(failed)?;
-    source
-        .execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()])
-        .map_err(failed)?;
-    let check: String = rusqlite::Connection::open(to)
-        .and_then(|copy| copy.query_row("PRAGMA integrity_check", [], |row| row.get(0)))
+    // `VACUUM INTO` writes the file itself: its destination is its own judged act, made new
+    // (T-2002 correction 7).
+    let source = crate::door::database::write(&clone)?;
+    crate::door::database::vacuum_into(&source, to)?;
+    let check: String = crate::door::database::read(to)?
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(failed)?;
     if check != "ok" {
         return Err(Error::Daemon(format!(

@@ -98,6 +98,32 @@ pub struct IsolatedCommand {
     pub prefix: Vec<OsString>,
 }
 
+impl IsolatedCommand {
+    /// Its start: on a Mac the file sandbox is the program, which starts Muse; elsewhere Muse's
+    /// program itself, started as a harness's ([`crate::process::Run::harness`]). Either way with
+    /// the switch that keeps Muse's launcher from updating itself.
+    pub fn run(&self) -> crate::process::Run {
+        let run = if self.program == Path::new("/usr/bin/sandbox-exec") {
+            crate::process::Run::new(&self.program)
+        } else {
+            crate::process::Run::harness("muse", &self.program)
+        };
+        crate::live::launcher::MUSE_UPDATES_OFF
+            .iter()
+            .fold(run, |run, (name, value)| run.var(name, value))
+            .args(&self.prefix)
+    }
+}
+
+/// A real Muse window on a Mac, which runs only on a machine marked as a test machine (K3: Muse on
+/// the Mac is its echo stand-in; the file sandbox does not hold its Keychain login).
+pub fn real_window_allowed(what: &str) -> Result {
+    if cfg!(target_os = "macos") {
+        crate::live::renew::TestMachine::required_for(what)?;
+    }
+    Ok(())
+}
+
 /// Build the invocation used for a Muse process (or the helper which starts it).
 /// Every directory exempted from the boundary must have been made by this run.
 pub fn isolated_command(
@@ -160,19 +186,15 @@ fn sandbox_profile(
     let mut reads = exemptions.clone();
     for executable in readable {
         let real = fs::canonicalize(executable).map_err(Error::file("resolve", executable))?;
-        for home in [
-            ".claude",
-            ".codex",
-            ".pi",
-            ".config",
-            ".local/share",
-            "Library/Application Support/Muse",
-        ] {
-            if real.starts_with(account.join(home)) {
-                return Err(Error::Daemon(
-                    "a Muse executable is inside a harness home".to_owned(),
-                ));
-            }
+        // The stores of every harness and of the account, as the table has them, and the two
+        // folders whose every child is one (the XDG config and data folders below the home).
+        let inside_folders = [".config", ".local/share"]
+            .iter()
+            .any(|folder| real.starts_with(account.join(folder)));
+        if inside_folders || crate::door::inside_protected(&real) {
+            return Err(Error::Daemon(
+                "a Muse executable is inside a harness home".to_owned(),
+            ));
         }
         reads.push_str(&format!(" (require-not (literal {}))", quote(&real)?));
     }

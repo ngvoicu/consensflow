@@ -171,7 +171,7 @@ impl Item {
     fn make(folder: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let name = live::keychain::item_of(folder);
         let user = own_var("USER").ok_or("no USER")?;
-        let made = live::keychain::security(
+        let made = live::keychain::control(
             "owner_launchers::Item::make",
             [
                 "add-generic-password",
@@ -198,7 +198,7 @@ impl Item {
 #[cfg(target_os = "macos")]
 impl Drop for Item {
     fn drop(&mut self) {
-        let _ = live::keychain::security(
+        let _ = live::keychain::control(
             "owner_launchers::Item::drop",
             [
                 "delete-generic-password",

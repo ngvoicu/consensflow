@@ -69,14 +69,17 @@ pub fn ran(
     } else {
         None
     };
-    let command = launch
-        .as_ref()
-        .map_or(program, |launch| launch.program.as_path());
-    let prefix = launch
-        .as_ref()
-        .map_or(&[][..], |launch| launch.prefix.as_slice());
-    let ran = Run::new(command)
-        .args(prefix)
+    // Muse is started through its launch (on a Mac its file sandbox), as a harness is; any other
+    // program as it is.
+    let start = match &launch {
+        Some(launch) => {
+            cf_e2e::muse::real_window_allowed("Muse's direct TUI case")
+                .map_err(|refused| refused.to_string())?;
+            launch.run()
+        }
+        None => Run::new(program),
+    };
+    let ran = start
         .args(args)
         .vars(env.iter())
         .cwd(cwd)

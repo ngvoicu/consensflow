@@ -130,7 +130,12 @@ pub(super) fn working(
 /// `found`, the program `name`, if it ends 0 when it is asked `probe`; an error that
 /// says how it ended otherwise.
 pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf> {
-    let ran = Run::new(&found)
+    // A harness's program is started as one: on the run's homes, with its update switches.
+    let start = match super::Harness::from_name(name) {
+        Some(harness) => Run::harness(harness.name(), &found),
+        None => Run::new(&found),
+    };
+    let ran = start
         .args(probe)
         .inheriting_env()
         .closed_input()

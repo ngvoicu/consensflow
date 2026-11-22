@@ -374,7 +374,7 @@ impl Installed {
         let Some(scratch) = scratch else {
             return "unknown".to_owned();
         };
-        let mut probe = Run::new(&self.command).arg(word).vars(
+        let mut probe = Run::harness(self.harness.name(), &self.command).arg(word).vars(
             probe_vars(&own_var, scratch.path(), config)
                 .into_iter()
                 .chain(

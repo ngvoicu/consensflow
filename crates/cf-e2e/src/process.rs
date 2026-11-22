@@ -536,8 +536,13 @@ impl Run {
                 .map(|(name, value)| (OsString::from(name), value))
                 .collect()
         } else {
+            // The test's own environment, but what of it is the account's: a home that is no
+            // folder of the run's, and any other variable but the search path that names a store
+            // of a harness's or of the account, is not handed on (the door gives the run's homes
+            // below). A case that names such a variable itself is refused by the seal instead.
             std::env::vars_os()
                 .filter(|(name, _)| !board_variable(name))
+                .filter(|(name, value)| inheritable(name, value))
                 .collect()
         };
         for (name, value) in &self.vars {
@@ -545,6 +550,20 @@ impl Run {
         }
         for name in &self.removed {
             env.retain(|(held, _)| !same_name(held, name, windows));
+        }
+        // The profile's two halves are said by the door from the profile the program is given,
+        // unless its case names them: the machine's own would say the caller's.
+        let halves_named = self.vars.iter().any(|(name, _)| {
+            crate::door::spawn::PROFILE_HALVES
+                .iter()
+                .any(|half| same_name(name, OsStr::new(half), true))
+        });
+        if !halves_named {
+            env.retain(|(held, _)| {
+                !crate::door::spawn::PROFILE_HALVES
+                    .iter()
+                    .any(|half| same_name(held, OsStr::new(half), true))
+            });
         }
         // A program of a say-only run says only, into the same file, whatever its environment;
         // every program is told the folders the run made so far, the only ones it writes below,
@@ -595,6 +614,17 @@ impl Run {
             (Kind::Plain, crate::door::spawn::Program::Plain) => Ok(()),
             (Kind::Harness(_), crate::door::spawn::Program::Harness(_)) => {
                 crate::door::spawn::has_update_switches(&program, env).map_err(Error::LiveApp)
+            }
+            // A file of the run's own that starts the harness (a rig's wrapper, a stand-in's copy
+            // of it): started as the harness is, with its switches.
+            (Kind::Harness(harness), crate::door::spawn::Program::Plain)
+                if crate::door::is_made_or_below(Path::new(&self.program)) =>
+            {
+                crate::door::spawn::has_update_switches(
+                    &crate::door::spawn::Program::Harness(harness),
+                    env,
+                )
+                .map_err(Error::LiveApp)
             }
             (Kind::Harness(harness), _) => Err(Error::LiveApp(format!(
                 "{} is no program of {harness}'s, and is not started as one",
@@ -700,6 +730,21 @@ impl Run {
         self.spawn_on().map(|(spawned, _)| spawned)
     }
 
+    /// Starts the program as this program's one child on this program's own console and
+    /// standard handles, sealed as every start is, and hands it over: for a stand-in that runs the
+    /// harness it stands for as its child (Windows' Muse stand-in, which has no `exec`). Waiting
+    /// for it is the caller's.
+    pub fn relay(self) -> Result<Child> {
+        self.startable()?;
+        let program = self.program.to_string_lossy().into_owned();
+        let (mut command, _) = self.command_on()?;
+        command.spawn().map_err(|source| Error::Program {
+            action: "start",
+            program,
+            source,
+        })
+    }
+
     /// [`Run::spawn`], and the whole environment the program was given, sealed: what a pane
     /// host's windows are opened over ([`crate::door::window_admitted`]).
     pub fn spawn_on(self) -> Result<(Spawned, Vec<(OsString, OsString)>)> {
@@ -785,6 +830,35 @@ pub fn required_from(
         .filter(|name| !(home_named && ["HOMEDRIVE", "HOMEPATH", "USERPROFILE"].contains(name)))
         .filter_map(|name| lookup(name).map(|value| (name, value)))
         .collect()
+}
+
+/// Whether the test's own variable `name` is handed on to a program that inherits the test's
+/// environment ([`Run::inheriting_env`]): not a home of the account's (one that is no folder this
+/// run made), and not another variable but the search path that names a store.
+fn inheritable(name: &OsStr, value: &OsStr) -> bool {
+    let text = name.to_string_lossy().to_ascii_uppercase();
+    if text == "PATH" {
+        return true;
+    }
+    let home = crate::door::spawn::HOME_VARS
+        .iter()
+        .chain(crate::door::spawn::OPTIONAL_HOME_VARS.iter())
+        .any(|home| *home == text);
+    if home {
+        let path = Path::new(value);
+        return path.is_absolute()
+            && crate::door::is_made_or_below(path)
+            && !crate::door::inside_protected(path);
+    }
+    if crate::door::spawn::PROFILE_HALVES.contains(&text.as_str()) {
+        // Said again by the door from the profile the program is given.
+        return false;
+    }
+    let whole = std::iter::once(PathBuf::from(value));
+    !whole
+        .chain(std::env::split_paths(value))
+        .filter(|path| path.is_absolute())
+        .any(|path| crate::door::inside_protected(&path))
 }
 
 /// Whether two names of variables are one: in any case on Windows.

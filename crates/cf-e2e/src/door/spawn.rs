@@ -240,15 +240,28 @@ pub fn missing_homes(vars: &[(OsString, OsString)], base: &Path) -> Vec<(OsStrin
         vars.iter()
             .any(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(wanted))
     };
-    crate::standin_process::home_vars(base)
+    let mut missing: Vec<(OsString, OsString)> = crate::standin_process::home_vars(base)
         .into_iter()
-        .filter(|(name, _)| !named(name))
-        .filter(|(name, _)| {
-            // The halves come with the profile they say, or not at all.
-            !(PROFILE_HALVES.contains(name) && (named("USERPROFILE") || named("HOMEDRIVE") || named("HOMEPATH")))
-        })
+        .filter(|(name, _)| !named(name) && !PROFILE_HALVES.contains(name))
         .map(|(name, value)| (OsString::from(name), value.into_os_string()))
-        .collect()
+        .collect();
+    // The halves come with the profile they say, where neither is named: on Windows, of the
+    // profile the program is given.
+    if cfg!(windows) && !named("HOMEDRIVE") && !named("HOMEPATH") {
+        let profile = vars
+            .iter()
+            .chain(missing.iter())
+            .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case("USERPROFILE"))
+            .map(|(_, value)| PathBuf::from(value));
+        if let Some((drive, path)) = profile
+            .as_deref()
+            .and_then(crate::standin_process::drive_and_path)
+        {
+            missing.push(("HOMEDRIVE".into(), drive.into()));
+            missing.push(("HOMEPATH".into(), path.into()));
+        }
+    }
+    missing
 }
 
 /// What a program is, by the file it resolves to.

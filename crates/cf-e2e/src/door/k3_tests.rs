@@ -408,3 +408,36 @@ fn the_roots_file_and_the_folders_it_is_in_are_protected_for_the_runs_life() {
     assert!(!super::Door::of_run().remove_made(&folder).is_gone());
     assert!(file.is_file());
 }
+
+// ---- Correction 6, the children's audit appends. ----
+
+#[test]
+fn a_child_adds_to_the_audit_file_the_run_made_and_to_no_file_put_at_its_path_since() {
+    let run = made("k3-audit-").unwrap();
+    let file = run.path().join("audit.txt");
+    let first = super::Door::asked(Some("1".as_ref()), Some(file.as_os_str()), None).unwrap();
+    let identity = super::identity::of_path(&file).unwrap();
+    let child = super::Door::asked_of(
+        Some("1".as_ref()),
+        Some(file.as_os_str()),
+        Some("1".as_ref()),
+        Some(identity.as_ref()),
+    );
+    assert!(child.is_ok());
+    // Another file at the path: a child told the run's file refuses it.
+    fs::rename(&file, run.path().join("moved.txt")).unwrap();
+    fs::write(&file, "another's").unwrap();
+    let refused = super::Door::asked_of(
+        Some("1".as_ref()),
+        Some(file.as_os_str()),
+        Some("1".as_ref()),
+        Some(identity.as_ref()),
+    )
+    .unwrap_err();
+    assert!(refused.contains("not the one the run made"), "{refused}");
+    // The run's own door adds nothing to the other file: it stops, as a door whose file cannot be
+    // written does.
+    let stopped = std::panic::catch_unwind(|| first.note("not the run's file"));
+    assert!(stopped.is_err());
+    assert_eq!(fs::read_to_string(&file).unwrap(), "another's");
+}

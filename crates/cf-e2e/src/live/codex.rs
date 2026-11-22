@@ -24,7 +24,7 @@ use crate::{Error, Result};
 /// --json`): each with its `name` and, in a Codex that says it, its `transport`.
 pub fn mcp_servers(codex: &Path, env: &[(String, String)]) -> Result<Value> {
     let (home, safe) = mcp_environment(env)?;
-    Run::new(codex)
+    Run::harness("codex", codex)
         .args(["mcp", "list", "--json"])
         .vars(safe)
         .cwd(home)

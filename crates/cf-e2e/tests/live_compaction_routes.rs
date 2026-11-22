@@ -148,7 +148,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         let (program, rest) = argv
             .split_first()
             .ok_or_else(|| Error::Daemon("no command line".to_owned()))?;
-        Run::new(program)
+        Run::harness("codex", program)
             .args(rest)
             .cwd(&folder)
             .machine_env()
@@ -338,7 +338,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
         let (program, rest) = argv
             .split_first()
             .ok_or_else(|| Error::Daemon("no command line".to_owned()))?;
-        let ran = Run::new(program)
+        let ran = Run::harness("devin", program)
             .args(rest)
             .cwd(&folder)
             .machine_env()

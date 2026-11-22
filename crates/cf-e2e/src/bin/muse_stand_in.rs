@@ -11,11 +11,10 @@
 //! one under the window's (`muse::paths`); this program ends with Muse's status.
 
 use std::io::{self, Write};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 use cf_e2e::muse::StandIn;
 
-#[allow(clippy::disallowed_methods)] // Muse is this program's one child, run to its end.
 fn main() -> ExitCode {
     let words: Vec<String> = std::env::args_os()
         .skip(1)
@@ -49,12 +48,14 @@ fn main() -> ExitCode {
         let _ = writeln!(io::stderr(), "the rig's Muse: {refused}");
         return ExitCode::FAILURE;
     }
-    let mut muse = Command::new(&stand_in.binary);
-    muse.args(args);
-    for (name, value) in stand_in.env() {
-        muse.env(name, value);
-    }
-    match muse.spawn() {
+    // Through the door's relay: Muse's program, on this window's environment with the stand-in's
+    // over it, sealed as every start of the kit's is, on this program's console and handles.
+    let muse = cf_e2e::process::Run::harness("muse", &stand_in.binary)
+        .args(args)
+        .inheriting_window_env()
+        .vars(stand_in.env())
+        .unlimited();
+    match muse.relay() {
         Ok(mut child) => {
             let _ = stand_in.note_pids(std::process::id(), child.id());
             child

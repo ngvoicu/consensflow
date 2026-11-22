@@ -148,11 +148,7 @@ impl Source {
                     })?;
                 // The login Keychain asks the person once to let it be read; a run
                 // waits for the answer (the call is limited, below).
-                let ran = super::keychain::security(
-                    "login::Source::read",
-                    keychain_args(&user),
-                    Duration::from_secs(120),
-                )?;
+                let ran = super::keychain::login_item(&user, Duration::from_secs(120))?;
                 if ran.code != Some(0) {
                     // What it printed is the login, or nothing: only what it said is shown.
                     return Err(Error::Daemon(format!(
@@ -180,7 +176,7 @@ impl Source {
 /// account: with `-a`, because the Keychain has another item of the service (the account
 /// `unknown`, expired and with no refresh token) and a lookup that names no account
 /// returns that one.
-fn keychain_args(user: &str) -> Vec<String> {
+pub(super) fn keychain_args(user: &str) -> Vec<String> {
     ["find-generic-password", "-s", SERVICE, "-a", user, "-w"]
         .map(str::to_owned)
         .into()
@@ -299,13 +295,9 @@ pub fn keychain_services() -> Option<BTreeSet<String>> {
     if !cfg!(target_os = "macos") && !cfg!(test) {
         return None;
     }
-    let ran = super::keychain::security(
-        "login::keychain_services",
-        ["dump-keychain"],
-        Duration::from_secs(60),
-    )
-    .ok()
-    .filter(|ran| ran.code == Some(0))?;
+    let ran = super::keychain::item_names(Duration::from_secs(60))
+        .ok()
+        .filter(|ran| ran.code == Some(0))?;
     Some(services(&ran.stdout))
 }
 

@@ -41,6 +41,11 @@ impl Rig {
     /// line says it is not the native one.
     pub fn start(config: Config) -> Result<Self> {
         crate::door::Door::init();
+        // A real Muse window on a Mac runs only on a machine marked as a test machine (K3: Muse
+        // on the Mac is its echo stand-in).
+        if matches!(config.muse, Some((_, crate::muse::Run::Live { .. }))) {
+            crate::muse::real_window_allowed("a rig of real Muse windows on a Mac")?;
+        }
         // Before anything: what the case's thread has failed with so far is none of this
         // rig's, and the case it names is the one that starts it.
         let judged = config.judged.then(Verdict::start);

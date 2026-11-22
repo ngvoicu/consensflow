@@ -66,6 +66,7 @@ use crate::live::members::{
 pub mod account;
 mod again;
 pub mod cargo;
+pub mod database;
 pub mod identity;
 pub mod place;
 pub mod spawn;
@@ -129,12 +130,28 @@ pub const KEPT: &str = "consensflow-kept.txt";
 /// How a rig names its folder, by the start of its name.
 pub const RIG_PREFIX: &str = "consensflow-integration-";
 
+/// The variable a say-only run gives the programs it starts with the identity of the audit file
+/// it made ([`identity`]): a program opens the file by its path once and checks it is that one, so
+/// that a file put at the path since is never added to (T-2002 finding 5). Never set by a person.
+pub const AUDIT_ID: &str = "CF_LIVE_AUDIT_ID";
+
 /// The door: one that acts, or one that only says.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Door {
     /// The file what would be done is written in, when the door only says.
     said: Option<PathBuf>,
+    /// The audit file, open: every line is added through the handle it was made or checked with,
+    /// never by opening the path again.
+    open: Option<std::sync::Arc<Mutex<fs::File>>>,
 }
+
+impl PartialEq for Door {
+    fn eq(&self, other: &Door) -> bool {
+        self.said == other.said
+    }
+}
+
+impl Eq for Door {}
 
 impl Door {
     /// The run's door, as its variables ask: one that acts unless [`AUDIT`] says to say only. A
@@ -145,10 +162,11 @@ impl Door {
     pub fn of_run() -> &'static Door {
         static DOOR: OnceLock<Door> = OnceLock::new();
         DOOR.get_or_init(|| {
-            Door::asked(
+            Door::asked_of(
                 std::env::var_os(AUDIT).as_deref(),
                 std::env::var_os(AUDIT_FILE).as_deref(),
                 std::env::var_os(AUDIT_MADE).as_deref(),
+                std::env::var_os(AUDIT_ID).as_deref(),
             )
             .unwrap_or_else(|why| panic!("the say-only run stops before it acts: {why}"))
         })
@@ -172,6 +190,17 @@ impl Door {
         file: Option<&std::ffi::OsStr>,
         made: Option<&std::ffi::OsStr>,
     ) -> Result<Door, String> {
+        Door::asked_of(audit, file, made, None)
+    }
+
+    /// [`Door::asked`], where a program the run started is also told the identity of the audit
+    /// file the run made (`identity`, [`AUDIT_ID`]): the file it opens must be that one.
+    pub fn asked_of(
+        audit: Option<&std::ffi::OsStr>,
+        file: Option<&std::ffi::OsStr>,
+        made: Option<&std::ffi::OsStr>,
+        identity: Option<&std::ffi::OsStr>,
+    ) -> Result<Door, String> {
         if !is_on(audit) {
             return Ok(Door::acting());
         }
@@ -182,14 +211,27 @@ impl Door {
                 std::env::temp_dir()
                     .join(format!("consensflow-live-audit-{}.txt", std::process::id()))
             });
+        let opened;
         if is_on(made) {
-            let open = fs::OpenOptions::new().append(true).open(&file);
-            open.map_err(|failed| {
-                format!(
-                    "the audit file {} the run began is not there to add to: {failed}",
-                    file.display()
-                )
-            })?;
+            let open = fs::OpenOptions::new()
+                .append(true)
+                .open(&file)
+                .map_err(|failed| {
+                    format!(
+                        "the audit file {} the run began is not there to add to: {failed}",
+                        file.display()
+                    )
+                })?;
+            if let Some(expected) = identity.filter(|identity| !identity.is_empty()) {
+                let found = self::identity::of_file(&open).map_err(|failed| failed.to_string())?;
+                if std::ffi::OsStr::new(&found) != expected {
+                    return Err(format!(
+                        "the audit file {} is not the one the run made: another file is at its path",
+                        file.display()
+                    ));
+                }
+            }
+            opened = open;
         } else {
             let mut open = fs::OpenOptions::new()
                 .write(true)
@@ -216,8 +258,12 @@ impl Door {
                     file.display()
                 )
             })?;
+            opened = open;
         }
-        Ok(Door::saying(file))
+        Ok(Door {
+            said: Some(file),
+            open: Some(std::sync::Arc::new(Mutex::new(opened))),
+        })
     }
 
     /// Whether the variables ask for a say-only run ([`AUDIT`]), read and nothing more: a program
@@ -231,12 +277,22 @@ impl Door {
     /// The variables that make a program this run starts say only into the same file, as this
     /// run does: none where this run acts.
     pub fn audit_vars() -> Vec<(String, String)> {
-        match Door::of_run().says_in() {
-            Some(file) => vec![
-                (AUDIT.to_owned(), "1".to_owned()),
-                (AUDIT_FILE.to_owned(), file.to_string_lossy().into_owned()),
-                (AUDIT_MADE.to_owned(), "1".to_owned()),
-            ],
+        let door = Door::of_run();
+        match door.says_in() {
+            Some(file) => {
+                let mut vars = vec![
+                    (AUDIT.to_owned(), "1".to_owned()),
+                    (AUDIT_FILE.to_owned(), file.to_string_lossy().into_owned()),
+                    (AUDIT_MADE.to_owned(), "1".to_owned()),
+                ];
+                if let Some(found) = door.open.as_ref().and_then(|open| {
+                    self::identity::of_file(&open.lock().unwrap_or_else(PoisonError::into_inner))
+                        .ok()
+                }) {
+                    vars.push((AUDIT_ID.to_owned(), found));
+                }
+                vars
+            }
             None => Vec::new(),
         }
     }
@@ -261,12 +317,19 @@ impl Door {
 
     /// A door that acts.
     pub fn acting() -> Door {
-        Door { said: None }
+        Door {
+            said: None,
+            open: None,
+        }
     }
 
-    /// A door that only says, in `file`.
+    /// A door that only says, in `file`, which it opens to add to each line (a door the run's
+    /// variables ask for holds the file it made or checked open instead, [`Door::asked`]).
     pub fn saying(file: PathBuf) -> Door {
-        Door { said: Some(file) }
+        Door {
+            said: Some(file),
+            open: None,
+        }
     }
 
     /// The file it says in, where it only says.
@@ -309,10 +372,29 @@ impl Door {
     /// and two writes could be cut between by another's.
     #[allow(clippy::print_stderr)]
     fn append(&self, file: &Path, line: &str) {
-        let written = fs::OpenOptions::new()
-            .append(true)
-            .open(file)
-            .and_then(|mut open| open.write_all(format!("{line}\n").as_bytes()));
+        let written = match &self.open {
+            // The handle the file was made or checked with: a file put at its path since is never
+            // added to, and one taken away stops the run as a file that cannot be written does.
+            Some(open) => {
+                let open = open.lock().unwrap_or_else(PoisonError::into_inner);
+                let same = match (self::identity::of_file(&open), self::identity::of_path(file)) {
+                    (Ok(held), Ok(now)) => held == now,
+                    _ => false,
+                };
+                if same {
+                    (&*open).write_all(format!("{line}\n").as_bytes())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "the audit file at its path is no longer the one the run made",
+                    ))
+                }
+            }
+            None => fs::OpenOptions::new()
+                .append(true)
+                .open(file)
+                .and_then(|mut open| open.write_all(format!("{line}\n").as_bytes())),
+        };
         if let Err(failed) = written {
             let why = format!(
                 "[say only] {} could not be written: {failed}: the run stops, for what it would do is no longer said",

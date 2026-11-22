@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
 use crate::{Error, Result};
@@ -127,11 +126,7 @@ pub fn history(file: &Path) -> Result<Vec<(String, String)>> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let db = Connection::open_with_flags(
-        file,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(said)?;
+    let db = crate::door::database::read(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
         .prepare("SELECT session_id, content FROM prompt_history ORDER BY id")
@@ -151,7 +146,7 @@ pub fn append_user(file: &Path, session: &str, text: &str) -> Result<()> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let mut db = Connection::open(file).map_err(said)?;
+    let mut db = crate::door::database::write(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let written = db.transaction().map_err(said)?;
     let head: Option<String> = written
@@ -197,11 +192,7 @@ fn read(file: &Path, session: Option<&str>) -> Result<Vec<Message>> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let db = Connection::open_with_flags(
-        file,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(said)?;
+    let db = crate::door::database::read(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
         .prepare(
@@ -256,6 +247,7 @@ fn words(content: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::Connection;
     use serde_json::json;
 
     use super::*;

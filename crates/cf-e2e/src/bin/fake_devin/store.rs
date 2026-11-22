@@ -83,7 +83,7 @@ fn made(db: &Connection) -> rusqlite::Result<()> {
 /// Enter, the second it is in, as Devin 3000.11.92 writes it whether a turn is at work or
 /// not (T-102, probed live).
 pub fn submitted(file: &Path, session: &str, text: &str) -> Result<(), String> {
-    let db = Connection::open(file).map_err(said)?;
+    let db = cf_e2e::door::database::write(file).map_err(|failed| failed.to_string())?;
     db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
     let second = jiff::Timestamp::now().as_second();
     patiently(|| {
@@ -104,7 +104,7 @@ impl Store {
         if let Some(folder) = file.parent() {
             cf_e2e::door::make_dir(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
         }
-        let db = Connection::open(file).map_err(said)?;
+        let db = cf_e2e::door::database::write(file).map_err(|failed| failed.to_string())?;
         db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
         made(&db).map_err(said)?;
         let (head, messages) = patiently(|| {
