@@ -35,18 +35,15 @@ use cf_e2e::process::{own_var, Run};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
-/// What the daemon is given of the machine, besides the home of its own: where the
-/// programs are and what they read their settings by.
-const MACHINE: [&str; 21] = [
+/// What the daemon is given of the machine, besides the home of its own: where the programs are
+/// and what describes the machine. Never a variable that says where a login or a setting is
+/// (`HOME`, `USERPROFILE`, `APPDATA`, a harness's own home, the XDG folders): the daemon's home
+/// is the kit's, so that what the daemon reads of a harness's setting (Claude's release source in
+/// `~/.claude/settings.json`) is read in the kit's home and never the owner's (T-1957).
+const MACHINE: [&str; 11] = [
     "PATH",
-    "HOME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
     "USER",
     "LOGNAME",
-    "APPDATA",
-    "LOCALAPPDATA",
     "ProgramData",
     "ProgramFiles",
     "ProgramFiles(x86)",
@@ -54,12 +51,34 @@ const MACHINE: [&str; 21] = [
     "NUMBER_OF_PROCESSORS",
     "PROCESSOR_ARCHITECTURE",
     "OS",
-    "CODEX_HOME",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_STATE_HOME",
-    "XDG_CACHE_HOME",
+    "SystemRoot",
 ];
+
+/// The daemon's environment: the home's own (`home`), then the machine's `MACHINE` variables as
+/// `lookup` has them, with `first` first on its `PATH` where there is one.
+fn daemon_vars(
+    home: Vec<(String, String)>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+    first: Option<&Path>,
+) -> Result<Vec<(String, String)>> {
+    let mut vars = home;
+    for name in MACHINE {
+        if let Some(value) = lookup(name) {
+            vars.retain(|(known, _)| known != name);
+            vars.push((name.to_owned(), value));
+        }
+    }
+    if let Some(folder) = first {
+        let path = std::env::join_paths(
+            std::iter::once(folder.to_path_buf())
+                .chain(std::env::split_paths(&lookup("PATH").unwrap_or_default())),
+        )
+        .map_err(|failed| Error::Daemon(format!("a PATH with {}: {failed}", folder.display())))?;
+        vars.retain(|(known, _)| known != "PATH");
+        vars.push(("PATH".to_owned(), path.to_string_lossy().into_owned()));
+    }
+    Ok(vars)
+}
 
 /// How long a look has to be answered, and an update (the daemon gives one ten minutes).
 const LOOKS: Duration = Duration::from_secs(120);
@@ -78,28 +97,14 @@ impl Admin {
     /// Starts the daemon, with `first` first on its `PATH` where there is one.
     fn start(first: Option<&Path>, patience: Duration) -> Result<Self> {
         let home = Home::new()?;
-        let mut vars: Vec<(String, String)> = home
-            .vars()
-            .into_iter()
-            .map(|(name, value)| (name.to_owned(), value.to_string_lossy().into_owned()))
-            .collect();
-        for name in MACHINE {
-            if let Some(value) = own_var(name) {
-                vars.retain(|(known, _)| known != name);
-                vars.push((name.to_owned(), value));
-            }
-        }
-        if let Some(folder) = first {
-            let path = std::env::join_paths(
-                std::iter::once(folder.to_path_buf())
-                    .chain(std::env::split_paths(&own_var("PATH").unwrap_or_default())),
-            )
-            .map_err(|failed| {
-                Error::Daemon(format!("a PATH with {}: {failed}", folder.display()))
-            })?;
-            vars.retain(|(known, _)| known != "PATH");
-            vars.push(("PATH".to_owned(), path.to_string_lossy().into_owned()));
-        }
+        let vars = daemon_vars(
+            home.vars()
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_string_lossy().into_owned()))
+                .collect(),
+            &own_var,
+            first,
+        )?;
         let mut daemon = home.daemon_with(vars)?;
         let handle = daemon.handle(Duration::from_secs(60))?;
         Ok(Self {
@@ -261,4 +266,57 @@ fn the_admin_page_looks_at_each_harness_as_its_program_says_and_updates_a_manage
         checks.extend(update_pi(&log)?);
     }
     report::conclude(&log, "what each check came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T-1957: the daemon and what it starts are on the kit's home. The owner's `HOME`,
+    /// `USERPROFILE`, `APPDATA`, `CODEX_HOME` and the XDG folders never replace the home's own;
+    /// the machine's `PATH` and description still pass.
+    #[test]
+    fn the_admin_daemon_is_given_the_kits_home_and_never_the_owners() {
+        let owner = |name: &str| match name {
+            "HOME" | "USERPROFILE" | "APPDATA" | "LOCALAPPDATA" | "CODEX_HOME"
+            | "XDG_CONFIG_HOME" | "XDG_DATA_HOME" | "HOMEDRIVE" | "HOMEPATH" => {
+                Some(format!("/the-owners/{name}"))
+            }
+            "PATH" => Some("/usr/bin".to_owned()),
+            "OS" => Some("Windows_NT".to_owned()),
+            _ => None,
+        };
+        let home = vec![
+            ("HOME".to_owned(), "/kit/home".to_owned()),
+            ("USERPROFILE".to_owned(), "/kit/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/kit/home/.config".to_owned()),
+        ];
+        let vars = daemon_vars(home, &owner, Some(Path::new("/pi/bin"))).unwrap();
+        let get = |name: &str| {
+            vars.iter()
+                .rev()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("HOME"), Some("/kit/home"));
+        assert_eq!(get("USERPROFILE"), Some("/kit/home"));
+        assert_eq!(get("XDG_CONFIG_HOME"), Some("/kit/home/.config"));
+        for name in [
+            "APPDATA",
+            "LOCALAPPDATA",
+            "CODEX_HOME",
+            "XDG_DATA_HOME",
+            "HOMEDRIVE",
+            "HOMEPATH",
+        ] {
+            assert_eq!(get(name), None, "{name} is the owner's");
+        }
+        assert!(
+            vars.iter().all(|(_, value)| !value.contains("the-owners")),
+            "{vars:?}"
+        );
+        assert_eq!(get("OS"), Some("Windows_NT"));
+        assert!(get("PATH")
+            .is_some_and(|path| path.starts_with("/pi/bin") && path.contains("/usr/bin")));
+    }
 }

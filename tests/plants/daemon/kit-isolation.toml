@@ -1,5 +1,6 @@
 # The plants of K3's guards: a wrong result here is silent and lets a live run touch an owner's home or login.
 [run]
+ki-test-harnesses = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harnesses"]
 ki-lib-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
 ki-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 ki-lib-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
@@ -120,3 +121,16 @@ runs = ["ki-lib-agents"]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env('''
 replace = '''        (Harness::Codex, Some(config)) if real_claude => isolated_env('''
+
+[[plant]]
+name = "K3: the admin daemon is given the owner's HOME over the kit's"
+meant = "the_admin_daemon_is_given_the_kits_home_and_never_the_owners"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''const MACHINE: [&str; 11] = [
+    "PATH",'''
+replace = '''const MACHINE: [&str; 12] = [
+    "PATH",
+    "HOME",'''
