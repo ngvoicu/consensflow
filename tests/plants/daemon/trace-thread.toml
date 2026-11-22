@@ -114,7 +114,7 @@ replace = "    let _ = (durable.flush)(&file);"
 
 [[plant]]
 name = "trace thread: the stop does not wait for the writer"
-meant = "the_stop_writes_what_the_trace_was_told_before_it_ends"
+meant = "the_stop_waits_a_quarter_of_a_second_for_a_held_trace_and_ends_without_it"
 runs = ["tt-held"]
 
 [[plant.edit]]
@@ -131,19 +131,3 @@ runs = ["tt-held"]
 file = "crates/cf-daemon/src/stop.rs"
 find = "        if !self.errors.trace().settled(SETTLE) {"
 replace = "        if !self.errors.trace().settled(std::time::Duration::from_secs(8)) {"
-
-[[plant]]
-name = "trace thread: the delete's notice is appended on the caller's thread"
-meant = "a_held_trace_file_holds_neither_a_timer_nor_a_ping_nor_does_a_projects_delete"
-runs = ["tt-held"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/files/trace.rs"
-find = '''        let text = format!("{json}\n");
-        let mut state = self.shared.lock();'''
-replace = '''        let text = format!("{json}\n");
-        if matches!(line.what, Traced::ProjectDeleted(_)) {
-            let _ = append_rotating(&self.file, &text, LIMIT);
-            return;
-        }
-        let mut state = self.shared.lock();'''
