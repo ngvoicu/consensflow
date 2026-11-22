@@ -250,7 +250,7 @@ fn case(
         || Ok((members.lane(members.chief())?["activity"]["state"] == "idle").then_some(())),
     )?;
     let pane = chief_pane(members)?;
-    let mark = Trace::read(members.rig()).len();
+    let mark = Trace::read_settled(members.rig()).len();
     let pasted = Instant::now();
     for (at, write) in writes(shape, text).iter().enumerate() {
         if at > 0 {
@@ -412,7 +412,7 @@ fn gap_case(members: &Members, text: &str, word: &str, gap: Duration, log: &Log)
         || Ok((members.lane(members.chief())?["activity"]["state"] == "idle").then_some(())),
     )?;
     let pane = chief_pane(members)?;
-    let mark = Trace::read(members.rig()).len();
+    let mark = Trace::read_settled(members.rig()).len();
     let mut last = drawn(members, &pane)?;
     let mut changes: Vec<String> = Vec::new();
     let mut look = |last: &mut Vec<String>, since: Instant| -> Result {

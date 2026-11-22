@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use cf_harness::contract::LaunchId;
+use cf_harness::contract::{LaunchId, Work};
 use cf_ledger::{Ledger, ParticipantView, ProjectView};
 use cf_proto::cf_word::CfWord;
 use cf_proto::specs::AppSpecs;
@@ -243,20 +243,23 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().push(line);
     }
 
-    fn forget(&self, project: i64) -> Result<(), String> {
-        if !self.forgets.get() {
-            return Ok(());
-        }
-        if let Some(cause) = self.forget_fails.borrow().clone() {
-            return Err(cause);
-        }
-        self.recorder
-            .called("trace", Some("forget"), json!([project]), Value::Null);
-        self.forgotten.borrow_mut().push(project);
-        self.lines.borrow_mut().retain(
-            |line| !matches!(&line.what, Traced::Window { project: of, .. } if *of == Some(project)),
-        );
-        Ok(())
+    fn forget(&self, project: i64) -> Work<'_, Result<(), String>> {
+        let done = (|| {
+            if !self.forgets.get() {
+                return Ok(());
+            }
+            if let Some(cause) = self.forget_fails.borrow().clone() {
+                return Err(cause);
+            }
+            self.recorder
+                .called("trace", Some("forget"), json!([project]), Value::Null);
+            self.forgotten.borrow_mut().push(project);
+            self.lines.borrow_mut().retain(
+                |line| !matches!(&line.what, Traced::Window { project: of, .. } if *of == Some(project)),
+            );
+            Ok(())
+        })();
+        Box::pin(async move { done })
     }
 }
 

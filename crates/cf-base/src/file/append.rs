@@ -4,14 +4,25 @@
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
-/// Held across an append's look at the size, its move and its write: two
-/// threads that append to one file (the daemon's and the records' own, to the
-/// daemon's log) would both move it aside at its limit, and the second would
-/// move the first's new file over the previous one.
-static APPENDING: Mutex<()> = Mutex::new(());
+/// The turn of each file in this process, held across an append's look at the
+/// size, its move and its write: two threads that append to one file (the
+/// daemon's and the records' own, to the daemon's log) would both move it
+/// aside at its limit, and the second would move the first's new file over the
+/// previous one. Each file has its own, so that a file that is held (a lock
+/// another process has, a slow disk) holds the appends to that file and no
+/// other.
+fn turn_of(file: &Path) -> Arc<Mutex<()>> {
+    static TURNS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut turns = TURNS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Arc::clone(turns.entry(file.to_path_buf()).or_default())
+}
 
 /// Appends `text` to `file`, made if it is not there. A file already past
 /// `limit` bytes is moved aside first, to `<file>.1`, which an earlier one
@@ -27,7 +38,8 @@ static APPENDING: Mutex<()> = Mutex::new(());
 /// to the log before its ledger refuses it.
 pub fn append_rotating(file: &Path, text: &str, limit: u64) -> io::Result<()> {
     // A thread that panicked holding it left nothing half done that matters here.
-    let _turn = APPENDING
+    let turn = turn_of(file);
+    let _turn = turn
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _held = held(file);
@@ -128,6 +140,46 @@ mod tests {
             lines.sort();
             assert_eq!(lines, ["a", "b"], "round {round}");
         }
+    }
+
+    #[test]
+    fn a_file_that_is_held_holds_the_appends_to_it_and_to_no_other_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (held, free) = (dir.path().join("events.jsonl"), dir.path().join("daemon.log"));
+        let lock = held_lock(&held);
+        let (began, begun) = std::sync::mpsc::channel();
+        let waiting = {
+            let held = held.clone();
+            std::thread::spawn(move || {
+                began.send(()).unwrap();
+                append_rotating(&held, "late\n", 100).unwrap();
+            })
+        };
+        begun.recv().unwrap();
+        // The appender is inside the held file's turn by now, or about to be.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        append_rotating(&free, "free\n", 100).unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "an append to another file waited for the held one"
+        );
+        assert_eq!(read(&free), "free\n");
+        drop(lock);
+        waiting.join().unwrap();
+        assert_eq!(read(&held), "late\n");
+    }
+
+    /// The lock beside `file`, taken as another process would take it.
+    fn held_lock(file: &Path) -> File {
+        let beside = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(lock_beside(file))
+            .unwrap();
+        beside.lock().unwrap();
+        beside
     }
 
     #[test]

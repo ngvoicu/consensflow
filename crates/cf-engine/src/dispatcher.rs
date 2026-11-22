@@ -798,7 +798,8 @@ impl Dispatcher {
         self.forget_project(deleted.id);
         // The project is gone from the ledger already: a trace that kept some of its
         // lines is said in the log, where the person who reads the trace looks.
-        if let Err(cause) = self.seams.trace.forget(project) {
+        // It is asked and awaited: the thread is free meanwhile.
+        if let Err(cause) = self.seams.trace.forget(project).await {
             self.seams.log.error(
                 "a deleted project's lines could not be removed from the trace",
                 &cause,

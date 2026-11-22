@@ -34,6 +34,7 @@ use tokio::sync::watch;
 
 use crate::api::Api;
 use crate::errors::{contain, contain_now, Errors};
+use crate::files::SETTLE;
 use crate::pass::PassLoop;
 
 /// How long a stop waits, all of it together.
@@ -133,6 +134,13 @@ impl Stopping {
                 .log()
                 .error("the ledger did not close", Some(&failed.to_string())),
             Err(panicked) => self.errors.caught("the ledger did not close", &panicked),
+        }
+        // What the trace was told is written, if its file lets it within the
+        // tail's wait: a held file loses its last lines, never the exit.
+        if !self.errors.trace().settled(SETTLE) {
+            self.errors
+                .log()
+                .warn("the trace was not written in time; its last lines may be missing", None);
         }
         self.errors.log().info("exit 0");
         (self.exit)(0);

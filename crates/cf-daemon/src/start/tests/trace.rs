@@ -41,8 +41,7 @@ async fn a_refused_ask_leaves_no_task_state_line_in_the_trace() {
                 .confirm_delivery(brief, Some(&json!({"item": "test"})))
                 .unwrap();
             let number = created.task.number;
-            let trace = rig.home.join("events.jsonl");
-            let before = std::fs::read_to_string(&trace).unwrap();
+            let before = crate::files::settled_trace(&rig.home).unwrap();
             assert!(
                 before.contains(r#""kind":"task.state""#),
                 "committed moves are traced"
@@ -65,7 +64,7 @@ async fn a_refused_ask_leaves_no_task_state_line_in_the_trace() {
                 "working"
             );
             assert_eq!(
-                std::fs::read_to_string(&trace).unwrap(),
+                crate::files::settled_trace(&rig.home).unwrap(),
                 before,
                 "the rolled-back pause has no trace line"
             );
