@@ -330,7 +330,9 @@ fn a_place_that_cannot_be_resolved_but_for_its_absence_is_refused() {
     super::write(&file, "a file").unwrap();
     // Through a file: not absent, and no place.
     assert!(judge(&file.join("below"), Act::Write).is_err());
-    // A `..` among the absent names.
+    // A `..` among the absent names, where the system follows it after the links (Unix); Windows
+    // settles a `..` by the path's words, as the door's absolute path does.
+    #[cfg(unix)]
     assert!(judge(&root.path().join("absent/../x"), Act::Write).is_err());
 }
 
