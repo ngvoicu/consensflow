@@ -6,27 +6,54 @@
 <title>ConsensFlow Harnesses</title>
 <link rel="stylesheet" href="/vendor/fonts/fonts.css">
 <style>
-  :root { color-scheme: dark light; --ink: #09090B; --panel: #18181B; --line: #27272A; --line-strong: #3F3F46; --text: #FAFAFA; --muted: #A1A1AA; --accent: #A5B4FC; --danger: #F87171; }
+  /* The board's own colours: zinc surfaces, lavender for focus, and a state each harness is in at a
+     glance: green it can start, amber it could not be checked, red it cannot start, grey not there. */
+  :root { color-scheme: dark light; --ink: #09090B; --card: #111114; --well: #0B0B0E; --panel: #18181B; --line: #27272A; --line-strong: #3F3F46; --text: #FAFAFA; --muted: #A1A1AA; --accent: #A5B4FC; --danger: #F87171; --ok: #6EE7B7; --amber: #FCD34D; --absent: #52525B; --danger-wash: rgba(248, 113, 113, .09); --amber-wash: rgba(252, 211, 77, .08); --shadow: none; }
   @media (prefers-color-scheme: light) {
-    :root:not([data-framed]) { color-scheme: light; --ink: #FFFFFF; --panel: #F4F4F5; --line: #E4E4E7; --line-strong: #D4D4D8; --text: #09090B; --muted: #52525B; --accent: #4338CA; --danger: #B91C1C; }
+    :root:not([data-framed]) { color-scheme: light; --ink: #FFFFFF; --card: #FFFFFF; --well: #F4F4F5; --panel: #F4F4F5; --line: #E4E4E7; --line-strong: #D4D4D8; --text: #09090B; --muted: #52525B; --accent: #4338CA; --danger: #B91C1C; --ok: #047857; --amber: #B45309; --absent: #A1A1AA; --danger-wash: rgba(220, 38, 38, .06); --amber-wash: rgba(217, 119, 6, .08); --shadow: 0 1px 2px rgba(9, 9, 11, .05); }
   }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 40px 24px 64px; background: var(--ink); color: var(--text); font: 15px/1.5 "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
   main { max-width: 760px; margin: 0 auto; }
-  .mark { font: 12px ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+  .mark { font: 12px "Geist Mono", ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0; }
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
   h1 { font-size: 26px; font-weight: 600; letter-spacing: -.01em; margin: 6px 0 4px; }
-  .lede, #check-note { color: var(--muted); font-size: 13.5px; }
-  #check-note { min-height: 20px; }
-  .host { padding: 18px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-  .host strong { display: block; font-size: 17px; color: var(--accent); margin-bottom: 6px; }
-  .host div { font-size: 13px; }
-  .host small { display: block; color: var(--muted); margin-top: 8px; }
-  button { font: inherit; font-size: 13px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .lede { margin: 0; color: var(--muted); font-size: 13.5px; }
+  #check-note { margin: 14px 0 10px; min-height: 20px; color: var(--muted); font-size: 13px; }
+  #check-note[data-tone="error"] { color: var(--danger); }
+  #harnesses { display: grid; gap: 12px; }
+  /* One card a harness: its name and state, then what stops it, what it is, and the command. */
+  .host { --dot: var(--ok); padding: 14px 18px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow-wrap: anywhere; font-size: 13.5px; }
+  .host[data-state="blocked"] { --dot: var(--danger); }
+  .host[data-state="unchecked"] { --dot: var(--amber); }
+  .host[data-state="absent"] { --dot: var(--absent); }
+  .head { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; }
+  .head strong { display: flex; align-items: center; gap: 10px; margin-right: auto; font-size: 16px; font-weight: 600; }
+  .head strong::before { content: ''; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px var(--line); }
+  .host[data-state="absent"] .head strong::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dot); }
+  .head small { color: var(--muted); font-size: 12px; }
+  .launch { margin-top: 8px; }
+  .host[data-state="ready"] .launch { color: var(--ok); }
+  .host[data-state="absent"] .launch { color: var(--muted); }
+  .alert { padding: 8px 12px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: var(--danger-wash); }
+  .alert.amber { border-left-color: var(--amber); background: var(--amber-wash); }
+  .launch b { font-weight: 600; }
+  .host > .alert:not(.launch) { margin-top: 8px; }
+  .alert + button { margin-top: 8px; }
+  .facts { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .facts .version { color: var(--text); }
+  .facts .beyond { color: var(--amber); }
+  .facts .path span { font: 12px "Geist Mono", ui-monospace, monospace; word-break: break-all; }
+  /* The command, as a person pastes it, in a well with Copy beside it; a long one wraps at the
+     well's edge, as a terminal wraps a line, never after a hyphen that reads as part of it. */
+  .command { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin-top: 14px; }
+  .command > span { grid-column: 1 / -1; margin-bottom: 6px; color: var(--muted); font-size: 12.5px; }
+  .command code { padding: 8px 12px; font: 12.5px/1.6 "Geist Mono", ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; background: var(--well); border: 1px solid var(--line); border-right: 0; border-radius: 6px 0 0 6px; user-select: all; }
+  .command button { border-radius: 0 6px 6px 0; min-width: 72px; }
+  .manual { margin: 14px 0 0; padding: 8px 12px; border: 1px dashed var(--line-strong); border-radius: 6px; }
+  button { font: inherit; font-size: 13px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: .6; cursor: wait; }
-  .host button { margin: 10px 12px 0 0; }
-  .host .command button { margin: 0 0 0 10px; padding: 2px 10px; }
-  .host code { font: 12.5px ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; user-select: all; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 <style>
@@ -45,10 +72,14 @@ if (window.parent !== window) {
 </head>
 <body>
 <main>
-  <p class="mark">ConsensFlow</p>
-  <h1>Harnesses</h1>
-  <p class="lede">Installed coding tools and available updates.</p>
-  <button id="check-all" type="button">Check all harnesses</button>
+  <header class="top">
+    <div>
+      <p class="mark">ConsensFlow</p>
+      <h1>Harnesses</h1>
+      <p class="lede">Installed coding tools and available updates.</p>
+    </div>
+    <button id="check-all" type="button">Check all harnesses</button>
+  </header>
   <p id="check-note" role="status"></p>
   <section id="harnesses" aria-label="Harness diagnostics"></section>
 </main>
@@ -80,10 +111,12 @@ function showRows(rows) {
 // The status line is the newest operation's: an older one that ends later writes nothing.
 let LOOKS = 0;
 let SAID = 0;
-function say(look, text) {
+function say(look, text, tone = '') {
   if (look < SAID) return;
   SAID = look;
-  document.querySelector('#check-note').textContent = text;
+  const note = document.querySelector('#check-note');
+  note.textContent = text;
+  note.dataset.tone = tone;
 }
 // The page installs nothing: it shows what the daemon knows of each harness, the command that
 // updates it the way it was installed, and Refresh. A refused or failed check is said as sent.
@@ -104,7 +137,7 @@ async function checkHarnesses(id = null, button = null) {
     renderHarnesses();
     say(look, '');
   } catch (error) {
-    say(look, error.message + ' — try checking again.');
+    say(look, error.message + ' — try checking again.', 'error');
   } finally { if (button) button.disabled = false; }
 }
 
@@ -125,10 +158,41 @@ async function copyCommand(text, button) {
 
 function renderHarness(row) {
   const line = el('div', 'host');
-  line.append(el('strong', null, row.id));
-  line.append(el('div', null, row.installed ? 'Installed: ' + row.path : 'Not installed'));
+  const setup = row.setup;
+  const setupFailed = row.extension?.state === 'error' || row.extension?.state === 'not-installed';
+  // The card's state at a glance, of what its lines say: its dot, and the colour of its first line.
+  line.dataset.state = !row.installed ? 'absent'
+    : setup?.state === 'update-required' || setupFailed ? 'blocked'
+    : setup?.state === 'unchecked' ? 'unchecked'
+    : 'ready';
+  const head = el('div', 'head');
+  head.append(el('strong', null, row.id));
+  head.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
+  const check = el('button', null, 'Refresh');
+  check.onclick = () => checkHarnesses(row.id, check); head.append(check);
+  line.append(head);
+  if (!row.installed) line.append(el('div', 'launch', 'Not installed'));
   if (row.installed) {
     const update = row.update;
+    // The launch's own check: whether ConsensFlow can start it, and the reason when it can't.
+    const launch = el('div', 'launch');
+    if (setup?.state === 'update-required' || setup?.state === 'unchecked') {
+      launch.classList.add('alert');
+      if (setup.state === 'unchecked') launch.classList.add('amber');
+      launch.append(el('b', null, setup.state === 'update-required' ? 'ConsensFlow cannot start it: ' : 'ConsensFlow could not check it: '), setup.reason);
+    } else {
+      launch.textContent = 'ConsensFlow can start it.';
+    }
+    line.append(launch);
+    if (setupFailed) {
+      const status = el('div', 'alert', 'Pi setup failed: ' + (row.extension.reason || 'Setup is missing.'));
+      status.style.color = 'var(--danger)';
+      line.append(status);
+      const retry = el('button', null, 'Retry Pi setup');
+      retry.onclick = () => checkHarnesses(row.id, retry);
+      line.append(retry);
+    }
+    const facts = el('div', 'facts');
     const installedRelease = row.tested?.release || row.version.value;
     const version = installedRelease ? 'Version ' + installedRelease : row.version.reason || 'Version unknown';
     const latest = update.state === 'current' ? ', up to date'
@@ -136,17 +200,16 @@ function renderHarness(row) {
       : update.state === 'unknown' ? '; the latest release is ' + update.value
       : update.state === 'error' ? '; could not check for updates: ' + update.reason
       : '';
-    line.append(el('div', null, version + latest));
-    // The launch's own check: whether ConsensFlow can start it, and the reason when it can't.
-    const setup = row.setup;
-    line.append(el('div', null, setup?.state === 'update-required' ? 'ConsensFlow cannot start it: ' + setup.reason
-      : setup?.state === 'unchecked' ? 'ConsensFlow could not check it: ' + setup.reason
-      : 'ConsensFlow can start it.'));
+    facts.append(el('div', 'version', version + latest));
     if (row.tested?.newest) {
-      line.append(el('div', null, 'Tested up to ' + row.tested.newest + '.'));
-      if (row.tested.beyond) line.append(el('div', null, 'This version is newer and has not been checked yet.'));
+      facts.append(el('div', null, 'Tested up to ' + row.tested.newest + '.'));
+      if (row.tested.beyond) facts.append(el('div', 'beyond', 'This version is newer and has not been checked yet.'));
     }
-    line.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
+    facts.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
+    const path = el('div', 'path', 'Installed: ');
+    path.append(el('span', null, row.path));
+    facts.append(path);
+    line.append(facts);
     const required = row.setup?.state === 'update-required';
     if (update.state === 'available' || required) {
       const command = update.command;
@@ -159,21 +222,10 @@ function renderHarness(row) {
         put.append(copy);
         line.append(put);
       } else {
-        line.append(el('small', null, 'ConsensFlow does not recognize how ' + row.id + ' was installed: update it the way you installed it, as its own update instructions say.'));
+        line.append(el('p', 'manual', 'ConsensFlow does not recognize how ' + row.id + ' was installed: update it the way you installed it, as its own update instructions say.'));
       }
     }
-    if (row.extension?.state === 'error' || row.extension?.state === 'not-installed') {
-      const status = el('div', null, 'Pi setup failed: ' + (row.extension.reason || 'Setup is missing.'));
-      status.style.color = 'var(--danger)';
-      line.append(status);
-      const retry = el('button', null, 'Retry Pi setup');
-      retry.onclick = () => checkHarnesses(row.id, retry);
-      line.append(retry);
-    }
   }
-  const check = el('button', null, 'Refresh');
-  check.onclick = () => checkHarnesses(row.id, check); line.append(check);
-  line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
   return line;
 }
 
