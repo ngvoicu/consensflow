@@ -61,7 +61,7 @@ pub struct Source {
 
 /// The command as a person pastes it into a terminal: the words that the shell would split or
 /// read are quoted (single quotes; on Windows double quotes, run with `&` as PowerShell has it).
-pub fn command_line(argv: &[String]) -> String {
+pub(super) fn command_line(argv: &[String]) -> String {
     let quoted = |word: &String| -> String {
         let plain = !word.is_empty()
             && word.chars().all(|c| {

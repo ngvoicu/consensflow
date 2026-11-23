@@ -30,7 +30,7 @@ pub(super) const QUESTION_TOOL: &str = "input needed";
 
 /// Whether a Claude is at work, at its prompt, or waiting on its own dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum State {
+pub(crate) enum State {
     Working,
     Idle,
     /// Waiting, and on what where Claude said.

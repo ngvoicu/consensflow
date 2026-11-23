@@ -327,9 +327,7 @@ impl Trace {
             let _ = answer.send(Err(io::Error::other(why)));
         } else if state.ending {
             drop(state);
-            let _ = answer.send(Err(io::Error::other(
-                "the trace has ended with the daemon",
-            )));
+            let _ = answer.send(Err(io::Error::other("the trace has ended with the daemon")));
         } else {
             state.jobs.push_back(Job::Forget {
                 project,
@@ -575,9 +573,7 @@ fn ends_cut(file: &Path) -> bool {
         return false;
     };
     let mut last = [0_u8; 1];
-    open.seek(SeekFrom::End(-1)).is_ok()
-        && open.read_exact(&mut last).is_ok()
-        && last[0] != b'\n'
+    open.seek(SeekFrom::End(-1)).is_ok() && open.read_exact(&mut last).is_ok() && last[0] != b'\n'
 }
 
 /// `name` without the lines of `project`, written beside it, flushed, and
@@ -828,7 +824,8 @@ mod tests {
     }
 
     #[test]
-    fn a_home_that_cannot_be_written_loses_the_line_and_not_the_run_and_answers_no_forgetting_done() {
+    fn a_home_that_cannot_be_written_loses_the_line_and_not_the_run_and_answers_no_forgetting_done()
+    {
         let dir = tempfile::tempdir().unwrap();
         let trace = Trace::with_clock(
             dir.path().join("gone").join("events.jsonl"),
