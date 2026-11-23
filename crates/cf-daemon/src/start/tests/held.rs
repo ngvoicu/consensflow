@@ -440,6 +440,28 @@ fn a_retry_that_finds_nothing_to_remove_still_needs_the_folder_flushed() {
     trace.forget_blocking(1, None).unwrap();
 }
 
+/// The review's case: a folder that allows the renames and cannot be opened for the flush.
+#[cfg(unix)]
+#[test]
+fn a_retry_on_a_folder_that_cannot_be_flushed_is_no_success_though_both_names_are_clean() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    for name in [dir.path().join("events.jsonl"), dir.path().join("events.jsonl.1")] {
+        std::fs::write(name, "{\"project\":3,\"kind\":\"old\"}\n").unwrap();
+    }
+    let trace = Trace::new(dir.path());
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o300)).unwrap();
+    // A user who is allowed to open it anyway (root) cannot show the case.
+    let cannot = std::fs::File::open(dir.path()).is_err();
+    let first = trace.forget_blocking(3, None);
+    let retry = trace.forget_blocking(3, None);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    if cannot {
+        assert!(first.is_err(), "{first:?}");
+        assert!(retry.is_err(), "a retry that found clean names answered done: {retry:?}");
+    }
+}
+
 #[test]
 fn a_replacement_that_is_not_there_for_its_rename_is_no_success() {
     let dir = tempfile::tempdir().unwrap();
@@ -454,21 +476,18 @@ fn a_replacement_that_is_not_there_for_its_rename_is_no_success() {
 #[test]
 fn an_abandoned_replacement_is_removed_by_a_forgetting_and_by_a_start_before_any_answer() {
     let line = "{\"at\":\"a\",\"project\":2,\"kind\":\"left\"}\n";
-    // By a forgetting: one that could not be renamed leaves its replacement.
+    // By a forgetting: the lines of project 2 have aged out of the names, and an
+    // abandoned replacement still holds them.
     let dir = tempfile::tempdir().unwrap();
-    let trace = durable_trace(dir.path(), Durable { flush: failed_flush, ..DISK });
-    trace.event(&event(1, "one"));
-    trace.event(&event(2, "two"));
-    settled(&trace);
-    drop(trace.forget_blocking(1, None));
     let temporary = dir.path().join("events.jsonl.tmp");
     let again = durable_trace(dir.path(), DISK);
+    again.event(&event(1, "one"));
     // The writer has started once it answers.
     again.forget_blocking(9, None).unwrap();
     std::fs::write(&temporary, line).unwrap();
     again.forget_blocking(2, None).unwrap();
     assert!(!temporary.exists(), "the replacement a forgetting left is removed");
-    assert_eq!(kinds(again.file()), ["one"], "project 2 is gone from the names");
+    assert_eq!(kinds(again.file()), ["one"]);
     // By a start: the writer removes both before it writes anything.
     let dir = tempfile::tempdir().unwrap();
     let names = [dir.path().join("events.jsonl.tmp"), dir.path().join("events.jsonl.1.tmp")];

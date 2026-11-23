@@ -74,7 +74,7 @@ replace = "    Arc::clone(turns.entry(PathBuf::new()).or_default())"
 
 [[plant]]
 name = "trace thread: a forgetting answers before its new file is flushed"
-meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_and_renamed"
+meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_renamed_and_the_folder_flushed"
 runs = ["tt-held"]
 
 [[plant.edit]]
@@ -84,7 +84,7 @@ replace = "    let _ = &file;"
 
 [[plant]]
 name = "trace thread: a forgetting answers before its rename is flushed through the folder"
-meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_and_renamed"
+meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_renamed_and_the_folder_flushed"
 runs = ["tt-held"]
 
 [[plant.edit]]
