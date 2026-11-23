@@ -884,3 +884,132 @@ fn a_refusal_seen_while_the_task_is_held_holds_the_member_and_the_task_is_not_re
     );
     assert_eq!(t.task(1).task.state, "paused");
 }
+
+#[test]
+fn a_question_asked_during_the_hold_and_a_restart_leave_the_task_held_and_fail_nothing() {
+    // The restart closes the question its old process asked (main's rule), so the Resume goes at
+    // its time as for any held task: the restart paused nothing and asked for no task Resume.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.ask(t.project.id, &window, "chief", 1, "Which destination?");
+    c.edit_ledger(|_| {});
+    c.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = c.make();
+    restarted.settle_after_restart().unwrap();
+    restarted.resume_project(t.project.id).unwrap();
+    let held = t.task(1).task;
+    assert_eq!(
+        held.state, "paused",
+        "a restart pauses nothing and asks for no Resume"
+    );
+    assert!(held.held_until.is_some());
+    c.advance(31_000);
+    for _ in 0..6 {
+        restarted.pass().unwrap();
+        c.advance(2_000);
+    }
+    assert_ne!(t.task(1).task.state, "failed");
+}
+
+#[test]
+fn a_restart_after_the_resume_was_received_and_before_its_answer_never_sends_the_brief_again() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert!(t.task(1).task.retry.is_none(), "received");
+    c.edit_ledger(|_| {});
+    c.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = c.make();
+    restarted.settle_after_restart().unwrap();
+    restarted.resume_project(t.project.id).unwrap();
+    for _ in 0..8 {
+        restarted.pass().unwrap();
+        c.advance(4_000);
+    }
+    let briefs: Vec<_> = c
+        .adapter
+        .agent("zeus")
+        .items
+        .into_iter()
+        .filter(|item| item.role == Role::User && item.text.contains("Write the parser"))
+        .collect();
+    assert!(briefs.len() <= 1, "the brief was not sent again");
+    let attempts: Vec<_> = t
+        .task(1)
+        .messages
+        .iter()
+        .filter(|m| m.kind == "task" && m.body != RESUMED)
+        .map(|m| m.attempts)
+        .collect();
+    assert_eq!(attempts, vec![1]);
+}
+
+#[test]
+fn a_failed_turn_after_an_answer_has_two_tries_and_twice_is_said_only_after_two_were_received() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    // The retry's turn asks, and the chief's answer is the window's last paste.
+    let question = c.ask(t.project.id, &window, "chief", 1, "Which destination?");
+    assert_eq!(t.task(1).task.state, "waiting");
+    c.adapter.with(&window, |agent| agent.settled = true);
+    c.answer(t.project.id, question.id, "Use staging");
+    for _ in 0..6 {
+        c.advance(4_000);
+        passes(&c, 1);
+    }
+    assert!(given(&c, "zeus")
+        .iter()
+        .any(|text| text.contains("Use staging")));
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 3);
+    let held = t.task(1).task;
+    assert_eq!(held.state, "paused", "two tries again after the answer");
+    assert_eq!(held.retry.expect("held").which, 1);
+    assert!(
+        failed_told(&t)
+            .iter()
+            .all(|note| !note.contains("tried again twice")),
+        "twice is said only once two were received"
+    );
+}
+
+#[test]
+fn a_count_at_its_limit_in_a_turn_at_work_is_main_s_hold_at_once() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    let quota = count_at_its_limit(&c);
+    c.adapter.refuse_unsettled(&window, quota);
+    passes(&c, 3);
+    assert!(t.out_until("zeus").is_some(), "held at once, as on main");
+    assert!(t.task(1).task.retry.is_none(), "no retry is in it");
+}
+
+#[test]
+fn with_the_tries_off_a_failed_end_fails_the_task_at_once_as_before() {
+    let c = Context::made(Made::default());
+    let t = Tiers::new(&c, &["zeus"]);
+    t.open();
+    passes(&c, 3);
+    let window = t.assignee(1);
+    fail(&c, &window);
+    passes(&c, 3);
+    let task = t.task(1).task;
+    assert_eq!(task.state, "failed");
+    assert!(task.retry.is_none());
+    assert_eq!(resumes(&c, "zeus"), 0);
+}
