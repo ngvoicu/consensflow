@@ -913,6 +913,7 @@ impl Window for DevinWindow {
                 return Ok(Observed {
                     reading: None,
                     settled: false,
+                    takes_words: false,
                     over: Over::No,
                     waiting: None,
                     failed: false,
@@ -956,8 +957,10 @@ impl Window for DevinWindow {
                 .is_some_and(|open| open.unchanged(&reading))
             {
                 observed.settled = true;
+                observed.takes_words = true;
             } else if self.begun_on_the_store(&observed) {
                 observed.settled = false;
+                observed.takes_words = false;
             }
             // A turn the window's own launch began on the conversation and has not ended is
             // the window's own, and its log is written by no other process: nothing the
@@ -972,6 +975,7 @@ impl Window for DevinWindow {
             // speaks of is still no turn of this window's (T-1403).
             if self.wire.turn_open(&session) {
                 observed.settled = false;
+                observed.takes_words = false;
             }
             // What the turn took in, by the messages it said back, has begun (T-1423): the
             // engine's watch for a message no turn began on leaves those be (`never_began`).

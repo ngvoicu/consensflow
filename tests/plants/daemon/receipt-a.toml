@@ -233,14 +233,15 @@ runs = ["codex-session-lib-broker-tests-handoff"]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/pair.rs"
 find = '''
-        // A task of the broker's, not the pair's: a pair that ends while the
-        // board is still polled for the question has its poll end at the next
-        // request, and an answer the board claimed meanwhile is still given back.
+        // Each receipt is its own asking, stamped as the request arrives: a request
+        // Codex replays to a reconnected pair is asked, and stamped, anew.
+        let begun = Asking::now();
         self.shared.spawn(async move {
-            let (asking, polling, raised) ='''
+            let (putting, polling, raised) ='''
 replace = '''
+        let begun = Asking::now();
         self.spawn(async move {
-            let (asking, polling, raised) ='''
+            let (putting, polling, raised) ='''
 
 [[plant]]
 name = "claim: a window at its own dialog keeps the claim on its answer"

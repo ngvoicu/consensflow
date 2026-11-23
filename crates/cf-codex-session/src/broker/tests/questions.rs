@@ -89,6 +89,16 @@ impl HeldBoard {
         self.polls.load(Ordering::SeqCst)
     }
 
+    /// What it was posted as questions, in order.
+    pub(super) fn questions_posted(&self) -> Vec<Value> {
+        let posted = self.posted.lock().expect("what was posted");
+        posted
+            .iter()
+            .filter(|(path, _)| path == "/api/questions")
+            .map(|(_, body)| body.clone())
+            .collect()
+    }
+
     /// What it was told of the answers it gave: each receipt's `received`, in order.
     pub(super) fn receipts(&self) -> Vec<Value> {
         let posted = self.posted.lock().expect("what was posted");
@@ -585,5 +595,93 @@ fn a_pair_that_retires_ends_every_question_it_holds_whatever_thread_asked_it() {
         for id in ["ask-a", "ask-b"] {
             assert!(asked_of(&f, id).is_none(), "{id} was answered for nobody");
         }
+    });
+}
+
+fn now_ms() -> i64 {
+    use cf_base::time::{Clock, SystemClock};
+    SystemClock.now_ms()
+}
+
+#[test]
+fn a_question_is_stamped_when_the_broker_first_receives_the_request() {
+    run(async {
+        let board = HeldBoard::start(Value::Null);
+        let (f, _tui) = window(&board.url, Duration::from_secs(60)).await;
+        let before = now_ms();
+        f.codex.send_json(1, &request_user_input());
+        wait(|| board.polls() == 1).await;
+        let after = now_ms();
+        let posted = board.questions_posted();
+        // Released first: a failing assertion must not leave the held poll to time out.
+        board.release();
+        assert_eq!(posted.len(), 1);
+        let at = posted[0]["askedAt"].as_i64().expect("a stamp");
+        assert!(
+            (before..=after).contains(&at),
+            "{before} <= {at} <= {after}"
+        );
+    });
+}
+
+#[test]
+fn a_request_replayed_to_a_reconnected_pair_is_asked_anew_as_it_always_was() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_user_input());
+        wait(|| board.polls() == 1).await;
+        let stamp = board.questions_posted()[0]["askedAt"]
+            .as_i64()
+            .expect("a stamp");
+        // The pair retires; Codex replays the same request to the next under another id.
+        tui.terminate();
+        wait(|| !f.codex.is_open(1)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _again = f.connect().await;
+        let mut replay = request_user_input();
+        replay["id"] = json!("ask-9");
+        f.codex.send_json(2, &replay);
+        wait(|| board.polls() == 2).await;
+        // Released first: a failing assertion must not leave the held polls to time out.
+        board.release();
+        let posted = board.questions_posted();
+        assert_eq!(posted.len(), 2, "the replay is a question of its own");
+        assert!(posted[1]["askedAt"].as_i64().expect("a stamp") >= stamp);
+    });
+}
+
+#[test]
+fn a_claimed_answer_is_given_back_when_the_retired_pair_and_its_replacement_both_end() {
+    run(async {
+        let board = HeldBoard::start(json!({ "id": 70, "choices": [["red"]] }));
+        let (f, tui) = window(&board.url, Duration::from_secs(60)).await;
+        f.codex.send_json(1, &request_user_input());
+        wait(|| board.polls() == 1).await;
+        tui.terminate();
+        wait(|| !f.codex.is_open(1)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let again = f.connect().await;
+        let mut replay = request_user_input();
+        replay["id"] = json!("ask-9");
+        f.codex.send_json(2, &replay);
+        wait(|| board.polls() == 2).await;
+        // The replacement goes before the old poll's reply arrives.
+        again.terminate();
+        wait(|| !f.codex.is_open(2)).await;
+        board.release();
+        wait(|| board.receipts().len() == 2).await;
+        assert_eq!(
+            board.receipts(),
+            [json!(false), json!(false)],
+            "every claim is given back, none is left held"
+        );
+        let natives = f
+            .codex
+            .requests()
+            .into_iter()
+            .filter(|message| message.get("result").is_some())
+            .count();
+        assert_eq!(natives, 0, "no answer is written to Codex");
     });
 }

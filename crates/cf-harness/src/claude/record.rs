@@ -224,6 +224,9 @@ struct Transcript {
     terminal: Option<Terminal>,
     /// The native id of the message the latest assistant record belongs to.
     active_assistant: Option<Arc<str>>,
+    /// The uuid of the record that holds the refusal in view: a prompt that descends from it
+    /// is the evidence that a new turn began after it.
+    refused_uuid: Option<Arc<str>>,
     /// The latest turn failed: the API refused it, in these words.
     failure: Option<String>,
     /// The last tool call the main conversation made, as a line (`calls::describe`).
@@ -321,6 +324,7 @@ impl Transcript {
             candidate: None,
             terminal: None,
             active_assistant: None,
+            refused_uuid: None,
             failure: None,
             last_call: None,
             quota: None,

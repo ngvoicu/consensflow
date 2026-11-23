@@ -59,6 +59,15 @@ fn written_by_codex(words: &str) -> bool {
         .any(|opening| head.starts_with(opening))
 }
 
+/// Whether a user's message is the person's words for the model: not Codex's own, and not the
+/// record of a shell command the person ran or of a turn they cut.
+fn is_a_prompt(words: &str) -> bool {
+    let head = words.trim_start();
+    !written_by_codex(words)
+        && !head.starts_with("<user_shell_command>")
+        && !head.starts_with("<turn_aborted>")
+}
+
 /// An input told once, in a turn, that the other telling has not repeated.
 struct Told {
     telling: Telling,
@@ -112,6 +121,10 @@ impl Rollout {
         seq: &Value,
     ) -> Result<(), Stop> {
         let id = native_id(id, "codex item", seq).map_err(Stop::Failed)?;
+        if self.awaiting_words.as_ref() == Some(turn) && is_a_prompt(&text) {
+            self.quota = None;
+            self.awaiting_words = None;
+        }
         if let Some(place) = self
             .turn(turn)
             .and_then(|open| open.inputs.twin_of(telling, &text))

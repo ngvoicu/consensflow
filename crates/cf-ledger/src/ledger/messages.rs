@@ -162,7 +162,7 @@ impl Ledger {
                 let Some(task) = task else { return Ok(false); };
                 store.db.execute("INSERT INTO question_resume_anchor (participant_id, task_id) VALUES (?1, ?2)", rusqlite::params![window, task])?;
                 let anchor = -store.db.last_insert_rowid();
-                store.db.execute("INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id) VALUES (?1, ?2, ?3, ?3, 0, ?4)", rusqlite::params![window, task, anchor, store.question_run])?;
+                crate::holding::put_holding(store, window, task, anchor, 0, None, None)?;
                 return Ok(true);
             };
             if !holding.resumable || holding.task_number != number {
@@ -258,7 +258,7 @@ impl Ledger {
                         in_flight,
                     )?);
                     store.db.execute(
-                        "UPDATE question_holding SET closed = 2 WHERE participant_id = ?1 AND task_id = ?2 AND first_brief_id = ?3 AND closed = 1",
+                        "UPDATE question_holding SET closed = 2, ended_at = NULL WHERE participant_id = ?1 AND task_id = ?2 AND first_brief_id = ?3 AND closed = 1",
                         rusqlite::params![window, h.task_id, h.first_brief],
                     )?;
                 }
@@ -581,6 +581,10 @@ impl Ledger {
     }
 
     /// Place a window request and choose its holding in the same transaction.
+    /// `asked_at` is when the asking process began (ms on the ledger's clock),
+    /// and binds the question to the window's holding of that moment; without
+    /// it the question is the holding's at its arrival. `idle_generation` is the
+    /// last brief of a holding the asking token was made beside and not given.
     pub fn ask_from_window(
         &mut self,
         project: i64,
@@ -588,10 +592,36 @@ impl Ledger {
         question: &NewQuestion,
         observed: Option<crate::WindowHolding>,
         launch_task: Option<(i64, i64)>,
+        stamp: crate::QuestionStamp,
     ) -> Result<MessageView, LedgerError> {
+        let (asked_at, idle_generation) = (stamp.asked_at, stamp.idle_generation);
         self.store.write(|store| {
             let current = crate::holding::of(store, window)?;
-            let selected = if let Some(old) = observed {
+            let mut replaced = None;
+            let selected = if let Some(at) = asked_at {
+                // A stamp later than the arrival counts as the arrival: it is later than
+                // every bound a holding has too, as the arrival is.
+                match crate::holding::placed_at(store, window, at, idle_generation)? {
+                    crate::holding::Placed::Current => match current {
+                        Some(h) if crate::holding::matches(store, window, Some(h.task_id), Some(h.first_brief))? => Some(h),
+                        Some(h) => return Err(crate::holding::window_task_refusal(store, window, h.task_id)?),
+                        None => None,
+                    },
+                    crate::holding::Placed::Taskless => {
+                        if current.is_none() {
+                            if let Some((task, _number)) = launch_task {
+                                return Err(crate::holding::window_task_refusal(store, window, task)?);
+                            }
+                        }
+                        None
+                    }
+                    crate::holding::Placed::Replaced { task, first } => {
+                        replaced = Some((task, first));
+                        None
+                    }
+                    crate::holding::Placed::Refused(refusal) => return Err(refusal),
+                }
+            } else if let Some(old) = observed {
                 if crate::holding::matches(store, window, Some(old.task_id), Some(old.first_brief))? {
                     Some(old)
                 } else {
@@ -617,8 +647,16 @@ impl Ledger {
             };
             let mut placed = question.clone();
             placed.task = selected.map(|h| h.task_number);
+            if let Some((task, _)) = replaced {
+                placed.task = Some(store.db.query_row("SELECT number FROM task WHERE id = ?", [task], |r| r.get(0))?);
+            }
             let message = messages::ask(store, project, &placed)?;
-            if selected.is_none() {
+            if let Some((task, first)) = replaced {
+                store.db.execute(
+                    "UPDATE question_binding SET task_id = ?2, first_brief_id = ?3 WHERE question_id = ?1",
+                    rusqlite::params![message.id, task, first],
+                )?;
+            } else if selected.is_none() {
                 store.db.execute("UPDATE question_binding SET task_id = NULL, first_brief_id = NULL WHERE question_id = ?", [message.id])?;
             }
             Ok(message)
@@ -948,6 +986,24 @@ impl Ledger {
                 .exists([message_id])?;
             if delivering {
                 crate::holding::hand_brief(store, message_id)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// A request with the token a window was launched with proves its process
+    /// ran with this brief, which may be before the host acknowledges the open:
+    /// the holding it makes began with the brief's admission.
+    pub fn question_launch_handed_over(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store.write(|store| {
+            let delivering = store
+                .db
+                .prepare(
+                    "SELECT 1 FROM message WHERE id = ? AND kind = 'task' AND state = 'delivering'",
+                )?
+                .exists([message_id])?;
+            if delivering {
+                crate::holding::hand_brief_launched(store, message_id)?;
             }
             Ok(())
         })

@@ -38,6 +38,16 @@ pub(crate) fn new_run() -> String {
     format!("{}-{}", process_run(), NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
+/// What a question request says of when and where it was asked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuestionStamp {
+    /// When its asking process began, in ms; none for a program that sends none.
+    pub asked_at: Option<i64>,
+    /// The last brief of a holding that was the window's before the asking token was
+    /// made, which the token was not given: its process asks in no turn of it.
+    pub idle_generation: Option<i64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowHolding {
     pub task_id: i64,
@@ -47,10 +57,26 @@ pub struct WindowHolding {
     pub active: bool,
     /// Its physical window ended, but the same task may resume on its own conversation.
     pub resumable: bool,
+    /// When its first brief's hand-over began, in ms on the ledger's clock; none for a
+    /// holding recorded before that was kept, which reaches back for ever.
+    pub began_at: Option<i64>,
+    /// When its task or window ended it, in ms; none while it is the window's.
+    pub ended_at: Option<i64>,
 }
 
 pub(crate) fn of(store: &Store, window: i64) -> Result<Option<WindowHolding>, LedgerError> {
-    let row: Option<(i64, i64, i64, i64, i64, String, bool)> = store
+    type Row = (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        String,
+        bool,
+        Option<i64>,
+        Option<i64>,
+    );
+    let row: Option<Row> = store
         .db
         .query_row(
             "SELECT h.task_id, t.number, h.first_brief_id, h.last_brief_id, h.closed, h.run_id,
@@ -63,6 +89,7 @@ pub(crate) fn of(store: &Store, window: i64) -> Result<Option<WindowHolding>, Le
                     AND b.kind = 'task' AND b.task_id = t.id AND b.project_id = t.project_id
                     AND b.recipient_id = h.participant_id)
                  OR EXISTS(SELECT 1 FROM question_resume_anchor a WHERE -a.id = h.first_brief_id AND a.task_id = h.task_id AND a.participant_id = h.participant_id))
+                , h.began_at, h.ended_at
          FROM question_holding h JOIN task t ON t.id = h.task_id WHERE h.participant_id = ?",
             [window],
             |r| {
@@ -74,11 +101,24 @@ pub(crate) fn of(store: &Store, window: i64) -> Result<Option<WindowHolding>, Le
                     r.get(4)?,
                     r.get(5)?,
                     r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
                 ))
             },
         )
         .optional()?;
-    let Some((task_id, task_number, first_brief, last_brief, closed, run, valid)) = row else {
+    let Some((
+        task_id,
+        task_number,
+        first_brief,
+        last_brief,
+        closed,
+        run,
+        valid,
+        began_at,
+        ended_at,
+    )) = row
+    else {
         return Ok(None);
     };
     if !valid {
@@ -95,6 +135,8 @@ pub(crate) fn of(store: &Store, window: i64) -> Result<Option<WindowHolding>, Le
         last_brief,
         active: closed == 0 && run == store.question_run,
         resumable: closed == 2,
+        began_at,
+        ended_at,
     }))
 }
 
@@ -134,6 +176,38 @@ pub(crate) fn matches(
 
 /// Record the start of a handover. Same-task handovers continue the same holding.
 pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerError> {
+    hand_brief_as(store, message, false)
+}
+
+/// [`hand_brief`] for a window whose process was launched with its brief: the
+/// process may ask before the host acknowledges the open, so the holding it
+/// makes began with the brief's admission, or reaches back for ever when the
+/// brief has none.
+pub(crate) fn hand_brief_launched(store: &mut Store, message: i64) -> Result<(), LedgerError> {
+    hand_brief_as(store, message, true)
+}
+
+/// When a brief's hand-over began: its admission time (the first physical
+/// hand-over; a later Enter moves `handed_at` only for a brief already admitted),
+/// else now, or for a launched window nothing.
+fn began_of(store: &mut Store, message: i64, launched: bool) -> Result<Option<i64>, LedgerError> {
+    let admitted: Option<String> = store
+        .db
+        .query_row(
+            "SELECT handed_at FROM message WHERE id = ?",
+            [message],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(match admitted.as_deref().and_then(cf_base::time::parse) {
+        Some(at) => Some(at),
+        None if launched => None,
+        None => Some(store.recent_ms()),
+    })
+}
+
+fn hand_brief_as(store: &mut Store, message: i64, launched: bool) -> Result<(), LedgerError> {
     let brief: Option<(i64, i64)> = store
         .db
         .query_row(
@@ -154,25 +228,90 @@ pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerEr
     // this exact state back without reading or reconstructing event history.
     store.db.execute(
         "INSERT INTO question_handover (brief_id, participant_id, run_id, previous_task_id,
-             previous_first_brief_id, previous_last_brief_id, previous_closed, previous_run_id)
-         SELECT ?1, ?2, ?3, h.task_id, h.first_brief_id, h.last_brief_id, h.closed, h.run_id
+             previous_first_brief_id, previous_last_brief_id, previous_closed, previous_run_id, previous_span)
+         SELECT ?1, ?2, ?3, h.task_id, h.first_brief_id, h.last_brief_id, h.closed, h.run_id,
+             json_object('began', h.began_at, 'ended', h.ended_at, 'priorTask', h.prior_task_id,
+                 'priorBegan', h.prior_began_at, 'priorEnded', h.prior_ended_at, 'earlier', h.earlier)
          FROM (SELECT 1) seed LEFT JOIN question_holding h ON h.participant_id = ?2 WHERE 1
          ON CONFLICT(brief_id) DO UPDATE SET participant_id=excluded.participant_id, run_id=excluded.run_id,
            previous_task_id=excluded.previous_task_id, previous_first_brief_id=excluded.previous_first_brief_id,
            previous_last_brief_id=excluded.previous_last_brief_id, previous_closed=excluded.previous_closed,
-           previous_run_id=excluded.previous_run_id, admission_unknown=0 WHERE question_handover.run_id != excluded.run_id OR question_handover.previous_closed = -1",
+           previous_run_id=excluded.previous_run_id, previous_span=excluded.previous_span, admission_unknown=0
+           WHERE question_handover.run_id != excluded.run_id OR question_handover.previous_closed = -1",
         params![message, window, store.question_run],
     )?;
     // Until the send has a result the preceding questions cannot be given to
     // this window, but must remain recoverable if the send is refused.
+    let continues = store
+        .db
+        .prepare(
+            "SELECT 1 FROM question_holding WHERE participant_id = ?1 AND closed = 0
+               AND task_id = ?2 AND run_id = ?3",
+        )?
+        .exists(params![window, task, store.question_run])?;
+    if continues {
+        store.db.execute(
+            "UPDATE question_holding SET last_brief_id = ?1 WHERE participant_id = ?2",
+            params![message, window],
+        )?;
+    } else {
+        let began = began_of(store, message, launched)?;
+        put_holding(store, window, task, message, 0, began, None)?;
+    }
+    Ok(())
+}
+
+/// The window's holding is now this one, made by `brief`. The holding it
+/// replaces stays beside it with its bounds, one hand-over back.
+pub(crate) fn put_holding(
+    store: &mut Store,
+    window: i64,
+    task: i64,
+    brief: i64,
+    closed: i64,
+    began: Option<i64>,
+    ended: Option<i64>,
+) -> Result<(), LedgerError> {
+    type Was = (i64, Option<i64>, Option<i64>, Option<i64>, i64);
+    let was: Option<Was> = store
+        .db
+        .query_row(
+            "SELECT task_id, began_at, ended_at, prior_task_id, earlier FROM question_holding
+             WHERE participant_id = ?",
+            [window],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?;
+    let (prior_task, prior_began, prior_ended, earlier) = match was {
+        Some((task, began_at, ended_at, prior, earlier)) => {
+            let ended_at = match ended_at.filter(|at| *at != crate::store::ENDING).or(began) {
+                Some(at) => at,
+                None => store.recent_ms(),
+            };
+            (
+                Some(task),
+                began_at,
+                Some(ended_at),
+                i64::from(prior.is_some() || earlier != 0),
+            )
+        }
+        None => (None, None, None, 0),
+    };
+    let run = store.question_run.clone();
     store.db.execute(
-        "INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id)
-         VALUES (?1, ?2, ?3, ?3, 0, ?4)
-         ON CONFLICT(participant_id) DO UPDATE SET
-           first_brief_id = CASE WHEN question_holding.closed = 0 AND question_holding.task_id = excluded.task_id AND question_holding.run_id = excluded.run_id
-                                 THEN question_holding.first_brief_id ELSE excluded.first_brief_id END,
-           task_id = excluded.task_id, last_brief_id = excluded.last_brief_id, closed = 0, run_id = excluded.run_id",
-        params![window, task, message, store.question_run],
+        "INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id,
+             began_at, ended_at, prior_task_id, prior_began_at, prior_ended_at, earlier)
+         VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(participant_id) DO UPDATE SET task_id = excluded.task_id,
+           first_brief_id = excluded.first_brief_id, last_brief_id = excluded.last_brief_id,
+           closed = excluded.closed, run_id = excluded.run_id, began_at = excluded.began_at,
+           ended_at = excluded.ended_at, prior_task_id = excluded.prior_task_id,
+           prior_began_at = excluded.prior_began_at, prior_ended_at = excluded.prior_ended_at,
+           earlier = excluded.earlier",
+        params![
+            window, task, brief, closed, run, began, ended, prior_task, prior_began, prior_ended,
+            earlier
+        ],
     )?;
     Ok(())
 }
@@ -203,17 +342,16 @@ pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), Ledg
         confirm_brief(store, message)?;
         return Ok(());
     }
+    let own = of(store, window)?.filter(|h| h.task_id == task && h.last_brief == message);
     if let Some(previous) = of(store, window)?.filter(|h| h.active) {
         close(store, window, Some(previous.task_id), None)?;
     }
-    store.db.execute(
-        "INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id)
-         VALUES (?1, ?2, ?3, ?3, 1, ?4)
-         ON CONFLICT(participant_id) DO UPDATE SET task_id = excluded.task_id,
-           first_brief_id = excluded.first_brief_id, last_brief_id = excluded.last_brief_id,
-           closed = 1, run_id = excluded.run_id",
-        params![window, task, message, store.question_run],
-    )?;
+    // The holding this very brief made is known already, with the end its task's
+    // ending gave it: a late report of the send does not date it again.
+    if own.is_none() {
+        let at = began_of(store, message, false)?;
+        put_holding(store, window, task, message, 1, at, at)?;
+    }
     confirm_brief(store, message)?;
     Ok(())
 }
@@ -374,13 +512,14 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
         Option<i64>,
         Option<i64>,
         Option<String>,
+        Option<String>,
     );
     let previous: Option<Previous> = store.db.query_row(
         "SELECT participant_id, run_id, previous_task_id, previous_first_brief_id,
-                previous_last_brief_id, previous_closed, previous_run_id FROM question_handover WHERE brief_id = ?",
-        [brief], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+                previous_last_brief_id, previous_closed, previous_run_id, previous_span FROM question_handover WHERE brief_id = ?",
+        [brief], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
     ).optional()?;
-    let Some((window, run, task, first, last, closed, previous_run)) = previous else {
+    let Some((window, run, task, first, last, closed, previous_run, span)) = previous else {
         return Ok(());
     };
     let current = of(store, window)?;
@@ -432,8 +571,22 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
             (task, first, last, closed, previous_run)
         {
             let closed = if previous_live { closed } else { 1 };
-            store.db.execute("UPDATE question_holding SET task_id = ?1, first_brief_id = ?2, last_brief_id = ?3, closed = ?4, run_id = ?5 WHERE participant_id = ?6",
-                params![task, first, last, closed, previous_run, window])?;
+            // Its bounds go back with it; one that ended while the send was in
+            // flight ended no later than now.
+            let span: serde_json::Value = span
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or(serde_json::Value::Null);
+            let bound = |key: &str| span.get(key).and_then(serde_json::Value::as_i64);
+            let ended = if previous_live || bound("ended").is_some() {
+                bound("ended")
+            } else {
+                Some(store.recent_ms())
+            };
+            store.db.execute("UPDATE question_holding SET task_id = ?1, first_brief_id = ?2, last_brief_id = ?3, closed = ?4, run_id = ?5,
+                    began_at = ?7, ended_at = ?8, prior_task_id = ?9, prior_began_at = ?10, prior_ended_at = ?11, earlier = ?12
+                 WHERE participant_id = ?6",
+                params![task, first, last, closed, previous_run, window, bound("began"), ended,
+                    bound("priorTask"), bound("priorBegan"), bound("priorEnded"), bound("earlier").unwrap_or(0)])?;
         } else {
             store.db.execute(
                 "DELETE FROM question_holding WHERE participant_id = ?",
@@ -446,6 +599,176 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
         [brief],
     )?;
     Ok(())
+}
+
+/// Whose a question is, by the moment its asking began.
+pub(crate) enum Placed {
+    /// The window's present holding, placed as ever.
+    Current,
+    /// No holding was the window's then: the session's own question.
+    Taskless,
+    /// The holding the pending hand-over replaced, which a refusal restores.
+    Replaced { task: i64, first: i64 },
+    /// An ended holding's, or one too far back to place.
+    Refused(LedgerError),
+}
+
+/// Which holding the window had at `at`: its present one if that began at or
+/// before `at` (and had not ended), else the one it replaced if that had begun
+/// and not ended, else none. A holding recorded before begins were kept reaches
+/// back for ever.
+///
+/// `idle_generation` is the last brief of the holding the asking window's token found
+/// already there when it was made and was not given (the window ended, or was closed):
+/// its process asks in no turn of that holding, whatever dates it has or lacks, and in
+/// none before the first brief that reached the window after it.
+pub(crate) fn placed_at(
+    store: &Store,
+    window: i64,
+    at: i64,
+    idle_generation: Option<i64>,
+) -> Result<Placed, LedgerError> {
+    type Span = (
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        i64,
+    );
+    let span: Option<Span> = store
+        .db
+        .query_row(
+            "SELECT task_id, last_brief_id, began_at, ended_at, prior_task_id, prior_began_at,
+                    prior_ended_at, earlier FROM question_holding WHERE participant_id = ?",
+            [window],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((_, last_brief, began, ended, prior, prior_began, prior_ended, earlier)) = span else {
+        return Ok(Placed::Taskless);
+    };
+    if let Some(generation) = idle_generation {
+        if generation == last_brief {
+            return Ok(Placed::Taskless);
+        }
+        // A brief came after the token's window held no task. A question asked before
+        // the first of them reached the window was asked while it was idle, whatever
+        // holding those briefs made since.
+        // A holding a Resume made has a negative anchor for its generation: no brief of
+        // its own to look after.
+        let first_after: Option<String> = if generation > 0 {
+            store
+                .db
+                .query_row(
+                    "SELECT handed_at FROM message
+                     WHERE recipient_id = ?1 AND kind = 'task' AND id > ?2 AND id <= ?3
+                       AND handed_at IS NOT NULL ORDER BY id LIMIT 1",
+                    params![window, generation, last_brief],
+                    |r| r.get(0),
+                )
+                .optional()?
+        } else {
+            None
+        };
+        if first_after
+            .as_deref()
+            .and_then(cf_base::time::parse)
+            .is_some_and(|admitted| at < admitted)
+        {
+            return Ok(Placed::Taskless);
+        }
+    }
+    if began.is_none_or(|began| at >= began) {
+        return Ok(match ended {
+            Some(ended) if at >= ended => Placed::Taskless,
+            _ => Placed::Current,
+        });
+    }
+    let Some(prior) = prior else {
+        return Ok(Placed::Taskless);
+    };
+    if prior_began.is_none_or(|began| at >= began) {
+        if prior_ended.is_some_and(|ended| at >= ended) {
+            return Ok(Placed::Taskless);
+        }
+        let pending: Option<i64> = store
+            .db
+            .query_row(
+                "SELECT previous_first_brief_id FROM question_handover
+                 WHERE brief_id = ?1 AND participant_id = ?2 AND run_id = ?3 AND previous_run_id = ?3
+                   AND previous_closed = 0 AND previous_task_id = ?4",
+                params![last_brief, window, store.question_run, prior],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(first) = pending {
+            let live = store
+                .db
+                .prepare(
+                    "SELECT 1 FROM task WHERE id = ?1 AND assignee_id = ?2 AND deleted_at IS NULL
+                       AND state NOT IN ('accepted','cancelled','failed')",
+                )?
+                .exists(params![prior, window])?;
+            if live {
+                return Ok(Placed::Replaced { task: prior, first });
+            }
+        }
+        return Ok(Placed::Refused(earlier_turn(store, window, Some(prior))?));
+    }
+    if earlier != 0 {
+        return Ok(Placed::Refused(earlier_turn(store, window, None)?));
+    }
+    Ok(Placed::Taskless)
+}
+
+/// A question from an earlier turn of this window: its task's place, or where
+/// the task is the window's again (or is unknown), to ask once more.
+fn earlier_turn(store: &Store, window: i64, task: Option<i64>) -> Result<LedgerError, LedgerError> {
+    let state: Option<(String, Option<i64>, i64)> = match task {
+        Some(task) => store
+            .db
+            .query_row(
+                "SELECT state, assignee_id, number FROM task WHERE id = ?",
+                [task],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?,
+        None => None,
+    };
+    Ok(match (task, state) {
+        (Some(task), Some((state, assignee, number))) => {
+            if assignee == Some(window)
+                && !matches!(state.as_str(), "accepted" | "cancelled" | "failed")
+            {
+                LedgerError::refused_with(
+                    "question-earlier-turn",
+                    format!("This question was asked in an earlier turn of T-{number}, which this window has again. Ask it again."),
+                    409,
+                )
+            } else {
+                return window_task_refusal(store, window, task);
+            }
+        }
+        _ => LedgerError::refused_with(
+            "question-earlier-turn",
+            "This question was asked in an earlier turn of this window. Ask it again.",
+            409,
+        ),
+    })
 }
 
 /// Bind every new ordinary member question to its window's actual holding.
@@ -749,9 +1072,10 @@ pub(crate) fn close_deferring(
     }
     if task.is_some() {
         store.db.execute(
-            "UPDATE question_holding SET closed = 1 WHERE participant_id = ?",
-            [window],
+            "UPDATE question_holding SET closed = 1, ended_at = COALESCE(ended_at, ?2) WHERE participant_id = ?1",
+            params![window, crate::store::ENDING],
         )?;
+        store.end_with_next_reading();
     }
     Ok(deferred)
 }
@@ -974,9 +1298,11 @@ pub(crate) fn close_task(
         // A move after a window ended also ends the right to resume that
         // window's former holding, even if this session is later used again.
         store.db.execute(
-            "UPDATE question_holding SET closed = 1 WHERE participant_id = ?1 AND task_id = ?2 AND closed = 2",
-            params![window, task.id],
+            "UPDATE question_holding SET closed = 1, ended_at = COALESCE(ended_at, ?3)
+             WHERE participant_id = ?1 AND task_id = ?2 AND closed = 2",
+            params![window, task.id, crate::store::ENDING],
         )?;
+        store.end_with_next_reading();
     }
     Ok(())
 }

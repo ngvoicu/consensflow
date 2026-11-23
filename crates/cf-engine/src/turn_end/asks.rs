@@ -26,14 +26,18 @@
 //! **A finished piece of work is a result, whatever it ends on.** A report that ends with an
 //! open question about its product ("Should #7 also cover absolute paths?"), an offer ("Want
 //! me to also add the Windows case?", "Shall I land it?"), work that awaits review or
-//! feedback, a wait for something that is not the chief (a lock, an agent, a build), and a
-//! description of this very feature are results: the chief decides them. Of the 1,963
+//! feedback, a wait for something that is not the chief (a lock, an agent, a build; one that
+//! says the writer ends its turn for it is [`super::waits`]'s), and a description of this very
+//! feature are results: the chief decides them. Of the 1,963
 //! results of members in the ledger this was counted on, 12 ended on a question mark and 11 of
 //! those were accepted as they were, and the chief reopened each of the 18 that waited.
 //!
 //! The rule is on English words, so it misses a worker that asks in other words (a result,
 //! as it was), and "I won't touch it until you answer", whose negation it reads as a denial.
 //! A misfire costs the chief one `cf task finish`, which takes the words as the result.
+//!
+//! A wait for something that is not the chief is read by [`super::waits`] (T-1923): one note
+//! tells the member to go on, and a second such end is the result.
 
 /// What says a worker waits ("waiting for", "awaits"): the one it waits for follows.
 const WAIT_STEMS: [&str; 7] = [
@@ -144,7 +148,7 @@ pub(crate) fn asks_the_chief(words: &str) -> bool {
 
 /// The words without their fenced code, table rows and block quotes: what is not the
 /// worker's voice. A fence never closed runs to the end.
-fn without_blocks(words: &str) -> String {
+pub(super) fn without_blocks(words: &str) -> String {
     let mut kept: Vec<&str> = Vec::new();
     let mut fenced = false;
     for line in words.lines() {
@@ -162,7 +166,7 @@ fn without_blocks(words: &str) -> String {
 }
 
 /// The last block of lines with something in them.
-fn last_paragraph(words: &str) -> String {
+pub(super) fn last_paragraph(words: &str) -> String {
     let mut block: Vec<&str> = Vec::new();
     for line in words.lines().rev() {
         if line.trim().is_empty() {
@@ -179,7 +183,7 @@ fn last_paragraph(words: &str) -> String {
 
 /// The paragraph as one line of lower-case words: a bullet begins a sentence, inline code
 /// and quoted text are gone, quotes are straight.
-fn plain(paragraph: &str) -> String {
+pub(super) fn plain(paragraph: &str) -> String {
     let lines: Vec<String> = paragraph
         .lines()
         .map(|line| {
@@ -366,7 +370,7 @@ fn has_first_person(sentence: &str) -> bool {
 /// Whether a negation stands in the clause before a phrase (`before` is the paragraph up to
 /// it), with no "but" or "and" between: "nothing is waiting for your answer", not "I did not
 /// run it and am waiting for your go".
-fn negated(before: &str) -> bool {
+pub(super) fn negated(before: &str) -> bool {
     let clause = before.rsplit(CLAUSE_ENDS).next().unwrap_or("");
     let words: Vec<&str> = words_of(clause).collect();
     for word in words.iter().rev() {
