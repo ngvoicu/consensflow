@@ -7,7 +7,7 @@
 [run]
 harness-window-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
 # The page's own suite, in Chromium: the commands it shows, and that it installs nothing.
-harness-window-page = ["npm", "--prefix", "app", "exec", "--", "playwright", "test", "tests/harnesses.spec.mjs", "-g", "shows the exact command|below the version|installs nothing"]
+harness-window-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/harnesses.spec.mjs", "-g", "shows the exact command|below the version|installs nothing"]
 harness-window-screens = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::tests::harnesses"]
 harness-window-recorded = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin"]
 harness-window-commands = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::source"]

@@ -58,12 +58,12 @@ fn unanswered(killed: bool) -> Result<String, Failed> {
 /// A world of the launch's and the page's own: one home, one CLI found on its path,
 /// the programs scripted, the engine's probes shared by the launch and the page.
 struct World {
-    _home: tempfile::TempDir,
     bin: PathBuf,
     fakes: Fakes,
     services: crate::seams::Services,
     admin: Rc<HarnessAdmin>,
     harness: Harness,
+    _home: tempfile::TempDir,
 }
 
 impl World {

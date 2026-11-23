@@ -10705,7 +10705,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const screen = harnesses.frameLocator('iframe')
     await expect(screen.locator('.host')).toHaveCount(5)
     await expect(
-      screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
+      screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^Pi$/ }) }),
     ).toContainText('Version 1.2.3')
     const before = daemon.runs('pi')
     await screen.getByRole('button', { name: 'Check all harnesses' }).click()
