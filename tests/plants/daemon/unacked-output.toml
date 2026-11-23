@@ -15,6 +15,8 @@ page-acks = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/te
 app-page-crash = ["cargo", "xtask", "app", "test", "page_crash"]
 app-page-reloads = ["cargo", "xtask", "app", "test", "page_reloads"]
 tiny-output = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "tiny_read"]
+screen-digest = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "screen::"]
+erase-enter = ["cargo", "test", "--offline", "--release", "-p", "cf-panes", "--lib", "--", "--ignored", "tiny_read_the_enter"]
 tiny-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cursor_query"]
 
 [[plant]]
@@ -266,3 +268,89 @@ runs = ["app-page-reloads"]
 file = "app/src-tauri/src/page_reloads.rs"
 find = ".is_some_and(|first| now.saturating_duration_since(*first) >= WITHIN)"
 replace = ".is_some_and(|first| now.saturating_duration_since(*first) > WITHIN * 60)"
+
+[[plant]]
+name = "kept digest: a write to a row's characters keeps the old digest"
+meant = "the_digest_kept_follows_the_blank_cell_a_wide_character_leaves_at_the_end_of_a_row"
+runs = ["screen-digest"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid/row.rs"
+find = '''    pub(super) fn cells_mut(&mut self) -> &mut Vec<char> {
+        self.kept.set(None);'''
+replace = '''    pub(super) fn cells_mut(&mut self) -> &mut Vec<char> {'''
+
+[[plant]]
+name = "kept digest: blanking cells keeps the old digest"
+meant = "the_digest_kept_after_each_read_is_the_one_taken_from_nothing"
+runs = ["screen-digest"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid/row.rs"
+find = '''            self.kept.set(None);
+            self.cells[from..to].fill(' ');'''
+replace = '''            self.cells[from..to].fill(' ');'''
+
+[[plant]]
+name = "kept digest: a styled mark alone is not written"
+meant = "a_screen_printed_again_as_it_is_shows_no_change_and_what_a_person_sees_change_is_one"
+runs = ["screen-digest"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid.rs"
+find = "if row.cells()[self.col] != character || row.styled()[self.col] != styled {"
+replace = "if row.cells()[self.col] != character {"
+
+[[plant]]
+name = "tiny read: a resize between reads is taken for the program's change"
+meant = "tiny_read_a_resize_between_reads_keeps_the_change_made_before_it_and_adds_none"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = '''        self.grid.resize(usize::from(rows), usize::from(cols));
+        self.shows = self.grid.digest();'''
+replace = '''        self.grid.resize(usize::from(rows), usize::from(cols));
+        self.shows = self.grid.digest().wrapping_add(1);'''
+
+[[plant]]
+name = "tiny read: a read's change does not reach the screen's clock"
+meant = "tiny_read_a_screen_that_changes_and_changes_back_across_reads_moves_the_screen_clock"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    let changed = screen.feed(bytes);
+    printed.note(changed);'''
+replace = '''    let changed = screen.feed(bytes);
+    printed.note(changed && bytes.len() > 2);'''
+
+[[plant]]
+name = "tiny read: a joined read's output is not stamped as it is taken in"
+meant = "tiny_read_every_read_of_a_batch_stamps_the_output_clock_as_it_is_taken_in"
+runs = ["tiny-output"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''    let changed = screen.feed(bytes);
+    printed.note(changed);'''
+replace = '''    let changed = screen.feed(bytes);
+    if bytes != b"x" {
+        printed.note(changed);
+    }'''
+
+[[plant]]
+name = "kept digest: a fill looks at every blank cell first"
+meant = "tiny_read_the_enter_goes_after_the_last_of_the_queued_erase_reads"
+runs = ["erase-enter"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen/grid/row.rs"
+find = '''        if from < to {
+            self.kept.set(None);'''
+replace = '''        if from < to {
+            let _ = std::hint::black_box(
+                self.cells[from..to].iter().any(|cell| *cell != ' ')
+                    || self.styled[from..to].iter().any(|styled| *styled),
+            );
+            self.kept.set(None);'''

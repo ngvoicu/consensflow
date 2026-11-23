@@ -48,12 +48,14 @@ use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use serde::de::IgnoredAny;
 use serde_json::Value;
 
-use super::torn;
+use super::{torn, zstd};
 
 /// How many bytes before where a look stopped the next look checks are unchanged.
 pub(crate) const EDGE_BYTES: u64 = 1024;
 /// How much of the file a look reads at a time.
 const CHUNK: usize = 64 * 1024;
+/// A compressed record may expand enormously. Bound the one line held at a time.
+pub(crate) const MAX_COMPRESSED_LINE: usize = 64 * 1024 * 1024;
 /// How long a torn line with no record after it waits for one before it is
 /// passed over, and an unfinished last line that does not grow before it is
 /// said: 5 s. A belt: no shape is known in which a whole line that is not JSON
@@ -67,6 +69,8 @@ pub(crate) const TORN_WAIT_MS: i64 = 5_000;
 pub(crate) struct Seen {
     identity: Identity,
     size: u64,
+    /// The physical size, which differs from `size` for a compressed file.
+    source_size: u64,
     mtime_ms: f64,
     /// When the look began, in the clock's milliseconds.
     looked_ms: i64,
@@ -211,10 +215,37 @@ pub(crate) fn read_on_with(
     visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
-    let mut handle = File::open(file)?;
+    read_source(file, seen, looked_ms, parse, visit, only, false)
+}
+
+/// The same JSONL follower over a Codex `.jsonl.zst` file.
+pub(crate) fn read_zstd_on_with(
+    file: &Path,
+    seen: Option<&Seen>,
+    looked_ms: i64,
+    parse: Parse,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
+    only: Option<&[u8]>,
+) -> Result<Looked, Stop> {
+    read_source(file, seen, looked_ms, parse, visit, only, true)
+}
+
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+fn read_source(
+    file: &Path,
+    seen: Option<&Seen>,
+    looked_ms: i64,
+    parse: Parse,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
+    only: Option<&[u8]>,
+    compressed: bool,
+) -> Result<Looked, Stop> {
+    let handle = File::open(file)?;
     let metadata = handle.metadata()?;
     let file_identity = identity(&handle)?;
-    let size = metadata.len();
+    let source_size = metadata.len();
     let written = mtime_ms(&metadata)?;
     let waited = |since: i64| looked_ms.saturating_sub(since) >= TORN_WAIT_MS;
     // The torn line the last look stopped at, if its wait is over: it is passed
@@ -227,11 +258,32 @@ pub(crate) fn read_on_with(
         seen.unfinished
             .is_some_and(|it| !it.said && waited(it.since))
     });
+    let no_waiting = done_waiting.is_none() && !unfinished_due;
+    // A settled compressed file cannot have changed, so do not decompress it
+    // again on each look. Until settled, the same checks as plain JSONL apply.
     if let Some(seen) = seen {
         if file_identity != seen.identity {
             return Ok(Looked::NotTheFile);
         }
+        if compressed
+            && source_size == seen.source_size
+            && written == seen.mtime_ms
+            && no_waiting
+            && settled(written, seen.since_ms, seen.looked_ms, looked_ms)
+        {
+            return Ok(Looked::Unchanged);
+        }
+    }
+    let (mut handle, size): (Box<dyn ReadSeek>, u64) = if compressed {
+        let decoded = zstd::Decoded::new(handle)?;
+        let size = decoded.len();
+        (Box::new(decoded), size)
+    } else {
+        (Box::new(handle), source_size)
+    };
+    if let Some(seen) = seen {
         let same = size == seen.size
+            && source_size == seen.source_size
             && written == seen.mtime_ms
             && done_waiting.is_none()
             && !unfinished_due;
@@ -298,7 +350,7 @@ pub(crate) fn read_on_with(
             let mut start = 0;
             while let Some(newline) = memchr::memchr(b'\n', &chunk[start..read]) {
                 let end = start + newline;
-                line.extend_from_slice(&chunk[start..end]);
+                extend_line(&mut line, &chunk[start..end], compressed)?;
                 if visited {
                     // A record visited whole may be followed by nothing but white space.
                     if !is_blank(&line) {
@@ -336,7 +388,7 @@ pub(crate) fn read_on_with(
                 offset = at + end as u64 + 1;
                 start = end + 1;
             }
-            line.extend_from_slice(&chunk[start..read]);
+            extend_line(&mut line, &chunk[start..read], compressed)?;
             at += read as u64;
         }
     }
@@ -396,6 +448,7 @@ pub(crate) fn read_on_with(
     Ok(Looked::Read(Seen {
         identity: file_identity,
         size: at,
+        source_size,
         mtime_ms: written,
         looked_ms,
         since_ms: match seen {
@@ -412,6 +465,16 @@ pub(crate) fn read_on_with(
         torn_since,
         unfinished,
     }))
+}
+
+fn extend_line(line: &mut Vec<u8>, bytes: &[u8], compressed: bool) -> Result<(), Stop> {
+    if compressed && line.len().saturating_add(bytes.len()) > MAX_COMPRESSED_LINE {
+        return Err(Stop::Failed(
+            "compressed rollout record exceeds 64 MiB".to_owned(),
+        ));
+    }
+    line.extend_from_slice(bytes);
+    Ok(())
 }
 
 /// A torn line read and not yet passed over: the byte it begins at, the place
@@ -516,7 +579,7 @@ fn counted(read: usize) -> usize {
 }
 
 /// The bytes of `handle` from `from` to `to`, fewer where the file ends first.
-fn bytes_at(handle: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>> {
+fn bytes_at(handle: &mut impl ReadSeek, from: u64, to: u64) -> io::Result<Vec<u8>> {
     handle.seek(SeekFrom::Start(from))?;
     let mut bytes = Vec::new();
     counted(handle.take(to - from).read_to_end(&mut bytes)?);
@@ -525,7 +588,12 @@ fn bytes_at(handle: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>> {
 
 /// `hash` gone on with the bytes of `handle` from `from` to `to`, read a [`CHUNK`] at a
 /// time; fewer where the file ends first.
-fn hash_of(handle: &mut File, mut hash: ReadHash, from: u64, to: u64) -> io::Result<ReadHash> {
+fn hash_of(
+    handle: &mut impl ReadSeek,
+    mut hash: ReadHash,
+    from: u64,
+    to: u64,
+) -> io::Result<ReadHash> {
     if from >= to {
         return Ok(hash);
     }
@@ -542,7 +610,7 @@ fn hash_of(handle: &mut File, mut hash: ReadHash, from: u64, to: u64) -> io::Res
 }
 
 /// Whether the file still holds `bytes` at `at`.
-fn holds(handle: &mut File, at: u64, bytes: &[u8]) -> io::Result<bool> {
+fn holds(handle: &mut impl ReadSeek, at: u64, bytes: &[u8]) -> io::Result<bool> {
     if bytes.is_empty() {
         return Ok(true);
     }

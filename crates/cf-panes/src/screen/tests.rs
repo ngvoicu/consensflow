@@ -478,3 +478,101 @@ fn a_resize_is_no_change_and_what_is_drawn_after_it_is() {
     assert!(!screen.feed(b"\x1b[1;1Hhello"), "the same text drawn again");
     assert!(screen.feed(b"\x1b[3;1Hnew"), "new text");
 }
+
+/// A row keeps its digest until a cell is written, and the screen's digest after
+/// every read is what hashing every cell from nothing gives (T-1941: the digest
+/// after each read costs the rows the read touched). Reads of every kind of sequence
+/// the grid takes, cut anywhere, with resizes between them.
+#[test]
+fn the_digest_kept_after_each_read_is_the_one_taken_from_nothing() {
+    for (rows, cols) in [(12, 40), (6, 9)] {
+        kept_digests_follow_every_kind_of_read(rows, cols);
+    }
+}
+
+fn kept_digests_follow_every_kind_of_read(rows: u16, cols: u16) {
+    let pieces: [&str; 32] = [
+        "text",
+        " ",
+        "\r\n",
+        "\r",
+        "\u{8}",
+        "\t",
+        "世界",
+        "é",
+        "\u{1b}[2J",
+        "\u{1b}[H",
+        "\u{1b}[K",
+        "\u{1b}[1K",
+        "\u{1b}[2K",
+        "\u{1b}[J",
+        "\u{1b}[1J",
+        "\u{1b}[5;7H",
+        "\u{1b}[3L",
+        "\u{1b}[2M",
+        "\u{1b}[4@",
+        "\u{1b}[3P",
+        "\u{1b}[2X",
+        "\u{1b}[31m",
+        "\u{1b}[2m",
+        "\u{1b}[0m",
+        "\u{1b}[?1049h",
+        "\u{1b}[?1049l",
+        "\u{1b}[3;9r",
+        "\u{1b}M",
+        "\u{1b}D",
+        "\u{1b}[2S",
+        "\u{1b}[2T",
+        "\u{1b}[?7l",
+    ];
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut screen = Screen::new(rows, cols);
+    let mut before = screen.grid.fresh_digest();
+    for read in 0..4000 {
+        let mut bytes = String::new();
+        for _ in 0..=(next() % 5) {
+            bytes.push_str(pieces[(next() % 32) as usize]);
+            if next() % 3 == 0 {
+                bytes.push_str(&"abc".repeat((next() % 30) as usize));
+            }
+        }
+        if read % 400 == 399 {
+            screen.resize(8 + (next() % 8) as u16, 20 + (next() % 40) as u16);
+            before = screen.grid.fresh_digest();
+        }
+        let bytes = bytes.as_bytes();
+        let cut = (next() as usize) % (bytes.len() + 1);
+        for chunk in [&bytes[..cut], &bytes[cut..]] {
+            let changed = screen.feed(chunk);
+            let now = screen.grid.fresh_digest();
+            assert_eq!(
+                screen.grid.digest(),
+                now,
+                "read {read}: the kept digests are stale"
+            );
+            assert_eq!(
+                changed,
+                now != before,
+                "read {read}: the change is the one a full hash shows"
+            );
+            before = now;
+        }
+    }
+}
+
+/// A wide character that does not fit at the end of a row leaves a cell with no text
+/// behind and goes to the next row: the row's kept digest follows that write too.
+#[test]
+fn the_digest_kept_follows_the_blank_cell_a_wide_character_leaves_at_the_end_of_a_row() {
+    let mut screen = Screen::new(3, 9);
+    screen.feed(b"12345678");
+    assert_eq!(screen.grid.digest(), screen.grid.fresh_digest());
+    assert!(screen.feed("世".as_bytes()));
+    assert_eq!(screen.grid.digest(), screen.grid.fresh_digest());
+}

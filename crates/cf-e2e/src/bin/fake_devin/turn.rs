@@ -156,6 +156,7 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
     static COMPACT: OnceLock<Regex> = OnceLock::new();
     static CF: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static SAY: OnceLock<Regex> = OnceLock::new();
     let seconds = |count: &str| Duration::from_secs(count.parse().unwrap_or(0));
     let (first_word, words) = match pattern::once(&THINK, r"(?m)^THINK (\d+) (.+)$").captures(text)
     {
@@ -182,9 +183,14 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
     let cf = pattern::once(&CF, r"(?m)^CF (.+)$")
         .captures(&words)
         .map(|verb| cf_words(&verb[1]));
-    let answer = match pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(&words) {
-        Some(exact) => exact[1].to_owned(),
-        None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
+    // A line `SAY <words>` answers the words as they stand (the fake Claude's `SAY`, T-1923).
+    let answer = if let Some(said) = pattern::once(&SAY, r"(?m)^SAY (.+)$").captures(&words) {
+        said[1].trim_end().to_owned()
+    } else {
+        match pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(&words) {
+            Some(exact) => exact[1].to_owned(),
+            None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
+        }
     };
     Plan {
         first_word,

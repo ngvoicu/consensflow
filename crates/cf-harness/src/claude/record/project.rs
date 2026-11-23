@@ -18,7 +18,7 @@ use cf_base::{js, time};
 use serde_json::{Map, Value};
 
 use super::jobs::Watch;
-use super::patterns::{BARE_COMPACT, CAVEAT, OUTPUT};
+use super::patterns::{BARE_COMPACT, CAVEAT, COMMAND_OR_OUTPUT, OUTPUT};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 use crate::shared::quota::{account_refusal, busy_refusal, spent_extra_usage, Refusal};
@@ -219,6 +219,11 @@ pub(super) struct User {
     /// What the record says of its tool's run besides its result (`toolUseResult`): how
     /// long it took and the change it made, for the history to draw.
     pub(super) ran: Ran,
+    /// The record is of the session's main conversation: not another session's, not a sidechain's.
+    pub(super) main: bool,
+    /// Claude Code's own record of a command typed at its prompt, or of what one printed or
+    /// warned (`isMeta`, `<command-name>`, `<local-command-…>`): no prompt for the model.
+    pub(super) local: bool,
 }
 
 /// What a user's record says of a tool's run besides its result (`toolUseResult`), which
@@ -583,6 +588,7 @@ fn user(record: &Value, session: &str) -> Projected {
         .filter(|_| of_main_conversation(record, session) && OUTPUT.is_match(&text))
         .map(Arc::from);
     let meta = record.get("isMeta") == Some(&Value::Bool(true));
+    let text_for_local = text.clone();
     let compacting = if BARE_COMPACT.is_match(&text) && !meta {
         Some(Compacting::Typed)
     } else if CAVEAT.is_match(&text) && meta {
@@ -617,6 +623,8 @@ fn user(record: &Value, session: &str) -> Projected {
             .flatten(),
         model_command,
         ran: ran(record),
+        main: of_main_conversation(record, session),
+        local: meta || COMMAND_OR_OUTPUT.is_match(&text_for_local),
     }))
 }
 

@@ -17,6 +17,17 @@
 failed-turn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
 failed-turn-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
 failed-turn-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::failed"]
+failed-turn-pi-retry = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1958_pis_first_refused_error_is_a_turn_at_work"]
+
+[[plant]]
+name = "failed turn: Pi says failed during its own retry"
+meant = "t1958_pis_first_refused_error_is_a_turn_at_work"
+runs = ["failed-turn-pi-retry"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        record.failed = self.failed && (native_settled || can_settle);\n"
+replace = "        record.failed = self.failed;\n"
 
 [[plant]]
 name = "failed turn: Pi's output-limit and deferred replies never end"

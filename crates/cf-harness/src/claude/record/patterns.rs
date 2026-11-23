@@ -32,6 +32,15 @@ pub(super) static QUIET_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
 pub(super) static OUTPUT: LazyLock<Regex> =
     LazyLock::new(|| compile(r"^<local-command-(?:stdout|stderr)>"));
 
+/// A command typed at Claude's prompt, or what one printed or warned: Claude Code's own words,
+/// no prompt of the human's for the model. The `!` shell mode writes `<bash-input>` and
+/// `<bash-stdout>`; that shape is from the review of T-1988, not from a recording.
+pub(super) static COMMAND_OR_OUTPUT: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"^(?:<command-name>|<local-command-|<bash-input>|<bash-stdout>|/compact(?:\s[\s\S]*)?$)",
+    )
+});
+
 /// What Claude Code writes as the user's turn the moment `/compact` is typed,
 /// before it compacts (2.1.303 to 2.1.310): the command as typed, with its
 /// instructions where it was given some.

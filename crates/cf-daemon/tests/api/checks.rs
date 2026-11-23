@@ -77,6 +77,18 @@ pub fn sent(relay: &Relay, names: &Names, run: &[Value]) -> Result<(), String> {
             run.len()
         ));
     }
+    // A question says when its asking began, which Node's `cf` never did: the
+    // stamp is checked to be a time and left out of the comparison.
+    fn unstamped(sent: &Sent) -> Vec<u8> {
+        if sent.method == "POST" && sent.target == "/api/questions" {
+            if let Ok(serde_json::Value::Object(mut fields)) = serde_json::from_slice(&sent.body) {
+                let stamp = fields.remove("askedAt");
+                assert!(stamp.is_some_and(|at| at.as_i64().is_some_and(|at| at > 0)));
+                return serde_json::to_vec(&serde_json::Value::Object(fields)).unwrap_or_default();
+            }
+        }
+        sent.body.clone()
+    }
     for (written, step) in written.iter().zip(run) {
         let request = &step["request"];
         let recorded = Sent {
@@ -108,7 +120,7 @@ pub fn sent(relay: &Relay, names: &Names, run: &[Value]) -> Result<(), String> {
                     written.content_type, recorded.content_type
                 )
             }),
-            differs("its body", &written.body, &recorded.body),
+            differs("its body", unstamped(written), &recorded.body),
         ]
         .into_iter()
         .flatten()

@@ -251,6 +251,7 @@ impl Transcript {
                 let at_ms = date_parse(record.at.as_ref())?;
                 self.quota = Some(Arc::new(busy_quota(at_ms, &record.text)?));
             }
+            self.refused_uuid = Some(Arc::clone(&uuid));
             self.terminal = Some(Terminal::Native);
             return Ok(());
         }
@@ -429,6 +430,26 @@ impl Transcript {
         self.hooks.clear();
         self.active_assistant = None;
         self.failure = None;
+        // A genuine prompt takes an earlier turn's refusal out of view, on clear evidence:
+        // the human's words for the model, of the main conversation, that descend from
+        // the refused record. A tool's result, a command's words, a notification, a
+        // summary, a sidechain's or another session's prompt, and the refused turn's own
+        // ancestors written late, are none. In doubt the refusal is kept.
+        let descends = match &self.refused_uuid {
+            Some(refused) => self.ancestry.descends_from(place, refused),
+            None => false,
+        };
+        if record.main
+            && !record.local
+            && !record.summary
+            && !record.notification
+            && !record.transcript_only
+            && record.results.is_empty()
+            && descends
+        {
+            self.quota = None;
+            self.refused_uuid = None;
+        }
         self.turn_open = true;
         self.candidate = None;
         self.terminal = None;

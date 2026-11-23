@@ -8,11 +8,13 @@
 //! and not the words typed there.
 
 mod edit;
+mod row;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use super::parser::Action;
+use row::Row;
 
 /// The most rows and columns the model keeps whatever the pty's size is: a
 /// page may size a pty up to 4096 each way, and the model is for reading a few
@@ -24,34 +26,6 @@ const TAB: usize = 8;
 
 /// A cell that is the second half of the wide character before it.
 const SECOND_HALF: char = '\0';
-
-#[derive(Debug, Clone)]
-struct Row {
-    cells: Vec<char>,
-    /// Whether each cell was drawn styled.
-    styled: Vec<bool>,
-    /// The text went on in the row below, because it filled this one: both
-    /// are one line.
-    wrapped: bool,
-}
-
-impl Row {
-    fn blank(cols: usize) -> Self {
-        Self {
-            cells: vec![' '; cols],
-            styled: vec![false; cols],
-            wrapped: false,
-        }
-    }
-
-    fn blank_cells(&mut self, from: usize, to: usize) {
-        let to = to.min(self.cells.len());
-        if from < to {
-            self.cells[from..to].fill(' ');
-            self.styled[from..to].fill(false);
-        }
-    }
-}
 
 /// Where the cursor was when it was saved.
 #[derive(Debug, Clone, Copy)]
@@ -145,7 +119,7 @@ impl Grid {
         let mut lines = Vec::new();
         let mut line = String::new();
         for row in &self.cells {
-            line.extend(row.cells.iter().filter(|cell| **cell != SECOND_HALF));
+            line.extend(row.cells().iter().filter(|cell| **cell != SECOND_HALF));
             if !row.wrapped {
                 lines.push(line.trim_end().to_owned());
                 line.clear();
@@ -167,8 +141,19 @@ impl Grid {
         let mut hasher = DefaultHasher::new();
         (self.rows, self.cols).hash(&mut hasher);
         for row in &self.cells {
-            row.cells.hash(&mut hasher);
-            row.styled.hash(&mut hasher);
+            row.digest().hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    /// The digest taken from nothing, with no row's kept one: what [`Grid::digest`] must
+    /// always equal (test).
+    #[cfg(test)]
+    pub(super) fn fresh_digest(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        (self.rows, self.cols).hash(&mut hasher);
+        for row in &self.cells {
+            row.fresh_digest().hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -181,7 +166,7 @@ impl Grid {
         let (mut line, mut before) = (0, 0);
         for (at, row) in self.cells.iter().enumerate() {
             let cells = |to: usize| {
-                row.cells[..to.min(row.cells.len())]
+                row.cells()[..to.min(row.cells().len())]
                     .iter()
                     .filter(|cell| **cell != SECOND_HALF)
                     .count()
@@ -195,7 +180,7 @@ impl Grid {
                 );
             }
             if row.wrapped {
-                before += cells(row.cells.len());
+                before += cells(row.cells().len());
             } else {
                 line += 1;
                 before = 0;
@@ -210,9 +195,9 @@ impl Grid {
         let mut plain = 0;
         let mut from = col;
         for row in &self.cells[at..] {
-            plain += row.cells[from.min(row.cells.len())..]
+            plain += row.cells()[from.min(row.cells().len())..]
                 .iter()
-                .zip(&row.styled[from.min(row.styled.len())..])
+                .zip(&row.styled()[from.min(row.styled().len())..])
                 .filter(|(cell, styled)| !**styled && **cell != ' ' && **cell != SECOND_HALF)
                 .count();
             if !row.wrapped {
@@ -234,8 +219,10 @@ impl Grid {
         for screen in std::iter::once(&mut self.cells).chain(self.parked.as_mut()) {
             screen.resize(rows, Row::blank(cols));
             for row in screen.iter_mut() {
-                row.cells.resize(cols, ' ');
-                row.styled.resize(cols, false);
+                if row.cells().len() != cols {
+                    row.cells_mut().resize(cols, ' ');
+                    row.styled_mut().resize(cols, false);
+                }
             }
         }
         self.rows = rows;
@@ -404,7 +391,7 @@ impl Grid {
             // A wide character that does not fit at the end of a row goes to
             // the next whole, and leaves a cell with no text in it behind.
             if self.autowrap && self.cols > 1 {
-                self.cells[self.row].cells[self.col] = SECOND_HALF;
+                self.cells[self.row].cells_mut()[self.col] = SECOND_HALF;
                 self.wrap();
             } else {
                 width = 1;
@@ -412,11 +399,15 @@ impl Grid {
         }
         let styled = self.coloured || self.faint;
         let row = &mut self.cells[self.row];
-        row.cells[self.col] = character;
-        row.styled[self.col] = styled;
-        if width == 2 {
-            row.cells[self.col + 1] = SECOND_HALF;
-            row.styled[self.col + 1] = styled;
+        if row.cells()[self.col] != character || row.styled()[self.col] != styled {
+            row.cells_mut()[self.col] = character;
+            row.styled_mut()[self.col] = styled;
+        }
+        if width == 2
+            && (row.cells()[self.col + 1] != SECOND_HALF || row.styled()[self.col + 1] != styled)
+        {
+            row.cells_mut()[self.col + 1] = SECOND_HALF;
+            row.styled_mut()[self.col + 1] = styled;
         }
         self.last = Some(character);
         if self.col + width >= self.cols {

@@ -115,6 +115,12 @@ pub struct EnterTiming {
 }
 
 impl EnterTiming {
+    /// [`EnterTiming::wait`] on the wall clock, for a test of another module of this crate.
+    #[cfg(test)]
+    pub(crate) fn wait_released(&self, output: &OutputClock, pasted: Instant) {
+        self.wait(&WallClock, output, pasted);
+    }
+
     /// A fixed wait, whatever the window prints.
     pub const fn fixed(milliseconds: u64) -> Self {
         Self {

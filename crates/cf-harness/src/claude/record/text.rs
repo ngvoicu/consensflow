@@ -13,7 +13,7 @@ use crate::shared::record::reading::visible_text;
 /// What Claude Code writes as the user's turn when its own prompt is cut short.
 const INTERRUPT_MARKERS: [&str; 2] = [
     "[Request interrupted by user]",
-    "[Request interrupted by user for tool use]",
+    crate::claude::stopped::TOOL_USE_INTERRUPT,
 ];
 
 /// `claudeText`: a message's text, from text, or from a list of blocks whose
