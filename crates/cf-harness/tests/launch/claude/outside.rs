@@ -364,7 +364,10 @@ fn a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_
     let mut look = window.observe();
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
-    assert!(look.as_mut().poll(&mut context).is_pending(), "the answer is on its way");
+    assert!(
+        look.as_mut().poll(&mut context).is_pending(),
+        "the answer is on its way"
+    );
     // The window follows another conversation, which only its own Claude shows.
     window.follow(OTHER);
     home.status(OTHER, &json!({ "status": "idle" }), me());
@@ -381,5 +384,8 @@ fn a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_
     };
     drop(stale);
     let observed = finished(window.observe()).unwrap();
-    assert!(!observed.shared, "one Claude shows the conversation the window follows");
+    assert!(
+        !observed.shared,
+        "one Claude shows the conversation the window follows"
+    );
 }

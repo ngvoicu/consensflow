@@ -604,10 +604,7 @@ impl ClaudeWindow {
         loop {
             let generation = self.generation.get();
             let session = self.session.borrow().clone();
-            let holders = self
-                .records
-                .claude_holders(&self.statuses, &session)
-                .await;
+            let holders = self.records.claude_holders(&self.statuses, &session).await;
             if generation != self.generation.get() {
                 continue;
             }

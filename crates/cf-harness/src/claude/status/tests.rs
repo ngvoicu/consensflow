@@ -477,3 +477,85 @@ fn every_file_system_call_of_the_scan_is_counted() {
     .sum();
     assert_eq!(calls, scan.matches("fs_calls += 1").count(), "{scan}");
 }
+
+thread_local! {
+    /// The numbers a test says are alive, for the scanner that asks [`says_alive`].
+    static ALIVE: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn says_alive(pid: u32) -> bool {
+    ALIVE.with(|alive| alive.borrow().contains(&pid))
+}
+
+/// One look at a folder holding the file of the one live Claude (this test's process) and 512 of
+/// ended windows, each under a number of its own: every call it makes of the file system, and
+/// every process it asks of.
+#[test]
+fn a_look_asks_once_of_each_file_and_opens_only_the_files_of_live_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    for number in 0..512u32 {
+        let pid = 100_000 + number;
+        let row = json!({ "pid": pid, "sessionId": "OLD", "status": "idle" });
+        write(dir.path(), &format!("{pid}.json"), &row);
+    }
+    let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
+    write(dir.path(), &format!("{}.json", me()), &own);
+    ALIVE.with(|alive| *alive.borrow_mut() = vec![me()]);
+    let folder = dir.path().to_string_lossy().into_owned();
+    let mut scanner = Scanner::asking(says_alive);
+    for look in ["the first", "a warm one"] {
+        let (calls, asks, reads) = (scanner.fs_calls, scanner.alive_asks, scanner.reads);
+        let found = scanner.statuses(&folder);
+        assert_eq!(found.len(), 1, "{look}: {found:?}");
+        assert_eq!(
+            scanner.fs_calls - calls,
+            4,
+            "{look}: the listing, and the live file's open, read and time"
+        );
+        assert_eq!(scanner.reads - reads, 1, "{look}: one file opened");
+        assert_eq!(
+            scanner.alive_asks - asks,
+            512 + 1 + 1,
+            "{look}: a question for each of the 513 names and one for the process the live file says"
+        );
+    }
+}
+
+/// A status file whose number a program took after the Claude that wrote it ended names no Claude,
+/// though the program began a moment after the file's last write (T-2081, finding 9: the system
+/// gives a number anew at once, and a tolerance of 2 s took such a program for the writer, so a
+/// window's conversation read as shared with it).
+#[test]
+fn a_program_that_took_the_writers_number_a_moment_after_its_last_write_is_no_holder() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_string_lossy().into_owned();
+    let last_write = SystemTime::now();
+    std::thread::sleep(Duration::from_millis(500));
+    let program = Other::start();
+    let pid = program.0.id();
+    let name = format!("{pid}.json");
+    write(
+        dir.path(),
+        &name,
+        &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
+    );
+    fs::File::options()
+        .write(true)
+        .open(dir.path().join(&name))
+        .unwrap()
+        .set_modified(last_write)
+        .unwrap();
+    assert_eq!(
+        holders(&folder, "S"),
+        Some(Vec::new()),
+        "begun half a second after the file's last write: no writer"
+    );
+    // The same program, writing the file now, is the writer.
+    write(
+        dir.path(),
+        &name,
+        &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
+    );
+    assert_eq!(holders(&folder, "S"), Some(vec![pid]));
+    drop(program);
+}

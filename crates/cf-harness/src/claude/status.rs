@@ -97,14 +97,24 @@ type Gone = (Option<u32>, u32);
 /// of the listing and of the files that are not found gone: the live windows'. Asking whether a
 /// number is alive is no file-system call (a signal of no effect on Unix, a handle that fails
 /// at once for a number nobody holds on Windows), and costs microseconds a name.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Scanner {
+    /// Whether a process is alive: the system's, and a test's own where it must name numbers.
+    alive: fn(u32) -> bool,
+    /// How many times a process was asked of whether it is alive.
+    pub(crate) alive_asks: usize,
     /// By folder, the files found of no live process, by name.
     gone: std::collections::HashMap<String, std::collections::HashMap<String, Gone>>,
     /// How many status files were opened, for a test to count.
     pub(crate) reads: usize,
     /// Every call made to the file system: a listing, an open, a metadata call, a read.
     pub(crate) fs_calls: usize,
+}
+
+impl Default for Scanner {
+    fn default() -> Self {
+        Self::asking(cf_process::alive)
+    }
 }
 
 /// What one status file says.
@@ -115,6 +125,18 @@ struct Seen {
 }
 
 impl Scanner {
+    /// A scanner that asks `alive` whether a process is: a test's, where it must say which
+    /// numbers are.
+    pub(crate) fn asking(alive: fn(u32) -> bool) -> Self {
+        Self {
+            alive,
+            alive_asks: 0,
+            gone: std::collections::HashMap::new(),
+            reads: 0,
+            fs_calls: 0,
+        }
+    }
+
     /// The status of each Claude running, by its process id, in the order
     /// Node's `readdir` lists their files: a second file naming the same
     /// process puts its status where the first was, as a `Map` keeps a key's
@@ -153,14 +175,19 @@ impl Scanner {
         let remembered = self.gone.entry(folder.to_owned()).or_default();
         let mut found = Vec::new();
         let mut present = std::collections::HashMap::new();
+        let ask = self.alive;
+        let mut asks = 0;
+        let mut alive = |pid: u32| {
+            asks += 1;
+            ask(pid)
+        };
         for entry in listed {
             let name = entry.file_name().to_string_lossy().into_owned();
             if !is_status_file(&name) {
                 continue;
             }
             if let Some(held) = remembered.get(&name) {
-                if held.0.is_none_or(|named| !cf_process::alive(named))
-                    && !cf_process::alive(held.1)
+                if held.0.is_none_or(|named| !alive(named)) && !alive(held.1)
                 {
                     present.insert(name, *held);
                     continue;
@@ -180,7 +207,7 @@ impl Scanner {
             // link, and no older than the content.
             self.fs_calls += 1;
             let written = file.metadata().ok().and_then(|meta| meta.modified().ok());
-            match read(&bytes, written) {
+            match read(&bytes, written, &mut alive) {
                 Read::Live(pid, status) => {
                     let parked = from_slice_lossy(&bytes)
                         .is_ok_and(|row| row.get("parkedJobId").is_some_and(|job| !job.is_null()));
@@ -199,6 +226,7 @@ impl Scanner {
         }
         // What is no longer listed is forgotten.
         *remembered = present;
+        self.alive_asks += asks;
         Some(found)
     }
 }
@@ -233,7 +261,11 @@ fn is_status_file(name: &str) -> bool {
 /// so at once and to any program (T-1226: a window's record read as shared with the earlier
 /// window's Claude, and no answer of it taken for its task's result). Claude Code says the same
 /// of a number by when its process began (its own `procStart`, `procStartFt` on Windows).
-fn read(bytes: &[u8], written: Option<SystemTime>) -> Read {
+fn read(
+    bytes: &[u8],
+    written: Option<SystemTime>,
+    alive: &mut dyn FnMut(u32) -> bool,
+) -> Read {
     let Ok(row) = from_slice_lossy(bytes) else {
         return Read::Nothing;
     };
@@ -243,7 +275,7 @@ fn read(bytes: &[u8], written: Option<SystemTime>) -> Read {
     ) else {
         return Read::Nothing;
     };
-    if !cf_process::alive(pid) {
+    if !alive(pid) {
         return Read::Gone(pid);
     }
     if written.is_some_and(|written| cf_process::began_after(pid, written + SLACK)) {
