@@ -331,8 +331,9 @@ fn a_status_link_whose_target_is_rewritten_is_read_as_the_target() {
     let link = folder.join(format!("{}.json", me()));
     std::os::unix::fs::symlink(&target, &link).unwrap();
     // The link is older than the live process, which a target's rewrite does not change.
+    let written = fs::metadata(&target).unwrap().modified().unwrap();
     let hour_ago = nix::sys::time::TimeSpec::new(
-        std::time::SystemTime::now()
+        written
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64
@@ -442,7 +443,8 @@ fn a_look_asks_once_of_each_file_and_opens_only_the_files_of_live_numbers() {
 fn a_program_that_took_the_writers_number_a_moment_after_its_last_write_is_no_holder() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().to_string_lossy().into_owned();
-    let last_write = SystemTime::now();
+    // The file system's own clock, as the file's time is: when the folder was made.
+    let last_write = fs::metadata(dir.path()).unwrap().modified().unwrap();
     std::thread::sleep(Duration::from_millis(500));
     let program = Other::start();
     let pid = program.0.id();
