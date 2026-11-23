@@ -7,6 +7,7 @@
 
 [run]
 app-updates = ["cargo", "xtask", "app", "test", "updates::"]
+app-update-page = ["cargo", "xtask", "app", "test", "update_page::"]
 
 # The production start is the direct one again: the new app is the old one's child.
 [[plant]]
@@ -29,18 +30,41 @@ replace = """
 # The helper opens the new app without waiting for the old one to end.
 [[plant]]
 name = "launch-services: the helper opens the new app while the old one is alive"
-meant = "the_launch_services_start_waits_for_the_old_app_and_opens_a_fresh_process"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
 runs = ["app-updates"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/updates/relaunch.rs"
-find = 'while kill -0 "$old" 2>/dev/null; do'
-replace = "while false; do"
+find = 'while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done'
+replace = 'while false; do /bin/sleep 0.1; done'
 
-# A failed opener leaves the person with no app (T-2114, blocker 1): the helper's fall back to
-# the direct start, and its word in the log, taken out.
+# A bound put back (T-2118, blocker 1): the helper gives up on an old app that lives long, and
+# the person is left with the old app or none.
 [[plant]]
-name = "launch-services: a failed open leaves no app and no word"
+name = "launch-services: the helper's wait for the old app is bounded again"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = 'while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done'
+replace = 'n=0; while kill -0 "$old" 2>/dev/null && [ "$n" -lt 5 ]; do /bin/sleep 0.1; n=$((n+1)); done'
+
+# `-n` put back (T-2118, blocker 2): where the person reopened the app during the wait, a second
+# instance starts.
+[[plant]]
+name = "launch-services: the helper asks for a new instance again"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = "    let mut prefix: Vec<std::ffi::OsString> = Vec::new();"
+replace = '    let mut prefix: Vec<std::ffi::OsString> = vec!["-n".into()];'
+
+# A failed opener leaves the person with no app: the helper's fall back to the direct start taken out.
+[[plant]]
+name = "launch-services: a failed open leaves no app"
 meant = "a_failed_open_starts_the_installed_app_directly_and_says_why"
 runs = ["app-updates"]
 
@@ -49,21 +73,39 @@ file = "app/src-tauri/src/updates/relaunch.rs"
 find = '"$opener" "$@" && exit 0'
 replace = '"$opener" "$@"; exit 0'
 
-# Never two apps (T-2114, blocker 2): at the bound the helper goes on to start the app over the
-# old one, as the 300 polls of the first build did at 32 seconds.
+# The failure without a word (T-2118, blocker 3): nothing is said, or nothing where the app's log
+# cannot be written.
 [[plant]]
-name = "launch-services: the helper starts a second app at its bound"
-meant = "an_old_app_still_alive_at_the_bound_is_not_started_over"
+name = "launch-services: a failed start leaves no word"
+meant = "two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log"
 runs = ["app-updates"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/updates/relaunch.rs"
-find = '''    exit 0
-  fi
-  /bin/sleep 0.1'''
-replace = '''    break
-  fi
-  /bin/sleep 0.1'''
+find = """say() { printf '%s\\n' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }"""
+replace = "say() { :; }"
+
+[[plant]]
+name = "launch-services: a failed start leaves no word where the log cannot be written"
+meant = "two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = """|| "$logger" -t ConsensFlow "$1"; }"""
+replace = "|| :; }"
+
+# The Settings opener's status read by no one: a failed open is a success, and the notice's error
+# line stays hidden.
+[[plant]]
+name = "launch-services: a failed settings opener is a success"
+meant = "an_opener_that_exits_with_a_failure_is_an_error"
+runs = ["app-update-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "    if status.success() {"
+replace = "    if status.success() || true {"
 
 # The notice at a first install: no file is a launch after an update.
 [[plant]]
