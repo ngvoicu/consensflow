@@ -46,7 +46,7 @@ pub mod test_support;
 mod testing;
 
 pub use alive::alive;
-pub use began::began_after;
+pub use began::{began_after, began_ms};
 pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
 pub use child::{not_spawned, spawn, Child, Ender, Streams, SAID_KEPT};
 pub use cmd_word::cmd_word;

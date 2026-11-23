@@ -174,3 +174,29 @@ async fn an_update_of_a_harness_installed_in_a_way_nothing_recognizes_runs_nothi
         "the version only: the update was not run"
     );
 }
+
+#[tokio::test]
+async fn an_update_refused_because_an_installer_runs_is_a_400_with_its_words_in_error() {
+    let rig = Rig::new(&["codex"]);
+    // The installer of a daemon that is gone, still running: this process stands for it.
+    let folder = rig._home.path().join("consensflow").join("updates");
+    std::fs::create_dir_all(&folder).unwrap();
+    let pid = std::process::id();
+    let began = cf_process::began_ms(pid).unwrap();
+    std::fs::write(
+        folder.join("codex.json"),
+        format!(r#"{{"pid":{pid},"began":{began}}}"#),
+    )
+    .unwrap();
+    assert_eq!(
+        the_app_asks(
+            &rig,
+            Method::POST,
+            "/api/harnesses/update",
+            r#"{"id":"codex"}"#
+        )
+        .await,
+        (400, error("an update of Codex is already running"))
+    );
+    assert!(rig.capture.take_ran().is_empty(), "nothing was run");
+}

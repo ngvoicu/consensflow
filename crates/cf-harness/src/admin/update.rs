@@ -10,6 +10,7 @@ use cf_base::js;
 use cf_process::Limits;
 use cf_proto::agents::Harness;
 
+use super::record;
 use super::row::{Ended, Outcome};
 use super::source::{name, release_source};
 use super::{program, HarnessAdmin};
@@ -71,7 +72,16 @@ impl HarnessAdmin {
         let before = row.version.value().map(str::to_owned);
         let command = argv.join(" ");
         let started = program(&inner.env, PathBuf::from(run), arguments.to_vec());
-        let (written, failure) = match inner.capture.capture(started, UPDATE).await {
+        let installer = {
+            let env = inner.env.clone();
+            Box::new(move |pid| record::write(&env, harness, pid))
+        };
+        let captured = inner
+            .capture
+            .capture_started(started, UPDATE, installer)
+            .await;
+        record::remove(&inner.env, harness);
+        let (written, failure) = match captured {
             Ok(done) => (format!("{}{}", done.stdout, done.stderr), None),
             Err(failed) => {
                 let reason = if failed.killed {
@@ -83,6 +93,12 @@ impl HarnessAdmin {
             }
         };
         let (stamp, after) = self.look(harness, true).await;
+        // A look that was cut keeps nothing: what is kept is from before the install.
+        let mut cache = inner.cache.borrow_mut();
+        if cache.get(&harness).is_some_and(|(kept, _)| *kept < stamp) {
+            cache.remove(&harness);
+        }
+        drop(cache);
         let now = after.version.value().map(str::to_owned);
         // `after.version.value !== before`, where an unrecognized version is
         // `undefined` after and `null` before: never equal to anything.
@@ -118,8 +134,10 @@ struct Running<'a> {
 
 impl<'a> Running<'a> {
     fn begin(inner: &'a super::Inner, harness: Harness) -> Result<Self, String> {
-        if !inner.updating.borrow_mut().insert(harness) {
-            return Err(format!("an update of {} is already running", name(harness)));
+        let refused = || format!("an update of {} is already running", name(harness));
+        // An installer a daemon that is gone began, and that still runs, is as running.
+        if record::running(&inner.env, harness) || !inner.updating.borrow_mut().insert(harness) {
+            return Err(refused());
         }
         Ok(Self { inner, harness })
     }
@@ -127,6 +145,13 @@ impl<'a> Running<'a> {
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
+        record::remove(&self.inner.env, self.harness);
+        *self
+            .inner
+            .ended
+            .borrow_mut()
+            .entry(self.harness)
+            .or_insert(0) += 1;
         self.inner.updating.borrow_mut().remove(&self.harness);
     }
 }

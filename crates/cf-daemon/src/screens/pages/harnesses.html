@@ -84,42 +84,22 @@ function say(look, text) {
   SAID = look;
   document.querySelector('#check-note').textContent = text;
 }
-// One update at a time for a harness: the daemon refuses a second, and its button stays disabled
-// through every redraw. An update the daemon is running that this page did not begin (another tab,
-// or this page before a reload) is watched until it ends.
+// One update at a time for a harness: the daemon refuses a second, and the button of one stays
+// disabled through every redraw. UPDATING is what this page began and waits for: its own answer
+// is its row. BUSY is what the daemon says is being updated by another page, or by this one
+// before a reload (the running list of each check's answer, and a refusal): that row says so,
+// offers no update and shows Refresh, and nothing asks the daemon again on its own.
 const UPDATING = new Set();
-const WATCHED = new Set();
+const BUSY = new Set();
 async function post(path, body, failed) {
   const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
   if (response.ok) return response.json();
   let words = null;
-  try { words = (await response.json()).message; } catch (error) { /* no words */ }
+  try { words = (await response.json()).error; } catch (error) { /* no words */ }
   throw new Error(words || failed);
 }
-function watchUpdate(id, words = 'Updating ' + id + '… this can take a minute.') {
-  if (WATCHED.has(id)) return;
-  WATCHED.add(id);
-  UPDATING.add(id);
-  const look = ++LOOKS;
-  say(look, words);
-  renderHarnesses();
-  const poll = async () => {
-    let running = true;
-    try {
-      const { harnesses, updating } = await post('/api/harnesses/check', { id, refresh: false }, 'Harness check failed');
-      showRows(harnesses);
-      running = updating.includes(id);
-    } catch (error) { /* try again */ }
-    if (running) return setTimeout(poll, 2000);
-    WATCHED.delete(id);
-    UPDATING.delete(id);
-    say(look, '');
-    renderHarnesses();
-  };
-  setTimeout(poll, 2000);
-}
 async function updateHarness(id, button) {
-  if (UPDATING.has(id)) return;
+  if (UPDATING.has(id) || BUSY.has(id)) return;
   UPDATING.add(id);
   const look = ++LOOKS;
   say(look, 'Updating ' + id + '… this can take a minute.');
@@ -127,14 +107,12 @@ async function updateHarness(id, button) {
   try {
     const { result } = await post('/api/harnesses/update', { id }, 'The update could not be started');
     UPDATES.set(id, result);
+    BUSY.delete(id);
     showRows([result.harness]);
     say(look, '');
   } catch (error) {
-    if (/already running/.test(error.message)) {
-      UPDATING.delete(id);
-      return watchUpdate(id, error.message + ': this page shows it when it ends.');
-    }
-    say(look, error.message + ' — try again.');
+    if (/already running/.test(error.message)) BUSY.add(id);
+    say(look, error.message + (BUSY.has(id) ? '' : ' — try again.'));
   }
   UPDATING.delete(id);
   renderHarnesses();
@@ -146,9 +124,10 @@ async function checkHarnesses(id = null, button = null) {
   try {
     const { harnesses, updating } = await post('/api/harnesses/check', { ...(id ? { id } : {}), refresh: button !== null }, 'Harness check failed');
     showRows(harnesses);
+    for (const row of harnesses) BUSY.delete(row.id);
+    for (const running of updating || []) BUSY.add(running);
     renderHarnesses();
     say(look, '');
-    for (const running of updating || []) if (!UPDATING.has(running)) watchUpdate(running);
   } catch (error) {
     say(look, error.message + ' — try checking again.');
   } finally { if (button) button.disabled = false; }
@@ -188,10 +167,11 @@ function renderHarness(row) {
         line.append(output);
       }
     }
+    if (BUSY.has(row.id)) line.append(el('div', null, row.id + ' is being updated. Refresh shows the result when it ends.'));
     if (update.state === 'available') {
       if (update.command) {
         const go = el('button', null, 'Update to ' + update.value);
-        go.disabled = UPDATING.has(row.id);
+        go.disabled = UPDATING.has(row.id) || BUSY.has(row.id);
         go.onclick = () => updateHarness(row.id, go);
         line.append(go);
       } else {
@@ -208,7 +188,7 @@ function renderHarness(row) {
     }
   }
   if (row.setup?.reason) line.append(el('div', null, row.setup.reason));
-  const check = el('button', null, 'Check again');
+  const check = el('button', null, BUSY.has(row.id) ? 'Refresh' : 'Check again');
   check.onclick = () => checkHarnesses(row.id, check); line.append(check);
   line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
   return line;

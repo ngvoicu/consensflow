@@ -6,6 +6,8 @@
 
 [run]
 harness-window-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
+# The page's own suite, in Chromium: the real routes' answers are what its cases feed it.
+harness-window-page = ["npm", "--prefix", "app", "exec", "--", "playwright", "test", "tests/harnesses.spec.mjs", "-g", "being updated|polls nothing|daemon refuses"]
 harness-window-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "harness_check::"]
 
 # The row says what the check said: a refusal is the launch's sentence, and nothing is "Ready"
@@ -222,10 +224,10 @@ runs = ["harness-window-admin"]
 [[plant.edit]]
 file = "crates/cf-harness/src/admin/update.rs"
 find = '''
-        if !inner.updating.borrow_mut().insert(harness) {
+        if record::running(&inner.env, harness) || !inner.updating.borrow_mut().insert(harness) {
 '''
 replace = '''
-        if inner.updating.borrow_mut().insert(harness) && false {
+        if record::running(&inner.env, harness) || (inner.updating.borrow_mut().insert(harness) && false) {
 '''
 
 [[plant]]
@@ -240,4 +242,66 @@ find = '''
 '''
 replace = '''
             updating: Vec::new(),
+'''
+
+# One update of a harness runs at a time across a daemon's replacement: the record an installer
+# leaves in the home (its number and when it began) is looked at before a second one begins.
+[[plant]]
+name = "harness window: the installer's record is not looked at"
+meant = "a_record_of_a_running_installer_refuses_an_update_in_a_daemon_that_did_not_begin_it"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/update.rs"
+find = '''
+        if record::running(&inner.env, harness) || !inner.updating.borrow_mut().insert(harness) {
+'''
+replace = '''
+        if !inner.updating.borrow_mut().insert(harness) {
+'''
+
+# No row older than an update that has ended: the look is made again when one ended meanwhile.
+[[plant]]
+name = "harness window: the rows are read before the running list and not again"
+meant = "a_check_that_waited_through_an_update_does_not_return_the_row_from_before_it"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+            if moved.is_empty() {
+'''
+replace = '''
+            if true {
+'''
+
+# The refusal is the daemon's `error`, and the page shows its words and keeps Update off.
+[[plant]]
+name = "harness window: the page reads the refusal from message"
+meant = "a_second_page_that_asks_for_an_update_the_daemon_refuses_shows_its_words_and_keeps_update_off"
+runs = ["harness-window-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/harnesses.html"
+find = '''
+  try { words = (await response.json()).error; } catch (error) { /* no words */ }
+'''
+replace = '''
+  try { words = (await response.json()).message; } catch (error) { /* no words */ }
+'''
+
+# Nothing polls: a page that is told an update runs asks again only when the person says Refresh.
+[[plant]]
+name = "harness window: a poll is put back"
+meant = "a_page_opened_while_an_update_runs_says_so_offers_no_second_update_and_polls_nothing"
+runs = ["harness-window-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/harnesses.html"
+find = '''
+    for (const running of updating || []) BUSY.add(running);
+'''
+replace = '''
+    for (const running of updating || []) BUSY.add(running);
+    if ((updating || []).length) setTimeout(() => checkHarnesses(), 2000);
 '''

@@ -19,6 +19,7 @@ use crate::testing::{
 use crate::testing::{named, EPOCH_MS};
 
 mod blockers;
+mod installs;
 mod launch_check;
 mod looks;
 pub(super) mod npm_windows;

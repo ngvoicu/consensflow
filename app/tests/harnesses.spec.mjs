@@ -489,9 +489,10 @@ for (const scope of ['row', 'all']) {
   }
 }
 
-// T-2072 finding 7: a reload during an update. The daemon says the install is running: the page
-// shows it, offers no second install, and shows the row the daemon has when it ends.
-test('a page opened while an update runs shows it and takes the row when it ends', async ({
+// T-2091: a page that opens or reloads during an install says so from the running list in each
+// check's answer, offers no second install and shows Refresh. It polls nothing: the row it shows
+// after the install is the one Refresh asks for.
+test('a page opened while an update runs says so, offers no second update and polls nothing', async ({
   page,
 }) => {
   const html = harnessesHtml()
@@ -518,28 +519,61 @@ test('a page opened while an update runs shows it and takes the row when it ends
     },
   })
   const codex = page.locator('.host').first()
-  await expect(page.getByRole('status')).toContainText('Updating codex')
+  await expect(codex).toContainText('being updated')
   await expect(codex.getByRole('button', { name: /^Update to/ })).toBeDisabled()
-  // It asks the daemon again until the install ends, and the row it gets then is shown.
-  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(2)
+  const refresh = codex.getByRole('button', { name: 'Refresh' })
+  await expect(refresh).toBeVisible()
+  // Nothing asks the daemon again on its own.
+  await page.waitForTimeout(2600)
+  expect(checks.length).toBe(1)
+  expect(updates.length).toBe(0)
+  // Refresh asks for this harness, and the row it gets is shown, the update over.
+  await refresh.click()
+  await expect.poll(() => checks.length).toBe(2)
+  expect(checks[1].body).toEqual({ id: 'codex', refresh: true })
   await checks[1].route.fulfill({
-    json: {
-      harnesses: [updateRow('0.150.0', available, 'Codex 0.150.0 has no native queue', 1)],
-      updating: ['codex'],
-    },
-  })
-  await expect(codex.getByRole('button', { name: /^Update to/ })).toBeDisabled()
-  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(3)
-  await checks[2].route.fulfill({
     json: { harnesses: [updateRow('0.171.0', current, undefined, 3)], updating: [] },
   })
   await expect(codex).toContainText('Version 0.171.0, up to date')
-  await expect(codex).not.toContainText('no native queue')
-  await expect(page.getByRole('status')).toHaveText('')
+  await expect(codex).not.toContainText('being updated')
+  await expect(codex.getByRole('button', { name: 'Refresh' })).toHaveCount(0)
   expect(updates.length).toBe(0)
 })
 
-test('a second page that asks for an update the daemon refuses shows its words and waits for the first', async ({
+test('a check that says another harness is updating marks that one, and polls nothing', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  const checks = []
+  await page.route('http://other.test/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/harnesses/check') {
+      checks.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+      return
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://other.test/harnesses')
+  await expect.poll(() => checks.length).toBe(1)
+  const pi = {
+    ...updateRow('0.8.0', available, undefined, 1),
+    id: 'pi',
+    path: '/test/pi',
+    distribution: 'npm',
+  }
+  await checks[0].route.fulfill({
+    json: { harnesses: [updateRow('0.150.0', current, undefined, 1), pi], updating: ['pi'] },
+  })
+  const rows = page.locator('.host')
+  await expect(rows.nth(1)).toContainText('being updated')
+  await expect(rows.nth(1).getByRole('button', { name: /^Update to/ })).toBeDisabled()
+  await expect(rows.first()).not.toContainText('being updated')
+  await page.waitForTimeout(2600)
+  expect(checks.length).toBe(1)
+})
+
+// T-2089 blocker 3: the refusal as the daemon sends it: HTTP 400 and `{"error": words}`.
+test('a second page that asks for an update the daemon refuses shows its words and keeps Update off', async ({
   page,
 }) => {
   const html = harnessesHtml()
@@ -554,8 +588,8 @@ test('a second page that asks for an update the daemon refuses shows its words a
     if (path === '/api/harnesses/update') {
       updates += 1
       return route.fulfill({
-        status: 500,
-        json: { error: 'internal', message: 'an update of Codex is already running' },
+        status: 400,
+        json: { error: 'an update of Codex is already running' },
       })
     }
     return route.fulfill({ contentType: 'text/html', body: html })
@@ -565,14 +599,12 @@ test('a second page that asks for an update the daemon refuses shows its words a
   await checks[0].route.fulfill({ json: { harnesses: [updateRow('0.150.0', available, undefined, 1)] } })
   await page.getByRole('button', { name: 'Update to 0.171.0' }).click()
   await expect(page.getByRole('status')).toContainText('an update of Codex is already running')
+  await expect(page.getByRole('status')).not.toContainText('could not be started')
   await expect(page.getByRole('button', { name: /^Update to/ })).toBeDisabled()
+  await expect(page.locator('.host').first().getByRole('button', { name: 'Refresh' })).toBeVisible()
+  await page.waitForTimeout(2600)
   expect(updates).toBe(1)
-  await expect.poll(() => checks.length, { timeout: 8000 }).toBe(2)
-  await checks[1].route.fulfill({
-    json: { harnesses: [updateRow('0.171.0', current, undefined, 3)], updating: [] },
-  })
-  await expect(page.locator('.host').first()).toContainText('Version 0.171.0, up to date')
-  expect(updates).toBe(1)
+  expect(checks.length).toBe(1)
 })
 
 test('a redraw during an update does not offer a second update, and an older outcome never replaces a later one', async ({

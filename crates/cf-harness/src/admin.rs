@@ -34,6 +34,7 @@ use crate::seams::Time;
 
 pub mod feed;
 mod inspect;
+mod record;
 mod row;
 mod source;
 mod update;
@@ -62,7 +63,22 @@ pub trait Capture {
         program: Program,
         limits: Limits,
     ) -> Work<'_, Result<Captured, CaptureFailed>>;
+
+    /// [`capture`](Self::capture), saying the program's number once it has started. A seam
+    /// that starts no program of the system's has none to say.
+    fn capture_started(
+        &self,
+        program: Program,
+        limits: Limits,
+        started: Started,
+    ) -> Work<'_, Result<Captured, CaptureFailed>> {
+        drop(started);
+        self.capture(program, limits)
+    }
 }
+
+/// [`Capture::capture_started`]'s notice: the number of the program, once it has started.
+pub type Started = Box<dyn FnOnce(u32)>;
 
 /// An inspection begun, which every call asking for the same harness while
 /// it runs shares.
@@ -100,6 +116,10 @@ struct Inner {
     looks: RefCell<HashMap<Harness, u64>>,
     /// The harnesses whose update is running: a second update of one is refused.
     updating: RefCell<HashSet<Harness>>,
+    /// How many updates of each harness have ended: a check that sees the number change
+    /// while it collects its rows looks again, so that no row older than an update that has
+    /// ended is the page's last word.
+    ended: RefCell<HashMap<Harness, u64>>,
 }
 
 /// Looks at the harnesses' CLIs and updates them.
@@ -176,6 +196,7 @@ impl HarnessAdmin {
                 pending: RefCell::new(HashMap::new()),
                 looks: RefCell::new(HashMap::new()),
                 updating: RefCell::new(HashSet::new()),
+                ended: RefCell::new(HashMap::new()),
             }),
         }
     }
@@ -201,10 +222,30 @@ impl HarnessAdmin {
             None => known_harnesses().to_vec(),
             Some(name) => vec![Harness::from_name(name).ok_or("Unknown harness")?],
         };
-        let looks = harnesses
-            .into_iter()
-            .map(|harness| self.look(harness, refresh));
-        let rows = join_all(looks).await;
+        let ended = |harness: Harness| self.inner.ended.borrow().get(&harness).copied();
+        let before: Vec<_> = harnesses.iter().map(|harness| ended(*harness)).collect();
+        let looks = harnesses.iter().map(|harness| self.look(*harness, refresh));
+        let mut rows = join_all(looks).await;
+        // A row collected before an update ended is older than the update: it is not the
+        // answer. The look is made again, which finds the row the update left, and again
+        // if another update ended meanwhile; the running list is read last, with nothing
+        // awaited between it and the last look.
+        let mut seen = before;
+        loop {
+            let moved: Vec<usize> = (0..harnesses.len())
+                .filter(|at| ended(harnesses[*at]) != seen[*at])
+                .collect();
+            if moved.is_empty() {
+                break;
+            }
+            for at in &moved {
+                seen[*at] = ended(harnesses[*at]);
+            }
+            let again = join_all(moved.iter().map(|at| self.look(harnesses[*at], false))).await;
+            for (at, row) in moved.into_iter().zip(again) {
+                rows[at] = row;
+            }
+        }
         Ok(Observed {
             rows,
             updating: self.updating(),
@@ -217,7 +258,9 @@ impl HarnessAdmin {
         known_harnesses()
             .iter()
             .copied()
-            .filter(|harness| running.contains(harness))
+            .filter(|harness| {
+                running.contains(harness) || record::running(&self.inner.env, *harness)
+            })
             .collect()
     }
 
