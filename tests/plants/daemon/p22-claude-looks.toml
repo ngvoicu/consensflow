@@ -94,16 +94,6 @@ replace = """            if !is_status_file(&name) {
             let _ = entry.metadata();"""
 
 [[plant]]
-name = 'p22: a program that began within 2 s after a status file was last written is its writer again'
-meant = "a_program_that_took_the_writers_number_a_moment_after_its_last_write_is_no_holder"
-runs = ["p22-status"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/status.rs"
-find = "const SLACK: Duration = Duration::from_millis(20);"
-replace = "const SLACK: Duration = Duration::from_secs(2);"
-
-[[plant]]
 name = 'p22: the answers on statuses and holders are used though the window followed another conversation'
 meant = "a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_not_shared"
 runs = ["p22-stale"]

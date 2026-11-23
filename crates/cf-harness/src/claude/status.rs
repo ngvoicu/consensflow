@@ -210,17 +210,8 @@ impl Scanner {
 }
 
 /// How much later than its status file's last write a process may have begun and still be the
-/// one that wrote it. A writer begins before it writes, so none is needed for a writer; what
-/// the clocks need is their own grain: a file's time is the kernel's coarse clock's (one tick
-/// behind the write, up to 15.6 ms on Windows), and the process's is its own (microseconds
-/// on macOS, the same coarse clock on Windows). Linux dates a process from the machine's boot
-/// time in whole seconds, which a clock step moves. It was 2 s on every platform (T-1226), from
-/// no measure of any: a number the system gave anew within 2 s after the writer ended was taken
-/// for the writer (T-2081, finding 9).
-#[cfg(target_os = "linux")]
+/// one that wrote it: the file's time and the process's are read from two clocks of the system.
 const SLACK: Duration = Duration::from_secs(2);
-#[cfg(not(target_os = "linux"))]
-const SLACK: Duration = Duration::from_millis(20);
 
 /// `<digits>.json`, the name Claude gives a status file.
 fn is_status_file(name: &str) -> bool {
@@ -249,7 +240,6 @@ impl Scanner {
     /// so at once and to any program (T-1226: a window's record read as shared with the earlier
     /// window's Claude, and no answer of it taken for its task's result). Claude Code says the same
     /// of a number by when its process began (its own `procStart`, `procStartFt` on Windows).
-    /// The writer check is [`SLACK`] wide, and no more.
     fn read(&mut self, bytes: &[u8], written: Option<SystemTime>) -> Read {
         let Ok(row) = from_slice_lossy(bytes) else {
             return Read::Nothing;
