@@ -145,8 +145,8 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        if record.delivery.borrow().delivering.is_some() {\n            self.confirm_arrival(record, &observed)?;\n        }\n        if participant.role != \"chief\" {"
-replace = "        if false {\n            self.confirm_arrival(record, &observed)?;\n        }\n        if participant.role != \"chief\" {"
+find = "        if record.delivery.borrow().delivering.is_some() {\n            self.confirm_arrival(record, &observed)?;\n        }\n        // A member held for its quota"
+replace = "        if false {\n            self.confirm_arrival(record, &observed)?;\n        }\n        // A member held for its quota"
 
 [[plant]]
 name = "n35 hold: the exit's look does not read a window that went on by itself"
@@ -175,8 +175,8 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "if (refused && !counted) || self.is_out(&owner) {"
-replace = "if refused || self.is_out(&owner) {"
+find = "        if refused && !counted {"
+replace = "        if refused {"
 
 [[plant]]
 name = "n35 hold: the card does not say a retry that waits"
