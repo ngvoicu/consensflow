@@ -243,7 +243,7 @@ replace = '''                .is_some_and(|record| record.version <= *loss)'''
 
 [[plant]]
 name = "pane input epoch: a notice confirmed while off screen"
-meant = "only the rows in view are confirmed, and Dismiss is reachable with the pointer"
+meant = "a notice is confirmed only once a person can see it: not under a dialog, not out of view"
 runs = ["epoch-seen"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

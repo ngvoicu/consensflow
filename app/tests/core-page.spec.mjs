@@ -5384,6 +5384,7 @@ test('only the rows in view are confirmed, and Dismiss is reachable with the poi
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await expect(notices(page)).toHaveCount(60, { timeout: 8000 })
   await expect.poll(() => host.acks.length).toBeGreaterThan(0)
+  await page.waitForTimeout(800)
   expect(host.acks.length, 'not the rows nobody can see').toBeLessThan(60)
   await notices(page).first().locator('.input-notice-dismiss').click({ timeout: 3000 })
   await expect(notices(page)).toHaveCount(59)
