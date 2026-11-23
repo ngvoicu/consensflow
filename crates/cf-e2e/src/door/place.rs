@@ -62,6 +62,14 @@ fn refused(why: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, why.into())
 }
 
+/// Why `at`, which is there or cannot be told absent, is no place to act: it cannot be resolved.
+fn unresolved(at: &Path, failed: &io::Error) -> io::Error {
+    refused(format!(
+        "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
+        at.display()
+    ))
+}
+
 /// The real path of `path`, with Windows' `\\?\` taken off.
 pub(crate) fn real(path: &Path) -> io::Result<PathBuf> {
     let found = path.canonicalize()?;
@@ -105,10 +113,7 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
                 return Ok(vec![Resolved { there, absent }]);
             }
             Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
-            Err(failed) => return Err(refused(format!(
-                "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
-                at.display()
-            ))),
+            Err(failed) => return Err(unresolved(&at, &failed)),
         }
         match fs::symlink_metadata(&at) {
             Ok(found) if found.file_type().is_symlink() => {

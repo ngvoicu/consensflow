@@ -179,16 +179,32 @@ pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, 
                 !value.is_empty(),
                 "stand-in {subject} {name} lookup: empty path"
             );
-            crate::standin_process::require_home(
-                Path::new(&value),
-                &format!("stand-in {subject} {name} lookup"),
-            );
+            // The profile's two halves (`C:`, `\Users\x`) name no folder each: they are held
+            // joined, below (T-2007 round 3: every rig on Windows stopped here).
+            if !crate::door::spawn::PROFILE_HALVES.contains(&name) {
+                crate::standin_process::require_home(
+                    Path::new(&value),
+                    &format!("stand-in {subject} {name} lookup"),
+                );
+            }
             value
         } else {
             default.to_string_lossy().into_owned()
         };
         env.retain(|(key, _)| !same_environment_name(key, name));
         env.push((name.to_owned(), value));
+    }
+    let half = |wanted: &str| {
+        env.iter()
+            .rev()
+            .find(|(key, _)| same_environment_name(key, wanted))
+            .map(|(_, value)| value.clone())
+    };
+    if let (Some(drive), Some(path)) = (half("HOMEDRIVE"), half("HOMEPATH")) {
+        crate::standin_process::require_home(
+            Path::new(&format!("{drive}{path}")),
+            &format!("stand-in {subject} HOMEDRIVE and HOMEPATH lookup"),
+        );
     }
     if let Some((_, path)) = env
         .iter()

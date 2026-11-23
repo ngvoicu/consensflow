@@ -409,9 +409,10 @@ fn record_of(answer: &Value) -> Result<Option<Record>> {
                 reading["reason"].as_str().unwrap_or("no reason given")
             )))
         }
-        _ => return Err(Error::Daemon(format!(
-            "harness-ask's answer to a record read says neither held, absent nor failed: {answer}"
-        ))),
+        _ => {
+            let said = "harness-ask's answer to a record read says neither held, absent nor failed";
+            return Err(Error::Daemon(format!("{said}: {answer}")));
+        }
     }
     Ok(Some(Record {
         items: reading["items"]

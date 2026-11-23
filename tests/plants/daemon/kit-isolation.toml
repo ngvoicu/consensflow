@@ -833,10 +833,7 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''            Err(failed) => return Err(refused(format!(
-                "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
-                at.display()
-            ))),'''
+find = '''            Err(failed) => return Err(unresolved(&at, &failed)),'''
 replace = '''            Err(_) => {}'''
 
 [[plant.edit]]
@@ -848,3 +845,4 @@ find = '''            Err(failed) => {
                 )))
             }'''
 replace = '''            Err(_) => {}'''
+
