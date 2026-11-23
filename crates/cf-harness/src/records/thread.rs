@@ -414,7 +414,7 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
     }
 }
 
-/// The statuses' worker: owns what the scans remember, answers each ask in turn, and ends once
+/// The statuses' worker: owns the scanner, answers each ask in turn, and ends once
 /// the queue is closed. A scan that panics answers as a folder that cannot be read.
 fn scan(mut waiting: mpsc::Receiver<Scan>) {
     let mut scanner = Scanner::default();

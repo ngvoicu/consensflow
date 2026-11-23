@@ -341,7 +341,7 @@ pub struct LocalRecords {
     env: Env,
     time: Rc<dyn Time>,
     cache: RefCell<Cache>,
-    /// What Claude's statuses read so far remember, as the worker's does.
+    /// The scanner of Claude's statuses, as the worker's is (it keeps nothing between looks).
     scanner: RefCell<crate::claude::Scanner>,
     hold: Cell<bool>,
     held: RefCell<VecDeque<HeldLook>>,

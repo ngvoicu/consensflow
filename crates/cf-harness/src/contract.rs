@@ -1379,9 +1379,9 @@ pub trait Records {
     /// Claude Code's own status of each of its processes in `folder` (its `sessions`
     /// folder), by process id: read off the engine's thread, where a scan opens a file for
     /// each process that ever ran and, on Windows, the process each names (P22-1, T-2029: a
-    /// look took 40 ms of the one thread once the files of ended windows piled up). The
-    /// worker remembers the files it found of no live process. The default reads them
-    /// here, with no memory, as a fake that has no worker does.
+    /// look took 40 ms of the one thread once the files of ended windows piled up). A look
+    /// opens no file whose name's process is not alive and keeps nothing of a file for the
+    /// next. The default reads them here, as a fake that has no worker does.
     fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, ProcessStatus)>> {
         Box::pin(async move { crate::claude::scan_statuses(folder) })
     }
