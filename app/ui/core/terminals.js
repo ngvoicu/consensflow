@@ -638,8 +638,11 @@ export class TerminalsView {
     const now = Date.now()
     // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
-    this.#names.set(entry.key, name)
-    this.#link.nameWindow(entry.pane, name)
+    // The chief's card while its window is down has no window to name.
+    if (entry.pane !== undefined) {
+      this.#names.set(entry.key, name)
+      this.#link.nameWindow(entry.pane, name)
+    }
     entry.meeting = Boolean(board.project?.meeting)
     entry.ownHands = board.project?.ownHands === true
     const history = button(

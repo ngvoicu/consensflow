@@ -5448,6 +5448,28 @@ test('the overflow row counts windows, not records', async ({ page }) => {
   await expect(page.locator('.input-notice[data-window="overflow"]')).toContainText('1 more window')
 })
 
+test('a refusal whose number the host could not keep is skipped until the host has spent it', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.retryNextSkips(2)
+  await page.evaluate(() => {
+    const hook = window.__paneInputHook
+    let first = true
+    window.__paneInputHook = (command, args) => {
+      if (first) {
+        first = false
+        return { ok: false, error: 'a decode error', spent: false, loss: undefined }
+      }
+      return hook(command, args)
+    }
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => host.skips.length, { timeout: 8000 }).toBe(3)
+  await expect(notices(page)).toHaveCount(1)
+})
+
 test('a skip the host cannot make final stays pending: the page asks again until it is, and then says so', async ({
   page,
 }) => {

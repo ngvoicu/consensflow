@@ -1167,7 +1167,10 @@ async function start() {
   } catch {}
   // The board is read at once, not when the daemon next changes: a page waiting on its host
   // reads, and only its terminals wait.
-  const boardRead = refresh().catch((cause) => report(cause))
+  const boardRead = readMissing()
+    .catch((cause) => report(cause))
+    .then(() => refresh())
+    .catch((cause) => report(cause))
   if (typeof Channel === 'function') {
     if (!(await establishPanePage())) return
     const channel = new Channel()
@@ -1178,13 +1181,7 @@ async function start() {
     // Once, for the life of the page: a second subscription ends the first.
     await invoke('subscribe_output', { pageId, onOutput: channel })
   }
-  try {
-    await readMissing()
-  } catch (cause) {
-    report(cause)
-  }
   await boardRead
-  await refresh()
   document.body.dataset.ready = 'true'
   // The board has loaded: what the host owes the person is asked for again, and on a timer.
   pullLosses = keepAskingForLosses()

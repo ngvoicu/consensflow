@@ -30,6 +30,11 @@ epoch-gate = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/t
 epoch-closed-row = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "R7: a window that has closed"]
 epoch-overflow-row = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "R11: the losses past the host"]
 epoch-skip-retry = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a skip the host cannot make final"]
+epoch-f2 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f2_"]
+epoch-f3 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f3_"]
+epoch-f6 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f6_"]
+epoch-seen = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "confirmed only once a person can see it|only the rows in view"]
+epoch-place = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "keeps its place before a key typed after it"]
 
 [[plant]]
 name = "pane input epoch: write a call of an older epoch"
@@ -214,3 +219,57 @@ runs = ["pane-order-bounded"]
 file = "crates/cf-panes/src/input_queue.rs"
 find = '''        if page.lane(&key).slots.len() >= MAX_LANE_SLOTS {'''
 replace = '''        if false && page.lane(&key).slots.len() >= MAX_LANE_SLOTS {'''
+
+[[plant]]
+name = "pane input epoch: a skip that leaves its parked job"
+meant = "f3_a_final_skip_removes_its_parked_job"
+runs = ["epoch-f3"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                        Some(Slot::Parked { job, .. }) => cancelled = Some(job),'''
+replace = '''                        Some(parked @ Slot::Parked { .. }) => {
+                            lane.slots.insert(sequence, parked);
+                        }'''
+
+[[plant]]
+name = "pane input epoch: a receipt that clears by at most"
+meant = "f6_a_receipt_clears_the_exact_version_for_its_own_window"
+runs = ["epoch-f6"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                .is_some_and(|record| record.version == *loss)'''
+replace = '''                .is_some_and(|record| record.version <= *loss)'''
+
+[[plant]]
+name = "pane input epoch: a notice confirmed while off screen"
+meant = "only the rows in view are confirmed, and Dismiss is reachable with the pointer"
+runs = ["epoch-seen"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    if (!inside) return false'''
+replace = '''    if (false) return false'''
+
+[[plant]]
+name = "pane input epoch: a drop sent after a later key"
+meant = "a drop whose short-name lookup is pending keeps its place before a key typed after it"
+runs = ["epoch-place"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''    const place = this.#placed?.key === key ? this.#placed : null'''
+replace = '''    const place = null'''
+
+[[plant]]
+name = "pane input epoch: a clock that cannot start leaves no loss"
+meant = "f2_a_clock_that_cannot_start_leaves_nothing_parked"
+runs = ["epoch-f2"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            state.pump_all(Instant::now() + ORDER_BOUND * 2, &mut events);'''
+replace = '''            let _ = &mut events;'''

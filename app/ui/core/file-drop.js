@@ -266,7 +266,7 @@ export async function listenForFileDrops({ listen, invoke, focus, dock, report }
     // The drop is a gesture, like a key: it takes its place among what is typed where it is
     // made, before the lookup of its paths, or is refused while the terminals are read-only.
     let place = null
-    if (target.pane !== undefined) {
+    if (target?.pane !== undefined) {
       place = dock.holdPlace(target.pane)
       if (place === null) return
     }
