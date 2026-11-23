@@ -19,14 +19,9 @@ use crate::testing::{
 use crate::testing::{named, EPOCH_MS};
 
 mod blockers;
-mod installs;
 mod launch_check;
 mod looks;
 pub(super) mod npm_windows;
-#[cfg(unix)]
-mod real;
-#[cfg(windows)]
-mod real_windows;
 mod stamps;
 pub(super) mod standalone;
 

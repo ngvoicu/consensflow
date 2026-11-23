@@ -92,7 +92,7 @@ fn finish(inner: &Inner, mut row: Row, source: Source, latest: Result<String, St
         .distribution
         .clone()
         .map_or(Distribution::Unrecognized, Distribution::Named);
-    let command = source.update.as_ref().map(|argv| argv.join(" "));
+    let command = source.update.as_deref().map(super::source::command_line);
     row.update = match latest {
         Ok(value) => {
             let release = Release {

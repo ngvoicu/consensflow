@@ -25,6 +25,8 @@
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: .6; cursor: wait; }
   .host button { margin: 10px 12px 0 0; }
+  .host .command button { margin: 0 0 0 10px; padding: 2px 10px; }
+  .host code { font: 12.5px ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; user-select: all; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 <style>
@@ -60,7 +62,6 @@ const el = (tag, className, text) => {
   return node;
 };
 let HARNESS_ROWS = [];
-const UPDATES = new Map();
 // The newest look wins: the daemon stamps each row with the number its look took when it began
 // (one counter per harness), and a row is shown only if no row of a later look has shown that
 // harness's. Whatever order the answers arrive in, and across a reload (a new page takes what the
@@ -84,13 +85,8 @@ function say(look, text) {
   SAID = look;
   document.querySelector('#check-note').textContent = text;
 }
-// One update at a time for a harness: the daemon refuses a second, and the button of one stays
-// disabled through every redraw. UPDATING is what this page began and waits for: its own answer
-// is its row. BUSY is what the daemon says is being updated by another page, or by this one
-// before a reload (the running list of each check's answer, and a refusal): that row says so,
-// offers no update and shows Refresh, and nothing asks the daemon again on its own.
-const UPDATING = new Set();
-const BUSY = new Set();
+// The page installs nothing: it shows what the daemon knows of each harness, the command that
+// updates it the way it was installed, and Refresh. A refused or failed check is said as sent.
 async function post(path, body, failed) {
   const response = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
   if (response.ok) return response.json();
@@ -98,39 +94,33 @@ async function post(path, body, failed) {
   try { words = (await response.json()).error; } catch (error) { /* no words */ }
   throw new Error(words || failed);
 }
-async function updateHarness(id, button) {
-  if (UPDATING.has(id) || BUSY.has(id)) return;
-  UPDATING.add(id);
-  const look = ++LOOKS;
-  say(look, 'Updating ' + id + '… this can take a minute.');
-  button.disabled = true;
-  try {
-    const { result } = await post('/api/harnesses/update', { id }, 'The update could not be started');
-    UPDATES.set(id, result);
-    BUSY.delete(id);
-    showRows([result.harness]);
-    say(look, '');
-  } catch (error) {
-    if (/already running/.test(error.message)) BUSY.add(id);
-    say(look, error.message + (BUSY.has(id) ? '' : ' — try again.'));
-  }
-  UPDATING.delete(id);
-  renderHarnesses();
-}
 async function checkHarnesses(id = null, button = null) {
   const look = ++LOOKS;
   say(look, 'Checking…');
   if (button) button.disabled = true;
   try {
-    const { harnesses, updating } = await post('/api/harnesses/check', { ...(id ? { id } : {}), refresh: button !== null }, 'Harness check failed');
+    const { harnesses } = await post('/api/harnesses/check', { ...(id ? { id } : {}), refresh: button !== null }, 'Harness check failed');
     showRows(harnesses);
-    for (const row of harnesses) BUSY.delete(row.id);
-    for (const running of updating || []) BUSY.add(running);
     renderHarnesses();
     say(look, '');
   } catch (error) {
     say(look, error.message + ' — try checking again.');
   } finally { if (button) button.disabled = false; }
+}
+
+async function copyCommand(text, button) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (error) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+  button.textContent = 'Copied';
+  setTimeout(() => { button.textContent = 'Copy'; }, 1500);
 }
 
 function renderHarness(row) {
@@ -147,35 +137,29 @@ function renderHarness(row) {
       : update.state === 'error' ? '; could not check for updates: ' + update.reason
       : '';
     line.append(el('div', null, version + latest));
+    // The launch's own check: whether ConsensFlow can start it, and the reason when it can't.
+    const setup = row.setup;
+    line.append(el('div', null, setup?.state === 'update-required' ? 'ConsensFlow cannot start it: ' + setup.reason
+      : setup?.state === 'unchecked' ? 'ConsensFlow could not check it: ' + setup.reason
+      : 'ConsensFlow can start it.'));
     if (row.tested?.newest) {
       line.append(el('div', null, 'Tested up to ' + row.tested.newest + '.'));
       if (row.tested.beyond) line.append(el('div', null, 'This version is newer and has not been checked yet.'));
     }
     line.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
-    const last = UPDATES.get(row.id);
-    if (last) {
-      const said = last.state === 'updated' ? 'Updated ' + last.before + ' → ' + last.after
-        : last.state === 'unchanged' ? 'Ran ' + last.command + '; the version did not change'
-        : last.state === 'failed' ? 'Update failed: ' + last.reason
-        : last.reason;
-      const outcome = el('div', null, said);
-      if (last.state === 'failed') outcome.style.color = 'var(--danger)';
-      line.append(outcome);
-      if (last.output && last.state !== 'updated') {
-        const output = el('pre', null, last.output);
-        output.style.cssText = 'font-size:12px;white-space:pre-wrap;color:var(--muted);margin:6px 0 0;';
-        line.append(output);
-      }
-    }
-    if (BUSY.has(row.id)) line.append(el('div', null, row.id + ' is being updated. Refresh shows the result when it ends.'));
-    if (update.state === 'available') {
-      if (update.command) {
-        const go = el('button', null, 'Update to ' + update.value);
-        go.disabled = UPDATING.has(row.id) || BUSY.has(row.id);
-        go.onclick = () => updateHarness(row.id, go);
-        line.append(go);
+    const required = row.setup?.state === 'update-required';
+    if (update.state === 'available' || required) {
+      const command = update.command;
+      if (command) {
+        const put = el('div', 'command');
+        put.append(el('span', null, 'To update it the way it was installed: '));
+        put.append(el('code', null, command));
+        const copy = el('button', null, 'Copy');
+        copy.onclick = () => copyCommand(command, copy);
+        put.append(copy);
+        line.append(put);
       } else {
-        line.append(el('small', null, 'Update it the way you installed it.'));
+        line.append(el('small', null, 'ConsensFlow does not recognize how ' + row.id + ' was installed: update it the way you installed it, as its own update instructions say.'));
       }
     }
     if (row.extension?.state === 'error' || row.extension?.state === 'not-installed') {
@@ -187,8 +171,7 @@ function renderHarness(row) {
       line.append(retry);
     }
   }
-  if (row.setup?.reason) line.append(el('div', null, row.setup.reason));
-  const check = el('button', null, BUSY.has(row.id) ? 'Refresh' : 'Check again');
+  const check = el('button', null, 'Refresh');
   check.onclick = () => checkHarnesses(row.id, check); line.append(check);
   line.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
   return line;

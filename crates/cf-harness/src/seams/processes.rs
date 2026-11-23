@@ -158,24 +158,10 @@ impl Capture for SystemProcesses {
         program: Program,
         limits: Limits,
     ) -> Work<'_, Result<Captured, CaptureFailed>> {
-        self.capture_started(program, limits, Box::new(|_| {}))
-    }
-
-    fn capture_started(
-        &self,
-        program: Program,
-        limits: Limits,
-        started: crate::admin::Started,
-    ) -> Work<'_, Result<Captured, CaptureFailed>> {
-        let start = self.start(&program);
+        let started = self.start(&program);
         Box::pin(async move {
-            let (run, env) = start.map_err(|refusal| CaptureFailed::unstarted(refusal.into()))?;
-            let kept = |ender: Ender| {
-                if let Some(pid) = ender.pid() {
-                    started(pid);
-                }
-                self.keep(ender)
-            };
+            let (run, env) = started.map_err(|refusal| CaptureFailed::unstarted(refusal.into()))?;
+            let kept = |ender| self.keep(ender);
             cf_process::capture(&run, program.cwd.as_deref(), &env, limits, kept).await
         })
     }

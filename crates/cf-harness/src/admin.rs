@@ -17,7 +17,7 @@
 //! look and kept by nothing here: what keeps an answer is the launch's map of probes.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -34,13 +34,11 @@ use crate::seams::Time;
 
 pub mod feed;
 mod inspect;
-mod record;
 mod row;
 mod source;
-mod update;
 pub(crate) mod version;
 
-pub use row::{Distribution, Ended, Extension, Outcome, Release, Row, Setup, Update, Version};
+pub use row::{Distribution, Extension, Release, Row, Setup, Update, Version};
 pub use source::{release_source, Format, Source};
 
 /// How long a row is kept: five minutes, from when its look began.
@@ -63,22 +61,7 @@ pub trait Capture {
         program: Program,
         limits: Limits,
     ) -> Work<'_, Result<Captured, CaptureFailed>>;
-
-    /// [`capture`](Self::capture), saying the program's number once it has started. A seam
-    /// that starts no program of the system's has none to say.
-    fn capture_started(
-        &self,
-        program: Program,
-        limits: Limits,
-        started: Started,
-    ) -> Work<'_, Result<Captured, CaptureFailed>> {
-        drop(started);
-        self.capture(program, limits)
-    }
 }
-
-/// [`Capture::capture_started`]'s notice: the number of the program, once it has started.
-pub type Started = Box<dyn FnOnce(u32)>;
 
 /// An inspection begun, which every call asking for the same harness while
 /// it runs shares.
@@ -87,14 +70,6 @@ type Pending = Shared<LocalBoxFuture<'static, Stamped>>;
 /// A row with its stamp: the number its look took when it began, from one counter per harness.
 /// A look begun later has a higher one, whatever the order the answers arrive in.
 pub type Stamped = (u64, Rc<Row>);
-
-/// What the page is told of the harnesses: their rows, each with its stamp, and the
-/// harnesses whose update is running now, whichever page began it.
-#[derive(Debug)]
-pub struct Observed {
-    pub rows: Vec<Stamped>,
-    pub updating: Vec<Harness>,
-}
 
 /// How long a row may take: at this time it is answered with what it has.
 const ROW_LIMIT: Duration = Duration::from_secs(40);
@@ -114,12 +89,6 @@ struct Inner {
     /// The number of the last look begun of each harness, taken when the look begins and not
     /// when it is answered: the newest look's row is the one kept and the one the page shows.
     looks: RefCell<HashMap<Harness, u64>>,
-    /// The harnesses whose update is running: a second update of one is refused.
-    updating: RefCell<HashSet<Harness>>,
-    /// How many updates of each harness have ended: a check that sees the number change
-    /// while it collects its rows looks again, so that no row older than an update that has
-    /// ended is the page's last word.
-    ended: RefCell<HashMap<Harness, u64>>,
 }
 
 /// Looks at the harnesses' CLIs and updates them.
@@ -195,8 +164,6 @@ impl HarnessAdmin {
                 cache: RefCell::new(HashMap::new()),
                 pending: RefCell::new(HashMap::new()),
                 looks: RefCell::new(HashMap::new()),
-                updating: RefCell::new(HashSet::new()),
-                ended: RefCell::new(HashMap::new()),
             }),
         }
     }
@@ -210,58 +177,19 @@ impl HarnessAdmin {
         Ok(self
             .observe(id, refresh)
             .await?
-            .rows
             .into_iter()
             .map(|(_, row)| row)
             .collect())
     }
 
-    /// [`check`](Self::check), each row with its stamp and the updates that are running.
-    pub async fn observe(&self, id: Option<&str>, refresh: bool) -> Result<Observed, String> {
+    /// [`check`](Self::check), each row with its stamp.
+    pub async fn observe(&self, id: Option<&str>, refresh: bool) -> Result<Vec<Stamped>, String> {
         let harnesses = match id {
             None => known_harnesses().to_vec(),
             Some(name) => vec![Harness::from_name(name).ok_or("Unknown harness")?],
         };
-        let ended = |harness: Harness| self.inner.ended.borrow().get(&harness).copied();
-        let before: Vec<_> = harnesses.iter().map(|harness| ended(*harness)).collect();
         let looks = harnesses.iter().map(|harness| self.look(*harness, refresh));
-        let mut rows = join_all(looks).await;
-        // A row collected before an update ended is older than the update: it is not the
-        // answer. The look is made again, which finds the row the update left, and again
-        // if another update ended meanwhile; the running list is read last, with nothing
-        // awaited between it and the last look.
-        let mut seen = before;
-        loop {
-            let moved: Vec<usize> = (0..harnesses.len())
-                .filter(|at| ended(harnesses[*at]) != seen[*at])
-                .collect();
-            if moved.is_empty() {
-                break;
-            }
-            for at in &moved {
-                seen[*at] = ended(harnesses[*at]);
-            }
-            let again = join_all(moved.iter().map(|at| self.look(harnesses[*at], false))).await;
-            for (at, row) in moved.into_iter().zip(again) {
-                rows[at] = row;
-            }
-        }
-        Ok(Observed {
-            rows,
-            updating: self.updating(),
-        })
-    }
-
-    /// The harnesses whose update is running, in the order they are listed in.
-    pub fn updating(&self) -> Vec<Harness> {
-        let running = self.inner.updating.borrow();
-        known_harnesses()
-            .iter()
-            .copied()
-            .filter(|harness| {
-                running.contains(harness) || record::running(&self.inner.env, *harness)
-            })
-            .collect()
+        Ok(join_all(looks).await)
     }
 
     /// One harness's row: the one kept, the inspection that is running, or an

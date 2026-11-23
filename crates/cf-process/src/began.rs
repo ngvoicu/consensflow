@@ -11,14 +11,6 @@ pub fn began_after(pid: u32, time: SystemTime) -> bool {
     began(pid).is_some_and(|began| began > time)
 }
 
-/// When the process `pid` began, in milliseconds since the epoch, as the system says: with
-/// its number it names the process, which no process that is given the number after it ends
-/// has the same of. None where it is gone or the system will not say.
-pub fn began_ms(pid: u32) -> Option<i64> {
-    let since = began(pid)?.duration_since(SystemTime::UNIX_EPOCH).ok()?;
-    i64::try_from(since.as_millis()).ok()
-}
-
 /// When the process `pid` began, as the system says (`Started`: to the microsecond).
 #[cfg(unix)]
 fn began(pid: u32) -> Option<SystemTime> {

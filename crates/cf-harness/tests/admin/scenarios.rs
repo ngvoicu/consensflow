@@ -29,8 +29,8 @@ use crate::shape::{
 /// How many scenarios there are at least: a file with fewer has lost some.
 /// Windows records ten fewer, the nine that make a link and the one that tries
 /// a system that is not Windows; its floor waits for the five of npm's folder,
-/// which only a run on Windows records, to be counted (85).
-const AT_LEAST: usize = if cfg!(windows) { 85 } else { 94 };
+/// which only a run on Windows records, to be counted (74).
+const AT_LEAST: usize = if cfg!(windows) { 74 } else { 83 };
 
 /// What a begun step settled with.
 type Done = Result<Value, String>;
@@ -256,13 +256,6 @@ impl Play {
                             .map(|row| serde_json::to_value(&**row).unwrap())
                             .collect(),
                     ))
-                });
-            }
-            "update" => {
-                let admin = Rc::clone(&self.admin);
-                self.begin(name, async move {
-                    let outcome = admin.update(id.as_deref().unwrap_or_default()).await?;
-                    Ok(serde_json::to_value(&outcome).unwrap())
                 });
             }
             "source" => {

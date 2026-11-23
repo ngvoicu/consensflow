@@ -6,8 +6,11 @@
 
 [run]
 harness-window-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
-# The page's own suite, in Chromium: the real routes' answers are what its cases feed it.
-harness-window-page = ["npm", "--prefix", "app", "exec", "--", "playwright", "test", "tests/harnesses.spec.mjs", "-g", "being updated|polls nothing|daemon refuses"]
+# The page's own suite, in Chromium: the commands it shows, and that it installs nothing.
+harness-window-page = ["npm", "--prefix", "app", "exec", "--", "playwright", "test", "tests/harnesses.spec.mjs", "-g", "shows the exact command|below the version|installs nothing"]
+harness-window-screens = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::tests::harnesses"]
+harness-window-recorded = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin"]
+harness-window-commands = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::source"]
 harness-window-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "harness_check::"]
 
 # The row says what the check said: a refusal is the launch's sentence, and nothing is "Ready"
@@ -216,92 +219,88 @@ replace = '''
     let stamped = (answered, Rc::clone(&row));
 '''
 
-[[plant]]
-name = "harness window: the install lock is left out"
-meant = "a_second_update_of_a_harness_is_refused_in_words_while_the_first_runs"
-runs = ["harness-window-admin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/admin/update.rs"
-find = '''
-        if record::running(&inner.env, harness) || !inner.updating.borrow_mut().insert(harness) {
-'''
-replace = '''
-        if record::running(&inner.env, harness) || (inner.updating.borrow_mut().insert(harness) && false) {
-'''
-
-[[plant]]
-name = "harness window: the daemon does not say an update is running"
-meant = "a_second_update_of_a_harness_is_refused_in_words_while_the_first_runs"
-runs = ["harness-window-admin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/admin.rs"
-find = '''
-            updating: self.updating(),
-'''
-replace = '''
-            updating: Vec::new(),
-'''
-
 # One update of a harness runs at a time across a daemon's replacement: the record an installer
 # leaves in the home (its number and when it began) is looked at before a second one begins.
-[[plant]]
-name = "harness window: the installer's record is not looked at"
-meant = "a_record_of_a_running_installer_refuses_an_update_in_a_daemon_that_did_not_begin_it"
-runs = ["harness-window-admin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/admin/update.rs"
-find = '''
-        if record::running(&inner.env, harness) || !inner.updating.borrow_mut().insert(harness) {
-'''
-replace = '''
-        if !inner.updating.borrow_mut().insert(harness) {
-'''
 
 # No row older than an update that has ended: the look is made again when one ended meanwhile.
-[[plant]]
-name = "harness window: the rows are read before the running list and not again"
-meant = "a_check_that_waited_through_an_update_does_not_return_the_row_from_before_it"
-runs = ["harness-window-admin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/admin.rs"
-find = '''
-            if moved.is_empty() {
-'''
-replace = '''
-            if true {
-'''
 
 # The refusal is the daemon's `error`, and the page shows its words and keeps Update off.
-[[plant]]
-name = "harness window: the page reads the refusal from message"
-meant = "a_second_page_that_asks_for_an_update_the_daemon_refuses_shows_its_words_and_keeps_update_off"
-runs = ["harness-window-page"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/screens/pages/harnesses.html"
-find = '''
-  try { words = (await response.json()).error; } catch (error) { /* no words */ }
-'''
-replace = '''
-  try { words = (await response.json()).message; } catch (error) { /* no words */ }
-'''
 
 # Nothing polls: a page that is told an update runs asks again only when the person says Refresh.
+
+# The page is read-only (the owner, 2026-11-23): no route of the daemon installs a harness.
 [[plant]]
-name = "harness window: a poll is put back"
-meant = "a_page_opened_while_an_update_runs_says_so_offers_no_second_update_and_polls_nothing"
+name = "harness window: an install route is put back"
+meant = "the_daemon_has_no_route_that_installs_a_harness"
+runs = ["harness-window-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '''
+        "/api/harnesses/check" => Some(Screen::HarnessCheck),
+'''
+replace = '''
+        "/api/harnesses/check" => Some(Screen::HarnessCheck),
+        "/api/harnesses/update" => Some(Screen::HarnessCheck),
+'''
+
+# The command shown is the one that updates it the way it was installed: a Homebrew cask is
+# upgraded as a cask.
+[[plant]]
+name = "harness window: a Homebrew cask is upgraded as a formula"
+meant = "every_scenario_answers_as_node_answered_step_by_step"
+runs = ["harness-window-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+                update.push("--cask".to_owned());
+'''
+replace = '''
+                update.push("--formula".to_owned());
+'''
+
+# What a person pastes is quoted where the shell would split it.
+[[plant]]
+name = "harness window: a command with a space in its path is not quoted"
+meant = "a_command_a_person_copies_quotes_what_the_shell_would_split"
+runs = ["harness-window-commands"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+        let plain = !word.is_empty()
+'''
+replace = '''
+        let plain = true || !word.is_empty()
+'''
+
+# The page shows the command the daemon said, not another.
+[[plant]]
+name = "harness window: the page shows the release in the place of the command"
+meant = "a harness installed with Homebrew cask shows the exact command that updates it, with Copy"
 runs = ["harness-window-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/screens/pages/harnesses.html"
 find = '''
-    for (const running of updating || []) BUSY.add(running);
+        put.append(el('code', null, command));
 '''
 replace = '''
-    for (const running of updating || []) BUSY.add(running);
-    if ((updating || []).length) setTimeout(() => checkHarnesses(), 2000);
+        put.append(el('code', null, update.value));
+'''
+
+# A harness ConsensFlow cannot start shows its command too, not only one with a newer release.
+[[plant]]
+name = "harness window: a required version shows no command"
+meant = "a harness below the version ConsensFlow needs shows its reason and its command"
+runs = ["harness-window-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/harnesses.html"
+find = '''
+    if (update.state === 'available' || required) {
+'''
+replace = '''
+    if (update.state === 'available') {
 '''

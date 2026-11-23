@@ -1,9 +1,7 @@
 //! What the admin says of a harness, as the page reads it: a row of what is
-//! known of one CLI, and what became of an update. Each is written with its
+//! known of one CLI. Each is written with its
 //! fields in the order Node's admin built them, absent where it left a key out,
 //! so that its JSON reads as Node's did.
-
-use std::rc::Rc;
 
 use cf_proto::agents::Harness;
 use serde::{Serialize, Serializer};
@@ -205,46 +203,6 @@ impl Extension {
             pi::Extension::Error { reason } => Self::failed(reason),
         }
     }
-}
-
-/// How an update ended, in the words the page switches on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Ended {
-    /// The install method is not recognized: nothing was run.
-    Unsupported,
-    Updated,
-    Unchanged,
-    Failed,
-}
-
-/// What an update came to.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum Outcome {
-    /// Nothing was run: the install method is not recognized.
-    Unsupported {
-        id: Harness,
-        state: Ended,
-        reason: String,
-        harness: Rc<Row>,
-    },
-    /// The command ran, and the CLI was checked again.
-    Ran {
-        id: Harness,
-        state: Ended,
-        /// The version before and after, when one was read.
-        before: Option<String>,
-        after: Option<String>,
-        command: String,
-        /// The last of what the command wrote, to either stream.
-        output: String,
-        /// Why it failed.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-        /// The row as it is after the update.
-        harness: Rc<Row>,
-    },
 }
 
 #[cfg(test)]

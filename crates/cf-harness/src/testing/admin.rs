@@ -141,16 +141,9 @@ impl<T: 'static> Script<T> {
 pub struct ScriptedCapture {
     script: Script<Said>,
     ran: RefCell<Vec<(Program, Limits)>>,
-    /// The number an update's installer says it has, when the test gives it one.
-    installer: Cell<Option<u32>>,
 }
 
 impl ScriptedCapture {
-    /// The installers of updates say they are the process `pid`.
-    pub fn installers_are(&self, pid: u32) {
-        self.installer.set(Some(pid));
-    }
-
     /// Scripts what `named` answers each time it is run, after the answers
     /// scripted for it already.
     pub fn answer(&self, named: &str, replies: impl IntoIterator<Item = Response<Said>>) {
@@ -191,22 +184,6 @@ impl ScriptedCapture {
 }
 
 impl Capture for ScriptedCapture {
-    fn capture_started(
-        &self,
-        program: Program,
-        limits: Limits,
-        started: crate::admin::Started,
-    ) -> Work<'_, Said> {
-        if let Some(pid) = self
-            .installer
-            .get()
-            .filter(|_| named(&program).ends_with(" update"))
-        {
-            started(pid);
-        }
-        self.capture(program, limits)
-    }
-
     fn capture(&self, program: Program, limits: Limits) -> Work<'_, Said> {
         let named = named(&program);
         self.ran.borrow_mut().push((program, limits));

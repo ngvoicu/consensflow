@@ -393,11 +393,6 @@ impl Ender {
         }
     }
 
-    /// The program's number, while it is there.
-    pub fn pid(&self) -> Option<u32> {
-        self.pid
-    }
-
     /// Whether the child is still there to be ended.
     pub fn running(&self) -> bool {
         self.live.upgrade().is_some_and(|live| !live.exited())
