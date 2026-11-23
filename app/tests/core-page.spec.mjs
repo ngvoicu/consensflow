@@ -5905,7 +5905,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     .toEqual(
       ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
         start,
-        ['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'],
+        ['pageId', 'epoch', 'id', 'generation', 'sequence', 'length', 'bytes'],
       ]),
     )
 })
