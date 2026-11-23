@@ -299,11 +299,25 @@ impl Shared {
         self.seen().refused.len()
     }
 
-    /// Whether the window `body` asks for may open on this rig's pane host: why not, where not.
-    pub fn window_admitted(&self, body: &Value) -> std::result::Result<(), String> {
+    /// The environment the window `body` asks for is judged on: the pane host's, the request's
+    /// `env` over it, its `dropEnv` out ([`crate::door::spawn::pane_environment`]). None for
+    /// routers a test makes without a host.
+    pub fn judged_environment(
+        &self,
+        body: &Value,
+    ) -> Option<std::result::Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String>> {
+        self.host_env
+            .as_ref()
+            .map(|host| crate::door::spawn::pane_environment(host, body, cfg!(windows)))
+    }
+
+    /// The window `body` asks for, as this rig's pane host is sent it, where it may open: why not,
+    /// where not ([`crate::door::window_to_send`], over the names the account's registry stores
+    /// now, [`crate::door::stored_names`]).
+    pub fn window_to_send(&self, body: &Value) -> std::result::Result<Value, String> {
         match &self.host_env {
-            Some(host) => crate::door::window_admitted(host, body),
-            None => Ok(()),
+            Some(host) => crate::door::window_to_send(host, body, &crate::door::stored_names()),
+            None => Ok(body.clone()),
         }
     }
 
@@ -534,17 +548,28 @@ impl Shared {
         let id = frame["id"].as_str().unwrap_or_default();
         // The daemon's windows are judged as the case's are, before the pane host has them: one
         // that breaks the seal is not opened, and the daemon is answered as refused.
+        let mut sent: Option<String> = None;
         if frame["kind"] == "req" && frame["op"] == "pane.open" {
-            if let Err(why) = self.window_admitted(&frame["body"]) {
-                let mut seen = self.seen();
-                seen.daemon += 1;
-                seen.refused.push((frame["body"].clone(), why.clone()));
-                drop(seen);
-                let refused = json!({ "ok": false, "error": format!("the rig refused the window: {why}") });
-                daemon.send(wire::response(id, "pane.open", &refused));
-                return;
+            match self.window_to_send(&frame["body"]) {
+                Err(why) => {
+                    let mut seen = self.seen();
+                    seen.daemon += 1;
+                    seen.refused.push((frame["body"].clone(), why.clone()));
+                    drop(seen);
+                    let refused = json!({ "ok": false, "error": format!("the rig refused the window: {why}") });
+                    daemon.send(wire::response(id, "pane.open", &refused));
+                    return;
+                }
+                // The host is sent the window as the door made it, not as the daemon asked it.
+                Ok(body) if body != frame["body"] => {
+                    let mut rewritten = frame.clone();
+                    rewritten["body"] = body;
+                    sent = Some(rewritten.to_string());
+                }
+                Ok(_) => {}
             }
         }
+        let line = sent.as_deref().unwrap_or(line);
         {
             let mut seen = self.seen();
             seen.daemon += 1;

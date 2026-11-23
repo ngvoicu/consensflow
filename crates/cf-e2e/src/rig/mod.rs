@@ -611,15 +611,28 @@ impl Rig {
     /// Opens the window `body` asks for (`pane.open`) on the rig's own pane host, the one sender
     /// of it: only where the environment it will really have (the host's, the request's `env`
     /// over it, its `dropEnv` out last) holds the seal and its program needs no door of its own
-    /// ([`crate::door::window_admitted`]). A window that does not is not opened, and the refusal
-    /// is the error.
+    /// ([`crate::door::window_admitted`]), and sent so that no variable the account's registry
+    /// stores reaches it ([`crate::door::window_to_send`]). A window that does not is not opened,
+    /// and the refusal is the error.
     pub fn open_pane(&self, body: Value) -> Result<Value> {
-        if let Err(why) = self.shared.window_admitted(&body) {
-            self.shared.seen().refused.push((body.clone(), why.clone()));
-            return Err(Error::LiveApp(format!("the rig refused the window: {why}")));
-        }
+        let body = match self.shared.window_to_send(&body) {
+            Ok(sent) => sent,
+            Err(why) => {
+                self.shared.seen().refused.push((body.clone(), why.clone()));
+                return Err(Error::LiveApp(format!("the rig refused the window: {why}")));
+            }
+        };
         let id = self.shared.next_host_id();
         self.ask(&id, "pane.open", &body, self.host.sink(), "the pane host")
+    }
+
+    /// The environment the window `body` asks for is judged on, on this rig's pane host: what the
+    /// window must have, whatever the account stores (T-2086 B1).
+    pub fn judged_environment(&self, body: &Value) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
+        self.shared
+            .judged_environment(body)
+            .ok_or_else(|| Error::LiveApp("the rig has no pane host's environment".to_owned()))?
+            .map_err(Error::LiveApp)
     }
 
     /// Each window the rig refused to open, by the daemon's request or the case's, and why.

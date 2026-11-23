@@ -408,13 +408,18 @@ pub(super) fn give_muse_its_folders(
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
 /// program the variable `var` names, or on Windows the shim of `program`.
+/// The door is told what the shim starts, so that a window of it is judged by that program
+/// (T-2086 C2).
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     let shim = dir.join(stand_in::program_name(name));
     if cfg!(windows) {
-        crate::door::write_executable(&shim, stand_in::window_command(program)?)
+        crate::door::write_executable(&shim, stand_in::window_command(program)?)?;
+        crate::door::register_shim(&shim, None, program);
     } else {
-        crate::door::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
+        crate::door::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))?;
+        crate::door::register_shim(&shim, Some(var), program);
     }
+    Ok(())
 }
 
 /// The file of the stand-ins a case seats, in the rig's folder beside the home: the case's

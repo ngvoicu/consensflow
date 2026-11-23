@@ -240,6 +240,156 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened() {
     }
 }
 
+/// A pane host's environment, as the door gives it: the run's homes below `home`, a search path
+/// and the door's own variables.
+fn window_host(home: &Path) -> Vec<(OsString, OsString)> {
+    run_homes(&home.to_string_lossy())
+        .into_iter()
+        .chain(vars(&[("PATH", "/usr/bin:/bin")]))
+        .chain(
+            super::Door::child_vars()
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into())),
+        )
+        .collect()
+}
+
+/// `harness`'s update switches, as a window's `env`.
+fn switches_of(harness: &str) -> serde_json::Value {
+    spawn::update_switches(harness)
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), json!(value)))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+/// T-2086 C1: a window that starts a harness's program without the switches that keep it from
+/// updating itself is refused, through the window's own door, and opened with them.
+#[test]
+fn a_window_that_starts_a_harness_without_its_update_switches_is_not_opened() {
+    let root = made("k3-switches-").unwrap();
+    let host = window_host(&root.path().join("home"));
+    let muse = root.path().join("opt").join("muse-bin-1.4.14");
+    let bare = json!({ "id": "p-1", "argv": [muse], "env": {} });
+    let refused = super::window_admitted(&host, &bare).unwrap_err();
+    assert!(refused.contains("MUSE"), "{refused}");
+    let switched = json!({ "id": "p-2", "argv": [muse], "env": switches_of("muse") });
+    assert_eq!(super::window_admitted(&host, &switched), Ok(()));
+}
+
+/// T-2086 C2: a live Claude window starts the rig's shim (`claude`, a file the run made), which
+/// starts what its variable names (`CF_TEST_HARNESS`; on Windows the program written in it), the
+/// kit's wrapper (`claude-isolated`, made by the run too), which starts the real Claude Code. The
+/// window's door sees through both: the window is Claude's, and needs its switches. A shim that
+/// starts a stand-in is a plain program.
+#[test]
+fn a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_harnesss_switches() {
+    let root = made("k3-wrapper-").unwrap();
+    let host = window_host(&root.path().join("home"));
+    let wrapper = root.path().join("claude-isolated");
+    super::write_executable(&wrapper, "#!/bin/sh\nexec /the/claude \"$@\"\n").unwrap();
+    super::register_wrapper(&wrapper, "claude");
+    let stand_in = root.path().join("fake_agent");
+    super::write_executable(&stand_in, "#!/bin/sh\n").unwrap();
+    let shim = root.path().join("claude");
+    super::write_executable(&shim, "#!/bin/sh\nexec \"$CF_TEST_HARNESS\" \"$@\"\n").unwrap();
+    super::register_shim(&shim, Some("CF_TEST_HARNESS"), &stand_in);
+
+    let wrapped = json!({ "id": "p-1", "argv": [wrapper], "env": {} });
+    let refused = super::window_admitted(&host, &wrapped).unwrap_err();
+    assert!(refused.contains("DISABLE_AUTOUPDATER"), "{refused}");
+    let switched = json!({ "id": "p-2", "argv": [wrapper], "env": switches_of("claude") });
+    assert_eq!(super::window_admitted(&host, &switched), Ok(()));
+
+    // The shim, on a stand-in: plain. On the wrapper its variable names: Claude's.
+    let on_stand_in = json!({ "id": "p-3", "argv": [shim], "env": {} });
+    assert_eq!(super::window_admitted(&host, &on_stand_in), Ok(()));
+    let mut env = serde_json::Map::new();
+    env.insert("CF_TEST_HARNESS".into(), json!(wrapper));
+    let on_wrapper = json!({ "id": "p-4", "argv": [shim], "env": env.clone() });
+    assert!(super::window_admitted(&host, &on_wrapper).is_err(), "the shim's wrapper was not seen");
+    for (name, value) in switches_of("claude").as_object().unwrap() {
+        env.insert(name.clone(), value.clone());
+    }
+    let switched = json!({ "id": "p-5", "argv": [shim], "env": env });
+    assert_eq!(super::window_admitted(&host, &switched), Ok(()));
+}
+
+/// The environment a pane host on Windows gives a window, in its builder's order (T-2086 B1):
+/// the host's own, every value the account's registry stores over it, the request's `env` over
+/// that, and its `dropEnv` taken out last. Names compare in any case, as Windows' do.
+fn as_the_host_builds_it(
+    host: &[(OsString, OsString)],
+    stored: &[(&str, &str)],
+    body: &serde_json::Value,
+) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = host
+        .iter()
+        .map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned()))
+        .collect();
+    let put = |env: &mut Vec<(String, String)>, name: &str, value: &str| {
+        env.retain(|(held, _)| !held.eq_ignore_ascii_case(name));
+        env.push((name.to_owned(), value.to_owned()));
+    };
+    for (name, value) in stored {
+        put(&mut env, name, value);
+    }
+    for (name, value) in body["env"].as_object().into_iter().flatten() {
+        put(&mut env, name, value.as_str().unwrap());
+    }
+    for name in body["dropEnv"].as_array().into_iter().flatten() {
+        env.retain(|(held, _)| !held.eq_ignore_ascii_case(name.as_str().unwrap()));
+    }
+    let mut env: Vec<_> = env.into_iter().map(|(name, value)| (name.to_ascii_lowercase(), value)).collect();
+    env.sort();
+    env
+}
+
+/// T-2086 B1: on Windows the pane host puts the account's stored variables (`setx`'s) over its own
+/// environment, which the seal never saw. The window the door sends names each stored variable:
+/// the judged value where the judged environment has it (a request's value wins over the
+/// registry's), and taken out where it has not, so the window's environment is the one judged,
+/// whatever the registry holds.
+#[test]
+fn a_window_is_sent_so_that_no_stored_variable_of_the_account_reaches_it() {
+    let root = made("k3-stored-").unwrap();
+    let home = root.path().join("home");
+    let temp = root.path().join("temp");
+    let host: Vec<(OsString, OsString)> = run_homes(&home.to_string_lossy())
+        .into_iter()
+        .chain(vars(&[("PATH", "/usr/bin:/bin"), ("TEMP", &temp.to_string_lossy())]))
+        .chain(
+            super::Door::child_vars()
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into())),
+        )
+        .collect();
+    // What `setx` leaves in HKCU\Environment: a harness's home, the temp folder, the search
+    // path, and a variable the host has not.
+    let stored = [
+        ("CODEX_HOME", "C:\\Users\\owner\\.codex"),
+        ("temp", "C:\\Users\\owner\\AppData\\Local\\Temp"),
+        ("Path", "C:\\Users\\owner\\.local\\bin"),
+        ("OneDrive", "C:\\Users\\owner\\OneDrive"),
+    ];
+    let names: Vec<OsString> = stored.iter().map(|(name, _)| OsString::from(*name)).collect();
+    let body = json!({ "id": "p-1", "argv": ["/bin/sh"], "env": { "CF_ASKED": "1" }, "dropEnv": [] });
+    let judged = spawn::pane_environment(&host, &body, true).unwrap();
+    let sent = super::window_to_send(&host, &body, &names).unwrap();
+    assert_eq!(
+        as_the_host_builds_it(&host, &stored, &sent),
+        as_the_host_builds_it(&judged, &[], &json!({})),
+        "{sent}"
+    );
+    // A stored name the request takes out stays out.
+    let dropping = json!({ "id": "p-2", "argv": ["/bin/sh"], "dropEnv": ["TEMP"] });
+    let sent = super::window_to_send(&host, &dropping, &names).unwrap();
+    let built = as_the_host_builds_it(&host, &stored, &sent);
+    assert!(!built.iter().any(|(name, _)| name == "temp"), "{built:?}");
+    // With nothing stored, the request is sent as it was asked.
+    assert_eq!(super::window_to_send(&host, &body, &[]).unwrap(), body);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_daemons_window_that_breaks_the_seal_is_answered_as_refused_and_never_reaches_the_host() {
@@ -334,6 +484,23 @@ fn a_place_that_cannot_be_resolved_but_for_its_absence_is_refused() {
     // settles a `..` by the path's words, as the door's absolute path does.
     #[cfg(unix)]
     assert!(judge(&root.path().join("absent/../x"), Act::Write).is_err());
+}
+
+/// T-2086 C3: a place below a folder that cannot be read cannot be resolved, and is refused: it
+/// is not taken for absent, which would judge it by the folder above as below a folder the run
+/// made.
+#[cfg(unix)]
+#[test]
+fn a_place_below_a_folder_that_cannot_be_read_is_refused() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = made("k3-unreadable-").unwrap();
+    let locked = root.path().join("locked");
+    fs::create_dir_all(locked.join("child")).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let judged = judge(&locked.join("child").join("file"), Act::Write);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+    let refused = judged.unwrap_err().to_string();
+    assert!(refused.contains("cannot be"), "{refused}");
 }
 
 #[cfg(unix)]

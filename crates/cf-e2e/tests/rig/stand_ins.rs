@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::files;
 use cf_e2e::process::{Run, Spawned};
-#[cfg(unix)]
 use serde_json::json;
 #[cfg(unix)]
 use serde_json::Value;
@@ -393,6 +392,67 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
     }
     assert!(!env.contains("CF_KIT_PROJECT_HOME"), "{env}");
     let _ = rig.close_pane(json!({ "id": "the-next", "generation": 1 }));
+    rig.close()?;
+    Ok(())
+}
+
+/// T-2086 B1: on Windows the pane host's builder puts every variable the account's registry stores
+/// over the host's own environment, which the seal never saw (`setx`'s `CODEX_HOME`, and always
+/// `TEMP`, `TMP` and `Path` from `HKCU\Environment`). A real window writes its environment down:
+/// each name the registry holds has the value the window was judged on, or is not there where the
+/// judged environment has none. Nothing is written to the registry: it is read for its names only.
+#[cfg(windows)]
+#[test]
+fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores() -> Outcome {
+    let rig = crate::rig()?;
+    let system = std::env::var_os("SystemRoot").ok_or("no SystemRoot")?;
+    let shell = Path::new(&system).join("System32").join("cmd.exe");
+    let body = json!({
+        "id": "the-window",
+        "generation": 1,
+        "cwd": rig.workspace(),
+        "argv": [shell, "/d", "/c", "set > window-env.txt & ping -n 30 127.0.0.1 > nul"],
+        "env": {},
+        "size": { "rows": 24, "cols": 80 },
+        "backlogBytes": 65536,
+    });
+    let judged = rig.judged_environment(&body)?;
+    let opened = rig.open_pane(body)?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let said = rig.workspace().join("window-env.txt");
+    rig.wait_for("the window's environment", crate::secs(20), || {
+        Ok(std::fs::read_to_string(&said).is_ok_and(|text| text.to_ascii_uppercase().contains("\nPATH=")))
+    })?;
+    let text = std::fs::read_to_string(&said)?;
+    let window: Vec<(String, String)> = text
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    let stored = cf_e2e::door::stored_names();
+    assert!(!stored.is_empty(), "the account's registry holds no variable (HKCU\\Environment has TEMP)");
+    let mut wrong = Vec::new();
+    for name in &stored {
+        let name = name.to_string_lossy();
+        let had = window
+            .iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.as_str());
+        let judged = judged
+            .iter()
+            .find(|(held, _)| held.to_string_lossy().eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.to_string_lossy().into_owned());
+        if had != judged.as_deref() {
+            // Which names differ, never their values: they are the account's.
+            wrong.push(format!(
+                "{name} (the window {} it, the judged environment {} it)",
+                if had.is_some() { "has" } else { "has not" },
+                if judged.is_some() { "has" } else { "has not" }
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "the window has what the account stores: {}", wrong.join("; "));
+    let _ = rig.close_pane(json!({ "id": "the-window", "generation": 1 }));
     rig.close()?;
     Ok(())
 }

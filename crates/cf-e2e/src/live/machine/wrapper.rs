@@ -145,6 +145,8 @@ pub fn shimmed_claude_with_servers(
 fn written(folder: &Path, name: &str, script: String) -> Result<PathBuf> {
     let program = folder.join(name);
     crate::door::write_executable(&program, script)?;
+    // A window that starts it starts Claude Code, and is asked for its switches (T-2086 C2).
+    crate::door::register_wrapper(&program, "claude");
     Ok(program)
 }
 
@@ -221,6 +223,8 @@ fn write_windows_wrapper(
     crate::door::write(&script, relay(why, argv, stand_in, names))?;
     let program = folder.join(format!("{name}.cmd"));
     crate::door::write_executable(&program, cmd(why, node, &script))?;
+    // A window that starts it starts the harness it relays to, Claude Code (T-2086 C2).
+    crate::door::register_wrapper(&program, "claude");
     Ok(program)
 }
 
@@ -469,6 +473,11 @@ mod tests {
         let folder = crate::door::made("cf-test-").unwrap();
         let program = isolated_claude(folder.path(), Path::new("/bin/echo")).unwrap();
         assert_eq!(program, folder.path().join("claude-isolated"));
+        // A window that starts it is Claude Code's, to the window's door (T-2086 C2).
+        assert_eq!(
+            crate::door::program_in(&program, &[]),
+            crate::door::spawn::Program::Harness("claude")
+        );
         // Run by the shell: a script just written and started as a program may be
         // refused as a file still open for writing, when another test starts one.
         let ran = crate::process::Run::new("/bin/sh")

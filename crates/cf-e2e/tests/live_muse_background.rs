@@ -95,6 +95,9 @@ fn look(id: &str, env: &BTreeMap<String, String>, ended: usize) -> Result<Option
 #[ignore = "live: one real Muse turn on the owner's login (cargo xtask live muse-background)"]
 fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcome {
     tui::on_a_mac()?;
+    // Before anything of the owner's Muse is read or copied (T-2086 N3): a real Muse window on a
+    // Mac runs only on a marked test machine.
+    cf_e2e::muse::real_window_allowed("Muse's background case").map_err(|refused| refused.to_string())?;
     // Its one window takes its model from Muse's list, not from shared `--models`.
     let log = Log::own_agents(
         "live muse-background",

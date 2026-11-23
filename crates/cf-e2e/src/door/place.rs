@@ -185,10 +185,7 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
 /// platform's default (any case on a Mac and on Windows) where no name of it has a letter.
 pub fn any_case_at(folder: &Path) -> bool {
     let mut at = folder.to_path_buf();
-    loop {
-        let Some(name) = at.file_name().and_then(|name| name.to_str()) else {
-            break;
-        };
+    while let Some(name) = at.file_name().and_then(|name| name.to_str()) {
         let other: String = name
             .chars()
             .map(|letter| {

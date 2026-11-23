@@ -70,6 +70,8 @@ pub mod database;
 pub mod identity;
 pub mod place;
 pub mod spawn;
+#[cfg(windows)]
+mod windows_registry;
 mod writes;
 
 pub use again::again_under_audit;
@@ -211,8 +213,7 @@ impl Door {
                 std::env::temp_dir()
                     .join(format!("consensflow-live-audit-{}.txt", std::process::id()))
             });
-        let opened;
-        if is_on(made) {
+        let opened = if is_on(made) {
             let open = fs::OpenOptions::new()
                 .append(true)
                 .open(&file)
@@ -231,7 +232,7 @@ impl Door {
                     ));
                 }
             }
-            opened = open;
+            open
         } else {
             let mut open = fs::OpenOptions::new()
                 .write(true)
@@ -258,8 +259,8 @@ impl Door {
                     file.display()
                 )
             })?;
-            opened = open;
-        }
+            open
+        };
         Ok(Door {
             said: Some(file),
             open: Some(std::sync::Arc::new(Mutex::new(opened))),
@@ -950,11 +951,149 @@ pub fn window_admitted(
     }
 }
 
+/// The names of the variables the account's registry stores (Windows: the machine's
+/// `Session Manager\Environment` and the user's `Environment`), which the pane host's builder puts
+/// over its own environment in every window; none elsewhere. Names only: no value is read. A key
+/// that cannot be opened holds none.
+pub fn stored_names() -> Vec<std::ffi::OsString> {
+    #[cfg(windows)]
+    {
+        windows_registry::stored_names()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// The window `body` asks for, as the rig sends it to its pane host on `host`, where it may open
+/// ([`window_admitted`]); why not, where not (T-2086 B1). On Windows the pane host starts a window
+/// on its own environment with every variable the account's registry stores put over it
+/// (portable-pty's builder), then the request's `env`, then its `dropEnv` taken out. So the
+/// request sent names each of `stored`, the names the registry holds: with the value the window
+/// was judged on where it has that name (a request's value wins over the registry's), and in
+/// `dropEnv` where it has not. The window's environment is then the one judged, whatever the
+/// registry holds; a value of the judged one that is not Unicode, which a request cannot carry,
+/// refuses the window.
+pub fn window_to_send(
+    host: &[(std::ffi::OsString, std::ffi::OsString)],
+    body: &serde_json::Value,
+    stored: &[std::ffi::OsString],
+) -> Result<serde_json::Value, String> {
+    window_admitted(host, body)?;
+    if stored.is_empty() {
+        return Ok(body.clone());
+    }
+    let judged = spawn::pane_environment(host, body, cfg!(windows))?;
+    let same = |left: &str, right: &std::ffi::OsStr| right.to_string_lossy().eq_ignore_ascii_case(left);
+    let mut sent = body.clone();
+    let mut env = sent["env"].as_object().cloned().unwrap_or_default();
+    let mut dropped = sent["dropEnv"].as_array().cloned().unwrap_or_default();
+    for name in stored {
+        let Some(text) = name.to_str() else {
+            return Err(format!(
+                "the account stores a variable whose name is not Unicode ({}), which a window's request cannot name",
+                name.to_string_lossy()
+            ));
+        };
+        if env.keys().any(|asked| asked.eq_ignore_ascii_case(text)) {
+            continue;
+        }
+        match judged.iter().find(|(held, _)| same(text, held)) {
+            Some((held, value)) => {
+                let value = value.to_str().ok_or_else(|| {
+                    format!(
+                        "the window's {} is not Unicode, so it cannot be named over the one the account stores",
+                        held.to_string_lossy()
+                    )
+                })?;
+                env.insert(held.to_string_lossy().into_owned(), value.into());
+            }
+            None => {
+                if !dropped
+                    .iter()
+                    .any(|out| out.as_str().is_some_and(|out| out.eq_ignore_ascii_case(text)))
+                {
+                    dropped.push(text.into());
+                }
+            }
+        }
+    }
+    sent["env"] = serde_json::Value::Object(env);
+    sent["dropEnv"] = serde_json::Value::Array(dropped);
+    Ok(sent)
+}
+
+/// What a file the run made starts, where it starts another program (T-2086 C2): a window is
+/// judged by that program, not by the file the run made.
+#[derive(Debug, Clone)]
+enum Starts {
+    /// A rig's shim: the program its variable names in the window's environment, or the one it
+    /// was written for where it reads no variable (Windows' holds the path) or the window has none.
+    Shim {
+        var: Option<String>,
+        program: PathBuf,
+    },
+    /// The kit's wrapper of a harness (`claude-isolated`, `claude-shimmed`), which starts the
+    /// harness's own program.
+    Wrapper(&'static str),
+}
+
+/// The files the run made that start another program, by their real paths.
+static STARTERS: Mutex<Vec<(PathBuf, Starts)>> = Mutex::new(Vec::new());
+
+fn register_starter(file: &Path, starts: Starts) {
+    let real = canonical(file).unwrap_or_else(|| file.to_path_buf());
+    let mut held = STARTERS.lock().unwrap_or_else(PoisonError::into_inner);
+    held.retain(|(path, _)| *path != real);
+    held.push((real, starts));
+}
+
+fn starter_of(real: &Path) -> Option<Starts> {
+    STARTERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(path, _)| path == real)
+        .map(|(_, starts)| starts.clone())
+}
+
+/// Registers `wrapper`, a file the run made, as the kit's wrapper of `harness`: a window that
+/// starts it starts `harness` ([`program_in`]).
+pub fn register_wrapper(wrapper: &Path, harness: &'static str) {
+    register_starter(wrapper, Starts::Wrapper(harness));
+}
+
+/// Registers `shim`, a file the run made, as a rig's shim: a window that starts it starts the
+/// program its variable `var` names in the window's environment, or `program` ([`program_in`]).
+pub fn register_shim(shim: &Path, var: Option<&str>, program: &Path) {
+    register_starter(
+        shim,
+        Starts::Shim {
+            var: var.map(str::to_owned),
+            program: program.to_path_buf(),
+        },
+    );
+}
+
 /// What `program` is ([`spawn::program_of`]), found on the search path `env` gives it where it
 /// is a bare name, by the file it resolves to.
 pub fn program_in(
     program: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> spawn::Program {
+    program_within(program, env, 0)
+}
+
+/// How many files that start another program a window's program is followed through.
+const STARTERS_DEEP: usize = 8;
+
+/// [`program_in`], `depth` files that start another program in: a rig's shim is followed to what
+/// it starts, and the kit's wrapper of a harness is that harness (T-2086 C2).
+fn program_within(
+    program: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    depth: usize,
 ) -> spawn::Program {
     let windows = cfg!(windows);
     let get = |wanted: &str| {
@@ -979,6 +1118,20 @@ pub fn program_in(
     };
     let real = found.as_deref().and_then(canonical);
     let judged = real.as_deref().or(found.as_deref()).unwrap_or(program);
+    if depth < STARTERS_DEEP {
+        match starter_of(judged) {
+            Some(Starts::Wrapper(harness)) => return spawn::Program::Harness(harness),
+            Some(Starts::Shim { var, program: written }) => {
+                let next = var
+                    .as_deref()
+                    .and_then(get)
+                    .filter(|value| !value.is_empty())
+                    .map_or(written, PathBuf::from);
+                return program_within(&next, env, depth + 1);
+            }
+            None => {}
+        }
+    }
     let in_store = inside_protected(judged);
     let made_by_run = is_made_or_below(judged);
     spawn::program_of(found.as_deref().unwrap_or(program), real.as_deref(), in_store, made_by_run)

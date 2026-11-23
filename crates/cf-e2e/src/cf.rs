@@ -131,7 +131,7 @@ pub fn engine_ask() -> Result<&'static Path> {
 enum Cargo {
     Door,
     #[cfg(test)]
-    Fake(Run),
+    Fake(Box<Run>),
 }
 
 /// The folder the run built `cf` and the pane host in before it, where it says one.
@@ -286,7 +286,7 @@ fn build(
     let ran = match cargo {
         Cargo::Door => crate::door::cargo::build(root, &words),
         #[cfg(test)]
-        Cargo::Fake(fake) => fake
+        Cargo::Fake(fake) => (*fake)
             .arg("build")
             .args(&words)
             .cwd(root)
@@ -329,7 +329,7 @@ mod tests {
     /// program of its own may be refused as a file still open for writing.
     fn cargo(text: &str) -> (tempfile::TempDir, Cargo) {
         let (folder, file) = script(text);
-        (folder, Cargo::Fake(Run::new("/bin/sh").arg(file)))
+        (folder, Cargo::Fake(Box::new(Run::new("/bin/sh").arg(file))))
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
     fn a_cargo_that_cannot_be_started_is_a_failed_build() {
         let root = tempfile::tempdir().unwrap();
         let failed = build(
-            Cargo::Fake(Run::new(root.path().join("no-cargo"))),
+            Cargo::Fake(Box::new(Run::new(root.path().join("no-cargo")))),
             root.path(),
             "cf",
             "cf",
@@ -711,7 +711,7 @@ mod tests {
     fn helper_asks_for_the_cf_of_a_run() {
         static CELL: Built = OnceLock::new();
         let root = PathBuf::from(own_var(ROOT).unwrap());
-        let cargo = Cargo::Fake(Run::new("/bin/sh").arg(own_var(CARGO).unwrap()));
+        let cargo = Cargo::Fake(Box::new(Run::new("/bin/sh").arg(own_var(CARGO).unwrap())));
         match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), (None, false)) {
             Ok(path) => {
                 let there: std::result::Result<bool, String> = if own_var(RUN).is_some() {
