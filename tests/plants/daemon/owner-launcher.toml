@@ -81,6 +81,15 @@ replace = '''                        super::launcher::updates_off_of(self.harnes
                             .take(0)
                             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),'''
 
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        for (name, value) in crate::door::spawn::update_switches(harness) {
+            run = run.var(name, value);
+        }'''
+replace = '''        for (name, value) in crate::door::spawn::update_switches(harness) {
+            let _ = (name, value);
+        }'''
+
 [[plant]]
 name = "owner launcher: a rig seats no guard of the launchers of the harnesses it runs"
 meant = "a_run_that_re_points_the_owners_launcher_at_a_copy_of_the_same_binary_fails_the_rig_that_ends"
