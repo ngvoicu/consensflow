@@ -256,6 +256,20 @@ impl Ledger {
 }
 
 impl Ledger {
+    /// Why the ledger can go on no more, if it cannot: a rollback did not take
+    /// and a transaction is open still. It refuses every write from then on
+    /// (`ledger-broken`); a connection that is out of its transaction stays
+    /// usable.
+    pub fn broken(&self) -> Option<&str> {
+        self.store.broken()
+    }
+
+    /// Told once, with the cause, the moment the ledger breaks: from inside
+    /// the operation that broke it, so what it does must not use the ledger.
+    pub fn on_broken(&mut self, hook: Box<dyn FnMut(&str)>) {
+        self.store.on_broken(hook);
+    }
+
     /// SQLite's own consistency check of the whole file: `ok` when sound.
     pub fn integrity(&mut self) -> Result<String, LedgerError> {
         Ok(self

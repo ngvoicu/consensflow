@@ -114,8 +114,7 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
                 Ok(())
             })();
             if let Err(cause) = step {
-                let _ = db.execute_batch("ROLLBACK");
-                return Err(cause);
+                return Err(crate::rollback::said(cause, crate::rollback::roll_back(db)));
             }
         }
         Ok(())

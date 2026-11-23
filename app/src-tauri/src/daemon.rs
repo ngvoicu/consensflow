@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use cf_bridge::Bridge;
 use cf_panes::headless::{reap_until_clean, Reaped};
 use cf_panes::pty::PaneTable;
+use serde_json::Value;
 
 use crate::daemon_command::LoginLookup;
 use crate::diag;
@@ -18,6 +19,10 @@ use crate::runtime::SHUTDOWN_REAP;
 
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
+/// What the daemon says, once, as it ends because its ledger cannot save any more
+/// (`cf_daemon::broken`): `{"words": …}`, which the person is told as they are. The app
+/// closes the windows and does not start that daemon again.
+pub(crate) const LEDGER_BROKEN_EVENT: &str = "ledger.broken";
 /// What the page is told of the daemon (see `DaemonStatus`).
 pub(crate) const DAEMON_STATUS_EVENT: &str = "daemon-status";
 /// Between starts of a daemon that failed to start.
@@ -157,6 +162,9 @@ struct DaemonState {
     up_since: Option<Instant>,
     /// The restarts in a row ([`Backoff::restarts`]).
     restarts: u32,
+    /// What the daemon in hand said as it ended because its ledger cannot save: the
+    /// person is told that, and it is not started again.
+    broken: Option<String>,
 }
 
 /// How a daemon that stopped is started again.
@@ -182,10 +190,25 @@ impl Daemon {
                 restart: None,
                 up_since: None,
                 restarts: 0,
+                broken: None,
             }),
             settled: Condvar::new(),
             report,
             login: Arc::default(),
+        })
+    }
+
+    /// What the daemon says as it ends because its ledger cannot save (the bridge's
+    /// `ledger.broken` event): its words are kept for the stop that follows.
+    pub(crate) fn hears_broken(self: &Arc<Self>) -> Arc<dyn Fn(Value) + Send + Sync> {
+        let daemon = Arc::downgrade(self);
+        Arc::new(move |body| {
+            let Some(daemon) = daemon.upgrade() else {
+                return;
+            };
+            if let Some(words) = body.get("words").and_then(Value::as_str) {
+                daemon.lock().broken = Some(words.to_owned());
+            }
         })
     }
 
@@ -339,17 +362,23 @@ impl Daemon {
     /// ([`Backoff::restarts`]), when the person is asked to quit.
     fn stopped(self: &Arc<Self>, mut state: MutexGuard<'_, DaemonState>) {
         diag::say(format!("consensflow: {DAEMON_STOPPED}"));
+        // A daemon that ended because its ledger cannot save is not started again: the
+        // windows are closed, as for any stop, and the person is told why.
+        let broken = state.broken.take();
         let Some(restart) = state.restart.clone() else {
-            self.change(&mut state, DaemonStatus::down(DAEMON_STOPPED, false));
+            let cause = broken.as_deref().unwrap_or(DAEMON_STOPPED);
+            self.change(&mut state, DaemonStatus::down(cause, false));
             return;
         };
-        let stayed_up = state
-            .up_since
-            .is_some_and(|since| since.elapsed() >= restart.backoff.stable);
-        state.restarts = if stayed_up { 1 } else { state.restarts + 1 };
-        if state.restarts > restart.backoff.restarts {
-            self.change(&mut state, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
-            return;
+        if broken.is_none() {
+            let stayed_up = state
+                .up_since
+                .is_some_and(|since| since.elapsed() >= restart.backoff.stable);
+            state.restarts = if stayed_up { 1 } else { state.restarts + 1 };
+            if state.restarts > restart.backoff.restarts {
+                self.change(&mut state, DaemonStatus::down(DAEMON_KEEPS_STOPPING, false));
+                return;
+            }
         }
         // Said as it is: the windows are being closed, and nothing is closed yet.
         self.change(&mut state, DaemonStatus::closing_windows());
@@ -358,7 +387,7 @@ impl Daemon {
         let daemon = Arc::clone(self);
         let spawned = thread::Builder::new()
             .name("consensflow-daemon-restart".to_string())
-            .spawn(move || daemon.restart(&restart, old));
+            .spawn(move || daemon.restart(&restart, old, broken));
         if let Err(error) = spawned {
             self.fail(&DaemonFailure {
                 cause: format!("ConsensFlow's daemon could not be started again: {error}"),
@@ -381,7 +410,7 @@ impl Daemon {
     /// grace and then killed. A window not proven gone by then (a program that cannot be
     /// ended, a close that does not return) leaves the daemon down, and the person is told
     /// to quit, which ends the app's processes.
-    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>) {
+    fn restart(self: &Arc<Self>, restart: &Restart, old: Option<Child>, broken: Option<String>) {
         if let Some(mut old) = old {
             stop_daemon(&mut old);
         }
@@ -391,9 +420,19 @@ impl Daemon {
                 // The end of the windows is not confirmed: that is what is said, and the
                 // person is asked to quit.
                 diag::say(format!("consensflow: {DAEMON_NOT_CONFIRMED}"));
+                if let Some(words) = &broken {
+                    let cause = format!("{words} {DAEMON_NOT_CONFIRMED}");
+                    self.tell(DaemonStatus::down(&cause, false));
+                    return;
+                }
                 self.tell(DaemonStatus::not_confirmed());
                 return;
             }
+        }
+        // The ledger cannot save: nothing is started again, and the person is told why.
+        if let Some(words) = broken {
+            self.tell(DaemonStatus::down(&words, false));
+            return;
         }
         // Every window is proven gone: now it is true to say they are closed, and that the
         // daemon is being started.
@@ -936,6 +975,66 @@ mod tests {
         if let Some(mut child) = child {
             stop_daemon(&mut child);
         }
+    }
+
+    /// A daemon that ends because its ledger cannot save says so first (`ledger.broken`, with
+    /// its words): its windows are closed as for any stop, the person is told its words as they
+    /// are, and it is not started again, however often it was started before (CLN-65).
+    #[test]
+    fn a_daemon_whose_ledger_cannot_save_is_not_started_again_and_the_person_is_told_why() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let words = "ConsensFlow cannot save to its ledger, /h/consensflow.db, so it has stopped.";
+        let frame = format!(
+            r#"{{"v":1,"id":"n-1","kind":"evt","op":"ledger.broken","body":{{"words":"{words}"}}}}"#
+        );
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let panes = Arc::new(PaneTable::new());
+        let table = Arc::clone(&panes);
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let hears = daemon.hears_broken();
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+            let inputs = Arc::new(InputQueue::new(Arc::clone(&table), Arc::clone(&arbiter)));
+            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+            crate::runtime::register_handlers(
+                &mut builder,
+                Arc::clone(&table),
+                arbiter,
+                Arc::new(OutputHub::new()),
+                inputs,
+            );
+            let hear = Arc::clone(&hears);
+            builder.on_event(LEDGER_BROKEN_EVENT, move |body| hear(body));
+            builder.on_close(closed);
+            connect_daemon(
+                stand_in_command(std::slice::from_ref(&frame), Then::StopAfter(300)),
+                builder,
+                Duration::from_secs(30),
+            )
+        });
+        daemon.start(starter, panes, QUICK);
+
+        let mut told = Vec::new();
+        for _ in 0..3 {
+            told.push(heard.recv_timeout(Duration::from_secs(25)).expect("told"));
+        }
+        assert_eq!(
+            told,
+            [
+                DaemonStatus::up(),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::down(words, false),
+            ]
+        );
+        assert!(
+            heard.recv_timeout(Duration::from_millis(800)).is_err(),
+            "nothing more is told: no start again"
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "not started again");
+        assert_eq!(daemon.connection().err().as_deref(), Some(words));
     }
 
     /// What a stand-in daemon does once it has said its handle line and its frames.

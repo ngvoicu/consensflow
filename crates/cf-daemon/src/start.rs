@@ -275,6 +275,13 @@ async fn run(
             }
         })
         .connect(options.input, options.output);
+    // The ledger can break in any operation; what is done then is done in one place.
+    ledger.borrow_mut().on_broken(crate::broken::reaction(
+        &home.join("consensflow.db"),
+        &errors,
+        &bridge,
+        &latch,
+    ));
 
     // One throttle for both the engine's changes and the agents' API writes:
     // neither source may send an extra core event during the other's wait.

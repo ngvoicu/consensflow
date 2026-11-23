@@ -32,6 +32,7 @@
 
 pub mod api;
 pub mod app_settings;
+pub mod broken;
 pub mod cli;
 pub mod computer_use;
 pub mod console;

@@ -77,12 +77,8 @@ runs = ["p19a-store"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
-find = '''
-            Err(unwound) => {
-                self.roll_back();'''
-replace = '''
-            Err(unwound) => {
-                let _ = self.db.execute_batch("ROLLBACK");'''
+find = '''                let _ = self.roll_back(LedgerError::refused("panicked", "an operation panicked"));'''
+replace = '''                let _ = self.db.execute_batch("ROLLBACK");'''
 
 [[plant]]
 name = "ledger trace: do not tell an event committed on its own"

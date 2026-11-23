@@ -26,6 +26,12 @@ pub(crate) struct Store {
     trace: Box<dyn FnMut(&Event)>,
     /// Events of the open transaction, discarded if it does not commit.
     logged: Vec<Event>,
+    /// Why the ledger can go on no more: a rollback did not take and a
+    /// transaction is open still, so whatever is done now would join it and
+    /// never be committed. Every write after it is refused.
+    broken: Option<String>,
+    /// Told once, the moment the ledger breaks.
+    on_broken: Option<Box<dyn FnMut(&str)>>,
 }
 
 impl Store {
@@ -42,7 +48,19 @@ impl Store {
             names,
             trace,
             logged: Vec::new(),
+            broken: None,
+            on_broken: None,
         }
+    }
+
+    /// Why the ledger is broken, if it is.
+    pub(crate) fn broken(&self) -> Option<&str> {
+        self.broken.as_deref()
+    }
+
+    /// Who is told, once, when the ledger breaks.
+    pub(crate) fn on_broken(&mut self, hook: Box<dyn FnMut(&str)>) {
+        self.on_broken = Some(hook);
     }
 
     /// A fresh session name: two words.
@@ -58,6 +76,7 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        self.refuse_if_broken()?;
         if !self.db.is_autocommit() {
             return work(self);
         }
@@ -70,26 +89,54 @@ impl Store {
                     }
                     Ok(value)
                 }
-                Err(cause) => {
-                    self.roll_back();
-                    Err(cause.into())
-                }
+                Err(cause) => Err(self.roll_back(cause.into())),
             },
-            Ok(Err(cause)) => {
-                self.roll_back();
-                Err(cause)
-            }
+            Ok(Err(cause)) => Err(self.roll_back(cause)),
             Err(unwound) => {
-                self.roll_back();
+                // The panic goes on whatever the rollback did; the ledger
+                // says so to everything after it if it did not take.
+                let _ = self.roll_back(LedgerError::refused("panicked", "an operation panicked"));
                 panic::resume_unwind(unwound)
             }
         }
     }
 
-    /// Rolls back the transaction and drops everything it logged.
-    fn roll_back(&mut self) {
-        let _ = self.db.execute_batch("ROLLBACK");
+    /// A broken ledger refuses whatever is asked of it.
+    fn refuse_if_broken(&self) -> Result<(), LedgerError> {
+        match &self.broken {
+            Some(cause) => Err(LedgerError::refused_with(
+                "ledger-broken",
+                format!("the ledger cannot save any more: {cause}"),
+                500,
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// Rolls back the transaction and drops everything it logged. `first`,
+    /// what the operation failed with, comes back as it was, or with a
+    /// rollback that failed added to it; a transaction still open after that
+    /// breaks the ledger.
+    fn roll_back(&mut self, first: LedgerError) -> LedgerError {
         self.logged.clear();
+        let rolled = crate::rollback::roll_back(&self.db);
+        if let Err(cause) = &rolled {
+            if !self.db.is_autocommit() {
+                self.break_with(&format!("a rollback did not take: {cause}"));
+            }
+        }
+        crate::rollback::said(first, rolled)
+    }
+
+    /// The ledger can go on no more; whoever asked is told once.
+    fn break_with(&mut self, cause: &str) {
+        if self.broken.is_some() {
+            return;
+        }
+        self.broken = Some(cause.to_owned());
+        if let Some(hook) = self.on_broken.as_mut() {
+            hook(cause);
+        }
     }
 
     /// A batch is one visible operation and needs a transaction of its own.
@@ -97,6 +144,7 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        self.refuse_if_broken()?;
         if !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",
@@ -542,5 +590,106 @@ mod tests {
             })
             .unwrap();
         assert_eq!(kinds(&events), ["outer"]);
+    }
+
+    fn broken_refusal(attempt: Result<(), LedgerError>) -> bool {
+        matches!(attempt, Err(ref cause) if cause.code() == Some("ledger-broken"))
+    }
+
+    #[test]
+    fn a_rollback_that_fails_is_said_after_the_failure_that_asked_for_it_and_breaks_the_ledger() {
+        let (mut store, _) = store();
+        let told = Rc::new(RefCell::new(Vec::new()));
+        let hook = Rc::clone(&told);
+        store.on_broken(Box::new(move |cause| {
+            hook.borrow_mut().push(cause.to_owned())
+        }));
+        crate::rollback::refuse_next_rollback();
+        let failed = store.write(|store| {
+            store.log(1, "lost", serde_json::json!({}))?;
+            Err::<(), _>(LedgerError::refused("no", "no way"))
+        });
+        let said = failed.unwrap_err().to_string();
+        assert!(
+            said.starts_with("no way; its rollback failed too: "),
+            "{said}"
+        );
+        assert!(
+            !store.db.is_autocommit(),
+            "the refused rollback left it open"
+        );
+        assert_eq!(told.borrow().len(), 1, "told once");
+        assert!(store.broken().is_some());
+        // A later operation is refused, and nothing is written.
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+        assert!(broken_refusal(store.write_batch(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+        assert_eq!(told.borrow().len(), 1, "told once, however often asked");
+    }
+
+    #[test]
+    fn a_commit_that_fails_and_a_rollback_that_fails_break_the_ledger() {
+        let (mut store, _) = store();
+        store
+            .db
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE parent (id INTEGER PRIMARY KEY);
+                 CREATE TABLE child (parent INTEGER REFERENCES parent(id))",
+            )
+            .unwrap();
+        crate::rollback::refuse_next_rollback();
+        let failed = store.write(|store| {
+            store
+                .db
+                .execute_batch("PRAGMA defer_foreign_keys = ON; INSERT INTO child VALUES (7)")?;
+            Ok(())
+        });
+        let said = failed.unwrap_err().to_string();
+        assert!(said.contains("FOREIGN KEY"), "{said}");
+        assert!(said.contains("its rollback failed too"), "{said}");
+        assert!(store.broken().is_some());
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+    }
+
+    #[test]
+    fn a_panic_whose_rollback_fails_breaks_the_ledger_and_the_panic_goes_on() {
+        let (mut store, _) = store();
+        crate::rollback::refuse_next_rollback();
+        let unwound = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = store.write(|store| -> Result<(), LedgerError> {
+                store.log(1, "lost", serde_json::json!({}))?;
+                panic!("in the middle of an operation");
+            });
+        }));
+        assert!(unwound.is_err(), "the panic went on");
+        assert!(store.broken().is_some());
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+    }
+
+    #[test]
+    fn a_rollback_that_takes_leaves_the_ledger_usable_and_the_failure_as_it_was() {
+        let (mut store, _) = store();
+        let failed = store.write(|_| Err::<(), _>(LedgerError::refused("no", "no way")));
+        assert_eq!(failed.unwrap_err().code(), Some("no"));
+        assert!(store.broken().is_none());
+        store
+            .write(|store| store.log(1, "after", serde_json::json!({})))
+            .unwrap();
     }
 }

@@ -1,0 +1,165 @@
+# P23-A (CLN-65): a rollback that fails is said, a ledger left in a transaction refuses every
+# later write, and the daemon ends and tells the app, which does not start it again.
+[run]
+p23a-store = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "store::tests"]
+p23a-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "broken_ledger"]
+p23a-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::broken"]
+p23a-app = ["cargo", "xtask", "app", "test", "daemon::tests::"]
+
+[[plant]]
+name = "broken ledger: the rollback's result is discarded"
+meant = "a_rollback_that_fails_is_said_after_the_failure_that_asked_for_it_and_breaks_the_ledger"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        let rolled = crate::rollback::roll_back(&self.db);"
+replace = '''        let rolled = {
+            let _ = crate::rollback::roll_back(&self.db);
+            Ok(())
+        };'''
+
+[[plant]]
+name = "broken ledger: the rollback's result is discarded, as the operation saw it"
+meant = "after_a_rollback_that_did_not_take_no_later_operation_seems_to_succeed"
+runs = ["p23a-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        let rolled = crate::rollback::roll_back(&self.db);"
+replace = '''        let rolled = {
+            let _ = crate::rollback::roll_back(&self.db);
+            Ok(())
+        };'''
+
+[[plant]]
+name = "broken ledger: a later write is admitted after a rollback that did not take"
+meant = "after_a_rollback_that_did_not_take_no_later_operation_seems_to_succeed"
+runs = ["p23a-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''        self.refuse_if_broken()?;
+        if !self.db.is_autocommit() {
+            return work(self);'''
+replace = '''        if !self.db.is_autocommit() {
+            return work(self);'''
+
+[[plant]]
+name = "broken ledger: a batch is admitted after a rollback that did not take"
+meant = "a_rollback_that_fails_is_said_after_the_failure_that_asked_for_it_and_breaks_the_ledger"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''        self.refuse_if_broken()?;
+        if !self.db.is_autocommit() {
+            return Err(LedgerError::refused('''
+replace = '''        if !self.db.is_autocommit() {
+            return Err(LedgerError::refused('''
+
+[[plant]]
+name = "broken ledger: a transaction left open does not break the ledger"
+meant = "a_commit_that_fails_and_a_rollback_that_fails_break_the_ledger"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''                self.break_with(&format!("a rollback did not take: {cause}"));'''
+replace = '''                let _ = cause;'''
+
+[[plant]]
+name = "broken ledger: a failed commit's rollback is not added to its failure"
+meant = "a_commit_that_fails_and_a_rollback_that_fails_break_the_ledger"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "                Err(cause) => Err(self.roll_back(cause.into())),"
+replace = '''                Err(cause) => {
+                    let _ = self.roll_back(cause.into());
+                    Err(LedgerError::refused("commit", "the commit failed"))
+                }'''
+
+[[plant]]
+name = "broken ledger: a panic's rollback is not looked at"
+meant = "a_panic_whose_rollback_fails_breaks_the_ledger_and_the_panic_goes_on"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''                let _ = self.roll_back(LedgerError::refused("panicked", "an operation panicked"));'''
+replace = '''                self.logged.clear();
+                let _ = self.db.execute_batch("ROLLBACK");'''
+
+[[plant]]
+name = "broken ledger: a migration's rollback is discarded"
+meant = "a_migration_whose_rollback_is_refused_says_so_after_its_own_failure"
+runs = ["p23a-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = "                return Err(crate::rollback::said(cause, crate::rollback::roll_back(db)));"
+replace = '''                let _ = crate::rollback::roll_back(db);
+                return Err(cause);'''
+
+[[plant]]
+name = "broken ledger: the daemon does not stop"
+meant = "a_ledger_that_cannot_save_ends_the_daemon_and_tells_the_app_why_once"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = "        latch.trip(WHY);"
+replace = "        let _ = (&latch, WHY);"
+
+[[plant]]
+name = "broken ledger: the app is not told"
+meant = "a_ledger_that_cannot_save_ends_the_daemon_and_tells_the_app_why_once"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = '''        let _ = bridge.event(EVENT, json!({ "words": words(&file) }));'''
+replace = '''        let _ = (&bridge, EVENT, words(&file), json!({}));'''
+
+[[plant]]
+name = "broken ledger: the daemon does not listen to its ledger"
+meant = "a_ledger_that_cannot_save_ends_the_daemon_and_tells_the_app_why_once"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''    ledger.borrow_mut().on_broken(crate::broken::reaction(
+        &home.join("consensflow.db"),
+        &errors,
+        &bridge,
+        &latch,
+    ));'''
+replace = '''    let _ = crate::broken::reaction;'''
+
+[[plant]]
+name = "broken ledger: the app starts the daemon again"
+meant = "a_daemon_whose_ledger_cannot_save_is_not_started_again_and_the_person_is_told_why"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = "        let broken = state.broken.take();"
+replace = "        let broken = state.broken.take().and(None::<String>);"
+
+[[plant]]
+name = "broken ledger: the person is not told why"
+meant = "a_daemon_whose_ledger_cannot_save_is_not_started_again_and_the_person_is_told_why"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''        if let Some(words) = broken {
+            self.tell(DaemonStatus::down(&words, false));
+            return;
+        }'''
+replace = '''        if broken.is_some() {
+            self.tell(DaemonStatus::windows_closed());
+            return;
+        }'''

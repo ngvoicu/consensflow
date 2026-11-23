@@ -46,6 +46,13 @@ pub enum LedgerError {
     Sqlite(#[from] rusqlite::Error),
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+    /// An operation failed and the rollback that should have undone it failed
+    /// too: what the operation failed with is first, and stays what it was.
+    #[error("{first}; its rollback failed too: {rollback}")]
+    Unrolled {
+        first: Box<LedgerError>,
+        rollback: rusqlite::Error,
+    },
 }
 
 impl LedgerError {

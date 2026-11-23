@@ -32,6 +32,7 @@ mod projects;
 mod questions;
 mod queue;
 pub mod roles;
+mod rollback;
 mod saved_agents;
 mod schema;
 mod specs;
@@ -79,6 +80,8 @@ pub use projects::{
     STAFF_RULES_MAX_LINES,
 };
 pub use queue::{OVER, SHOWN};
+#[cfg(feature = "test-support")]
+pub use rollback::refuse_next_rollback;
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;
