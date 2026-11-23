@@ -6,6 +6,8 @@ use std::io::{self, Read};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Instant;
 
+use crate::arbiter::OutputCount;
+
 use super::{output_end, Pane, PaneError, PaneKey, PaneOutput, PaneTable};
 
 pub(super) struct OutputFlow {
@@ -150,6 +152,7 @@ pub(super) fn stream_output(
     mut output: output_end::Output,
     flow: Arc<OutputFlow>,
     sender: mpsc::Sender<PaneOutput>,
+    counts: Arc<OutputCount>,
 ) {
     const MAX_CHUNK_BYTES: usize = 8 * 1024;
     let mut buffer = [0; MAX_CHUNK_BYTES];
@@ -160,7 +163,11 @@ pub(super) fn stream_output(
         else {
             break;
         };
+        // Counted as read the moment it is in hand: before the flow, the queue and the lock of
+        // the screen, so that the paste's Enter and the input box's readers know of it.
+        counts.took(byte_count);
         let Some(seq) = flow.record(byte_count) else {
+            counts.give_up();
             break;
         };
         if sender
@@ -171,6 +178,8 @@ pub(super) fn stream_output(
             })
             .is_err()
         {
+            // Nobody takes the output in: what was read will not be drawn.
+            counts.give_up();
             break;
         }
     }
@@ -236,6 +245,7 @@ mod tiny_read_tests {
             output,
             Arc::new(OutputFlow::new(1024 * 1024)),
             sender,
+            Arc::new(OutputCount::default()),
         );
         let message = received.recv().expect("one byte was read");
         assert_eq!(message.bytes, b"x");

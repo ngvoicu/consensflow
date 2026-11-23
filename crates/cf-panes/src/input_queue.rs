@@ -136,6 +136,9 @@ impl From<ArbiterError> for InputError {
     fn from(error: ArbiterError) -> Self {
         let code = match &error {
             ArbiterError::Pane(_) => return Self::FailedWrite(error.to_string()),
+            // The paste is in the window and its Enter was not sent: uncertain, as any paste
+            // that may have been written is, so that the harness's own record decides.
+            ArbiterError::StillPrinting => return Self::Uncertain(error.to_string()),
             ArbiterError::Stale => "stale-pane",
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => INPUT_FAILED,

@@ -320,10 +320,10 @@ runs = ["tiny-output"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/screen.rs"
-find = '''        let changed = screen.feed(bytes);
-        feeding.noted(changed);'''
-replace = '''        let changed = screen.feed(bytes);
-        feeding.noted(changed && bytes.len() > 2);'''
+find = '''        printed.note(changed);
+        printed.counts().drew(bytes.len());'''
+replace = '''        printed.note(changed && bytes.len() > 2);
+        printed.counts().drew(bytes.len());'''
 
 [[plant]]
 name = "tiny read: a joined read's output is not stamped as it is taken in"
@@ -336,7 +336,6 @@ find = '''        let now = millis_since(self.clock.now(), self.started).saturat
         self.printed.store(now, Ordering::Release);'''
 replace = '''        let now = millis_since(self.clock.now(), self.started).saturating_add(1);
         if self.printed.load(Ordering::Acquire) != 0 {
-            self.feeding.store(false, Ordering::Release);
             return;
         }
         self.printed.store(now, Ordering::Release);'''

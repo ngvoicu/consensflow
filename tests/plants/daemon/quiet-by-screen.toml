@@ -33,8 +33,8 @@ runs = ["qs-panes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/screen.rs"
-find = "        feeding.noted(changed);"
-replace = "        feeding.noted(changed || !changed);"
+find = "        printed.note(changed);"
+replace = "        printed.note(changed || !changed);"
 
 [[plant]]
 name = "quiet by screen: a chunk that draws again what is shown is a change"

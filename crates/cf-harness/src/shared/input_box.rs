@@ -225,8 +225,26 @@ pub(crate) async fn on_screen(
     )
 }
 
+/// Whether the screen of `snapshot` shows every byte of output the host has read of the
+/// window (`outputDrawn` equal to `outputRead`), where it says: the input box on it is current.
+pub(crate) fn screen_current(snapshot: &Value) -> bool {
+    let count = |name: &str| snapshot.get(name).and_then(Value::as_u64);
+    match (count("outputRead"), count("outputDrawn")) {
+        (Some(read), Some(drawn)) => read == drawn,
+        _ => true,
+    }
+}
+
 /// The screen's last lines as drawn that a snapshot holds (`bottom`).
+///
+/// None where the screen is not current: the host says more output was read than the screen
+/// shows (`outputRead` over `outputDrawn`), so the box on it may lack what the window has
+/// already printed (a split echo, a read waiting for its feed). A host that gives no counts
+/// has nothing pending to tell.
 fn bottom(snapshot: &Value) -> Option<Vec<String>> {
+    if !screen_current(snapshot) {
+        return None;
+    }
     snapshot
         .get("bottom")
         .and_then(Value::as_array)
@@ -340,5 +358,37 @@ mod tests {
             read_unsent(Harness::Claude, &snapshot),
             Unsent::ReadEmpty(typed)
         );
+    }
+
+    /// A box is current only when the screen shows every byte the host has read (N17,
+    /// T-2132): a window that printed the cursor move of a key's echo in one read and the key
+    /// in the next, the second not yet drawn, shows an empty box that is not its box. The
+    /// reader says held, never empty, while the counts differ; with them equal, or where the
+    /// host gives none, the box is read as before.
+    #[test]
+    fn a_box_on_a_screen_that_lacks_bytes_the_host_has_read_is_not_read_empty() {
+        let screens = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/screens/claude-2.1.312-keys-cleared-at-rest.json");
+        let mut snapshot: Value =
+            serde_json::from_str(&std::fs::read_to_string(screens).unwrap()).unwrap();
+        let typed = snapshot["typed"].as_u64().unwrap();
+        snapshot["typedQuietMs"] = Value::from(1_200);
+        snapshot["outputQuietMs"] = Value::from(0);
+        snapshot["screenQuietMs"] = Value::from(1_500);
+        assert_eq!(
+            read_unsent(Harness::Claude, &snapshot),
+            Unsent::ReadEmpty(typed)
+        );
+        snapshot["outputRead"] = Value::from(262);
+        snapshot["outputDrawn"] = Value::from(261);
+        assert_eq!(read_unsent(Harness::Claude, &snapshot), Unsent::Held);
+        assert!(!read_empty(Harness::Claude, &snapshot));
+        assert!(!screen_current(&snapshot));
+        snapshot["outputDrawn"] = Value::from(262);
+        assert_eq!(
+            read_unsent(Harness::Claude, &snapshot),
+            Unsent::ReadEmpty(typed)
+        );
+        assert!(read_empty(Harness::Claude, &snapshot));
     }
 }

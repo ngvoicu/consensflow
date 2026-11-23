@@ -113,6 +113,9 @@ pub struct StreamedPane {
     pub output: mpsc::Receiver<PaneOutput>,
     /// What the window's screen shows: whoever reads `output` feeds it.
     pub screen: Arc<PaneScreen>,
+    /// The bytes of the window's output the pty has given and the screen shows: the thread that
+    /// reads the pty advances the first, whoever reads `output` the second.
+    pub counts: Arc<crate::arbiter::OutputCount>,
     /// How the window's program ended, once anyone read its status.
     pub ended: Arc<EndedSlot>,
     /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
@@ -426,18 +429,34 @@ impl PaneInputWriter for PaneTable {
 /// A paste in brackets, then its Enter as a write of its own, once
 /// `before_enter` returns: a harness takes an Enter that arrives with the
 /// paste into it.
+#[cfg(test)]
 pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
     writer: &W,
     key: &PaneKey,
     body: &[u8],
     before_enter: impl FnOnce(),
 ) -> Result<(), PaneError> {
+    write_paste_if_via(writer, key, body, || {
+        before_enter();
+        true
+    })
+}
+
+/// [`write_paste_via`], the Enter written only where `before_enter` says it may go.
+pub(crate) fn write_paste_if_via<W: PaneInputWriter + ?Sized>(
+    writer: &W,
+    key: &PaneKey,
+    body: &[u8],
+    before_enter: impl FnOnce() -> bool,
+) -> Result<(), PaneError> {
     let mut bracketed = Vec::with_capacity(12 + body.len());
     bracketed.extend_from_slice(b"\x1b[200~");
     bracketed.extend_from_slice(body);
     bracketed.extend_from_slice(b"\x1b[201~");
     writer.write(key, &bracketed)?;
-    before_enter();
+    if !before_enter() {
+        return Ok(());
+    }
     writer.write(key, b"\r")
 }
 

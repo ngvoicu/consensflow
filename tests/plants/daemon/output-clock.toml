@@ -1,77 +1,94 @@
-# The window's output clock while a read is taken into its screen (N17). The paste's Enter waits
-# for the window to be quiet, and a box reader asks whether the window answered the human's last
-# key. A read of erases on the biggest screen takes longer than the 120 ms the Enter waits when
-# the machine is loaded, and the clock was stamped only where a read ended: the Enter went while
-# two reads the host had already read were still on their way into the screen. Now:
+# The window's output clock while a read of its output is on its way to the screen (N17). The paste's
+# Enter waits for the window to be quiet, and a box reader asks whether the window answered the human's
+# last key. A read of erases on the biggest screen takes longer than the 120 ms the Enter waits when the
+# machine is loaded, and bytes the pty gave waited behind the consumer's other work and the screen's
+# lock where no clock knew of them. Now each pane counts two things: the bytes the thread that reads
+# the pty has taken, advanced the moment they are in hand, and the bytes in the screen, advanced when
+# each feed ends. Output is pending while the first is the greater.
 #
-# - the clock says output is active while a read is fed, from the moment the screen's lock is
-#   held to the moment the read is in the screen;
-# - the feed announces itself under that lock, and a snapshot reads the clocks with the same lock
-#   held, so no reader sees a clock past a key with the screen before its echo (a paste would go
-#   over what the human typed);
-# - a panic in the feed notes the window as printed, and its screen as changed, now.
+# - the window is not quiet while output is pending, and a paste's Enter never goes then, the cap
+#   included: past the cap and a grace the paste is answered uncertain and no Enter is written;
+# - every snapshot carries both counts; a counts-only one waits for no lock, one with the screen's
+#   lines takes the counts with the lock held;
+# - the input box is current only where the counts are equal (the shared reader of cf-harness);
+# - a panic in the feed ends the pane's generation: its program is ended, it admits nothing, and its
+#   exit is told.
 #
 # Every name holds `output clock`, so `cargo xtask plants daemon "output clock"` runs them.
 
 [run]
-oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::feeding_tests::"]
+oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::", "pane_handlers::native_tests::"]
+oc-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::input_box::tests::a_box_on_a_screen_that_lacks"]
 
 [[plant]]
-name = "output clock: the mark that a read is being fed is left out"
-meant = "the_enter_goes_after_a_read_that_the_host_has_and_the_screen_does_not_yet_show"
+name = "output clock: the bytes the pty gave are counted read only as the feed takes the lock"
+meant = "the_enter_waits_for_a_byte_the_pty_gave_and_the_screen_has_not"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "        counts.took(byte_count);\n"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """        let mut screen = self.locked();
+        #[cfg(test)]
+        self.hook.at(FeedStage::Locked);"""
+replace = """        let mut screen = self.locked();
+        printed.counts().took(bytes.len());
+        #[cfg(test)]
+        self.hook.at(FeedStage::Locked);"""
+
+[[plant]]
+name = "output clock: the Enter goes at the cap with output pending"
+meant = "the_cap_does_not_send_the_enter_over_pending_output"
 runs = ["oc-feed"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/timing.rs"
-find = '''        if self.feeding.load(Ordering::Acquire) {
-            return Some(0);
-        }
-'''
-replace = ""
+find = "                    return Waited::StillPrinting;"
+replace = "                    return Waited::Released;"
 
 [[plant]]
-name = "output clock: the feed is announced before the screen's lock is taken"
-meant = "a_snapshot_never_has_the_clock_of_a_read_whose_echo_the_screen_does_not_show"
+name = "output clock: the input box is read as current with output pending"
+meant = "a_box_on_a_screen_that_lacks_bytes_the_host_has_read_is_not_read_empty"
+runs = ["oc-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/input_box.rs"
+find = "        (Some(read), Some(drawn)) => read == drawn,"
+replace = "        (Some(_), Some(_)) => true,"
+
+[[plant]]
+name = "output clock: a pane whose feed panicked still admits input"
+meant = "a_pane_whose_feed_broke_admits_no_paste_and_no_claim"
 runs = ["oc-feed"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/screen.rs"
-find = '''        #[cfg(test)]
-        self.hook.at(FeedStage::Read);
-        let mut screen = self.locked();
-        // Announced under the lock: a reader that takes the lock (`observe`) never sees the
-        // window busy with a read its screen does not yet show.
-        let feeding = printed.feeding();
-'''
-replace = '''        let feeding = printed.feeding();
-        #[cfg(test)]
-        self.hook.at(FeedStage::Read);
-        let mut screen = self.locked();
-'''
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = "    if state.input_failed || state.output.counts().is_broken() {"
+replace = "    if state.input_failed {"
+
+[[plant]]
+name = "output clock: a counts-only snapshot waits for the screen's lock"
+meant = "a_counts_only_snapshot_does_not_wait_for_the_screen_lock"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        Some(screen) if tail.is_some() || bottom.is_some() => screen.observe(lines, counts),"
+replace = "        Some(screen) => screen.observe(lines, counts),"
 
 [[plant]]
 name = "output clock: the clock is read apart from the screen"
-meant = "a_reader_between_the_screens_lines_and_the_clocks_keeps_the_next_read_out_of_both"
+meant = "a_reader_between_the_lines_and_the_counts_keeps_the_next_read_out_of_both"
 runs = ["oc-feed"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/screen.rs"
-find = '''        let screen = self.locked();
+find = """        let screen = self.locked();
         let drawn = read(&screen);
-'''
-replace = '''        let drawn = read(&self.locked());
-'''
-
-[[plant]]
-name = "output clock: a panic in the feed leaves the window busy for good"
-meant = "a_panic_in_the_feed_leaves_the_window_printed_now_and_not_busy_for_good"
-runs = ["oc-feed"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/timing.rs"
-find = '''        if !self.noted {
-            self.clock.note(true);
-        }
-'''
-replace = '''        if !self.noted {}
-'''
+"""
+replace = """        let drawn = read(&self.locked());
+"""

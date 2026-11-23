@@ -190,7 +190,7 @@ fn register(
             Err(error) => return Err(error.to_string()),
         };
         let printed = match open_arbiter
-            .register_with(&streamed.key, request.silent_paste)
+            .register_counted(&streamed.key, request.silent_paste, &streamed.counts)
             .map_err(|error| error.to_string())
             .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
         {
@@ -410,9 +410,11 @@ fn snapshot_of(
         )
     };
     let counts = || arbiter.snapshot(key).map_err(|error| error.to_string());
+    // A counts-only request waits for no lock: the byte counts it carries say whether output
+    // is pending, which is all a caller of counts alone can use.
     let ((tail, drawn), counts) = match screen {
-        Some(screen) => screen.observe(lines, counts),
-        None => ((None, None), counts()),
+        Some(screen) if tail.is_some() || bottom.is_some() => screen.observe(lines, counts),
+        _ => ((None, None), counts()),
     };
     let mut answer = snapshot_answer(&counts?);
     if let Some(tail) = tail {
@@ -505,6 +507,8 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "typedQuietMs":snapshot.typed_quiet_ms,
         "outputQuietMs":snapshot.output_quiet_ms,
         "screenQuietMs":snapshot.screen_quiet_ms,
+        "outputRead":snapshot.output_read,
+        "outputDrawn":snapshot.output_drawn,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -625,17 +629,33 @@ fn stream_to_page(
             pid,
             output: stream,
             screen,
+            counts: _,
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
             #[cfg(target_os = "macos")]
             tree,
         } = streamed;
-        forward_output(
-            &stream,
-            |bytes| took_in(&screen, &printed, bytes),
-            |message| output.publish(message.into()),
-        );
+        let fed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            forward_output(
+                &stream,
+                |bytes| took_in(&screen, &printed, bytes),
+                |message| output.publish(message.into()),
+            );
+        }));
+        if fed.is_err() {
+            // The feed panicked: the screen is partly written, and no input is admitted
+            // against it (`OutputCount::break_feed`). The window's program is ended and the
+            // output let go, so the pane ends as one whose program ended does: its exit is
+            // told below, with the screen it left.
+            printed.counts().break_feed();
+            say(&format!(
+                "the feed of window {}#{} panicked; its program is ended",
+                key.id, key.generation
+            ));
+            let _ = panes.kill(&key);
+            while stream.recv().is_ok() {}
+        }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
         // that follows ends it.
@@ -758,6 +778,8 @@ mod windows_tests;
 
 #[cfg(test)]
 mod feeding_tests;
+#[cfg(all(test, unix))]
+mod native_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1479,6 +1501,8 @@ mod tests {
             typed: 2,
             typed_quiet_ms: Some(40),
             output_quiet_ms: None,
+            output_read: 0,
+            output_drawn: 0,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![

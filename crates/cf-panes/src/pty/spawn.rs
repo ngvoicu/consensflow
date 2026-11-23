@@ -21,6 +21,7 @@ use super::OpenedPane;
 #[cfg(test)]
 use super::TERMINAL_FAILS;
 use super::{Pane, PaneEnvironment, PaneError, PaneKey, PaneTable, StreamedPane};
+use crate::arbiter::OutputCount;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
 use crate::screen::PaneScreen;
@@ -367,12 +368,15 @@ impl PaneTable {
                 .is_none_or(|table| table.program_gone(&watched, &slot, at_an_end))
         });
         let read = output_end::Output::new(reader, terminal, gone);
-        std::thread::spawn(move || stream_output(output_key, read, flow, sender));
+        let counts = Arc::new(OutputCount::default());
+        let reader_counts = Arc::clone(&counts);
+        std::thread::spawn(move || stream_output(output_key, read, flow, sender, reader_counts));
         Ok(StreamedPane {
             key,
             pid,
             output,
             screen,
+            counts,
             ended,
             owed: self.exits.owe(),
             #[cfg(target_os = "macos")]

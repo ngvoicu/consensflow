@@ -194,20 +194,20 @@ impl PaneScreen {
         self.locked().feed(bytes)
     }
 
-    /// The program printed `bytes` ([`Screen::feed`]) and the output clock says so, both under
-    /// the screen's one lock: no reader of [`PaneScreen::observe`] sees the clock past a read
-    /// whose bytes the screen does not yet show. Whether the screen changed.
+    /// The program printed `bytes` ([`Screen::feed`]), under the screen's lock, and the output
+    /// clock says so and counts them drawn when the feed ends: no reader under the lock
+    /// ([`PaneScreen::observe`]) sees the clock or the count past a read the screen does not
+    /// show. Whether the screen changed.
     pub(crate) fn feed_noting(&self, bytes: &[u8], printed: &OutputClock) -> bool {
         #[cfg(test)]
         self.hook.at(FeedStage::Read);
         let mut screen = self.locked();
-        // Announced under the lock: a reader that takes the lock (`observe`) never sees the
-        // window busy with a read its screen does not yet show.
-        let feeding = printed.feeding();
         #[cfg(test)]
         self.hook.at(FeedStage::Locked);
         let changed = screen.feed(bytes);
-        feeding.noted(changed);
+        // The clock first: between the two the window still reads as having output pending.
+        printed.note(changed);
+        printed.counts().drew(bytes.len());
         changed
     }
 

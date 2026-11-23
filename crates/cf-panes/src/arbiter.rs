@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use cf_proto::panes::SilentPaste;
 
-use crate::pty::{write_paste_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
+use crate::pty::{write_paste_if_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
 
 mod keys;
 mod paste;
@@ -24,8 +24,9 @@ use state::{
     PaneStateMap, Written, HUMAN_WRITES,
 };
 pub(crate) use timing::Clock;
+pub(crate) use timing::Waited;
 use timing::WallClock;
-pub use timing::{EnterTiming, OutputClock};
+pub use timing::{EnterTiming, OutputClock, OutputCount};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SanitizeError {
@@ -59,6 +60,9 @@ pub enum ArbiterError {
     Stale,
     Busy,
     InputFailed,
+    /// The window's output was still being taken in when the paste's Enter was due, past the
+    /// cap and its grace: the paste is in the window, its Enter was not sent.
+    StillPrinting,
     /// The human has typed in the window and not sent it yet.
     Unsent,
     InvalidBody(SanitizeError),
@@ -74,6 +78,10 @@ impl fmt::Display for ArbiterError {
             Self::Stale => write!(formatter, "stale pane generation"),
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
+            Self::StillPrinting => write!(
+                formatter,
+                "the window kept printing: the paste is in it and its Enter was not sent"
+            ),
             Self::Unsent => write!(formatter, "the human has unsent text in the window"),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
@@ -113,6 +121,10 @@ pub struct ArbiterSnapshot {
     /// paste's Enter waits on ([`EnterTiming`]), and a harness's reader of its input box
     /// on whether the window answered the human's last key.
     pub output_quiet_ms: Option<u64>,
+    /// Bytes the pty has given, and bytes in the screen: the output is pending while the first
+    /// is the greater (`OutputCount`).
+    pub output_read: u64,
+    pub output_drawn: u64,
     /// How long what the pane's screen shows has not changed, once it has shown
     /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
     /// at work. A harness can print without end and change nothing shown (T-1083).
@@ -163,6 +175,17 @@ impl InputArbiter {
         self.register_with(pane, None)
     }
 
+    /// [`InputArbiter::register_with`] for a pane whose output is counted by `counts`, which
+    /// the thread that reads its pty advances (`stream_output`).
+    pub fn register_counted(
+        &self,
+        pane: &PaneKey,
+        silent_paste: Option<SilentPaste>,
+        counts: &Arc<OutputCount>,
+    ) -> Result<Arc<OutputClock>, ArbiterError> {
+        self.register_with_counts(pane, silent_paste, Arc::clone(counts))
+    }
+
     /// Takes a pane in as [`InputArbiter::register`] does, with how its harness reads a
     /// human's paste where it reads one silently (`pane.open`'s `silentPaste`).
     pub fn register_with(
@@ -170,7 +193,16 @@ impl InputArbiter {
         pane: &PaneKey,
         silent_paste: Option<SilentPaste>,
     ) -> Result<Arc<OutputClock>, ArbiterError> {
-        let output = self.register_inner(pane, || {}, || {})?;
+        self.register_with_counts(pane, silent_paste, Arc::new(OutputCount::default()))
+    }
+
+    fn register_with_counts(
+        &self,
+        pane: &PaneKey,
+        silent_paste: Option<SilentPaste>,
+        counts: Arc<OutputCount>,
+    ) -> Result<Arc<OutputClock>, ArbiterError> {
+        let output = self.register_inner(pane, counts, || {}, || {})?;
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
         if state.generation == pane.generation {
@@ -196,7 +228,12 @@ impl InputArbiter {
     where
         F: FnMut(),
     {
-        self.register_inner(pane, before_replace, || {})
+        self.register_inner(
+            pane,
+            Arc::new(OutputCount::default()),
+            before_replace,
+            || {},
+        )
     }
 
     #[cfg(test)]
@@ -208,12 +245,13 @@ impl InputArbiter {
     where
         F: FnMut(),
     {
-        self.register_inner(pane, || {}, before_commit)
+        self.register_inner(pane, Arc::new(OutputCount::default()), || {}, before_commit)
     }
 
     fn register_inner<F, G>(
         &self,
         pane: &PaneKey,
+        counts: Arc<OutputCount>,
         mut before_replace: F,
         mut before_commit: G,
     ) -> Result<Arc<OutputClock>, ArbiterError>
@@ -226,7 +264,7 @@ impl InputArbiter {
             match panes.get(&pane.id) {
                 Some(state) => Arc::clone(state),
                 None => {
-                    let fresh = PaneInputState::new(pane.generation, &self.clock);
+                    let fresh = PaneInputState::new(pane.generation, &self.clock, counts);
                     let output = Arc::clone(&fresh.output);
                     panes.insert(pane.id.clone(), Arc::new(Mutex::new(fresh)));
                     return Ok(output);
@@ -256,7 +294,7 @@ impl InputArbiter {
             return Err(ArbiterError::Busy);
         }
         before_commit();
-        *state = PaneInputState::new(pane.generation, &self.clock);
+        *state = PaneInputState::new(pane.generation, &self.clock, counts);
         Ok(Arc::clone(&state.output))
     }
 
@@ -436,7 +474,7 @@ impl InputArbiter {
 
     /// A paste and its Enter. While it goes in, the pane's snapshot says so,
     /// and a newer generation of the pane cannot take its place.
-    fn write_paste_via<W: PaneInputWriter + ?Sized>(
+    pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
@@ -464,9 +502,12 @@ impl InputArbiter {
         };
         // The Enter's wait begins once the paste itself is written.
         let mut pasted = false;
-        let written = write_paste_via(writer, pane, &body, || {
+        let mut still_printing = false;
+        let written = write_paste_if_via(writer, pane, &body, || {
             pasted = true;
-            enter.wait(self.clock.as_ref(), &output, self.clock.now());
+            let waited = enter.wait(self.clock.as_ref(), &output, self.clock.now());
+            still_printing = waited == Waited::StillPrinting;
+            !still_printing
         });
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
@@ -476,7 +517,11 @@ impl InputArbiter {
                 state.pasted = Some(self.clock.now());
             }
         }
-        written.map_err(|error| fail_input(&state, pane, error, pasted))
+        written.map_err(|error| fail_input(&state, pane, error, pasted))?;
+        if still_printing {
+            return Err(ArbiterError::StillPrinting);
+        }
+        Ok(())
     }
 
     fn pane_state(&self, pane: &PaneKey) -> Result<PaneState, ArbiterError> {

@@ -8,7 +8,7 @@ use crate::pty::{PaneError, PaneKey};
 
 use super::keys::Classes;
 use super::paste::PasteWatch;
-use super::timing::{millis_since, Clock, EnterTiming, OutputClock};
+use super::timing::{millis_since, Clock, EnterTiming, OutputClock, OutputCount};
 use super::{ArbiterError, ArbiterSnapshot, HumanWrite};
 
 /// How many of the human's last writes a pane keeps.
@@ -62,7 +62,7 @@ pub(super) type PaneState = Arc<Mutex<PaneInputState>>;
 pub(super) type PaneStateMap = HashMap<String, PaneState>;
 
 impl PaneInputState {
-    pub(super) fn new(generation: u64, clock: &Arc<dyn Clock>) -> Self {
+    pub(super) fn new(generation: u64, clock: &Arc<dyn Clock>, counts: Arc<OutputCount>) -> Self {
         Self {
             generation,
             paste_in_flight: false,
@@ -70,7 +70,7 @@ impl PaneInputState {
             unsent: 0,
             typed: 0,
             typed_at: None,
-            output: Arc::new(OutputClock::new(Arc::clone(clock))),
+            output: Arc::new(OutputClock::new(Arc::clone(clock), counts)),
             pasted: None,
             silent_paste: None,
             human_pasted: None,
@@ -92,6 +92,8 @@ impl PaneInputState {
             typed_quiet_ms: self.typed_at.map(|at| millis_since(now, at)),
             output_quiet_ms: self.output.quiet_ms(now),
             screen_quiet_ms: self.output.screen_quiet_ms(now),
+            output_read: self.output.counts().both().0,
+            output_drawn: self.output.counts().both().1,
             paste_quiet_ms: self.pasted.map(|pasted| millis_since(now, pasted)),
             human_writes: self
                 .writes
@@ -128,7 +130,8 @@ pub(super) fn validate_admission(
     pane: &PaneKey,
 ) -> Result<(), ArbiterError> {
     validate_generation(state, pane)?;
-    if state.input_failed {
+    // A feed that panicked leaves a screen only partly written: nothing is admitted against it.
+    if state.input_failed || state.output.counts().is_broken() {
         return Err(ArbiterError::InputFailed);
     }
     Ok(())
