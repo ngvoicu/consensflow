@@ -261,6 +261,35 @@ impl Ledger {
         tasks::hold_task(&mut self.store, project_id, number, until, because)
     }
 
+    /// The daemon holds a task whose turn failed, `until` the time its retry goes in, and keeps
+    /// the fact of that retry (`fact`) in the same write (D3's N35).
+    pub fn hold_task_for_retry(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        until: &str,
+        because: &str,
+        fact: &crate::RetryFact<'_>,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::hold_task_for_retry(&mut self.store, project_id, number, until, because, fact)
+    }
+
+    /// The try the message carried: 1 or 2 for a retry's Resume, 0 for any other.
+    pub fn turn_retry_tries(&self, message: i64) -> Result<i64, LedgerError> {
+        tasks::turn_retry_tries(&self.store, message)
+    }
+
+    /// The daemon resumes a held task at its time: with the words that resume it, unless a
+    /// question of its window has no answer, which leaves it waiting with no words.
+    pub fn resume_held_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::resume_held_task(&mut self.store, project_id, number, body)
+    }
+
     /// The daemon ends a held task's hold without resuming it: the task stays paused.
     pub fn clear_hold(
         &mut self,

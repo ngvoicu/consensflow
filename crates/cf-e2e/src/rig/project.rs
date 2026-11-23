@@ -120,6 +120,20 @@ impl<'a> Project<'a> {
             .unwrap_or(Value::Null))
     }
 
+    /// The member's own lane, rather than a newer session's lane.
+    pub fn member_lane(&self, handle: &str) -> Result<Value> {
+        let board = self.board()?;
+        Ok(board["lanes"]
+            .as_array()
+            .and_then(|lanes| {
+                lanes
+                    .iter()
+                    .find(|lane| lane["participant"]["handle"] == handle)
+            })
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
+
     /// The messages in the inbox of `participant`, in the order they were made.
     pub fn inbox(&self, participant: &str) -> Result<Vec<Value>> {
         let answer = self.rig.page(

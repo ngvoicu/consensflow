@@ -40,6 +40,9 @@ pub struct TaskSummary {
     /// note that asks no decision is not typed into the chief's window (RS-25).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aside: Option<String>,
+    /// The retry its task waits for: a failed turn tried again (D3's N35).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<cf_proto::ledger::TaskRetry>,
 }
 
 impl From<&TaskView> for TaskSummary {
@@ -56,6 +59,7 @@ impl From<&TaskView> for TaskSummary {
             blocked_by: task.blocked_by.clone(),
             updated_at: task.updated_at.clone(),
             aside: task.aside.clone(),
+            retry: task.retry.clone(),
         }
     }
 }
@@ -75,6 +79,7 @@ impl From<&TaskCard> for TaskSummary {
             blocked_by: card.blocked_by.clone(),
             updated_at: card.updated_at.clone(),
             aside: card.aside.clone(),
+            retry: card.retry.clone(),
         }
     }
 }
@@ -199,10 +204,31 @@ mod tests {
             created_at: "2026-10-05T08:00:00.000Z".to_owned(),
             updated_at: "2026-10-05T09:00:00.000Z".to_owned(),
             aside: None,
+            retry: None,
         }
     }
 
     const SUMMARY: &str = r#"{"number":4,"title":"Parser","state":"waiting","requester":"chief","assignee":"zeus","pool":"worker","tier":"standard","needs":[{"number":2,"state":"done"}],"blockedBy":[3],"updatedAt":"2026-10-05T09:00:00.000Z"}"#;
+
+    #[test]
+    fn a_task_with_a_retry_on_its_way_says_it_in_its_summary_and_one_without_says_nothing() {
+        let mut task = task();
+        let plain = serde_json::to_string(&TaskSummary::from(&task)).unwrap();
+        assert!(!plain.contains("retry"), "{plain}");
+        task.retry = Some(cf_proto::ledger::TaskRetry {
+            kind: "failed".to_owned(),
+            which: 1,
+            of: 2,
+            due_at: Some("2026-10-05T09:00:30.000Z".to_owned()),
+        });
+        let said = serde_json::to_string(&TaskSummary::from(&task)).unwrap();
+        assert!(
+            said.contains(
+                r#""retry":{"kind":"failed","which":1,"of":2,"dueAt":"2026-10-05T09:00:30.000Z"}"#
+            ),
+            "{said}"
+        );
+    }
 
     #[test]
     fn a_task_is_summarised_in_the_order_node_said_it_with_no_brief_and_no_kind() {

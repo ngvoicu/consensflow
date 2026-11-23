@@ -192,6 +192,10 @@ fn daemon_environment(
     root: &Path,
 ) -> Vec<(String, String)> {
     let mut env = env.to_vec();
+    // A rig case keeps the failure and the hold it was written for: the daemon's tries of a
+    // refused or failed turn are off unless the case asks for them (`Config::daemon_var`,
+    // `CONSENSFLOW_TURN_RETRY_MS`: the unit of the tries, in milliseconds).
+    env.push(("CONSENSFLOW_TURN_RETRY_MS".to_owned(), "0".to_owned()));
     for (name, value) in &config.daemon_vars {
         env.retain(|(held, _)| !crate::standin_process::same_environment_name(held, name));
         env.push((name.clone(), value.clone()));

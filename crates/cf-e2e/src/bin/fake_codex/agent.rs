@@ -71,7 +71,7 @@
 use std::fs::{self};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
@@ -608,6 +608,28 @@ impl Agent {
             );
             return;
         }
+        // Turns that fail a given number of times, the retry's among them, and then answer
+        // (`FAIL-TURNS 2`: this turn and the next fail, the third answers; D3's N35).
+        if let Some(fails) = pattern::once(&FAILS, r"\bFAIL-TURNS (\d+)\b").captures(text) {
+            FAILS_LEFT.store(fails[1].parse().unwrap_or(0), Ordering::SeqCst);
+        }
+        if FAILS_LEFT.fetch_sub(1, Ordering::SeqCst) > 0 {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in dropped the connection.",
+                        "codex_error_info": "other",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        FAILS_LEFT.store(0, Ordering::SeqCst);
         if text.contains("TURN-FAILS") {
             self.write(
                 "event_msg",
@@ -692,18 +714,25 @@ fn memory_job_command() -> Option<Vec<String>> {
     cf_in(&format!("CF {}", own_var("CF_TEST_CODEX_MEMORY_JOB")?))
 }
 
+/// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.
+static FAILS_LEFT: AtomicI64 = AtomicI64::new(0);
+static FAILS: OnceLock<Regex> = OnceLock::new();
+
 /// Whether the usage limit refuses this window the message `text`: it says
 /// `QUOTA-OUT`, the window is a session of the member `CF_TEST_QUOTA_OUT` names,
 /// and the account is the refused one (`CF_TEST_QUOTA_FILE`, when it is set, is
-/// still there).
+/// still there). `CF_TEST_QUOTA_SPENT` names members whose every turn is refused
+/// while that file exists, including retries.
 fn refused(text: &str) -> bool {
     let member = own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
     let participant = own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
     let account = own_var("CF_TEST_QUOTA_FILE").is_none_or(|file| Path::new(&file).exists());
-    text.contains("QUOTA-OUT")
-        && !member.is_empty()
-        && account
-        && (participant == member || participant.starts_with(&format!("{member}-")))
+    let named = |name: &str| {
+        !name.is_empty() && (participant == name || participant.starts_with(&format!("{name}-")))
+    };
+    let all_turns = own_var("CF_TEST_QUOTA_SPENT")
+        .is_some_and(|names| names.split(',').map(str::trim).any(named));
+    account && (all_turns || (text.contains("QUOTA-OUT") && named(&member)))
 }
 
 /// The id of an item of the model's, as Codex numbers them.

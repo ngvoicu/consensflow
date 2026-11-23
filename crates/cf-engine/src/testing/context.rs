@@ -92,6 +92,9 @@ pub struct Made {
     /// The settle of the pacing ([`Limits::settle_ms`]): none, unless the case is
     /// the pacing's.
     pub settle_ms: i64,
+    /// The unit of the tries of a refused or failed turn ([`Limits::turn_retry_ms`]): none,
+    /// unless the case is a retry's, so that every other case keeps what it was written for.
+    pub turn_retry_ms: i64,
 }
 
 impl Default for Made {
@@ -101,6 +104,7 @@ impl Default for Made {
             harnesses: vec!["claude-code", "pi"],
             codex: false,
             settle_ms: 0,
+            turn_retry_ms: 0,
         }
     }
 }
@@ -273,6 +277,16 @@ impl Context {
                     made.settle_ms
                 },
                 settle_from_first_look: paced && made.settle_ms == 0,
+                // A case that asks for none runs with the daemon's tries when the kit is asked
+                // to (`CF_KIT_TURN_RETRY_MS`): the hold probes and a survey of every case.
+                turn_retry_ms: if made.turn_retry_ms == 0 {
+                    cf_base::env::Env::from_process()
+                        .text("CF_KIT_TURN_RETRY_MS")
+                        .and_then(|text| text.parse().ok())
+                        .unwrap_or(0)
+                } else {
+                    made.turn_retry_ms
+                },
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());

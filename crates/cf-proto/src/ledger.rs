@@ -483,6 +483,25 @@ pub struct TaskView {
     /// (until the task moves on). None where none does.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aside: Option<String>,
+    /// The retry its task waits for: a turn that failed, tried again in its window before its
+    /// task fails. None where none is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<TaskRetry>,
+}
+
+/// A retry on its way for a task's window.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRetry {
+    /// What turn it is for: `failed` (`refused` is D3's R2).
+    pub kind: String,
+    /// Which try this is, and how many the turn gets (two).
+    pub which: i64,
+    pub of: i64,
+    /// When its task goes on, as the ledger writes a time, while it is held: none once main's
+    /// Resume is queued and on its way to the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_at: Option<String>,
 }
 
 /// A message in an inbox.
@@ -680,6 +699,9 @@ pub struct TaskCard {
     /// What ConsensFlow shows of the task instead of telling its chief ([`TaskView::aside`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aside: Option<String>,
+    /// The retry its window has on its way ([`TaskView::retry`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<TaskRetry>,
 }
 
 impl TaskCard {
@@ -707,6 +729,7 @@ impl TaskCard {
             state_since,
             result,
             aside: task.aside,
+            retry: task.retry,
         }
     }
 }

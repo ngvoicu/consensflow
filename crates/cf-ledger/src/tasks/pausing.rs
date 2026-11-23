@@ -31,6 +31,8 @@ use crate::staff::{require_free, Giving};
 use crate::store::Store;
 use crate::views::TaskRow;
 
+use super::RetryFact;
+
 /// The chief (or the human) stops a worker's task without ending it: its
 /// agent is interrupted on the daemon's next look and its window stays for
 /// the resumption, and the task keeps its member, its conversation, its place
@@ -525,6 +527,30 @@ pub(crate) fn hold_task(
     until: &str,
     because: &str,
 ) -> Result<TaskView, LedgerError> {
+    hold(store, project_id, number, until, because, None)
+}
+
+/// A hold of a working task whose turn failed, with the fact of the retry it is for, in one
+/// write (D3's N35): the same hold, and main's own Resume at its time is the retry.
+pub(crate) fn hold_task_for_retry(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    until: &str,
+    because: &str,
+    fact: &RetryFact<'_>,
+) -> Result<TaskView, LedgerError> {
+    hold(store, project_id, number, until, because, Some(fact))
+}
+
+fn hold(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    until: &str,
+    because: &str,
+    retry: Option<&RetryFact<'_>>,
+) -> Result<TaskView, LedgerError> {
     model::require_text(because, "because", 1000)?;
     if time::parse(until).is_none() {
         return Err(LedgerError::refused(
@@ -545,6 +571,9 @@ pub(crate) fn hold_task(
             "UPDATE task SET held_until = ? WHERE id = ?",
             params![until, task.id],
         )?;
+        if let Some(fact) = retry {
+            super::turn_retry::write(store, task.id, fact)?;
+        }
         task_by_id(store, task.id)
     })
 }
@@ -842,6 +871,94 @@ pub(crate) fn told_since_paused(
              AND q.created_at >= t.paused_at",
         )?
         .exists(params![participant_id, task_id])?)
+}
+
+/// The daemon's Resume of a held task at its time (D3's N35, for every hold): the words go into
+/// its window as `resume_task` sends them, except where a question its window asked has no
+/// answer on its way or received. Nothing is sent then: the task is waiting, as a project's
+/// Resume leaves it ([`resume_with_project`]), and the answer, when it comes, is what goes in.
+pub(crate) fn resume_held_task(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+) -> Result<TaskMoved, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        if task.state == "paused" {
+            let window = task
+                .assignee_id
+                .map(|id| store.participant_row(id))
+                .transpose()?
+                .filter(|window| window.left_at.is_none());
+            if let Some(window) = window {
+                if crate::messages::outstanding(store, task.id, window.id)? {
+                    leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
+                    store.move_task(
+                        &task,
+                        "working",
+                        json!({
+                            "by": null,
+                            "because": "its hold ended while a question of its window waits for an answer",
+                        }),
+                    )?;
+                    reconcile(store, task.id)?;
+                    return Ok(TaskMoved {
+                        task: task_by_id(store, task.id)?,
+                        message: None,
+                        withdrawn: Vec::new(),
+                        landing: Vec::new(),
+                    });
+                }
+            }
+        }
+        resume_task(store, project_id, number, None, body)
+    })
+}
+
+/// The daemon's bare words that resume a task, about to be handed to its window, turned away
+/// in this write if a question the window asked since has no answer: the task waits, and no
+/// words go into a window that waits to be answered. Whether they were.
+pub(crate) fn turned_away_for_a_question(
+    store: &mut Store,
+    message: &MessageView,
+) -> Result<bool, LedgerError> {
+    if message.kind != "task"
+        || message.sender.is_some()
+        || message.body != format!("Resumed: {RESUME_WORDS}")
+    {
+        return Ok(false);
+    }
+    let Some(number) = message.task_number else {
+        return Ok(false);
+    };
+    let task = store.task_row(message.project_id, number)?;
+    if task.state != "queued" || task.assignee_id != Some(message.recipient_id) {
+        return Ok(false);
+    }
+    let carries: bool = store.db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM message WHERE carried_by = ?)",
+        [message.id],
+        |row| row.get(0),
+    )?;
+    if carries || !crate::messages::outstanding(store, task.id, message.recipient_id)? {
+        return Ok(false);
+    }
+    cancel_message(
+        store,
+        message.id,
+        "a question of its window waits for an answer",
+    )?;
+    store.move_task(
+        &task,
+        "working",
+        json!({
+            "by": null,
+            "because": "a question of its window waits for an answer, and the words that resume it were withdrawn",
+        }),
+    )?;
+    reconcile(store, task.id)?;
+    Ok(true)
 }
 
 /// A task its window went on with by itself, in a turn of its own that got
@@ -1203,6 +1320,10 @@ pub(crate) fn resume_task(
             "queued",
             json!({ "by": by, "message": message_id }),
         )?;
+        // main's own Resume of a hold made for a retry carries that retry (D3's N35).
+        if by.is_none() {
+            super::turn_retry::link(store, &task, message_id)?;
+        }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,

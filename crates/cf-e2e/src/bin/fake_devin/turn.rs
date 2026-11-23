@@ -135,16 +135,23 @@ const QUOTA_WORDS: &str = "Your daily usage quota has been exhausted.";
 /// Whether a turn on `text` is refused for its account's quota: the message says `QUOTA-OUT`, the
 /// window is of the member `CF_TEST_QUOTA_OUT` names, and the file `CF_TEST_QUOTA_FILE` names is
 /// there (from the window's folder; taking it away is the human logging Devin into another
-/// account), as the other stand-ins take theirs (T-1207).
+/// account), as the other stand-ins take theirs (T-1207). `CF_TEST_QUOTA_SPENT`
+/// names members whose every turn is refused, including retries.
 fn refused_for_quota(text: &str) -> bool {
     let wanted = cf_e2e::process::own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
     let participant = cf_e2e::process::own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
-    let ours = !wanted.is_empty()
-        && (participant == wanted || participant.starts_with(&format!("{wanted}-")));
+    let named = |name: &str| {
+        !name.is_empty() && (participant == name || participant.starts_with(&format!("{name}-")))
+    };
+    let all_turns = cf_e2e::process::own_var("CF_TEST_QUOTA_SPENT")
+        .is_some_and(|names| names.split(',').map(str::trim).any(named));
     let spent = cf_e2e::process::own_var("CF_TEST_QUOTA_FILE")
         .is_none_or(|file| std::path::Path::new(&file).exists());
-    text.contains("QUOTA-OUT") && ours && spent
+    spent && (all_turns || (text.contains("QUOTA-OUT") && named(&wanted)))
 }
+
+/// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.
+static FAILS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// What the message `text` asks of a turn, which takes as long as `pace` says
 /// where the message says nothing of it.
@@ -575,6 +582,21 @@ impl<W: Write> Window<W> {
                 .map_err(said)?;
             return self.say(&format!("{QUOTA_WORDS}\n")).map_err(said);
         }
+        // Turns that fail a given number of times, the retry's among them, and then answer
+        // (`FAIL-TURNS 2`: this turn and the next fail, the third answers; D3's N35).
+        static FAILS: OnceLock<Regex> = OnceLock::new();
+        if let Some(fails) = pattern::once(&FAILS, r"\bFAIL-TURNS (\d+)\b").captures(text) {
+            FAILS_LEFT.store(
+                fails[1].parse().unwrap_or(0),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        }
+        if FAILS_LEFT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            let words = "The agent crashed: I/O error";
+            self.wire.ended_in_error(&client, words).map_err(said)?;
+            return self.say(&format!("{words}\n")).map_err(said);
+        }
+        FAILS_LEFT.store(0, std::sync::atomic::Ordering::SeqCst);
         self.wire.said(&answer, &stream, &client).map_err(said)?;
         if plan.compact {
             // The compactor ran while the turn worked, as the turn's steps filled the

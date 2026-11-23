@@ -400,6 +400,17 @@ impl Wire {
         }))
     }
 
+    /// The turn that answers `client` ended in an error (cause `error`), with `words`: an I/O
+    /// failure, as Devin's record of a dropped connection says it.
+    pub fn ended_in_error(&mut self, client: &str, words: &str) -> io::Result<()> {
+        self.status("blocked")?;
+        self.record(json!({
+            "turnClientMessageId": client,
+            "cause": "error",
+            "errorMessage": words,
+        }))
+    }
+
     /// The turn that answers `client` ended in the model's request `request`, as Devin
     /// 3000.11 says it (`wire-b09accf0.jsonl` of T-652, lines 46275-46276): a record that
     /// names the turn's message and its request (`turnRequestId`), then the cause, with

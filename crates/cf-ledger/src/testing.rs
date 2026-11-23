@@ -103,6 +103,11 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the turn-retry table when a fixture reconstructs a ledger before 0045.
+pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry")
+}
+
 /// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
 pub fn undo_migration_0044(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
@@ -250,6 +255,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             "question_binding",
             "question_handover",
             "question_reminder",
+            "turn_retry",
         ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
@@ -321,6 +327,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_handover"
             && entry["name"] != "question_reminder"
             && entry["name"] != "question_reminder_by_message"
+            && entry["name"] != "turn_retry"
+            && entry["name"] != "turn_retry_by_task"
+            && entry["name"] != "turn_retry_by_message"
             && entry["name"] != "message_questions_for_chief"
             && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"

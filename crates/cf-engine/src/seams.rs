@@ -243,6 +243,12 @@ pub struct Limits {
     /// still meets every other rule of the gate (the human's keys, the fallback, the fresh
     /// look and its box). False in every daemon.
     pub settle_from_first_look: bool,
+    /// The unit of the tries of a refused or failed turn, in milliseconds (`turn_retry`): a
+    /// refused turn's retry and a failed turn's first try are due after one, the second try
+    /// after four, and a retry's receipt and a refusal's open turn are waited for ten. None
+    /// at all (0) is no retry: a refused turn holds its member and a failed turn fails its
+    /// task at once, as before D3's R2 and N35.
+    pub turn_retry_ms: i64,
 }
 
 impl Default for Limits {
@@ -255,6 +261,7 @@ impl Default for Limits {
             max_attempts: 3,
             settle_ms: 3_000,
             settle_from_first_look: false,
+            turn_retry_ms: 30_000,
         }
     }
 }
@@ -275,6 +282,12 @@ pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
 /// test that runs many deliveries back to back would otherwise wait the settle at
 /// each; nothing in a person's environment sets it.
 pub const SETTLE_MS_VARIABLE: &str = "CONSENSFLOW_SETTLE_MS";
+
+/// The variable that sets the unit of the tries of a refused or failed turn, in milliseconds
+/// (`Limits::turn_retry_ms`); 0 turns the tries off. A rig that fails a turn would otherwise
+/// wait two and a half minutes for it to fail its task; nothing in a person's environment
+/// sets it.
+pub const TURN_RETRY_MS_VARIABLE: &str = "CONSENSFLOW_TURN_RETRY_MS";
 
 /// The variable that sets how long the pane host has to answer a window's open, in
 /// milliseconds. A test of an open the host answers late would otherwise hold it a
@@ -302,6 +315,11 @@ impl Limits {
                 .and_then(|text| text.parse::<i64>().ok())
                 .filter(|ms| *ms >= 0)
                 .unwrap_or(default.settle_ms),
+            turn_retry_ms: env
+                .text(TURN_RETRY_MS_VARIABLE)
+                .and_then(|text| text.parse::<i64>().ok())
+                .filter(|ms| *ms >= 0)
+                .unwrap_or(default.turn_retry_ms),
             ..default
         }
     }
@@ -330,6 +348,12 @@ impl Limits {
                 self.settle_ms,
                 default.settle_ms,
                 SETTLE_MS_VARIABLE,
+            ),
+            (
+                "turn retry unit",
+                self.turn_retry_ms,
+                default.turn_retry_ms,
+                TURN_RETRY_MS_VARIABLE,
             ),
         ]
         .into_iter()
@@ -521,6 +545,7 @@ mod tests {
                 max_attempts: 3,
                 settle_ms: 3_000,
                 settle_from_first_look: false,
+                turn_retry_ms: 30_000,
             },
             "each variable sets its own wait and nothing else"
         );

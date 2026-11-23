@@ -500,6 +500,11 @@ pub(crate) fn admit(
         if stale {
             return Ok(HandOver::Withdrawn);
         }
+        // The daemon's bare words that resume a task go into no window that waits to be
+        // answered, where a question opened since they were queued (D3's N35).
+        if crate::tasks::turned_away_for_a_question(store, &message)? {
+            return Ok(HandOver::Withdrawn);
+        }
         if let Some(task) = message_task(store, message_id)? {
             if withdrawn_late(store, &message, &task)? {
                 return Ok(HandOver::Withdrawn);
