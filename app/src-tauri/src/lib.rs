@@ -306,6 +306,8 @@ pub(crate) fn page_commands<R: Runtime>(
         updates::update_download,
         updates::update_install,
         updates::update_open_page,
+        updates::local_network::local_network_notice,
+        updates::local_network::local_network_notice_open,
         link::open_link,
         selftest_report,
         #[cfg(any(test, feature = "test-support"))]

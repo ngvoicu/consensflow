@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::Update;
 
 mod check;
+pub(crate) mod local_network;
 #[cfg(target_os = "macos")]
 mod relaunch;
 
@@ -240,6 +241,10 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
                 let directory = manager.preferences.parent().ok_or("Invalid preferences path")?.join("updates");
                 crate::update_install::install_archive(&target, bytes, version, &directory, &identity)?;
                 swapped_in_worker.store(true, std::sync::atomic::Ordering::Release);
+                // The app installed has not run: its first launch shows the Local Network notice.
+                if let Some(preferences) = manager.preferences.parent() {
+                    local_network::mark_updated(&preferences.join("local-network.json"));
+                }
                 Ok(())
             })?;
             let runtime = worker.state::<AppRuntime>();
@@ -291,6 +296,14 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.manage(UpdateManager::new(
         &app.package_info().version.to_string(),
         preferences,
+    ));
+    // The notice of the first launch after an update on a Mac (T-2105); no file is written elsewhere.
+    app.manage(local_network::Notice::new(
+        cfg!(target_os = "macos")
+            && local_network::record(
+                &directory.join("local-network.json"),
+                &app.package_info().version.to_string(),
+            ),
     ));
     let menu = tauri::menu::Menu::default(app.handle())?;
     let check = tauri::menu::MenuItem::with_id(
@@ -1369,6 +1382,86 @@ mod tests {
             format!(
                 "{}\n--first\nsecond word\nholds none\nthe smoke's input\n",
                 home.display()
+            )
+        );
+    }
+
+    /// The installed app is started through LaunchServices in the app, and directly only in a
+    /// packaged self-test (T-2105): a direct start makes the new app the old one's child, which
+    /// no Finder or LaunchServices open does.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_installed_app_is_started_through_launch_services_and_directly_only_in_a_selftest() {
+        let app = Path::new("/Applications/ConsensFlow.app");
+        let run = |selftest| {
+            let steps = std::cell::RefCell::new(Vec::new());
+            let started = relaunch::start_installed(
+                app,
+                selftest,
+                |at| {
+                    steps.borrow_mut().push(format!("direct {}", at.display()));
+                    Ok(())
+                },
+                |at| {
+                    steps
+                        .borrow_mut()
+                        .push(format!("launch services {}", at.display()));
+                    Ok(())
+                },
+            );
+            assert_eq!(started, Ok(()));
+            steps.into_inner()
+        };
+        assert_eq!(
+            run(false),
+            ["launch services /Applications/ConsensFlow.app"]
+        );
+        assert_eq!(run(true), ["direct /Applications/ConsensFlow.app"]);
+    }
+
+    /// The LaunchServices start waits for this app to end, then opens a fresh process on the
+    /// bundle's path (`open -n`), from a helper that is not this app's child group. A stand-in
+    /// opener writes what it was asked; a child that ends later stands for the old app.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_launch_services_start_waits_for_the_old_app_and_opens_a_fresh_process() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().expect("a folder");
+        let asked = directory.path().join("asked");
+        let opener = directory.path().join("open");
+        std::fs::write(
+            &opener,
+            format!("#!/bin/sh\necho \"$@\" > '{}'\n", asked.display()),
+        )
+        .expect("write the opener");
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let app = directory.path().join("ConsensFlow.app");
+        let mut old = crate::testing::command("/bin/sleep")
+            .arg("1")
+            .spawn()
+            .expect("the old app's stand-in");
+        let mut helper = relaunch::launch_services_with(
+            &opener,
+            old.id(),
+            &app,
+            [std::ffi::OsString::from("--first")],
+            Some(directory.path()),
+        )
+        .expect("start the helper");
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert!(!asked.exists(), "opened while the old app was alive");
+        old.wait().expect("the old app ends");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !asked.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        helper.wait().expect("the helper ends");
+        assert_eq!(
+            std::fs::read_to_string(&asked).expect("what the opener was asked"),
+            format!(
+                "-n --env CONSENSFLOW_HOME={} {} --args --first\n",
+                directory.path().display(),
+                app.display()
             )
         );
     }

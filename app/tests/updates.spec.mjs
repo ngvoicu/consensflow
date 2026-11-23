@@ -41,7 +41,14 @@ function updateSnapshot(overrides = {}) {
     lastChecked: null,
     error: null,
     blockers: [],
-    compatibility: [{ harness: 'codex', version: '0.153.4', status: 'verified', fixedIn: null }],
+    compatibility: [
+      {
+        harness: 'codex',
+        version: '0.153.4',
+        status: 'verified',
+        fixedIn: null,
+      },
+    ],
     ...overrides,
   }
 }
@@ -58,8 +65,18 @@ function coreState(blocker = null) {
     tier: role === 'worker' ? 'standard' : null,
     outUntil: null,
   })
-  const lane = (who, pane) => ({ participant: who, tasks: [], activity: { state: 'idle' }, pane })
-  const project = { id: 1, name: 'hidden-session', directory: '/work/hidden', state: 'open' }
+  const lane = (who, pane) => ({
+    participant: who,
+    tasks: [],
+    activity: { state: 'idle' },
+    pane,
+  })
+  const project = {
+    id: 1,
+    name: 'hidden-session',
+    directory: '/work/hidden',
+    state: 'open',
+  }
   return {
     projects: [project],
     boards: {
@@ -68,10 +85,17 @@ function coreState(blocker = null) {
         open: [],
         lanes: [
           lane(participant(1, 'human', 'human'), null),
-          lane(participant(2, 'chief', 'chief'), { id: 'hidden-chief', generation: 1 }),
+          lane(participant(2, 'chief', 'chief'), {
+            id: 'hidden-chief',
+            generation: 1,
+          }),
           ...(blocker === null
             ? []
-            : [lane(participant(3, 'background-worker', 'worker'), { ...blocker })]),
+            : [
+                lane(participant(3, 'background-worker', 'worker'), {
+                  ...blocker,
+                }),
+              ]),
         ],
       },
     },
@@ -85,10 +109,10 @@ function coreState(blocker = null) {
  */
 async function installTauriShim(
   page,
-  { snapshot = updateSnapshot(), state = coreState(), lateDaemon = false } = {},
+  { snapshot = updateSnapshot(), state = coreState(), lateDaemon = false, notice = null } = {},
 ) {
   await page.addInitScript(
-    ({ initialSnapshot, initialState, late, roles }) => {
+    ({ initialSnapshot, initialState, late, roles, initialNotice }) => {
       const copy = (value) => JSON.parse(JSON.stringify(value))
       const eventListeners = new Map()
       const timers = []
@@ -103,7 +127,8 @@ async function installTauriShim(
 
       window.__calls = []
       window.__updateSnapshot = copy(initialSnapshot)
-      window.__commandResults = {}
+      window.__commandResults =
+        initialNotice === null ? {} : { local_network_notice: initialNotice }
       window.setTimeout = (callback, delay, ...args) => {
         if (delay === 10_000 || delay === 6 * 60 * 60 * 1_000) {
           const timer = { callback, delay, args, consumed: false }
@@ -191,7 +216,13 @@ async function installTauriShim(
         },
       }
     },
-    { initialSnapshot: snapshot, initialState: state, late: lateDaemon, roles: ROLES },
+    {
+      initialSnapshot: snapshot,
+      initialState: state,
+      late: lateDaemon,
+      roles: ROLES,
+      initialNotice: notice,
+    },
   )
 }
 
@@ -199,7 +230,9 @@ async function boot(page, options = {}) {
   await installTauriShim(page, options)
   await page.goto(ui.origin)
   await page.waitForLoadState('networkidle')
-  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 2_000,
+  })
 }
 
 function commandCalls(page, command) {
@@ -232,7 +265,9 @@ test('the menu check works while the daemon has not answered yet, as when a logi
   await expect(page.locator('body')).not.toHaveAttribute('data-ready', 'true')
   // And the board comes once the daemon answers.
   await page.evaluate(() => window.__answerDaemon())
-  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 2_000,
+  })
 })
 
 test('menu check keeps unavailable-feed failures visible and never enables download or install', async ({
@@ -262,7 +297,11 @@ test('quiet checks run at ten seconds and six hours without reopening a dismisse
   page,
 }) => {
   const candidate = updateSnapshot({
-    available: { version: '3.0.0-alpha.36', notes: 'Quiet release', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Quiet release',
+      date: '2026-09-09',
+    },
   })
   await boot(page)
   await page.evaluate((next) => window.__setCommandResult('update_check', next), candidate)
@@ -282,7 +321,11 @@ test("the banner's Review update opens the dialog on the candidate and checks ag
   page,
 }) => {
   const candidate = updateSnapshot({
-    available: { version: '3.0.0-alpha.36', notes: 'Quiet release', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Quiet release',
+      date: '2026-09-09',
+    },
   })
   await boot(page)
   await page.evaluate((next) => window.__setCommandResult('update_check', next), candidate)
@@ -369,7 +412,11 @@ test("offers a release's download page where the app installs nothing itself, ne
   // Windows, for now: the check finds the release, and the page it is downloaded from.
   const available = updateSnapshot({
     phase: 'available',
-    available: { version: '3.0.0-alpha.36', notes: 'The terminals take half', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'The terminals take half',
+      date: '2026-09-09',
+    },
     page: 'https://github.com/ngvoicu/consensflow/releases/tag/v3.0.0-alpha.36',
   })
   await boot(page, { snapshot: available })
@@ -399,7 +446,11 @@ test('channel changes clear the candidate and disable while downloading or insta
   page,
 }) => {
   const available = updateSnapshot({
-    available: { version: '3.0.0-alpha.36', notes: 'Candidate', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Candidate',
+      date: '2026-09-09',
+    },
   })
   await boot(page, { snapshot: available })
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
@@ -435,7 +486,11 @@ test('shows active hidden blockers, allows download, and never offers an unsafe 
   const blockers = [{ id: 'hidden-pane', generation: 4 }]
   const available = updateSnapshot({
     phase: 'idle',
-    available: { version: '3.0.0-alpha.36', notes: 'Ready', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Ready',
+      date: '2026-09-09',
+    },
     blockers,
   })
   await boot(page, { snapshot: available, state: coreState(blockers[0]) })
@@ -458,7 +513,11 @@ test('explains finishing and unconfirmed cleanup without inventing open panes', 
   await boot(page, {
     snapshot: updateSnapshot({
       phase: 'ready',
-      available: { version: '3.0.0-alpha.36', notes: 'Ready', date: '2026-09-09' },
+      available: {
+        version: '3.0.0-alpha.36',
+        notes: 'Ready',
+        date: '2026-09-09',
+      },
       blockers: [
         { id: 'finishing-pane-cleanup-0', generation: 0 },
         { id: 'unconfirmed-pane-cleanup-0', generation: 0 },
@@ -477,7 +536,11 @@ test('explains finishing and unconfirmed cleanup without inventing open panes', 
 test('refreshes before install and reports a backend race or install failure', async ({ page }) => {
   const ready = updateSnapshot({
     phase: 'ready',
-    available: { version: '3.0.0-alpha.36', notes: 'Ready', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Ready',
+      date: '2026-09-09',
+    },
     downloadedBytes: 100,
     totalBytes: 100,
   })
@@ -485,7 +548,10 @@ test('refreshes before install and reports a backend race or install failure', a
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
   const dialog = page.locator('#updates-dialog')
   await page.evaluate(() => {
-    window.__setCommandResult('update_install', { ok: false, error: 'pane opened before install' })
+    window.__setCommandResult('update_install', {
+      ok: false,
+      error: 'pane opened before install',
+    })
   })
   await page.getByRole('button', { name: 'Install and restart' }).click()
   await expect.poll(async () => (await commandCalls(page, 'update_install')).length).toBe(1)
@@ -493,7 +559,10 @@ test('refreshes before install and reports a backend race or install failure', a
   await expect(commandCalls(page, 'update_status')).resolves.toHaveLength(3)
 
   await page.evaluate(() =>
-    window.__setCommandResult('update_install', { ok: false, error: 'signature mismatch' }),
+    window.__setCommandResult('update_install', {
+      ok: false,
+      error: 'signature mismatch',
+    }),
   )
   await page.getByRole('button', { name: 'Install and restart' }).click()
   await expect.poll(async () => (await commandCalls(page, 'update_install')).length).toBe(2)
@@ -502,7 +571,11 @@ test('refreshes before install and reports a backend race or install failure', a
 
 test('Later closes the dialog and dismisses the same-version banner', async ({ page }) => {
   const available = updateSnapshot({
-    available: { version: '3.0.0-alpha.36', notes: 'Quiet release', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Quiet release',
+      date: '2026-09-09',
+    },
   })
   await boot(page, { snapshot: available })
   await page.evaluate(() => window.__runUpdateTimer(10_000))
@@ -518,12 +591,20 @@ test('Later closes the dialog and dismisses the same-version banner', async ({ p
 
 test('changing channel immediately checks the selected feed', async ({ page }) => {
   const alpha = updateSnapshot({
-    available: { version: '3.0.0-alpha.36', notes: 'Alpha release', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Alpha release',
+      date: '2026-09-09',
+    },
   })
   const stable = updateSnapshot({ channel: 'stable', available: null })
   const stableCandidate = updateSnapshot({
     channel: 'stable',
-    available: { version: '3.0.0', notes: 'Stable release', date: '2026-09-09' },
+    available: {
+      version: '3.0.0',
+      notes: 'Stable release',
+      date: '2026-09-09',
+    },
   })
   await boot(page, { snapshot: alpha })
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
@@ -551,7 +632,10 @@ const DAMAGED =
 test('a damaged saved channel is told in the dialog, and the shown channel can be kept to replace it', async ({
   page,
 }) => {
-  const damaged = updateSnapshot({ error: DAMAGED, preferenceProblem: DAMAGED })
+  const damaged = updateSnapshot({
+    error: DAMAGED,
+    preferenceProblem: DAMAGED,
+  })
   await boot(page, { snapshot: damaged })
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
   const dialog = page.locator('#updates-dialog')
@@ -576,7 +660,10 @@ test('a damaged saved channel is told in the dialog, and the shown channel can b
 test('choosing the other channel replaces a damaged saved one and its message', async ({
   page,
 }) => {
-  const damaged = updateSnapshot({ error: DAMAGED, preferenceProblem: DAMAGED })
+  const damaged = updateSnapshot({
+    error: DAMAGED,
+    preferenceProblem: DAMAGED,
+  })
   await boot(page, { snapshot: damaged })
   await page.evaluate(() => window.__emitTauriEvent('check-updates'))
   const dialog = page.locator('#updates-dialog')
@@ -601,7 +688,11 @@ test('choosing the other channel replaces a damaged saved one and its message', 
 test('aborts install when the pre-install status refresh fails', async ({ page }) => {
   const ready = updateSnapshot({
     phase: 'ready',
-    available: { version: '3.0.0-alpha.36', notes: 'Ready', date: '2026-09-09' },
+    available: {
+      version: '3.0.0-alpha.36',
+      notes: 'Ready',
+      date: '2026-09-09',
+    },
     downloadedBytes: 100,
     totalBytes: 100,
   })
@@ -610,11 +701,89 @@ test('aborts install when the pre-install status refresh fails', async ({ page }
   const dialog = page.locator('#updates-dialog')
   await expect(dialog.getByRole('button', { name: 'Install and restart' })).toBeEnabled()
   await page.evaluate(() =>
-    window.__setCommandResult('update_status', { ok: false, error: 'status unavailable' }),
+    window.__setCommandResult('update_status', {
+      ok: false,
+      error: 'status unavailable',
+    }),
   )
 
   await dialog.getByRole('button', { name: 'Install and restart' }).click()
   await expect.poll(async () => (await commandCalls(page, 'update_status')).length).toBe(2)
   await expect(commandCalls(page, 'update_install')).resolves.toHaveLength(0)
   await expect(dialog).toContainText('status unavailable')
+})
+
+const AFTER_UPDATE =
+  "If Pi can't reach your local model after this update, macOS may need you to allow Local Network access again."
+const ALREADY_ON =
+  "If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder. If that doesn't help, remove ConsensFlow from the list and add it again."
+
+test('no Local Network notice is drawn where the app does not ask for one', async ({ page }) => {
+  await boot(page)
+  await expect.poll(async () => (await commandCalls(page, 'local_network_notice')).length).toBe(1)
+  await expect(page.locator('#local-network-notice')).toHaveCount(0)
+  await boot(page, { notice: { ok: true, show: false } })
+  await expect(page.locator('#local-network-notice')).toHaveCount(0)
+})
+
+test('after an update the notice opens Local Network settings and can be dismissed', async ({
+  page,
+}) => {
+  await boot(page, {
+    notice: {
+      ok: true,
+      show: true,
+      button: 'Open Local Network settings',
+      path: null,
+    },
+  })
+  const notice = page.locator('#local-network-notice')
+  await expect(notice).toBeVisible()
+  await expect(notice).toContainText(AFTER_UPDATE)
+  await expect(notice).toContainText(ALREADY_ON)
+  await expect(notice).not.toContainText('Privacy & Security')
+  await notice.getByRole('button', { name: 'Open Local Network settings' }).click()
+  await expect
+    .poll(async () => (await commandCalls(page, 'local_network_notice_open')).length)
+    .toBe(1)
+  await expect(notice).toBeVisible()
+  await notice.getByRole('button', { name: 'Dismiss Local Network notice' }).click()
+  await expect(notice).toHaveCount(0)
+  await expect(commandCalls(page, 'local_network_notice')).resolves.toHaveLength(1)
+})
+
+test('where the settings link lands on the parent page the notice names the way', async ({
+  page,
+}) => {
+  await boot(page, {
+    notice: {
+      ok: true,
+      show: true,
+      button: 'Open Privacy & Security',
+      path: 'Privacy & Security, then Local Network',
+    },
+  })
+  const notice = page.locator('#local-network-notice')
+  await expect(notice).toContainText('You find it in Privacy & Security, then Local Network.')
+  await expect(notice.getByRole('button', { name: 'Open Privacy & Security' })).toBeVisible()
+})
+
+test('a settings page that could not open is said in the notice', async ({ page }) => {
+  await boot(page, {
+    notice: {
+      ok: true,
+      show: true,
+      button: 'Open Local Network settings',
+      path: null,
+    },
+  })
+  await page.evaluate(() =>
+    window.__setCommandResult('local_network_notice_open', {
+      ok: false,
+      error: 'The settings could not open: no opener',
+    }),
+  )
+  const notice = page.locator('#local-network-notice')
+  await notice.getByRole('button', { name: 'Open Local Network settings' }).click()
+  await expect(notice).toContainText('The settings could not open: no opener')
 })
