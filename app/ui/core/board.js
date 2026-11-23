@@ -122,6 +122,28 @@ const ACTIVITY_LABEL = {
   unknown: 'Unknown',
   out: 'Out of quota',
 }
+/**
+ * What a task waiting to be tried again says (D3's N35): its turn failed, and ConsensFlow's own
+ * Resume tries it again in its window. Held, it names the time and the try ("Trying again at
+ * 14:02:31 (1 of 2)"; the drawer says "its turn failed: tries again at ..."); from that time
+ * until its window has the words, that it waits for its window. `drawer` is the drawer's line.
+ */
+const retryWords = (retry, drawer = false, now = Date.now()) => {
+  const count = ` (${retry.which} of ${retry.of})`
+  const due = retry.dueAt ? new Date(retry.dueAt).getTime() : null
+  if (due !== null && due > now) {
+    const at = new Date(due).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+    return drawer ? `its turn failed: tries again at ${at}${count}` : `Trying again at ${at}${count}`
+  }
+  return drawer
+    ? `its turn failed: trying again, waiting for its window${count}`
+    : `Trying again, waiting for its window${count}`
+}
 /** How a message's kind reads. */
 const KIND_LABEL = {
   task: 'Task',
@@ -1687,6 +1709,7 @@ export class BoardView {
     card.dataset.state = task.state
     if (task.questionPending) card.dataset.pending = 'question'
     if (task.held) card.dataset.pending = 'background'
+    if (task.retry) card.dataset.pending = 'retry'
     card.setAttribute(
       'aria-label',
       `T-${task.number}, ${task.title}, ${stateLabel(task)}${task.resumeWait ? `, resume waits: ${task.resumeWait.reason}` : ''}, from ${who(task.requester)}`,
@@ -1707,6 +1730,7 @@ export class BoardView {
     if (task.held) {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
     }
+    if (task.retry) where.append(' · ', element('span', 'card-held', retryWords(task.retry)))
     if (task.resumeWait) {
       where.append(' · ', element('span', 'card-held', `resume waits: ${task.resumeWait.reason}`))
     }
@@ -1823,7 +1847,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.retry ? ` · ${retryWords(task.retry, true)}` : ''}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]

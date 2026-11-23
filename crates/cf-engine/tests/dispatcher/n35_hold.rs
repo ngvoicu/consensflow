@@ -191,6 +191,7 @@ fn the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the
         .filter(|note| note.contains("tried again twice"))
         .collect();
     assert_eq!(said.len(), 1, "the failure says what was tried: {said:?}");
+    assert!(said[0].contains("connection reset"), "and why the last turn failed: {said:?}");
     let tries: Vec<String> = t
         .notes("chief")
         .into_iter()
@@ -625,4 +626,185 @@ fn a_question_opened_after_the_resume_was_queued_turns_its_bare_words_away_at_th
     passes(&c, 5);
     assert_eq!(resumes(&c, "zeus"), 0, "nothing is pasted into a window that waits");
     assert_eq!(t.task(1).task.state, "waiting");
+}
+
+// ---- the review cases of T-2075 and T-2103 that stand on the hold ----
+
+#[test]
+fn a_completed_answer_on_the_first_receipt_look_of_a_count_is_kept_once() {
+    let c = retrying();
+    let t = Tiers::new(&c, &["zeus"]);
+    t.open();
+    c.pass().unwrap();
+    assert_eq!(t.task(1).task.state, "queued");
+    c.adapter.answer("zeus", "The completed result from the last allowance.");
+    let quota = count_at_its_limit(&c);
+    c.adapter.quota("zeus", Some(quota));
+    passes(&c, 3);
+    let end = t.task(1);
+    assert_eq!(end.task.state, "done");
+    assert_eq!(
+        end.messages
+            .iter()
+            .filter(|m| m.kind == "result" && m.body.contains("completed result"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_brief_s_first_receipt_with_a_count_and_its_answer_first_seen_at_the_exit_gives_the_result() {
+    let c = retrying();
+    let t = Tiers::new(&c, &["zeus"]);
+    t.open();
+    c.pass().unwrap();
+    assert_eq!(t.task(1).task.state, "queued");
+    c.adapter.answer("zeus", "The completed result.");
+    let quota = count_at_its_limit(&c);
+    c.adapter.quota("zeus", Some(quota));
+    c.exit("zeus");
+    assert_eq!(t.task(1).task.state, "done");
+    assert_eq!(results_of(&t, 1), 1);
+}
+
+#[test]
+fn a_restart_after_the_resume_was_pasted_never_sends_the_brief_again() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    c.edit_ledger(|_| {});
+    c.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = c.make();
+    restarted.settle_after_restart().unwrap();
+    restarted.resume_project(t.project.id).unwrap();
+    for _ in 0..8 {
+        restarted.pass().unwrap();
+        c.advance(4_000);
+    }
+    let briefs: Vec<_> = c
+        .adapter
+        .agent("zeus")
+        .items
+        .into_iter()
+        .filter(|item| item.role == Role::User && item.text.contains("Write the parser"))
+        .map(|item| item.id)
+        .collect();
+    assert!(briefs.len() <= 1, "the window was not given the brief again: {briefs:?}");
+    let message_briefs: Vec<_> = t
+        .task(1)
+        .messages
+        .iter()
+        .filter(|m| m.kind == "task" && m.body != RESUMED)
+        .map(|m| (m.attempts, m.state.clone()))
+        .collect();
+    assert_eq!(message_briefs, vec![(1, "delivered".to_owned())], "one brief, one attempt");
+}
+
+#[test]
+fn a_question_asked_before_or_during_the_hold_and_answered_before_or_after_its_time_is_answered_once() {
+    for (before_failure, answer_in_time) in [(true, false), (false, false), (false, true)] {
+        let c = retrying();
+        let (t, window) = working(&c);
+        let early = before_failure.then(|| c.ask(t.project.id, &window, "chief", 1, "Which?"));
+        if before_failure {
+            assert_eq!(t.task(1).task.state, "waiting");
+        }
+        fail(&c, &window);
+        passes(&c, 3);
+        let question = early.unwrap_or_else(|| c.ask(t.project.id, &window, "chief", 1, "Which?"));
+        if answer_in_time {
+            c.answer(t.project.id, question.id, "The west one");
+        }
+        c.advance(31_000);
+        passes(&c, 5);
+        if !answer_in_time {
+            c.answer(t.project.id, question.id, "The west one");
+        }
+        for _ in 0..8 {
+            c.advance(4_000);
+            passes(&c, 1);
+        }
+        next_turn_opens(&c, &window);
+        c.adapter.answer("zeus", "Done at the west one");
+        passes(&c, 4);
+        let case = format!("before failure {before_failure}, in time {answer_in_time}");
+        let answers = given(&c, "zeus")
+            .iter()
+            .filter(|text| text.contains("The west one"))
+            .count();
+        assert_eq!(answers, 1, "one answer delivered ({case})");
+        assert_eq!(results_of(&t, 1), 1, "one result ({case})");
+        assert_ne!(t.task(1).task.state, "failed", "{case}");
+    }
+}
+
+#[test]
+fn a_question_asked_and_answered_between_two_looks_is_never_failed_by_any_time() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    let question = c.ask(t.project.id, &window, "chief", 1, "Which destination?");
+    c.answer(t.project.id, question.id, "Use staging");
+    c.advance(31_000);
+    for _ in 0..8 {
+        c.advance(4_000);
+        passes(&c, 1);
+    }
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    // The turn on the answer goes on for longer than any retry's time: nothing fails it.
+    c.advance(900_000);
+    passes(&c, 4);
+    assert_eq!(t.task(1).task.state, "working");
+    c.adapter.answer("zeus", "Done on staging");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.state, "done");
+    assert_eq!(results_of(&t, 1), 1);
+}
+
+#[test]
+fn a_resume_that_waits_six_minutes_for_its_window_is_pasted_once_and_fails_nothing() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    // The window is at work: main's Resume is queued for its rest.
+    c.adapter.with(&window, |agent| {
+        agent.failed = false;
+        agent.failure = None;
+        agent.settled = false;
+    });
+    passes(&c, 3);
+    assert_eq!(resumes(&c, "zeus"), 0);
+    c.advance(400_000);
+    passes(&c, 3);
+    c.adapter.with(&window, |agent| agent.settled = true);
+    passes(&c, 6);
+    assert_eq!(resumes(&c, "zeus"), 1, "pasted once");
+    assert_ne!(t.task(1).task.state, "failed");
+}
+
+#[test]
+fn a_refusal_seen_while_the_task_is_held_holds_the_member_and_the_task_is_not_resumed_while_it_is_out() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(1_000);
+    let quota = super::fixtures::exhausted(
+        Some(&super::fixtures::now(&c)),
+        Some(&super::fixtures::soon(&c, 5)),
+    );
+    c.adapter.refuse(&window, quota);
+    passes(&c, 3);
+    assert!(t.out_until("zeus").is_some(), "main's hold of the member");
+    c.advance(40_000);
+    passes(&c, 4);
+    assert_eq!(resumes(&c, "zeus"), 0, "not resumed while its member is out");
+    assert_eq!(t.task(1).task.state, "paused");
 }

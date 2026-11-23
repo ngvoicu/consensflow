@@ -19515,3 +19515,75 @@ test('T1859 a team with one no-end hold gives the other part reset time in eithe
     )
   }
 })
+
+/** A board whose worker's task T-12 waits to be tried again (D3's N35): paused while held, queued once main's Resume is on its way. */
+function retryingModel(state, which, dueIn) {
+  const data = model();
+  const lane = data.boards[1].lanes.find(
+    (l) => l.participant.handle === "zeus",
+  );
+  lane.tasks.push(
+    task(12, "Serve the docs", state, "chief", "zeus", 3, {
+      pool: "worker",
+      tier: "standard",
+      retry: {
+        kind: "failed",
+        which,
+        of: 2,
+        ...(dueIn === null
+          ? {}
+          : { dueAt: new Date(Date.now() + dueIn).toISOString() }),
+      },
+    }),
+  );
+  data.tasks["1:12"] = { ...lane.tasks.at(-1), messages: [] };
+  return data;
+}
+
+for (const [which, words] of [
+  [1, /^Trying again at \d\d:\d\d:\d\d \(1 of 2\)$/],
+  [2, /^Trying again at \d\d:\d\d:\d\d \(2 of 2\)$/],
+]) {
+  test(`a task held to be tried again reads Paused and says when, on the card and in the drawer (${which} of 2)`, async ({
+    page,
+  }) => {
+    await open(page, retryingModel("paused", which, 30_000));
+    const card = page.locator('button.card[data-task="12"]');
+    await expect(card).toHaveAttribute("data-pending", "retry");
+    await expect(card.locator(".card-state")).toHaveText("Paused");
+    await expect(card.locator(".card-held")).toHaveText(words);
+    // A card with no retry on its way says nothing of it.
+    await expect(
+      page.locator('button.card[data-task="2"] .card-state'),
+    ).not.toHaveText(/trying again/i);
+    await card.click();
+    const drawer = page.getByRole("complementary", { name: "Task T-12" });
+    await expect(drawer.locator(".drawer-meta")).toContainText("Paused");
+    await expect(drawer.locator(".drawer-meta")).toContainText(
+      new RegExp(
+        `its turn failed: tries again at \\d\\d:\\d\\d:\\d\\d \\(${which} of 2\\)`,
+      ),
+    );
+  });
+}
+
+test("a task whose time has come, or whose Resume is on its way, says it waits for its window", async ({
+  page,
+}) => {
+  for (const [state, dueIn] of [
+    ["paused", -20_000],
+    ["queued", null],
+  ]) {
+    await open(page, retryingModel(state, 1, dueIn));
+    const card = page.locator('button.card[data-task="12"]');
+    await expect(card.locator(".card-held")).toHaveText(
+      "Trying again, waiting for its window (1 of 2)",
+    );
+    await expect(card.locator(".card-held")).not.toHaveText(/at \d\d:/);
+    await card.click();
+    const drawer = page.getByRole("complementary", { name: "Task T-12" });
+    await expect(drawer.locator(".drawer-meta")).toContainText(
+      "its turn failed: trying again, waiting for its window (1 of 2)",
+    );
+  }
+});
