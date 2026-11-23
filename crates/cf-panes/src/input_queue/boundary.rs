@@ -524,6 +524,10 @@ fn r11_a_stale_call_is_told_at_any_age_and_overflow_is_counted_apart() {
     assert_eq!(count, 1);
     // One more is evicted while the aggregate's confirmation is in flight.
     rig.skip_key(&page, &PaneKey::new("window-513", 1), 1).unwrap();
+    // A window's notice confirmed apart does not confirm the count.
+    let confirmed: Vec<_> = shown.iter().take(1).map(|n| (n.key.clone(), n.loss)).collect();
+    rig.told(&page, &confirmed).unwrap();
+    assert!(rig.overflow(&page).is_some(), "the count is confirmed on its own");
     rig.told_overflow(&page, version, count).unwrap();
     let (later, left) = rig.overflow(&page).expect("the further eviction survives");
     assert_eq!(left, 1, "the confirmation of that version leaves the one further record");

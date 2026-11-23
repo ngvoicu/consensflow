@@ -2130,6 +2130,20 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_number_lets_the_next_go_in_at_once() {
+        let (inputs, key, received, _) = bare();
+        inputs.begin_page("page").unwrap();
+        let over = InputWork::Typed(vec![b'x'; crate::validation::MAX_PAGE_INPUT_BYTES + 1]);
+        assert!(inputs.enqueue("page", key.clone(), 1, over, true).is_err());
+        inputs
+            .enqueue("page", key.clone(), 2, typed(b"B"), true)
+            .unwrap();
+        assert_eq!(handed(&received), b"B", "the order goes on past the refused number");
+        inputs.close_and_drain();
+    }
+
+    /// A refusal is final for its number: nothing was written, and the next goes on.
+    #[test]
     fn a_refused_admission_is_final_for_its_number() {
         let inputs = InputQueue::new(
             Arc::new(PaneTable::new()),

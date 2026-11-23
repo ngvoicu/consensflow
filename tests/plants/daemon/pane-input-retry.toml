@@ -6,10 +6,9 @@
 pane-input-reconcile = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_skipped_call_is_never_written_when_its_original_comes_late"]
 pane-input-late = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives"]
 pane-input-lost-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_lost_paste_writes_none_of_itself_even_when_it_comes_late"]
-pane-input-capacity = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
-pane-input-final = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_refused_admission_is_final_for_its_number"]
+pane-input-final = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_refused_number_lets_the_next_go_in_at_once"]
 pane-input-cap = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_over_the_cap_is_refused_whole_and_spends_its_number"]
-pane-input-fence = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::navigation_fences_a_page_before_the_next_subscription"]
+pane-input-fence = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_delayed_old_page_retry_cannot_write_into_the_new_page"]
 pane-input-whole = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_that_comes_during_a_paste_goes_after_all_of_it"]
 pane-input-length = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "validation::tests::a_page_calls_bytes_are_the_length_it_stated_or_refused"]
 pane-input-cut = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_is_final_for_its_sequence"]
@@ -18,18 +17,14 @@ failed-pane-answer = ["cargo", "test", "--offline", "-p", "app", "commands::test
 failed-pane-notice = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a failed pane input|a late pane refusal|another pane cannot replace failed pane"]
 
 [[plant]]
-name = "pane input retry: let a departed page admit input"
-meant = "navigation_fences_a_page_before_the_next_subscription"
+name = "pane input retry: let a page that is not current admit input"
+meant = "a_delayed_old_page_retry_cannot_write_into_the_new_page"
 runs = ["pane-input-fence"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        self.current.as_deref() == Some(page_id)
-            || self
-                .left_at
-                .get(page_id)
-                .is_some_and(|left| now < *left + ORDER_BOUND)'''
-replace = '''        true'''
+find = '''        self.epoch == epoch && self.current.as_deref() == Some(page_id)'''
+replace = '''        self.epoch == epoch'''
 
 [[plant]]
 name = "pane input retry: a skip leaves its number open"
@@ -38,11 +33,10 @@ runs = ["pane-input-reconcile", "pane-input-late", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            if sequence > lane.passed
-                && !lane.slots.contains_key(&sequence)'''
-replace = '''            if false
-                && sequence > lane.passed
-                && !lane.slots.contains_key(&sequence)'''
+find = '''                if sequence > lane.passed && !lane.slots.contains_key(&sequence) {
+                    lane.slots.insert('''
+replace = '''                if false && sequence > lane.passed && !lane.slots.contains_key(&sequence) {
+                    lane.slots.insert('''
 
 [[plant]]
 name = "pane input retry: admit a number the count has passed"
@@ -78,12 +72,12 @@ replace = '''                let _ = first;
 
 [[plant]]
 name = "pane input retry: a refused admission leaves its number open"
-meant = "unanswered_page_input_is_bounded_until_a_new_page"
-runs = ["pane-input-capacity", "pane-input-final"]
+meant = "a_refused_number_lets_the_next_go_in_at_once"
+runs = ["pane-input-final"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            let lane = page.lane(&key, page_id);
+find = '''            let lane = page.lane(&key);
             if lane.slots.len() < MAX_LANE_SLOTS {
                 lane.slots.insert(
                     sequence,
@@ -92,7 +86,7 @@ find = '''            let lane = page.lane(&key, page_id);
                     },
                 );
             }'''
-replace = '''            let _ = page.lane(&key, page_id);'''
+replace = '''            let _ = page.lane(&key);'''
 
 [[plant]]
 name = "pane input retry: a paste over the cap goes in"
@@ -214,8 +208,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/terminal-link.js"
-find = '''        settled?.failedUntilRestart === true,'''
-replace = '''        false,'''
+find = '''      if (settled?.failedUntilRestart === true) this.#failedInputs.add(key)'''
+replace = '''      if (false) this.#failedInputs.add(key)'''
 
 [[plant]]
 name = "failed pane notice: a late refusal replaces restart advice"
@@ -225,8 +219,12 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/terminal-link.js"
-find = '''    this.#report(this.#failedInputs.size > 0 ? new Error(RESTART_INPUT_ADVICE) : cause)'''
-replace = '''    this.#report(failed ? new Error(RESTART_INPUT_ADVICE) : cause)'''
+find = '''        this.#failedInputs.has(key)
+          ? RESTART_INPUT_ADVICE
+          : settled?.uncertain === true'''
+replace = '''        false
+          ? RESTART_INPUT_ADVICE
+          : settled?.uncertain === true'''
 
 [[plant]]
 name = "failed pane notice: a retired generation keeps its restart advice"
