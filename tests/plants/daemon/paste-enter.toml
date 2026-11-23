@@ -113,8 +113,8 @@ runs = ["paste-enter-open"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "            .register_with(&streamed.key, request.silent_paste)"
-replace = "            .register_with(&streamed.key, None)"
+find = "            .register_counted(&streamed.key, request.silent_paste, &streamed.counts)"
+replace = "            .register_counted(&streamed.key, None, &streamed.counts)"
 
 [[plant]]
 name = "paste enter: a pane's generation keeps no word on how it reads a paste"
@@ -166,10 +166,10 @@ runs = ["paste-enter-arbiter"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/timing.rs"
 find = """
-    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
+    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) -> Waited {
         loop {"""
 replace = """
-    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
+    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) -> Waited {
         let _ = pasted;
         let pasted = clock.now();
         loop {"""
@@ -575,8 +575,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/timing.rs"
-find = "            if since >= self.most_ms"
-replace = "            if since >= self.most_ms / 2"
+find = "            if since >= self.most_ms\n                ||"
+replace = "            if since >= self.most_ms / 2\n                ||"
 
 # --- a paste's time to be answered (T-1127, second part). `pane.write_paste` had the bridge's
 # 30 s whatever the pane host holds a delivery's Enter for: into a window like Muse's on Windows

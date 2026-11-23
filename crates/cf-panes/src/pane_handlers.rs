@@ -1089,6 +1089,8 @@ mod tests {
         let mut reads: Vec<&[u8]> = vec![b"echo"];
         reads.extend((0..8).map(|_| heavy.as_slice()));
         for (seq, bytes) in reads.iter().enumerate() {
+            // As the pty's reader counts what it takes, before the read waits in the queue.
+            printed.counts().took(bytes.len());
             sender
                 .send(PaneOutput {
                     key: key.clone(),
