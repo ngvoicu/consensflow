@@ -241,10 +241,6 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
                 let directory = manager.preferences.parent().ok_or("Invalid preferences path")?.join("updates");
                 crate::update_install::install_archive(&target, bytes, version, &directory, &identity)?;
                 swapped_in_worker.store(true, std::sync::atomic::Ordering::Release);
-                // The app installed has not run: its first launch shows the Local Network notice.
-                if let Some(preferences) = manager.preferences.parent() {
-                    local_network::mark_updated(&preferences.join("local-network.json"));
-                }
                 Ok(())
             })?;
             let runtime = worker.state::<AppRuntime>();
@@ -275,6 +271,20 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
+/// Whether ConsensFlow's home shows an earlier run, read before the app's own start makes any
+/// of what it looks for (the daemon's ledger): the notice of an update needs to tell a first
+/// install from an upgrade by a build that wrote no marker (T-2114).
+#[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
+pub fn earlier_run(app: &tauri::App) -> bool {
+    app.path().home_dir().is_ok_and(|home| {
+        let directory = preferences_directory(
+            &home,
+            std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from),
+        );
+        directory.parent().is_some_and(local_network::earlier_run)
+    })
+}
+
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
     configured
         .unwrap_or_else(|| home.join(".consensflow"))
@@ -282,7 +292,7 @@ fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
 }
 
 #[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
-pub fn setup(app: &tauri::App) -> tauri::Result<()> {
+pub fn setup(app: &tauri::App, earlier_run: bool) -> tauri::Result<()> {
     let directory = preferences_directory(
         &app.path().home_dir()?,
         std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from),
@@ -303,6 +313,7 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
             && local_network::record(
                 &directory.join("local-network.json"),
                 &app.package_info().version.to_string(),
+                earlier_run,
             ),
     ));
     let menu = tauri::menu::Menu::default(app.handle())?;
@@ -1419,50 +1430,135 @@ mod tests {
         assert_eq!(run(true), ["direct /Applications/ConsensFlow.app"]);
     }
 
+    /// A folder holding stand-ins for the opener and the bundle's executable, each writing what
+    /// it was asked to a file of its own (the opener exits with `opener_status`), and the
+    /// log the helper writes to.
+    #[cfg(target_os = "macos")]
+    struct Handoff {
+        directory: tempfile::TempDir,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Handoff {
+        fn new(opener_status: i32) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempfile::tempdir().expect("a folder");
+            for (name, status) in [("open", opener_status), ("executable", 0)] {
+                let path = directory.path().join(name);
+                std::fs::write(
+                    &path,
+                    format!(
+                        "#!/bin/sh\necho \"$@\" > '{}'\nexit {status}\n",
+                        directory.path().join(format!("{name}-asked")).display()
+                    ),
+                )
+                .expect("write a stand-in");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("mode");
+            }
+            Self { directory }
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.directory.path().join(name)
+        }
+
+        fn asked(&self, name: &str) -> Option<String> {
+            std::fs::read_to_string(self.path(&format!("{name}-asked"))).ok()
+        }
+
+        fn start(&self, old: u32, polls: u32) -> std::process::Child {
+            relaunch::launch_services_with(relaunch::Handoff {
+                opener: &self.path("open"),
+                old,
+                app: &self.path("ConsensFlow.app"),
+                args: vec![std::ffi::OsString::from("--first")],
+                home: Some(self.directory.path()),
+                executable: &self.path("executable"),
+                polls,
+                log: Some(&self.path("log")),
+            })
+            .expect("start the helper")
+        }
+
+        fn log(&self) -> String {
+            std::fs::read_to_string(self.path("log")).unwrap_or_default()
+        }
+    }
+
     /// The LaunchServices start waits for this app to end, then opens a fresh process on the
     /// bundle's path (`open -n`), from a helper that is not this app's child group. A stand-in
     /// opener writes what it was asked; a child that ends later stands for the old app.
     #[cfg(target_os = "macos")]
     #[test]
     fn the_launch_services_start_waits_for_the_old_app_and_opens_a_fresh_process() {
-        use std::os::unix::fs::PermissionsExt;
-        let directory = tempfile::tempdir().expect("a folder");
-        let asked = directory.path().join("asked");
-        let opener = directory.path().join("open");
-        std::fs::write(
-            &opener,
-            format!("#!/bin/sh\necho \"$@\" > '{}'\n", asked.display()),
-        )
-        .expect("write the opener");
-        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).expect("mode");
-        let app = directory.path().join("ConsensFlow.app");
+        let fixture = Handoff::new(0);
         let mut old = crate::testing::command("/bin/sleep")
             .arg("1")
             .spawn()
             .expect("the old app's stand-in");
-        let mut helper = relaunch::launch_services_with(
-            &opener,
-            old.id(),
-            &app,
-            [std::ffi::OsString::from("--first")],
-            Some(directory.path()),
-        )
-        .expect("start the helper");
+        let mut helper = fixture.start(old.id(), 3000);
         std::thread::sleep(std::time::Duration::from_millis(400));
-        assert!(!asked.exists(), "opened while the old app was alive");
+        assert!(
+            fixture.asked("open").is_none(),
+            "opened while the old app was alive"
+        );
         old.wait().expect("the old app ends");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !asked.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        helper.wait().expect("the helper ends");
+        assert!(helper.wait().expect("the helper ends").success());
         assert_eq!(
-            std::fs::read_to_string(&asked).expect("what the opener was asked"),
-            format!(
+            fixture.asked("open"),
+            Some(format!(
                 "-n --env CONSENSFLOW_HOME={} {} --args --first\n",
-                directory.path().display(),
-                app.display()
-            )
+                fixture.directory.path().display(),
+                fixture.path("ConsensFlow.app").display()
+            ))
+        );
+        assert_eq!(fixture.asked("executable"), None, "started it directly too");
+    }
+
+    /// An opener that fails leaves the person with their app (T-2114): the helper starts the
+    /// installed app directly, with the old app's arguments, and says why in the log.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_open_starts_the_installed_app_directly_and_says_why() {
+        let fixture = Handoff::new(1);
+        let mut helper = fixture.start(u32::MAX, 3000);
+        helper.wait().expect("the helper ends");
+        assert_eq!(fixture.asked("executable"), Some("--first\n".into()));
+        assert!(
+            fixture.log().contains("failed with status 1"),
+            "the log says nothing: {:?}",
+            fixture.log()
+        );
+    }
+
+    /// Never two apps (T-2114): where the old app is still alive at the helper's bound, the
+    /// helper starts nothing (no opener, no direct start), says so in the log, and the old app
+    /// runs on. A stand-in old app that outlives a bound of five polls stands for the
+    /// review's 32.01 s case.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_old_app_still_alive_at_the_bound_is_not_started_over() {
+        let fixture = Handoff::new(0);
+        let mut old = crate::testing::command("/bin/sleep")
+            .arg("5")
+            .spawn()
+            .expect("the old app's stand-in");
+        let mut helper = fixture.start(old.id(), 5);
+        assert!(helper.wait().expect("the helper ends").success());
+        assert!(old.try_wait().expect("the old app").is_none(), "it ended");
+        let _ = old.kill();
+        let _ = old.wait();
+        assert_eq!(fixture.asked("open"), None, "a second app was opened");
+        assert_eq!(
+            fixture.asked("executable"),
+            None,
+            "a second app was started"
+        );
+        assert!(
+            fixture.log().contains("still running"),
+            "the log says nothing: {:?}",
+            fixture.log()
         );
     }
 

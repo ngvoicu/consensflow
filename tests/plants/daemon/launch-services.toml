@@ -34,8 +34,36 @@ runs = ["app-updates"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/updates/relaunch.rs"
-find = '''while kill -0 \"$1\" 2>/dev/null && [ \"$waited\" -lt \"$2\" ]; do \'''
-replace = '''while false; do \'''
+find = 'while kill -0 "$old" 2>/dev/null; do'
+replace = "while false; do"
+
+# A failed opener leaves the person with no app (T-2114, blocker 1): the helper's fall back to
+# the direct start, and its word in the log, taken out.
+[[plant]]
+name = "launch-services: a failed open leaves no app and no word"
+meant = "a_failed_open_starts_the_installed_app_directly_and_says_why"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '"$opener" "$@" && exit 0'
+replace = '"$opener" "$@"; exit 0'
+
+# Never two apps (T-2114, blocker 2): at the bound the helper goes on to start the app over the
+# old one, as the 300 polls of the first build did at 32 seconds.
+[[plant]]
+name = "launch-services: the helper starts a second app at its bound"
+meant = "an_old_app_still_alive_at_the_bound_is_not_started_over"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '''    exit 0
+  fi
+  /bin/sleep 0.1'''
+replace = '''    break
+  fi
+  /bin/sleep 0.1'''
 
 # The notice at a first install: no file is a launch after an update.
 [[plant]]
@@ -45,5 +73,17 @@ runs = ["app-updates"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/updates/local_network.rs"
-find = "    seen.is_some_and(|seen| seen != current)"
-replace = "    seen.is_none_or(|seen| seen != current)"
+find = "    seen.map_or(earlier_run, |seen| seen != current)"
+replace = "    seen.map_or(true, |seen| seen != current)"
+
+# The upgrade from a build that wrote no marker (T-2114, blocker 3): a missing file is a first
+# install whatever the home shows.
+[[plant]]
+name = "launch-services: an upgrade from a build with no marker shows no notice"
+meant = "an_upgrade_from_a_build_that_wrote_no_marker_shows_the_notice_once"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/local_network.rs"
+find = "    seen.map_or(earlier_run, |seen| seen != current)"
+replace = "    seen.map_or(false, |seen| seen != current)"

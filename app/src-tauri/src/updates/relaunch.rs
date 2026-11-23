@@ -76,9 +76,31 @@ pub(super) fn start_installed(
     }
 }
 
-/// The most the helper waits for the old app to end before it opens the new one anyway.
+/// How long the helper waits for the old app to end, in polls of a tenth of a second: five
+/// minutes. The old app's own shutdown is bounded (the panes' drain at five seconds, then the
+/// daemon's stop), so a minute past that is a hang, not a slow end; five minutes is long enough
+/// for a Mac under swap, and bounded so that a helper does not outlive a hung app for good. When
+/// it passes, no second app is started: the old one stays and the update applies at its next start.
 #[cfg(target_os = "macos")]
-const WAIT_FOR_THE_OLD_APP: &str = "300";
+const WAIT_POLLS: u32 = 3000;
+
+/// What the helper that starts the installed app is given.
+#[cfg(target_os = "macos")]
+pub(super) struct Handoff<'a> {
+    /// `/usr/bin/open`.
+    pub opener: &'a Path,
+    /// The old app's process: the helper starts nothing while it runs.
+    pub old: u32,
+    /// The installed bundle.
+    pub app: &'a Path,
+    pub args: Vec<std::ffi::OsString>,
+    pub home: Option<&'a Path>,
+    /// The bundle's executable: started directly where the opener fails.
+    pub executable: &'a Path,
+    pub polls: u32,
+    /// Where the helper says what it did and why: the app's error log.
+    pub log: Option<&'a Path>,
+}
 
 /// Starts the installed app through LaunchServices once this app has ended: `open -n` on the
 /// bundle's path, by a helper that outlives this app, with this app's arguments and its
@@ -87,59 +109,106 @@ const WAIT_FOR_THE_OLD_APP: &str = "300";
 #[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the app's setup does.
 pub(super) fn launch_services(installed: &Path) -> Result<std::process::Child, String> {
     let home = std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from);
-    launch_services_with(
-        Path::new("/usr/bin/open"),
-        std::process::id(),
-        installed,
-        std::env::args_os().skip(1),
-        home.as_deref(),
-    )
+    let executable = bundle_executable(installed)?;
+    let log = crate::error_log();
+    launch_services_with(Handoff {
+        opener: Path::new("/usr/bin/open"),
+        old: std::process::id(),
+        app: installed,
+        args: std::env::args_os().skip(1).collect(),
+        home: home.as_deref(),
+        executable: &executable,
+        polls: WAIT_POLLS,
+        log: log.as_deref(),
+    })
 }
 
-/// The helper: it waits (up to 30 seconds) for process `old` to end, then runs `opener -n` with
-/// `app` (and the home and `args`), a fresh process of the bundle at that path. It holds only
-/// the standard streams, nulled, and is in a process group of its own, so that the end of this
-/// app's group does not end it.
+/// The helper.
 #[cfg(target_os = "macos")]
 #[allow(clippy::disallowed_methods)] // The helper is a shell of the system's, started as this app starts the installed one: holding only its streams, older than cf-process's rule.
-pub(super) fn launch_services_with(
-    opener: &Path,
-    old: u32,
-    app: &Path,
-    args: impl IntoIterator<Item = std::ffi::OsString>,
-    home: Option<&Path>,
-) -> Result<std::process::Child, String> {
+pub(super) fn launch_services_with(handoff: Handoff) -> Result<std::process::Child, String> {
     use std::os::unix::process::CommandExt;
+    let mut prefix: Vec<std::ffi::OsString> = vec!["-n".into()];
+    if let Some(home) = handoff.home {
+        let mut variable = std::ffi::OsString::from("CONSENSFLOW_HOME=");
+        variable.push(home);
+        prefix.extend(["--env".into(), variable]);
+    }
+    prefix.push(handoff.app.into());
+    if !handoff.args.is_empty() {
+        prefix.push("--args".into());
+    }
+    let log = handoff.log.and_then(|log| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+            .ok()
+    });
     let mut command = std::process::Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg(
-            "waited=0; while kill -0 \"$1\" 2>/dev/null && [ \"$waited\" -lt \"$2\" ]; do \
-             sleep 0.1; waited=$((waited + 1)); done; shift 2; exec \"$@\"",
-        )
+        .arg(HELPER)
         .arg("sh")
-        .arg(old.to_string())
-        .arg(WAIT_FOR_THE_OLD_APP)
-        .arg(opener)
-        .arg("-n");
-    if let Some(home) = home {
-        let mut variable = std::ffi::OsString::from("CONSENSFLOW_HOME=");
-        variable.push(home);
-        command.arg("--env").arg(variable);
-    }
-    command.arg(app);
-    let mut args = args.into_iter().peekable();
-    if args.peek().is_some() {
-        command.arg("--args").args(args);
-    }
-    command
+        .arg(handoff.old.to_string())
+        .arg(handoff.polls.to_string())
+        .arg(handoff.executable)
+        .arg(handoff.opener)
+        .arg(prefix.len().to_string())
+        .args(&prefix)
+        .args(&handoff.args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(log.map_or_else(std::process::Stdio::null, std::process::Stdio::from))
         .process_group(0);
     cf_process::hold_only_the_streams(&mut command);
     command.spawn().map_err(|e| e.to_string())
 }
+
+/// The helper's script, given the old app's pid, the polls to wait, the bundle's executable,
+/// the opener, the number of the opener's arguments that are not the old app's own, and then the
+/// opener's arguments (`-n`, the home, the bundle, `--args` where there are any) and the old
+/// app's arguments. It waits for the old app to end and starts nothing while it runs: past its
+/// bound it says so and ends, the old app staying (the update applies at its next start). A
+/// failed opener is said with its status and the app is started directly, the way it was
+/// before LaunchServices (T-2114). `/bin/sleep` is the system's by its path: the helper keeps
+/// the old app's environment, whose PATH may hold no `sleep`.
+#[cfg(target_os = "macos")]
+const HELPER: &str = r#"old=$1; polls=$2; executable=$3; opener=$4; keep=$5; shift 5
+waited=0
+while kill -0 "$old" 2>/dev/null; do
+  if [ "$waited" -ge "$polls" ]; then
+    echo "ConsensFlow relaunch: the old app (pid $old) is still running after $polls polls; no second app is started, the update applies at its next start" >&2
+    exit 0
+  fi
+  /bin/sleep 0.1
+  waited=$((waited + 1))
+done
+"$opener" "$@" && exit 0
+status=$?
+echo "ConsensFlow relaunch: $opener failed with status $status; starting the installed app directly" >&2
+shift "$keep"
+exec "$executable" "$@"
+"#;
+
+/// The executable of the bundle at `app`: its Info.plist names it, and it is one file of
+/// `Contents/MacOS`.
+#[cfg(target_os = "macos")]
+pub(super) fn bundle_executable(app: &Path) -> Result<PathBuf, String> {
+    let tools = crate::update_install::Tools::system();
+    let executable = crate::update_install::plist_value(&tools, app, "CFBundleExecutable")?;
+    let mut parts = Path::new(&executable).components();
+    if !matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) {
+        return Err(format!(
+            "the bundle names no executable of its own: {executable:?}"
+        ));
+    }
+    Ok(app.join("Contents/MacOS").join(&executable))
+}
+
 /// The installed app is started once, by `start`, or not at all here (T-941): Tauri's cleanup
 /// runs first, a panic of it stopped and said, and a start that succeeds is followed by `exit`
 /// and nothing else, so Tauri's restart, which runs where this returns, never starts it a second
@@ -174,18 +243,7 @@ pub(super) fn relaunch(
     app: &Path,
     args: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> Result<std::process::Child, String> {
-    let tools = crate::update_install::Tools::system();
-    let executable = crate::update_install::plist_value(&tools, app, "CFBundleExecutable")?;
-    let mut parts = Path::new(&executable).components();
-    if !matches!(
-        (parts.next(), parts.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    ) {
-        return Err(format!(
-            "the bundle names no executable of its own: {executable:?}"
-        ));
-    }
-    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
+    let mut command = std::process::Command::new(bundle_executable(app)?);
     command.args(args);
     cf_process::hold_only_the_streams(&mut command);
     command.spawn().map_err(|e| e.to_string())

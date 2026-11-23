@@ -438,10 +438,12 @@ fn settle_home(identifier: &str) {
 /// panic that was contained, the update check, and the main window.
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     tell_of_contained_panics(app.handle().clone());
+    // Read before the runtime starts the daemon, which makes the ledger it looks for.
+    let earlier_run = updates::earlier_run(app);
     app.manage(AppRuntime::start(app.handle()));
     // The terminal's command names this bundle's `cf`, whichever build wrote it.
     launcher::repair_in_background(app.handle());
-    updates::setup(app)?;
+    updates::setup(app, earlier_run)?;
     open_main_window(app)
 }
 

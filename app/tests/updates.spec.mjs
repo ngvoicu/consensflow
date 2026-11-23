@@ -716,7 +716,8 @@ test('aborts install when the pre-install status refresh fails', async ({ page }
 const AFTER_UPDATE =
   "If Pi can't reach your local model after this update, macOS may need you to allow Local Network access again."
 const ALREADY_ON =
-  "If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder. If that doesn't help, remove ConsensFlow from the list and add it again."
+  'If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder.'
+const REMOVE_AND_ADD = "If that doesn't help, remove ConsensFlow from the list and add it again."
 
 test('no Local Network notice is drawn where the app does not ask for one', async ({ page }) => {
   await boot(page)
@@ -735,12 +736,15 @@ test('after an update the notice opens Local Network settings and can be dismiss
       show: true,
       button: 'Open Local Network settings',
       path: null,
+      removeAndAdd: false,
     },
   })
   const notice = page.locator('#local-network-notice')
   await expect(notice).toBeVisible()
   await expect(notice).toContainText(AFTER_UPDATE)
   await expect(notice).toContainText(ALREADY_ON)
+  // Below macOS 27.2 the list has no remove button: the line is not said (TN3179).
+  await expect(notice).not.toContainText('remove ConsensFlow')
   await expect(notice).not.toContainText('Privacy & Security')
   await notice.getByRole('button', { name: 'Open Local Network settings' }).click()
   await expect
@@ -761,10 +765,13 @@ test('where the settings link lands on the parent page the notice names the way'
       show: true,
       button: 'Open Privacy & Security',
       path: 'Privacy & Security, then Local Network',
+      removeAndAdd: true,
     },
   })
   const notice = page.locator('#local-network-notice')
   await expect(notice).toContainText('You find it in Privacy & Security, then Local Network.')
+  await expect(notice).toContainText(ALREADY_ON)
+  await expect(notice).toContainText(REMOVE_AND_ADD)
   await expect(notice.getByRole('button', { name: 'Open Privacy & Security' })).toBeVisible()
 })
 

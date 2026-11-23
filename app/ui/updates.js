@@ -250,7 +250,12 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
       element(
         'p',
         null,
-        "If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder. If that doesn't help, remove ConsensFlow from the list and add it again.",
+        // The list has its remove and add buttons from macOS 27.2 only (TN3179): the app says so.
+        `If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder.${
+          answer.removeAndAdd === true
+            ? " If that doesn't help, remove ConsensFlow from the list and add it again."
+            : ''
+        }`,
       ),
     )
     const problem = element('p', 'local-network-problem')
