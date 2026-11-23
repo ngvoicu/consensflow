@@ -16,6 +16,7 @@ ki-test-models = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_
 ki-lib-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::"]
 ki-lib-stores = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::stores"]
 ki-lib-ask = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ask"]
+ki-xtask-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
 
 
 [[plant]]
@@ -476,7 +477,11 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/spawn.rs"
-find = '''            _ => return Err(format!("the kit's own variable {name} was changed or taken away")),'''
+find = '''            _ => {
+                return Err(format!(
+                    "the kit's own variable {name} was changed or taken away"
+                ))
+            }'''
 replace = '''            _ => {}'''
 
 [[plant]]
@@ -530,8 +535,8 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/route.rs"
-find = '''            if let Err(why) = self.window_admitted(&frame["body"]) {'''
-replace = '''            if let Err(why) = Ok::<(), String>(()) {'''
+find = '''            match self.window_to_send(&frame["body"]) {'''
+replace = '''            match Ok::<Value, String>(frame["body"].clone()) {'''
 
 [[plant]]
 name = "K3 doors: the helper's question is asked unsealed"
@@ -749,3 +754,97 @@ runs = ["ki-lib-door"]
 file = "crates/cf-e2e/src/door/identity.rs"
 find = '''        let found = fs::metadata(path)?;'''
 replace = '''        let found = fs::File::open(path)?.metadata()?;'''
+
+[[plant]]
+name = "K3 doors: a window gets the variables the account's registry stores (T-2086 B1)"
+meant = "a_window_is_sent_so_that_no_stored_variable_of_the_account_reaches_it"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    if stored.is_empty() {'''
+replace = '''    if true {'''
+
+[[plant]]
+name = "K3 doors: the Windows runner marks zeewin2, whose account is its owner's, as a test machine (T-2086 N1)"
+meant = "zeewin2_is_no_marked_test_machine_and_the_others_are"
+runs = ["ki-xtask-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''                marked: false,'''
+replace = '''                marked: true,'''
+
+[[plant]]
+name = "K3 doors: a renewal's record is taken away on an account that is no test machine (T-2086 N1)"
+meant = "a_renewals_record_is_taken_away_only_on_a_marked_test_machine"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        if marked.is_none() {'''
+replace = '''        if false && marked.is_none() {'''
+
+[[plant]]
+name = "K3 doors: the renewal runs the harness on an account that is no test machine (T-2086 N1)"
+meant = "a_renewal_on_an_account_that_is_no_test_machine_starts_nothing_and_refuses"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    TestMachine::required_by("the renewal of a login", machine.cloned())?;'''
+replace = '''    let _ = machine;'''
+
+[[plant]]
+name = "K3 doors: a harness window is opened without its update switches (T-2086 C1)"
+meant = "a_window_that_starts_a_harness_without_its_update_switches_is_not_opened"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        program => spawn::has_update_switches(&program, &env),'''
+replace = '''        _program => Ok(()),'''
+
+[[plant]]
+name = "K3 doors: the kit's Claude wrapper is taken for a plain program (T-2086 C2)"
+meant = "a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_harnesss_switches"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            Some(Starts::Wrapper(harness)) => return spawn::Program::Harness(harness),'''
+replace = '''            Some(Starts::Wrapper(_)) => return spawn::Program::Plain,'''
+
+[[plant]]
+name = "K3 doors: a rig's shim is judged as itself, not as what it starts (T-2086 C2)"
+meant = "a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_harnesss_switches"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''                return program_within(&next, env, depth + 1);'''
+replace = '''                let _ = next;'''
+
+[[plant]]
+name = "K3 doors: a place that cannot be read is taken for absent (T-2086 C3)"
+meant = "a_place_below_a_folder_that_cannot_be_read_is_refused"
+runs = ["ki-lib-door"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) => return Err(refused(format!(
+                "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
+                at.display()
+            ))),'''
+replace = '''            Err(_) => {}'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) => {
+                return Err(refused(format!(
+                    "{} cannot be read ({failed})",
+                    at.display()
+                )))
+            }'''
+replace = '''            Err(_) => {}'''

@@ -116,8 +116,8 @@ runs = ["standin-home-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/standin_process.rs"
-find = '''        !launchers.iter().any(|home| same_or_inside(folder, home))'''
-replace = '''        !launchers.iter().any(|_home| false)'''
+find = '''        !launchers.iter().any(|home| may_reach(folder, home)) && safe_path_entry(folder, forbidden)'''
+replace = '''        !launchers.iter().any(|_home| false) && safe_path_entry(folder, forbidden)'''
 
 [[plant]]
 name = "standin homes: Muse launcher search enters an inherited harness home"

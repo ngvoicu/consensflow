@@ -936,8 +936,8 @@ runs = ["matrix-live-plan"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
-replace = '''    if kind == "claude-code" && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
+find = '''    if crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)'''
+replace = '''    if kind == "claude-code" && crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)'''
 
 [[plant]]
 name = "live matrix: the Codex stand-in's server takes no interrupt"

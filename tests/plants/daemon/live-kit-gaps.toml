@@ -128,13 +128,13 @@ replace = "        .any(|item| item.role == \"assistant\")"
 
 [[plant]]
 name = "live kit gaps: a Codex window on a home of the run's own has the owner's Codex folder for its HOME"
-meant = "a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder"
+meant = "a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_own_home"
 runs = ["e2e-lib-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = "            let person = isolation.owner_home().to_string_lossy().into_owned();"
-replace = "            let person = { let _ = isolation; home.clone() };"
+find = '''            Some(isolation) => isolation.owner_home().to_path_buf(),'''
+replace = '''            Some(_) => self.home.clone(),'''
 
 [[plant]]
 name = "live kit gaps: every paste of a shape asks the same word"

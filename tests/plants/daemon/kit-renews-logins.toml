@@ -62,11 +62,11 @@ meant = "a_run_tells_its_command_which_machine_it_is_on_before_the_steps_and_the
 runs = ["renew-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script/templates.rs"
-find = '''$env:«test_machine» = «machine»
-'''
-replace = '''$env:«test_machine» = ''
-'''
+file = "tools/xtask/src/windows/script.rs"
+find = '''    if script.marked {
+        format!('''
+replace = '''    if false && script.marked {
+        format!('''
 
 [[plant]]
 name = "kit renews logins: the runner names the same machine for every run"
@@ -75,10 +75,12 @@ runs = ["renew-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = '''            ("machine", &quoted(script.machine)),'''
-replace = '''            ("machine", &quoted("zeewin2")),'''
-
-# ---------------------------------------------------------------------------- the renewal
+find = '''            quoted(script.machine)
+        )
+    } else {'''
+replace = '''            quoted("zeewin2")
+        )
+    } else {'''
 
 [[plant]]
 name = "kit renews logins: the login is not read again after the harness ran"
@@ -160,8 +162,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation/pi.rs"
-find = '''renew::pi_words(&model))?;'''
-replace = '''renew::pi_words("openai/other"))?;'''
+find = '''            &renew::pi_words(&model),'''
+replace = '''            &renew::pi_words("openai/other"),'''
 
 [[plant]]
 name = "kit renews logins: the renewal of Claude Code is not kept for the report"
@@ -435,10 +437,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/renew.rs"
-find = '''    if ran.code == Some(0) {'''
-replace = '''    if ran.code.is_some() {'''
-
-# ---------------------------------------------------------------------------- a say-only run renews nothing
+find = '''    } else if ran.code == Some(0) {'''
+replace = '''    } else if ran.code.is_some() {'''
 
 [[plant]]
 name = "kit renews logins: a say-only run renews a Claude Code login"

@@ -73,13 +73,13 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''            super::launcher::updates_off_of(self.harness)
-                .iter()
-                .copied(),'''
-replace = '''            super::launcher::updates_off_of(self.harness)
-                .iter()
-                .copied()
-                .take(0),'''
+find = '''                        super::launcher::updates_off_of(self.harness)
+                            .iter()
+                            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),'''
+replace = '''                        super::launcher::updates_off_of(self.harness)
+                            .iter()
+                            .take(0)
+                            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),'''
 
 [[plant]]
 name = "owner launcher: a rig seats no guard of the launchers of the harnesses it runs"
