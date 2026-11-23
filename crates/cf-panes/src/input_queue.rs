@@ -32,11 +32,13 @@ pub const ORDER_BOUND: Duration = Duration::from_millis(1500);
 const MAX_LANE_SLOTS: usize = 8192;
 #[cfg(test)]
 const MAX_LANE_SLOTS: usize = 64;
-/// How many windows' unshown notices the host keeps.
-const MAX_PENDING_LOSSES: usize = 512;
+/// How many notices stay outstanding as rows of their own: past it the oldest are folded into
+/// one, "Input was also lost in N more places".
+const MAX_OUTSTANDING_NOTICES: usize = 64;
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
-/// How many windows past the bound the host counts apart, and how many names it keeps.
-const MAX_EVICTED_WINDOWS: usize = 65_536;
+/// How many dropped files' places the host holds at once.
+const MAX_PLACES: usize = 4096;
+/// How many names the host keeps.
 const MAX_NAMED_WINDOWS: usize = 1024;
 /// How many page sessions' latest numbers the host keeps.
 const MAX_PAGE_SESSIONS: usize = 64;
@@ -191,6 +193,40 @@ thread_local! {
     static FAIL_THREAD_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// A call's identity: the window and its generation, the page's epoch and the call's number.
+/// The window's generation does not change at a page cut and the epoch does, so the old
+/// document's number 1 and the new one's are different calls.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CallKey {
+    key: PaneKey,
+    epoch: u64,
+    sequence: u64,
+}
+
+/// What is known of one call's loss, shared by its outcome and whoever speaks for it (a skip):
+/// the call has at most one loss, and whoever takes the number first (a compare and swap from 0)
+/// is the one that makes the notice.
+#[derive(Default)]
+struct CallCell {
+    loss: AtomicU64,
+}
+
+impl CallCell {
+    fn get(&self) -> Option<u64> {
+        match self.loss.load(Ordering::Acquire) {
+            0 => None,
+            loss => Some(loss),
+        }
+    }
+
+    /// Take loss number `loss` for the call, if it has none: `Err` holds the one it has.
+    fn take(&self, loss: u64) -> Result<(), u64> {
+        self.loss
+            .compare_exchange(0, loss, Ordering::AcqRel, Ordering::Acquire)
+            .map(drop)
+    }
+}
+
 /// A page job's one host-owned outcome. The host settles it itself, under its lock, whatever
 /// becomes of the page's wait, ticket or window: written (nothing to say), refused, or
 /// uncertain. A job dropped with none (its worker vanished, its queue was dropped whole) is
@@ -198,43 +234,46 @@ thread_local! {
 /// number from the host's counter at once, and the host settles it the next time it looks.
 struct Outcome {
     shared: Weak<PageShared>,
-    key: PaneKey,
-    sequence: u64,
+    call: CallKey,
     /// Whether the window is still there: false once it has retired.
     alive: Arc<AtomicBool>,
-    /// The number of the loss the host recorded for this call, for its wait to answer.
-    loss: Arc<AtomicU64>,
+    /// The call's loss, for its wait to answer.
+    cell: Arc<CallCell>,
     settled: bool,
 }
 
 impl Outcome {
     fn new(
         shared: &Arc<PageShared>,
-        key: &PaneKey,
-        sequence: u64,
+        call: CallKey,
         alive: Arc<AtomicBool>,
-        loss: Arc<AtomicU64>,
+        cell: Arc<CallCell>,
     ) -> Self {
         Self {
             shared: Arc::downgrade(shared),
-            key: key.clone(),
-            sequence,
+            call,
             alive,
-            loss,
+            cell,
             settled: false,
         }
     }
 
-    /// Recorded under the host's lock: the call did not go in whole, or may not have. A call the
-    /// page skipped already has its loss: it is that one.
-    fn lose(&mut self, state: &mut PageInputState, closed: bool, events: &mut Vec<Event>) -> u64 {
-        let loss = match state.skipped_loss(&self.key, self.sequence) {
-            Some(loss) => loss,
-            None => state.lost(&self.key, closed || !self.alive.load(Ordering::Acquire), events),
-        };
-        self.loss.store(loss, Ordering::Release);
+    /// Recorded under the host's lock: the call did not go in whole, or may not have. A call
+    /// that already has its loss (the page skipped it) has that one, and makes no second.
+    fn lose(
+        &mut self,
+        state: &mut PageInputState,
+        closed: bool,
+        failed: bool,
+        events: &mut Vec<Event>,
+    ) -> u64 {
         self.settled = true;
-        loss
+        let flags = Flags {
+            closed: closed || !self.alive.load(Ordering::Acquire),
+            failed,
+            dropped: false,
+        };
+        state.lose_call(&self.cell, &self.call.key, flags, events)
     }
 
     /// The worker's answer. A failed or uncertain write is recorded before it is answered,
@@ -242,12 +281,13 @@ impl Outcome {
     /// same notice.
     fn finish(mut self, result: InputResponse, response: oneshot::Sender<InputResponse>) {
         let shared = self.shared.upgrade();
-        match (shared, result.is_err()) {
-            (Some(shared), true) => {
+        match (shared, result.as_ref().err()) {
+            (Some(shared), Some(error)) => {
+                let failed = error.failed_until_restart();
                 let mut events = Vec::new();
                 {
                     let mut state = shared.lock();
-                    self.lose(&mut state, false, &mut events);
+                    self.lose(&mut state, false, failed, &mut events);
                     let _ = response.send(result);
                 }
                 shared.flush(events);
@@ -270,16 +310,18 @@ impl Drop for Outcome {
             return;
         };
         // The number first, so that the wait this drop answers finds it; the record is the
-        // host's to make, from its own list, whatever thread has the lock (this one may).
+        // host's to make, from its own list, whatever thread has the lock (this one may). A
+        // call that has a loss already (a skip took it) makes none.
         let loss = shared.next_loss.fetch_add(1, Ordering::AcqRel) + 1;
-        self.loss.store(loss, Ordering::Release);
+        if self.cell.take(loss).is_err() {
+            return;
+        }
         shared
             .orphans
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .push((
-                self.key.clone(),
-                self.sequence,
+                self.call.key.clone(),
                 loss,
                 !self.alive.load(Ordering::Acquire),
             ));
@@ -305,13 +347,17 @@ impl InputJob {
         let _ = self.response.send(Err(error));
     }
 
-    /// Nothing of it was written, and the host has recorded loss number `loss` for it.
-    fn refuse_told(mut self, loss: u64, error: InputError) {
+    /// Nothing of it was written, and the host has recorded its loss (the call's own).
+    fn refuse_told(mut self, error: InputError) {
         if let Some(outcome) = self.outcome.as_mut() {
-            outcome.loss.store(loss, Ordering::Release);
             outcome.settled = true;
         }
         let _ = self.response.send(Err(error));
+    }
+
+    /// The call's cell, if it is a page's.
+    fn cell(&self) -> Option<Arc<CallCell>> {
+        self.outcome.as_ref().map(|outcome| Arc::clone(&outcome.cell))
     }
 }
 
@@ -319,7 +365,7 @@ impl InputJob {
 /// byte of what was typed.
 pub trait InputObserver: Send + Sync {
     /// Typing may not have reached this window (loss number `loss`, the window's
-    /// latest): told to the page that is current, which says so and confirms it.
+    /// latest): a hint to the page that is current, which pulls the host's list.
     fn lost(&self, key: &PaneKey, loss: u64);
     /// A line for the host's own log (R01): a number given up at its bound, a
     /// late call refused, and how late.
@@ -358,7 +404,7 @@ pub struct PageInputCompletion {
     key: PaneKey,
     sequence: u64,
     notified: Arc<AtomicBool>,
-    loss: Arc<AtomicU64>,
+    cell: Arc<CallCell>,
 }
 
 impl PageInputCompletion {
@@ -370,42 +416,46 @@ impl PageInputCompletion {
 
     /// The number of the loss the host recorded for this call, once it is told as lost.
     pub fn loss(&self) -> Option<u64> {
-        match self.loss.load(Ordering::Acquire) {
-            0 => None,
-            loss => Some(loss),
-        }
+        self.cell.get()
     }
 }
 
-/// A window whose typing may not have arrived: the notice's version, and whether the window
-/// has closed for good (its notice then names it).
+/// What a notice says. It is fixed when the notice is made: the window's name and generation
+/// as the host knew them then, what was lost, and the advice. A change of any of it is a new
+/// notice under a new id.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LossNotice {
-    pub key: PaneKey,
-    pub loss: u64,
-    pub closed: bool,
-    /// What the page called the window, if it said.
-    pub name: Option<String>,
+pub enum NoticeBody {
+    /// Typing (or, `dropped`, a dropped file's path) may not have reached a window.
+    Window {
+        key: PaneKey,
+        /// What the page called the window, if it had said.
+        name: Option<String>,
+        /// The window has closed for good.
+        closed: bool,
+        /// The window takes no more input until its project restarts.
+        failed: bool,
+        dropped: bool,
+    },
+    /// The oldest notices past the cap, folded into one: the places input was also lost in.
+    Folded { count: u64 },
 }
 
-/// The losses past the bound, counted: its own version, and how many further records.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OverflowNotice {
-    pub version: u64,
-    pub count: u64,
+/// One thing the host still owes the person. Its id is never used again while the host runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub id: u64,
+    pub body: NoticeBody,
 }
 
-/// Everything the host still owes the person.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PendingNotices {
-    pub losses: Vec<LossNotice>,
-    pub overflow: Option<OverflowNotice>,
-}
+/// Everything the host still owes the person, oldest id first.
+pub type PendingNotices = Vec<Notice>;
 
-#[derive(Clone, Copy)]
-struct LossRecord {
-    version: u64,
+/// What a loss says beyond its window.
+#[derive(Clone, Copy, Default)]
+struct Flags {
     closed: bool,
+    failed: bool,
+    dropped: bool,
 }
 
 /// A number of the page's, waiting for the numbers before it.
@@ -450,30 +500,48 @@ struct PageInputState {
     current_nonce: String,
     /// Pages that prepared, with the nonce and epoch the host answered them.
     pending_pages: HashMap<String, (String, u64)>,
+    /// The last activated document's number of each page session, for at most
+    /// `MAX_PAGE_SESSIONS` sessions (the oldest forgotten). Nothing depends on it: a page is
+    /// judged by its epoch and nonce; this only refuses an out-of-order preparation early.
     page_ordinals: HashMap<String, u64>,
+    ordinal_order: VecDeque<String>,
     lanes: HashMap<PaneKey, Lane>,
     completions: HashMap<String, PageInputCompletion>,
     next_ticket: u64,
-    /// By window, its latest loss, until a page says it has shown that version.
-    pending_lost: HashMap<PaneKey, LossRecord>,
-    /// The windows whose notices went past the bound, each by the version it was evicted at.
-    evicted: BTreeMap<PaneKey, u64>,
-    /// What the page said of each window's name, kept for a notice of a window that has closed.
+    /// The calls that hold bytes in the host (parked, or handed to a writer), by identity.
+    calls: HashMap<CallKey, Weak<CallCell>>,
+    calls_swept_at: usize,
+    /// Dropped files' places held by a page of this epoch: a number taken at the gesture and
+    /// not yet used or let go.
+    places: std::collections::HashSet<(PaneKey, u64)>,
+    /// Outstanding notices by id; at most `notice_cap` (`MAX_OUTSTANDING_NOTICES`).
+    notices: BTreeMap<u64, Notice>,
+    notice_cap: usize,
+    /// The one row that stands for the oldest notices past the cap: its id and the places folded.
+    folded: Option<(u64, u64)>,
+    /// Windows whose input fails until their project restarts (their notices say so).
+    failed_windows: std::collections::HashSet<PaneKey>,
+    /// What the page said of each window's name.
     names: HashMap<PaneKey, String>,
     name_order: VecDeque<PaneKey>,
     counter: Arc<AtomicU64>,
     reaper: bool,
+    /// For tests: each loss number's notice, and each notice's successor (a replacement or a fold).
+    #[cfg(test)]
+    covers: HashMap<u64, u64>,
+    #[cfg(test)]
+    lineage: HashMap<u64, u64>,
 }
 
 struct PageShared {
     state: Mutex<PageInputState>,
     wake: Condvar,
     observer: Mutex<Option<Arc<dyn InputObserver>>>,
-    /// The host's loss counter: a version is taken from it with or without the state's lock.
+    /// The host's loss counter: a number is taken from it with or without the state's lock.
     next_loss: Arc<AtomicU64>,
-    /// Outcomes of calls whose worker went without answering: `(window, number, loss, closed)`,
+    /// Outcomes of calls whose worker went without answering: `(window, loss, closed)`,
     /// settled into the state the next time anything looks at it.
-    orphans: Mutex<Vec<(PaneKey, u64, u64, bool)>>,
+    orphans: Mutex<Vec<(PaneKey, u64, bool)>>,
 }
 
 impl PageShared {
@@ -493,8 +561,8 @@ impl PageShared {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
         );
-        for (key, sequence, loss, closed) in orphans {
-            state.settle_orphan(&key, sequence, loss, closed);
+        for (key, loss, closed) in orphans {
+            state.record(&key, loss, Flags { closed, ..Flags::default() }, &mut Vec::new());
         }
         state
     }
@@ -519,104 +587,153 @@ impl PageShared {
 }
 
 impl PageInputState {
-    /// The next loss version: from the host's counter, which a job's drop also takes from.
+    /// The next loss number: from the host's counter, which a job's drop also takes from. A
+    /// notice's id is the loss number that made it, so an id is never used twice.
     fn fresh_version(&self) -> u64 {
         self.counter.fetch_add(1, Ordering::AcqRel) + 1
     }
 
-    /// Record that typing may be missing from this window. Kept until a page says it has
-    /// shown this version; the page that is current is told at once, and one that is not
-    /// yet, at its activation.
+    /// Record that typing may be missing from this window, as a loss of its own: the window's
+    /// notice is replaced by a new one under a new id (so that a Dismiss of the old one cannot
+    /// clear what came after it), and the page that is current is told to ask.
     fn lost(&mut self, key: &PaneKey, closed: bool, events: &mut Vec<Event>) -> u64 {
+        self.lost_with(key, Flags { closed, ..Flags::default() }, events)
+    }
+
+    fn lost_with(&mut self, key: &PaneKey, flags: Flags, events: &mut Vec<Event>) -> u64 {
         let loss = self.fresh_version();
-        self.note(key, loss, closed);
-        if self.current.is_some() {
-            events.push(Event::Lost(key.clone(), loss));
-        }
+        self.record(key, loss, flags, events);
         loss
     }
 
-    /// Keep loss `version` for a window: the latest per window, and a window that has closed
-    /// stays closed. Past the bound the oldest is counted apart, by the window.
-    fn note(&mut self, key: &PaneKey, version: u64, closed: bool) {
-        let held = self.pending_lost.get(key).copied();
-        let closed = closed || held.is_some_and(|record| record.closed);
-        // A change of wording is a new version: an older receipt cannot clear it unseen.
-        let version = match held {
-            Some(record) if record.version >= version => record.version,
-            _ => version,
+    /// A call's one loss: the number it already has, or a new one that takes it.
+    fn lose_call(
+        &mut self,
+        cell: &CallCell,
+        key: &PaneKey,
+        flags: Flags,
+        events: &mut Vec<Event>,
+    ) -> u64 {
+        let loss = self.fresh_version();
+        match cell.take(loss) {
+            Ok(()) => {
+                self.record(key, loss, flags, events);
+                loss
+            }
+            Err(held) => held,
+        }
+    }
+
+    /// The cell of a call that still holds bytes in the host, by its whole identity.
+    fn call_cell(&self, call: &CallKey) -> Option<Arc<CallCell>> {
+        self.calls.get(call).and_then(Weak::upgrade)
+    }
+
+    fn remember_call(&mut self, call: CallKey, cell: &Arc<CallCell>) {
+        if self.calls.len() >= self.calls_swept_at.max(1024) {
+            self.calls.retain(|_, held| held.strong_count() > 0);
+            self.calls_swept_at = self.calls.len() * 2;
+        }
+        self.calls.insert(call, Arc::downgrade(cell));
+    }
+
+    /// Make the notice for loss `loss`. The window's outstanding notice of the same kind, if
+    /// any, goes, and what it said is kept (a closed window stays closed; a failed one stays
+    /// failed): the new one stands in its place under the new id. Past the cap the oldest is
+    /// folded.
+    fn record(&mut self, key: &PaneKey, loss: u64, flags: Flags, events: &mut Vec<Event>) {
+        if flags.failed {
+            self.failed_windows.insert(key.clone());
+        }
+        let mut body = NoticeBody::Window {
+            key: key.clone(),
+            name: self.names.get(key).cloned(),
+            closed: flags.closed,
+            failed: flags.failed || self.failed_windows.contains(key),
+            dropped: flags.dropped,
         };
-        self.pending_lost
-            .insert(key.clone(), LossRecord { version, closed });
-        self.evicted.remove(key);
-        if self.pending_lost.len() > MAX_PENDING_LOSSES {
-            if let Some(oldest) = self
-                .pending_lost
-                .iter()
-                .filter(|(other, _)| *other != key)
-                .min_by_key(|(_, record)| record.version)
-                .map(|(other, _)| other.clone())
+        let before = self
+            .notices
+            .iter()
+            .find(|(_, notice)| match &notice.body {
+                NoticeBody::Window { key: of, dropped, .. } => of == key && *dropped == flags.dropped,
+                NoticeBody::Folded { .. } => false,
+            })
+            .map(|(id, _)| *id);
+        if let Some(id) = before {
+            if let Some(Notice {
+                body: NoticeBody::Window { closed: was, .. },
+                ..
+            }) = self.notices.remove(&id)
             {
-                self.pending_lost.remove(&oldest);
-                let evicted_at = self.fresh_version();
-                self.evicted.insert(oldest, evicted_at);
-                while self.evicted.len() > MAX_EVICTED_WINDOWS {
-                    if let Some(first) = self
-                        .evicted
-                        .iter()
-                        .min_by_key(|(_, at)| **at)
-                        .map(|(key, _)| key.clone())
-                    {
-                        self.evicted.remove(&first);
-                    }
+                if let NoticeBody::Window { closed, .. } = &mut body {
+                    *closed |= was;
                 }
             }
+            #[cfg(test)]
+            self.lineage.insert(id, loss);
+        }
+        #[cfg(test)]
+        self.covers.insert(loss, loss);
+        self.notices.insert(loss, Notice { id: loss, body });
+        self.fold_past_the_cap();
+        if self.current.is_some() {
+            events.push(Event::Lost(key.clone(), loss));
         }
     }
 
-    /// A call whose worker went without answering: its loss was numbered when it went.
-    fn settle_orphan(&mut self, key: &PaneKey, sequence: u64, loss: u64, closed: bool) {
-        match self.skipped_loss(key, sequence) {
-            Some(_) => {}
-            None => self.note(key, loss, closed),
+    /// Past the cap the oldest notices are one row, "also lost in N more places"; a fold that
+    /// changes is a new row under a new id.
+    fn fold_past_the_cap(&mut self) {
+        while self.notices.len() > self.notice_cap {
+            let Some(oldest) = self.notices.keys().next().copied() else {
+                return;
+            };
+            self.notices.remove(&oldest);
+            let id = self.fresh_version();
+            let count = self.folded.map_or(0, |(_, count)| count) + 1;
+            #[cfg(test)]
+            {
+                self.lineage.insert(oldest, id);
+                if let Some((old, _)) = self.folded {
+                    self.lineage.insert(old, id);
+                }
+            }
+            self.folded = Some((id, count));
         }
     }
 
-    /// The loss recorded for a skip of this call's number, if it was skipped.
-    fn skipped_loss(&self, key: &PaneKey, sequence: u64) -> Option<u64> {
-        self.lanes.get(key).and_then(|lane| {
-            lane.skipped
-                .iter()
-                .find(|(number, _)| *number == sequence)
-                .map(|(_, loss)| *loss)
-        })
+    /// The person dismissed the notice with this id: it goes, if it is still outstanding under
+    /// that id. A replaced notice's id is nothing any more.
+    fn dismiss(&mut self, id: u64) -> bool {
+        if self.notices.remove(&id).is_some() {
+            return true;
+        }
+        if self.folded.is_some_and(|(held, _)| held == id) {
+            self.folded = None;
+            return true;
+        }
+        false
     }
 
     fn notices(&self) -> PendingNotices {
-        let mut losses: Vec<LossNotice> = self
-            .pending_lost
-            .iter()
-            .map(|(key, record)| LossNotice {
-                key: key.clone(),
-                loss: record.version,
-                closed: record.closed,
-                name: self.names.get(key).cloned(),
-            })
-            .collect();
-        losses.sort_by_key(|notice| notice.loss);
-        let overflow = self
-            .evicted
-            .values()
-            .max()
-            .map(|version| OverflowNotice {
-                version: *version,
-                count: self.evicted.len() as u64,
+        let mut all: Vec<Notice> = self.notices.values().cloned().collect();
+        if let Some((id, count)) = self.folded {
+            all.push(Notice {
+                id,
+                body: NoticeBody::Folded { count },
             });
-        PendingNotices { losses, overflow }
+        }
+        all.sort_by_key(|notice| notice.id);
+        all
     }
 
-    /// The name the page gave a window, kept for its notice once it has closed.
+    /// The name the page gave a window. A notice of that window which says another name (or
+    /// none) is replaced by one that says this.
     fn name_window(&mut self, key: &PaneKey, name: &str) {
+        if self.names.get(key).map(String::as_str) == Some(name) {
+            return;
+        }
         if self.names.insert(key.clone(), name.to_owned()).is_none() {
             self.name_order.push_back(key.clone());
         }
@@ -625,24 +742,36 @@ impl PageInputState {
                 self.names.remove(&old);
             }
         }
+        let stale: Vec<u64> = self
+            .notices
+            .iter()
+            .filter(|(_, notice)| match &notice.body {
+                NoticeBody::Window { key: of, name: said, .. } => {
+                    of == key && said.as_deref() != Some(name)
+                }
+                NoticeBody::Folded { .. } => false,
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in stale {
+            self.replace(id, |body| {
+                if let NoticeBody::Window { name: said, .. } = body {
+                    *said = Some(name.to_owned());
+                }
+            });
+        }
     }
 
-    /// What the page has shown: each window's exact version, and the overflow up to the
-    /// version it showed. A later version of the same window stays, and so does an eviction
-    /// since; a receipt repeated clears nothing more.
-    fn told(&mut self, told: &[(PaneKey, u64)], overflow: Option<(u64, u64)>) {
-        for (key, loss) in told {
-            if self
-                .pending_lost
-                .get(key)
-                .is_some_and(|record| record.version == *loss)
-            {
-                self.pending_lost.remove(key);
-            }
-        }
-        if let Some((version, _count)) = overflow {
-            self.evicted.retain(|_, evicted_at| *evicted_at > version);
-        }
+    /// The notice `id` says something else now: it is replaced by one under a new id.
+    fn replace(&mut self, id: u64, change: impl FnOnce(&mut NoticeBody)) -> Option<u64> {
+        let mut notice = self.notices.remove(&id)?;
+        change(&mut notice.body);
+        let fresh = self.fresh_version();
+        notice.id = fresh;
+        #[cfg(test)]
+        self.lineage.insert(id, fresh);
+        self.notices.insert(fresh, notice);
+        Some(fresh)
     }
 
     /// Whether a call is of the current page and the current epoch.
@@ -683,7 +812,7 @@ impl PageInputState {
         events: &mut Vec<Event>,
     ) -> Vec<(u64, InputError, u64)> {
         let mut refusals: Vec<(u64, InputJob, InputError, bool)> = Vec::new();
-        let mut gave_up = false;
+        let mut gave_up: Vec<(u64, u64)> = Vec::new();
         let mut said = Vec::new();
         {
             let Some(lane) = self.lanes.get_mut(key) else {
@@ -704,8 +833,8 @@ impl PageInputState {
                         let waited = earliest.map_or(ORDER_BOUND, |earliest| {
                             now.saturating_duration_since(earliest - ORDER_BOUND)
                         });
+                        gave_up.push((lane.passed + 1, first - 1));
                         lane.give_up(first - 1, now, waited, key, &mut said);
-                        gave_up = true;
                         continue;
                     }
                     break;
@@ -734,12 +863,34 @@ impl PageInputState {
         events.extend(said.into_iter().map(Event::Say));
         let mut refused = Vec::new();
         for (number, job, error, closed) in refusals {
-            let loss = self.lost(key, closed, events);
-            job.refuse_told(loss, error.clone());
+            let flags = Flags {
+                closed,
+                failed: error.failed_until_restart(),
+                dropped: false,
+            };
+            let loss = match job.cell() {
+                Some(cell) => self.lose_call(&cell, key, flags, events),
+                None => self.lost_with(key, flags, events),
+            };
+            job.refuse_told(error.clone());
             refused.push((number, error, loss));
         }
-        if gave_up {
-            self.lost(key, false, events);
+        // What was given up: a dropped file's place is a loss of the file, any other number
+        // a loss of typing.
+        for (from, upto) in gave_up {
+            let places: Vec<u64> = self
+                .places
+                .iter()
+                .filter(|(of, number)| of == key && (from..=upto).contains(number))
+                .map(|(_, number)| *number)
+                .collect();
+            for number in &places {
+                self.places.remove(&(key.clone(), *number));
+                self.lost_with(key, Flags { dropped: true, ..Flags::default() }, events);
+            }
+            if (upto - from + 1) > places.len() as u64 {
+                self.lost(key, false, events);
+            }
         }
         refused
     }
@@ -752,8 +903,9 @@ impl PageInputState {
     }
 
     /// A new main document: nothing of the old page's still in order goes in. Each parked
-    /// call is cancelled as a loss, and so is a known missing number below the numbers seen.
-    /// What was handed to a window's writer stays written, in order.
+    /// call is cancelled as a loss, and so is a known missing number below the numbers seen,
+    /// and each dropped file's place that was never used. What was handed to a window's
+    /// writer stays written, in order.
     fn cut(&mut self, events: &mut Vec<Event>) {
         let lanes = std::mem::take(&mut self.lanes);
         for (key, lane) in lanes {
@@ -763,12 +915,21 @@ impl PageInputState {
             let loss = self.lost(&key, false, events);
             for slot in lane.slots.into_values() {
                 if let Slot::Parked { job, .. } = slot {
-                    job.refuse_told(
-                        loss,
-                        InputError::refused(INPUT_STALE_PAGE, "the page reloaded before this was sent"),
-                    );
+                    if let Some(cell) = job.cell() {
+                        let _ = cell.take(loss);
+                    }
+                    job.refuse_told(InputError::refused(
+                        INPUT_STALE_PAGE,
+                        "the page reloaded before this was sent",
+                    ));
                 }
             }
+        }
+        // A file dropped whose path the old page had not typed: the host says so itself.
+        let mut places: Vec<(PaneKey, u64)> = std::mem::take(&mut self.places).into_iter().collect();
+        places.sort();
+        for (key, _) in places {
+            self.lost_with(&key, Flags { dropped: true, ..Flags::default() }, events);
         }
         // No departed identity is kept: a page is judged by the epoch and the nonce it echoes.
         self.current = None;
@@ -874,15 +1035,25 @@ impl InputQueue {
                     current_nonce: String::new(),
                     pending_pages: HashMap::new(),
                     page_ordinals: HashMap::new(),
+                    ordinal_order: VecDeque::new(),
                     lanes: HashMap::new(),
                     completions: HashMap::new(),
                     next_ticket: 1,
-                    pending_lost: HashMap::new(),
-                    evicted: BTreeMap::new(),
+                    calls: HashMap::new(),
+                    calls_swept_at: 0,
+                    places: std::collections::HashSet::new(),
+                    notices: BTreeMap::new(),
+                    notice_cap: MAX_OUTSTANDING_NOTICES,
+                    folded: None,
+                    failed_windows: std::collections::HashSet::new(),
                     names: HashMap::new(),
                     name_order: VecDeque::new(),
                     counter: Arc::clone(&counter),
                     reaper: false,
+                    #[cfg(test)]
+                    covers: HashMap::new(),
+                    #[cfg(test)]
+                    lineage: HashMap::new(),
                 }),
                 wake: Condvar::new(),
                 observer: Mutex::new(None),
@@ -974,7 +1145,7 @@ impl InputQueue {
     }
 
     /// As [`Self::enqueue_page`], and a refusal carries the number of the loss the host
-    /// recorded for it: the page confirms that number once it has said so.
+    /// recorded for it (a number for the host's own record; the page draws nothing from it).
     pub fn enqueue_page_told(
         &self,
         page_id: &str,
@@ -1014,9 +1185,26 @@ impl InputQueue {
                 page.epoch, key.id, key.generation
             )));
             let closed = !self.has_route(&key);
-            page.lost(&key, closed, events);
-            return Err(INPUT_STALE_PAGE.to_string().into());
+            let call = CallKey {
+                key: key.clone(),
+                epoch,
+                sequence,
+            };
+            // A repeat of a call that still holds bytes in the host is that call's: it has its
+            // own outcome (and its loss, if it has one), and the repeat makes no second. Any
+            // other call of a departed page is a loss of its window.
+            let loss = match page.call_cell(&call) {
+                Some(cell) => cell.get(),
+                None => Some(page.lost(&key, closed, events)),
+            };
+            return Err(Refusal {
+                error: INPUT_STALE_PAGE.to_string(),
+                loss,
+                spent: true,
+            });
         }
+        // The call takes the number a dropped file may have held for it.
+        page.places.remove(&(key.clone(), sequence));
         let lane = page.lane(&key);
         // A call at or below what the lane has settled is a late original after
         // its skip or its bound, or a repeat: nothing of it is written.
@@ -1139,17 +1327,22 @@ impl InputQueue {
                 }
             }
         };
-        let loss = Arc::new(AtomicU64::new(0));
+        let cell = Arc::new(CallCell::default());
+        let call = CallKey {
+            key: key.clone(),
+            epoch,
+            sequence,
+        };
+        page.remember_call(call.clone(), &cell);
         let job = InputJob {
             work,
             response,
             _reserved: reserved,
             outcome: Some(Outcome::new(
                 &self.page,
-                &key,
-                sequence,
+                call,
                 alive,
-                Arc::clone(&loss),
+                Arc::clone(&cell),
             )),
         };
         let ticket = format!("pane-input-{}", page.next_ticket);
@@ -1164,7 +1357,7 @@ impl InputQueue {
                 key: key.clone(),
                 sequence,
                 notified: Arc::new(AtomicBool::new(false)),
-                loss,
+                cell,
             },
         );
         page.lane(&key).slots.insert(
@@ -1232,9 +1425,30 @@ impl InputQueue {
         let result = {
             let mut page = self.state()?;
             let now = Instant::now();
+            let call = CallKey {
+                key: key.clone(),
+                epoch,
+                sequence,
+            };
             if !page.admits(page_id, epoch) {
-                let closed = !self.has_route(key);
-                page.lost(key, closed, &mut events);
+                // A departed page's skip says a call of its own may be missing: that call, if
+                // it still holds bytes in the host, has its own loss (or will). A let-go place
+                // from a departed page says nothing is missing: it records nothing.
+                if record {
+                    let closed = !self.has_route(key);
+                    let flags = Flags {
+                        closed,
+                        ..Flags::default()
+                    };
+                    match page.call_cell(&call) {
+                        Some(cell) => {
+                            page.lose_call(&cell, key, flags, &mut events);
+                        }
+                        None => {
+                            page.lost_with(key, flags, &mut events);
+                        }
+                    }
+                }
                 drop(page);
                 self.page.flush(events);
                 return Err(INPUT_STALE_PAGE.to_string());
@@ -1242,11 +1456,20 @@ impl InputQueue {
             if sequence == u64::MAX {
                 return Err("pane-input-sequence-overflow".to_string());
             }
+            page.places.remove(&(key.clone(), sequence));
             page.pump(key, now, &mut events);
+            let held = page.call_cell(&call);
             let lane = page.lane(key);
             if let Some((_, loss)) = lane.skipped.iter().find(|(number, _)| *number == sequence) {
                 Ok(*loss)
+            } else if let Some(loss) = held.as_ref().and_then(|cell| cell.get()).filter(|_| record) {
+                // The call has its loss already (its writer failed first): this is that one.
+                Ok(loss)
             } else if !record && sequence <= lane.passed {
+                Ok(0)
+            } else if !record && matches!(lane.slots.get(&sequence), Some(Slot::Parked { .. })) {
+                // A number that holds a call is not a place nobody used: the call stands, and
+                // is written or lost on its own.
                 Ok(0)
             } else if sequence > lane.passed
                 && !lane.slots.contains_key(&sequence)
@@ -1276,16 +1499,23 @@ impl InputQueue {
                 });
                 page.pump(key, now, &mut events);
                 let closed = !self.has_route(key);
-                let loss = if record {
-                    page.lost(key, closed, &mut events)
-                } else {
+                let loss = if !record {
                     0
+                } else {
+                    let flags = Flags {
+                        closed,
+                        ..Flags::default()
+                    };
+                    match &held {
+                        Some(cell) => page.lose_call(cell, key, flags, &mut events),
+                        None => page.lost_with(key, flags, &mut events),
+                    }
                 };
                 if let Some(job) = cancelled {
-                    job.refuse_told(
-                        loss,
-                        InputError::refused(INPUT_SEQUENCE_STALE, "the page skipped this call"),
-                    );
+                    job.refuse_told(InputError::refused(
+                        INPUT_SEQUENCE_STALE,
+                        "the page skipped this call",
+                    ));
                 }
                 if record {
                     let lane = page.lane(key);
@@ -1301,6 +1531,35 @@ impl InputQueue {
         self.page.flush(events);
         self.page.wake.notify_all();
         result
+    }
+
+    /// A drop took number `sequence` of `key` at its gesture, before it looked up its path:
+    /// the host holds the place. If the page reloads before the call comes, the host says
+    /// the file was not typed; a call with the number, a skip or a release ends the place.
+    pub fn place_page_sequence(
+        &self,
+        page_id: &str,
+        epoch: u64,
+        key: &PaneKey,
+        sequence: u64,
+    ) -> Result<(), String> {
+        let mut page = self.state()?;
+        if !page.admits(page_id, epoch) {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        let lane = page.lane(key);
+        if sequence <= lane.passed || lane.slots.contains_key(&sequence) {
+            // The number was used before this was heard.
+            return Ok(());
+        }
+        if !self.has_route(key) {
+            return Ok(());
+        }
+        if page.places.len() >= MAX_PLACES {
+            return Err("pane-input-place-capacity".to_string());
+        }
+        page.places.insert((key.clone(), sequence));
+        Ok(())
     }
 
     /// A call of the page was refused before the host saw it (its bytes did not decode): the
@@ -1331,26 +1590,21 @@ impl InputQueue {
         Ok(())
     }
 
-    /// The page has shown these windows' notices (each at its version), and the overflow's
-    /// (at its version, with its count): those are done, atomically with the check that it is
-    /// the current page of the current epoch. A later loss of the same window stays.
-    pub fn lost_told(
-        &self,
-        page_id: &str,
-        epoch: u64,
-        told: &[(PaneKey, u64)],
-        overflow: Option<(u64, u64)>,
-    ) -> Result<(), String> {
+    /// The person dismissed the notice with this id, on the current page of the current
+    /// epoch: it goes, if it is still outstanding under that id. A notice the host replaced
+    /// (its window closed, a name came, a loss came after it) has a new id, and a dismissal of
+    /// the old one clears nothing of it. Whether anything went comes back.
+    pub fn dismiss_notice(&self, page_id: &str, epoch: u64, id: u64) -> Result<bool, String> {
         let mut page = self.state()?;
         if !page.admits(page_id, epoch) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
-        page.told(told, overflow);
-        Ok(())
+        Ok(page.dismiss(id))
     }
 
     /// What the host still owes the person, for the page that is current to show: it asks at
-    /// its activation, after the board loads, on a timer and when it comes into view.
+    /// its activation, after the board loads, on a timer and when it comes into view. Every
+    /// outstanding notice, until it is dismissed by its id.
     pub fn pending_losses(&self, page_id: &str, epoch: u64) -> Result<PendingNotices, String> {
         let page = self.state()?;
         if !page.admits(page_id, epoch) {
@@ -1415,7 +1669,7 @@ impl InputQueue {
 
     /// The page becomes current, if it echoes the exact pair its preparation was answered
     /// and the host's epoch is still that one. What the host owes the person comes back, and
-    /// is kept until a page says it has shown it ([`Self::lost_told`]): an activation whose
+    /// is kept until the person dismisses it ([`Self::dismiss_notice`]): an activation whose
     /// answer was lost is asked again.
     pub fn activate_page(
         &self,
@@ -1480,10 +1734,15 @@ impl InputQueue {
             page.cut(events);
         }
         if let Some((session, number)) = ordinal {
-            page.page_ordinals.insert(session, number);
-            if page.page_ordinals.len() > MAX_PAGE_SESSIONS {
-                let keep = page.current.clone();
-                page.page_ordinals.retain(|name, _| keep.as_deref().is_some_and(|id| id.starts_with(name.as_str())));
+            if page.page_ordinals.insert(session.clone(), number).is_none() {
+                page.ordinal_order.push_back(session);
+            }
+            // At most `MAX_PAGE_SESSIONS` sessions are remembered, the oldest forgotten. A
+            // forgotten session's page is refused by its epoch and nonce all the same.
+            while page.ordinal_order.len() > MAX_PAGE_SESSIONS {
+                if let Some(old) = page.ordinal_order.pop_front() {
+                    page.page_ordinals.remove(&old);
+                }
             }
         }
         page.current = Some(page_id.to_owned());
@@ -1665,21 +1924,40 @@ impl InputQueue {
                 let loss = page.lost(key, true, &mut events);
                 for slot in lane.slots.into_values() {
                     if let Slot::Parked { job, .. } = slot {
-                        job.refuse_told(
-                            loss,
-                            InputError::refused(INPUT_CLOSED, "pane input queue is closed"),
-                        );
+                        if let Some(cell) = job.cell() {
+                            let _ = cell.take(loss);
+                        }
+                        job.refuse_told(InputError::refused(
+                            INPUT_CLOSED,
+                            "pane input queue is closed",
+                        ));
                     }
                 }
             }
         }
-        // An unshown notice of a window that has closed names it, whatever its card; its
-        // wording changed, so it has a version of its own and an old receipt clears nothing.
-        if page.pending_lost.contains_key(key) {
-            let version = page.fresh_version();
-            page.pending_lost
-                .insert(key.clone(), LossRecord { version, closed: true });
+        // A notice of a window that has closed says so: it is a new notice under a new id, so
+        // that a Dismiss of the old one clears nothing of it.
+        let open: Vec<u64> = page
+            .notices
+            .iter()
+            .filter(|(_, notice)| {
+                matches!(&notice.body, NoticeBody::Window { key: of, closed: false, .. } if of == key)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in open {
+            if let Some(fresh) = page.replace(id, |body| {
+                if let NoticeBody::Window { closed, .. } = body {
+                    *closed = true;
+                }
+            }) {
+                if page.current.is_some() {
+                    events.push(Event::Lost(key.clone(), fresh));
+                }
+            }
         }
+        page.places.retain(|(of, _)| of != key);
+        page.failed_windows.remove(key);
         page.completions
             .retain(|_, completion| &completion.key != key);
         drop(page);
@@ -1864,7 +2142,7 @@ mod tests {
         fn skip(&self, page: &str, key: &PaneKey, sequence: u64) -> Result<u64, String>;
         fn prepare(&self, page: &str) -> Result<(), String>;
         fn activate(&self, page: &str) -> Result<Vec<(PaneKey, u64)>, String>;
-        fn told(&self, told: &[(PaneKey, u64)]) -> Result<(), String>;
+        fn dismiss(&self, id: u64) -> Result<bool, String>;
     }
 
     impl Pages for InputQueue {
@@ -1891,9 +2169,15 @@ mod tests {
             } else {
                 self.activate_page(page, "nonce", self.epoch())?
             };
-            Ok(notices.losses.into_iter().map(|n| (n.key, n.loss)).collect())
+            Ok(notices
+                .into_iter()
+                .filter_map(|notice| match notice.body {
+                    NoticeBody::Window { key, .. } => Some((key, notice.id)),
+                    NoticeBody::Folded { .. } => None,
+                })
+                .collect())
         }
-        fn told(&self, told: &[(PaneKey, u64)]) -> Result<(), String> {
+        fn dismiss(&self, id: u64) -> Result<bool, String> {
             let page = self
                 .page
                 .state
@@ -1902,7 +2186,7 @@ mod tests {
                 .current
                 .clone()
                 .expect("a page is current");
-            self.lost_told(&page, self.epoch(), told, None)
+            self.dismiss_notice(&page, self.epoch(), id)
         }
     }
     use crate::arbiter::EnterTiming;
@@ -2677,25 +2961,27 @@ mod tests {
         assert_eq!(lost[0].0, key);
         // The answer was lost at the page, which asks again, and gets the same notice.
         assert_eq!(inputs.activate("s:2").unwrap(), lost);
-        inputs.told(&lost).unwrap();
+        assert_eq!(inputs.dismiss(lost[0].1), Ok(true));
         assert!(inputs.activate("s:2").unwrap().is_empty());
         inputs.close_and_drain();
     }
 
-    /// A notice told for one loss does not clear a later loss of the window.
+    /// A notice dismissed by its id clears only that notice: a later loss of the window is a
+    /// new notice under a new id.
     #[test]
-    fn a_notice_told_clears_only_the_losses_up_to_its_number() {
+    fn a_dismissal_clears_only_the_notice_of_its_id() {
         let (inputs, key, _received, _) = bare();
         inputs.begin_page("s:1").unwrap();
-        let first = inputs.skip("s:1", &key, 1).unwrap();
-        let second = inputs.skip("s:1", &key, 2).unwrap();
-        assert!(second > first);
-        inputs.told(&[(key.clone(), first)]).unwrap();
-        assert_eq!(
-            inputs.activate("s:1").unwrap(),
-            vec![(key.clone(), second)]
-        );
-        inputs.told(&[(key, second)]).unwrap();
+        inputs.skip("s:1", &key, 1).unwrap();
+        let first = inputs.activate("s:1").unwrap();
+        inputs.skip("s:1", &key, 2).unwrap();
+        let second = inputs.activate("s:1").unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert!(second[0].1 > first[0].1);
+        assert_eq!(inputs.dismiss(first[0].1), Ok(false), "the replaced id is nothing");
+        assert_eq!(inputs.activate("s:1").unwrap(), second);
+        assert_eq!(inputs.dismiss(second[0].1), Ok(true));
         assert!(inputs.activate("s:1").unwrap().is_empty());
         inputs.close_and_drain();
     }
@@ -2752,13 +3038,13 @@ mod tests {
     fn the_notices_a_host_keeps_are_bounded() {
         let (inputs, _key, _received, _) = bare();
         inputs.begin_page("page").unwrap();
-        for window in 0..(MAX_PENDING_LOSSES as u64 + 20) {
+        for window in 0..(MAX_OUTSTANDING_NOTICES as u64 + 20) {
             let key = PaneKey::new(format!("window-{window}"), 1);
             inputs.skip("page", &key, 1).unwrap();
         }
         assert_eq!(
             inputs.activate("page").unwrap().len(),
-            MAX_PENDING_LOSSES
+            MAX_OUTSTANDING_NOTICES
         );
         inputs.close_and_drain();
     }

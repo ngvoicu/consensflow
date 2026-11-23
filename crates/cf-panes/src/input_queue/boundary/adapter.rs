@@ -37,12 +37,7 @@ impl Doc {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Notice {
-    pub key: PaneKey,
-    pub loss: u64,
-    pub closed: bool,
-}
+pub(super) use super::super::{Notice, NoticeBody};
 
 /// A window with a writer nobody drains but the test: what is handed to it, in order.
 pub(super) struct Window {
@@ -54,6 +49,44 @@ pub(super) struct Window {
 
 pub(super) struct Rig {
     pub q: InputQueue,
+}
+
+/// A call the host handed to a window's writer, which the test finishes.
+pub(super) struct Job(InputJob);
+
+impl Job {
+    pub fn bytes(&self) -> &[u8] {
+        match &self.0.work {
+            InputWork::Typed(part) | InputWork::Reply(part) | InputWork::Write(part) => part,
+            InputWork::Paste { body, .. } => body,
+            InputWork::Claim => &[],
+        }
+    }
+
+    fn finish(self, result: InputResponse) {
+        let InputJob {
+            response, outcome, ..
+        } = self.0;
+        match outcome {
+            Some(outcome) => outcome.finish(result, response),
+            None => {
+                let _ = response.send(result);
+            }
+        }
+    }
+
+    pub fn written(self) {
+        self.finish(Ok(()));
+    }
+
+    pub fn failed(self, error: InputError) {
+        self.finish(Err(error));
+    }
+
+    /// The writer disappears with the call, answering nothing.
+    pub fn vanishes(self) {
+        drop(self.0);
+    }
 }
 
 pub(super) type Refused = (String, Option<u64>);
@@ -113,7 +146,6 @@ impl Rig {
     pub fn activate(&self, doc: &Doc) -> Result<Vec<Notice>, String> {
         self.q
             .activate_page(&doc.page, &doc.nonce, doc.at())
-            .map(|notices| notices_of(&notices))
     }
 
     pub fn open_page(&self, page: &str) -> Doc {
@@ -183,35 +215,27 @@ impl Rig {
 
     /// What the host still owes the person, as this document asks it.
     pub fn pull(&self, doc: &Doc) -> Result<Vec<Notice>, String> {
-        self.q
-            .pending_losses(&doc.page, doc.at())
-            .map(|notices| notices_of(&notices))
+        self.q.pending_losses(&doc.page, doc.at())
     }
 
-    /// The count past the host's bound, with its version, as this document asks it.
-    pub fn overflow(&self, doc: &Doc) -> Option<(u64, u64)> {
-        self.q
-            .pending_losses(&doc.page, doc.at())
-            .unwrap()
-            .overflow
-            .map(|overflow| (overflow.version, overflow.count))
+    /// The person dismisses the notice with this id, from this document.
+    pub fn dismiss(&self, doc: &Doc, id: u64) -> Result<bool, String> {
+        self.q.dismiss_notice(&doc.page, doc.at(), id)
     }
 
-    /// This document says it has shown these notices.
-    pub fn told(&self, doc: &Doc, shown: &[(PaneKey, u64)]) -> Result<(), String> {
-        self.q.lost_told(&doc.page, doc.at(), shown, None)
+    /// The page says what a window is called.
+    pub fn name(&self, doc: &Doc, key: &PaneKey, name: &str) -> Result<(), String> {
+        self.q.name_window(&doc.page, doc.at(), key, name)
     }
 
-    /// The page's confirmation as it is made when the page reloads in the middle of it: the
-    /// navigation comes between the host's check of the page and its clearing of the notice.
-    pub fn told_across_navigation(&self, doc: &Doc, shown: &[(PaneKey, u64)]) {
-        self.navigate();
-        let _ = self.told(doc, shown);
+    /// A drop's place: the number taken at the gesture, told to the host.
+    pub fn place(&self, doc: &Doc, window: &Window, number: u64) -> Result<(), String> {
+        self.q.place_page_sequence(&doc.page, doc.at(), &window.key, number)
     }
 
-    pub fn told_overflow(&self, doc: &Doc, version: u64, count: u64) -> Result<(), String> {
-        self.q
-            .lost_told(&doc.page, doc.at(), &[], Some((version, count)))
+    /// A place nobody used, let go.
+    pub fn release(&self, doc: &Doc, window: &Window, number: u64) -> Result<(), String> {
+        self.q.release_page_sequence(&doc.page, doc.at(), &window.key, number)
     }
 
     /// What was handed to the window's writer since the last call, in order; the writer
@@ -254,6 +278,11 @@ impl Rig {
         }
     }
 
+    /// The next call handed to the window's writer, if one waits.
+    pub fn take(&self, window: &Window) -> Option<Job> {
+        window.jobs.try_recv().ok().map(Job)
+    }
+
     /// The window's writer disappears with the call it took, answering nothing.
     pub fn writer_vanishes(&self, window: &Window) {
         drop(window.jobs.try_recv().expect("a call was handed to the writer"));
@@ -264,6 +293,17 @@ impl Rig {
         let Window { key, jobs, .. } = window;
         drop(jobs);
         key
+    }
+
+    /// What was handed to the window's replies' writer.
+    pub fn replied(&self, window: &Window) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        while let Ok(job) = window._replies.try_recv() {
+            if let InputWork::Reply(part) = &job.work {
+                bytes.extend_from_slice(part);
+            }
+        }
+        bytes
     }
 
     /// The bytes the window holds reserved for the person's pending input.
@@ -303,6 +343,32 @@ impl Rig {
         assert!(outcome.is_err());
     }
 
+    /// The host's bounds clock is the test's: nothing starts a thread, and `bounds_pass` is time.
+    pub fn manual_clock(&self) {
+        self.q.page.state.lock().unwrap().reaper = true;
+    }
+
+    /// The cap on outstanding notices, made small so that a schedule reaches a fold.
+    pub fn notice_cap(&self, cap: usize) {
+        self.q.page.state.lock().unwrap().notice_cap = cap;
+    }
+
+    /// Every bound the parked calls wait on has passed.
+    pub fn bounds_pass(&self) {
+        let mut events = Vec::new();
+        self.q
+            .page
+            .lock()
+            .pump_all(Instant::now() + ORDER_BOUND + Duration::from_millis(5), &mut events);
+        self.q.page.flush(events);
+    }
+
+    /// For the schedules' checks: the notice each loss number made, and each notice's successor.
+    pub fn ledger(&self) -> (HashMap<u64, u64>, HashMap<u64, u64>) {
+        let state = self.q.page.lock();
+        (state.covers.clone(), state.lineage.clone())
+    }
+
     /// The page identities the host holds after its cuts.
     pub fn held_identities(&self) -> usize {
         self.q.held_identities()
@@ -321,16 +387,4 @@ impl Rig {
     pub fn host_epoch(&self) -> Option<u64> {
         Some(self.q.epoch())
     }
-}
-
-fn notices_of(notices: &PendingNotices) -> Vec<Notice> {
-    notices
-        .losses
-        .iter()
-        .map(|notice| Notice {
-            key: notice.key.clone(),
-            loss: notice.loss,
-            closed: notice.closed,
-        })
-        .collect()
 }

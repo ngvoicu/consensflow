@@ -3,7 +3,7 @@ import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { focusWhatIsClicked } from './click-focus.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
-import { listenForFileDrops, PENDING_DROPS } from './file-drop.js'
+import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
@@ -1048,10 +1048,10 @@ async function establishPanePage() {
             if (answer.nonce !== pageNonce) throw new Error('pane page answer is not this document')
             epoch = answer.epoch
           } else {
-            // The terminals take input only now; what the host owes the person is shown, then
-            // confirmed.
+            // The terminals take input only now; what the host owes the person is drawn from
+            // its list, and stays until the person dismisses it.
             terminals.open(epoch)
-            void terminals.receive(answer)
+            terminals.receive(answer)
           }
           break
         }
@@ -1155,16 +1155,6 @@ async function start() {
         : [],
     }),
   })
-  // A drop that was being looked up when the page before reloaded was never typed: say so.
-  try {
-    const lost = Number(sessionStorage.getItem(PENDING_DROPS) ?? 0)
-    sessionStorage.removeItem(PENDING_DROPS)
-    if (lost > 0) {
-      terminals.say(
-        `${lost === 1 ? 'A file' : 'Files'} you dropped just before ConsensFlow reloaded ${lost === 1 ? 'was' : 'were'} not typed. Drop ${lost === 1 ? 'it' : 'them'} again.`,
-      )
-    }
-  } catch {}
   // The board is read at once, not when the daemon next changes: a page waiting on its host
   // reads, and only its terminals wait.
   const boardRead = readMissing()

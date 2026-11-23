@@ -419,7 +419,7 @@ fn begun_reader(
     PaneKey,
     mpsc::Receiver<u8>,
     mpsc::Receiver<Vec<u8>>,
-    impl FnOnce(),
+    Hold,
 ) {
     static FIFOS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let hold = std::env::temp_dir().join(format!(
@@ -473,13 +473,29 @@ fn begun_reader(
         reader.read_exact(&mut bytes[1..]).unwrap();
         done.send(bytes).unwrap();
     });
-    let release = move || {
-        if count > 1 {
-            std::fs::write(&hold, b"").unwrap();
+    (key, begun, finished, Hold { path: hold, writes: count > 1 })
+}
+
+/// The FIFO a reader waits on: letting it go writes what the reader waits for, and the FIFO is
+/// removed when this goes, whether the test passed or failed.
+struct Hold {
+    path: std::path::PathBuf,
+    writes: bool,
+}
+
+impl Hold {
+    #[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+    fn release(&self) {
+        if self.writes {
+            std::fs::write(&self.path, b"").unwrap();
         }
-        let _ = std::fs::remove_file(&hold);
-    };
-    (key, begun, finished, release)
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// R13 (and P4-D). The paste has begun, proved by the reader's first byte and not by a sleep;
@@ -500,7 +516,7 @@ fn a_reply_after_the_pastes_first_byte_reaches_the_program_after_the_whole_paste
     assert_eq!(first, 0x1b, "the reader saw the paste's first byte");
     let answer = reply(&inputs, &key, 2, b"R").unwrap();
     // The reply is admitted while the reader still holds the paste: now it reads on.
-    release();
+    release.release();
     finished(&inputs, "page", &ticket);
     finished(&inputs, "page", &answer);
     let bytes = finished_reading.recv_timeout(Duration::from_secs(20)).unwrap();
@@ -539,7 +555,7 @@ fn a_call_handed_to_a_blocked_writer_is_written_before_the_new_pages_key_and_oth
         "window X gets its key while W is blocked"
     );
     assert!(w_done.try_recv().is_err(), "W is still blocked on its paste");
-    release_w();
+    release_w.release();
     finished(&inputs, "s:2", &d);
     let _ = (paste_ticket, k);
     let bytes = w_done.recv_timeout(Duration::from_secs(30)).unwrap();

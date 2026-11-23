@@ -85,10 +85,8 @@ export class TerminalsView {
    * terminal alone, and Show terminal brings a session's back.
    */
   #showing = new Set()
-  /** The notices of typing that may be missing, one row for each window, above the dock. */
+  /** The host's notices of typing that may be missing, one row for each, above the dock. */
   #noticeList
-  /** By window: the name it was last shown under, kept for the row of a window that has closed. */
-  #names = new Map()
 
   constructor(
     stage,
@@ -131,10 +129,7 @@ export class TerminalsView {
       registry: this.#registry,
       report,
       pageId,
-      notices: {
-        show: (notice) => this.#showNotice(notice),
-        showOverflow: (notice) => this.#showOverflow(notice),
-      },
+      notices: { draw: (owed) => this.#drawNotices(owed) },
       // Until this document's epoch is acknowledged, the terminals are visibly read-only.
       onGate: (open) => {
         this.#stage.dataset.input = open ? 'open' : 'closed'
@@ -161,9 +156,9 @@ export class TerminalsView {
     this.#link.releasePlace(place)
   }
 
-  /** What the host owes the person (at activation, by a pull, or from its event): shown, then confirmed. */
+  /** What the host owes the person (at activation or by a pull of its list): drawn, until dismissed. */
   receive(owed) {
-    return this.#link.receive(owed)
+    this.#link.receive(owed)
   }
 
   /** Ask the host what it owes the person. */
@@ -172,87 +167,73 @@ export class TerminalsView {
   }
 
   /**
-   * One window's row: the window by name (a window that has closed, by the name it last had
-   * and its generation), what may be missing, and a way to dismiss it. A newer version of the
-   * same window's loss updates its row. True only once a person can see the row: in view, not
-   * under a dialog, with Dismiss within the pointer's reach.
+   * The host's list as rows, one for each notice, by the host's id. A row is drawn once and its
+   * words never change (the host replaces a notice that says something else, under a new id);
+   * a row that is not on the list any more (replaced, folded) goes, and one the person
+   * dismissed is not drawn again. Order is the list's.
    */
-  #showNotice({ pane, loss, closed, name, text }) {
-    const key = paneKey(pane)
-    const called = name ?? this.#nameOf(pane)
-    const said = closed
-      ? `${called} (window ${pane.generation}) has closed. Typing sent to it just before may not have arrived.`
-      : `${called}: ${text}`
-    const row = this.#row(key)
-    row.dataset.loss = String(loss ?? '')
-    row.dataset.state = closed ? 'closed' : 'open'
-    row.dataset.generation = String(pane.generation)
-    row.firstElementChild.textContent = said
-    this.#noticeList.hidden = false
-    return this.#seen(row)
+  #drawNotices(owed) {
+    const ids = new Set(owed.map((notice) => String(notice.id)))
+    for (const row of [...this.#noticeList.children]) {
+      if (row.dataset.notice !== undefined && !ids.has(row.dataset.notice)) row.remove()
+    }
+    for (const notice of owed) {
+      const { row, created } = this.#row(`notice:${notice.id}`)
+      if (created) {
+        row.dataset.notice = String(notice.id)
+        row.dataset.state = notice.kind === 'window' && notice.closed ? 'closed' : 'open'
+        if (notice.kind === 'window') row.dataset.generation = String(notice.generation)
+        row.firstElementChild.textContent = this.#noticeWords(notice)
+      }
+    }
+    this.#noticeList.hidden = this.#noticeList.children.length === 0
   }
 
-  /** The losses past the host's bound, as one row of their own. */
-  #showOverflow({ version, count }) {
-    const row = this.#row('overflow')
-    row.dataset.version = String(version)
-    row.firstElementChild.textContent = `and ${count} more window${count === 1 ? '' : 's'} may not have received what you typed. Check what appeared in your other windows.`
-    this.#noticeList.hidden = false
-    return this.#seen(row)
+  /** What a notice says, from what the host knew when it made it: the window by name and generation. */
+  #noticeWords(notice) {
+    if (notice.kind === 'folded') {
+      const places = notice.count === 1 ? 'place' : 'places'
+      return `Input was also lost in ${notice.count} more ${places}. Check what appeared in your other windows.`
+    }
+    const called = notice.name ?? `Window ${notice.window}`
+    if (notice.closed) {
+      return `${called} (window ${notice.generation}) has closed. Typing sent to it just before may not have arrived.`
+    }
+    if (notice.dropped) {
+      return `${called}: A file you dropped here was not typed. Drop it again.`
+    }
+    if (notice.failed) {
+      return `${called}: Check whether your last typing appeared, then restart the project before typing again.`
+    }
+    return `${called}: Some of your typing may not have reached this window. Check what appeared.`
   }
 
   /** What was dropped and could not be typed, as a row of its own. */
   say(text) {
-    const row = this.#row(`say:${text}`)
+    const { row } = this.#row(`say:${text}`)
     row.firstElementChild.textContent = text
     this.#noticeList.hidden = false
   }
 
-  /** The row for `window`, made if it is not there. */
+  /** The row for `window`, made if it is not there: whether it was made now, and the row. */
   #row(window) {
     let row = [...this.#noticeList.children].find((item) => item.dataset.window === window)
+    let created = false
     if (row === undefined) {
+      created = true
       row = element('li', 'input-notice')
       row.dataset.window = window
       const words = element('span', 'input-notice-text')
       const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+        const id = Number(row.dataset.notice)
         row.remove()
         this.#noticeList.hidden = this.#noticeList.children.length === 0
+        if (Number.isSafeInteger(id)) this.#link.dismiss(id)
       })
       row.append(words, dismiss)
       this.#noticeList.append(row)
     }
-    return row
-  }
-
-  /** Whether a person can see and reach the row: in the window, inside the list, and on top. */
-  #seen(row) {
-    if (document.hidden) return false
-    const box = row.getBoundingClientRect()
-    if (box.width === 0 || box.height === 0) return false
-    const list = this.#noticeList.getBoundingClientRect()
-    const inside =
-      box.top >= Math.max(0, list.top) - 0.5 &&
-      box.bottom <= Math.min(window.innerHeight, list.bottom) + 0.5 &&
-      box.left >= 0 &&
-      box.right <= window.innerWidth
-    if (!inside) return false
-    const onTop = (x, y) => {
-      const at = document.elementFromPoint(x, y)
-      return at !== null && row.contains(at)
-    }
-    const words = row.firstElementChild.getBoundingClientRect()
-    const dismiss = row.lastElementChild.getBoundingClientRect()
-    return (
-      onTop(words.left + Math.min(words.width, 8), words.top + words.height / 2) &&
-      onTop(dismiss.left + dismiss.width / 2, dismiss.top + dismiss.height / 2)
-    )
-  }
-
-  #nameOf(pane) {
-    const entry = this.#cards.get(paneKey(pane))
-    if (entry?.participant) return laneName(entry.participant)
-    return this.#names.get(paneKey(pane)) ?? `Window ${pane.id}`
+    return { row, created }
   }
 
   /**
@@ -640,7 +621,6 @@ export class TerminalsView {
     entry.participant = participant
     // The chief's card while its window is down has no window to name.
     if (entry.pane !== undefined) {
-      this.#names.set(entry.key, name)
       this.#link.nameWindow(entry.pane, name)
     }
     entry.meeting = Boolean(board.project?.meeting)

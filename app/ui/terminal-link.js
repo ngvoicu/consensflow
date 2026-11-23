@@ -8,13 +8,8 @@ const WAIT_TIMEOUT_MS = 30_000
 const INPUT_RETRY_MS = 100
 const RESTART_INPUT_ADVICE =
   'Check whether your last typing appeared, then restart the project before typing again.'
-const LOST_TYPING = 'Some of your typing may not have reached this window. Check what appeared.'
 const RECONNECTING =
   'ConsensFlow is reconnecting its terminals: what you type is not sent yet. Wait a moment, then type it again.'
-// The host's own words for a window that holds all the input it takes (`InputError::queue_full`).
-const WINDOW_FULL = "the pane's input queue is full"
-const WINDOW_FULL_ADVICE =
-  'This window is still taking in what you sent before, so your last typing was not sent. Wait a moment, then type it again.'
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
@@ -67,10 +62,10 @@ export class TerminalLink {
   #sizes = new Map()
   #retired = new Set()
   #failedInputs = new Set()
-  /** By window: the latest loss version this page has shown (the host's own numbers). */
-  #shown = new Map()
-  /** The last version of the count past the host's bound that this page has shown. */
-  #overflowShown = 0
+  /** The ids the person dismissed on this page, never drawn again (the host's ids are never reused). */
+  #dismissed = new Set()
+  /** The dismissals the host has not acknowledged yet: asked again at each pull. */
+  #unacknowledged = new Set()
   #notices
   #onGate
   #pageId
@@ -81,9 +76,6 @@ export class TerminalLink {
    */
   #epoch = null
   #gateTold = 0
-  #wanted = new Map()
-  #wantedOverflow = null
-  #flushing = false
   #named = new Map()
   #placed = null
 
@@ -92,7 +84,7 @@ export class TerminalLink {
     registry,
     report,
     pageId = crypto.randomUUID(),
-    notices = { show: () => false, showOverflow: () => false },
+    notices = { draw: () => {} },
     onGate = () => {},
   }) {
     this.#invoke = invoke
@@ -171,52 +163,23 @@ export class TerminalLink {
   }
 
   /**
-   * What the host owes the person, as it came at activation, by a pull or with a refusal:
-   * `lost` (each `{ id, generation, loss, closed }`, the host's version of the window's loss) and
-   * `overflow` (`{ version, count }`, the losses past the host's bound). Each version is shown
-   * once on this page, as a row of its own naming its window; the host is told it was shown
-   * only after the row is there, and is told again for a version already known, until it
-   * has cleared it (an answer can be lost).
+   * What the host owes the person, as a pull of its list brought it (at activation, by a pull
+   * or after its event): every outstanding notice, each by the host's id. Only such a list
+   * draws rows, and every row on it is drawn until the person dismisses it: a refusal or a
+   * wait's reply never draws one or takes one away. A notice's words are the host's, fixed
+   * when it made it, and an id the person dismissed is not drawn again.
    */
-  async receive({ lost = [], overflow = null } = {}) {
-    const confirm = []
-    for (const notice of lost) {
-      const { id, generation, loss } = notice
-      if (!Number.isSafeInteger(loss)) continue
-      const key = paneKey({ id, generation })
-      if (loss > (this.#shown.get(key) ?? 0)) {
-        // Shown means a person can see it: a row that is out of view or covered is not, and
-        // is asked for again at the next pull.
-        const seen = this.#notices.show({
-          pane: { id, generation },
-          loss,
-          closed: notice.closed === true || this.#retired.has(key),
-          name: notice.name ?? null,
-          text: this.#failedInputs.has(key) ? RESTART_INPUT_ADVICE : LOST_TYPING,
-        })
-        if (!seen) continue
-        this.#shown.set(key, loss)
-      }
-      confirm.push({ id, generation, loss })
-    }
-    let overflowShown = null
-    if (overflow !== null && Number.isSafeInteger(overflow?.version)) {
-      if (
-        overflow.version > this.#overflowShown &&
-        this.#notices.showOverflow({ version: overflow.version, count: overflow.count })
-      ) {
-        this.#overflowShown = overflow.version
-      }
-      if (overflow.version <= this.#overflowShown) {
-        overflowShown = { version: overflow.version, count: overflow.count }
-      }
-    }
-    this.#confirm(confirm, overflowShown)
+  receive({ notices = [] } = {}) {
+    const owed = notices.filter(
+      (notice) => Number.isSafeInteger(notice?.id) && !this.#dismissed.has(notice.id),
+    )
+    this.#notices.draw(owed)
   }
 
   /** Ask the host what it owes the person. An idle page asks again on a timer. */
   async pull() {
     if (this.#epoch === null) return
+    await this.#sendDismissals()
     let answer
     try {
       answer = await this.#call(
@@ -227,56 +190,31 @@ export class TerminalLink {
     } catch {
       return
     }
-    if (answer?.ok === true) await this.receive(answer)
+    if (answer?.ok === true) this.receive(answer)
   }
 
   /**
-   * The person has been shown these (`{ id, generation, loss }`) and the count of the overflow:
-   * the host may forget exactly those versions. One confirmation is in flight at a time, and
-   * its wait is bounded: an answer that never comes holds neither a pull nor the next
-   * confirmation. The host keeps what it was not told, and the next pull asks again.
+   * The person dismissed the notice with this id. It is gone from the page at once and never
+   * drawn again; the host is told until it has heard (a dismissal of an id the host has since
+   * replaced clears nothing of the new notice).
    */
-  #confirm(keys, overflow) {
-    for (const each of keys) this.#wanted.set(paneKey(each), each)
-    if (overflow !== null) this.#wantedOverflow = overflow
-    void this.#flushConfirmations()
+  dismiss(id) {
+    this.#dismissed.add(id)
+    this.#unacknowledged.add(id)
+    void this.#sendDismissals()
   }
 
-  async #flushConfirmations() {
-    if (this.#flushing) return
-    this.#flushing = true
-    try {
-      while (this.#wanted.size > 0 || this.#wantedOverflow !== null) {
-        const keys = [...this.#wanted.values()]
-        const overflow = this.#wantedOverflow
-        this.#wanted.clear()
-        this.#wantedOverflow = null
-        try {
-          await this.#call(
-            'pane_lost_told',
-            { pageId: this.#pageId, epoch: this.#epoch, keys, overflow },
-            ADMISSION_TIMEOUT_MS,
-          )
-        } catch {}
-      }
-    } finally {
-      this.#flushing = false
-    }
-  }
-
-  /** A refusal, a failed wait or a skip said the window's typing may be missing, with the host's number. */
-  #noticed(pane, key, loss, text) {
-    if (this.#retired.has(key)) return
-    const numbered = Number.isSafeInteger(loss)
-    // A version the person has seen (and perhaps dismissed) is not shown again.
-    if (numbered && loss <= (this.#shown.get(key) ?? 0)) {
-      this.#confirm([{ id: pane.id, generation: pane.generation, loss }], null)
-      return
-    }
-    const seen = this.#notices.show({ pane, loss, closed: false, name: null, text })
-    if (numbered && seen) {
-      this.#shown.set(key, loss)
-      this.#confirm([{ id: pane.id, generation: pane.generation, loss }], null)
+  async #sendDismissals() {
+    if (this.#epoch === null) return
+    for (const id of [...this.#unacknowledged]) {
+      try {
+        const answer = await this.#call(
+          'pane_lost_dismiss',
+          { pageId: this.#pageId, epoch: this.#epoch, id },
+          ADMISSION_TIMEOUT_MS,
+        )
+        if (typeof answer?.ok === 'boolean') this.#unacknowledged.delete(id)
+      } catch {}
     }
   }
 
@@ -294,7 +232,34 @@ export class TerminalLink {
     }
     const sequence = (this.#issued.get(key) ?? 0) + 1
     this.#issued.set(key, sequence)
-    return { pane, key, sequence, epoch: this.#epoch, used: false }
+    const place = { pane, key, sequence, epoch: this.#epoch, used: false }
+    void this.#tellPlace(place)
+    return place
+  }
+
+  /**
+   * The host holds the place from here: a reload before the path is typed is the host's to say
+   * (it records the drop as a numbered loss with its notice), so the page keeps no marker of
+   * its own. Asked until the host answers, or the place is used or let go.
+   */
+  async #tellPlace(place) {
+    for (let tries = 0; tries < 20 && !place.used && !this.#retired.has(place.key); tries += 1) {
+      try {
+        const answer = await this.#call(
+          'pane_input_place',
+          {
+            pageId: this.#pageId,
+            epoch: place.epoch,
+            id: place.pane.id,
+            generation: place.pane.generation,
+            sequence: place.sequence,
+          },
+          ADMISSION_TIMEOUT_MS,
+        )
+        if (typeof answer?.ok === 'boolean') return
+      } catch {}
+      await pause(INPUT_RETRY_MS)
+    }
   }
 
   /** Types what `action` pastes in `place`: its input takes the number the place holds. */
@@ -478,7 +443,7 @@ export class TerminalLink {
    * count past its number, so the original either went in before this or is
    * refused when it comes late. The skip itself is repeated until the host says it
    * is final: a number it cannot spend yet is asked again (`retry`), and the person is told
-   * it is pending. Answers the number of the loss the host recorded for it.
+   * it is pending.
    */
   async #skip(pane, sequence, epoch) {
     let failures = 0
@@ -496,7 +461,7 @@ export class TerminalLink {
           },
           ADMISSION_TIMEOUT_MS,
         )
-        if (typeof answer?.ok === 'boolean' && answer.retry !== true) return answer.loss
+        if (typeof answer?.ok === 'boolean' && answer.retry !== true) return
       } catch {}
       failures += 1
       if (failures === 5)
@@ -532,20 +497,18 @@ export class TerminalLink {
     if (answer?.ok === true && typeof answer.ticket === 'string') {
       // Completion and its acknowledgement are independent of what is typed
       // next: a lost wait answer cannot hold later typing.
-      void this.#collect(pane, key, answer.ticket)
+      void this.#collect(key, answer.ticket)
       return
     }
-    let loss = answer?.loss
     // A call that ended unknown, or a refusal whose number the host could not keep, is skipped
-    // until the host has spent its number.
+    // until the host has spent its number. What the host recorded of it is told by its list:
+    // this reply draws nothing.
     if (typeof answer?.ok !== 'boolean' || answer.spent === false) {
-      loss = await this.#skip(pane, sequence, epoch)
+      await this.#skip(pane, sequence, epoch)
     }
-    if (this.#retired.has(key)) return
-    this.#noticed(pane, key, loss, answer?.error === WINDOW_FULL ? WINDOW_FULL_ADVICE : LOST_TYPING)
   }
 
-  async #collect(pane, key, ticket) {
+  async #collect(key, ticket) {
     let settled
     let failures = 0
     while (!this.#retired.has(key)) {
@@ -574,18 +537,9 @@ export class TerminalLink {
       return
     }
     if (settled?.ok !== true) {
-      // A failed pane refuses later typing, even when this call wrote nothing.
+      // A failed pane refuses later typing, even when this call wrote nothing. The notice of
+      // it is the host's, from its list; this keeps the status line's advice.
       if (settled?.failedUntilRestart === true) this.#failedInputs.add(key)
-      this.#noticed(
-        pane,
-        key,
-        settled?.loss,
-        this.#failedInputs.has(key)
-          ? RESTART_INPUT_ADVICE
-          : settled?.uncertain === true
-            ? 'Some of your typing may have reached this window, and some may not. Check what appeared.'
-            : LOST_TYPING,
-      )
     }
   }
 

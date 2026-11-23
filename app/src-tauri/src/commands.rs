@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion, PendingNotices};
+use cf_panes::input_queue::{InputWork, NoticeBody, PageInputCompletion, PendingNotices};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{
     decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
@@ -129,54 +129,35 @@ impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
 
 fn notices_json(notices: &PendingNotices) -> Value {
     json!({
-        "lost":notices.losses.iter().map(|notice| json!({
-            "id":notice.key.id,
-            "generation":notice.key.generation,
-            "loss":notice.loss,
-            "closed":notice.closed,
-            "name":notice.name,
-        })).collect::<Vec<_>>(),
-        "overflow":notices.overflow.map(|overflow| json!({"version":overflow.version,"count":overflow.count})),
+        "notices":notices.iter().map(|notice| match &notice.body {
+            NoticeBody::Window { key, name, closed, failed, dropped } => json!({
+                "id":notice.id,
+                "kind":"window",
+                "window":key.id,
+                "generation":key.generation,
+                "name":name,
+                "closed":closed,
+                "failed":failed,
+                "dropped":dropped,
+            }),
+            NoticeBody::Folded { count } => json!({
+                "id":notice.id,
+                "kind":"folded",
+                "count":count,
+            }),
+        }).collect::<Vec<_>>(),
     })
 }
 
-/// The page has shown the person what was lost in these windows (each version it shows) and
-/// the count past the host's bound: those notices are done, if this is the current page of the
-/// current epoch.
+/// The person dismissed the notice with this id: it goes if it is still outstanding under that
+/// id, on the current page of the current epoch. A notice the host replaced has a new id.
 #[tauri::command]
-pub fn pane_lost_told<R: Runtime>(
-    app: AppHandle<R>,
-    page_id: String,
-    epoch: u64,
-    keys: Vec<LostArgs>,
-    overflow: Option<OverflowArgs>,
-) -> Value {
+pub fn pane_lost_dismiss<R: Runtime>(app: AppHandle<R>, page_id: String, epoch: u64, id: u64) -> Value {
     let state = app.state::<AppRuntime>();
-    let mut told = Vec::with_capacity(keys.len());
-    for each in keys {
-        match pane_key(&each.id, each.generation) {
-            Ok(key) => told.push((key, each.loss)),
-            Err(error) => return json!({"ok":false,"error":error}),
-        }
-    }
-    let overflow = overflow.map(|overflow| (overflow.version, overflow.count));
-    match state.inputs.lost_told(&page_id, epoch, &told, overflow) {
-        Ok(()) => json!({"ok":true}),
+    match state.inputs.dismiss_notice(&page_id, epoch, id) {
+        Ok(removed) => json!({"ok":true,"removed":removed}),
         Err(error) => json!({"ok":false,"error":error}),
     }
-}
-
-#[derive(serde::Deserialize)]
-pub struct LostArgs {
-    id: String,
-    generation: u64,
-    loss: u64,
-}
-
-#[derive(serde::Deserialize)]
-pub struct OverflowArgs {
-    version: u64,
-    count: u64,
 }
 
 /// The page says what a window is called, so that a notice of a window that has closed names it.
@@ -382,6 +363,31 @@ pub fn pane_input_skip<R: Runtime>(
         Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
             json!({"ok":false,"error":error,"retry":true})
         }
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// A drop took this number at its gesture, before it looked up its path: the host holds the
+/// place, and says so itself if the page reloads before the path is typed.
+#[tauri::command]
+pub fn pane_input_place<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    sequence: u64,
+) -> Value {
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state
+        .inputs
+        .place_page_sequence(&page_id, epoch, &key, sequence)
+    {
+        Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }

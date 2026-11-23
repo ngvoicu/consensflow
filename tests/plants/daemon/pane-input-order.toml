@@ -1,15 +1,16 @@
 # The host writes a window's calls in the order of their numbers, and by the epoch it gave the
 # document (P4-B): a call of an epoch that is not the host's current one is never written; a call
 # that comes early waits for the numbers before it, at most the bound, and a reload cancels what
-# still waits in order; every loss the host knows of is kept, by version, until the current page
-# says it showed that version, and the losses past the bound are counted apart. A reply has room
-# of its own (P4-D).
+# still waits in order; every loss the host knows of is a notice with an id, kept until the
+# person dismisses that exact id, never edited (a change is a new notice), and the oldest past 64
+# are folded into one row. A call is judged by the window, its generation, the page's epoch and
+# its number. A reply has room of its own (P4-D).
 [run]
 pane-order = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::calls_that_come_out_of_order_reach_the_writer_in_number_order"]
 pane-order-bound = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_number_that_never_comes_holds_what_is_behind_it_for_the_bound_only"]
 pane-order-own-wait = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_later_arrival_does_not_stretch_an_earlier_calls_wait"]
 pane-order-bounded = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::what_a_page_holds_behind_a_gap_is_bounded"]
-pane-order-numbered = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_notice_told_clears_only_the_losses_up_to_its_number"]
+pane-order-numbered = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_dismissal_clears_only_the_notice_of_its_id"]
 pane-order-kept = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::typing_lost_with_no_page_current_is_told_at_the_next_activation"]
 pane-reply-room = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_reply_is_admitted_while_a_paste_is_pending"]
 pane-full = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_full_window_refuses_the_next_key_once_and_goes_on"]
@@ -28,12 +29,19 @@ epoch-r11 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_que
 epoch-r12 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::r12_"]
 epoch-gate = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "R3: until the document is acknowledged"]
 epoch-closed-row = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "R7: a window that has closed"]
-epoch-overflow-row = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "R11: the losses past the host"]
+epoch-fold-row = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "the notices past the host"]
 epoch-skip-retry = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a skip the host cannot make final"]
 epoch-f2 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f2_"]
 epoch-f3 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f3_"]
 epoch-f6 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f6_"]
-epoch-seen = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "confirmed only once a person can see it|only the rows in view"]
+epoch-dismiss-pointer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "Dismiss is reachable with the pointer"]
+epoch-dismissed-stays = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a dismissed id is not drawn again"]
+epoch-drop-told = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a drop whose lookup is pending when the page reloads"]
+epoch-f4 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f4_"]
+epoch-f5 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::f5_"]
+epoch-g2 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::g2_"]
+epoch-g3 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::g3_"]
+epoch-g4 = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::boundary::g4_"]
 epoch-place = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "keeps its place before a key typed after it"]
 
 [[plant]]
@@ -97,33 +105,175 @@ runs = ["epoch-r7", "epoch-closed-row"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            page.pending_lost
-                .insert(key.clone(), LossRecord { version, closed: true });'''
-replace = '''            page.pending_lost
-                .insert(key.clone(), LossRecord { version, closed: false });'''
+find = '''                    *closed = true;'''
+replace = '''                    *closed = false;'''
 
 [[plant]]
-name = "pane input epoch: the overflow count is confirmed with a window's notice"
-meant = "r11_a_stale_call_is_told_at_any_age_and_overflow_is_counted_apart"
-runs = ["epoch-r11", "epoch-overflow-row"]
+name = "pane input epoch: the 65th notice does not fold the oldest"
+meant = "r11_the_65th_notice_folds_the_oldest_into_one_row"
+runs = ["epoch-r11", "epoch-fold-row"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        if let Some((version, _count)) = overflow {'''
-replace = '''        if !told.is_empty() {
-            self.evicted.clear();
-        }
-        if let Some((version, _count)) = overflow {'''
+find = '''        while self.notices.len() > self.notice_cap {'''
+replace = '''        while false && self.notices.len() > self.notice_cap {'''
 
 [[plant]]
-name = "pane input epoch: a known loss for a window is dropped at its notice"
-meant = "r10_only_the_current_document_clears_the_version_it_showed"
-runs = ["epoch-r10", "pane-order-numbered"]
+name = "pane input epoch: a notice is removed without a Dismiss, at a cut"
+meant = "f5_a_notice_outlives_pulls_and_never_changes"
+runs = ["epoch-f5"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                .is_some_and(|record| record.version == *loss)'''
-replace = '''                .is_some()'''
+find = '''        // No departed identity is kept: a page is judged by the epoch and the nonce it echoes.
+        self.current = None;'''
+replace = '''        self.notices.clear();
+        self.current = None;'''
+
+[[plant]]
+name = "pane input epoch: a Dismiss of one id clears the window's later notice too"
+meant = "r10_a_notice_goes_only_by_its_exact_id"
+runs = ["epoch-r10"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        if self.notices.remove(&id).is_some() {
+            return true;
+        }'''
+replace = '''        if let Some(held) = self.notices.remove(&id) {
+            if let NoticeBody::Window { key, .. } = &held.body {
+                self.notices.retain(|_, other| {
+                    !matches!(&other.body, NoticeBody::Window { key: of, .. } if of == key)
+                });
+            }
+            return true;
+        }'''
+
+[[plant]]
+name = "pane input epoch: a notice's text changed after it was made"
+meant = "f4_a_late_name_and_new_advice_are_new_notices"
+runs = ["epoch-f4"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            self.replace(id, |body| {
+                if let NoticeBody::Window { name: said, .. } = body {
+                    *said = Some(name.to_owned());
+                }
+            });'''
+replace = '''            if let Some(Notice {
+                body: NoticeBody::Window { name: said, .. },
+                ..
+            }) = self.notices.get_mut(&id)
+            {
+                *said = Some(name.to_owned());
+            }'''
+
+[[plant]]
+name = "failed pane notice: the host's notice does not carry the restart advice"
+meant = "f4_a_late_name_and_new_advice_are_new_notices"
+runs = ["epoch-f4"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            failed: flags.failed || self.failed_windows.contains(key),'''
+replace = '''            failed: false,'''
+
+[[plant]]
+name = "pane input epoch: a call keyed by window and number alone"
+meant = "g2_a_successors_acknowledged_skip_does_not_hide_the_old_writers_failure"
+runs = ["epoch-g2"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        let call = CallKey {
+            key: key.clone(),
+            epoch,
+            sequence,
+        };
+        page.remember_call(call.clone(), &cell);'''
+replace = '''        let call = CallKey {
+            key: key.clone(),
+            epoch: 0,
+            sequence,
+        };
+        page.remember_call(call.clone(), &cell);'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            let call = CallKey {
+                key: key.clone(),
+                epoch,
+                sequence,
+            };
+            if !page.admits(page_id, epoch) {
+                // A departed page's skip says'''
+replace = '''            let call = CallKey {
+                key: key.clone(),
+                epoch: 0,
+                sequence,
+            };
+            if !page.admits(page_id, epoch) {
+                // A departed page's skip says'''
+
+[[plant]]
+name = "pane input epoch: a stale release records a loss where no bytes were held"
+meant = "g4_a_departed_pages_release_records_no_loss"
+runs = ["epoch-g4"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                if record {
+                    let closed = !self.has_route(key);
+                    let flags = Flags {'''
+replace = '''                if true {
+                    let closed = !self.has_route(key);
+                    let flags = Flags {'''
+
+[[plant]]
+name = "pane input epoch: a place no call used is no loss at a reload"
+meant = "g3_a_place_no_call_used_at_a_reload_is_a_numbered_loss_told_as_a_dropped_file"
+runs = ["epoch-g3"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        for (key, _) in places {
+            self.lost_with(&key, Flags { dropped: true, ..Flags::default() }, events);
+        }'''
+replace = '''        for (_key, _) in places {}'''
+
+[[plant]]
+name = "pane input epoch: the page decides a drop's loss, not the host"
+meant = "a drop whose lookup is pending when the page reloads is told on the next page, by the host"
+runs = ["epoch-drop-told"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''    void this.#tellPlace(place)'''
+replace = '''    void place'''
+
+[[plant]]
+name = "pane input epoch: Dismiss tells the host nothing"
+meant = "Dismiss is reachable with the pointer in a crowd of rows, and the row stays dismissed after the next pull"
+runs = ["epoch-dismiss-pointer"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''        if (Number.isSafeInteger(id)) this.#link.dismiss(id)'''
+replace = '''        void id'''
+
+[[plant]]
+name = "pane input epoch: a pull restores a dismissed id"
+meant = "a dismissed id is not drawn again, even when the host has not heard the dismissal"
+runs = ["epoch-dismissed-stays"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''      (notice) => Number.isSafeInteger(notice?.id) && !this.#dismissed.has(notice.id),'''
+replace = '''      (notice) => Number.isSafeInteger(notice?.id),'''
 
 [[plant]]
 name = "pane input epoch: a failed write is not recorded"
@@ -132,8 +282,8 @@ runs = ["epoch-r12"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            (Some(shared), true) => {'''
-replace = '''            (Some(shared), true) if false => {'''
+find = '''            (Some(shared), Some(error)) => {'''
+replace = '''            (Some(shared), Some(error)) if false => {'''
 
 [[plant]]
 name = "pane input order: write a call before the numbers ahead of it"
@@ -157,8 +307,8 @@ replace = '''pub const ORDER_BOUND: Duration = Duration::from_secs(3600);'''
 
 [[plant]]
 name = "pane input order: a notice is forgotten as soon as it is given"
-meant = "r10_only_the_current_document_clears_the_version_it_showed"
-runs = ["epoch-r10", "pane-order-kept"]
+meant = "f5_a_notice_outlives_pulls_and_never_changes"
+runs = ["epoch-f5", "pane-order-kept"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
@@ -172,7 +322,8 @@ replace = '''        let mut page = self.state()?;
             return Err(INPUT_STALE_PAGE.to_string());
         }
         let notices = page.notices();
-        page.pending_lost.clear();
+        page.notices.clear();
+        page.folded = None;
         Ok(notices)'''
 
 [[plant]]
@@ -230,30 +381,6 @@ replace = '''                        Some(parked @ Slot::Parked { .. }) => {
                             lane.slots.insert(sequence, parked);
                             cancelled = None::<InputJob>;
                         }'''
-
-[[plant]]
-name = "pane input epoch: a receipt that clears by at most"
-meant = "f6_a_receipt_clears_the_exact_version_for_its_own_window"
-runs = ["epoch-f6"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = '''                .is_some_and(|record| record.version == *loss)'''
-replace = '''                .is_some_and(|record| record.version <= *loss)'''
-
-[[plant]]
-name = "pane input epoch: a notice confirmed while off screen"
-meant = "a notice is confirmed only once a person can see it: not under a dialog, not out of view"
-runs = ["epoch-seen"]
-prepare = [["node", "app/scripts/bundle-ui.mjs"]]
-
-[[plant.edit]]
-file = "app/ui/core/terminals.js"
-find = '''    return (
-      onTop(words.left + Math.min(words.width, 8), words.top + words.height / 2) &&
-      onTop(dismiss.left + dismiss.width / 2, dismiss.top + dismiss.height / 2)
-    )'''
-replace = '''    return onTop === undefined || true'''
 
 [[plant]]
 name = "pane input epoch: a drop sent after a later key"

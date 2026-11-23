@@ -464,9 +464,10 @@ mod conpty {
         let owed = inputs
             .pending_losses("s:2", next)
             .expect("the page is current")
-            .losses
             .iter()
-            .any(|notice| notice.key == key);
+            .any(|notice| {
+                matches!(&notice.body, crate::input_queue::NoticeBody::Window { key: of, .. } if *of == key)
+            });
         let mut seen = String::new();
         let settled = Instant::now() + Duration::from_secs(3);
         while Instant::now() < settled {
