@@ -56,7 +56,7 @@ use cf_proto::panes::SCREEN_QUIET_MS;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::arrival::ENTER_AGAIN_QUIET_MS;
+use crate::arrival::{output_is_drawn, ENTER_AGAIN_QUIET_MS};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -339,7 +339,7 @@ impl Dispatcher {
             .get(SCREEN_QUIET_MS)
             .and_then(Value::as_f64)
             .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
-        if !quiet {
+        if !quiet || !output_is_drawn(&snapshot) {
             return Ok(Pressed::Printing);
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });

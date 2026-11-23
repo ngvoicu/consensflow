@@ -2314,7 +2314,7 @@ fn a_write_that_finds_its_pane_gone_is_refused_and_fails_nothing() {
         Err(ArbiterError::Stale)
     ));
     assert!(matches!(
-        arbiter.write_paste(&without_the_pane, &key, b"body", None),
+        arbiter.write_paste(&without_the_pane, &key, b"body", None, None),
         Err(ArbiterError::Stale)
     ));
     let snapshot = arbiter.snapshot(&key).expect("the pane's input");

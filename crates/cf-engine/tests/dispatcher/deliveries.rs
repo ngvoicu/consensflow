@@ -180,6 +180,30 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
     );
 }
 
+/// N17 (T-2139): the Enter pressed once more is no more an Enter that goes while the window's
+/// output is not all in its screen (the pane host's `outputRead` over `outputDrawn`): the
+/// screen's quiet is the quiet of a screen that lacks bytes the window has printed.
+#[test]
+fn presses_no_enter_once_more_while_the_windows_output_is_not_all_drawn() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    context.note(project.id, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 5_000, "screenQuietMs": 5_000, "outputRead": 259, "outputDrawn": 258
+    }));
+    context.pass().unwrap();
+    assert_eq!(enters(&context), 0, "259 bytes read, 258 drawn");
+    context.advance(2_000);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 5_000, "screenQuietMs": 5_000, "outputRead": 259, "outputDrawn": 259
+    }));
+    context.pass().unwrap();
+    assert_eq!(enters(&context), 1, "pressed once the screen has them all");
+}
+
 #[test]
 fn pastes_again_once_its_arrival_window_passes_when_one_more_enter_did_not_bring_it() {
     let context = Context::new();

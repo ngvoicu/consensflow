@@ -83,6 +83,9 @@ impl PaneInputState {
     /// writes, read one after another, are never aged from different ones and an older write
     /// never reads younger than a newer.
     pub(super) fn snapshot(&self, now: Instant) -> ArbiterSnapshot {
+        // One sampling of the pair, drawn first and read after it ([`OutputCount::both`]): two
+        // samplings, one for each number, could tell 10/10 of a stream going 10/9, 11/9, 11/10.
+        let (output_read, output_drawn) = self.output.counts().both();
         ArbiterSnapshot {
             generation: self.generation,
             paste_in_flight: self.paste_in_flight,
@@ -92,8 +95,8 @@ impl PaneInputState {
             typed_quiet_ms: self.typed_at.map(|at| millis_since(now, at)),
             output_quiet_ms: self.output.quiet_ms(now),
             screen_quiet_ms: self.output.screen_quiet_ms(now),
-            output_read: self.output.counts().both().0,
-            output_drawn: self.output.counts().both().1,
+            output_read,
+            output_drawn,
             paste_quiet_ms: self.pasted.map(|pasted| millis_since(now, pasted)),
             human_writes: self
                 .writes

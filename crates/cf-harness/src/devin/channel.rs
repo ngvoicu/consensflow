@@ -6,6 +6,7 @@ use std::path::Path;
 use super::wire::naming;
 use crate::contract::{Pane, PaneHost};
 use crate::shared::admission::Sent;
+use crate::shared::input_box::ReadEmpty;
 use crate::shared::pane::write_paste;
 
 /// A refusal before the paste is made: nothing was written.
@@ -41,7 +42,7 @@ pub(super) async fn send(
     session: Option<&str>,
     guard: Guard,
     text: &str,
-    read_empty: Option<u64>,
+    read_empty: Option<ReadEmpty>,
 ) -> Sent {
     let Ok(naming) = naming(wire) else {
         return refused("Devin conversation is unavailable");

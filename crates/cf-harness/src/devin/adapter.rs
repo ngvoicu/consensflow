@@ -76,7 +76,7 @@ use crate::detect::executable;
 use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, Unsent};
+use crate::shared::input_box::{self, ReadEmpty, Unsent};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
@@ -510,7 +510,7 @@ struct DevinWindow {
     /// The human's keys left something unsent by the pane host's count, and the
     /// latest readiness read the input box empty on the screen, at this count of
     /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
-    read_empty: Cell<Option<u64>>,
+    read_empty: Cell<Option<ReadEmpty>>,
     /// What the pane host said of the human's input at the latest readiness, where it
     /// read a snapshot of the pane ([`Window::human_input`]).
     input: RefCell<Option<HumanInput>>,
@@ -807,7 +807,7 @@ impl Window for DevinWindow {
             // The count is the human's keys, a guess: the box on the screen says.
             if js::truthy(snapshot.get("unsent")) {
                 match input_box::unsent(host, pane, Harness::Devin, &snapshot).await {
-                    Unsent::ReadEmpty(typed) => self.read_empty.set(Some(typed)),
+                    Unsent::ReadEmpty(answer) => self.read_empty.set(Some(answer)),
                     Unsent::Held => return Ok(Readiness::Held(Held::Unsent)),
                 }
             }

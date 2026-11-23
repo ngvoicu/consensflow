@@ -144,6 +144,19 @@ impl<'a> PaneEnvironment<'a> {
 
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
+
+    /// [`PaneInputWriter::write`], once `ready` says so with the pane's writer held: it is
+    /// asked again, the writer let go between, until it does. The paste's Enter is written so,
+    /// the window's output looked at last where the write is made.
+    fn write_when(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        ready: &mut dyn FnMut() -> bool,
+    ) -> Result<(), PaneError> {
+        let _ = ready;
+        self.write(key, bytes)
+    }
 }
 
 struct Pane {
@@ -166,6 +179,8 @@ struct Pane {
     active_writes: Arc<AtomicU64>,
     alive: bool,
     last_activity: Arc<Mutex<Instant>>,
+    /// The bytes the window printed, read and drawn.
+    counts: Arc<crate::arbiter::OutputCount>,
     screen: Arc<PaneScreen>,
     ended: Arc<EndedSlot>,
 }
@@ -285,6 +300,16 @@ impl PaneTable {
     }
 
     pub(crate) fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
+        self.write_when(key, bytes, &mut || true)
+    }
+
+    /// [`PaneTable::write`], once `ready` says so with the writer held.
+    pub(crate) fn write_when(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        ready: &mut dyn FnMut() -> bool,
+    ) -> Result<(), PaneError> {
         let (writer, last_activity, active_writes) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -298,11 +323,25 @@ impl PaneTable {
             )
         };
         let _active_write = ActiveWrite(active_writes);
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;
+        let mut writer = loop {
+            let writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;
+            if ready() {
+                break writer;
+            }
+            drop(writer);
+            std::thread::sleep(Duration::from_millis(2));
+        };
         writer.write_all(bytes)?;
         writer.flush()?;
         *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
         Ok(())
+    }
+
+    /// The pane's writer, for a test that holds it as a slow write would.
+    #[cfg(all(test, unix))]
+    pub(crate) fn writer_of(&self, key: &PaneKey) -> Arc<Mutex<Box<dyn Write + Send>>> {
+        let panes = self.lock_panes().unwrap();
+        Arc::clone(&panes.get(key).expect("the pane").writer)
     }
 
     /// How many writes into the pane are in flight, counted from before the write waits for the
@@ -424,6 +463,15 @@ impl PaneInputWriter for PaneTable {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
         PaneTable::write(self, key, bytes)
     }
+
+    fn write_when(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        ready: &mut dyn FnMut() -> bool,
+    ) -> Result<(), PaneError> {
+        PaneTable::write_when(self, key, bytes, ready)
+    }
 }
 
 /// A paste in brackets, then its Enter as a write of its own, once
@@ -436,28 +484,25 @@ pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
     body: &[u8],
     before_enter: impl FnOnce(),
 ) -> Result<(), PaneError> {
-    write_paste_if_via(writer, key, body, || {
-        before_enter();
-        true
-    })
+    write_paste_if_via(writer, key, body, before_enter, &mut || true)
 }
 
-/// [`write_paste_via`], the Enter written only where `before_enter` says it may go.
+/// [`write_paste_via`], the Enter written once `ready` says so, with the pane's writer held
+/// ([`PaneInputWriter::write_when`]).
 pub(crate) fn write_paste_if_via<W: PaneInputWriter + ?Sized>(
     writer: &W,
     key: &PaneKey,
     body: &[u8],
-    before_enter: impl FnOnce() -> bool,
+    before_enter: impl FnOnce(),
+    ready: &mut dyn FnMut() -> bool,
 ) -> Result<(), PaneError> {
     let mut bracketed = Vec::with_capacity(12 + body.len());
     bracketed.extend_from_slice(b"\x1b[200~");
     bracketed.extend_from_slice(body);
     bracketed.extend_from_slice(b"\x1b[201~");
     writer.write(key, &bracketed)?;
-    if !before_enter() {
-        return Ok(());
-    }
-    writer.write(key, b"\r")
+    before_enter();
+    writer.write_when(key, b"\r", ready)
 }
 
 struct ActiveWrite(Arc<AtomicU64>);

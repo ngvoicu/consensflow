@@ -22,7 +22,7 @@ use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::arrival::ENTER_AGAIN_QUIET_MS;
+use crate::arrival::{output_is_drawn, ENTER_AGAIN_QUIET_MS};
 use crate::at_work::OnWork;
 use crate::delivery_text::{is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
@@ -1574,6 +1574,7 @@ impl Dispatcher {
                     .get(SCREEN_QUIET_MS)
                     .and_then(Value::as_f64)
                     .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
+                && output_is_drawn(&snapshot)
         })
     }
 

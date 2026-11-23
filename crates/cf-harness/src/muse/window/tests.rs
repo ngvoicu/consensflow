@@ -646,7 +646,7 @@ fn a_window_whose_screen_lacks_bytes_the_host_has_read_is_held_and_never_read_em
     assert_eq!(ready(&host), Readiness::Ready);
     // With the counts equal the empty box is read empty, as before.
     assert_eq!(ready(&host), Readiness::Ready);
-    assert_eq!(window.read_empty.get(), Some(1));
+    assert_eq!(window.read_empty.get().map(|answer| answer.typed), Some(1));
 }
 
 /// A turn taken back, its box shown on a screen that lacks bytes the host has read (N17): the

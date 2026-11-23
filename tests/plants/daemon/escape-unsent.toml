@@ -118,8 +118,8 @@ runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                    Unsent::ReadEmpty(typed) => {
-                        self.read_empty.set(Some(typed));
+find = '''                    Unsent::ReadEmpty(answer) => {
+                        self.read_empty.set(Some(answer));
                         Readiness::Ready
                     }'''
 replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
@@ -141,7 +141,7 @@ runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                    Unsent::ReadEmpty(typed) => self.read_empty.set(Some(typed)),"
+find = "                    Unsent::ReadEmpty(answer) => self.read_empty.set(Some(answer)),"
 replace = "                    Unsent::ReadEmpty(_) => return Ok(Readiness::Held(Held::Unsent)),"
 
 [[plant]]
@@ -314,8 +314,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                    Unsent::ReadEmpty(typed) => {
-                        self.read_empty.set(Some(typed));
+find = '''                    Unsent::ReadEmpty(answer) => {
+                        self.read_empty.set(Some(answer));
                         Readiness::Ready
                     }'''
 replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''

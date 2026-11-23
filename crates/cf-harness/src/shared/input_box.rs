@@ -205,7 +205,25 @@ pub(crate) enum Unsent {
     /// keys, the last of them [`SETTLED_MS`] or more before and the window having
     /// printed since ([`UNDRAWN_MS`] or more before where it has not): a paste told so
     /// goes in (`readEmpty`), unless a key came since.
-    ReadEmpty(u64),
+    ReadEmpty(ReadEmpty),
+}
+
+/// An input box read empty: when the host had taken `typed` writes of the human's keys, and
+/// where its snapshot says, `read` bytes of the window's output. A paste told so goes in over
+/// the count only while no more output has been read since (`readAt`): a box read before a
+/// later print, the echo of the key in a second read, may lack the key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadEmpty {
+    pub(crate) typed: u64,
+    pub(crate) read: Option<u64>,
+}
+
+impl ReadEmpty {
+    /// An answer of no output count (a host that gives none).
+    #[cfg(test)]
+    pub(crate) fn at_keys(typed: u64) -> Self {
+        Self { typed, read: None }
+    }
 }
 
 /// What the input box of a `harness` window holds on its screen now, whatever the
@@ -293,7 +311,10 @@ pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
         (true, Some(typed), Some(lines))
             if read(harness, &lines, cursor) == Some(InputBox::Empty) =>
         {
-            Unsent::ReadEmpty(typed)
+            Unsent::ReadEmpty(ReadEmpty {
+                typed,
+                read: snapshot.get("outputRead").and_then(Value::as_u64),
+            })
         }
         _ => Unsent::Held,
     }
@@ -326,7 +347,7 @@ mod tests {
             let typed = snapshot["typed"].as_u64().unwrap();
             assert_eq!(
                 read_unsent(harness, &snapshot),
-                Unsent::ReadEmpty(typed),
+                Unsent::ReadEmpty(ReadEmpty::at_keys(typed)),
                 "{name}"
             );
             let lines = bottom(&snapshot).unwrap();
@@ -356,7 +377,7 @@ mod tests {
         snapshot["screenQuietMs"] = Value::from(60_000);
         assert_eq!(
             read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(typed)
+            Unsent::ReadEmpty(ReadEmpty::at_keys(typed))
         );
     }
 
@@ -377,7 +398,7 @@ mod tests {
         snapshot["screenQuietMs"] = Value::from(1_500);
         assert_eq!(
             read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(typed)
+            Unsent::ReadEmpty(ReadEmpty::at_keys(typed))
         );
         snapshot["outputRead"] = Value::from(262);
         snapshot["outputDrawn"] = Value::from(261);
@@ -387,7 +408,11 @@ mod tests {
         snapshot["outputDrawn"] = Value::from(262);
         assert_eq!(
             read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(typed)
+            Unsent::ReadEmpty(ReadEmpty {
+                typed,
+                read: Some(262)
+            }),
+            "the answer says the output it was read at"
         );
         assert!(read_empty(Harness::Claude, &snapshot));
     }

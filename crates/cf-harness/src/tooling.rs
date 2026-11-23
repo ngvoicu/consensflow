@@ -247,7 +247,10 @@ fn unsent(question: &Value) -> Result<Value, String> {
         .ok_or("the question names no snapshot")?;
     Ok(
         match input_box::read_unsent(harness(text(question, "kind")?)?, snapshot) {
-            input_box::Unsent::ReadEmpty(typed) => json!({ "readEmpty": typed }),
+            input_box::Unsent::ReadEmpty(answer) => match answer.read {
+                Some(read) => json!({ "readEmpty": answer.typed, "readAt": read }),
+                None => json!({ "readEmpty": answer.typed }),
+            },
             input_box::Unsent::Held => json!("held"),
         },
     )

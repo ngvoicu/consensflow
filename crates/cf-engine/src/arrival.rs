@@ -988,7 +988,10 @@ impl Dispatcher {
                     .as_ref()
                     .and_then(|snapshot| snapshot.get("unsent")),
             )
-            && quiet.is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
+            && quiet.is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
+            // The window's output is all in the screen the quiet was read from: an Enter into
+            // a window that has printed what is not yet drawn may go before its last bytes.
+            && snapshot.as_ref().is_some_and(output_is_drawn);
         if !ready {
             self.entered_again(record, message, false);
             return Ok(());
@@ -1210,5 +1213,15 @@ fn item_ms(item: &Item) -> Option<i64> {
         Value::String(at) => time::parse(at),
         Value::Number(ms) => ms.as_i64(),
         _ => None,
+    }
+}
+
+/// Whether a pane host's `snapshot` says the screen shows every byte of output the pty gave
+/// (`outputDrawn` equal to `outputRead`); a host that gives no counts has none pending.
+pub(crate) fn output_is_drawn(snapshot: &Value) -> bool {
+    let count = |name: &str| snapshot.get(name).and_then(Value::as_u64);
+    match (count("outputRead"), count("outputDrawn")) {
+        (Some(read), Some(drawn)) => read == drawn,
+        _ => true,
     }
 }

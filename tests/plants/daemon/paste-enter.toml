@@ -166,10 +166,10 @@ runs = ["paste-enter-arbiter"]
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/timing.rs"
 find = """
-    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) -> Waited {
+    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {"""
 replace = """
-    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) -> Waited {
+    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         let _ = pasted;
         let pasted = clock.now();
         loop {"""

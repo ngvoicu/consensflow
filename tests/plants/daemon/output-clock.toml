@@ -6,8 +6,13 @@
 # the pty has taken, advanced the moment they are in hand, and the bytes in the screen, advanced when
 # each feed ends. Output is pending while the first is the greater.
 #
-# - the window is not quiet while output is pending, and a paste's Enter never goes then, the cap
-#   included: past the cap and a grace the paste is answered uncertain and no Enter is written;
+# - the window is not quiet while output is pending, and a paste's Enter waits then, up to the cap
+#   and a grace; it is looked at again with the pane's writer held, where it is written; at the cap
+#   it goes, as it did before the counts, and the paste is answered as made;
+# - a read is counted the moment the pty returns it, before the lock of the activity time;
+# - an answer of the input box's reader says the output read it was read at (`readAt`), and a paste
+#   goes in over a count only while no more has been read since;
+# - the pair is sampled once, drawn first and read after it;
 # - every snapshot carries both counts; a counts-only one waits for no lock, one with the screen's
 #   lines takes the counts with the lock held;
 # - the input box is current only where the counts are equal (the shared reader of cf-harness);
@@ -19,37 +24,98 @@
 [run]
 oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::", "pane_handlers::native_tests::"]
 oc-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "muse::window::"]
+oc-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "presses_no_enter_once_more_while"]
+oc-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_read_is_counted"]
+oc-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::pane::tests::a_paste_over_a_read_empty_box"]
 oc-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::input_box::tests::a_box_on_a_screen_that_lacks"]
 
 [[plant]]
-name = "output clock: the bytes the pty gave are counted read only as the feed takes the lock"
-meant = "the_enter_waits_for_a_byte_the_pty_gave_and_the_screen_has_not"
-runs = ["oc-feed"]
+name = "output clock: a read is counted after the lock of the activity time"
+meant = "a_read_is_counted_while_the_activity_lock_is_held"
+runs = ["oc-pty"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/flow.rs"
-find = "        counts.took(byte_count);\n"
-replace = ""
-
-[[plant.edit]]
-file = "crates/cf-panes/src/screen.rs"
-find = """        let mut screen = self.locked();
-        #[cfg(test)]
-        self.hook.at(FeedStage::Locked);"""
-replace = """        let mut screen = self.locked();
-        printed.counts().took(bytes.len());
-        #[cfg(test)]
-        self.hook.at(FeedStage::Locked);"""
+find = """            self.counts.took(byte_count);
+            *self
+                .last_activity
+                .lock()
+                .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();"""
+replace = """            *self
+                .last_activity
+                .lock()
+                .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
+            self.counts.took(byte_count);"""
 
 [[plant]]
-name = "output clock: the Enter goes at the cap with output pending"
-meant = "the_cap_does_not_send_the_enter_over_pending_output"
+name = "output clock: the Enter goes at the cap with no grace"
+meant = "the_cap_sends_one_enter_and_no_uncertain_answer"
 runs = ["oc-feed"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/timing.rs"
-find = "                    return Waited::StillPrinting;"
-replace = "                    return Waited::Released;"
+find = "        self.most_ms.saturating_add(PENDING_GRACE_MS)"
+replace = "        self.most_ms"
+
+[[plant]]
+name = "output clock: the Enter is written without a look at the counts with the writer held"
+meant = "the_enter_looks_at_the_counts_again_with_the_writer_held"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "            if ready() {\n                break writer;"
+replace = "            if true || ready() {\n                break writer;"
+
+[[plant]]
+name = "output clock: an answer's read count is ignored at admission"
+meant = "an_answer_read_before_output_that_came_since_does_not_admit_a_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                if read_at.is_some_and(|at| state.output.counts().both().0 > at) {"
+replace = "                if false && read_at.is_some_and(|at| state.output.counts().both().0 > at) {"
+
+[[plant]]
+name = "output clock: the pair is sampled read first"
+meant = "a_snapshot_samples_the_counts_drawn_first_and_once"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        let drawn = self.drawn.load(Ordering::Acquire);
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (self.read.load(Ordering::Acquire), drawn);"""
+replace = """        let read = self.read.load(Ordering::Acquire);
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (read, self.drawn.load(Ordering::Acquire));"""
+
+[[plant]]
+name = "output clock: a snapshot samples each count apart"
+meant = "a_snapshot_takes_both_counts_from_one_sampling"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = "        let (output_read, output_drawn) = self.output.counts().both();"
+replace = "        let (output_read, output_drawn) = (self.output.counts().both().0, self.output.counts().both().1);"
+
+[[plant]]
+name = "output clock: the Enter pressed again goes while output is pending"
+meant = "presses_no_enter_once_more_while_the_windows_output_is_not_all_drawn"
+runs = ["oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            && snapshot.as_ref().is_some_and(output_is_drawn);"
+replace = "            && snapshot.as_ref().is_some_and(|_| true);"
 
 [[plant]]
 name = "output clock: the input box is read as current with output pending"
@@ -119,3 +185,13 @@ find = """        if !input_box::screen_current(&snapshot) {
             return None;
         }"""
 replace = ""
+
+[[plant]]
+name = "output clock: a paste's request drops the output count of the answer"
+meant = "a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at"
+runs = ["oc-paste"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = "            request[\"readAt\"] = json!(read);"
+replace = "            let _ = read;"

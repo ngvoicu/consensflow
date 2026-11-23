@@ -264,7 +264,7 @@ fn paste_in_a_thread(
     let (told, result) = mpsc::channel();
     thread::spawn(move || {
         let sent = inputs
-            .paste(key, b"hello".to_vec(), None)
+            .paste(key, b"hello".to_vec(), None, None)
             .and_then(wait_for_input_blocking);
         let _ = told.send(sent);
     });
@@ -315,10 +315,12 @@ fn the_enter_waits_for_a_byte_the_pty_gave_and_the_screen_has_not() {
     window.end();
 }
 
-/// T-2132 2: output pending past the cap and its grace ends the wait as a paste whose Enter
-/// was not sent: uncertain, nothing counted as made, the Enter never written.
+/// T-2132 2, T-2139 8: output pending past the cap and its grace ends the wait as it did on
+/// main: the Enter goes, once, and the paste is answered as made, not as uncertain (an
+/// uncertain answer sent the delivery into a recovery that pressed Enter over the pending
+/// bytes or pasted the message again).
 #[test]
-fn the_cap_does_not_send_the_enter_over_pending_output() {
+fn the_cap_sends_one_enter_and_no_uncertain_answer() {
     let window = Window::new("enter", InputArbiter::new(timing(200)));
     let pasted = paste_in_a_thread(&window);
     window.took_input();
@@ -329,14 +331,102 @@ fn the_cap_does_not_send_the_enter_over_pending_output() {
     window.gate("paint");
     held.recv_timeout(BOUND)
         .expect("the feed holds Z inside the lock");
+    thread::sleep(ms(1_500));
+    assert!(
+        window.bytes().is_none(),
+        "the child had its Enter before the cap and its grace"
+    );
     let answer = pasted
         .recv_timeout(ms(10_000))
         .expect("the wait ends in bounded time");
-    let error = answer.expect_err("the Enter is not sent over output being drawn");
-    assert_eq!(error.paste_answer()["error"], "uncertain", "{error}");
-    assert!(window.bytes().is_none(), "the child had its Enter");
+    assert!(answer.is_ok(), "the paste is answered as made: {answer:?}");
+    window.wait_for(&window.directory.join("bytes"));
+    assert!(
+        window.bytes().unwrap().ends_with(b"\x1b[201~\r"),
+        "the paste and one Enter"
+    );
     release.send(()).unwrap();
-    // A key of the daemon's own lets the child end.
+    window.end();
+}
+
+/// T-2139 1: the Enter passed its quiet check and waited on the pane's writer while another
+/// read arrived. The counts are looked at again with the writer held, where the Enter is
+/// written: it did not go (259 read, 258 drawn) and went once `Z` was drawn.
+#[test]
+fn the_enter_looks_at_the_counts_again_with_the_writer_held() {
+    let window = Window::new("enter", InputArbiter::new(timing(600)));
+    let pasted = paste_in_a_thread(&window);
+    window.took_input();
+    window.gate("echo");
+    window
+        .until(|snapshot| snapshot["bottom"].to_string().contains("echo") && is_current(snapshot));
+    let writer = window.panes.writer_of(&window.key);
+    let held_writer = writer.lock().unwrap();
+    // Quiet for 120 ms: the wait passes its check and the Enter waits for the writer.
+    thread::sleep(ms(400));
+    let (held, release) = hold_the_next_read(&window, FeedStage::Read);
+    window.gate("paint");
+    held.recv_timeout(BOUND).expect("the feed holds Z");
+    thread::sleep(ms(100));
+    drop(held_writer);
+    thread::sleep(ms(700));
+    assert!(
+        window.bytes().is_none(),
+        "the child had its Enter with Z read and not drawn"
+    );
+    assert!(pasted.try_recv().is_err());
+    release.send(()).unwrap();
+    assert!(pasted.recv_timeout(BOUND).unwrap().is_ok());
+    window.wait_for(&window.directory.join("bytes"));
+    assert!(window.bytes().unwrap().ends_with(b"\x1b[201~\r"));
+    window.end();
+}
+
+/// T-2139 3: the reader's `readEmpty` of the cursor prefix alone (the box empty, 6 bytes read)
+/// carries the read count it saw. The `X` came after in a read of its own, pending and then
+/// drawn: the paste with that answer is refused both times, and the child took only the `X`.
+#[test]
+fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
+    let clock = Manual::new();
+    let window = Window::new("split", InputArbiter::with_clock(ENTER, clock.clone()));
+    clock.advance(ms(300));
+    wait_for_input_blocking(
+        window
+            .inputs
+            .typed(window.key.clone(), b"X".to_vec())
+            .unwrap(),
+    )
+    .unwrap();
+    window.took_input();
+    clock.advance(ms(1_200));
+    let before = window.counts_only()["outputRead"].as_u64().unwrap();
+    window.gate("prefix");
+    window.until(|snapshot| {
+        snapshot["outputDrawn"].as_u64() == Some(before + 6) && is_current(snapshot)
+    });
+    let answered_at = window.counts_only()["outputRead"].as_u64().unwrap();
+    let typed = window.counts_only()["typed"].as_u64().unwrap();
+    // The answer was read here; the `X` comes in a read of its own, held before the screen.
+    let (held, release) = hold_the_next_read(&window, FeedStage::Read);
+    window.gate("paint");
+    held.recv_timeout(BOUND).expect("the feed holds X");
+    let paste_over = |window: &Window| {
+        window
+            .inputs
+            .paste(
+                window.key.clone(),
+                b"hello".to_vec(),
+                Some(typed),
+                Some(answered_at),
+            )
+            .and_then(wait_for_input_blocking)
+    };
+    let pending = paste_over(&window).expect_err("X is pending: the answer is stale");
+    assert_eq!(pending.paste_answer()["admitted"], false, "{pending}");
+    release.send(()).unwrap();
+    window.until(|snapshot| is_current(snapshot) && snapshot["bottom"].to_string().contains('X'));
+    let drawn = paste_over(&window).expect_err("X is drawn: the answer is still stale");
+    assert_eq!(drawn.paste_answer()["admitted"], false, "{drawn}");
     wait_for_input_blocking(
         window
             .inputs
@@ -345,6 +435,11 @@ fn the_cap_does_not_send_the_enter_over_pending_output() {
     )
     .unwrap();
     window.wait_for(&window.directory.join("bytes"));
+    assert_eq!(
+        window.bytes().unwrap(),
+        b"X\r",
+        "no paste went over the key"
+    );
     window.end();
 }
 
@@ -432,7 +527,7 @@ fn a_panic_in_the_feed_ends_the_pane_and_admits_no_input() {
     // written, the pane's own record gone with its generation.
     let refused = window
         .inputs
-        .paste(window.key.clone(), b"again".to_vec(), Some(1))
+        .paste(window.key.clone(), b"again".to_vec(), Some(1), None)
         .and_then(wait_for_input_blocking);
     let error = refused.expect_err("no input is admitted against the broken screen");
     assert_eq!(error.paste_answer()["admitted"], false, "{error}");

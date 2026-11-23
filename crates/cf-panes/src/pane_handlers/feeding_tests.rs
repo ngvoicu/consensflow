@@ -10,10 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::snapshot_of;
-use crate::arbiter::{
-    ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, OutputCount, Waited,
-};
-use crate::input_queue::InputError;
+use crate::arbiter::{ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, OutputCount};
 use crate::pty::{PaneError, PaneInputWriter, PaneKey};
 use crate::screen::{FeedStage, PaneScreen};
 
@@ -116,10 +113,10 @@ fn a_window_is_not_quiet_while_bytes_it_printed_are_not_in_its_screen() {
 }
 
 /// The Enter's wait, with the pty's bytes pending, is not over at its cap: it waits a grace
-/// more, and then ends as one that did not send the Enter. With the bytes in the screen it
-/// goes as it did.
+/// more, and then the Enter goes, once, as main's did: no uncertain answer, so no recovery
+/// that sends another Enter or pastes the message again (T-2139 finding 8).
 #[test]
-fn the_enter_wait_holds_at_its_cap_while_bytes_are_pending_and_ends_without_sending() {
+fn the_enter_wait_holds_at_its_cap_while_bytes_are_pending_and_then_sends_one_enter() {
     let clock = Manual::new();
     let wait = EnterTiming {
         least_ms: 0,
@@ -134,38 +131,20 @@ fn the_enter_wait_holds_at_its_cap_while_bytes_are_pending_and_ends_without_send
     printed.counts().took(8);
     let writer = Recording::default();
     let before = clock.now();
-    let answer = arbiter.write_paste_via(&writer, &key, b"body", None);
-    assert!(
-        matches!(answer, Err(ArbiterError::StillPrinting)),
-        "{answer:?}"
-    );
+    arbiter
+        .write_paste_via(&writer, &key, b"body", None)
+        .expect("the paste is answered as admitted, not as uncertain");
     assert!(
         clock.now() - before >= Duration::from_millis(5_000),
         "the cap and its grace were waited"
     );
     let written = writer.0.lock().unwrap().clone();
-    assert_eq!(written.len(), 1, "the paste only, no Enter: {written:?}");
+    assert_eq!(written.len(), 2, "the paste and one Enter: {written:?}");
     assert!(written[0].starts_with(b"\x1b[200~"));
+    assert_eq!(written[1], b"\r");
     let snapshot = arbiter.snapshot(&key).unwrap();
-    assert!(
-        !snapshot.input_failed,
-        "the pane's input is not failed by a window that prints"
-    );
-    assert!(
-        snapshot.paste_quiet_ms.is_some(),
-        "the paste is in the window"
-    );
-    // As any paste that may have been written is answered: uncertain, and not a refusal.
-    let answer = InputError::from(ArbiterError::StillPrinting).paste_answer();
-    assert_eq!(answer["error"], "uncertain");
-    assert!(answer["admitted"].is_null());
-    // The same wait with the screen caught up goes at the cap, as before.
-    printed.counts().drew(4);
-    let writer = Recording::default();
-    arbiter
-        .write_paste_via(&writer, &key, b"again", None)
-        .expect("goes");
-    assert_eq!(writer.0.lock().unwrap().last().unwrap(), b"\r");
+    assert!(!snapshot.input_failed);
+    assert!(snapshot.paste_quiet_ms.is_some());
 }
 
 /// The wait itself, on the clock: a window whose bytes arrive in the screen goes on to its
@@ -187,8 +166,7 @@ fn the_wait_ends_when_the_screen_has_caught_up_and_is_quiet() {
     screen.feed_noting(b"e", &printed);
     let paste_at = clock.now();
     clock.advance(Duration::from_millis(1));
-    let waited = wait.wait_released_on(&*clock, &printed, paste_at);
-    assert_eq!(waited, Waited::Released);
+    wait.wait_released_on(&*clock, &printed, paste_at);
     assert!(clock.now() - paste_at >= Duration::from_millis(120));
 }
 
@@ -335,4 +313,57 @@ fn a_pane_whose_feed_broke_admits_no_paste_and_no_claim() {
         arbiter.claim(&key),
         Err(ArbiterError::InputFailed)
     ));
+}
+
+/// N17 (T-2139): a snapshot samples the two counts once, drawn first and read after it. A
+/// stream that goes 10/9, then 11/9, then 11/10 while it is sampled is pending throughout: the
+/// pair is read 11 and 9 (or more of read), never 10 and 10.
+#[test]
+fn a_snapshot_samples_the_counts_drawn_first_and_once() {
+    let clock = Manual::new();
+    let arbiter = InputArbiter::with_clock(EnterTiming::fixed(0), clock.clone());
+    let key = PaneKey::new("sampled", 1);
+    let printed = arbiter.register(&key).expect("register");
+    printed.counts().took(10);
+    printed.counts().drew(9);
+    let counts = Arc::clone(printed.counts());
+    crate::arbiter::BETWEEN_LOADS.with(|slot| {
+        slot.set(Some(Box::new(move || {
+            counts.took(1);
+            counts.drew(1);
+        })))
+    });
+    let snapshot = arbiter.snapshot(&key).unwrap();
+    assert!(
+        snapshot.output_read > snapshot.output_drawn,
+        "pending throughout, read as {}/{}",
+        snapshot.output_read,
+        snapshot.output_drawn
+    );
+    assert_eq!(snapshot.output_quiet_ms, Some(0));
+}
+
+/// The same, the stream moving after the first sampling: the snapshot's pair is the one
+/// sampling's (10 read and 9 drawn), not the read of one and the drawn of another (10/10).
+#[test]
+fn a_snapshot_takes_both_counts_from_one_sampling() {
+    let clock = Manual::new();
+    let arbiter = InputArbiter::with_clock(EnterTiming::fixed(0), clock.clone());
+    let key = PaneKey::new("sampled-once", 1);
+    let printed = arbiter.register(&key).expect("register");
+    printed.counts().took(10);
+    printed.counts().drew(9);
+    let counts = Arc::clone(printed.counts());
+    crate::arbiter::AFTER_LOADS.with(|slot| {
+        slot.set(Some(Box::new(move || {
+            counts.took(1);
+            counts.drew(1);
+        })))
+    });
+    let snapshot = arbiter.snapshot(&key).unwrap();
+    assert_eq!(
+        (snapshot.output_read, snapshot.output_drawn),
+        (10, 9),
+        "the pair of one sampling"
+    );
 }

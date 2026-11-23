@@ -65,6 +65,20 @@ pub struct OutputCount {
     broken: AtomicBool,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// What a test does between the two loads of [`OutputCount::both`], once.
+    pub(crate) static BETWEEN_LOADS: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a test does once the pair of [`OutputCount::both`] is formed, once.
+    pub(crate) static AFTER_LOADS: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::Cell::new(None) };
+}
+
 impl OutputCount {
     /// `bytes` came off the pty.
     pub(crate) fn took(&self, bytes: usize) {
@@ -81,7 +95,16 @@ impl OutputCount {
     /// the reverse.
     pub(crate) fn both(&self) -> (u64, u64) {
         let drawn = self.drawn.load(Ordering::Acquire);
-        (self.read.load(Ordering::Acquire), drawn)
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (self.read.load(Ordering::Acquire), drawn);
+        #[cfg(test)]
+        if let Some(after) = AFTER_LOADS.with(|slot| slot.take()) {
+            after();
+        }
+        pair
     }
 
     /// Whether the screen lacks bytes the pty has given.
@@ -184,7 +207,7 @@ pub struct EnterTiming {
 impl EnterTiming {
     /// [`EnterTiming::wait`] on the wall clock, for a test of another module of this crate.
     #[cfg(test)]
-    pub(crate) fn wait_released(&self, output: &OutputClock, pasted: Instant) -> Waited {
+    pub(crate) fn wait_released(&self, output: &OutputClock, pasted: Instant) {
         self.wait(&WallClock, output, pasted)
     }
 
@@ -195,7 +218,7 @@ impl EnterTiming {
         clock: &dyn Clock,
         output: &OutputClock,
         pasted: Instant,
-    ) -> Waited {
+    ) {
         self.wait(clock, output, pasted)
     }
 
@@ -245,20 +268,17 @@ impl EnterTiming {
     }
 
     /// Waits until the Enter of a paste written at `pasted` may go: at once, where the
-    /// window has taken it in already. The Enter never goes while output the pty gave is not
-    /// yet in the screen ([`OutputCount`]), the cap included: a window that prints without
-    /// pause is waited on for [`PENDING_GRACE_MS`] more, and then the Enter stays unsent
-    /// ([`Waited::StillPrinting`]).
-    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) -> Waited {
+    /// window has taken it in already. The Enter does not go while output the pty gave is not
+    /// yet in the screen ([`OutputCount`]), up to the cap and [`PENDING_GRACE_MS`] more: a
+    /// window that prints without pause for longer than that gets its Enter at the end of it,
+    /// as it did before the counts (the cap is a limit, `.specs`).
+    pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {
             // One look at the time for both numbers: the paste's age and the quiet are of the
             // same moment, however long the thread was kept from running between them.
             let now = clock.now();
             let since = millis_since(now, pasted);
-            if output.counts().pending() {
-                if since >= self.most_ms.saturating_add(PENDING_GRACE_MS) {
-                    return Waited::StillPrinting;
-                }
+            if output.counts().pending() && since < self.pending_cap_ms() {
                 clock.rest(Duration::from_millis(5));
                 continue;
             }
@@ -270,23 +290,18 @@ impl EnterTiming {
             if since >= self.most_ms
                 || (since >= self.least_ms && echoed.is_some_and(|quiet| quiet >= self.quiet_ms))
             {
-                return Waited::Released;
+                return;
             }
             clock.rest(Duration::from_millis(5));
         }
+    }
+
+    /// How long after the paste the Enter waits for output not yet drawn, at the most.
+    pub(super) fn pending_cap_ms(&self) -> u64 {
+        self.most_ms.saturating_add(PENDING_GRACE_MS)
     }
 }
 
 /// How long past its cap a paste's Enter waits for a window that still has output not drawn:
 /// less than the five seconds an adapter allows a paste beyond its harness's cap.
 pub(super) const PENDING_GRACE_MS: u64 = 3_000;
-
-/// How a paste's Enter wait ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Waited {
-    /// The Enter may go.
-    Released,
-    /// The cap and its grace passed with the window's output still being taken in (or its feed
-    /// broken): the Enter does not go.
-    StillPrinting,
-}

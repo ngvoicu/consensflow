@@ -241,9 +241,11 @@ impl PaneTable {
         #[cfg(not(unix))]
         let process_group_id = None;
         let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let counts = Arc::new(OutputCount::default());
         let reader = Box::new(ActivityReader {
             inner: reader,
             last_activity: Arc::clone(&last_activity),
+            counts: Arc::clone(&counts),
         });
 
         panes.insert(
@@ -264,6 +266,7 @@ impl PaneTable {
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
                 last_activity,
+                counts,
                 screen: Arc::new(PaneScreen::new(size.rows, size.cols)),
                 ended: Arc::new(EndedSlot::default()),
             },
@@ -325,7 +328,7 @@ impl PaneTable {
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
         #[cfg(target_os = "macos")]
         let tree;
-        let (pid, screen, ended, terminal) = {
+        let (pid, screen, ended, terminal, counts) = {
             let mut panes = self.lock_panes()?;
             let pane = panes
                 .get_mut(&key)
@@ -340,6 +343,7 @@ impl PaneTable {
                 Arc::clone(&pane.screen),
                 Arc::clone(&pane.ended),
                 terminal_of(pane),
+                Arc::clone(&pane.counts),
             )
         };
         // A window that fails here lets go of its output before it is ended: on Windows a
@@ -368,7 +372,6 @@ impl PaneTable {
                 .is_none_or(|table| table.program_gone(&watched, &slot, at_an_end))
         });
         let read = output_end::Output::new(reader, terminal, gone);
-        let counts = Arc::new(OutputCount::default());
         let reader_counts = Arc::clone(&counts);
         std::thread::spawn(move || stream_output(output_key, read, flow, sender, reader_counts));
         Ok(StreamedPane {

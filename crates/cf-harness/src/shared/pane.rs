@@ -7,6 +7,7 @@ use cf_proto::panes::BOTTOM_LINES;
 
 use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
+use crate::shared::input_box::ReadEmpty;
 
 /// The pane's id and generation, as a request names it.
 fn named(pane: &Pane) -> Value {
@@ -28,15 +29,18 @@ pub(crate) async fn write_paste(
     host: &dyn PaneHost,
     pane: &Pane,
     body: &str,
-    read_empty: Option<u64>,
+    read_empty: Option<ReadEmpty>,
 ) -> Sent {
     if !host.admits() {
         return not_admitted();
     }
     let mut request = named(pane);
     request["body"] = json!(body);
-    if let Some(typed) = read_empty {
-        request["readEmpty"] = json!(typed);
+    if let Some(answer) = read_empty {
+        request["readEmpty"] = json!(answer.typed);
+        if let Some(read) = answer.read {
+            request["readAt"] = json!(read);
+        }
     }
     match host.request("pane.write_paste", request).await {
         Ok(answer) => Sent::from_reply(&answer),

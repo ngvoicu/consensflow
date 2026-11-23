@@ -104,7 +104,7 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
 /// goes in over the human's keys because the box read empty (T-288) as any other.
 #[test]
 fn a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane() {
-    for read_empty in [None, Some(9)] {
+    for read_empty in [None, Some(ReadEmpty::at_keys(9))] {
         let host = ScriptedHost::default();
         host.refuse_hand_overs();
         let sent = finished(Box::pin(write_paste(&host, &pane(), "hello", read_empty)));
@@ -154,4 +154,28 @@ fn a_request_the_host_never_answered_is_a_transport_answer_in_the_hosts_word_els
     assert_eq!(error(None), transport("bridge ended"));
     // An empty word is a word, as `??` takes it.
     assert_eq!(error(Some("")), transport(""));
+}
+
+/// N17 (T-2139 finding 3): a paste told the box read empty says the output the host had read
+/// when it did, for the host to refuse it once more has been read since.
+#[test]
+fn a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at() {
+    let host = AnsweringHost::new(|_| json!({"ok": true, "admitted": true}));
+    let answer = ReadEmpty {
+        typed: 3,
+        read: Some(260),
+    };
+    finished(Box::pin(write_paste(&host, &pane(), "hello", Some(answer))));
+    let asked = host.asked.borrow();
+    assert_eq!(asked[0].1["readEmpty"], 3);
+    assert_eq!(asked[0].1["readAt"], 260);
+    drop(asked);
+    let host = AnsweringHost::new(|_| json!({"ok": true, "admitted": true}));
+    finished(Box::pin(write_paste(
+        &host,
+        &pane(),
+        "hello",
+        Some(ReadEmpty::at_keys(3)),
+    )));
+    assert!(host.asked.borrow()[0].1.get("readAt").is_none());
 }

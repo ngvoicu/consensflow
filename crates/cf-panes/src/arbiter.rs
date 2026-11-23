@@ -24,9 +24,10 @@ use state::{
     PaneStateMap, Written, HUMAN_WRITES,
 };
 pub(crate) use timing::Clock;
-pub(crate) use timing::Waited;
-use timing::WallClock;
+use timing::{millis_since, WallClock};
 pub use timing::{EnterTiming, OutputClock, OutputCount};
+#[cfg(test)]
+pub(crate) use timing::{AFTER_LOADS, BETWEEN_LOADS};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SanitizeError {
@@ -60,9 +61,6 @@ pub enum ArbiterError {
     Stale,
     Busy,
     InputFailed,
-    /// The window's output was still being taken in when the paste's Enter was due, past the
-    /// cap and its grace: the paste is in the window, its Enter was not sent.
-    StillPrinting,
     /// The human has typed in the window and not sent it yet.
     Unsent,
     InvalidBody(SanitizeError),
@@ -78,10 +76,6 @@ impl fmt::Display for ArbiterError {
             Self::Stale => write!(formatter, "stale pane generation"),
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
-            Self::StillPrinting => write!(
-                formatter,
-                "the window kept printing: the paste is in it and its Enter was not sent"
-            ),
             Self::Unsent => write!(formatter, "the human has unsent text in the window"),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
@@ -451,15 +445,17 @@ impl InputArbiter {
     /// A paste and its Enter, held while the human's keys left text unsent,
     /// unless `read_empty`: the window's adapter read its input box empty when
     /// the pane had taken that many writes of the human's keys, and none came
-    /// since.
+    /// since; and, where it says `read_at`, when the pane had read that many bytes of output,
+    /// and no more came since (the box it read may lack what the window printed after it).
     pub(crate) fn write_paste(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
+        read_at: Option<u64>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_via(table, pane, body, read_empty)
+        self.write_paste_read_at_via(table, pane, body, read_empty, read_at)
     }
 
     /// Admit a native-channel send (a harness's own server, inbox or socket)
@@ -474,12 +470,26 @@ impl InputArbiter {
 
     /// A paste and its Enter. While it goes in, the pane's snapshot says so,
     /// and a newer generation of the pane cannot take its place.
+    #[cfg(test)]
     pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
+    ) -> Result<(), ArbiterError> {
+        self.write_paste_read_at_via(writer, pane, body, read_empty, None)
+    }
+
+    /// [`InputArbiter::write_paste_via`] for an answer that says the bytes of output it was
+    /// read at.
+    pub(crate) fn write_paste_read_at_via<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        body: &[u8],
+        read_empty: Option<u64>,
+        read_at: Option<u64>,
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
@@ -488,6 +498,11 @@ impl InputArbiter {
             validate_admission(&state, pane)?;
             if state.unsent > 0 {
                 if read_empty != Some(state.typed) {
+                    return Err(ArbiterError::Unsent);
+                }
+                // An answer read at fewer bytes than the window has printed since is of a box
+                // that may lack them (the echo of the key, in a later read): read it again.
+                if read_at.is_some_and(|at| state.output.counts().both().0 > at) {
                     return Err(ArbiterError::Unsent);
                 }
                 state.unsent = 0;
@@ -500,15 +515,29 @@ impl InputArbiter {
                 self.enter.for_delivery(state.silent_paste, &body),
             )
         };
-        // The Enter's wait begins once the paste itself is written.
+        // The Enter's wait begins once the paste itself is written. It goes once the window's
+        // output is drawn, and is looked at again with the pane's writer held, where it is
+        // written: a read that came while it waited for the writer holds it back too, up to the
+        // same cap.
         let mut pasted = false;
-        let mut still_printing = false;
-        let written = write_paste_if_via(writer, pane, &body, || {
-            pasted = true;
-            let waited = enter.wait(self.clock.as_ref(), &output, self.clock.now());
-            still_printing = waited == Waited::StillPrinting;
-            !still_printing
-        });
+        let started = std::cell::Cell::new(None);
+        let written = write_paste_if_via(
+            writer,
+            pane,
+            &body,
+            || {
+                pasted = true;
+                let at = self.clock.now();
+                started.set(Some(at));
+                enter.wait(self.clock.as_ref(), &output, at);
+            },
+            &mut || {
+                let overdue = started
+                    .get()
+                    .is_none_or(|at| millis_since(self.clock.now(), at) >= enter.pending_cap_ms());
+                overdue || !output.counts().pending()
+            },
+        );
         // A paste is answered as it went: a lock poisoned meanwhile fails the
         // pane's next admission, never what this paste already wrote.
         if let Ok(mut state) = lock_state(&state) {
@@ -518,9 +547,6 @@ impl InputArbiter {
             }
         }
         written.map_err(|error| fail_input(&state, pane, error, pasted))?;
-        if still_printing {
-            return Err(ArbiterError::StillPrinting);
-        }
         Ok(())
     }
 

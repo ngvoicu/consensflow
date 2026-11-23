@@ -101,6 +101,10 @@ struct PasteRequest {
     /// window's adapter read its input box empty on the screen.
     #[serde(default, rename = "readEmpty")]
     read_empty: Option<u64>,
+    /// The bytes of the window's output the pane had read (`pane.snapshot`'s `outputRead`) when
+    /// it did: a paste goes in over the count only while no more has been read since.
+    #[serde(default, rename = "readAt")]
+    read_at: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -253,8 +257,8 @@ fn register(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
-            let pending = paste_queue.paste(key, body.into_bytes(), read_empty)?;
+        let pasted = paste_request(body).and_then(|(key, body, read_empty, read_at)| {
+            let pending = paste_queue.paste(key, body.into_bytes(), read_empty, read_at)?;
             wait_for_input_blocking(pending)
         });
         Ok(match pasted {
@@ -747,11 +751,11 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
+fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>, Option<u64>), InputError> {
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body, request.read_empty))
+    Ok((key, request.body, request.read_empty, request.read_at))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the

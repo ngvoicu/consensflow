@@ -1952,3 +1952,43 @@ mod windows {
         table.kill(&key).expect("kill the pane");
     }
 }
+
+/// N17 (T-2139 finding 1): a read is counted the moment the pty returns it, before the lock of
+/// the pane's activity time: a thread kept from that lock has told the window's readers of its
+/// bytes (the child's `Z` was read and the count still 258/258 while the activity mutex was
+/// held, and the paste's Enter went).
+#[cfg(unix)]
+#[test]
+fn a_read_is_counted_while_the_activity_lock_is_held() {
+    let _pty_guard = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let streamed = table
+        .open_streamed(
+            Path::new("/tmp"),
+            &shell("/bin/sleep 1.5; printf x; /bin/sleep 1000"),
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            terminal_size(24, 80),
+            1024,
+        )
+        .expect("open delayed-output pane");
+    let activity = Arc::clone(
+        &table
+            .lock_panes()
+            .unwrap()
+            .get(&streamed.key)
+            .expect("the pane")
+            .last_activity,
+    );
+    let held = activity.lock().unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    while streamed.counts.both().0 == 0 {
+        assert!(
+            Instant::now() < until,
+            "the byte the pty gave was not counted while the activity lock was held"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(streamed.counts.both(), (1, 0), "read, and not yet drawn");
+    drop(held);
+    table.kill(&streamed.key).expect("kill the pane");
+}

@@ -129,12 +129,17 @@ impl PaneTable {
 pub(super) struct ActivityReader {
     pub(super) inner: Box<dyn Read + Send>,
     pub(super) last_activity: Arc<Mutex<Instant>>,
+    /// The window's byte counts: a read is counted here, the moment it returns and before the
+    /// lock of the activity time, so that the two move together and a thread that waits for the
+    /// lock has already told the paste's Enter and the input box's readers of its bytes.
+    pub(super) counts: Arc<OutputCount>,
 }
 
 impl Read for ActivityReader {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let byte_count = self.inner.read(buffer)?;
         if byte_count > 0 {
+            self.counts.took(byte_count);
             *self
                 .last_activity
                 .lock()
@@ -163,9 +168,8 @@ pub(super) fn stream_output(
         else {
             break;
         };
-        // Counted as read the moment it is in hand: before the flow, the queue and the lock of
-        // the screen, so that the paste's Enter and the input box's readers know of it.
-        counts.took(byte_count);
+        // The bytes were counted as read as the pty returned them ([`ActivityReader`]): before
+        // the activity lock, the flow, the queue and the lock of the screen.
         let Some(seq) = flow.record(byte_count) else {
             counts.give_up();
             break;

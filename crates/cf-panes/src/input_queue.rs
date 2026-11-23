@@ -47,6 +47,7 @@ pub enum InputWork {
     Paste {
         body: Vec<u8>,
         read_empty: Option<u64>,
+        read_at: Option<u64>,
     },
     Claim,
 }
@@ -136,9 +137,6 @@ impl From<ArbiterError> for InputError {
     fn from(error: ArbiterError) -> Self {
         let code = match &error {
             ArbiterError::Pane(_) => return Self::FailedWrite(error.to_string()),
-            // The paste is in the window and its Enter was not sent: uncertain, as any paste
-            // that may have been written is, so that the harness's own record decides.
-            ArbiterError::StillPrinting => return Self::Uncertain(error.to_string()),
             ArbiterError::Stale => "stale-pane",
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => INPUT_FAILED,
@@ -503,8 +501,16 @@ impl InputQueue {
         key: PaneKey,
         body: Vec<u8>,
         read_empty: Option<u64>,
+        read_at: Option<u64>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
-        self.submit(key, InputWork::Paste { body, read_empty })
+        self.submit(
+            key,
+            InputWork::Paste {
+                body,
+                read_empty,
+                read_at,
+            },
+        )
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
@@ -667,9 +673,11 @@ fn input_worker(
             InputWork::Write(bytes) | InputWork::Reply(bytes) => {
                 arbiter.write(&panes, &key, &bytes)
             }
-            InputWork::Paste { body, read_empty } => {
-                arbiter.write_paste(&panes, &key, &body, read_empty)
-            }
+            InputWork::Paste {
+                body,
+                read_empty,
+                read_at,
+            } => arbiter.write_paste(&panes, &key, &body, read_empty, read_at),
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);
