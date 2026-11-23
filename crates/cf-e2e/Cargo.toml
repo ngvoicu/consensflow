@@ -101,6 +101,8 @@ thiserror.workspace = true
 toml.workspace = true
 # The daemon's loopback HTTP.
 ureq.workspace = true
+# The terminal door's pty (`src/door/terminal.rs`): the one place the kit makes one.
+portable-pty.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
 # The conversation id a live test opens a Claude Code or Pi window on.
@@ -125,7 +127,6 @@ url.workspace = true
 # The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on
 # Windows), plainly and as a member, with no daemon (`tests/live_parity/claude.rs`).
 cf-panes = { workspace = true, features = ["test-support"] }
-portable-pty.workspace = true
 # The variables each harness marks its own session with, as the product lists them, which
 # no window of a rig started inside such a session may be given (T-971): a case enumerates
 # the product's own list, so a harness added to it is held at once.

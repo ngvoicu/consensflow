@@ -176,7 +176,7 @@ impl Source {
 /// account: with `-a`, because the Keychain has another item of the service (the account
 /// `unknown`, expired and with no refresh token) and a lookup that names no account
 /// returns that one.
-pub(super) fn keychain_args(user: &str) -> Vec<String> {
+pub(crate) fn keychain_args(user: &str) -> Vec<String> {
     ["find-generic-password", "-s", SERVICE, "-a", user, "-w"]
         .map(str::to_owned)
         .into()

@@ -37,7 +37,7 @@ pub fn start(
     let _ = machine;
     if !matches!(harness, Harness::Claude | Harness::Pi) {
         return Err(Error::Daemon(format!(
-            "{harness} is not renewed by the kit: only Claude Code's and Pi's logins are"
+            "{harness:?} is not renewed by the kit: only Claude Code's and Pi's logins are"
         )));
     }
     if !crate::door::is_made_or_below(cwd) {

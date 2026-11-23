@@ -25,7 +25,7 @@ pub struct Terminal {
     screen: Arc<Mutex<Vec<u8>>>,
 }
 
-fn failed(action: &'static str) -> impl Fn(portable_pty::ExtError) -> Error {
+fn failed<E: std::fmt::Display>(action: &'static str) -> impl Fn(E) -> Error {
     move |why| Error::Daemon(format!("could not {action}: {why}"))
 }
 
