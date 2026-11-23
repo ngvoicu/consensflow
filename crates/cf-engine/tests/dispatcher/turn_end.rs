@@ -564,7 +564,7 @@ fn no_other_task_goes_into_a_window_an_earlier_task_left_work_in_whatever_releas
     // Both reviews of round 7: a cancel let T-2 into T-1's window, and the end of T-1's job
     // woke a turn there whose words were taken for T-2's result.
     for how in NAMED {
-        let context = Context::new();
+        let context = Context::tries_off();
         let tiers = zeus_at_work(&context);
         let old = context.host.last("zeus").unwrap().pane;
         docs_for_zeus(&context, &tiers);
@@ -619,7 +619,7 @@ fn follow_up(context: &Context, tiers: &Tiers<'_>) {
 fn a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_it_is_no_ones_result(
 ) {
     for how in NAMED {
-        let context = Context::new();
+        let context = Context::tries_off();
         let (tiers, session) = session_kept_open(&context);
         let old = context.host.last(&session).unwrap().pane;
         release(&context, &tiers, how);

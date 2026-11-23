@@ -1001,7 +1001,7 @@ fn a_count_at_its_limit_in_a_turn_at_work_is_main_s_hold_at_once() {
 
 #[test]
 fn with_the_tries_off_a_failed_end_fails_the_task_at_once_as_before() {
-    let c = Context::made(Made::default());
+    let c = Context::tries_off();
     let t = Tiers::new(&c, &["zeus"]);
     t.open();
     passes(&c, 3);

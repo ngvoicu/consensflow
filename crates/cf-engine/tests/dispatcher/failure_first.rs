@@ -54,7 +54,7 @@ fn about_the_two(tiers: &Tiers<'_>) -> Vec<String> {
 
 #[test]
 fn a_turn_that_failed_is_told_to_the_chief_before_the_task_that_waits_for_it() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     waits_for_t1(&tiers);
 
@@ -265,7 +265,7 @@ fn a_task_the_human_asked_for_that_waits_for_a_failed_launch_is_told_to_the_huma
 #[test]
 fn a_task_the_human_asked_for_that_waits_for_a_failed_turn_is_told_to_the_human_after_the_chiefs_note(
 ) {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     waits_for_t1(&tiers);
     human_waits_for_t1(&tiers);

@@ -36,7 +36,7 @@ fn told(tiers: &Tiers<'_>) -> Vec<String> {
 
 #[test]
 fn a_failed_turn_says_what_its_harness_said_of_it() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     fails(
         &context,
@@ -251,7 +251,7 @@ fn a_non_mac_failure_does_not_name_mac_local_network_settings() {
 fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_before_its_words() {
     // T-823: Codex's safety filter refused the turn (kluris T-158 and T-163), and the board
     // said only that the harness reported a failure.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context.adapter.with("zeus", |agent| {
         agent.failure_kind = Some(
@@ -275,7 +275,7 @@ fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_befor
 
 #[test]
 fn a_named_failure_with_no_harness_words_does_not_quote_the_screen() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context
         .host
@@ -295,7 +295,7 @@ fn a_named_failure_with_no_harness_words_does_not_quote_the_screen() {
 
 #[test]
 fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context.host.set_snapshot(json!({
         "tail": ["Working on the parser", "", "Error: model 'gpt-0-nonesuch' not found"]
@@ -315,7 +315,7 @@ fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
 #[test]
 fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
     // An error's headline is its first line: the first six lines are kept.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let frames: Vec<String> = (1..=9)
         .map(|n| format!("    at frame{n} (agent.js:{n})"))
@@ -333,7 +333,7 @@ fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
     );
 
     // A first line too long for the quote is cut, and nothing after it is kept.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     // Words: forty letters in a row are a token's, and are hidden.
     let long = format!("Internal error: {}", "ab ".repeat(200));
@@ -350,7 +350,7 @@ fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
 
 #[test]
 fn a_secret_value_in_the_harness_words_is_masked_and_the_rest_quoted() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     fails(
         &context,
@@ -369,7 +369,7 @@ fn a_secret_value_in_the_harness_words_is_masked_and_the_rest_quoted() {
 #[test]
 fn a_harness_without_a_login_says_so_in_the_note() {
     // Pi's words when it has no key: a key named, none held. The fix is the human's /login.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let words = "No API key found for the selected model. Use /login to log into a provider.";
     fails(&context, Some(words));
@@ -385,7 +385,7 @@ fn a_harness_without_a_login_says_so_in_the_note() {
 
 #[test]
 fn an_email_address_in_the_harness_words_is_masked() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     fails(
         &context,
@@ -403,7 +403,7 @@ fn an_email_address_in_the_harness_words_is_masked() {
 
 #[test]
 fn a_screen_the_host_would_not_show_is_said_to_be_unread() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context.host.set_snapshot(json!({ "ok": false }));
     fails(&context, None);
@@ -420,7 +420,7 @@ fn a_screen_the_host_would_not_show_is_said_to_be_unread() {
 #[test]
 fn the_screens_chrome_is_no_line_of_its_quote() {
     // A composer's box and a footer's rule under the error: none has a letter or digit.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context.host.set_snapshot(json!({
         "tail": [
@@ -577,7 +577,7 @@ fn a_chiefs_failed_turn_tells_the_human_once() {
 
 #[test]
 fn harness_words_with_nothing_of_a_word_leave_the_reason_to_the_screen() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context
         .host
@@ -597,7 +597,7 @@ fn harness_words_with_nothing_of_a_word_leave_the_reason_to_the_screen() {
 fn a_tasks_failure_is_its_failed_turn_told_in_a_window_the_human_keeps_open() {
     // The window stays after its task failed: its next looks find the failure told
     // by the task's own note, and say nothing more.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context
         .open_window(tiers.project.id, &tiers.assignee(1))
@@ -618,7 +618,7 @@ fn a_tasks_failure_is_its_failed_turn_told_in_a_window_the_human_keeps_open() {
 
 #[test]
 fn the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let brief = context.task(tiers.project.id, 1).messages[0].clone();
     let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
@@ -640,7 +640,7 @@ fn the_lines_consensflow_typed_into_the_window_are_no_reason_and_are_not_quoted(
 fn an_error_line_a_waiting_message_repeats_is_still_the_windows() {
     // A note to zeus already quotes the line its window is about to show (the
     // outage's own shape: the chief told the team what another window said).
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let error = "Error: model 'gpt-0-nonesuch' not found";
     context.note_from_consensflow(
@@ -666,7 +666,7 @@ fn an_error_line_a_waiting_message_repeats_is_still_the_windows() {
 
 #[test]
 fn a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let brief = context.task(tiers.project.id, 1).messages[0].clone();
     let header = format!("[ConsensFlow m-{} · T-1 · task from @chief]", brief.id);
@@ -688,7 +688,7 @@ fn a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own() {
 fn the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is_the_windows() {
     // T-1 held and resumed: its words go in with what zeus's window kept for it,
     // each under its "(kept for you: …)" label, and the turn after them fails.
-    let context = Context::new();
+    let context = Context::tries_off();
     let (project, _, _, _) = crate::carriers::kept(&context);
     context.hold_task(project, 1);
     context.pass().unwrap();
@@ -793,7 +793,7 @@ fn the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way() {
 fn a_long_brief_whose_header_scrolled_off_is_still_no_reason() {
     // A brief of fifteen lines: the look's twelve lines hold only its last ten, under
     // them the error.
-    let context = Context::new();
+    let context = Context::tries_off();
     let project = context.with_staff(&["zeus"]);
     let brief: Vec<String> = (1..=15)
         .map(|n| format!("Step {n}: write the part of the parser that reads clause {n}."))
@@ -836,7 +836,7 @@ fn held_notes(tiers: &Tiers<'_>) -> usize {
 
 #[test]
 fn a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_holds_nothing() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context
         .adapter
@@ -861,7 +861,7 @@ fn a_failed_turn_that_left_a_job_running_fails_its_task_with_its_reason_and_hold
 
 #[test]
 fn a_held_tasks_turn_its_job_woke_that_fails_fails_the_task_with_its_reason_once() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context
         .adapter
@@ -941,7 +941,7 @@ fn a_held_tasks_woken_turn_that_fails_holds_it_no_more_in_the_pass_that_fails_it
     // Calliope's P3-3 of T-532: the failed path left the hold in the record until the
     // next pass reset it, so `held_for` told a failed task held for its job for a pass,
     // in a window that stays after its task: one the human keeps open.
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     let session = tiers.assignee(1);
     context.open_window(tiers.project.id, &session).unwrap();

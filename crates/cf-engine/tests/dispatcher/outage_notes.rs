@@ -124,7 +124,7 @@ fn reason_of(tiers: &Tiers<'_>, id: i64) -> Option<String> {
 
 #[test]
 fn six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     // The field's own spread: 25 minutes in all, the longest wait 9 minutes.
     let gaps = [0, 3, 3, 8, 3, 9];
@@ -176,7 +176,7 @@ fn six_windows_that_fail_on_the_same_error_over_25_minutes_are_told_in_one_note(
 
 #[test]
 fn what_waits_for_those_tasks_is_a_list_in_the_note_and_no_note_of_its_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     let seventh = waits_for(&tiers, &[1]);
     let eighth = waits_for(&tiers, &[1, 4]);
@@ -198,7 +198,7 @@ fn what_waits_for_those_tasks_is_a_list_in_the_note_and_no_note_of_its_own() {
 
 #[test]
 fn the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     // The host ends what the window ran as it closes it.
     context.host.exits_leaving(&[LOCK]);
@@ -233,7 +233,7 @@ fn the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_
 
 #[test]
 fn a_single_failure_is_told_as_it_always_was_and_its_close_shown_in_a_note_of_its_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     context.host.exits_leaving(&[LOCK]);
     fails(&context, &tiers, 1, ENOTFOUND);
@@ -268,7 +268,7 @@ fn a_single_failure_is_told_as_it_always_was_and_its_close_shown_in_a_note_of_it
 
 #[test]
 fn failures_with_different_errors_are_two_notes() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     fails(&context, &tiers, 1, ENOTFOUND);
     context.advance(MINUTE);
@@ -282,7 +282,7 @@ fn failures_with_different_errors_are_two_notes() {
 
 #[test]
 fn a_failure_with_the_same_error_after_the_span_is_a_note_of_its_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     fails(&context, &tiers, 1, ENOTFOUND);
     context.advance(SAME_ERROR_WITHIN_MS + MINUTE);
@@ -294,7 +294,7 @@ fn a_failure_with_the_same_error_after_the_span_is_a_note_of_its_own() {
 
 #[test]
 fn a_failure_with_the_same_error_just_within_the_span_is_told_in_the_note_before_it() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     fails(&context, &tiers, 1, ENOTFOUND);
     context.advance(SAME_ERROR_WITHIN_MS - MINUTE);
@@ -315,7 +315,7 @@ fn a_failure_with_the_same_error_just_within_the_span_is_told_in_the_note_before
 
 #[test]
 fn a_failure_after_the_chief_was_given_the_note_is_a_note_of_its_own() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     context.adapter.with("chief", |agent| agent.at_work = false);
     fails(&context, &tiers, 1, ENOTFOUND);
@@ -344,7 +344,7 @@ fn a_failure_after_the_chief_was_given_the_note_is_a_note_of_its_own() {
 
 #[test]
 fn a_task_reopened_before_its_note_was_given_leaves_the_note_and_the_notes_of_what_waits() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     // T-7 is the chief's own; T-8 is the human's own and has no part in the chief's note.
     let seventh = waits_for(&tiers, &[1]);
@@ -408,7 +408,7 @@ fn a_task_reopened_before_its_note_was_given_leaves_the_note_and_the_notes_of_wh
 
 #[test]
 fn a_task_accepted_leaves_its_note_as_a_reopened_one_does() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     fails(&context, &tiers, 1, ENOTFOUND);
     context.advance(31 * MINUTE);
@@ -428,7 +428,7 @@ fn a_task_accepted_leaves_its_note_as_a_reopened_one_does() {
 
 #[test]
 fn a_waiter_called_off_leaves_the_notes_that_it_waits() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     let by_the_chief = waits_for(&tiers, &[1]);
     let by_the_human = tiers
@@ -490,7 +490,7 @@ fn a_waiter_called_off_leaves_the_notes_that_it_waits() {
 
 #[test]
 fn a_note_of_several_is_written_again_for_those_that_failed_still() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     for number in 1..=3 {
         context.advance(MINUTE);
@@ -547,7 +547,7 @@ fn a_note_of_several_is_written_again_for_those_that_failed_still() {
 
 #[test]
 fn a_note_already_given_is_left_when_its_task_is_reopened() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     context.adapter.with("chief", |agent| agent.at_work = false);
     fails(&context, &tiers, 1, ENOTFOUND);
@@ -651,7 +651,7 @@ fn parts_of(secret: &str) -> Vec<String> {
 
 #[test]
 fn a_failure_whose_screen_names_a_key_leaves_no_part_of_it_in_the_ledger() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     context.host.set_snapshot(json!({
         "tail": [
@@ -681,7 +681,7 @@ fn a_failure_whose_screen_names_a_key_leaves_no_part_of_it_in_the_ledger() {
 #[test]
 fn a_failure_whose_harness_quotes_a_key_leaves_no_part_of_it_in_the_ledger() {
     // A provider's error that says which key it refused ("Incorrect API key provided: sk-…").
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     fails(
         &context,
@@ -698,7 +698,7 @@ fn a_failure_whose_harness_quotes_a_key_leaves_no_part_of_it_in_the_ledger() {
 
 #[test]
 fn failures_whose_screens_say_the_same_are_still_one_note_and_other_screens_stand_apart() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = six_at_work(&context);
     let screen = |last: &str| json!({ "tail": ["Working on the parser", format!("export OPENAI_API_KEY={SECRET}"), last] });
     context
