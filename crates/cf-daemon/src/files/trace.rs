@@ -115,6 +115,22 @@ impl Shared {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The writer is gone for good: what waits is answered with an error, and what is
+    /// sent later is refused.
+    fn fail(&self, why: &str) {
+        let mut state = self.lock();
+        state.failed = Some(why.to_owned());
+        state.busy = false;
+        for job in std::mem::take(&mut state.jobs) {
+            if let Job::Forget { answer, .. } = job {
+                let _ = answer.send(Err(io::Error::other(why.to_owned())));
+            }
+        }
+        state.ordinary = 0;
+        drop(state);
+        self.done.notify_all();
+    }
+
     fn settled(&self, within: Duration) -> bool {
         let until = Instant::now() + within;
         let mut state = self.lock();
@@ -194,9 +210,17 @@ impl Trace {
         };
         // The thread is the trace's own: it ends once the trace is dropped and
         // what was sent is written.
+        let guard = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
             .name("trace".to_owned())
-            .spawn(move || writer.run());
+            .spawn(move || {
+                // A writer that panics is not started again: its trace is gone for the
+                // run, and every forgetting waiting, and every later one, is told so.
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| writer.run())).is_err()
+                {
+                    guard.fail("the thread that writes the trace panicked");
+                }
+            });
         if let Err(failed) = spawned {
             shared.lock().failed = Some(failed.to_string());
         }
@@ -536,20 +560,9 @@ impl Writer {
         // The names are clean: that they are on the disk is the folder's to say, even
         // where this forgetting found nothing to remove.
         let folder = self.file.parent().unwrap_or(Path::new(""));
-        keep(
-            match (self.durable.folder)(folder) {
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        && !self.file.exists()
-                        && !aside(&self.file).exists() =>
-                {
-                    // A home that is not there has nothing that could come back.
-                    Ok(())
-                }
-                other => other,
-            },
-            folder,
-        );
+        // A home that is not there, or cannot be opened, cannot be said to hold no line of the
+        // project: it may come back with them.
+        keep((self.durable.folder)(folder), folder);
         answer
     }
 }
@@ -577,10 +590,12 @@ fn forget_in(name: &Path, project: i64, durable: Durable) -> io::Result<()> {
     };
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let lines: Vec<&str> = text.split('\n').filter(|line| !line.is_empty()).collect();
+    // A line that does not parse (a record cut by a kill) could hold the project's data
+    // with its name cut off: it goes with the rest.
     let kept: Vec<&str> = lines
         .iter()
         .copied()
-        .filter(|line| !is_of(line, project))
+        .filter(|line| serde_json::from_str::<Value>(line).is_ok() && !is_of(line, project))
         .collect();
     if kept.len() == lines.len() {
         return Ok(());
@@ -599,7 +614,8 @@ fn forget_in(name: &Path, project: i64, durable: Durable) -> io::Result<()> {
 }
 
 /// Whether a line of the trace names `project` (`JSON.parse(line).project ===
-/// project`): a line that is no JSON, or no object, or names another, is not.
+/// project`): a line that is no JSON, or no object, or names another, is not (a rewrite drops
+/// the first kind all the same).
 fn is_of(line: &str, project: i64) -> bool {
     let Ok(Value::Object(fields)) = serde_json::from_str::<Value>(line) else {
         return false;
@@ -771,8 +787,8 @@ mod tests {
         trace.forget_blocking(1, None).unwrap();
         assert_eq!(
             lines(&trace, &previous),
-            ["not json", "{\"at\":\"b\",\"project\":2,\"kind\":\"x\"}"],
-            "a line that is no JSON is kept"
+            ["{\"at\":\"b\",\"project\":2,\"kind\":\"x\"}"],
+            "a line that is no JSON goes with the rewrite: it could be a cut record of the project"
         );
         let current = lines(&trace, trace.file());
         assert_eq!(current.len(), 2);
@@ -812,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn a_home_that_cannot_be_written_loses_the_line_and_not_the_run() {
+    fn a_home_that_cannot_be_written_loses_the_line_and_not_the_run_and_answers_no_forgetting_done() {
         let dir = tempfile::tempdir().unwrap();
         let trace = Trace::with_clock(
             dir.path().join("gone").join("events.jsonl"),
@@ -821,7 +837,8 @@ mod tests {
         );
         trace.event(&event(1, "lost"));
         trace.error("lost");
-        trace.forget_blocking(1, None).unwrap();
+        // A home that is not there may come back with the lines: no answer of done.
+        assert!(trace.forget_blocking(1, None).is_err());
         assert!(!trace.file().exists());
     }
 

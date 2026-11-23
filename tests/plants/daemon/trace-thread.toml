@@ -174,8 +174,8 @@ runs = ["tt-held"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/files/trace.rs"
-find = "            match (self.durable.folder)(folder) {"
-replace = "            match Ok::<(), io::Error>(()) {"
+find = "        keep((self.durable.folder)(folder), folder);"
+replace = "        keep(Ok::<(), io::Error>(()), folder);"
 
 [[plant]]
 name = "trace thread: a replacement that vanished before its rename is no failure"
@@ -230,3 +230,49 @@ runs = ["tt-held"]
 file = "crates/cf-daemon/src/files/trace.rs"
 find = "            if state.dropped == 0 {\n                state.jobs.push_back(Job::Count);\n            }"
 replace = "            if state.dropped == 0 && state.jobs.is_empty() {\n                state.jobs.push_back(Job::Count);\n            }"
+
+[[plant]]
+name = "trace thread: a writer that panicked leaves the forgettings queued behind it waiting"
+meant = "a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        for job in std::mem::take(&mut state.jobs) {"
+replace = "        for job in Vec::<Job>::new() {"
+
+[[plant]]
+name = "trace thread: a forgetting asked after the writer panicked is queued, not refused"
+meant = "a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        if let Some(why) = state.failed.clone() {"
+replace = "        if let Some(why) = state.failed.clone().filter(|_| false) {"
+
+[[plant]]
+name = "trace thread: a home that is not there answers done"
+meant = "a_home_that_is_not_there_answers_an_error_not_done"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        keep((self.durable.folder)(folder), folder);"
+replace = '''        keep(
+            match (self.durable.folder)(folder) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+            folder,
+        );'''
+
+[[plant]]
+name = "trace thread: a rewrite keeps a line that does not parse"
+meant = "a_rewrite_drops_every_line_that_does_not_parse_so_no_fragment_of_a_deleted_project_stays"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        .filter(|line| serde_json::from_str::<Value>(line).is_ok() && !is_of(line, project))"
+replace = "        .filter(|line| !is_of(line, project))"

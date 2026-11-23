@@ -756,3 +756,110 @@ async fn a_stop_after_a_delete_that_is_asked_has_the_deletes_notice_and_none_of_
         })
         .await;
 }
+
+// Round 3: what a forgetting answers when the writer or the home is gone, and what a
+// rewrite leaves of a torn record.
+
+fn panicking_folder(_: &Path) -> io::Result<()> {
+    panic!("a bug in the writer");
+}
+
+/// The answer of `forgetting`, which must come within two seconds: a forgetting left
+/// waiting is the failure.
+async fn answered(forgetting: impl std::future::Future<Output = io::Result<()>>) -> io::Result<()> {
+    tokio::time::timeout(WITHIN, forgetting)
+        .await
+        .expect("a forgetting was left waiting")
+}
+
+#[tokio::test]
+async fn a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace = durable_trace(dir.path(), Durable { folder: panicking_folder, ..DISK });
+    let mut held = Held::on(trace.file());
+    // The writer is behind the held file with a line in hand; two forgettings wait behind it.
+    trace.event(&event(1, "one"));
+    let (first, second) = (trace.forget(1, None), trace.forget(1, None));
+    held.release();
+    // The first is the one whose job the panic broke; the second was queued behind it.
+    assert!(answered(first).await.is_err());
+    assert!(answered(second).await.is_err(), "a forgetting queued behind the panic");
+    assert!(answered(trace.forget(1, None)).await.is_err(), "a forgetting after it");
+    assert!(trace.started().is_err(), "the trace says its writer is gone");
+    // Lines said now are dropped, not waited for, and the stop need not wait for a writer that is gone.
+    trace.event(&event(1, "after"));
+    assert!(trace.end(Duration::from_millis(50)));
+}
+
+#[test]
+fn a_home_that_is_not_there_answers_an_error_not_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let trace = trace_in(&home, 5_000_000);
+    trace.event(&event(1, "one"));
+    settled(&trace);
+    // The home is moved away and the forgetting asked: it cannot say the lines are gone.
+    let away = dir.path().join("away");
+    std::fs::rename(&home, &away).unwrap();
+    assert!(trace.forget_blocking(1, None).is_err());
+    std::fs::rename(&away, &home).unwrap();
+    assert_eq!(kinds(trace.file()), ["one"], "the lines were never claimed gone");
+}
+
+#[test]
+fn a_rewrite_drops_every_line_that_does_not_parse_so_no_fragment_of_a_deleted_project_stays() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace = trace_in(dir.path(), 5_000_000);
+    // A record cut before its closing brace, its project and payload whole.
+    std::fs::write(
+        trace.file(),
+        "{\"at\":\"a\",\"project\":5,\"kind\":\"task.created\",\"data\":{\"task\":\"SECRET-PAYLOAD\"\nnot json\n{\"at\":\"b\",\"project\":6,\"kind\":\"kept\"}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        aside(trace.file()),
+        "{\"at\":\"a\",\"project\":5,\"kind\":\"task.created\",\"data\":{\"task\":\"SECRET-PAYLOAD\"\n",
+    )
+    .unwrap();
+    trace.forget_blocking(5, None).unwrap();
+    for file in [trace.file().to_owned(), aside(trace.file())] {
+        let bytes = std::fs::read_to_string(&file).unwrap();
+        assert!(!bytes.contains("SECRET-PAYLOAD"), "{}: {bytes}", file.display());
+        assert!(!bytes.contains("not json"), "{}: {bytes}", file.display());
+    }
+    assert_eq!(kinds(trace.file()), ["kept"]);
+}
+
+/// What P23-B's verifying pass does: reads the bytes of a trace file and finds each line that
+/// names `project`, or does not parse (it could hold a cut record of anything).
+fn verifying_scan(file: &Path, project: i64) -> usize {
+    std::fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<Value>(line).map_or(true, |parsed| parsed["project"] == project)
+        })
+        .count()
+}
+
+#[test]
+fn a_line_a_prior_process_wrote_after_its_successors_forgetting_is_found_by_the_verifying_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    // The prior process's writer is behind a held file with a line of project 1 in hand.
+    let prior = trace_in(dir.path(), 5_000_000);
+    let mut held = Held::on(prior.file());
+    prior.event(&event(1, "from_the_prior_process"));
+    // The successor, which has the home now, deletes the project and is answered.
+    let successor = trace_in(dir.path(), 5_000_000);
+    successor.forget_blocking(1, None).unwrap();
+    assert_eq!(verifying_scan(successor.file(), 1), 0, "clean at the answer");
+    // The prior writer gets the file and writes behind the answer.
+    held.release();
+    settled(&prior);
+    assert_eq!(
+        verifying_scan(successor.file(), 1),
+        1,
+        "the line is on the disk and names the project: the verifying pass finds it"
+    );
+}
