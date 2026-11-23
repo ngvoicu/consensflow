@@ -60,6 +60,9 @@ pub(super) const CLEAR_INPUT: [u8; 1] = [0x03];
 const HOLD: &str = "Muse has not said yet which session its window shows";
 
 /// What a window whose prompt is not drawn yet is held for.
+/// Held while the screen lacks output the host has read.
+const PRINTING: &str = "Muse's screen does not yet show all that it printed";
+
 const STARTING: &str = "Muse has not shown its prompt yet";
 
 /// Why a paste waits while the message of a turn taken back is in a box the screen does
@@ -157,6 +160,10 @@ impl MuseWindow {
     /// none where the host says nothing.
     async fn screen(host: &dyn PaneHost, pane: &Pane) -> Option<(Vec<String>, Option<Cursor>)> {
         let snapshot = pane::snapshot_drawn(host, pane).await.ok()?;
+        // A screen that lacks bytes the host has read says nothing of the box (N17).
+        if !input_box::screen_current(&snapshot) {
+            return None;
+        }
         let lines = snapshot
             .get("bottom")?
             .as_array()?
@@ -260,6 +267,11 @@ impl Window for MuseWindow {
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
                 return Ok(Readiness::Held(Held::Unsaid));
+            }
+            // The screen lacks bytes the host has read: what it shows of the box is not the
+            // box (a split echo, a read waiting for its feed). Held, never read empty.
+            if !input_box::screen_current(&snapshot) {
+                return Ok(Readiness::Held(Held::Because(PRINTING.to_owned())));
             }
             let lines: Vec<String> = snapshot
                 .get("bottom")

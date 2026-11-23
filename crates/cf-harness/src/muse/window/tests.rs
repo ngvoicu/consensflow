@@ -608,3 +608,81 @@ fn a_muse_window_takes_nothing_out_of_a_dialog_that_counts_down() {
         window.dialog_identity(&card("3m 12s"))
     );
 }
+
+/// The screen lacks bytes the host has read (N17, T-2132 case 3): the window printed its key's
+/// echo in two reads, the cursor move and then the key, and the second is not yet drawn. The box
+/// on that screen is not its box. Muse's window holds, never ready and never read empty, and
+/// reads it as before once the counts are equal (or where the host gives none).
+#[test]
+fn a_window_whose_screen_lacks_bytes_the_host_has_read_is_held_and_never_read_empty() {
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, "");
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
+    let host = ScriptedHost::default();
+    let counted = |read: u64, drawn: u64, unsent: bool| {
+        Answer::Now(Ok(json!({
+            "ok": true, "unsent": unsent, "typed": 1, "typedQuietMs": 1_200, "outputQuietMs": 0,
+            "outputRead": read, "outputDrawn": drawn,
+            "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ ", RULE, "  echo · YOLO"],
+        })))
+    };
+    let ready = |host: &ScriptedHost| finished(window.ready(host, &pane())).unwrap();
+    host.answer(
+        "pane.snapshot",
+        [
+            counted(262, 261, false),
+            counted(262, 261, true),
+            counted(262, 262, false),
+            counted(262, 262, true),
+        ],
+    );
+    assert!(matches!(ready(&host), Readiness::Held(Held::Because(_))));
+    assert!(
+        matches!(ready(&host), Readiness::Held(_)),
+        "a box is not read over a key"
+    );
+    assert_eq!(ready(&host), Readiness::Ready);
+    // With the counts equal the empty box is read empty, as before.
+    assert_eq!(ready(&host), Readiness::Ready);
+    assert_eq!(window.read_empty.get(), Some(1));
+}
+
+/// A turn taken back, its box shown on a screen that lacks bytes the host has read (N17): the
+/// box is neither cleared nor pasted behind on what that screen shows. Nothing is pressed or
+/// pasted; with the counts equal, it is cleared and the paste goes in as before.
+#[test]
+fn a_taken_back_brief_whose_box_is_out_of_view_is_held_not_cleared_blind_while_the_screen_lacks_bytes(
+) {
+    let home = Home::new();
+    let session = v7(100);
+    home.log(&session, 40_085, &taken_back());
+    let window = home.window(Some(&session));
+    window.opened(Some(40_085));
+    assert!(finished(window.observe()).unwrap().took_back);
+    let host = ScriptedHost::default();
+    let counted = |read: u64, drawn: u64| {
+        Answer::Now(Ok(json!({
+            "ok": true, "unsent": false, "typed": 0,
+            "outputRead": read, "outputDrawn": drawn,
+            "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ Stop me before a word.", RULE, "  echo · YOLO"],
+        })))
+    };
+    host.answer("pane.snapshot", [counted(262, 261)]);
+    let refused = finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
+    assert!(matches!(refused, Admission::Refused { .. }), "{refused:?}");
+    assert_eq!(
+        asked(&host),
+        ["pane.snapshot"],
+        "nothing pressed, nothing pasted"
+    );
+    host.answer("pane.snapshot", [counted(262, 262)]);
+    host.answer("pane.input", [ok()]);
+    host.answer("pane.write_paste", [ok()]);
+    finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
+    assert_eq!(
+        asked(&host),
+        ["pane.snapshot", "keys [3]", "paste The next one."]
+    );
+}
