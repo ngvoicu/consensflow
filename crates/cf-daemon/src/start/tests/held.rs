@@ -701,27 +701,43 @@ async fn a_stop_after_a_delete_that_is_asked_has_the_deletes_notice_and_none_of_
     LocalSet::new()
         .run_until(async {
             let root = Rc::new(tempfile::tempdir().unwrap());
-            let rig = started(&root).await;
-            let id = rig
-                .daemon
+            let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
+            let (mut opts, _app) = options(root.path(), &said, &exited, &handles);
+            let home = root.path().join("consensflow");
+            // What the trace holds at the moment the process would end.
+            let at_exit = Rc::new(RefCell::new(None));
+            let capture = Rc::clone(&at_exit);
+            let path = home.join("events.jsonl");
+            opts.exit = Rc::new(move |code| {
+                *capture.borrow_mut() =
+                    Some((code, std::fs::read_to_string(&path).unwrap_or_default()));
+            });
+            let daemon = start(environment(root.path()), opts).await.unwrap();
+            daemon
+                .parts
+                .ledger
+                .borrow_mut()
+                .keep_test_file_owner(Rc::clone(&root));
+            let id = daemon
                 .parts
                 .ledger
                 .borrow_mut()
                 .create_project(&new_project(root.path()))
                 .unwrap()
                 .id;
-            rig.daemon.parts.engine.close_project(id).await.unwrap();
-            crate::files::settle_in(&rig.home);
-            let engine = Rc::clone(&rig.daemon.parts.engine);
+            daemon.parts.engine.close_project(id).await.unwrap();
+            crate::files::settle_in(&home);
+            let engine = Rc::clone(&daemon.parts.engine);
             let deleting = tokio::task::spawn_local(async move { engine.delete_project(id).await });
             // The delete runs to its first wait: the ledger has it, and the trace was asked.
             tokio::task::yield_now().await;
-            assert!(rig.daemon.parts.ledger.borrow().project(id).unwrap().is_none());
+            assert!(daemon.parts.ledger.borrow().project(id).unwrap().is_none());
             // The stop takes the daemon's one thread from here: the delete's continuation
-            // does not run before it ends.
-            rig.daemon.stop("test");
-            rig.daemon.finished().await;
-            let written = std::fs::read_to_string(rig.home.join("events.jsonl")).unwrap();
+            // does not run before the process would end.
+            daemon.stop("test");
+            daemon.finished().await;
+            let (code, written) = at_exit.borrow_mut().take().unwrap();
+            assert_eq!(code, 0);
             let lines: Vec<Value> = written
                 .lines()
                 .filter_map(|line| serde_json::from_str(line).ok())
@@ -736,6 +752,7 @@ async fn a_stop_after_a_delete_that_is_asked_has_the_deletes_notice_and_none_of_
                 "none of the project's lines: {written}"
             );
             drop(deleting);
+            cf_ledger::Ledger::finish_test_fixture(&daemon.parts.ledger);
         })
         .await;
 }
