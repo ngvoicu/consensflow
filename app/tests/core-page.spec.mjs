@@ -942,6 +942,7 @@ async function open(page, given = model(), { ready = true } = {}) {
           ? window.__paneActivateHook(args)
           : { ok: true, epoch: args.epoch, lost: [], overflow: null }
       }
+      if (command === 'pane_input_release') return { ok: true }
       if (command === 'pane_window_name') {
         return window.__paneNameHook ? window.__paneNameHook(args) : { ok: true }
       }

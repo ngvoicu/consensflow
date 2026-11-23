@@ -76,6 +76,7 @@ impl Rig {
         self.q.senders.lock().unwrap().insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::clone(&pending),
@@ -199,6 +200,13 @@ impl Rig {
     /// This document says it has shown these notices.
     pub fn told(&self, doc: &Doc, shown: &[(PaneKey, u64)]) -> Result<(), String> {
         self.q.lost_told(&doc.page, doc.at(), shown, None)
+    }
+
+    /// The page's confirmation as it is made when the page reloads in the middle of it: the
+    /// navigation comes between the host's check of the page and its clearing of the notice.
+    pub fn told_across_navigation(&self, doc: &Doc, shown: &[(PaneKey, u64)]) {
+        self.navigate();
+        let _ = self.told(doc, shown);
     }
 
     pub fn told_overflow(&self, doc: &Doc, version: u64, count: u64) -> Result<(), String> {

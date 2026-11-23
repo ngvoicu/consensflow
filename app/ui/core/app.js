@@ -3,7 +3,7 @@ import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { focusWhatIsClicked } from './click-focus.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
-import { listenForFileDrops } from './file-drop.js'
+import { listenForFileDrops, PENDING_DROPS } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
@@ -1155,6 +1155,19 @@ async function start() {
         : [],
     }),
   })
+  // A drop that was being looked up when the page before reloaded was never typed: say so.
+  try {
+    const lost = Number(sessionStorage.getItem(PENDING_DROPS) ?? 0)
+    sessionStorage.removeItem(PENDING_DROPS)
+    if (lost > 0) {
+      terminals.say(
+        `${lost === 1 ? 'A file' : 'Files'} you dropped just before ConsensFlow reloaded ${lost === 1 ? 'was' : 'were'} not typed. Drop ${lost === 1 ? 'it' : 'them'} again.`,
+      )
+    }
+  } catch {}
+  // The board is read at once, not when the daemon next changes: a page waiting on its host
+  // reads, and only its terminals wait.
+  const boardRead = refresh().catch((cause) => report(cause))
   if (typeof Channel === 'function') {
     if (!(await establishPanePage())) return
     const channel = new Channel()
@@ -1170,6 +1183,7 @@ async function start() {
   } catch (cause) {
     report(cause)
   }
+  await boardRead
   await refresh()
   document.body.dataset.ready = 'true'
   // The board has loaded: what the host owes the person is asked for again, and on a timer.

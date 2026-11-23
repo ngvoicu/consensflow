@@ -134,6 +134,7 @@ fn notices_json(notices: &PendingNotices) -> Value {
             "generation":notice.key.generation,
             "loss":notice.loss,
             "closed":notice.closed,
+            "name":notice.name,
         })).collect::<Vec<_>>(),
         "overflow":notices.overflow.map(|overflow| json!({"version":overflow.version,"count":overflow.count})),
     })
@@ -176,6 +177,30 @@ pub struct LostArgs {
 pub struct OverflowArgs {
     version: u64,
     count: u64,
+}
+
+/// The page says what a window is called, so that a notice of a window that has closed names it.
+#[tauri::command]
+pub fn pane_window_name<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    name: String,
+) -> Value {
+    if name.is_empty() || name.len() > 200 {
+        return json!({"ok":false,"error":"invalid window name"});
+    }
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state.inputs.name_window(&page_id, epoch, &key, &name) {
+        Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
 }
 
 /// What the host still owes the person, for the page that is current to show. The page asks at
@@ -240,12 +265,17 @@ fn enqueue_page_text<R: Runtime>(
             // order must not wait for this one.
             if let Ok(key) = pane_key(&call.id, call.generation) {
                 let state = app.state::<AppRuntime>();
-                if let Ok(loss) =
-                    state
-                        .inputs
-                        .refuse_page_sequence(&call.page_id, call.epoch, &key, call.sequence)
+                match state
+                    .inputs
+                    .refuse_page_sequence(&call.page_id, call.epoch, &key, call.sequence)
                 {
-                    return json!({"ok":false,"error":error,"loss":loss});
+                    Ok(loss) => return json!({"ok":false,"error":error,"loss":loss}),
+                    // Its number cannot be spent yet (the page's slots are full): the page skips
+                    // it until the host has, and never takes this for a final refusal.
+                    Err(pending) if pending == cf_panes::input_queue::SKIP_PENDING => {
+                        return json!({"ok":false,"error":error,"spent":false});
+                    }
+                    Err(_) => {}
                 }
             }
             json!({"ok":false,"error":error})
@@ -275,7 +305,9 @@ fn enqueue_page_call<R: Runtime>(
     match inputs.enqueue_page_told(&call.page_id, call.epoch, key, call.sequence, work, !reply) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
         Err(refusal) => match refusal.loss {
-            Some(loss) => json!({"ok":false,"error":refusal.error,"loss":loss}),
+            Some(loss) => {
+                json!({"ok":false,"error":refusal.error,"loss":loss,"spent":refusal.spent})
+            }
             None => json!({"ok":false,"error":refusal.error}),
         },
     }
@@ -347,6 +379,33 @@ pub fn pane_input_skip<R: Runtime>(
     {
         Ok(loss) => json!({"ok":true,"loss":loss}),
         // Its number cannot be spent yet: the page asks again, and the skip stays pending.
+        Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
+            json!({"ok":false,"error":error,"retry":true})
+        }
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// A number the page took for a gesture and never used is let go: spent, and nothing told.
+#[tauri::command]
+pub fn pane_input_release<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    sequence: u64,
+) -> Value {
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state
+        .inputs
+        .release_page_sequence(&page_id, epoch, &key, sequence)
+    {
+        Ok(()) => json!({"ok":true}),
         Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
             json!({"ok":false,"error":error,"retry":true})
         }

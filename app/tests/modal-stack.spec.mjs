@@ -166,6 +166,8 @@ async function open(page, given = model()) {
         }),
     }
     const invoke = async (command, args = {}) => {
+      if (command === 'pane_page_prepare') return {ok:true, nonce:args.nonce, epoch:1}
+      if (command === 'pane_page_activate') return {ok:true, epoch:args.epoch, lost:[]}
       if (command === 'daemon_request') {
         window.__calls.push([command, args.body, args.operation])
         const handle = operations[args.operation]

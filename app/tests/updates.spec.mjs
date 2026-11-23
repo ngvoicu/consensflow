@@ -120,6 +120,8 @@ async function installTauriShim(
       }
 
       const invoke = async (command, args = {}) => {
+      if (command === 'pane_page_prepare') return {ok:true, nonce:args.nonce, epoch:1}
+      if (command === 'pane_page_activate') return {ok:true, epoch:args.epoch, lost:[]}
         window.__calls.push({ command, args: copy(args) })
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])

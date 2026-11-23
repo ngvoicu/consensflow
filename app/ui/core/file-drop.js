@@ -176,7 +176,7 @@ async function keyed(id, paths, harness, invoke) {
  * stay with, as Windows Terminal found); a drop typed after the human went on
  * elsewhere takes neither.
  */
-async function type(target, { id, paths }, { invoke, focus, dock, report, still }) {
+async function type(target, { id, paths }, { invoke, focus, dock, report, still, place = null }) {
   if (target === null) return
   if (target.missed !== undefined) {
     report(`Nothing was typed: ${target.missed}.`)
@@ -198,12 +198,15 @@ async function type(target, { id, paths }, { invoke, focus, dock, report, still 
     return
   }
   const focused = still()
-  if (!dock.pasteInto(target.pane, droppedText(typed.paths, WINDOWS), { focus: focused })) {
+  if (!dock.pasteInto(target.pane, droppedText(typed.paths, WINDOWS), { focus: focused, place })) {
     report(`Nothing was typed: ${target.name}'s window has closed.`)
     return
   }
   if (WINDOWS && focused) await focus(id)
 }
+
+/** Where a page leaves the drops it has not typed yet, for the page after a reload to say. */
+export const PENDING_DROPS = 'consensflow-pending-drops'
 
 /**
  * Hears the files dragged over the app's window and dropped on it. While they
@@ -217,6 +220,15 @@ async function type(target, { id, paths }, { invoke, focus, dock, report, still 
  * `report` says on the status line why nothing was typed.
  */
 export async function listenForFileDrops({ listen, invoke, focus, dock, report }) {
+  // Drops whose paths are still being looked up: a reload takes them, and the next page says so.
+  let waiting = 0
+  const pending = (change) => {
+    waiting += change
+    try {
+      if (waiting > 0) sessionStorage.setItem(PENDING_DROPS, String(waiting))
+      else sessionStorage.removeItem(PENDING_DROPS)
+    } catch {}
+  }
   /** Whether the drag over the page carries files: its `over` events do not say. */
   let carrying = false
   /** The drops before this one, typed or not yet. */
@@ -251,7 +263,21 @@ export async function listenForFileDrops({ listen, invoke, focus, dock, report }
     if (payload.paths.length === 0) return
     const asOf = acts
     const still = () => acts === asOf
-    const dropped = () => type(target, payload, { invoke, focus, dock, report, still })
-    typing = typing.then(dropped).catch(report)
+    // The drop is a gesture, like a key: it takes its place among what is typed where it is
+    // made, before the lookup of its paths, or is refused while the terminals are read-only.
+    let place = null
+    if (target.pane !== undefined) {
+      place = dock.holdPlace(target.pane)
+      if (place === null) return
+    }
+    pending(+1)
+    const dropped = () => type(target, payload, { invoke, focus, dock, report, still, place })
+    typing = typing
+      .then(dropped)
+      .catch(report)
+      .finally(() => {
+        if (place !== null) dock.releasePlace(place)
+        pending(-1)
+      })
   })
 }

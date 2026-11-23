@@ -2,7 +2,7 @@
 //! pane, and a second for the terminal's replies, the page's numbered input
 //! admitted before it is answered, and why an input did not go in.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, Weak};
@@ -35,6 +35,11 @@ const MAX_LANE_SLOTS: usize = 64;
 /// How many windows' unshown notices the host keeps.
 const MAX_PENDING_LOSSES: usize = 512;
 const MAX_PENDING_INPUT_TICKETS: usize = 4096;
+/// How many windows past the bound the host counts apart, and how many names it keeps.
+const MAX_EVICTED_WINDOWS: usize = 65_536;
+const MAX_NAMED_WINDOWS: usize = 1024;
+/// How many page sessions' latest numbers the host keeps.
+const MAX_PAGE_SESSIONS: usize = 64;
 const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
 /// The host is stopping, and takes no more input.
 const INPUT_CLOSED: &str = "input-closed";
@@ -189,28 +194,44 @@ thread_local! {
 /// A page job's one host-owned outcome. The host settles it itself, under its lock, whatever
 /// becomes of the page's wait, ticket or window: written (nothing to say), refused, or
 /// uncertain. A job dropped with none (its worker vanished, its queue was dropped whole) is
-/// uncertain, and the drop records that.
+/// uncertain, and the drop records that, without taking the host's lock: it takes its loss
+/// number from the host's counter at once, and the host settles it the next time it looks.
 struct Outcome {
     shared: Weak<PageShared>,
     key: PaneKey,
+    sequence: u64,
+    /// Whether the window is still there: false once it has retired.
+    alive: Arc<AtomicBool>,
     /// The number of the loss the host recorded for this call, for its wait to answer.
     loss: Arc<AtomicU64>,
     settled: bool,
 }
 
 impl Outcome {
-    fn new(shared: &Arc<PageShared>, key: &PaneKey, loss: Arc<AtomicU64>) -> Self {
+    fn new(
+        shared: &Arc<PageShared>,
+        key: &PaneKey,
+        sequence: u64,
+        alive: Arc<AtomicBool>,
+        loss: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             shared: Arc::downgrade(shared),
             key: key.clone(),
+            sequence,
+            alive,
             loss,
             settled: false,
         }
     }
 
-    /// Recorded under the host's lock: the call did not go in whole, or may not have.
+    /// Recorded under the host's lock: the call did not go in whole, or may not have. A call the
+    /// page skipped already has its loss: it is that one.
     fn lose(&mut self, state: &mut PageInputState, closed: bool, events: &mut Vec<Event>) -> u64 {
-        let loss = state.lost(&self.key, closed, events);
+        let loss = match state.skipped_loss(&self.key, self.sequence) {
+            Some(loss) => loss,
+            None => state.lost(&self.key, closed || !self.alive.load(Ordering::Acquire), events),
+        };
         self.loss.store(loss, Ordering::Release);
         self.settled = true;
         loss
@@ -225,10 +246,7 @@ impl Outcome {
             (Some(shared), true) => {
                 let mut events = Vec::new();
                 {
-                    let mut state = shared
-                        .state
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
+                    let mut state = shared.lock();
                     self.lose(&mut state, false, &mut events);
                     let _ = response.send(result);
                 }
@@ -251,35 +269,21 @@ impl Drop for Outcome {
         let Some(shared) = self.shared.upgrade() else {
             return;
         };
-        let key = self.key.clone();
-        let cell = Arc::clone(&self.loss);
-        let record = move |shared: Arc<PageShared>| {
-            let mut events = Vec::new();
-            {
-                let mut state = shared
-                    .state
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                let loss = state.lost(&key, false, &mut events);
-                cell.store(loss, Ordering::Release);
-            }
-            shared.flush(events);
-            shared.wake.notify_all();
-        };
-        // Inline when the lock is free, so that the wait that this drop answers finds the
-        // loss; on a thread when a holder (which may be this one) has it.
-        let free = shared.state.try_lock().map(drop).is_ok();
-        if free {
-            record(shared);
-        } else {
-            #[cfg(test)]
-            if FAIL_THREAD_SPAWN.with(|fail| fail.get()) {
-                return;
-            }
-            let _ = thread::Builder::new()
-                .name("consensflow-input-outcome".to_owned())
-                .spawn(move || record(shared));
-        }
+        // The number first, so that the wait this drop answers finds it; the record is the
+        // host's to make, from its own list, whatever thread has the lock (this one may).
+        let loss = shared.next_loss.fetch_add(1, Ordering::AcqRel) + 1;
+        self.loss.store(loss, Ordering::Release);
+        shared
+            .orphans
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push((
+                self.key.clone(),
+                self.sequence,
+                loss,
+                !self.alive.load(Ordering::Acquire),
+            ));
+        shared.wake.notify_all();
     }
 }
 
@@ -332,11 +336,18 @@ enum Event {
 pub struct Refusal {
     pub error: String,
     pub loss: Option<u64>,
+    /// Whether the refused number is spent: false where the host could not keep it (its slots
+    /// are full), and the page then skips it until the host has.
+    pub spent: bool,
 }
 
 impl From<String> for Refusal {
     fn from(error: String) -> Self {
-        Self { error, loss: None }
+        Self {
+            error,
+            loss: None,
+            spent: true,
+        }
     }
 }
 
@@ -373,6 +384,8 @@ pub struct LossNotice {
     pub key: PaneKey,
     pub loss: u64,
     pub closed: bool,
+    /// What the page called the window, if it said.
+    pub name: Option<String>,
 }
 
 /// The losses past the bound, counted: its own version, and how many further records.
@@ -435,7 +448,6 @@ struct PageInputState {
     current: Option<String>,
     /// The nonce the current page prepared with.
     current_nonce: String,
-    retired: HashSet<String>,
     /// Pages that prepared, with the nonce and epoch the host answered them.
     pending_pages: HashMap<String, (String, u64)>,
     page_ordinals: HashMap<String, u64>,
@@ -444,8 +456,12 @@ struct PageInputState {
     next_ticket: u64,
     /// By window, its latest loss, until a page says it has shown that version.
     pending_lost: HashMap<PaneKey, LossRecord>,
-    overflow: Option<OverflowNotice>,
-    next_loss: u64,
+    /// The windows whose notices went past the bound, each by the version it was evicted at.
+    evicted: BTreeMap<PaneKey, u64>,
+    /// What the page said of each window's name, kept for a notice of a window that has closed.
+    names: HashMap<PaneKey, String>,
+    name_order: VecDeque<PaneKey>,
+    counter: Arc<AtomicU64>,
     reaper: bool,
 }
 
@@ -453,9 +469,36 @@ struct PageShared {
     state: Mutex<PageInputState>,
     wake: Condvar,
     observer: Mutex<Option<Arc<dyn InputObserver>>>,
+    /// The host's loss counter: a version is taken from it with or without the state's lock.
+    next_loss: Arc<AtomicU64>,
+    /// Outcomes of calls whose worker went without answering: `(window, number, loss, closed)`,
+    /// settled into the state the next time anything looks at it.
+    orphans: Mutex<Vec<(PaneKey, u64, u64, bool)>>,
 }
 
 impl PageShared {
+    /// The host's state. A lock a panic poisoned is taken back: the state is what it was when
+    /// the panic came, and the host goes on with it rather than refuse every call after.
+    fn lock(&self) -> MutexGuard<'_, PageInputState> {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                self.state.clear_poison();
+                poisoned.into_inner()
+            }
+        };
+        let orphans = std::mem::take(
+            &mut *self
+                .orphans
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+        for (key, sequence, loss, closed) in orphans {
+            state.settle_orphan(&key, sequence, loss, closed);
+        }
+        state
+    }
+
     fn flush(&self, events: Vec<Event>) {
         if events.is_empty() {
             return;
@@ -476,41 +519,77 @@ impl PageShared {
 }
 
 impl PageInputState {
+    /// The next loss version: from the host's counter, which a job's drop also takes from.
+    fn fresh_version(&self) -> u64 {
+        self.counter.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
     /// Record that typing may be missing from this window. Kept until a page says it has
     /// shown this version; the page that is current is told at once, and one that is not
     /// yet, at its activation.
     fn lost(&mut self, key: &PaneKey, closed: bool, events: &mut Vec<Event>) -> u64 {
-        self.next_loss += 1;
-        let loss = self.next_loss;
-        let closed = closed || self.pending_lost.get(key).is_some_and(|record| record.closed);
-        self.pending_lost.insert(
-            key.clone(),
-            LossRecord {
-                version: loss,
-                closed,
-            },
-        );
-        if self.pending_lost.len() > MAX_PENDING_LOSSES {
-            if let Some(oldest) = self
-                .pending_lost
-                .iter()
-                .min_by_key(|(_, record)| record.version)
-                .map(|(key, _)| key.clone())
-            {
-                self.pending_lost.remove(&oldest);
-                // Past the bound a record is counted, with a version of its own.
-                self.next_loss += 1;
-                let count = self.overflow.map_or(0, |overflow| overflow.count) + 1;
-                self.overflow = Some(OverflowNotice {
-                    version: self.next_loss,
-                    count,
-                });
-            }
-        }
+        let loss = self.fresh_version();
+        self.note(key, loss, closed);
         if self.current.is_some() {
             events.push(Event::Lost(key.clone(), loss));
         }
         loss
+    }
+
+    /// Keep loss `version` for a window: the latest per window, and a window that has closed
+    /// stays closed. Past the bound the oldest is counted apart, by the window.
+    fn note(&mut self, key: &PaneKey, version: u64, closed: bool) {
+        let held = self.pending_lost.get(key).copied();
+        let closed = closed || held.is_some_and(|record| record.closed);
+        // A change of wording is a new version: an older receipt cannot clear it unseen.
+        let version = match held {
+            Some(record) if record.version >= version => record.version,
+            _ => version,
+        };
+        self.pending_lost
+            .insert(key.clone(), LossRecord { version, closed });
+        self.evicted.remove(key);
+        if self.pending_lost.len() > MAX_PENDING_LOSSES {
+            if let Some(oldest) = self
+                .pending_lost
+                .iter()
+                .filter(|(other, _)| *other != key)
+                .min_by_key(|(_, record)| record.version)
+                .map(|(other, _)| other.clone())
+            {
+                self.pending_lost.remove(&oldest);
+                let evicted_at = self.fresh_version();
+                self.evicted.insert(oldest, evicted_at);
+                while self.evicted.len() > MAX_EVICTED_WINDOWS {
+                    if let Some(first) = self
+                        .evicted
+                        .iter()
+                        .min_by_key(|(_, at)| **at)
+                        .map(|(key, _)| key.clone())
+                    {
+                        self.evicted.remove(&first);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A call whose worker went without answering: its loss was numbered when it went.
+    fn settle_orphan(&mut self, key: &PaneKey, sequence: u64, loss: u64, closed: bool) {
+        match self.skipped_loss(key, sequence) {
+            Some(_) => {}
+            None => self.note(key, loss, closed),
+        }
+    }
+
+    /// The loss recorded for a skip of this call's number, if it was skipped.
+    fn skipped_loss(&self, key: &PaneKey, sequence: u64) -> Option<u64> {
+        self.lanes.get(key).and_then(|lane| {
+            lane.skipped
+                .iter()
+                .find(|(number, _)| *number == sequence)
+                .map(|(_, loss)| *loss)
+        })
     }
 
     fn notices(&self) -> PendingNotices {
@@ -521,40 +600,48 @@ impl PageInputState {
                 key: key.clone(),
                 loss: record.version,
                 closed: record.closed,
+                name: self.names.get(key).cloned(),
             })
             .collect();
         losses.sort_by_key(|notice| notice.loss);
-        PendingNotices {
-            losses,
-            overflow: self.overflow,
+        let overflow = self
+            .evicted
+            .values()
+            .max()
+            .map(|version| OverflowNotice {
+                version: *version,
+                count: self.evicted.len() as u64,
+            });
+        PendingNotices { losses, overflow }
+    }
+
+    /// The name the page gave a window, kept for its notice once it has closed.
+    fn name_window(&mut self, key: &PaneKey, name: &str) {
+        if self.names.insert(key.clone(), name.to_owned()).is_none() {
+            self.name_order.push_back(key.clone());
+        }
+        while self.name_order.len() > MAX_NAMED_WINDOWS {
+            if let Some(old) = self.name_order.pop_front() {
+                self.names.remove(&old);
+            }
         }
     }
 
-    /// What the page has shown: those windows' versions, and the overflow's count at its
-    /// version. A later loss of the same window stays, and so does an eviction since.
+    /// What the page has shown: each window's exact version, and the overflow up to the
+    /// version it showed. A later version of the same window stays, and so does an eviction
+    /// since; a receipt repeated clears nothing more.
     fn told(&mut self, told: &[(PaneKey, u64)], overflow: Option<(u64, u64)>) {
         for (key, loss) in told {
             if self
                 .pending_lost
                 .get(key)
-                .is_some_and(|record| record.version <= *loss)
+                .is_some_and(|record| record.version == *loss)
             {
                 self.pending_lost.remove(key);
             }
         }
-        if let Some((version, count)) = overflow {
-            if let Some(held) = self.overflow {
-                if held.version <= version {
-                    self.overflow = None;
-                } else if held.count > count {
-                    self.overflow = Some(OverflowNotice {
-                        version: held.version,
-                        count: held.count - count,
-                    });
-                } else {
-                    self.overflow = None;
-                }
-            }
+        if let Some((version, _count)) = overflow {
+            self.evicted.retain(|_, evicted_at| *evicted_at > version);
         }
     }
 
@@ -683,14 +770,10 @@ impl PageInputState {
                 }
             }
         }
-        if let Some(previous) = self.current.take() {
-            self.retired.insert(previous);
-        }
+        // No departed identity is kept: a page is judged by the epoch and the nonce it echoes.
+        self.current = None;
         self.current_nonce.clear();
-        self.retired.extend(
-            std::mem::take(&mut self.pending_pages)
-                .into_keys(),
-        );
+        self.pending_pages.clear();
         self.completions.clear();
     }
 }
@@ -727,6 +810,8 @@ impl Lane {
 }
 
 struct InputRoute {
+    /// Whether the window is still there; false once it has retired.
+    alive: Arc<AtomicBool>,
     sender: mpsc::SyncSender<InputJob>,
     /// The terminal's replies, to a worker of their own ([`InputWork::Reply`]).
     replies: mpsc::SyncSender<InputJob>,
@@ -776,6 +861,7 @@ pub struct InputQueue {
 
 impl InputQueue {
     pub fn new(panes: Arc<PaneTable>, arbiter: Arc<InputArbiter>) -> Self {
+        let counter = Arc::new(AtomicU64::new(0));
         Self {
             panes,
             arbiter,
@@ -786,19 +872,22 @@ impl InputQueue {
                     epoch: 0,
                     current: None,
                     current_nonce: String::new(),
-                    retired: HashSet::new(),
                     pending_pages: HashMap::new(),
                     page_ordinals: HashMap::new(),
                     lanes: HashMap::new(),
                     completions: HashMap::new(),
                     next_ticket: 1,
                     pending_lost: HashMap::new(),
-                    overflow: None,
-                    next_loss: 0,
+                    evicted: BTreeMap::new(),
+                    names: HashMap::new(),
+                    name_order: VecDeque::new(),
+                    counter: Arc::clone(&counter),
                     reaper: false,
                 }),
                 wake: Condvar::new(),
                 observer: Mutex::new(None),
+                next_loss: counter,
+                orphans: Mutex::new(Vec::new()),
             }),
             accepting: AtomicBool::new(true),
         }
@@ -814,25 +903,19 @@ impl InputQueue {
     }
 
     fn state(&self) -> Result<MutexGuard<'_, PageInputState>, String> {
-        self.page
-            .state
-            .lock()
-            .map_err(|_| "pane input admission lock is poisoned".to_string())
+        Ok(self.page.lock())
     }
 
     /// How many page identities the host holds, for a test that counts what a cut leaves.
     #[cfg(test)]
     fn held_identities(&self) -> usize {
-        let state = self.page.state.lock().unwrap();
-        state.retired.len() + state.pending_pages.len()
+        let state = self.page.lock();
+        state.pending_pages.len() + state.page_ordinals.len()
     }
 
     /// The host's epoch: how many main documents have loaded.
     pub fn epoch(&self) -> u64 {
-        self.page
-            .state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        self.page.lock()
             .epoch
     }
 
@@ -857,6 +940,10 @@ impl InputQueue {
         };
         if spawned.is_err() {
             state.reaper = false;
+            // No clock will come for what waits: settle it all now, as if its bound had passed,
+            // so that nothing stays parked, unanswered or reserved. The gaps are numbered losses.
+            let mut events = Vec::new();
+            state.pump_all(Instant::now() + ORDER_BOUND * 2, &mut events);
         }
     }
 
@@ -899,6 +986,10 @@ impl InputQueue {
     ) -> Result<String, Refusal> {
         let mut events = Vec::new();
         let result = self.admit(page_id, epoch, key, sequence, work, human, &mut events);
+        // A refusal's number can leave a gap the clock must watch, whatever else is parked.
+        if let Ok(mut page) = self.state() {
+            self.watch_bounds(&mut page);
+        }
         self.page.flush(events);
         self.page.wake.notify_all();
         result
@@ -955,9 +1046,11 @@ impl InputQueue {
                       error: String,
                       closed: bool|
          -> Result<String, Refusal> {
-            // Final for its number: the order goes on past it.
+            // Final for its number: the order goes on past it. A spent number is cheap, so the
+            // lane keeps twice what it parks; past that the page is told it is not spent yet.
             let lane = page.lane(&key);
-            if lane.slots.len() < MAX_LANE_SLOTS {
+            let spent = lane.slots.len() < 2 * MAX_LANE_SLOTS;
+            if spent {
                 lane.slots.insert(
                     sequence,
                     Slot::Void {
@@ -970,6 +1063,7 @@ impl InputQueue {
             Err(Refusal {
                 error,
                 loss: Some(loss),
+                spent,
             })
         };
         if page.lane(&key).slots.len() >= MAX_LANE_SLOTS {
@@ -1006,7 +1100,7 @@ impl InputQueue {
             }
         };
         let (response, receiver) = oneshot::channel();
-        let (reserved, sender) = {
+        let (reserved, sender, alive) = {
             let senders = self
                 .senders
                 .lock()
@@ -1034,7 +1128,11 @@ impl InputQueue {
                 );
             };
             match route.reserve(&work) {
-                Ok(reserved) => (reserved, route.sender_for(&work).clone()),
+                Ok(reserved) => (
+                    reserved,
+                    route.sender_for(&work).clone(),
+                    Arc::clone(&route.alive),
+                ),
                 Err(error) => {
                     drop(senders);
                     return refuse(&mut page, events, error.to_string(), false);
@@ -1046,7 +1144,13 @@ impl InputQueue {
             work,
             response,
             _reserved: reserved,
-            outcome: Some(Outcome::new(&self.page, &key, Arc::clone(&loss))),
+            outcome: Some(Outcome::new(
+                &self.page,
+                &key,
+                sequence,
+                alive,
+                Arc::clone(&loss),
+            )),
         };
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
@@ -1078,6 +1182,7 @@ impl InputQueue {
             return Err(Refusal {
                 error: error.to_string(),
                 loss: Some(loss),
+                spent: true,
             });
         }
         self.watch_bounds(&mut page);
@@ -1099,6 +1204,30 @@ impl InputQueue {
         key: &PaneKey,
         sequence: u64,
     ) -> Result<u64, String> {
+        self.spend_sequence(page_id, epoch, key, sequence, true)
+    }
+
+    /// A number the page took for a gesture and never used (a drop that was refused): spent
+    /// like a skip's, with nothing told, for nothing was typed.
+    pub fn release_page_sequence(
+        &self,
+        page_id: &str,
+        epoch: u64,
+        key: &PaneKey,
+        sequence: u64,
+    ) -> Result<(), String> {
+        self.spend_sequence(page_id, epoch, key, sequence, false)
+            .map(drop)
+    }
+
+    fn spend_sequence(
+        &self,
+        page_id: &str,
+        epoch: u64,
+        key: &PaneKey,
+        sequence: u64,
+        record: bool,
+    ) -> Result<u64, String> {
         let mut events = Vec::new();
         let result = {
             let mut page = self.state()?;
@@ -1117,19 +1246,29 @@ impl InputQueue {
             let lane = page.lane(key);
             if let Some((_, loss)) = lane.skipped.iter().find(|(number, _)| *number == sequence) {
                 Ok(*loss)
+            } else if !record && sequence <= lane.passed {
+                Ok(0)
             } else if sequence > lane.passed
                 && !lane.slots.contains_key(&sequence)
-                && lane.slots.len() >= MAX_LANE_SLOTS
+                && lane.slots.len() >= 2 * MAX_LANE_SLOTS
             {
+                // Its number cannot be spent yet: the skip stays pending, and the page asks again.
                 Err(SKIP_PENDING.to_string())
             } else {
-                if sequence > lane.passed && !lane.slots.contains_key(&sequence) {
-                    lane.slots.insert(
-                        sequence,
-                        Slot::Void {
-                            deadline: now + ORDER_BOUND,
-                        },
-                    );
+                // A skip that is final leaves nothing of the call: a parked original is taken
+                // out, so that it never writes when the numbers before it come.
+                let mut cancelled = None;
+                if sequence > lane.passed {
+                    let void = Slot::Void {
+                        deadline: now + ORDER_BOUND,
+                    };
+                    match lane.slots.insert(sequence, void) {
+                        Some(Slot::Parked { job, .. }) => cancelled = Some(job),
+                        Some(Slot::Void { deadline }) => {
+                            lane.slots.insert(sequence, Slot::Void { deadline });
+                        }
+                        None => {}
+                    }
                 }
                 // The page's own ticket only: the number is its own.
                 page.completions.retain(|_, completion| {
@@ -1137,11 +1276,23 @@ impl InputQueue {
                 });
                 page.pump(key, now, &mut events);
                 let closed = !self.has_route(key);
-                let loss = page.lost(key, closed, &mut events);
-                let lane = page.lane(key);
-                lane.skipped.push_back((sequence, loss));
-                while lane.skipped.len() > 64 {
-                    lane.skipped.pop_front();
+                let loss = if record {
+                    page.lost(key, closed, &mut events)
+                } else {
+                    0
+                };
+                if let Some(job) = cancelled {
+                    job.refuse_told(
+                        loss,
+                        InputError::refused(INPUT_SEQUENCE_STALE, "the page skipped this call"),
+                    );
+                }
+                if record {
+                    let lane = page.lane(key);
+                    lane.skipped.push_back((sequence, loss));
+                    while lane.skipped.len() > 64 {
+                        lane.skipped.pop_front();
+                    }
                 }
                 Ok(loss)
             }
@@ -1162,6 +1313,22 @@ impl InputQueue {
         sequence: u64,
     ) -> Result<u64, String> {
         self.skip_page_sequence(page_id, epoch, key, sequence)
+    }
+
+    /// The page says what a window is called, for the notice of a window that has closed.
+    pub fn name_window(
+        &self,
+        page_id: &str,
+        epoch: u64,
+        key: &PaneKey,
+        name: &str,
+    ) -> Result<(), String> {
+        let mut page = self.state()?;
+        if !page.admits(page_id, epoch) {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        page.name_window(key, name);
+        Ok(())
     }
 
     /// The page has shown these windows' notices (each at its version), and the overflow's
@@ -1195,9 +1362,6 @@ impl InputQueue {
     fn check_page(page: &PageInputState, page_id: &str) -> Result<Option<(String, u64)>, String> {
         if page_id.is_empty() || page_id.len() > 128 {
             return Err("invalid pane input page identity".to_string());
-        }
-        if page.retired.contains(page_id) {
-            return Err(INPUT_STALE_PAGE.to_string());
         }
         let ordinal = page_id
             .rsplit_once(':')
@@ -1317,6 +1481,10 @@ impl InputQueue {
         }
         if let Some((session, number)) = ordinal {
             page.page_ordinals.insert(session, number);
+            if page.page_ordinals.len() > MAX_PAGE_SESSIONS {
+                let keep = page.current.clone();
+                page.page_ordinals.retain(|name, _| keep.as_deref().is_some_and(|id| id.starts_with(name.as_str())));
+            }
         }
         page.current = Some(page_id.to_owned());
         page.current_nonce = nonce.to_owned();
@@ -1461,6 +1629,7 @@ impl InputQueue {
         senders.insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
@@ -1477,19 +1646,19 @@ impl InputQueue {
     /// recorded as a loss for a window that has closed (named on the current page),
     /// and its page numbers and arbiter state go.
     pub(crate) fn retire(&self, key: &PaneKey) {
-        self.senders
+        if let Some(route) = self
+            .senders
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .remove(key);
+            .remove(key)
+        {
+            route.alive.store(false, Ordering::Release);
+        }
         self.workers
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(key);
-        let mut page = self
-            .page
-            .state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let mut page = self.page.lock();
         let mut events = Vec::new();
         if let Some(lane) = page.lanes.remove(key) {
             if !lane.slots.is_empty() {
@@ -1504,9 +1673,12 @@ impl InputQueue {
                 }
             }
         }
-        // An unshown notice of a window that has closed names it, whatever its card.
-        if let Some(record) = page.pending_lost.get_mut(key) {
-            record.closed = true;
+        // An unshown notice of a window that has closed names it, whatever its card; its
+        // wording changed, so it has a version of its own and an old receipt clears nothing.
+        if page.pending_lost.contains_key(key) {
+            let version = page.fresh_version();
+            page.pending_lost
+                .insert(key.clone(), LossRecord { version, closed: true });
         }
         page.completions
             .retain(|_, completion| &completion.key != key);
@@ -1566,11 +1738,7 @@ impl InputQueue {
         // What waits in order holds a sender to its worker: refuse it, or the
         // worker never ends.
         let lanes = std::mem::take(
-            &mut self
-                .page
-                .state
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
+            &mut self.page.lock()
                 .lanes,
         );
         for lane in lanes.into_values() {
@@ -1604,10 +1772,7 @@ fn bounds_clock(shared: Weak<PageShared>) {
         };
         let mut events = Vec::new();
         {
-            let mut state = shared
-                .state
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
+            let mut state = shared.lock();
             let now = Instant::now();
             state.pump_all(now, &mut events);
             let Some(next) = state.next_deadline() else {
@@ -2080,6 +2245,7 @@ mod tests {
         inputs.senders.lock().unwrap().insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
@@ -2140,10 +2306,6 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         assert_eq!(passed(&inputs, &key), 0);
-        assert_eq!(
-            inputs.begin_page("page-one"),
-            Err(INPUT_STALE_PAGE.to_owned())
-        );
         inputs
             .enqueue("page-two", key, 1, typed(b"E"), true)
             .unwrap();
@@ -2181,6 +2343,7 @@ mod tests {
         inputs.senders.lock().unwrap().insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
@@ -2221,6 +2384,7 @@ mod tests {
         inputs.senders.lock().unwrap().insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
@@ -2261,6 +2425,7 @@ mod tests {
         inputs.senders.lock().unwrap().insert(
             key.clone(),
             InputRoute {
+                alive: Arc::new(AtomicBool::new(true)),
                 sender,
                 replies,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
@@ -2577,7 +2742,8 @@ mod tests {
             .values()
             .map(|lane| lane.slots.len())
             .sum();
-        assert_eq!(held, MAX_LANE_SLOTS);
+        // What it parks, and the spent numbers of what it was refused, twice as many at most.
+        assert!(held > MAX_LANE_SLOTS && held <= 2 * MAX_LANE_SLOTS, "{held}");
         inputs.close_and_drain();
     }
 

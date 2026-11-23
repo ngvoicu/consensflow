@@ -327,41 +327,53 @@ fn fill_the_writer(rig: &Rig, doc: &Doc, w: &adapter::Window) {
 }
 
 /// R8. Every exit that refuses a call before its bytes reach the writer leaves a numbered loss
-/// for the exact window, which the page can pull after the answer was lost to a reload.
+/// for the exact window, which the page can pull after the answer was lost to a reload, and
+/// the writer got exactly what was committed and nothing else.
 #[test]
 fn r8_every_refusal_exit_leaves_a_loss_for_the_surviving_page() {
-    type Setup = fn(&Rig, &Doc, &adapter::Window) -> Result<String, adapter::Refused>;
+    /// The call's answer, the window the notice must name, and the bytes W's writer must have.
+    type Outcome = (Result<String, adapter::Refused>, PaneKey, Vec<u8>);
+    type Setup = fn(&Rig, &Doc, &adapter::Window) -> Outcome;
     let exits: [(&str, Setup); 6] = [
         ("a full writer queue refuses the call at once", |rig, doc, w| {
             fill_the_writer(rig, doc, w);
-            rig.input(doc, w, INPUT_QUEUE_CAPACITY as u64 + 1, b"K")
+            let refused = rig.input(doc, w, INPUT_QUEUE_CAPACITY as u64 + 1, b"K");
+            (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
         }),
         ("a parked call pumped into a full writer queue", |rig, doc, w| {
             fill_the_writer(rig, doc, w);
             let n = INPUT_QUEUE_CAPACITY as u64;
-            rig.input(doc, w, n + 2, b"K")?;
+            rig.input(doc, w, n + 2, b"K").unwrap();
             // Its number comes: the call before it takes the order past it into the full queue.
-            rig.input(doc, w, n + 1, b"J").map(|_| String::new())
+            let refused = rig.input(doc, w, n + 1, b"J");
+            assert!(refused.is_err(), "the call that completes the order is refused: {refused:?}");
+            (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
         }),
         ("a human's bytes past the window's allowance", |rig, doc, w| {
             let paste = vec![b'p'; 4 * 1024 * 1024 - 64];
-            rig.input(doc, w, 1, &paste)?;
-            rig.input(doc, w, 2, &paste)?;
-            rig.input(doc, w, 3, &paste)
+            rig.input(doc, w, 1, &paste).unwrap();
+            rig.input(doc, w, 2, &paste).unwrap();
+            let refused = rig.input(doc, w, 3, &vec![b'q'; 200]);
+            (refused, w.key.clone(), [paste.clone(), paste].concat())
         }),
         ("a reply past the replies' allowance", |rig, doc, w| {
-            rig.reply(doc, w, 1, &vec![b'r'; 64 * 1024 + 1])
+            let refused = rig.reply(doc, w, 1, &vec![b'r'; 64 * 1024 + 1]);
+            (refused, w.key.clone(), Vec::new())
         }),
-        ("a window with no writer queue", |rig, doc, _w| {
+        ("a window with no writer queue", |rig, doc, w| {
             let gone = rig.window("gone", 1);
             let key = rig.writer_queue_gone(gone);
             rig.remove_route(&key);
-            rig.input_for(doc, &key, 1, b"K")
+            let refused = rig.input_for(doc, &key, 1, b"K");
+            let _ = w;
+            (refused, key, Vec::new())
         }),
-        ("a writer queue that has closed", |rig, doc, _w| {
+        ("a writer queue that has closed", |rig, doc, w| {
             let closed = rig.window("closed", 1);
             let key = rig.writer_queue_gone(closed);
-            rig.input_for(doc, &key, 1, b"K")
+            let refused = rig.input_for(doc, &key, 1, b"K");
+            let _ = w;
+            (refused, key, Vec::new())
         }),
     ];
     for (name, setup) in exits {
@@ -369,25 +381,41 @@ fn r8_every_refusal_exit_leaves_a_loss_for_the_surviving_page() {
         let w = rig.window("W", 5);
         rig.navigate();
         let old = rig.open_page("s:1");
-        let result = setup(&rig, &old, &w);
+        let (result, named, expected) = setup(&rig, &old, &w);
         assert!(
-            result.is_err() || name.contains("pumped"),
-            "{name}: the refusal is told to the caller: {result:?}"
+            result.as_ref().is_err_and(|(_, loss)| loss.is_some()),
+            "{name}: the refusal is told to the caller, numbered: {result:?}"
         );
         // The refusal answer is lost to the reload: the surviving page pulls the loss.
         rig.navigate();
         let next = rig.open_page("s:2");
         let owed = rig.pull(&next).unwrap();
-        assert!(
-            !owed.is_empty() && owed.iter().all(|notice| notice.loss > 0),
-            "{name}: a numbered loss survives for the surviving page: {owed:?}"
+        assert_eq!(
+            owed.iter().map(|notice| notice.key.clone()).collect::<Vec<_>>(),
+            vec![named],
+            "{name}: one numbered notice, for the exact window: {owed:?}"
         );
-        let written = rig.written(&w);
         assert!(
-            !written.contains(&b'K'),
-            "{name}: no refused byte reaches the writer"
+            Some(owed[0].loss) >= result.unwrap_err().1,
+            "{name}: and it is the caller's loss or a later one for the same window"
         );
+        assert_eq!(rig.written(&w), expected, "{name}: the writer got exactly what was committed");
     }
+}
+
+/// Finding 6 (R10). A confirmation the old document makes as the page reloads, with the
+/// navigation between the host's two steps on the earlier head, clears nothing the next page
+/// has not seen.
+#[test]
+fn r10_a_confirmation_across_a_navigation_clears_nothing_unseen() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let old = rig.open_page("s:1");
+    let loss = rig.skip(&old, &w, 1).unwrap();
+    rig.told_across_navigation(&old, &[(w.key.clone(), loss)]);
+    let next = rig.open_page("s:2");
+    assert!(names(&rig.pull(&next).unwrap(), &w.key), "the next page has not seen it yet");
 }
 
 /// R9. The old page's timeout skip for its missing number 1 arrives after the reload: only the
@@ -426,7 +454,11 @@ fn r9_a_skip_is_final_only_once_its_number_is_spent() {
     for number in 2..=slots + 1 {
         rig.input(&page, &w, number, b"x").unwrap();
     }
-    let absent = slots + 2;
+    // The page's spent numbers are kept too, up to as many again as it parks.
+    for number in slots + 2..=2 * slots + 1 {
+        rig.skip(&page, &w, number).unwrap();
+    }
+    let absent = 2 * slots + 2;
     let first = rig.skip(&page, &w, absent);
     assert!(
         first.is_err(),

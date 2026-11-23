@@ -405,16 +405,33 @@ fn the_largest_paste_goes_in_whole() {
     assert!(bytes[..paste.len()] == paste[..] && bytes[paste.len()] == b'Z');
 }
 
-/// A pane whose program reads one byte, says it did, waits `wait` seconds, then reads the rest
-/// (`count` bytes in all): the reader's first byte proves its writer is writing.
+/// A pane whose program reads one byte, says it did, waits until the test lets it go, then
+/// reads the rest (`count` bytes in all): the reader's first byte proves its writer is
+/// writing, and the test, not a timer, decides when the program reads on. The last is the
+/// way to let it go.
 #[allow(clippy::unwrap_used, reason = "a test fixture failure must fail the test")]
 fn begun_reader(
     panes: &Arc<PaneTable>,
     arbiter: &Arc<InputArbiter>,
     inputs: &InputQueue,
-    wait: u64,
     count: usize,
-) -> (PaneKey, mpsc::Receiver<u8>, mpsc::Receiver<Vec<u8>>) {
+) -> (
+    PaneKey,
+    mpsc::Receiver<u8>,
+    mpsc::Receiver<Vec<u8>>,
+    impl FnOnce(),
+) {
+    static FIFOS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let hold = std::env::temp_dir().join(format!(
+        "cf-panes-hold-{}-{}",
+        std::process::id(),
+        FIFOS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    assert!(std::process::Command::new("/usr/bin/mkfifo")
+        .arg(&hold)
+        .status()
+        .unwrap()
+        .success());
     let opened = panes
         .open(
             Path::new("/tmp"),
@@ -425,7 +442,8 @@ fn begun_reader(
                     "stty raw -echo; printf READY; dd bs=1 count=1 2>/dev/null".to_owned()
                 } else {
                     format!(
-                        "stty raw -echo; printf READY; dd bs=1 count=1 2>/dev/null; sleep {wait}; head -c {}",
+                        "stty raw -echo; printf READY; dd bs=1 count=1 2>/dev/null; cat '{}' >/dev/null; head -c {}",
+                        hold.display(),
                         count - 1
                     )
                 },
@@ -455,7 +473,13 @@ fn begun_reader(
         reader.read_exact(&mut bytes[1..]).unwrap();
         done.send(bytes).unwrap();
     });
-    (key, begun, finished)
+    let release = move || {
+        if count > 1 {
+            std::fs::write(&hold, b"").unwrap();
+        }
+        let _ = std::fs::remove_file(&hold);
+    };
+    (key, begun, finished, release)
 }
 
 /// R13 (and P4-D). The paste has begun, proved by the reader's first byte and not by a sleep;
@@ -468,13 +492,15 @@ fn a_reply_after_the_pastes_first_byte_reaches_the_program_after_the_whole_paste
     let panes = Arc::new(PaneTable::new());
     let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
     let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
-    let (key, begun, finished_reading) =
-        begun_reader(&panes, &arbiter, &inputs, 1, paste.len() + 1);
+    let (key, begun, finished_reading, release) =
+        begun_reader(&panes, &arbiter, &inputs, paste.len() + 1);
     inputs.begin_page("page").unwrap();
     let ticket = admitted(&inputs, "page", &key, 1, &paste);
     let first = begun.recv_timeout(Duration::from_secs(8)).unwrap();
     assert_eq!(first, 0x1b, "the reader saw the paste's first byte");
     let answer = reply(&inputs, &key, 2, b"R").unwrap();
+    // The reply is admitted while the reader still holds the paste: now it reads on.
+    release();
     finished(&inputs, "page", &ticket);
     finished(&inputs, "page", &answer);
     let bytes = finished_reading.recv_timeout(Duration::from_secs(20)).unwrap();
@@ -494,8 +520,8 @@ fn a_call_handed_to_a_blocked_writer_is_written_before_the_new_pages_key_and_oth
     let panes = Arc::new(PaneTable::new());
     let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
     let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
-    let (w, w_begun, w_done) = begun_reader(&panes, &arbiter, &inputs, 2, paste.len() + 2);
-    let (x, _x_begun, x_done) = begun_reader(&panes, &arbiter, &inputs, 0, 1);
+    let (w, w_begun, w_done, release_w) = begun_reader(&panes, &arbiter, &inputs, paste.len() + 2);
+    let (x, _x_begun, x_done, _release_x) = begun_reader(&panes, &arbiter, &inputs, 1);
     inputs.begin_page("s:1").unwrap();
     let paste_ticket = admitted(&inputs, "s:1", &w, 1, &paste);
     assert_eq!(w_begun.recv_timeout(Duration::from_secs(8)).unwrap(), 0x1b);
@@ -513,6 +539,7 @@ fn a_call_handed_to_a_blocked_writer_is_written_before_the_new_pages_key_and_oth
         "window X gets its key while W is blocked"
     );
     assert!(w_done.try_recv().is_err(), "W is still blocked on its paste");
+    release_w();
     finished(&inputs, "s:2", &d);
     let _ = (paste_ticket, k);
     let bytes = w_done.recv_timeout(Duration::from_secs(30)).unwrap();

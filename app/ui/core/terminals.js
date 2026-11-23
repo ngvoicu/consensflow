@@ -151,6 +151,16 @@ export class TerminalsView {
     this.#link.open(epoch)
   }
 
+  /** A place among what is typed in `pane`, taken where a drop is made; null (and said) while the terminals are read-only. */
+  holdPlace(pane) {
+    return this.#link.holdPlace(pane)
+  }
+
+  /** A place a drop did not use: its number is let go. */
+  releasePlace(place) {
+    this.#link.releasePlace(place)
+  }
+
   /** What the host owes the person (at activation, by a pull, or from its event): shown, then confirmed. */
   receive(owed) {
     return this.#link.receive(owed)
@@ -162,41 +172,48 @@ export class TerminalsView {
   }
 
   /**
-   * One window's row: the window by name (a window that has closed, by the name it last had),
-   * what may be missing, and a way to dismiss it. A newer version of the same window's loss
-   * updates its row. True once the row is there to read.
+   * One window's row: the window by name (a window that has closed, by the name it last had
+   * and its generation), what may be missing, and a way to dismiss it. A newer version of the
+   * same window's loss updates its row. True only once a person can see the row: in view, not
+   * under a dialog, with Dismiss within the pointer's reach.
    */
-  #showNotice({ pane, loss, closed, text }) {
+  #showNotice({ pane, loss, closed, name, text }) {
     const key = paneKey(pane)
-    const name = this.#nameOf(pane)
+    const called = name ?? this.#nameOf(pane)
     const said = closed
-      ? `${name} has closed. Typing sent to it just before may not have arrived.`
-      : `${name}: ${text}`
-    let row = [...this.#noticeList.children].find((item) => item.dataset.window === key)
-    if (row === undefined) {
-      row = element('li', 'input-notice')
-      row.dataset.window = key
-      const words = element('span', 'input-notice-text')
-      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
-        row.remove()
-        this.#noticeList.hidden = this.#noticeList.children.length === 0
-      })
-      row.append(words, dismiss)
-      this.#noticeList.append(row)
-    }
+      ? `${called} (window ${pane.generation}) has closed. Typing sent to it just before may not have arrived.`
+      : `${called}: ${text}`
+    const row = this.#row(key)
     row.dataset.loss = String(loss ?? '')
     row.dataset.state = closed ? 'closed' : 'open'
+    row.dataset.generation = String(pane.generation)
     row.firstElementChild.textContent = said
     this.#noticeList.hidden = false
-    return true
+    return this.#seen(row)
   }
 
   /** The losses past the host's bound, as one row of their own. */
   #showOverflow({ version, count }) {
-    let row = [...this.#noticeList.children].find((item) => item.dataset.window === 'overflow')
+    const row = this.#row('overflow')
+    row.dataset.version = String(version)
+    row.firstElementChild.textContent = `and ${count} more window${count === 1 ? '' : 's'} may not have received what you typed. Check what appeared in your other windows.`
+    this.#noticeList.hidden = false
+    return this.#seen(row)
+  }
+
+  /** What was dropped and could not be typed, as a row of its own. */
+  say(text) {
+    const row = this.#row(`say:${text}`)
+    row.firstElementChild.textContent = text
+    this.#noticeList.hidden = false
+  }
+
+  /** The row for `window`, made if it is not there. */
+  #row(window) {
+    let row = [...this.#noticeList.children].find((item) => item.dataset.window === window)
     if (row === undefined) {
       row = element('li', 'input-notice')
-      row.dataset.window = 'overflow'
+      row.dataset.window = window
       const words = element('span', 'input-notice-text')
       const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
         row.remove()
@@ -205,10 +222,31 @@ export class TerminalsView {
       row.append(words, dismiss)
       this.#noticeList.append(row)
     }
-    row.dataset.version = String(version)
-    row.firstElementChild.textContent = `and ${count} more window${count === 1 ? '' : 's'} may not have received what you typed. Check what appeared in your other windows.`
-    this.#noticeList.hidden = false
-    return true
+    return row
+  }
+
+  /** Whether a person can see and reach the row: in the window, inside the list, and on top. */
+  #seen(row) {
+    if (document.hidden) return false
+    const box = row.getBoundingClientRect()
+    if (box.width === 0 || box.height === 0) return false
+    const list = this.#noticeList.getBoundingClientRect()
+    const inside =
+      box.top >= Math.max(0, list.top) - 0.5 &&
+      box.bottom <= Math.min(window.innerHeight, list.bottom) + 0.5 &&
+      box.left >= 0 &&
+      box.right <= window.innerWidth
+    if (!inside) return false
+    const onTop = (x, y) => {
+      const at = document.elementFromPoint(x, y)
+      return at !== null && row.contains(at)
+    }
+    const words = row.firstElementChild.getBoundingClientRect()
+    const dismiss = row.lastElementChild.getBoundingClientRect()
+    return (
+      onTop(words.left + Math.min(words.width, 8), words.top + words.height / 2) &&
+      onTop(dismiss.left + dismiss.width / 2, dismiss.top + dismiss.height / 2)
+    )
   }
 
   #nameOf(pane) {
@@ -295,10 +333,11 @@ export class TerminalsView {
    * keyboard is the window's after it, so what the human types next follows.
    * False where the window has closed since, and nothing is typed.
    */
-  pasteInto(pane, text, { focus }) {
+  pasteInto(pane, text, { focus, place = null }) {
     const emulator = this.#registry.get(pane)
     if (emulator === null) return false
-    emulator.paste(text)
+    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))
+    else emulator.paste(text)
     if (focus) emulator.terminal?.focus()
     return true
   }
@@ -600,6 +639,7 @@ export class TerminalsView {
     // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
     this.#names.set(entry.key, name)
+    this.#link.nameWindow(entry.pane, name)
     entry.meeting = Boolean(board.project?.meeting)
     entry.ownHands = board.project?.ownHands === true
     const history = button(
