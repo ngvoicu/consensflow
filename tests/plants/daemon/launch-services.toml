@@ -73,6 +73,45 @@ file = "app/src-tauri/src/updates/relaunch.rs"
 find = '"$opener" "$@" && exit 0'
 replace = '"$opener" "$@"; exit 0'
 
+# A temporary LaunchServices failure must not force the direct start without a retry.
+[[plant]]
+name = "launch-services: a failed open is not retried"
+meant = "retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds"
+runs = ["app-updates"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '''for delay in 0.5 1 2; do
+    /bin/sleep "$delay"
+    if "$opener" "$@"; then
+        say "ConsensFlow relaunch: $opener succeeded after failed tries with statuses $opened"
+        exit 0
+    else
+        status=$?
+        say "ConsensFlow relaunch: $opener failed with status $status"
+        opened="$opened, $status"
+    fi
+done'''
+replace = ': # the retry was left out'
+
+# Every failed attempt must be recorded even when a later open succeeds.
+[[plant]]
+name = "launch-services: failed open attempts are not logged"
+meant = "retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds"
+runs = ["app-updates"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = 'say "ConsensFlow relaunch: $opener failed with status $opened"'
+replace = ': # the first failed attempt was not logged'
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '        say "ConsensFlow relaunch: $opener failed with status $status"'
+replace = '        : # a failed retry was not logged'
+
 # The failure without a word (T-2118, blocker 3): nothing is said, or nothing where the app's log
 # cannot be written.
 [[plant]]

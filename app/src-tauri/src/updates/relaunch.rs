@@ -162,18 +162,31 @@ pub(super) fn launch_services_with(handoff: Handoff) -> Result<std::process::Chi
 /// It waits for the old app to end, however long that takes, and nothing else decides: an app
 /// that hangs is one the person force-quits, and the helper goes on. Then it opens the bundle
 /// with no `-n`, so that where the person reopened the app meanwhile that one is brought up and
-/// no second starts. A failed `open` is said and the app is started directly, the way it was
-/// before LaunchServices. Where that fails too the old app is gone and no one else will start
-/// one, so the helper says what failed and to open ConsensFlow from the Finder: in the app's log,
-/// and where that cannot be written, in the system log (`logger`). `/bin/sleep` is the
-/// system's by its path: the helper keeps the old app's environment, whose PATH may hold no
-/// `sleep` (T-2114, T-2118).
+/// no second starts. A failed `open` is said and retried after 0.5, 1 and 2 seconds; the helper
+/// reports the failed tries on a successful retry, or starts the app directly after all fail,
+/// the way it was before LaunchServices. Where that fails too the old app is gone and no one
+/// else will start one, so the helper says what failed and to open ConsensFlow from the Finder:
+/// in the app's log, and where that cannot be written, in the system log (`logger`). `/bin/sleep`
+/// is the system's by its path: the helper keeps the old app's environment, whose PATH may hold
+/// no `sleep` (T-2114, T-2118).
 #[cfg(target_os = "macos")]
 const HELPER: &str = r#"old=$1; executable=$2; opener=$3; logger=$4; log=$5; keep=$6; shift 6
 say() { printf '%s\n' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }
 while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done
 "$opener" "$@" && exit 0
 opened=$?
+say "ConsensFlow relaunch: $opener failed with status $opened"
+for delay in 0.5 1 2; do
+    /bin/sleep "$delay"
+    if "$opener" "$@"; then
+        say "ConsensFlow relaunch: $opener succeeded after failed tries with statuses $opened"
+        exit 0
+    else
+        status=$?
+        say "ConsensFlow relaunch: $opener failed with status $status"
+        opened="$opened, $status"
+    fi
+done
 say "ConsensFlow relaunch: $opener failed with status $opened; starting the installed app directly"
 shift "$keep"
 "$executable" "$@" && exit 0

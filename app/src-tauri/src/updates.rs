@@ -1527,6 +1527,87 @@ mod tests {
         assert_eq!(fixture.asked("executable"), None, "started it directly too");
     }
 
+    /// A transient LaunchServices failure gets another `open`, and the successful retry starts
+    /// the app without the helper starting its executable directly.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds() {
+        let fixture = Handoff::new(0, 0);
+        std::fs::write(
+            fixture.path("open"),
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{asked}'\nif [ $(/usr/bin/wc -l < '{asked}') -eq 1 ]; then exit 41; fi\n'{executable}' from-open\n",
+                asked = fixture.path("open-asked").display(),
+                executable = fixture.path("executable").display(),
+            ),
+        )
+        .expect("write the opener");
+        assert!(fixture.start(u32::MAX, "log").wait().unwrap().success());
+        let asked = fixture.asked("open").expect("the opener was asked");
+        let expected = format!(
+            "--env CONSENSFLOW_HOME={} {} --args --first",
+            fixture.directory.path().display(),
+            fixture.path("ConsensFlow.app").display()
+        );
+        assert_eq!(asked.lines().collect::<Vec<_>>(), [expected.as_str(); 2]);
+        assert_eq!(fixture.asked("executable"), Some("from-open\n".into()));
+        let log = fixture.log();
+        assert!(log.contains("failed with status 41"), "the log: {log:?}");
+        let success = log.lines().find(|line| line.contains("succeeded"));
+        assert!(
+            success.is_some_and(|line| line.contains("41")),
+            "the log: {log:?}"
+        );
+        assert!(
+            !log.contains("starting the installed app directly"),
+            "the log: {log:?}"
+        );
+    }
+
+    /// Every failed `open` is reported, including its status in the direct-start line; the
+    /// final fallback follows the short retries with the old app's arguments.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retries_a_failed_open_then_starts_directly_and_reports_every_status() {
+        let fixture = Handoff::new(0, 0);
+        std::fs::write(
+            fixture.path("open"),
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{asked}'\nexit $((10 + $(/usr/bin/wc -l < '{asked}')))\n",
+                asked = fixture.path("open-asked").display(),
+            ),
+        )
+        .expect("write the opener");
+        let before = std::time::Instant::now();
+        assert!(fixture.start(u32::MAX, "log").wait().unwrap().success());
+        let elapsed = before.elapsed();
+        let asked = fixture.asked("open").expect("the opener was asked");
+        assert_eq!(asked.lines().count(), 4, "the opener was asked: {asked:?}");
+        assert!(
+            elapsed >= std::time::Duration::from_secs(3),
+            "the retries took {elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "the retries took {elapsed:?}"
+        );
+        assert_eq!(fixture.asked("executable"), Some("--first\n".into()));
+        let log = fixture.log();
+        for status in [11, 12, 13, 14] {
+            assert!(
+                log.contains(&format!("failed with status {status}")),
+                "the log: {log:?}"
+            );
+        }
+        let direct = log
+            .lines()
+            .find(|line| line.contains("starting the installed app directly"));
+        assert!(
+            direct.is_some_and(|line| line.contains("11, 12, 13, 14")),
+            "the log: {log:?}"
+        );
+    }
+
     /// An opener that fails leaves the person with their app (T-2114): the helper starts the
     /// installed app directly, with the old app's arguments, and says why in the log.
     #[cfg(target_os = "macos")]
