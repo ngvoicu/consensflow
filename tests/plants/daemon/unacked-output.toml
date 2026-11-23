@@ -331,15 +331,15 @@ meant = "tiny_read_every_read_of_a_batch_stamps_the_output_clock_as_it_is_taken_
 runs = ["tiny-output"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/screen.rs"
-find = '''        let changed = screen.feed(bytes);
-        feeding.noted(changed);'''
-replace = '''        let changed = screen.feed(bytes);
-        if bytes != b"x" {
-            feeding.noted(changed);
-        } else {
-            std::mem::forget(feeding);
-        }'''
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = '''        let now = millis_since(self.clock.now(), self.started).saturating_add(1);
+        self.printed.store(now, Ordering::Release);'''
+replace = '''        let now = millis_since(self.clock.now(), self.started).saturating_add(1);
+        if self.printed.load(Ordering::Acquire) != 0 {
+            self.feeding.store(false, Ordering::Release);
+            return;
+        }
+        self.printed.store(now, Ordering::Release);'''
 
 [[plant]]
 name = "kept digest: a fill looks at every blank cell first"
