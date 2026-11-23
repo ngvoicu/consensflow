@@ -126,10 +126,20 @@ fn a_hold_for_a_retry_is_the_task_s_hold_and_one_fact_written_with_it() {
     assert_eq!(thread.task.held_until.as_deref(), Some(UNTIL));
     assert_eq!(
         facts(&ledger),
-        vec![(1, "failed".to_owned(), 1, "it dropped".to_owned(), "k1".to_owned(), None)]
+        vec![(
+            1,
+            "failed".to_owned(),
+            1,
+            "it dropped".to_owned(),
+            "k1".to_owned(),
+            None
+        )]
     );
     let retry = thread.task.retry.expect("the card reads the retry");
-    assert_eq!((retry.kind.as_str(), retry.which, retry.of), ("failed", 1, 2));
+    assert_eq!(
+        (retry.kind.as_str(), retry.which, retry.of),
+        ("failed", 1, 2)
+    );
     assert_eq!(retry.due_at.as_deref(), Some(UNTIL));
 }
 
@@ -152,7 +162,11 @@ fn mains_own_resume_of_the_hold_carries_the_fact_once_and_the_card_follows_the_w
         .resume_held_task(project.id, 1, RESUME_WORDS)
         .expect("resumed");
     let message = moved.message.expect("main's words").id;
-    assert_eq!(facts(&ledger)[0].5, Some(message), "the fact names its Resume");
+    assert_eq!(
+        facts(&ledger)[0].5,
+        Some(message),
+        "the fact names its Resume"
+    );
     assert_eq!(ledger.turn_retry_tries(message).expect("read"), 1);
     // The Resume is on its way: the card still says the retry, with no time.
     let on_its_way = ledger
@@ -216,5 +230,9 @@ fn a_resume_of_another_hold_than_the_fact_s_links_nothing() {
         .resume_held_task(project.id, 1, RESUME_WORDS)
         .expect("resumed at its time");
     assert!(moved.message.is_some());
-    assert_eq!(facts(&ledger)[0].5, None, "the stale fact was not taken for this hold");
+    assert_eq!(
+        facts(&ledger)[0].5,
+        None,
+        "the stale fact was not taken for this hold"
+    );
 }

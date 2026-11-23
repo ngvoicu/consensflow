@@ -78,7 +78,11 @@ impl Dispatcher {
         if n >= TRIES {
             return Ok(Tried::Fails(format!("{said} (tried again twice)")));
         }
-        let wait = if n == 0 { unit } else { SECOND_TRY_UNITS * unit };
+        let wait = if n == 0 {
+            unit
+        } else {
+            SECOND_TRY_UNITS * unit
+        };
         let until = time::iso(self.now() + wait);
         self.seams.ledger.borrow_mut().hold_task_for_retry(
             project.id,

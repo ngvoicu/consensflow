@@ -1,8 +1,8 @@
-//! A turn that fails is tried again in its window, and one refused for its account is tried
-//! once, before the task fails or the member is held (D3's N35 and R2). The stand-in's turn
-//! fails a given number of times (`FAIL-TURNS n`), the retry's among them, and the daemon's
-//! tries run at a unit of half a second (`CONSENSFLOW_TURN_RETRY_MS`) in place of its thirty:
-//! the stand-in Claude Code and the stand-in Codex each run both cases.
+//! A turn that fails is tried again in its window, twice, before its task fails (D3's N35): each
+//! try is a hold of the task and main's own Resume. The stand-in's turn fails a given number of
+//! times (`FAIL-TURNS n`), the retries' among them, and the daemon's tries run at a unit of half
+//! a second (`CONSENSFLOW_TURN_RETRY_MS`) in place of its thirty: the stand-in Claude Code, Codex
+//! and Devin each run both cases. Muse's echo stand-in cannot fail a turn, and the rig has no Pi.
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
 
@@ -11,8 +11,8 @@ use crate::{config, secs, Outcome};
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
 
-/// The rig's configuration: the daemon tries a failed or refused turn at a unit of half a
-/// second, and a worker of `kind` runs on its stand-in.
+/// The rig's configuration: the daemon tries a failed turn at a unit of half a second, and a
+/// worker of `kind` runs on its stand-in.
 fn retrying(kind: &str) -> Config {
     let config = match kind {
         "codex" => config().codex(FAKE_CODEX),
@@ -20,9 +20,8 @@ fn retrying(kind: &str) -> Config {
         _ => config(),
     };
     // Devin's adapter reads a window at work for 30 seconds after a message of the user's its
-    // agent has not answered, an error end of the turn or not (`TAKEN_IN_MS`): its retry waits
-    // that long for the window's rest, so its unit is eight times the others', and a retry's
-    // five minutes (ten units) are 40 seconds.
+    // agent has not answered, an error end of the turn or not (`TAKEN_IN_MS`): a Resume waits
+    // that long for the window's rest, so its unit is eight times the others'.
     let unit = if kind == "devin" { "4000" } else { "500" };
     config.daemon_var("CONSENSFLOW_TURN_RETRY_MS", unit)
 }
@@ -53,6 +52,31 @@ fn results_of(project: &Project, number: i64) -> cf_e2e::Result<usize> {
         }))
 }
 
+/// How many times main's own Resume was pasted for T-1: one for each try.
+fn resumes_of(project: &Project, number: i64) -> cf_e2e::Result<usize> {
+    Ok(project.task(number)?["messages"]
+        .as_array()
+        .map_or(0, |messages| {
+            messages
+                .iter()
+                .filter(|message| {
+                    message["kind"] == "task"
+                        && message["body"] == "Resumed: Go on where you stopped."
+                })
+                .count()
+        }))
+}
+
+/// The text of the result of T-1.
+fn result_of(project: &Project, number: i64) -> cf_e2e::Result<String> {
+    Ok(project.task(number)?["messages"]
+        .as_array()
+        .and_then(|messages| messages.iter().find(|message| message["kind"] == "result"))
+        .and_then(|message| message["body"].as_str())
+        .unwrap_or_default()
+        .to_owned())
+}
+
 fn failed_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
     Ok(project
         .inbox("chief")?
@@ -77,6 +101,16 @@ fn two_failed_turns_then_an_answer(kind: &str) -> Outcome {
         ))
     })?;
     assert_eq!(results_of(&project, 1)?, 1, "one result");
+    assert!(
+        result_of(&project, 1)?.contains("AFTER_TWO"),
+        "the answer of the third turn is the result: {}",
+        result_of(&project, 1)?
+    );
+    assert_eq!(
+        resumes_of(&project, 1)?,
+        2,
+        "two Resumes were pasted, one for each try"
+    );
     assert!(failed_notes(&project)?.is_empty(), "nothing failed");
     rig.close()?;
     Ok(())
@@ -99,6 +133,7 @@ fn a_turn_that_always_fails(kind: &str) -> Outcome {
     let notes = failed_notes(&project)?;
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("(tried again twice)"), "{notes:?}");
+    assert_eq!(resumes_of(&project, 1)?, 2, "two Resumes, never a third");
     rig.close()?;
     Ok(())
 }

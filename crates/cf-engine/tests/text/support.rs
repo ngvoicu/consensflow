@@ -178,6 +178,7 @@ pub fn task(number: i64, title: &str, assignee: Option<&str>, state: &str) -> Ta
         created_at: "2026-10-01T09:00:00.000Z".to_owned(),
         updated_at: "2026-10-01T09:00:00.000Z".to_owned(),
         aside: None,
+        retry: None,
     }
 }
 

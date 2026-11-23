@@ -25,15 +25,18 @@ pub struct RetryFact<'a> {
 }
 
 /// The fact of the hold the task has just been put in (its `paused_at` names that hold).
-pub(crate) fn write(
-    store: &Store,
-    task: i64,
-    fact: &RetryFact<'_>,
-) -> Result<(), LedgerError> {
+pub(crate) fn write(store: &Store, task: i64, fact: &RetryFact<'_>) -> Result<(), LedgerError> {
     store.db.execute(
         "INSERT INTO turn_retry (task_id, session_id, kind, try, said, cause, paused_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT paused_at FROM task WHERE id = ?1))",
-        params![task, fact.session, fact.kind, fact.which, fact.said, fact.cause],
+        params![
+            task,
+            fact.session,
+            fact.kind,
+            fact.which,
+            fact.said,
+            fact.cause
+        ],
     )?;
     Ok(())
 }

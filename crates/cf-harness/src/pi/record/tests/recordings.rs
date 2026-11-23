@@ -397,5 +397,8 @@ fn n35_a_failed_end_is_out_of_view_once_a_later_paste_is_in_the_record() {
         }
     }
     assert!(checked >= 200, "every prefix was read: {checked}");
-    assert!(failed_ends >= 3, "failed ends were actually met: {failed_ends}");
+    assert!(
+        failed_ends >= 3,
+        "failed ends were actually met: {failed_ends}"
+    );
 }

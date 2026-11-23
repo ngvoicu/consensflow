@@ -1014,11 +1014,7 @@ impl Dispatcher {
             .is_some_and(|thread| {
                 thread.task.id == in_hand.task.id && thread.task.state == "working"
             });
-        if !working
-            || !observed.settled
-            || observed.failed
-            || observed.pending().total() > 0
-        {
+        if !working || !observed.settled || observed.failed || observed.pending().total() > 0 {
             return Ok(());
         }
         // A refusal a pass would act on is the quota's to settle, not a result: the look

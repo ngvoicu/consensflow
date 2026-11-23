@@ -105,7 +105,9 @@ pub use staff_rules::undo_migration_0026;
 
 /// Remove the turn-retry table when a fixture reconstructs a ledger before 0045.
 pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
-    db.execute_batch("DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry")
+    db.execute_batch(
+        "DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
+    )
 }
 
 /// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
