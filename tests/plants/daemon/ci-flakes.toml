@@ -139,12 +139,16 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         (self.exit)(code);
 '''
 replace = '''
         std::thread::sleep(Duration::from_millis(1_000));
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         (self.exit)(code);
 '''
 
@@ -166,11 +170,15 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         (self.exit)(code);
 '''
 replace = '''
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(code);
 '''
@@ -183,11 +191,15 @@ runs = ["stop-program"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         (self.exit)(code);
 '''
 replace = '''
-        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(code);
 '''

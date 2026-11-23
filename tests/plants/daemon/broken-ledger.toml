@@ -277,8 +277,11 @@ runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = '''    if used && matches!('''
-replace = '''    if false && used && matches!('''
+find = '''    if used
+        && matches!('''
+replace = '''    if false
+        && used
+        && matches!('''
 
 [[plant]]
 name = "broken ledger: a held log blocks the ordinary stop"
