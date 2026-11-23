@@ -17,6 +17,9 @@ use crate::tasks::{no_longer_failed, no_longer_waiting};
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
 
+/// Told the cause when the ledger breaks.
+type BrokenHook = Box<dyn FnMut(&str)>;
+
 pub(crate) struct Store {
     pub(crate) db: Connection,
     pub(crate) question_run: String,
@@ -31,7 +34,14 @@ pub(crate) struct Store {
     /// never be committed. Every write after it is refused.
     broken: Option<String>,
     /// Told once, the moment the ledger breaks.
-    on_broken: Option<Box<dyn FnMut(&str)>>,
+    on_broken: Option<BrokenHook>,
+    /// The connection that was left in its transaction when the ledger broke, kept
+    /// open so that its lock holds (no other daemon takes the file while this
+    /// process ends) and never read or written again: [`Store::db`] is an empty
+    /// ledger in memory from then on, so that every read and every write that does
+    /// not go through [`Store::write`] fails too, and none shows what was never
+    /// committed.
+    parked: Option<Connection>,
 }
 
 impl Store {
@@ -50,7 +60,22 @@ impl Store {
             logged: Vec::new(),
             broken: None,
             on_broken: None,
+            parked: None,
         }
+    }
+
+    /// Lets go of the connection parked at a break: its transaction is rolled
+    /// back with it and the file's lock goes.
+    pub(crate) fn release_parked(&mut self) {
+        if let Some(parked) = self.parked.take() {
+            let _ = parked.close();
+        }
+    }
+
+    /// Whether a connection is parked in a transaction (a test's look).
+    #[cfg(test)]
+    pub(crate) fn parked_open(&self) -> bool {
+        self.parked.as_ref().is_some_and(|db| !db.is_autocommit())
     }
 
     /// Why the ledger is broken, if it is.
@@ -93,10 +118,16 @@ impl Store {
             },
             Ok(Err(cause)) => Err(self.roll_back(cause)),
             Err(unwound) => {
-                // The panic goes on whatever the rollback did; the ledger
-                // says so to everything after it if it did not take.
-                let _ = self.roll_back(LedgerError::refused("panicked", "an operation panicked"));
-                panic::resume_unwind(unwound)
+                // The panic goes on whatever the rollback did, as it was; a rollback
+                // that failed is said after its words, and the ledger refuses
+                // everything after it if the transaction is open still.
+                let rolled = self.roll_back(LedgerError::refused("panicked", "a panic"));
+                match (rolled, crate::rollback::words_of(&unwound)) {
+                    (LedgerError::Unrolled { rollback, .. }, Some(words)) => panic::resume_unwind(
+                        Box::new(format!("{words}; its rollback failed too: {rollback}")),
+                    ),
+                    _ => panic::resume_unwind(unwound),
+                }
             }
         }
     }
@@ -134,6 +165,9 @@ impl Store {
             return;
         }
         self.broken = Some(cause.to_owned());
+        if let Ok(memory) = Connection::open_in_memory() {
+            self.parked = Some(std::mem::replace(&mut self.db, memory));
+        }
         if let Some(hook) = self.on_broken.as_mut() {
             hook(cause);
         }
@@ -615,8 +649,12 @@ mod tests {
             "{said}"
         );
         assert!(
-            !store.db.is_autocommit(),
-            "the refused rollback left it open"
+            store.parked_open(),
+            "the refused rollback left it open, parked"
+        );
+        assert!(
+            store.message(1).is_err(),
+            "a read after the break shows nothing of what was not committed"
         );
         assert_eq!(told.borrow().len(), 1, "told once");
         assert!(store.broken().is_some());
@@ -673,7 +711,11 @@ mod tests {
                 panic!("in the middle of an operation");
             });
         }));
-        assert!(unwound.is_err(), "the panic went on");
+        let said = crate::rollback::words_of(&unwound.unwrap_err()).unwrap();
+        assert!(
+            said.starts_with("in the middle of an operation; its rollback failed too: "),
+            "the panic's words come first: {said}"
+        );
         assert!(store.broken().is_some());
         assert!(broken_refusal(store.write(|store| store.log(
             1,

@@ -131,14 +131,16 @@ pub(crate) fn withdraw_queued_note(
     message: &MessageView,
     reason: &str,
 ) -> Result<bool, LedgerError> {
-    let Some(now) = store.message(message.id)? else {
-        return Ok(false);
-    };
-    if now.kind != "note" || now.sender.is_some() || now.state != "queued" {
-        return Ok(false);
-    }
-    withdraw_each(store, now.project_id, &[now.id], reason)?;
-    Ok(true)
+    store.write(|store| {
+        let Some(now) = store.message(message.id)? else {
+            return Ok(false);
+        };
+        if now.kind != "note" || now.sender.is_some() || now.state != "queued" {
+            return Ok(false);
+        }
+        withdraw_each(store, now.project_id, &[now.id], reason)?;
+        Ok(true)
+    })
 }
 
 /// The tasks as a continuation names them.

@@ -136,6 +136,31 @@ pub enum StartError {
     /// failures.
     #[error("{0}")]
     Ledger(#[from] LedgerError),
+    /// The ledger cannot be saved to, or a home that was used has none: said in the words
+    /// the person is shown ([`crate::broken::words`]), and the process ends with
+    /// [`crate::broken::EXIT`], which the app does not start again.
+    #[error("{0}")]
+    CannotSave(String),
+}
+
+impl StartError {
+    /// The status the process ends with.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            StartError::CannotSave(_) => crate::broken::EXIT,
+            _ => 1,
+        }
+    }
+}
+
+/// A failure of the ledger at the start, as it is told: the words of a ledger that cannot
+/// be saved to, or the ledger's own.
+fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
+    if failed.cannot_save() {
+        StartError::CannotSave(crate::broken::words(file))
+    } else {
+        StartError::Ledger(failed)
+    }
 }
 
 /// A daemon that is running.
@@ -190,8 +215,18 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
     let home = config_root(&env).ok_or(StartError::NoHome)?;
+    // A home that was used and has no ledger is not a first use: it is refused, in the
+    // words of a ledger that cannot be saved to, and never started as an empty board.
+    // (Read before this start writes a line of its own.)
+    let used = crate::broken::home_was_used(&home);
     make_folder(&home, 0o777, Mkdir::Sync)
         .map_err(|failed| StartError::System(failed.to_string()))?;
+    let ledger_file = home.join("consensflow.db");
+    if used
+        && matches!(std::fs::symlink_metadata(&ledger_file), Err(error) if error.kind() == io::ErrorKind::NotFound)
+    {
+        return Err(StartError::CannotSave(crate::broken::words(&ledger_file)));
+    }
     let trace = Rc::new(Trace::new(&home));
     trace
         .started()
@@ -222,13 +257,15 @@ async fn run(
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
     let told = Rc::clone(&trace);
+    let ledger_file = home.join("consensflow.db");
     let ledger = open_ledger(
-        &home.join("consensflow.db"),
+        &ledger_file,
         LedgerOptions {
             trace: Box::new(move |event| told.event(event)),
             ..LedgerOptions::default()
         },
-    )?;
+    )
+    .map_err(|failed| at_start(&ledger_file, failed))?;
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
     let limits = Limits::of(&env);
@@ -244,10 +281,16 @@ async fn run(
             if swept == 1 { "" } else { "s" }
         ));
     }
-    ledger.borrow_mut().suspend_for_restart()?;
+    ledger
+        .borrow_mut()
+        .suspend_for_restart()
+        .map_err(|failed| at_start(&ledger_file, failed))?;
     // What a harness listed in an earlier life of this daemon is no record of what it lists
     // now: a submission is checked against a list read in this one (A4-28).
-    ledger.borrow_mut().forget_model_listings()?;
+    ledger
+        .borrow_mut()
+        .forget_model_listings()
+        .map_err(|failed| at_start(&ledger_file, failed))?;
     // What the app says, which a chief's launch reads afresh: a file that cannot be read
     // stops no start, and says nothing.
     let settings = Rc::new(SettingsFile::new(
@@ -277,7 +320,7 @@ async fn run(
         .connect(options.input, options.output);
     // The ledger can break in any operation; what is done then is done in one place.
     ledger.borrow_mut().on_broken(crate::broken::reaction(
-        &home.join("consensflow.db"),
+        &ledger_file,
         &errors,
         &bridge,
         &latch,
@@ -425,6 +468,10 @@ async fn run(
         },
         ledger: Rc::clone(&ledger),
         exit: Rc::clone(&options.exit),
+        fence: {
+            let bridge = bridge.clone();
+            Rc::new(move || bridge.fence())
+        },
     });
     arm(
         &latch,

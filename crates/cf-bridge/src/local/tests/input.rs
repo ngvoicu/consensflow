@@ -269,3 +269,26 @@ fn a_line_that_grows_past_the_limit_once_its_bytes_are_replaced_is_refused() {
         );
     });
 }
+
+#[test]
+fn a_fenced_bridge_refuses_a_request_and_drops_an_event_and_still_settles_an_answer() {
+    run(async {
+        let (bridge, mut wire) = lonely();
+        let served = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = std::rc::Rc::clone(&served);
+        bridge.on("ping", move |_, _| {
+            counted.set(counted.get() + 1);
+            async { Ok(json!({ "ok": true })) }
+        });
+        let heard = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = std::rc::Rc::clone(&heard);
+        let _hearing = bridge.on_event("tick", move |_| counted.set(counted.get() + 1));
+        bridge.fence();
+        wire.send(frame("req", "r-1", "ping", json!({}))).await;
+        wire.send(frame("evt", "r-2", "tick", json!({}))).await;
+        let answered = wire.wait_for_frames(1).await;
+        assert_eq!(answered[0]["body"]["ok"], false, "{answered:?}");
+        quiet().await;
+        assert_eq!((served.get(), heard.get()), (0, 0), "nothing was admitted");
+    });
+}

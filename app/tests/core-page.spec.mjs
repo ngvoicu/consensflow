@@ -16027,6 +16027,22 @@ test('says a restart of the daemon in its steps, and each thing only once it is 
   await expect(page.locator('#status')).toHaveText(notice)
 })
 
+test('says a ledger that cannot be saved to in the daemon\'s own words, and nothing of the page\'s own beside them', async ({
+  page,
+}) => {
+  await open(page)
+  const banner = page.getByRole('alert')
+  const words =
+    "Work has stopped because ConsensFlow can't save to its ledger at /home/me/.consensflow/consensflow.db. The disk may be full, failing or disconnected, or you may have lost write permission. Quit ConsensFlow. Once you've restored access to that ledger, reopen ConsensFlow. Check the board before retrying an unconfirmed change, because it may already be there. Choose Resume for each project so its members continue from their saved records."
+  await page.evaluate(
+    (payload) => window.__listeners.get('daemon-status')({ event: 'daemon-status', payload }),
+    { available: false, cause: words, retrying: false, ledger: true },
+  )
+  await expect(banner).toHaveText(words)
+  await expect(banner).not.toContainText('The daemon is not running')
+  await expect(banner).not.toContainText('Quit ConsensFlow and open it again')
+})
+
 test('says what to do with no project yet: start one; there is no board to read, no staff to open', async ({
   page,
 }) => {

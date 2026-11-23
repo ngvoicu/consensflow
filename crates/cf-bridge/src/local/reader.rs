@@ -11,7 +11,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::lines::{Line, Lines};
-use super::state::Inner;
+use super::state::{refusal, Inner};
 use super::Bridge;
 use crate::BridgeError;
 
@@ -117,6 +117,14 @@ impl Bridge {
                 "id {} has the wrong namespace for {}",
                 frame.id, frame.kind
             )));
+            return;
+        }
+        // A daemon that is ending admits no new work: a request is refused, an event
+        // dropped, and what this end asked is still answered.
+        if self.inner.is_fenced() && frame.kind != "res" {
+            if frame.kind == "req" {
+                self.respond(frame.id, frame.op, refusal("the daemon is stopping"));
+            }
             return;
         }
         match frame.kind.as_str() {

@@ -47,3 +47,11 @@ pub(crate) fn said(
         },
     }
 }
+
+/// The words a panic carried, if it carried words.
+pub(crate) fn words_of(payload: &Box<dyn std::any::Any + Send>) -> Option<String> {
+    payload
+        .downcast_ref::<&str>()
+        .map(|words| (*words).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+}

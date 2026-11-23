@@ -126,6 +126,13 @@ impl Bridge {
         self.inner.is_closed()
     }
 
+    /// The daemon is ending: from now on no request or event the peer sends is admitted
+    /// (a request is refused in words, an event dropped); what this end asked of the
+    /// peer is still answered.
+    pub fn fence(&self) {
+        self.inner.fence();
+    }
+
     /// Waits for the bridge to end and says why it did first: its input
     /// ended, it was closed, or its transport failed. The end is latched: it
     /// is told at once to whoever asks after it came, and to as many as ask.

@@ -9,7 +9,7 @@ use cf_bridge::{BridgeBuilder, BridgeError};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{DaemonFailure, StartedDaemon, DAEMON_STOP_GRACE};
+use super::{DaemonFailure, StartedDaemon, DAEMON_STOP_GRACE, LEDGER_EXIT};
 
 /// Starts a daemon and connects to it: its output carries the handle line,
 /// then the bridge's frames; its input carries the app's. A daemon that has
@@ -37,7 +37,16 @@ pub(crate) fn connect_daemon(
     })?;
     let failed = |child: &mut Child, cause: String| {
         let _ = child.kill();
-        let _ = child.wait();
+        let ended = child.wait();
+        // A daemon that ended for a ledger it cannot save to says so by its status: not a
+        // start to try again, whatever else it failed to say.
+        if ended.is_ok_and(|status| status.code() == Some(LEDGER_EXIT)) {
+            return DaemonFailure {
+                cause: crate::daemon::ledger_words(),
+                retry: false,
+                ledger: true,
+            };
+        }
         DaemonFailure::transient(cause)
     };
     // The handle line is read on a thread of its own, since the read has no

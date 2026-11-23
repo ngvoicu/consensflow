@@ -98,15 +98,21 @@ pub struct Stopping {
     pub ledger: Rc<RefCell<Ledger>>,
     /// How the process ends: the daemon's own exits; a test's is told it.
     pub exit: Rc<dyn Fn(i32)>,
+    /// Admits no new frame from the peer (the bridge's `fence`): a stop ends what is
+    /// begun and begins nothing.
+    pub fence: Rc<dyn Fn()>,
 }
 
 impl Stopping {
     /// The stop, for `why`: ends with the process's exit.
     pub async fn run(&self, why: &str) {
+        (self.fence)();
         let size = rss().map_or(0, megabytes);
+        // The deadline of the waiting starts here: a log that is held (another
+        // process has its lock) is waited for a moment and let go, never for good.
         self.errors
             .log()
-            .info(&format!("stop: {why}; rss {size} MB"));
+            .info_within(&format!("stop: {why}; rss {size} MB"), SETTLE);
         let waiting = async {
             let passes = async {
                 if let Some(passes) = self.passes.get() {
@@ -121,12 +127,12 @@ impl Stopping {
             // settled at the next start.
             self.api.drop_connections();
         }
-        self.tail();
+        self.tail(exit_code(why));
     }
 
     /// What is left to do, with no wait in it. Each step is its own: one that
-    /// fails or panics leaves the rest, and the process ends.
-    pub(crate) fn tail(&self) {
+    /// fails or panics leaves the rest, and the process ends with `code`.
+    pub(crate) fn tail(&self, code: i32) {
         if let Err(panicked) = contain_now(|| (self.ends_children)()) {
             self.errors.caught("the children did not end", &panicked);
         }
@@ -139,20 +145,33 @@ impl Stopping {
             let closed = contain_now(|| self.ledger.borrow_mut().close_in_place());
             match closed {
                 Ok(Ok(())) => {}
-                Ok(Err(failed)) => self
-                    .errors
-                    .log()
-                    .error("the ledger did not close", Some(&failed.to_string())),
+                Ok(Err(failed)) => self.errors.log().error_within(
+                    "the ledger did not close",
+                    Some(&failed.to_string()),
+                    SETTLE,
+                ),
                 Err(panicked) => self.errors.caught("the ledger did not close", &panicked),
             }
         } else {
-            self.errors.log().warn(
+            self.errors.log().warn_within(
                 "the trace was not written in time; its last lines may be missing",
-                None,
+                SETTLE,
             );
         }
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors
+            .log()
+            .info_within(&format!("exit {code}"), SETTLE);
+        (self.exit)(code);
+    }
+}
+
+/// How the process ends for a stop of this reason: 0 as at a quit, or the status a ledger
+/// that cannot save ends with ([`crate::broken::EXIT`]).
+fn exit_code(why: &str) -> i32 {
+    if why == crate::broken::WHY {
+        crate::broken::EXIT
+    } else {
+        0
     }
 }
 
@@ -185,7 +204,7 @@ pub(crate) fn arm(
         // The tail must be reached whatever goes wrong before it.
         if let Err(panicked) = contain(stopping.run(&why)).await {
             stop_errors.caught("the stop failed", &panicked);
-            stopping.tail();
+            stopping.tail(exit_code(&why));
         }
         done.send_replace(true);
     });

@@ -9,7 +9,8 @@ use std::path::Path;
 use std::rc::Rc;
 
 use cf_ledger::{
-    open_ledger, refuse_next_rollback, Ledger, NewChief, NewMember, NewProject, NewTask, Options,
+    open_ledger, refuse_next_rollback, Ledger, NewChief, NewMember, NewNote, NewProject, NewTask,
+    Options,
 };
 
 fn project(ledger: &mut Ledger) {
@@ -98,7 +99,13 @@ fn after_a_rollback_that_did_not_take_no_later_operation_seems_to_succeed() {
         .create_task(1, &task(1, "later"))
         .expect_err("refused");
     assert_eq!(later.code(), Some("ledger-broken"), "{later}");
-    assert_eq!(tasks(&ledger), 0, "no row shows");
+    assert!(
+        ledger
+            .sqlite()
+            .query_row("SELECT COUNT(*) FROM task", [], |row| row.get::<_, i64>(0))
+            .is_err(),
+        "no row shows"
+    );
     drop(ledger);
     assert_eq!(tasks_in(&file), 0, "a reopening holds nothing");
 }
@@ -132,4 +139,45 @@ fn a_migration_whose_rollback_is_refused_says_so_after_its_own_failure() {
     );
     assert!(said.contains("its rollback failed too"), "{said}");
     assert!(!db.is_autocommit(), "the transaction is open still");
+}
+
+#[test]
+fn a_note_is_not_withdrawn_after_the_break_and_nothing_of_the_dirty_transaction_is_read() {
+    let home = tempfile::tempdir().expect("a home");
+    let file = home.path().join("consensflow.db");
+    let mut ledger = open_ledger(&file, Options::default()).expect("a ledger");
+    project(&mut ledger);
+    let note = ledger
+        .note(
+            1,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: "a note of ConsensFlow's".into(),
+                task: None,
+            },
+        )
+        .expect("a queued note");
+    refuse_next_rollback();
+    ledger
+        .create_task(99, &task(99, "nowhere"))
+        .expect_err("no such project");
+    assert!(ledger.broken().is_some());
+
+    // Resume's way of taking a note back: refused, not reported as done.
+    let withdrawn = ledger
+        .withdraw_note(&note, "its window is gone")
+        .expect_err("refused");
+    assert_eq!(withdrawn.code(), Some("ledger-broken"), "{withdrawn}");
+    // And a read shows nothing of what the open transaction holds.
+    assert!(ledger.message(note.id).is_err());
+    drop(ledger);
+    let reopened = open_ledger(&file, Options::default()).expect("reopened");
+    let state: String = reopened
+        .sqlite()
+        .query_row("SELECT state FROM message WHERE id = ?", [note.id], |row| {
+            row.get(0)
+        })
+        .expect("the note");
+    assert_eq!(state, "queued", "the committed note is as it was");
 }

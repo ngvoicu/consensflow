@@ -32,6 +32,27 @@ pub fn default_root(env: &Env) -> Option<PathBuf> {
     Some(PathBuf::from(path::join(&[&home, ".consensflow"])))
 }
 
+/// How the daemon's process ends when ConsensFlow cannot save to its ledger, whether it
+/// was running or refused to start: the app reads it at the end of the process, before it
+/// decides anything, and does not start the daemon again.
+pub const CANNOT_SAVE_EXIT: i32 = 74;
+
+/// What the person is told when ConsensFlow cannot save to its ledger, `ledger` being the
+/// file, said by its full path (a relative `CONSENSFLOW_HOME` is made whole against the
+/// folder the process is in). One message for the daemon that says it, the app that shows
+/// it, and every start that is refused for it.
+pub fn cannot_save_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "Work has stopped because ConsensFlow can't save to its ledger at {}. The disk may be \
+         full, failing or disconnected, or you may have lost write permission. Quit ConsensFlow. \
+         Once you've restored access to that ledger, reopen ConsensFlow. Check the board before \
+         retrying an unconfirmed change, because it may already be there. Choose Resume for each \
+         project so its members continue from their saved records.",
+        whole.display()
+    )
+}
+
 /// The variable as text when it is set to something, a byte that is no UTF-8
 /// as U+FFFD.
 fn named(env: &Env, name: &str) -> Option<String> {

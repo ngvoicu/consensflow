@@ -139,13 +139,13 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        (self.exit)(code);
 '''
 replace = '''
         std::thread::sleep(Duration::from_millis(1_000));
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        (self.exit)(code);
 '''
 
 [[plant]]
@@ -166,13 +166,13 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        (self.exit)(code);
 '''
 replace = '''
-        self.errors.log().info("exit 0");
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
         std::thread::sleep(Duration::from_millis(1_000));
-        (self.exit)(0);
+        (self.exit)(code);
 '''
 
 [[plant]]
@@ -183,13 +183,13 @@ runs = ["stop-program"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
+        (self.exit)(code);
 '''
 replace = '''
-        self.errors.log().info("exit 0");
+        self.errors.log().info_within(&format!("exit {code}"), SETTLE);
         std::thread::sleep(Duration::from_millis(1_000));
-        (self.exit)(0);
+        (self.exit)(code);
 '''
 
 [[plant]]
@@ -233,13 +233,13 @@ file = "crates/cf-daemon/src/stop.rs"
 find = '''
             self.api.drop_connections();
         }
-        self.tail();
+        self.tail(exit_code(why));
 '''
 replace = '''
             self.api.drop_connections();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        self.tail();
+        self.tail(exit_code(why));
 '''
 
 [[plant]]

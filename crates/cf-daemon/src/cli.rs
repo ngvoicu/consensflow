@@ -66,7 +66,7 @@ pub fn ui(env: &Env, args: &[OsString]) -> i32 {
                 daemon.finished().await;
                 Ok(())
             }
-            Err(failed) => Err(failed.to_string()),
+            Err(failed) => Err(failed),
         }
     });
     // Neither is let wait for the read of the input, which cannot be
@@ -76,7 +76,10 @@ pub fn ui(env: &Env, args: &[OsString]) -> i32 {
     runtime.shutdown_background();
     match outcome {
         Ok(()) => 0,
-        Err(words) => fail(&words),
+        Err(failed) => {
+            fail(&failed.to_string());
+            failed.exit_code()
+        }
     }
 }
 

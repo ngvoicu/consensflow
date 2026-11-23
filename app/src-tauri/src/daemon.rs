@@ -48,6 +48,12 @@ const DAEMON_STARTED_AGAIN: &str = "ConsensFlow's daemon was started again. Its 
 const DAEMON_NOT_CONFIRMED: &str = "ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run.";
 /// What the person is told when the app gave up: the restarts did not hold.
 const DAEMON_KEEPS_STOPPING: &str = "ConsensFlow's daemon keeps stopping: it was started again three times, and each time it stopped within a minute";
+/// How the daemon's process ends when the ledger cannot be saved to (`cf_base::home`).
+pub(crate) const LEDGER_EXIT: i32 = cf_base::home::CANNOT_SAVE_EXIT;
+/// How long the app waits for the end of a daemon whose bridge has closed, to read how it
+/// ended: it is ending, and a process that is not gone by then is read as one that has no
+/// status to give.
+const EXIT_READ: Duration = Duration::from_millis(1500);
 /// How long a daemon has to say it is ready (its handle line) before its
 /// start counts as failed. It opens its ledger first and migrates it, and
 /// each step of a migration rebuilds a table and checks every reference in
@@ -70,11 +76,19 @@ pub(crate) use status::DaemonStatus;
 pub(crate) struct DaemonFailure {
     pub(crate) cause: String,
     pub(crate) retry: bool,
+    /// The cause is the whole message of a ledger that cannot be saved to: the daemon
+    /// ended for it, with its status, before it was ready. It is told as it is, and the
+    /// start is never tried again.
+    pub(crate) ledger: bool,
 }
 
 impl DaemonFailure {
     fn transient(cause: String) -> Self {
-        Self { cause, retry: true }
+        Self {
+            cause,
+            retry: true,
+            ledger: false,
+        }
     }
 }
 
@@ -140,6 +154,9 @@ pub(crate) struct Daemon {
     /// The login shell a start is asking for the daemon's PATH, which the
     /// app's stop ends.
     login: Arc<LoginLookup>,
+    /// A test's: the thread that closes the windows is not made.
+    #[cfg(test)]
+    no_cleanup_thread: std::sync::atomic::AtomicBool,
 }
 
 struct DaemonState {
@@ -162,9 +179,9 @@ struct DaemonState {
     up_since: Option<Instant>,
     /// The restarts in a row ([`Backoff::restarts`]).
     restarts: u32,
-    /// What the daemon in hand said as it ended because its ledger cannot save: the
-    /// person is told that, and it is not started again.
-    broken: Option<String>,
+    /// What a daemon said as it ended because its ledger cannot save, and which process
+    /// said it: the words are the person's, and only the daemon in hand may give them.
+    broken: Option<(u32, String)>,
 }
 
 /// How a daemon that stopped is started again.
@@ -195,7 +212,16 @@ impl Daemon {
             settled: Condvar::new(),
             report,
             login: Arc::default(),
+            #[cfg(test)]
+            no_cleanup_thread: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// A test makes the thread that closes the windows fail to start.
+    #[cfg(test)]
+    fn fail_the_cleanup_thread(&self) {
+        self.no_cleanup_thread
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// What the daemon says as it ends because its ledger cannot save (the bridge's
@@ -206,8 +232,12 @@ impl Daemon {
             let Some(daemon) = daemon.upgrade() else {
                 return;
             };
-            if let Some(words) = body.get("words").and_then(Value::as_str) {
-                daemon.lock().broken = Some(words.to_owned());
+            let from = body
+                .get("pid")
+                .and_then(Value::as_u64)
+                .and_then(|pid| u32::try_from(pid).ok());
+            if let (Some(from), Some(words)) = (from, body.get("words").and_then(Value::as_str)) {
+                daemon.lock().broken = Some((from, words.to_owned()));
             }
         })
     }
@@ -254,6 +284,7 @@ impl Daemon {
                             "ConsensFlow's daemon could not be started: its start stopped on an error ({said})"
                         ),
                         retry: false,
+                        ledger: false,
                     });
                 }
             })
@@ -261,6 +292,7 @@ impl Daemon {
             self.fail(&DaemonFailure {
                 cause: format!("ConsensFlow's daemon could not be started: {error}"),
                 retry: false,
+                ledger: false,
             });
         }
     }
@@ -329,7 +361,11 @@ impl Daemon {
         state.roster = Some(started.roster);
         state.up_since = Some(Instant::now());
         if ended {
-            self.stopped(state);
+            let exit = state
+                .daemon
+                .as_mut()
+                .and_then(|child| exit_status_within(child, Duration::ZERO));
+            self.stopped(state, exit);
             return Ok(());
         }
         // A daemon started again says what became of the windows and the projects once, when
@@ -345,26 +381,56 @@ impl Daemon {
 
     fn fail(&self, failure: &DaemonFailure) {
         diag::say(format!("consensflow: {}", failure.cause));
-        self.tell(DaemonStatus::down(&failure.cause, failure.retry));
+        let status = if failure.ledger {
+            DaemonStatus::ledger(&failure.cause)
+        } else {
+            DaemonStatus::down(&failure.cause, failure.retry)
+        };
+        self.tell(status);
     }
 
-    /// A start's bridge closed: if it is the daemon's, the daemon stopped.
+    /// A start's bridge closed: if it is the daemon's, the daemon stopped. How its process
+    /// ended is read first, before anything is decided: the status is the daemon's own word
+    /// for why, and no frame it sent before it ended is needed to know it.
     fn closed(self: &Arc<Self>, start: u64) {
-        let state = self.lock();
+        let mut state = self.lock();
         if state.stopping || state.current != start || !state.status.available {
             return;
         }
-        self.stopped(state);
+        let mut child = state.daemon.take();
+        drop(state);
+        let exit = child
+            .as_mut()
+            .and_then(|child| exit_status_within(child, EXIT_READ));
+        let mut state = self.lock();
+        if state.stopping || state.current != start {
+            drop(state);
+            if let Some(mut child) = child {
+                stop_daemon(&mut child);
+            }
+            return;
+        }
+        state.daemon = child;
+        self.stopped(state, exit);
     }
 
     /// The daemon in hand stopped while the app runs: the person is told, once, and the
     /// app starts it again ([`Daemon::restart`]) unless it has stopped again and again
     /// ([`Backoff::restarts`]), when the person is asked to quit.
-    fn stopped(self: &Arc<Self>, mut state: MutexGuard<'_, DaemonState>) {
+    fn stopped(self: &Arc<Self>, mut state: MutexGuard<'_, DaemonState>, exit: Option<i32>) {
         diag::say(format!("consensflow: {DAEMON_STOPPED}"));
         // A daemon that ended because its ledger cannot save is not started again: the
-        // windows are closed, as for any stop, and the person is told why.
-        let broken = state.broken.take();
+        // windows are closed, as for any stop, and the person is told why. Its status says
+        // it; the words come from what it said, if it said them and this daemon is the one
+        // that did, and from the app otherwise.
+        let from = state.daemon.as_ref().map(Child::id);
+        let said = state
+            .broken
+            .take()
+            .filter(|(pid, _)| Some(*pid) == from)
+            .map(|(_, words)| words);
+        let broken = (exit == Some(LEDGER_EXIT) || said.is_some())
+            .then(|| said.unwrap_or_else(ledger_words));
         let Some(restart) = state.restart.clone() else {
             let cause = broken.as_deref().unwrap_or(DAEMON_STOPPED);
             self.change(&mut state, DaemonStatus::down(cause, false));
@@ -384,16 +450,80 @@ impl Daemon {
         self.change(&mut state, DaemonStatus::closing_windows());
         let old = state.daemon.take();
         drop(state);
+        // What the cleanup needs is kept where this can reach it if its thread is not made:
+        // the windows are closed all the same, and what the person is told is the daemon's
+        // reason, not this one's.
+        let job = Arc::new(Mutex::new(Some((restart, old, broken))));
+        let held = Arc::clone(&job);
         let daemon = Arc::clone(self);
-        let spawned = thread::Builder::new()
-            .name("consensflow-daemon-restart".to_string())
-            .spawn(move || daemon.restart(&restart, old, broken));
+        #[cfg(test)]
+        let refuse = self
+            .no_cleanup_thread
+            .load(std::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(test))]
+        let refuse = false;
+        let spawned = if refuse {
+            Err(std::io::Error::other("no thread"))
+        } else {
+            thread::Builder::new()
+                .name("consensflow-daemon-restart".to_string())
+                .spawn(move || {
+                    let taken = held.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some((restart, old, broken)) = taken {
+                        daemon.restart(&restart, old, broken);
+                    }
+                })
+        };
         if let Err(error) = spawned {
-            self.fail(&DaemonFailure {
-                cause: format!("ConsensFlow's daemon could not be started again: {error}"),
-                retry: false,
-            });
+            let taken = job.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some((restart, old, broken)) = taken {
+                self.end_windows(&restart, old, broken, &format!("{error}"));
+            }
         }
+    }
+
+    /// The thread that closes the windows and starts the daemon again was not made: the
+    /// windows are closed here, and nothing is started. A daemon whose ledger cannot save
+    /// is told as it is; any other is told it could not be started again.
+    fn end_windows(
+        self: &Arc<Self>,
+        restart: &Restart,
+        old: Option<Child>,
+        broken: Option<String>,
+        error: &str,
+    ) {
+        if let Some(mut old) = old {
+            stop_daemon(&mut old);
+        }
+        let closed = reap_until_clean(&restart.panes, restart.backoff.cleanup);
+        if let Some(words) = broken {
+            self.ledger_ended(&words, &closed);
+            return;
+        }
+        let mut cause = format!("ConsensFlow's daemon could not be started again: {error}");
+        if !matches!(closed, Reaped::Clean) {
+            cause = format!("{cause}. {DAEMON_NOT_CONFIRMED}");
+        }
+        self.fail(&DaemonFailure {
+            cause,
+            retry: false,
+            ledger: false,
+        });
+    }
+
+    /// The daemon ended because the ledger cannot save, and its windows were closed: the
+    /// person is told why, and the warning that the windows' end could not be confirmed goes
+    /// with it where that is so.
+    fn ledger_ended(&self, words: &str, reaped: &Reaped) {
+        let cause = match reaped {
+            Reaped::Clean => words.to_owned(),
+            Reaped::TooLate | Reaped::Unconfirmed => {
+                diag::say(format!("consensflow: {DAEMON_NOT_CONFIRMED}"));
+                format!("{words} {DAEMON_NOT_CONFIRMED}")
+            }
+        };
+        diag::say(format!("consensflow: {cause}"));
+        self.tell(DaemonStatus::ledger(&cause));
     }
 
     /// Starts the daemon again after it stopped: what is left of it ends, the windows close
@@ -414,25 +544,22 @@ impl Daemon {
         if let Some(mut old) = old {
             stop_daemon(&mut old);
         }
-        match reap_until_clean(&restart.panes, restart.backoff.cleanup) {
+        let reaped = reap_until_clean(&restart.panes, restart.backoff.cleanup);
+        // The ledger cannot save: nothing is started again, and the person is told why,
+        // with the warning where the end of the windows is not confirmed.
+        if let Some(words) = broken {
+            self.ledger_ended(&words, &reaped);
+            return;
+        }
+        match reaped {
             Reaped::Clean => {}
             Reaped::TooLate | Reaped::Unconfirmed => {
                 // The end of the windows is not confirmed: that is what is said, and the
                 // person is asked to quit.
                 diag::say(format!("consensflow: {DAEMON_NOT_CONFIRMED}"));
-                if let Some(words) = &broken {
-                    let cause = format!("{words} {DAEMON_NOT_CONFIRMED}");
-                    self.tell(DaemonStatus::down(&cause, false));
-                    return;
-                }
                 self.tell(DaemonStatus::not_confirmed());
                 return;
             }
-        }
-        // The ledger cannot save: nothing is started again, and the person is told why.
-        if let Some(words) = broken {
-            self.tell(DaemonStatus::down(&words, false));
-            return;
         }
         // Every window is proven gone: now it is true to say they are closed, and that the
         // daemon is being started.
@@ -457,6 +584,7 @@ impl Daemon {
                         failure.cause
                     ),
                     retry: false,
+                    ledger: false,
                 });
                 return;
             }
@@ -562,6 +690,30 @@ impl Daemon {
             state.bridge = bridge;
         }
         held
+    }
+}
+
+/// How a process ended, as its code, waiting up to `wait` for it to be gone: none where it
+/// is not, or ended by a signal.
+fn exit_status_within(child: &mut Child, wait: Duration) -> Option<i32> {
+    let until = Instant::now() + wait;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.code(),
+            Ok(None) if Instant::now() < until => thread::sleep(Duration::from_millis(10)),
+            _ => return None,
+        }
+    }
+}
+
+/// The words of a ledger that cannot be saved to, as the app makes them where the daemon
+/// did not say them: by the ledger of the home this process is given, which the daemon it
+/// started takes too.
+pub(crate) fn ledger_words() -> String {
+    let home = cf_base::home::config_root(&cf_base::env::Env::from_process());
+    match home {
+        Some(home) => cf_base::home::cannot_save_words(&home.join("consensflow.db")),
+        None => cf_base::home::cannot_save_words(std::path::Path::new("consensflow.db")),
     }
 }
 
@@ -977,24 +1129,22 @@ mod tests {
         }
     }
 
-    /// A daemon that ends because its ledger cannot save says so first (`ledger.broken`, with
-    /// its words): its windows are closed as for any stop, the person is told its words as they
-    /// are, and it is not started again, however often it was started before (CLN-65).
-    #[test]
-    fn a_daemon_whose_ledger_cannot_save_is_not_started_again_and_the_person_is_told_why() {
-        let _pty_guard = cf_panes::pty::serial_pty_test();
-        let words = "ConsensFlow cannot save to its ledger, /h/consensflow.db, so it has stopped.";
-        let frame = format!(
-            r#"{{"v":1,"id":"n-1","kind":"evt","op":"ledger.broken","body":{{"words":"{words}"}}}}"#
+    /// A stand-in daemon that ends as one whose ledger cannot save does: it says `frames`
+    /// (`{pid}` is its own number), and ends with `then`. What it says is heard by `hears`.
+    fn a_ledger_stand_in(
+        panes: &Arc<PaneTable>,
+        starts: &Arc<AtomicUsize>,
+        hears: &Arc<dyn Fn(Value) + Send + Sync>,
+        frames: &[String],
+        then: Then,
+    ) -> DaemonStarter {
+        let (table, counted, hears, frames) = (
+            Arc::clone(panes),
+            Arc::clone(starts),
+            Arc::clone(hears),
+            frames.to_vec(),
         );
-        let starts = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&starts);
-        let panes = Arc::new(PaneTable::new());
-        let table = Arc::clone(&panes);
-        let (report, heard) = listener();
-        let daemon = Daemon::new(report);
-        let hears = daemon.hears_broken();
-        let starter: DaemonStarter = Arc::new(move |closed| {
+        Arc::new(move |closed| {
             counted.fetch_add(1, Ordering::SeqCst);
             let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
             let inputs = Arc::new(InputQueue::new(Arc::clone(&table), Arc::clone(&arbiter)));
@@ -1010,31 +1160,266 @@ mod tests {
             builder.on_event(LEDGER_BROKEN_EVENT, move |body| hear(body));
             builder.on_close(closed);
             connect_daemon(
-                stand_in_command(std::slice::from_ref(&frame), Then::StopAfter(300)),
+                stand_in_command(&frames, then),
                 builder,
                 Duration::from_secs(30),
             )
-        });
-        daemon.start(starter, panes, QUICK);
+        })
+    }
 
-        let mut told = Vec::new();
-        for _ in 0..3 {
-            told.push(heard.recv_timeout(Duration::from_secs(25)).expect("told"));
-        }
+    fn the_words_frame(words: &str) -> String {
+        format!(
+            r#"{{"v":1,"id":"n-1","kind":"evt","op":"ledger.broken","body":{{"words":"{words}","pid":{{pid}}}}}}"#
+        )
+    }
+
+    const SAID: &str =
+        "ConsensFlow cannot save to its ledger, /h/consensflow.db, so it has stopped.";
+
+    fn told_of(heard: &mpsc::Receiver<DaemonStatus>, count: usize) -> Vec<DaemonStatus> {
+        (0..count)
+            .map(|_| heard.recv_timeout(Duration::from_secs(25)).expect("told"))
+            .collect()
+    }
+
+    /// A daemon that ends for a ledger it cannot save to has its windows closed as for any
+    /// stop, and the person is told its words as they are; it is not started again, however
+    /// often it was started before (CLN-65).
+    #[test]
+    fn a_daemon_whose_ledger_cannot_save_is_not_started_again_and_the_person_is_told_why() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let (argv, folder) = a_program_that_runs_on();
+        panes
+            .open(
+                folder.path(),
+                &argv,
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a window");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &daemon.hears_broken(),
+            &[the_words_frame(SAID)],
+            Then::ExitAfter(300, LEDGER_EXIT),
+        );
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+
         assert_eq!(
-            told,
+            told_of(&heard, 3),
             [
                 DaemonStatus::up(),
                 DaemonStatus::closing_windows(),
-                DaemonStatus::down(words, false),
+                DaemonStatus::ledger(SAID),
             ]
         );
         assert!(
             heard.recv_timeout(Duration::from_millis(800)).is_err(),
-            "nothing more is told: no start again"
+            "nothing more is told"
         );
         assert_eq!(starts.load(Ordering::SeqCst), 1, "not started again");
-        assert_eq!(daemon.connection().err().as_deref(), Some(words));
+        assert_eq!(daemon.connection().err().as_deref(), Some(SAID));
+        assert!(
+            panes.list().expect("a list").is_empty(),
+            "its windows are closed"
+        );
+    }
+
+    /// The status of the process is the daemon's word for why: a frame that was lost to the
+    /// end of the pipe changes nothing but whose words are shown.
+    #[test]
+    fn a_ledger_that_cannot_save_is_known_from_the_exit_status_when_its_frame_is_lost() {
+        let panes = Arc::new(PaneTable::new());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &daemon.hears_broken(),
+            &[],
+            Then::ExitAfter(300, LEDGER_EXIT),
+        );
+        daemon.start(starter, panes, QUICK);
+
+        let told = told_of(&heard, 3);
+        assert_eq!(told[2], DaemonStatus::ledger(&ledger_words()));
+        assert!(heard.recv_timeout(Duration::from_millis(800)).is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "not started again");
+    }
+
+    /// An event that is heard after the close was decided on changes nothing: the status was
+    /// read first.
+    #[test]
+    fn an_event_that_races_the_close_does_not_decide_it() {
+        let panes = Arc::new(PaneTable::new());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let hears = daemon.hears_broken();
+        let slow: Arc<dyn Fn(Value) + Send + Sync> = Arc::new(move |body| {
+            thread::sleep(Duration::from_millis(1200));
+            hears(body);
+        });
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &slow,
+            &[the_words_frame(SAID)],
+            Then::ExitAfter(100, LEDGER_EXIT),
+        );
+        daemon.start(starter, panes, QUICK);
+
+        let told = told_of(&heard, 3);
+        assert!(told[2].ledger, "{:?}", told[2]);
+        assert!(heard.recv_timeout(Duration::from_millis(1800)).is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "not started again");
+    }
+
+    /// What an older daemon said names that daemon, not the one in hand: it takes no part in
+    /// how this one ended.
+    #[test]
+    fn a_late_event_from_an_older_daemon_does_not_end_the_one_that_is_up() {
+        let panes = Arc::new(PaneTable::new());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let hears = daemon.hears_broken();
+        let counted = Arc::clone(&starts);
+        let table = Arc::clone(&panes);
+        let first = a_ledger_stand_in(&panes, &starts, &hears, &[], Then::StopAfter(1000));
+        let again = a_ledger_stand_in(&panes, &starts, &hears, &[], Then::StayUp);
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            let _ = &table;
+            if counted.load(Ordering::SeqCst) == 0 {
+                first(closed)
+            } else {
+                again(closed)
+            }
+        });
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+        assert_eq!(told_of(&heard, 1), [DaemonStatus::up()]);
+        // Heard while this daemon is up: another process's, by its number.
+        hears(json!({ "words": "old", "pid": 1u32 }));
+        assert_eq!(
+            told_of(&heard, 3),
+            [
+                DaemonStatus::closing_windows(),
+                DaemonStatus::windows_closed(),
+                DaemonStatus::started_again(),
+            ]
+        );
+        assert_eq!(
+            starts.load(Ordering::SeqCst),
+            2,
+            "started again, as for any stop"
+        );
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
+    }
+
+    /// The thread that closes the windows is not made: they are closed all the same, and the
+    /// person is told the daemon's reason.
+    #[test]
+    fn a_cleanup_thread_that_is_not_made_still_closes_the_windows_and_keeps_the_ledgers_reason() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let (argv, folder) = a_program_that_runs_on();
+        panes
+            .open(
+                folder.path(),
+                &argv,
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open a window");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.fail_the_cleanup_thread();
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &daemon.hears_broken(),
+            &[the_words_frame(SAID)],
+            Then::ExitAfter(300, LEDGER_EXIT),
+        );
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+
+        assert_eq!(
+            told_of(&heard, 3),
+            [
+                DaemonStatus::up(),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::ledger(SAID),
+            ]
+        );
+        assert!(
+            panes.list().expect("a list").is_empty(),
+            "the windows are closed"
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A daemon that ends for its ledger before it is ready is not a start to try again.
+    #[test]
+    fn a_daemon_that_ends_for_its_ledger_before_it_is_ready_is_never_started_again() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.on_close(closed);
+            connect_daemon(an_exit_with(LEDGER_EXIT), builder, Duration::from_secs(30))
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+
+        assert_eq!(told_of(&heard, 1), [DaemonStatus::ledger(&ledger_words())]);
+        assert!(
+            heard.recv_timeout(Duration::from_millis(1500)).is_err(),
+            "no retry"
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A program that ends at once with `code`, on either system.
+    fn an_exit_with(code: i32) -> Command {
+        #[cfg(unix)]
+        {
+            let mut command = crate::testing::command("/bin/sh");
+            command.arg("-c").arg(format!("exit {code}"));
+            command
+        }
+        #[cfg(windows)]
+        {
+            let mut command = crate::testing::command("powershell.exe");
+            command
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!("exit {code}"));
+            command
+        }
     }
 
     /// What a stand-in daemon does once it has said its handle line and its frames.
@@ -1044,6 +1429,8 @@ mod tests {
         StopAfter(u64),
         /// Reads its input to the end, and stops with it.
         StayUp,
+        /// Ends after this many milliseconds with this status.
+        ExitAfter(u64, i32),
     }
 
     /// The command of a stand-in for `cf ui --json` on either system: a shell on a Mac, a
@@ -1055,11 +1442,16 @@ mod tests {
         {
             let mut script = format!("printf '%s\\n' '{handle}'; ");
             for frame in frames {
+                // `{pid}` is the number of the process that says it.
+                let frame = frame.replace("{pid}", "'\"$$\"'");
                 script.push_str(&format!("printf '%s\\n' '{frame}'; "));
             }
             script.push_str(&match then {
                 Then::StopAfter(milliseconds) => format!("sleep {}", milliseconds as f64 / 1000.0),
                 Then::StayUp => "while read -r line; do :; done".to_string(),
+                Then::ExitAfter(milliseconds, code) => {
+                    format!("sleep {}; exit {code}", milliseconds as f64 / 1000.0)
+                }
             });
             let mut command = crate::testing::command("/bin/sh");
             command.arg("-c").arg(script);
@@ -1067,7 +1459,12 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            let said = |text: &str| format!("$o.WriteLine('{}'); ", text.replace('\'', "''"));
+            let said = |text: &str| {
+                format!(
+                    "$o.WriteLine('{}'); ",
+                    text.replace('\'', "''").replace("{pid}", "' + $PID + '")
+                )
+            };
             let mut script = format!("$o=[Console]::Out; {}", said(handle));
             for frame in frames {
                 script.push_str(&said(frame));
@@ -1078,6 +1475,9 @@ mod tests {
                     format!("Start-Sleep -Milliseconds {milliseconds}")
                 }
                 Then::StayUp => "while ($null -ne [Console]::In.ReadLine()) {}".to_string(),
+                Then::ExitAfter(milliseconds, code) => {
+                    format!("Start-Sleep -Milliseconds {milliseconds}; exit {code}")
+                }
             });
             let mut command = crate::testing::command("powershell.exe");
             command
@@ -1463,6 +1863,7 @@ mod tests {
             Err(DaemonFailure {
                 cause: "the bundled runtime is missing from this app".to_string(),
                 retry: false,
+                ledger: false,
             })
         });
         let (report, heard) = listener();

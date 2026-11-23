@@ -203,7 +203,7 @@ runs = ["daemon-lib-stop", "stop"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = "        (self.exit)(0);"
+find = "        (self.exit)(code);"
 replace = "        (self.exit)(1);"
 
 [[plant]]
@@ -306,5 +306,8 @@ runs = ["daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = "    ledger.borrow_mut().suspend_for_restart()?;"
+find = """    ledger
+        .borrow_mut()
+        .suspend_for_restart()
+        .map_err(|failed| at_start(&ledger_file, failed))?;"""
 replace = ""

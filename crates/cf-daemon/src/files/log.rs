@@ -7,6 +7,9 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use cf_base::file::append_rotating;
 use cf_base::time::{iso, Clock, SystemClock};
@@ -59,14 +62,52 @@ impl Log {
         self.write("error", message, cause);
     }
 
-    fn write(&self, level: &str, message: &str, cause: Option<&str>) {
+    /// [`Log::info`] that gives up after `wait` if the log is held (another process
+    /// holds its lock, a disk that does not answer): what the stop says, which must
+    /// never keep the stop from ending.
+    pub fn info_within(&self, message: &str, wait: Duration) {
+        self.write_within("info", message, None, wait);
+    }
+
+    /// [`Log::warn`] that gives up after `wait`, as [`Log::info_within`].
+    pub fn warn_within(&self, message: &str, wait: Duration) {
+        self.write_within("warn", message, None, wait);
+    }
+
+    /// [`Log::error`] that gives up after `wait`, as [`Log::info_within`].
+    pub fn error_within(&self, message: &str, cause: Option<&str>, wait: Duration) {
+        self.write_within("error", message, cause, wait);
+    }
+
+    fn text(&self, level: &str, message: &str, cause: Option<&str>) -> String {
         let at = iso(self.clock.borrow_mut().now_ms());
         let mut lines = vec![format!("{at} {level} {message}")];
         if let Some(text) = cause {
             lines.extend(text.split('\n').map(|line| format!("    {line}")));
         }
+        format!("{}\n", lines.join("\n"))
+    }
+
+    fn write(&self, level: &str, message: &str, cause: Option<&str>) {
         // The home may be read-only or gone mid-run.
-        let _ = append_rotating(&self.file, &format!("{}\n", lines.join("\n")), self.limit);
+        let _ = append_rotating(&self.file, &self.text(level, message, cause), self.limit);
+    }
+
+    /// The append is made on a thread of its own and waited for `wait` at most; one
+    /// that is still held then is left to finish, or not, by itself.
+    fn write_within(&self, level: &str, message: &str, cause: Option<&str>, wait: Duration) {
+        let text = self.text(level, message, cause);
+        let (file, limit) = (self.file.clone(), self.limit);
+        let (done, heard) = mpsc::channel();
+        let started = thread::Builder::new()
+            .name("consensflow-log".to_owned())
+            .spawn(move || {
+                let _ = append_rotating(&file, &text, limit);
+                let _ = done.send(());
+            });
+        if started.is_ok() {
+            let _ = heard.recv_timeout(wait);
+        }
     }
 }
 

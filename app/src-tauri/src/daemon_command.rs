@@ -51,6 +51,7 @@ pub(crate) fn daemon_command(
     let cf = bundled_cf(app).map_err(|cause| DaemonFailure {
         cause,
         retry: false,
+        ledger: false,
     })?;
     diag::say(format!("consensflow: {}", starting(&cf)));
     let mut command = command_for(&cf);

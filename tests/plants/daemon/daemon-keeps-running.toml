@@ -143,8 +143,8 @@ runs = ["app-daemon-restart"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon.rs"
-find = "        match reap_until_clean(&restart.panes, restart.backoff.cleanup) {"
-replace = "        match Reaped::Clean {"
+find = "        let reaped = reap_until_clean(&restart.panes, restart.backoff.cleanup);"
+replace = "        let reaped = Reaped::Clean;"
 
 [[plant]]
 name = "daemon keeps running: a daemon is started again for ever"

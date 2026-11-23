@@ -207,6 +207,7 @@ impl Ledger {
     /// folders of such tests stayed for good, with their `consensflow.db` (T-1333).
     pub fn let_go_of_its_file(&mut self) {
         if let Ok(memory) = Connection::open_in_memory() {
+            self.store.release_parked();
             self.store.db = memory;
             self.test_file_owners.clear();
         }
@@ -290,6 +291,7 @@ impl Ledger {
     /// still, and every operation after this fails as SQLite fails for a
     /// table that is not there: nothing may use it again.
     pub fn close_in_place(&mut self) -> Result<(), LedgerError> {
+        self.store.release_parked();
         let open = std::mem::replace(&mut self.store.db, Connection::open_in_memory()?);
         open.close().map_err(|(_, cause)| cause.into())
     }
