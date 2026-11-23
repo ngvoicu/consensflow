@@ -34,7 +34,8 @@ runs = ["p19a-store"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
 find = '''
-            Ok(Ok(value)) => match self.db.execute_batch("COMMIT") {
+                .and_then(|()| self.db.execute_batch("COMMIT"))
+            {
                 Ok(()) => {
                     for event in std::mem::take(&mut self.logged) {
                         (self.trace)(&event);
@@ -42,12 +43,13 @@ find = '''
                     Ok(value)
                 }'''
 replace = '''
-            Ok(Ok(value)) => match {
-                for event in std::mem::take(&mut self.logged) {
-                    (self.trace)(&event);
-                }
-                self.db.execute_batch("COMMIT")
-            } {
+                .and_then(|()| {
+                    for event in std::mem::take(&mut self.logged) {
+                        (self.trace)(&event);
+                    }
+                    self.db.execute_batch("COMMIT")
+                })
+            {
                 Ok(()) => Ok(value),'''
 
 [[plant]]

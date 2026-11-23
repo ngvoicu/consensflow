@@ -329,10 +329,10 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
 find = '''
-                return Err(version::required());
+                verdict: if old { Err(older()) } else { Ok(()) },
 '''
 replace = '''
-                return Ok(executable.to_owned());
+                verdict: Ok(()),
 '''
 
 # MUS-23 (reversing T-703's 402-as-quota, Calliope's P2 on T-767): a billing refusal is not a
@@ -456,12 +456,12 @@ meant = "muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_q
 runs = ["muse-admin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/admin/inspect.rs"
+file = "crates/cf-harness/src/muse/launch.rs"
 find = '''
-        Harness::Muse => muse_version(inner, &path).await,
+        binary.is_file().then_some(binary)
 '''
 replace = '''
-        Harness::Muse => ask_version(inner, &path, &inner.env).await,
+        binary.is_file().then_some(binary).filter(|_| false)
 '''
 
 # The admin: a --version asked of Muse is asked with its update and its login off.
@@ -471,12 +471,12 @@ meant = "muses_version_is_the_line_beside_its_launcher_with_nothing_run_else_a_q
 runs = ["muse-admin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/admin/inspect.rs"
+file = "crates/cf-harness/src/muse/launch.rs"
 find = '''
-            env.with_var(name, value)
+        env = env.with_var(name, value);
 '''
 replace = '''
-            env.with_var(name, "")
+        env = env.with_var(name, "");
 '''
 
 # The switch: Muse's transcript is its session's log.
@@ -873,11 +873,12 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''                .is_file()
-                .then(|| binary.to_string_lossy().into_owned())'''
-replace = '''                .is_file()
-                .then(|| binary.to_string_lossy().into_owned())
-                .filter(|_| false)'''
+find = '''
+        binary.is_file().then_some(binary)
+'''
+replace = '''
+        binary.is_file().then_some(binary).filter(|_| false)
+'''
 
 # What a launch runs: with the launcher's update off.
 [[plant]]
@@ -3158,8 +3159,12 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/launch.rs"
-find = '''        None if batch_file(launcher) => Err(format!('''
-replace = '''        None if batch_file(launcher) && false => Err(format!('''
+find = '''
+    if batch_file(launcher) {
+'''
+replace = '''
+    if batch_file(launcher) && false {
+'''
 
 [[plant]]
 name = "muse: a .bat launcher is no batch file"
@@ -3722,8 +3727,10 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/version.rs"
 find = '''
-    let line = text.strip_suffix('\n').unwrap_or(&text);
-    let line = line.strip_suffix('\r').unwrap_or(line);
+    let line = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
 '''
 replace = '''
     let line = text.trim();
