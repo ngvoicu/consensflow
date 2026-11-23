@@ -136,6 +136,29 @@ fn a_failed_end_in_view_while_the_task_is_held_is_told_to_nobody() {
 }
 
 #[test]
+fn the_second_failed_end_in_view_while_its_task_is_held_is_told_to_nobody() {
+    // The first try's note is no note of the second: nothing else keeps the failed end from
+    // being told as one that came while its task was paused.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 6);
+    assert_eq!(t.task(1).task.state, "paused");
+    let told: Vec<String> = t
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains("failed while"))
+        .collect();
+    assert!(told.is_empty(), "told again while held: {told:?}");
+}
+
+#[test]
 fn the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task() {
     let c = retrying();
     let (t, window) = working(&c);
@@ -557,6 +580,28 @@ fn a_quota_renewal_puts_no_words_into_a_window_whose_question_is_open() {
         .count();
     assert_eq!(answers, 1, "the late answer is delivered once");
     assert_eq!(resumes(&c, "zeus"), 0);
+}
+
+#[test]
+fn the_pass_queues_no_words_for_a_task_whose_window_has_a_question_open() {
+    // The window is at work, so nothing could be handed over: only the pass's own write is
+    // asked.
+    let c = retrying();
+    let (t, window) = working(&c);
+    c.ledger
+        .borrow_mut()
+        .hold_task(t.project.id, 1, &super::fixtures::now(&c), "out of quota")
+        .unwrap();
+    c.ask(t.project.id, &window, "chief", 1, "Which destination?");
+    c.adapter.with(&window, |agent| agent.settled = false);
+    passes(&c, 2);
+    let thread = t.task(1);
+    assert_eq!(thread.task.state, "waiting");
+    assert!(
+        thread.messages.iter().all(|m| m.body != RESUMED),
+        "no words were queued: {:?}",
+        thread.messages.iter().map(|m| (&m.body, &m.state)).collect::<Vec<_>>()
+    );
 }
 
 #[test]
