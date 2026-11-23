@@ -67,6 +67,23 @@ fn resumes_of(project: &Project, number: i64) -> cf_e2e::Result<usize> {
         }))
 }
 
+/// The id of the last Resume of T-1 main's pass pasted.
+fn last_resume_of(project: &Project, number: i64) -> cf_e2e::Result<i64> {
+    project.task(number)?["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .rev()
+                .find(|message| {
+                    message["kind"] == "task"
+                        && message["body"] == "Resumed: Go on where you stopped."
+                })
+                .and_then(|message| message["id"].as_i64())
+        })
+        .ok_or_else(|| cf_e2e::Error::Daemon("T-1 has no Resume of main's".to_owned()))
+}
+
 /// The text of the result of T-1.
 fn result_of(project: &Project, number: i64) -> cf_e2e::Result<String> {
     Ok(project.task(number)?["messages"]
@@ -101,9 +118,12 @@ fn two_failed_turns_then_an_answer(kind: &str) -> Outcome {
         ))
     })?;
     assert_eq!(results_of(&project, 1)?, 1, "one result");
+    // The stand-in says "noted:" and the header of the message its turn answered: the third
+    // turn's answer, to the second Resume, is the result.
+    let last_resume = last_resume_of(&project, 1)?;
     assert!(
-        result_of(&project, 1)?.contains("AFTER_TWO"),
-        "the answer of the third turn is the result: {}",
+        result_of(&project, 1)?.contains(&format!("[ConsensFlow m-{last_resume} ")),
+        "the answer of the third turn, to the second Resume m-{last_resume}, is the result: {}",
         result_of(&project, 1)?
     );
     assert_eq!(
