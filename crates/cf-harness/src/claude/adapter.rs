@@ -97,6 +97,10 @@ use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
 use crate::shared::{compacting, pane, specmint, window_args};
 
+/// What a look says when a follow overtook it: the window shows another conversation than the
+/// one its answers were asked for, and the pass that asked takes no answer.
+const OVERTAKEN: &str = "the window followed another conversation while it was looked at";
+
 /// What every window's Claude Code is started with in its environment, for its launch alone:
 /// no survey of its own (Claude Code 2.1.317's session survey "How is Claude doing this
 /// session?", its memory and plugin ratings), which waits under the prompt for a digit
@@ -465,9 +469,9 @@ struct ClaudeWindow {
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
     session: RefCell<String>,
-    /// How many times the window has followed a conversation: what a scan's answer was asked
-    /// for, and is used only while it stands (P22-1, T-2052: a worker's reply for the
-    /// conversation the window left must not mark the one it shows now).
+    /// How many times the window has followed a conversation: what a look's answers were asked
+    /// for, and are used only while it stands (P22-1, T-2052 and T-2081: a worker's reply for the
+    /// conversation the window left must not mark the one it shows now, nor give its transcript).
     generation: Cell<u64>,
     /// The pane's own child, once the host named it.
     pid: Cell<Option<u32>>,
@@ -561,21 +565,13 @@ impl ClaudeWindow {
         }
     }
 
-    /// Claude's status of the window's process: the pane's own child's,
-    /// when the host named it and Claude keeps one, else the status of the
+    /// Claude's status of the window's process, from the statuses of every Claude: the pane's
+    /// own child's, when the host named it and Claude keeps one, else the status of the
     /// process that first named the window's conversation, but one that showed
     /// it before the window opened (`before`): that Claude is another's, the
     /// human's outside ConsensFlow or the program before the window's, however
     /// Claude's statuses are listed (T-800).
-    async fn status(&self) -> Option<Status> {
-        let statuses = loop {
-            let generation = self.generation.get();
-            let statuses = self.records.claude_statuses(&self.statuses).await;
-            // An answer is the conversation's it was asked for: after a follow, ask again.
-            if generation == self.generation.get() {
-                break statuses;
-            }
-        };
+    fn status_of(&self, statuses: &[(u32, Status)]) -> Option<Status> {
         let of = |pid: u32| {
             statuses
                 .iter()
@@ -596,23 +592,25 @@ impl ClaudeWindow {
         self.claude_pid.get().and_then(of)
     }
 
-    /// Whether another Claude than the window's shows its conversation now: one
-    /// that showed it before the window was opened, or a second beside the
-    /// window's own. Which of two is the window's need not be known. The answer of a scan
-    /// is used for the conversation it was asked for, while the window shows it.
-    async fn shares(&self) -> bool {
-        loop {
-            let generation = self.generation.get();
-            let session = self.session.borrow().clone();
-            let holders = self.records.claude_holders(&self.statuses, &session).await;
-            if generation != self.generation.get() {
-                continue;
-            }
-            return holders.is_some_and(|holders| {
-                let before = self.before.borrow();
-                holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
-            });
+    /// Claude's status of the window's process, asked of the worker once: none to tell where a
+    /// follow overtook the ask ([`OVERTAKEN`]), as it does a look's.
+    async fn status(&self) -> Result<Option<Status>, String> {
+        let generation = self.generation.get();
+        let statuses = self.records.claude_statuses(&self.statuses).await;
+        if generation != self.generation.get() {
+            return Err(OVERTAKEN.to_owned());
         }
+        Ok(self.status_of(&statuses))
+    }
+
+    /// Whether another Claude than the window's shows its conversation, from the holders of it:
+    /// one that showed it before the window was opened, or a second beside the window's own.
+    /// Which of two is the window's need not be known.
+    fn shares_of(&self, holders: Option<Vec<u32>>) -> bool {
+        holders.is_some_and(|holders| {
+            let before = self.before.borrow();
+            holders.len() > 1 || holders.iter().any(|pid| before.contains(pid))
+        })
     }
 
     /// Whether `status` names another conversation than the window's.
@@ -823,11 +821,11 @@ impl Window for ClaudeWindow {
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
-            if self
-                .status()
-                .await
-                .is_some_and(|live| self.elsewhere(&live))
-            {
+            // A status a follow overtook is none: the paste waits for the next look.
+            let Ok(live) = self.status().await else {
+                return Ok(Readiness::Held(Held::Because(OVERTAKEN.to_owned())));
+            };
+            if live.is_some_and(|live| self.elsewhere(&live)) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
             let snapshot = pane::snapshot(host, pane)
@@ -919,24 +917,31 @@ impl Window for ClaudeWindow {
             // in when Claude's few small status files are read before a
             // transcript is. Kept from Node on purpose: Node started both at once, and
             // a transcript its look had read before the status came back
-            // could be older than the status. The status is read off the engine's
-            // thread (P22-1), awaited before the transcript is asked for.
-            // A look that a follow overtook begins again: its status and its answer on holders
-            // are of the conversation the window left.
-            let live = loop {
-                let generation = self.generation.get();
-                let live = self.status().await;
-                let shares = self.shares().await;
-                if generation == self.generation.get() {
-                    if shares {
-                        self.shared.set(true);
-                    }
-                    break live;
-                }
-            };
-            let session = self.session.borrow().clone();
+            // could be older than the status. The status and the holders are read off the
+            // engine's thread (P22-1), awaited before the transcript is asked for.
+            //
+            // Each answer is of the conversation it was asked for, while the window shows
+            // it: a look that a follow overtook gives no answer (P22-1, T-2052 and T-2081),
+            // asks no more, and the next pass asks afresh. The caller takes it as a look
+            // that could not be made, never as a window at rest.
+            let generation = self.generation.get();
+            let statuses = self.records.claude_statuses(&self.statuses).await;
+            let asked = self.session.borrow().clone();
+            let holders = self.records.claude_holders(&self.statuses, &asked).await;
+            if generation != self.generation.get() {
+                return Err(OVERTAKEN.to_owned());
+            }
+            if self.shares_of(holders) {
+                self.shared.set(true);
+            }
+            let live = self.status_of(&statuses);
+            let session = asked;
             let options = told(self.relaunched.as_ref(), self.model.as_deref(), &session);
             let reading = self.records.look(Harness::Claude, &session, &options).await;
+            // The transcript is the conversation's it was asked for too.
+            if generation != self.generation.get() {
+                return Err(OVERTAKEN.to_owned());
+            }
             let (empty, settled, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),

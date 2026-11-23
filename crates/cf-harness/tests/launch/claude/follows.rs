@@ -88,7 +88,10 @@ fn a_transcript_read_across_a_follow_is_no_answer_and_never_conversation_a_s_res
     );
     assert!(answer.is_err(), "a look a follow overtook gives no answer");
     let fresh = finished(window.observe()).unwrap();
-    assert!(!collectable(&fresh), "the next look asks afresh: B's turn is open");
+    assert!(
+        !collectable(&fresh),
+        "the next look asks afresh: B's turn is open"
+    );
 }
 
 #[test]
@@ -118,7 +121,10 @@ fn a_look_that_follows_keep_overtaking_ends_without_asking_again() {
     records.release_holders();
     let (turn, answer) = ended.expect("the look never ended over 64 follows");
     assert_eq!(turn, 0, "it ends at the first follow that overtook it");
-    assert!(answer.is_err(), "no answer for the pass it was overtaken in");
+    assert!(
+        answer.is_err(),
+        "no answer for the pass it was overtaken in"
+    );
     assert!(
         finished(window.observe()).is_ok(),
         "the next pass asks afresh and is answered"

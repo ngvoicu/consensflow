@@ -59,7 +59,7 @@ fn each_live_claude_says_its_conversation_and_its_state() {
         ("shell", State::Idle),
         ("waiting", State::Waiting(None)),
     ] {
-        write(dir.path(), "1.json", &row(status));
+        write(dir.path(), &format!("{pid}.json"), &row(status));
         let expected = Status {
             session: "S".to_owned(),
             state,
@@ -72,7 +72,7 @@ fn each_live_claude_says_its_conversation_and_its_state() {
     }
     write(
         dir.path(),
-        "1.json",
+        &format!("{pid}.json"),
         &json!({ "pid": pid, "sessionId": "S", "status": "waiting", "waitingFor": "permission prompt" }),
     );
     let said = statuses(&dir.path().to_string_lossy());
@@ -102,11 +102,12 @@ fn a_file_of_no_live_claude_says_nothing() {
         json!(null),
         json!([1]),
     ];
+    let name = format!("{pid}.json");
     for row in &rows {
-        write(dir.path(), "1.json", row);
+        write(dir.path(), &name, row);
         assert_eq!(statuses(&dir.path().to_string_lossy()), [], "{row}");
     }
-    fs::write(dir.path().join("1.json"), "{not json").unwrap();
+    fs::write(dir.path().join(&name), "{not json").unwrap();
     assert_eq!(statuses(&dir.path().to_string_lossy()), []);
     assert_eq!(statuses(&dir.path().join("missing").to_string_lossy()), []);
 }
@@ -174,12 +175,14 @@ fn only_a_file_named_by_digits_is_read_and_a_process_keeps_its_first_place() {
     write(dir.path(), "1.json.bak", &row(me(), "backup"));
     write(dir.path(), ".json", &row(me(), "unnamed"));
     fs::create_dir(dir.path().join("4.json")).unwrap();
-    assert_eq!(statuses(&dir.path().to_string_lossy()), []);
     let other = Other::start();
+    let mut scanner = scanner_of(&[1, 2, 3, 4, me(), other.0.id()]);
+    assert_eq!(scanner.statuses(&dir.path().to_string_lossy()), []);
     write(dir.path(), "1.json", &row(me(), "first"));
     write(dir.path(), "2.json", &row(other.0.id(), "second"));
     write(dir.path(), "3.json", &row(me(), "third"));
-    let said: Vec<(u32, String)> = statuses(&dir.path().to_string_lossy())
+    let said: Vec<(u32, String)> = scanner
+        .statuses(&dir.path().to_string_lossy())
         .into_iter()
         .map(|(pid, status)| (pid, status.session))
         .collect();
@@ -195,7 +198,8 @@ fn the_holders_of_a_conversation_are_the_live_claudes_that_show_it_but_a_parked_
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().to_string_lossy().into_owned();
     let pid = me();
-    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "none yet");
+    let mut scanner = scanner_of(&[1, 2, pid]);
+    assert_eq!(scanner.holders(&folder, "S"), Some(Vec::new()), "none yet");
     write(
         dir.path(),
         "1.json",
@@ -206,22 +210,30 @@ fn the_holders_of_a_conversation_are_the_live_claudes_that_show_it_but_a_parked_
         "2.json",
         &json!({ "pid": pid, "sessionId": "T", "status": "idle" }),
     );
-    assert_eq!(holders(&folder, "S"), Some(vec![pid]));
-    assert_eq!(holders(&folder, "U"), Some(Vec::new()));
+    assert_eq!(scanner.holders(&folder, "S"), Some(vec![pid]));
+    assert_eq!(scanner.holders(&folder, "U"), Some(Vec::new()));
     write(
         dir.path(),
         "1.json",
         &json!({ "pid": pid, "sessionId": "S", "status": "busy", "parkedJobId": "job-1" }),
     );
-    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "a parked job");
+    assert_eq!(
+        scanner.holders(&folder, "S"),
+        Some(Vec::new()),
+        "a parked job"
+    );
     write(
         dir.path(),
         "1.json",
         &json!({ "pid": u32::MAX - 1, "sessionId": "S", "status": "busy" }),
     );
-    assert_eq!(holders(&folder, "S"), Some(Vec::new()), "a process gone");
+    assert_eq!(
+        scanner.holders(&folder, "S"),
+        Some(Vec::new()),
+        "a process gone"
+    );
     let missing = dir.path().join("none").to_string_lossy().into_owned();
-    assert_eq!(holders(&missing, "S"), None, "no folder to read");
+    assert_eq!(scanner.holders(&missing, "S"), None, "no folder to read");
 }
 
 /// A window that was ended left its status file, and its number went to another program that
@@ -236,19 +248,20 @@ fn a_status_file_whose_number_a_later_program_took_names_no_claude() {
     let folder = dir.path().to_string_lossy().into_owned();
     let left = Other::start();
     let pid = left.0.id();
+    let name = format!("{pid}.json");
     write(
         dir.path(),
-        "1.json",
+        &name,
         &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
     );
     // The file was last written an hour ago: by a process of that number then, not this one.
-    let written = fs::metadata(dir.path().join("1.json"))
+    let written = fs::metadata(dir.path().join(&name))
         .unwrap()
         .modified()
         .unwrap();
     fs::File::options()
         .write(true)
-        .open(dir.path().join("1.json"))
+        .open(dir.path().join(&name))
         .unwrap()
         .set_modified(written - std::time::Duration::from_secs(3600))
         .unwrap();
@@ -257,7 +270,7 @@ fn a_status_file_whose_number_a_later_program_took_names_no_claude() {
     // Written now, while it runs: it is the one that wrote it.
     write(
         dir.path(),
-        "1.json",
+        &name,
         &json!({ "pid": pid, "sessionId": "S", "status": "idle" }),
     );
     assert_eq!(holders(&folder, "S"), Some(vec![pid]));
@@ -278,114 +291,6 @@ fn ended_pid() -> u32 {
 }
 
 #[test]
-fn a_look_costs_the_live_windows_not_the_files_of_ended_ones() {
-    let dir = tempfile::tempdir().unwrap();
-    let gone = ended_pid();
-    for number in 0..512 {
-        let row = json!({ "pid": gone, "sessionId": "OLD", "status": "idle" });
-        write(dir.path(), &format!("{}.json", 100_000 + number), &row);
-    }
-    let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
-    write(dir.path(), &format!("{}.json", me()), &own);
-    let folder = dir.path().to_string_lossy().into_owned();
-    let mut scanner = Scanner::default();
-    let first = scanner.statuses(&folder);
-    assert_eq!(
-        first,
-        [(
-            me(),
-            Status {
-                session: "S".into(),
-                state: State::Working
-            }
-        )]
-    );
-    let after_first = scanner.reads;
-    let second = scanner.statuses(&folder);
-    assert_eq!(second, first);
-    assert_eq!(
-        scanner.reads - after_first,
-        1,
-        "the second look opens the one live window's file, not the 512 of ended ones"
-    );
-}
-
-#[test]
-fn a_file_found_gone_is_read_again_once_written_and_a_live_one_is_read_every_look() {
-    let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().to_string_lossy().into_owned();
-    let mut scanner = Scanner::default();
-    // Claude names its file by its process: the number of a live one is its file's.
-    let name = format!("{}.json", me());
-    let dead = ended_pid();
-    let gone = json!({ "pid": dead, "sessionId": "S", "status": "idle" });
-    write(dir.path(), &format!("{dead}.json"), &gone);
-    assert_eq!(scanner.statuses(&folder), []);
-    assert_eq!(scanner.statuses(&folder), []);
-    assert_eq!(scanner.reads, 1, "found gone: not opened again");
-    // The number taken by a live Claude that writes its file.
-    let live = json!({ "pid": me(), "sessionId": "S", "status": "busy", "extra": "longer" });
-    write(dir.path(), &name, &live);
-    let now = State::Working;
-    assert_eq!(
-        scanner.statuses(&folder),
-        [(
-            me(),
-            Status {
-                session: "S".into(),
-                state: now
-            }
-        )]
-    );
-    let after = scanner.reads;
-    let idle = json!({ "pid": me(), "sessionId": "S", "status": "idle", "extra": "longer" });
-    write(dir.path(), &name, &idle);
-    assert_eq!(scanner.holders(&folder, "S"), Some(vec![me()]));
-    assert_eq!(
-        scanner.reads,
-        after + 1,
-        "a live window's file is read each look"
-    );
-    fs::remove_file(dir.path().join(&name)).unwrap();
-    assert_eq!(scanner.holders(&folder, "S"), Some(vec![]));
-    fs::remove_file(dir.path().join(format!("{dead}.json"))).unwrap();
-    assert_eq!(scanner.holders(&folder, "S"), Some(vec![]));
-    assert!(
-        scanner.gone[&folder].is_empty(),
-        "a file no longer listed is forgotten"
-    );
-}
-
-/// What one warm look at a folder costs the file system, in every call it makes.
-fn warm_calls(dir: &Path) -> usize {
-    let folder = dir.to_string_lossy().into_owned();
-    let mut scanner = Scanner::default();
-    let _ = scanner.statuses(&folder);
-    let before = scanner.fs_calls;
-    let _ = scanner.statuses(&folder);
-    scanner.fs_calls - before
-}
-
-#[test]
-fn a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone() {
-    let alone = tempfile::tempdir().unwrap();
-    let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
-    write(alone.path(), &format!("{}.json", me()), &own);
-    let beside = tempfile::tempdir().unwrap();
-    write(beside.path(), &format!("{}.json", me()), &own);
-    let gone = ended_pid();
-    for number in 0..512 {
-        let row = json!({ "pid": gone, "sessionId": "OLD", "status": "idle" });
-        write(beside.path(), &format!("{}.json", 100_000 + number), &row);
-    }
-    assert_eq!(
-        warm_calls(beside.path()),
-        warm_calls(alone.path()),
-        "512 files of ended windows add no call: every metadata call and open counts"
-    );
-}
-
-#[test]
 fn a_live_file_rewritten_in_place_is_never_skipped_whatever_its_listing_says() {
     // The file of a process found gone, then the number taken by a live Claude that writes the
     // file anew with the same byte count, and a time the listing cannot tell from the old one
@@ -397,7 +302,9 @@ fn a_live_file_rewritten_in_place_is_never_skipped_whatever_its_listing_says() {
     let dead = ended_pid();
     let gone = format!(r#"{{"pid":{dead},"sessionId":"S","status":"idle"}}"#);
     let live = format!(r#"{{"pid":{},"sessionId":"S","status":"busy"}}"#, me());
-    // The same byte count: pids of one width, and "idle" as long as "busy".
+    // The same byte count, whatever the pids' widths: the shorter text is padded.
+    let width = gone.len().max(live.len());
+    let (gone, live) = (format!("{gone:width$}"), format!("{live:width$}"));
     assert_eq!(gone.len(), live.len(), "pids {dead} and {}", me());
     fs::write(&file, gone).unwrap();
     let stamp = fs::metadata(&file).unwrap().modified().unwrap();
@@ -478,6 +385,13 @@ fn every_file_system_call_of_the_scan_is_counted() {
     assert_eq!(calls, scan.matches("fs_calls += 1").count(), "{scan}");
 }
 
+/// A scanner that takes the numbers `alive` for alive and no other, the files it reads named by
+/// them.
+fn scanner_of(alive: &[u32]) -> Scanner {
+    ALIVE.with(|held| *held.borrow_mut() = alive.to_vec());
+    Scanner::asking(says_alive)
+}
+
 thread_local! {
     /// The numbers a test says are alive, for the scanner that asks [`says_alive`].
     static ALIVE: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -500,9 +414,8 @@ fn a_look_asks_once_of_each_file_and_opens_only_the_files_of_live_numbers() {
     }
     let own = json!({ "pid": me(), "sessionId": "S", "status": "busy" });
     write(dir.path(), &format!("{}.json", me()), &own);
-    ALIVE.with(|alive| *alive.borrow_mut() = vec![me()]);
     let folder = dir.path().to_string_lossy().into_owned();
-    let mut scanner = Scanner::asking(says_alive);
+    let mut scanner = scanner_of(&[me()]);
     for look in ["the first", "a warm one"] {
         let (calls, asks, reads) = (scanner.fs_calls, scanner.alive_asks, scanner.reads);
         let found = scanner.statuses(&folder);

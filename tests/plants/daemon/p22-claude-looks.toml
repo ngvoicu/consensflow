@@ -1,45 +1,56 @@
-# A look at a Claude Code window leaves the engine's thread, and costs the live windows and
-# not the status files Claude Code has kept (P22-1, T-2029, T-2038). The scan of the status
-# folder is the records worker's (`Records::claude_statuses`, `claude_holders`, in
-# crates/cf-harness/src/records/thread.rs); what it found of no live process it does not open
-# again while the processes it names are not there (crates/cf-harness/src/claude/status.rs, `Scanner`).
+# A look at a Claude Code window leaves the engine's thread, remembers nothing of the status
+# files Claude Code has kept, and drops an answer that a follow overtook (P22-1, T-2029, T-2038,
+# T-2070, round 3). The scan of the status folder is the records worker's
+# (`Records::claude_statuses`, `claude_holders`, in crates/cf-harness/src/records/thread.rs); a
+# file whose name's number is not alive is not opened (crates/cf-harness/src/claude/status.rs,
+# `Scanner`); a look's answers are used only while the window shows the conversation they were
+# asked for (crates/cf-harness/src/claude/adapter.rs, `observe`).
 
 [run]
 p22-off-thread = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "off_thread"]
+p22-ping = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::claude_scan"]
+p22-follows = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::follows"]
 p22-stale = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "holders_answer"]
 p22-status = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::status::"]
 
 [[plant]]
 name = 'p22: the status scan runs on the engine thread again'
-meant = "a_status_scan_held_at_a_gate_stops_no_timer_and_no_answer_of_the_engine"
+meant = "a_status_scan_held_at_a_gate_stops_no_timer_of_the_engine_and_its_look_is_answered"
 runs = ["p22-off-thread"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '        let statuses = self.records.claude_statuses(&self.statuses).await;'
-replace = '        let statuses = crate::claude::scan_statuses(&self.statuses);'
+find = """            let statuses = self.records.claude_statuses(&self.statuses).await;
+            let asked"""
+replace = """            let statuses = crate::claude::scan_statuses(&self.statuses);
+            let asked"""
 
 [[plant]]
-name = 'p22: every status file is read again at each look'
-meant = "a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone"
+name = 'p22: the records worker scans the status folder on the daemon thread again'
+meant = "a_claude_status_scan_held_at_a_gate_holds_up_no_ping_of_the_daemon"
+runs = ["p22-ping"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/records/thread.rs"
+find = """    fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, Status)>> {
+        Box::pin(async move {
+            let (answer, answered) = oneshot::channel();"""
+replace = """    fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, Status)>> {
+        Box::pin(async move {
+            if folder.len() > 0 {
+                return crate::claude::scan_statuses(folder);
+            }
+            let (answer, answered) = oneshot::channel();"""
+
+[[plant]]
+name = 'p22: every status file is opened, the skip of a dead number removed'
+meant = "a_look_asks_once_of_each_file_and_opens_only_the_files_of_live_numbers"
 runs = ["p22-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = '            if let Some(held) = remembered.get(&name) {'
-replace = '            if let Some(held) = remembered.get(&name).filter(|_| false) {'
-
-[[plant]]
-name = 'p22: a status file found gone stays gone whatever is written, the cache keyed as the listing says'
-meant = "a_live_file_rewritten_in_place_is_never_skipped_whatever_its_listing_says"
-runs = ["p22-status"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/status.rs"
-find = """                if held.0.is_none_or(|named| !cf_process::alive(named))
-                    && !cf_process::alive(held.1)
-                {"""
-replace = """                if true {"""
+find = "            if !named.is_some_and(|named| self.alive(named)) {"
+replace = "            if !named.is_some_and(|named| self.alive(named)) && false {"
 
 [[plant]]
 name = 'p22: a status link whose target was rewritten is judged by the link, not the file read'
@@ -58,36 +69,78 @@ runs = ["p22-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = """            if let Some(held) = remembered.get(&name) {"""
-replace = """            let _ = entry.metadata();
-            if let Some(held) = remembered.get(&name) {"""
+find = """            if !is_status_file(&name) {
+                continue;
+            }"""
+replace = """            if !is_status_file(&name) {
+                continue;
+            }
+            let _ = entry.metadata();"""
 
 [[plant]]
 name = 'p22: a metadata call of each listed file is made and counted'
-meant = "a_warm_look_makes_the_file_system_calls_of_the_live_windows_alone"
+meant = "a_look_asks_once_of_each_file_and_opens_only_the_files_of_live_numbers"
 runs = ["p22-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = """            if let Some(held) = remembered.get(&name) {"""
-replace = """            self.fs_calls += 1;
-            let _ = entry.metadata();
-            if let Some(held) = remembered.get(&name) {"""
+find = """            if !is_status_file(&name) {
+                continue;
+            }"""
+replace = """            if !is_status_file(&name) {
+                continue;
+            }
+            self.fs_calls += 1;
+            let _ = entry.metadata();"""
 
 [[plant]]
-name = 'p22: the answer on holders is used though the window followed another conversation'
+name = 'p22: a program that began within 2 s after a status file was last written is its writer again'
+meant = "a_program_that_took_the_writers_number_a_moment_after_its_last_write_is_no_holder"
+runs = ["p22-status"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/status.rs"
+find = "const SLACK: Duration = Duration::from_millis(20);"
+replace = "const SLACK: Duration = Duration::from_secs(2);"
+
+[[plant]]
+name = 'p22: the answers on statuses and holders are used though the window followed another conversation'
 meant = "a_holders_answer_for_the_conversation_a_window_left_marks_the_one_it_follows_not_shared"
 runs = ["p22-stale"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = """            if generation != self.generation.get() {
-                continue;
-            }
-            return holders"""
-replace = """            return holders"""
+find = """            let holders = self.records.claude_holders(&self.statuses, &asked).await;
+            if generation != self.generation.get() {
+                return Err(OVERTAKEN.to_owned());
+            }"""
+replace = """            let holders = self.records.claude_holders(&self.statuses, &asked).await;"""
+
+[[plant]]
+name = 'p22: the transcript read is used though the window followed another conversation'
+meant = "a_transcript_read_across_a_follow_is_no_answer_and_never_conversation_a_s_result_for_b"
+runs = ["p22-follows"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "                if generation == self.generation.get() {\n                    if shares {"
-replace = "                if generation == self.generation.get() || true {\n                    if shares {"
+find = """            // The transcript is the conversation's it was asked for too.
+            if generation != self.generation.get() {
+                return Err(OVERTAKEN.to_owned());
+            }"""
+replace = """            // The transcript is the conversation's it was asked for too."""
+
+[[plant]]
+name = 'p22: a look that a follow overtook asks again'
+meant = "a_look_that_follows_keep_overtaking_ends_without_asking_again"
+runs = ["p22-follows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """            let holders = self.records.claude_holders(&self.statuses, &asked).await;
+            if generation != self.generation.get() {
+                return Err(OVERTAKEN.to_owned());
+            }"""
+replace = """            let holders = self.records.claude_holders(&self.statuses, &asked).await;
+            if generation != self.generation.get() {
+                return Window::observe(self).await;
+            }"""
