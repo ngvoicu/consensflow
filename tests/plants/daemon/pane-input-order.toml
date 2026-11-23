@@ -97,10 +97,10 @@ runs = ["epoch-r7", "epoch-closed-row"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        if let Some(record) = page.pending_lost.get_mut(key) {
-            record.closed = true;
-        }'''
-replace = '''        let _ = page.pending_lost.get_mut(key);'''
+find = '''            page.pending_lost
+                .insert(key.clone(), LossRecord { version, closed: true });'''
+replace = '''            page.pending_lost
+                .insert(key.clone(), LossRecord { version, closed: false });'''
 
 [[plant]]
 name = "pane input epoch: the overflow count is confirmed with a window's notice"
@@ -109,13 +109,11 @@ runs = ["epoch-r11", "epoch-overflow-row"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''        if let Some((version, count)) = overflow {
-            if let Some(held) = self.overflow {'''
+find = '''        if let Some((version, _count)) = overflow {'''
 replace = '''        if !told.is_empty() {
-            self.overflow = None;
+            self.evicted.clear();
         }
-        if let Some((version, count)) = overflow {
-            if let Some(held) = self.overflow {'''
+        if let Some((version, _count)) = overflow {'''
 
 [[plant]]
 name = "pane input epoch: a known loss for a window is dropped at its notice"
@@ -124,7 +122,7 @@ runs = ["epoch-r10", "pane-order-numbered"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                .is_some_and(|record| record.version <= *loss)'''
+find = '''                .is_some_and(|record| record.version == *loss)'''
 replace = '''                .is_some()'''
 
 [[plant]]
@@ -230,6 +228,7 @@ file = "crates/cf-panes/src/input_queue.rs"
 find = '''                        Some(Slot::Parked { job, .. }) => cancelled = Some(job),'''
 replace = '''                        Some(parked @ Slot::Parked { .. }) => {
                             lane.slots.insert(sequence, parked);
+                            cancelled = None::<InputJob>;
                         }'''
 
 [[plant]]
@@ -250,8 +249,11 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = '''    if (!inside) return false'''
-replace = '''    if (false) return false'''
+find = '''    return (
+      onTop(words.left + Math.min(words.width, 8), words.top + words.height / 2) &&
+      onTop(dismiss.left + dismiss.width / 2, dismiss.top + dismiss.height / 2)
+    )'''
+replace = '''    return onTop === undefined || true'''
 
 [[plant]]
 name = "pane input epoch: a drop sent after a later key"
@@ -272,4 +274,4 @@ runs = ["epoch-f2"]
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
 find = '''            state.pump_all(Instant::now() + ORDER_BOUND * 2, &mut events);'''
-replace = '''            let _ = &mut events;'''
+replace = '''            let _: &mut Vec<Event> = &mut events;'''
