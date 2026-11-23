@@ -968,9 +968,7 @@ pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Resul
         .ok_or_else(|| Error::Daemon("Muse's usage home has no root".to_owned()))?;
     crate::door::make_dir_private(root.join("runtime"))?;
     let launch = isolated_command(&install.binary, &[root.to_path_buf()], &[])?;
-    let mut run = crate::process::Run::new(&launch.program)
-        .args(&launch.prefix)
-        .args(["usage", "--json"]);
+    let mut run = launch.run().args(["usage", "--json"]);
     for (name, value) in usage_vars(real_home, config_home, cfg!(windows)) {
         run = run.var(name, value);
     }

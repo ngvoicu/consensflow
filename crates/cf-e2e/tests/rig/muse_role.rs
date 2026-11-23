@@ -979,8 +979,8 @@ fn muse_exec(
     fs::create_dir_all(&workspace)?;
     fs::create_dir_all(at("runtime"))?;
     let launch = muse::isolated_command(&install.binary, &[home.path().to_path_buf()], &[])?;
-    let mut run = cf_e2e::process::Run::new(&launch.program)
-        .args(&launch.prefix)
+    let mut run = launch
+        .run()
         .args([
             "exec",
             "--provider",
