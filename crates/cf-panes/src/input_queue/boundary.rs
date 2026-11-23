@@ -1067,6 +1067,32 @@ fn g3_a_place_no_call_used_at_a_reload_is_a_numbered_loss_told_as_a_dropped_file
     assert_eq!(text(rig.written(&w)), "");
 }
 
+/// A dropped file's notice and the window's typing notice are two notices: dismissing one clears
+/// nothing of the other.
+#[test]
+fn g3_a_dropped_files_notice_and_a_typing_notice_are_dismissed_apart() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let old = rig.open_page("s:1");
+    rig.place(&old, &w, 1).unwrap();
+    rig.navigate();
+    let next = rig.open_page("s:2");
+    rig.skip(&next, &w, 1).unwrap();
+    let owed = rig.pull(&next).unwrap();
+    assert_eq!(owed.len(), 2, "{owed:?}");
+    let of_kind = |dropped_kind: bool| {
+        owed.iter()
+            .find(|notice| matches!(&notice.body, NoticeBody::Window { dropped, .. } if *dropped == dropped_kind))
+            .unwrap_or_else(|| panic!("a notice of kind dropped={dropped_kind} in {owed:?}"))
+            .id
+    };
+    let (dropped, typing) = (of_kind(true), of_kind(false));
+    assert_eq!(rig.dismiss(&next, typing), Ok(true));
+    let left = rig.pull(&next).unwrap();
+    assert_eq!(left.iter().map(|notice| notice.id).collect::<Vec<_>>(), vec![dropped]);
+}
+
 #[test]
 fn g3_a_place_a_call_used_or_a_release_let_go_is_no_loss() {
     let rig = Rig::new();

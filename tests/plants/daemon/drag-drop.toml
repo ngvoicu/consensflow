@@ -783,8 +783,8 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    else emulator.paste(text)"
-replace = "    else void this.#link.input(pane, text)"
+find = "    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))"
+replace = "    if (place !== null) this.#link.withPlace(place, () => void this.#link.input(pane, text))"
 
 [[plant]]
 name = "file drop: the paths are typed as keys through the dock's input, with no markers"
@@ -793,8 +793,8 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    else emulator.paste(text)"
-replace = "    else void this.input(pane, text)"
+find = "    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))"
+replace = "    if (place !== null) this.#link.withPlace(place, () => void this.input(pane, text))"
 
 [[plant]]
 name = "file drop: the paths are typed a second time, as an emulator's reply"
@@ -803,8 +803,10 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    else emulator.paste(text)"
-replace = '''    else emulator.paste(text)
+find = '''    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))
+    else emulator.paste(text)'''
+replace = '''    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))
+    else emulator.paste(text)
     void this.#link.reply(pane, text)'''
 
 [[plant]]

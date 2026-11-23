@@ -131,9 +131,9 @@ replace = '''        self.notices.clear();
         self.current = None;'''
 
 [[plant]]
-name = "pane input epoch: a Dismiss of one id clears the window's later notice too"
-meant = "r10_a_notice_goes_only_by_its_exact_id"
-runs = ["epoch-r10"]
+name = "pane input epoch: a Dismiss of one id clears the window's other notice too"
+meant = "g3_a_dropped_files_notice_and_a_typing_notice_are_dismissed_apart"
+runs = ["epoch-g3"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
@@ -384,7 +384,7 @@ replace = '''                        Some(parked @ Slot::Parked { .. }) => {
 
 [[plant]]
 name = "pane input epoch: a drop sent after a later key"
-meant = "a drop whose short-name lookup is pending keeps its place before a key typed after it"
+meant = "a drop whose short-name lookup is pending keeps its place before a key typed after it, and the host holds the number from the gesture"
 runs = ["epoch-place"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

@@ -4992,6 +4992,8 @@ function epochHost({
     places: [],
     releases: [],
     dismissCalls: 0,
+    // With `holdDismiss` no dismissal is heard (its call never answers) until `hearDismissals`.
+    hears: !holdDismiss,
   }
   const split = (key) => ({
     id: key.slice(0, key.lastIndexOf(':')),
@@ -5067,6 +5069,9 @@ function epochHost({
     get releases() {
       return st.releases
     },
+    hearDismissals: () => {
+      st.hears = true
+    },
     /** A loss the host recorded by itself (a writer that failed, a window that closed). */
     lose: (key, flags) => lose(key, flags),
     /** The row for the oldest notices past the host's cap. */
@@ -5131,7 +5136,7 @@ function epochHost({
       }
       if (command === 'pane_lost_dismiss') {
         st.dismissCalls += 1
-        if (holdDismiss && st.dismissCalls === 1) return new Promise(() => {})
+        if (!st.hears) return new Promise(() => {})
         if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
         st.dismissals.push(args.id)
         return { ok: true, removed: st.notices.delete(args.id) }
@@ -5533,12 +5538,18 @@ test('a dismissed id is not drawn again, even when the host has not heard the di
   await notices(page).first().locator('.input-notice-dismiss').click()
   await expect(notices(page)).toHaveCount(0)
   await expect.poll(() => host.dismissCalls).toBe(1)
-  // The host still holds it (the call never answered): a pull lists it, and the page does not
-  // draw it. The next pull asks the host to dismiss it again, which it hears.
+  // The host still holds it (no call of the page's was heard): a pull lists it, and the page
+  // does not draw it.
   expect(host.outstanding).toHaveLength(1)
+  const before = host.pulls
   await pullNow(page)
-  await expect.poll(() => host.dismissCalls, { timeout: 8000 }).toBeGreaterThan(1)
-  await expect.poll(() => host.outstanding).toEqual([])
+  await expect.poll(() => host.pulls, { timeout: 8000 }).toBeGreaterThan(before)
+  await page.waitForTimeout(400)
+  await expect(notices(page)).toHaveCount(0)
+  // Once the host hears, the next pull's dismissal clears it there too.
+  host.hearDismissals()
+  await pullNow(page)
+  await expect.poll(() => host.outstanding, { timeout: 8000 }).toEqual([])
   await expect(notices(page)).toHaveCount(0)
 })
 
