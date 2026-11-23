@@ -110,7 +110,7 @@ replace = "            return Ok(Tried::Fails(\"(tried again twice)\".to_owned()
 
 [[plant]]
 name = "n35 hold: the tries off hold a task"
-meant = "a_failed_end_holds_the_task_for_30_seconds_and_main_s_resume_tries_it"
+meant = "with_the_tries_off_a_failed_end_fails_the_task_at_once_as_before"
 runs = ["n35-dispatcher"]
 
 [[plant.edit]]
