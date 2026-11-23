@@ -198,7 +198,7 @@ find = '''        let call = CallKey {
         page.remember_call(call.clone(), &cell);'''
 replace = '''        let call = CallKey {
             key: key.clone(),
-            page: page_id.to_owned(),
+            page: String::new(),
             epoch: 0,
             sequence,
         };
@@ -216,7 +216,7 @@ find = '''            let call = CallKey {
                 // A departed page's skip says'''
 replace = '''            let call = CallKey {
                 key: key.clone(),
-                page: page_id.to_owned(),
+                page: String::new(),
                 epoch: 0,
                 sequence,
             };
