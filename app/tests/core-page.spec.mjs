@@ -5420,6 +5420,20 @@ test('R7: a notice for generation 5 is never worded as this window beside a card
   await expect(row).toContainText(`(window ${chief.generation + 5}) has closed`)
 })
 
+test("R7: a closed window's dropped-file notice speaks of the file, not of typing", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('gone-window:5', { closed: true, dropped: true })
+  await pullNow(page)
+  const row = notices(page).first()
+  await expect(row).toContainText(
+    'gone-window has closed. A file you dropped into it just before may not have arrived.',
+  )
+  await expect(row).not.toContainText('Typing')
+})
+
 test("the notices past the host's cap are one row of their own, replaced under a new id when its count changes", async ({
   page,
 }) => {

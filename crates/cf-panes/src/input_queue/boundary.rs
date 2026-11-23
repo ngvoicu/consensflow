@@ -1165,3 +1165,79 @@ fn g5_a_forgotten_session_is_refused_by_its_epoch_alone() {
     assert!(rig.input(&stranger, &w, 1, b"X").is_err());
     assert_eq!(text(rig.written(&w)), "");
 }
+
+/// Round 4 (T-2148's findings). The page id is in a call's key: two documents of one epoch
+/// (a page that takes over from another with no navigation between) have their own calls, so a
+/// late call of the first, numbered like an outstanding call of the second, is told.
+#[test]
+fn h1_two_documents_of_one_epoch_a_late_call_is_told() {
+    let rig = Rig::new();
+    rig.manual_clock();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let a = rig.open_page("s:1");
+    let b = rig.open_page("s:2");
+    assert_eq!(a.epoch, b.epoch, "the host let two documents share an epoch");
+    rig.input(&b, &w, 1, b"B1").unwrap();
+    let late = rig.input(&a, &w, 1, b"A1");
+    assert!(late.is_err(), "{late:?}");
+    assert_eq!(text(rig.written(&w)), "B1", "A's bytes are never written");
+    let owed = rig.pull(&b).unwrap();
+    assert_eq!(owed.len(), 1, "A's key was refused and is told: {owed:?}");
+}
+
+/// A skip that took the call's loss first, and a write that then fails for good: the window is
+/// marked failed and its notice says to restart.
+#[test]
+fn h2_a_skipped_call_whose_write_fails_for_good_keeps_the_restart_advice() {
+    let rig = Rig::new();
+    rig.manual_clock();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    rig.input(&page, &w, 1, b"A").unwrap();
+    rig.skip(&page, &w, 1).unwrap();
+    let before = rig.pull(&page).unwrap();
+    assert!(matches!(
+        of_window(&before[0], &w.key),
+        Some(NoticeBody::Window { failed: false, .. })
+    ));
+    rig.writer_finishes(&w, Err(InputError::FailedWrite("the window broke".into())));
+    let owed = rig.pull(&page).unwrap();
+    assert_eq!(owed.len(), 1, "one loss, one notice: {owed:?}");
+    assert!(
+        matches!(of_window(&owed[0], &w.key), Some(NoticeBody::Window { failed: true, .. })),
+        "the notice says to restart: {owed:?}"
+    );
+    assert!(owed[0].id > before[0].id, "it is a new notice");
+    // The window is marked: a later loss of it says so too.
+    rig.skip(&page, &w, 5).unwrap();
+    assert!(matches!(
+        of_window(&rig.pull(&page).unwrap()[0], &w.key),
+        Some(NoticeBody::Window { failed: true, .. })
+    ));
+}
+
+/// A file dropped into a window that closes before the page reloads is told, as a file, in a
+/// notice of the closed window.
+#[test]
+fn h3_a_place_in_a_window_that_closes_before_a_reload_is_told_as_a_file() {
+    let rig = Rig::new();
+    rig.manual_clock();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let old = rig.open_page("s:1");
+    rig.place(&old, &w, 1).unwrap();
+    rig.retire(&w);
+    rig.navigate();
+    let next = rig.open_page("s:2");
+    let owed = rig.pull(&next).unwrap();
+    assert_eq!(owed.len(), 1, "{owed:?}");
+    assert!(
+        matches!(
+            of_window(&owed[0], &w.key),
+            Some(NoticeBody::Window { closed: true, dropped: true, .. })
+        ),
+        "{owed:?}"
+    );
+}

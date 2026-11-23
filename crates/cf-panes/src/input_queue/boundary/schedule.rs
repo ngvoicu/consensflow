@@ -731,7 +731,7 @@ fn run(seed: u64, steps: usize) -> Reached {
     schedule.reached
 }
 
-/// The gate. `CF_SCHEDULES` schedules (200 by default, 10,000 or more for the gate), from the
+/// The gate. `CF_SCHEDULES` schedules (2,000 by default, 10,000 or more for the gate), from the
 /// seeds `CF_SCHEDULE_FIRST_SEED` onwards, 40 to 120 steps each. Every seed run is appended to
 /// `CF_SCHEDULE_LOG` if it names a file; a failure is reported with its seed.
 #[test]
@@ -740,7 +740,7 @@ fn a_randomized_schedule_over_the_native_queue_holds_its_invariants() {
     let count: u64 = std::env::var("CF_SCHEDULES")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(200);
+        .unwrap_or(2000);
     let first: u64 = std::env::var("CF_SCHEDULE_FIRST_SEED")
         .ok()
         .and_then(|value| value.parse().ok())

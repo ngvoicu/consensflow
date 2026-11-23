@@ -1346,6 +1346,97 @@ mod tests {
         drop(app);
     }
 
+    /// The page's notice commands, called as the page calls them (`terminal-link.js`: camelCase
+    /// names, numbers as numbers), through Tauri's own argument decoding: a wrong name or type
+    /// fails here, not in the real app. Prepare and activate, the window's name, a drop's
+    /// place and its release, a skip, the pull and the Dismiss.
+    #[cfg(unix)]
+    #[test]
+    fn the_page_s_notice_commands_decode_as_the_page_calls_them() {
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("notice-window", 3);
+        inputs.open(&key).expect("open the window's input");
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_page_prepare,
+                pane_page_activate,
+                pane_window_name,
+                pane_input_place,
+                pane_input_release,
+                pane_input_skip,
+                pane_lost_pull,
+                pane_lost_dismiss
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .unwrap_or_else(|error| panic!("{command} decodes: {error:?}"))
+                .deserialize::<Value>()
+                .expect("command response JSON")
+        };
+        let page = json!({"pageId":"test-page"});
+        let prepared = invoke("pane_page_prepare", json!({"pageId":"test-page","nonce":"n-1"}));
+        assert_eq!(prepared["ok"], true, "{prepared}");
+        let epoch = prepared["epoch"].as_u64().expect("the host's epoch");
+        let activated = invoke(
+            "pane_page_activate",
+            json!({"pageId":"test-page","nonce":"n-1","epoch":epoch}),
+        );
+        assert_eq!(activated["ok"], true, "{activated}");
+        assert_eq!(activated["notices"], json!([]));
+        let at = |extra: Value| {
+            let mut args = json!({"pageId":page["pageId"],"epoch":epoch,"id":key.id,"generation":key.generation});
+            for (name, value) in extra.as_object().expect("an object") {
+                args[name] = value.clone();
+            }
+            args
+        };
+        assert_eq!(
+            invoke("pane_window_name", at(json!({"name":"Chief"}))),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            invoke("pane_input_place", at(json!({"sequence":1}))),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            invoke("pane_input_release", at(json!({"sequence":1}))),
+            json!({"ok":true})
+        );
+        let skipped = invoke("pane_input_skip", at(json!({"sequence":2})));
+        assert_eq!(skipped["ok"], true, "{skipped}");
+        let pulled = invoke("pane_lost_pull", json!({"pageId":"test-page","epoch":epoch}));
+        assert_eq!(pulled["ok"], true, "{pulled}");
+        let notices = pulled["notices"].as_array().expect("the list");
+        assert_eq!(notices.len(), 1, "{pulled}");
+        let id = notices[0]["id"].as_u64().expect("an id");
+        assert_eq!(
+            notices[0],
+            json!({"id":id,"kind":"window","window":"notice-window","generation":3,
+                   "name":"Chief","closed":false,"failed":false,"dropped":false})
+        );
+        // A Dismiss of an id the host does not hold clears nothing; its own clears it.
+        assert_eq!(
+            invoke("pane_lost_dismiss", json!({"pageId":"test-page","epoch":epoch,"id":id + 1000})),
+            json!({"ok":true,"removed":false})
+        );
+        assert_eq!(
+            invoke("pane_lost_dismiss", json!({"pageId":"test-page","epoch":epoch,"id":id})),
+            json!({"ok":true,"removed":true})
+        );
+        let pulled = invoke("pane_lost_pull", json!({"pageId":"test-page","epoch":epoch}));
+        assert_eq!(pulled["notices"], json!([]));
+        inputs.close_and_drain();
+    }
+
     /// One emission of the page's terminal is one call (P4-A): exactly the cap of unbracketed
     /// input is admitted through Tauri's own argument decoding and reaches an owned PTY byte
     /// for byte, and one byte more is refused whole, writing nothing.

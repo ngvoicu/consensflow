@@ -196,6 +196,9 @@ export class TerminalsView {
       return `Input was also lost in ${notice.count} more ${places}. Check what appeared in your other windows.`
     }
     const called = notice.name ?? `Window ${notice.window}`
+    if (notice.closed && notice.dropped) {
+      return `${called} has closed. A file you dropped into it just before may not have arrived.`
+    }
     if (notice.closed) {
       return `${called} (window ${notice.generation}) has closed. Typing sent to it just before may not have arrived.`
     }
@@ -206,13 +209,6 @@ export class TerminalsView {
       return `${called}: Check whether your last typing appeared, then restart the project before typing again.`
     }
     return `${called}: Some of your typing may not have reached this window. Check what appeared.`
-  }
-
-  /** What was dropped and could not be typed, as a row of its own. */
-  say(text) {
-    const { row } = this.#row(`say:${text}`)
-    row.firstElementChild.textContent = text
-    this.#noticeList.hidden = false
   }
 
   /** The row for `window`, made if it is not there: whether it was made now, and the row. */

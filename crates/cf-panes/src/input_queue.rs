@@ -193,12 +193,15 @@ thread_local! {
     static FAIL_THREAD_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// A call's identity: the window and its generation, the page's epoch and the call's number.
-/// The window's generation does not change at a page cut and the epoch does, so the old
-/// document's number 1 and the new one's are different calls.
+/// A call's identity: the window and its generation, the page that made it, its epoch and the
+/// call's number. The window's generation does not change at a page cut and the epoch does, and
+/// two documents that share an epoch (a page that takes over from another with no navigation
+/// between) still have their own page ids: the old document's number 1 and the new one's are
+/// different calls whatever the web view does.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct CallKey {
     key: PaneKey,
+    page: String,
     epoch: u64,
     sequence: u64,
 }
@@ -620,7 +623,35 @@ impl PageInputState {
                 self.record(key, loss, flags, events);
                 loss
             }
-            Err(held) => held,
+            Err(held) => {
+                // A skip took the call's one loss first. If the write then failed for good,
+                // the window is failed all the same and its notice says to restart.
+                if flags.failed {
+                    self.mark_failed(key);
+                }
+                held
+            }
+        }
+    }
+
+    /// The window takes no more input until its project restarts: it is marked, and its
+    /// outstanding typing notice, if it does not say so, is replaced by one that does.
+    fn mark_failed(&mut self, key: &PaneKey) {
+        self.failed_windows.insert(key.clone());
+        let unsaid: Vec<u64> = self
+            .notices
+            .iter()
+            .filter(|(_, notice)| {
+                matches!(&notice.body, NoticeBody::Window { key: of, failed: false, dropped: false, .. } if of == key)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in unsaid {
+            self.replace(id, |body| {
+                if let NoticeBody::Window { failed, .. } = body {
+                    *failed = true;
+                }
+            });
         }
     }
 
@@ -1187,6 +1218,7 @@ impl InputQueue {
             let closed = !self.has_route(&key);
             let call = CallKey {
                 key: key.clone(),
+                page: page_id.to_owned(),
                 epoch,
                 sequence,
             };
@@ -1330,6 +1362,7 @@ impl InputQueue {
         let cell = Arc::new(CallCell::default());
         let call = CallKey {
             key: key.clone(),
+            page: page_id.to_owned(),
             epoch,
             sequence,
         };
@@ -1427,6 +1460,7 @@ impl InputQueue {
             let now = Instant::now();
             let call = CallKey {
                 key: key.clone(),
+                page: page_id.to_owned(),
                 epoch,
                 sequence,
             };
@@ -1956,7 +1990,21 @@ impl InputQueue {
                 }
             }
         }
-        page.places.retain(|(of, _)| of != key);
+        // A file dropped into a window that closes before the page reloads is told, as a
+        // file, in a notice of the closed window.
+        let held: Vec<(PaneKey, u64)> = page.places.iter().filter(|(of, _)| of == key).cloned().collect();
+        for place in held {
+            page.places.remove(&place);
+            page.lost_with(
+                key,
+                Flags {
+                    closed: true,
+                    dropped: true,
+                    ..Flags::default()
+                },
+                &mut events,
+            );
+        }
         page.failed_windows.remove(key);
         page.completions
             .retain(|_, completion| &completion.key != key);
