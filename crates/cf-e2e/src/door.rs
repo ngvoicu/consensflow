@@ -70,7 +70,6 @@ pub mod database;
 pub mod identity;
 pub mod place;
 pub mod spawn;
-#[cfg(windows)]
 mod windows_registry;
 mod writes;
 
@@ -958,15 +957,16 @@ pub fn window_admitted(
 /// The names of the variables the account's registry stores (Windows: the machine's
 /// `Session Manager\Environment` and the user's `Environment`), which the pane host's builder puts
 /// over its own environment in every window; none elsewhere. Names only: no value is read. A key
-/// that cannot be opened holds none.
-pub fn stored_names() -> Vec<std::ffi::OsString> {
+/// that is not there holds none; any other failure to read is the error, so the window it would
+/// have is refused (T-2119 B1-a).
+pub fn stored_names() -> Result<Vec<std::ffi::OsString>, String> {
     #[cfg(windows)]
     {
         windows_registry::stored_names()
     }
     #[cfg(not(windows))]
     {
-        Vec::new()
+        Ok(Vec::new())
     }
 }
 

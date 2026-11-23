@@ -85,6 +85,24 @@ const CALLS: &[&str] = &[
     "TerminateJobObject",
 ];
 
+/// The names that start a program on a pseudo-terminal of the kit's own: the product's pane table
+/// (`cf_panes`), `portable_pty`'s system, command builder and spawn. A live case opens a window
+/// only on a rig's pane host (`Rig::open_pane`), through the seal; a program on a pty of its own
+/// has no seal, no update switches and the test process's whole environment (T-2119 X1).
+const PTY_STARTS: &[&str] = &[
+    "PaneTable",
+    "native_pty_system",
+    "CommandBuilder",
+    "openpty",
+    "spawn_command",
+];
+
+/// The files that start a program on a pty of their own and the one reason each is let: Muse's
+/// direct TUI cases run Muse inside its file sandbox on a Mac, from a marked test machine alone
+/// (`muse::real_window_allowed`, asked by each case and by `Window::open` itself). They go
+/// through a door of their own in part 2.
+const PTY_WAIVERS: &[&str] = &["tests/live_muse/tui.rs"];
+
 /// The functions of `std::fs` (and `std::os::*::fs`) that write, copy, rename, link, make or set
 /// something in the file system: what only the door's writers ([`crate::door`]) may do in the
 /// kit's code, as they refuse a path that is no part of this run's allocations.
@@ -409,6 +427,11 @@ impl<'ast> Visit<'ast> for Reader {
                 ".{method}(…) (a change made by a path or a handle)"
             ));
         }
+        if PTY_STARTS.contains(&method.as_str()) {
+            self.flag(format!(
+                ".{method}(…) (a program started on a pty of its own)"
+            ));
+        }
         // The descent's hold of a process, which it ends: the descent's own.
         if method == "hold" && call.args.len() == 1 {
             self.flag(".hold(…) of a process to end".into());
@@ -426,6 +449,14 @@ impl<'ast> Visit<'ast> for Reader {
     }
 
     fn visit_path(&mut self, path: &'ast syn::Path) {
+        if let Some(name) = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .find(|name| PTY_STARTS.contains(&name.as_str()))
+        {
+            self.flag(format!("{name} (a program started on a pty of its own)"));
+        }
         if path
             .segments
             .first()
@@ -460,6 +491,15 @@ impl<'ast> Visit<'ast> for Reader {
             self.flag("use tempfile::… (taken away when dropped)".into());
         }
         for imported in imports(&item.tree, Vec::new()) {
+            if let Some(name) = imported
+                .iter()
+                .find(|name| PTY_STARTS.contains(&name.as_str()))
+            {
+                self.flag(format!(
+                    "use {} ({name}: a program started on a pty of its own)",
+                    imported.join("::")
+                ));
+            }
             if writes_raw(&imported)
                 || (imported.last().is_some_and(|last| last == "*")
                     && imported
@@ -700,6 +740,11 @@ fn the_live_kit_ends_removes_and_writes_only_through_its_door() {
                 .replace('\\', "/");
             read(&name, &fs::read_to_string(file).unwrap())
         })
+        .filter(|found| {
+            let waived = PTY_WAIVERS.contains(&found.file.as_str())
+                && found.what.contains("a program started on a pty of its own");
+            !waived
+        })
         .map(|found| found.to_string())
         .collect();
     assert!(
@@ -762,6 +807,12 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "fn f() { let _ = Run::new(\"cp\").args([a, b]); }",
         "fn f() { let _ = std::process::Command::new(\"/bin/mv\"); }",
         "fn f() { assert!(fs::write(p, \"x\").is_ok()); }",
+        // A program on a pty of the kit's own.
+        "use cf_panes::pty::PaneTable;",
+        "fn f() { let table = PaneTable::new(); }",
+        "fn f() { let command = CommandBuilder::new(program); }",
+        "fn f() { let child = pair.slave.spawn_command(command); }",
+        "use portable_pty::native_pty_system;",
         "fn f() { paths.iter().for_each(|p| { let _ = fs::write(p, \"\"); }); }",
     ] {
         assert_eq!(found(text).len(), 1, "{text}");
@@ -797,6 +848,8 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "fn f() { let file = File::options().read(true).open(p); }",
         "fn f() { writer.write(b\"x\"); }",
         "fn f() { let _ = files::read(p); let _ = files::read_string(p); }",
+        "use portable_pty::PtySize;\nfn f() { let size = PtySize { rows: 40, cols: 140, pixel_width: 0, pixel_height: 0 }; }",
+        "#[cfg(test)]\nmod tests { fn f() { let table = PaneTable::new(); } }",
         "// fs::write(p, \"x\")\nfn f() {}",
     ] {
         assert_eq!(found(text), Vec::new(), "{text}");

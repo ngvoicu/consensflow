@@ -7,27 +7,33 @@
 //! (`crates/cf-harness/tests/goldens/launch/scenarios.*.json`, the first Claude scenario):
 //! its settings file, its role folder and prompt, its own session, model, effort and full
 //! permission, and the terminal ConsensFlow says it is (`TERM_PROGRAM=ConsensFlow`).
+//!
+//! Both windows open on a rig's own pane host (`Rig::open_pane`), the one door a live window
+//! opens through: the environment each has is the rig's, judged by the seal, with every home the
+//! run's own and Claude Code's update switches given (T-2119 X1: the case opened the machine's
+//! Claude Code on a pane table of its own, on the test process's whole environment).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use cf_e2e::door::Door;
 #[cfg(unix)]
-use cf_e2e::door::Grounded;
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::ask;
-use cf_e2e::live::machine::live_folder;
+use cf_e2e::live::machine::live_folder_in;
 #[cfg(unix)]
 use cf_e2e::live::members::{self, Machine};
 use cf_e2e::live::{self, Log};
-use cf_e2e::rig::ClaudeConfig;
+use cf_e2e::rig::{ClaudeConfig, Rig};
 use cf_e2e::{files, Error, Result};
-use cf_panes::pty::PaneTable;
-use portable_pty::PtySize;
 use serde_json::{json, Value};
 
 use super::codex_devin::{skill, GLOBAL_SKILL, SERVER};
+
+/// The stand-in for the chief's window: the rig the two windows open on seats it, and no
+/// message is given to anyone.
+const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// How long each window has to start and settle what it loads.
 const SETTLES: Duration = Duration::from_secs(45);
@@ -215,29 +221,42 @@ fn member_words(made: &Path) -> Result<Vec<String>> {
     Ok(words)
 }
 
-/// Opens `claude` with `words` in a terminal of ConsensFlow's, in `folder`, on the config
-/// `config`, as the terminal `terminal` (what `TERM_PROGRAM` says), lets it settle and ends
-/// it: what its debug log says it loaded.
-fn opened(
-    claude: &Path,
-    words: &[String],
-    folder: &Path,
-    config: &Path,
-    terminal: Option<&str>,
-    debug: &Path,
-) -> Result<Loaded> {
-    let mut argv = vec![
-        claude.to_string_lossy().into_owned(),
+/// Where and as what one window opens: its pane's name, its folder, the run's config folder it
+/// loads, the terminal it says it is (`TERM_PROGRAM`) and the debug log it writes.
+#[derive(Clone, Copy)]
+struct Spot<'a> {
+    id: &'a str,
+    folder: &'a Path,
+    config: &'a Path,
+    terminal: Option<&'a str>,
+    debug: &'a Path,
+}
+
+/// The `pane.open` request for `program` (the argv that starts Claude Code, as `ask::program` says
+/// it) with `words` in `folder`, as the terminal `terminal` (what
+/// `TERM_PROGRAM` says): the run's own config folder and the words of a terminal, and no other
+/// variable. The home variables and the update switches are the rig's pane host's, which
+/// [`Rig::open_pane`] judges the whole environment of, with this over it.
+fn window_request(program: &[String], words: &[String], spot: &Spot) -> Value {
+    let Spot {
+        id,
+        folder,
+        config,
+        terminal,
+        debug,
+    } = *spot;
+    let mut argv = program.to_vec();
+    argv.extend([
         "--debug-file".to_owned(),
         debug.to_string_lossy().into_owned(),
-    ];
+    ]);
     argv.extend(words.iter().cloned());
-    let mut env = HashMap::from([
+    let mut env = serde_json::Map::from_iter([
         (
             "CLAUDE_CONFIG_DIR".to_owned(),
-            config.to_string_lossy().into_owned(),
+            json!(config.to_string_lossy()),
         ),
-        ("TERM".to_owned(), "xterm-256color".to_owned()),
+        ("TERM".to_owned(), json!("xterm-256color")),
     ]);
     // What a terminal says it is: the plain window's is the system's own terminal (the
     // pane host would say ConsensFlow, which it is not), the member's ConsensFlow's.
@@ -246,51 +265,57 @@ fn opened(
         None if cfg!(windows) => (String::new(), ""),
         None => ("Apple_Terminal".to_owned(), "com.apple.Terminal"),
     };
-    env.insert("TERM_PROGRAM".to_owned(), program);
-    env.insert("COLORTERM".to_owned(), "truecolor".to_owned());
+    env.insert("TERM_PROGRAM".to_owned(), json!(program));
+    env.insert("COLORTERM".to_owned(), json!("truecolor"));
     if cfg!(target_os = "macos") {
-        env.insert("__CFBundleIdentifier".to_owned(), bundle.to_owned());
+        env.insert("__CFBundleIdentifier".to_owned(), json!(bundle));
     }
     if cfg!(windows) && terminal.is_none() {
         env.insert(
             "WT_SESSION".to_owned(),
-            "5ac0c0a8-1d0b-4e3a-9a52-0d2c3f1f0001".to_owned(),
+            json!("5ac0c0a8-1d0b-4e3a-9a52-0d2c3f1f0001"),
         );
     }
-    let table = PaneTable::new();
-    let size = PtySize {
-        rows: 40,
-        cols: 140,
-        pixel_width: 0,
-        pixel_height: 0,
-    };
-    let pane = table
-        .open(folder, &argv, &env, size)
-        .map_err(|failed| Error::Daemon(format!("the window did not open: {failed}")))?;
-    // Its output is read and let go, as a terminal reads it.
-    let mut reader = pane.reader;
-    let drain = std::thread::spawn(move || {
-        let mut sink = [0_u8; 8192];
-        while matches!(std::io::Read::read(&mut reader, &mut sink), Ok(read) if read > 0) {}
-    });
+    json!({
+        "id": id, "generation": 1, "cwd": folder, "argv": argv,
+        "env": env, "dropEnv": [],
+        "size": { "rows": 40, "cols": 140 },
+    })
+}
+
+/// Opens `claude` with `words` in a terminal of ConsensFlow's, in `folder`, on the config
+/// `config`, as the terminal `terminal` (what `TERM_PROGRAM` says), on `rig`'s pane host: lets it
+/// settle and ends it: what its debug log says it loaded.
+fn opened(rig: &Rig, claude: &Path, words: &[String], spot: &Spot) -> Result<Loaded> {
+    let (id, debug) = (spot.id, spot.debug);
+    let program = ask::program(&[claude.to_string_lossy().into_owned()], rig.environment())?;
+    let request = window_request(&program, words, spot);
+    let opened = rig.open_pane(request)?;
+    if opened["ok"] != true {
+        return Err(Error::Daemon(format!("the window did not open: {opened}")));
+    }
     std::thread::sleep(SETTLES);
-    let screen = table.tail(&pane.key, 40).unwrap_or_default();
+    let screen: Vec<String> = rig
+        .host(
+            "pane.snapshot",
+            json!({ "id": id, "generation": 1, "tail": 40 }),
+        )
+        .ok()
+        .and_then(|answer| answer["tail"].as_array().cloned())
+        .map(|lines| {
+            lines
+                .iter()
+                .map(|line| line.as_str().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default();
     // Claude and what it started end first, through the descent: an MCP server that starts
-    // a session of its own is no process the pane table may signal (`cf-panes`' test guard).
+    // a session of its own is no process the pane host may signal.
     #[cfg(unix)]
     let ended = ended_by_its_debug_log(debug);
-    let named = format!("pane {}#{}", pane.key.id, pane.key.generation);
-    let closed = Door::of_run().close_own_terminal(&named, || {
-        let _ = table.kill(&pane.key);
-    });
-    if closed {
-        let _ = drain.join();
-    } else {
-        // A say-only door left the pane open: the table is not dropped, which would close it
-        // (the system hangs a terminal's program up with it), so what the audit says is what
-        // the case did.
-        std::mem::forget(table);
-    }
+    // The window ends through the rig's pane host, the door's one way to close a pane; a pane that
+    // is gone already is no matter.
+    let _ = rig.close_pane(json!({ "id": id, "generation": 1 }));
     #[cfg(unix)]
     ended?;
     let log = files::read_string(debug).unwrap_or_default();
@@ -418,7 +443,6 @@ fn parity_version(claude: &live::machine::Installed, config: &Path) -> String {
 
 pub fn run(log: &Log) -> Result {
     let claude = live::installed_for_claude_parity(Duration::from_secs(2 * 60 * 60))?;
-    let folder = live_folder("parity-claude")?;
     let made_here = work_folder()?;
     let made = made_here.path();
     let login = claude
@@ -426,47 +450,75 @@ pub fn run(log: &Log) -> Result {
         .ok_or_else(|| Error::Daemon("Claude parity needs the kit's own login copy".to_owned()))?;
     // Finish the kit's login checks even when setup or either window fails.
     let outcome = (|| -> Result {
-        let config = prepare_config(login.as_ref(), &folder)?;
-        log.say(format!(
-            "Claude Code is {} ({}); both windows open in {} on the kit's login copy",
-            claude.command().display(),
-            parity_version(&claude, &config),
-            folder.display()
-        ));
-        let plain = opened(
-            claude.command(),
-            &["--model".to_owned(), MODEL.to_owned()],
-            &folder,
-            &config,
-            None,
-            &made.join("debug-terminal.txt"),
-        )?;
-        log.say(format!("terminal: {}", said(&plain)));
-        let missing = plain_requirements(&plain);
-        if !missing.is_empty() {
-            return Err(Error::Daemon(missing.join("; ")));
-        }
-        let member = opened(
-            claude.command(),
-            &member_words(made)?,
-            &folder,
-            &config,
-            Some("ConsensFlow"),
-            &made.join("debug-member.txt"),
-        )?;
-        log.say(format!("member: {}", said(&member)));
-        let found = differences(&plain, &member);
-        if !found.is_empty() {
-            return Err(Error::Daemon(format!(
-                "the member's window lacks what the terminal's has:\n  - {}",
-                found.join("\n  - ")
-            )));
-        }
-        Ok(())
+        // Both windows open on this rig's pane host, which judges each one's whole environment.
+        let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
+        let compared = compared(&rig, &claude, login.as_ref(), made, log);
+        let closed = rig.close();
+        compared?;
+        closed
     })();
     claude.finish_homes()?;
     outcome?;
     log.say("ok: the member's window loads what the terminal's does, and its role's skill");
+    Ok(())
+}
+
+/// The two windows on `rig`, and what each loaded, compared.
+fn compared(
+    rig: &Rig,
+    claude: &live::machine::Installed,
+    login: &dyn ClaudeConfig,
+    made: &Path,
+    log: &Log,
+) -> Result {
+    let home = rig
+        .project_home()
+        .ok_or_else(|| Error::Daemon("the rig gives its windows no project home".to_owned()))?;
+    let folder = live_folder_in(Path::new(home), "parity-claude")?;
+    let config = prepare_config(login, &folder)?;
+    log.say(format!(
+        "Claude Code is {} ({}); both windows open in {} on the kit's login copy",
+        claude.command().display(),
+        parity_version(claude, &config),
+        folder.display()
+    ));
+    let plain = opened(
+        rig,
+        claude.command(),
+        &["--model".to_owned(), MODEL.to_owned()],
+        &Spot {
+            id: "parity-terminal",
+            folder: &folder,
+            config: &config,
+            terminal: None,
+            debug: &made.join("debug-terminal.txt"),
+        },
+    )?;
+    log.say(format!("terminal: {}", said(&plain)));
+    let missing = plain_requirements(&plain);
+    if !missing.is_empty() {
+        return Err(Error::Daemon(missing.join("; ")));
+    }
+    let member = opened(
+        rig,
+        claude.command(),
+        &member_words(made)?,
+        &Spot {
+            id: "parity-member",
+            folder: &folder,
+            config: &config,
+            terminal: Some("ConsensFlow"),
+            debug: &made.join("debug-member.txt"),
+        },
+    )?;
+    log.say(format!("member: {}", said(&member)));
+    let found = differences(&plain, &member);
+    if !found.is_empty() {
+        return Err(Error::Daemon(format!(
+            "the member's window lacks what the terminal's has:\n  - {}",
+            found.join("\n  - ")
+        )));
+    }
     Ok(())
 }
 
@@ -489,6 +541,44 @@ mod tests {
         let folder = work_folder().unwrap();
         assert!(cf_e2e::door::is_made_or_below(folder.path()));
         cf_e2e::door::write(folder.path().join("debug.txt"), "own debug").unwrap();
+    }
+
+    /// T-2119 X1: a parity window asks for the run's config folder and a terminal's words and
+    /// nothing else of the environment; the homes and the update switches are its rig's pane
+    /// host's, which the rig judges whole (`Rig::open_pane`).
+    #[test]
+    fn a_parity_window_asks_for_the_runs_config_and_a_terminals_words_alone() {
+        let allowed = [
+            "CLAUDE_CONFIG_DIR",
+            "TERM",
+            "TERM_PROGRAM",
+            "COLORTERM",
+            "__CFBundleIdentifier",
+            "WT_SESSION",
+        ];
+        for terminal in [None, Some("ConsensFlow")] {
+            let request = window_request(
+                &["claude".to_owned()],
+                &["--model".to_owned(), MODEL.to_owned()],
+                &Spot {
+                    id: "parity-x",
+                    folder: Path::new("folder"),
+                    config: Path::new("run-config"),
+                    terminal,
+                    debug: Path::new("debug.txt"),
+                },
+            );
+            let env = request["env"].as_object().unwrap();
+            for name in env.keys() {
+                assert!(allowed.contains(&name.as_str()), "{name} is asked for");
+            }
+            assert_eq!(env["CLAUDE_CONFIG_DIR"], "run-config");
+            assert_eq!(request["dropEnv"], json!([]));
+            assert_eq!(
+                request["argv"],
+                json!(["claude", "--debug-file", "debug.txt", "--model", MODEL])
+            );
+        }
     }
 
     #[cfg(unix)]

@@ -205,6 +205,31 @@ fn copy_login(owner: &Path, root: &Path) -> Outcome {
     .map_err(|error| format!("auth.json: {error}"))
 }
 
+/// T-2119 X1: the window's pty is opened for no account that is not a marked test machine's.
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[test]
+fn a_muse_window_is_not_opened_off_a_marked_test_machine() {
+    if cf_e2e::live::renew::TestMachine::detect().is_some() {
+        return;
+    }
+    let model = agents::Model {
+        harness: cf_e2e::live::Harness::Muse,
+        name: "any".to_owned(),
+        effort: None,
+    };
+    let refused = Window::open(
+        Path::new("/no/muse"),
+        &BTreeMap::new(),
+        Path::new("/no/root"),
+        &model,
+        &[],
+    )
+    .err()
+    .expect("a window opened on an account that is not a test machine's");
+    assert!(refused.contains("marked as a test machine"), "{refused}");
+}
+
 #[cfg(test)]
 #[test]
 fn tui_setup_copies_no_refresh_keys() {
@@ -397,6 +422,11 @@ impl Window {
         model: &agents::Model,
         posture: &[&str],
     ) -> Result<Self, String> {
+        // The pty is this case's own, outside a rig: Muse's real window on a Mac runs only on a
+        // marked test machine, whoever calls this (T-2119 X1: no pty of the kit's own is open to
+        // an account that is its owner's).
+        cf_e2e::muse::real_window_allowed("Muse's direct TUI window")
+            .map_err(|refused| refused.to_string())?;
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 50,

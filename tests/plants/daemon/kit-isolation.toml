@@ -17,6 +17,9 @@ ki-lib-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::"]
 ki-lib-stores = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::stores"]
 ki-lib-ask = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ask"]
 ki-xtask-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
+ki-test-muse-tui = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "a_muse_window_is_not_opened"]
+ki-test-claude-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "a_parity_window_asks"]
+ki-test-rig-registry = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "a_windows_window_has_the_environment"]
 
 
 [[plant]]
@@ -846,3 +849,113 @@ find = '''            Err(failed) => {
             }'''
 replace = '''            Err(_) => {}'''
 
+
+# T-2119 X1, N1-b, B1-a, B1-b: the parity case's window, the direct Muse window, the marker given by
+# a word, and the registry's names.
+
+[[plant]]
+name = "K3 doors: Claude's parity case opens a window on a pane table of its own (T-2119 X1)"
+meant = "the_live_kit_ends_removes_and_writes_only_through_its_door"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''use serde_json::{json, Value};'''
+replace = '''use serde_json::{json, Value};
+use cf_panes::pty::PaneTable;'''
+
+[[plant]]
+name = "K3 doors: the rule knows no start on a pty of the kit's own (T-2119 X1)"
+meant = "the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_door"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const PTY_STARTS: &[&str] = &[
+    "PaneTable",'''
+replace = '''const PTY_STARTS: &[&str] = &[
+    "NoSuchName",'''
+
+[[plant]]
+name = "K3 doors: Muse's direct TUI is let past the rule (T-2119 X1)"
+meant = "the_live_kit_ends_removes_and_writes_only_through_its_door"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const PTY_WAIVERS: &[&str] = &["tests/live_muse/tui.rs"];'''
+replace = '''const PTY_WAIVERS: &[&str] = &[];'''
+
+[[plant]]
+name = "K3 doors: the direct Muse window opens its pty on an account that is no test machine's (T-2119 X1)"
+meant = "a_muse_window_is_not_opened_off_a_marked_test_machine"
+runs = ["ki-test-muse-tui"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse/tui.rs"
+find = '''real_window_allowed("Muse's direct TUI window")'''
+replace = '''real_window_allowed("Muse's direct TUI window").or_else(|_| Ok::<(), cf_e2e::Error>(()))'''
+
+[[plant]]
+name = "K3 doors: the parity window asks for a home of the account (T-2119 X1)"
+meant = "a_parity_window_asks_for_the_runs_config_and_a_terminals_words_alone"
+runs = ["ki-test-claude-parity"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''        ("TERM".to_owned(), json!("xterm-256color")),'''
+replace = '''        ("TERM".to_owned(), json!("xterm-256color")),
+        ("HOME".to_owned(), json!("/Users/owner")),'''
+
+[[plant]]
+name = "K3 doors: the runner's --env marks a machine a test machine (T-2119 N1-b)"
+meant = "the_test_machine_marker_is_refused_as_an_env_word_in_any_case"
+runs = ["ki-xtask-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''        if name.eq_ignore_ascii_case(TEST_MACHINE) {'''
+replace = '''        if name == "NO_SUCH_NAME" {'''
+
+[[plant]]
+name = "K3 doors: a registry key that cannot be opened holds no names (T-2119 B1-a)"
+meant = "a_registry_read_fails_closed_on_every_error_but_no_such_key"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/windows_registry.rs"
+find = '''        NO_SUCH_KEY => Ok(false),'''
+replace = '''        NO_SUCH_KEY | 5 => Ok(false),'''
+
+[[plant]]
+name = "K3 doors: a listing of a key's values that stops on an error is the end (T-2119 B1-a)"
+meant = "a_registry_read_fails_closed_on_every_error_but_no_such_key"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/windows_registry.rs"
+find = '''        NO_MORE_VALUES => Ok(false),'''
+replace = '''        NO_MORE_VALUES | 234 => Ok(false),'''
+
+[[plant]]
+name = "K3 doors: the relay and the rig's open send no name the registry stores (T-2119 B1-b)"
+meant = "the_relay_and_the_rigs_open_hand_the_registrys_names_on_and_a_registry_that_fails_opens_nothing"
+runs = ["ki-lib-door"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''                    Some(read) => read()?,'''
+replace = '''                    Some(_) => Vec::new(),'''
+
+[[plant]]
+name = "K3 doors: the rig reads the registry's names and sends none (T-2119 B1-b)"
+meant = "a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores"
+runs = ["ki-test-rig-registry"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''                    None => crate::door::stored_names()?,'''
+replace = '''                    None => Vec::new(),'''

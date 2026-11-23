@@ -203,6 +203,8 @@ pub enum Refusal {
     EnvNotAscii(String),
     #[error("--env {0} is given twice")]
     EnvTwice(String),
+    #[error("--env {0} says whether the machine is a test machine, which only the runner says, from the machine it runs on")]
+    EnvMarker(String),
     #[error("the script for the machine is {length} characters encoded, and its shell reads {ENCODED_LIMIT} at most: use a shorter --dir")]
     TooLong { length: usize },
 }
@@ -293,6 +295,12 @@ pub fn parse_env(entries: &[String]) -> Result<Vec<(String, String)>, Refusal> {
             .split_once('=')
             .filter(|(name, _)| is_name(name))
             .ok_or_else(|| Refusal::EnvForm(entry.clone()))?;
+        // The marker is the machine's own, given by the runner after these (T-2119 N1-b): a word
+        // of the caller's could mark an account that is its owner's. Windows reads a name in any
+        // case.
+        if name.eq_ignore_ascii_case(TEST_MACHINE) {
+            return Err(Refusal::EnvMarker(name.to_owned()));
+        }
         if !value.chars().all(|c| (' '..='~').contains(&c)) {
             return Err(Refusal::EnvNotAscii(name.to_owned()));
         }

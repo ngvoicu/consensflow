@@ -435,7 +435,7 @@ fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account
         .filter_map(|line| line.split_once('='))
         .map(|(name, value)| (name.to_owned(), value.to_owned()))
         .collect();
-    let stored = cf_e2e::door::stored_names();
+    let stored = cf_e2e::door::stored_names().expect("the account's registry can be read");
     assert!(
         !stored.is_empty(),
         "the account's registry holds no variable (HKCU\\Environment has TEMP)"

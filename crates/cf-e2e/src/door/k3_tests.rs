@@ -453,6 +453,73 @@ fn a_daemons_window_that_breaks_the_seal_is_answered_as_refused_and_never_reache
     assert_eq!(shared.refused_count(), 1);
 }
 
+/// The names an account's registry stores, which the Mac has none of.
+#[cfg(unix)]
+fn registry_names() -> std::result::Result<Vec<OsString>, String> {
+    Ok(vec![OsString::from("REGISTRY_ONLY")])
+}
+
+/// A registry that cannot be read.
+#[cfg(unix)]
+fn registry_unreadable() -> std::result::Result<Vec<OsString>, String> {
+    Err("the registry key Environment cannot be opened (error 5)".to_owned())
+}
+
+/// T-2119 B1-b: the routers a window passes through name every variable the account's registry
+/// stores in what the pane host is sent, for the window the rig opens (`Rig::open_pane`) and for
+/// one the daemon asks (the relay); and a registry that cannot be read opens no window (B1-a).
+#[cfg(unix)]
+#[test]
+fn the_relay_and_the_rigs_open_hand_the_registrys_names_on_and_a_registry_that_fails_opens_nothing()
+{
+    use crate::rig::route_tests::sinks_over;
+    let root = made("k3-registry-").unwrap();
+    let home = root.path().join("home");
+    let host_env = || -> Vec<(OsString, OsString)> {
+        run_homes(&home.to_string_lossy())
+            .into_iter()
+            .chain(vars(&[("PATH", "/usr/bin:/bin")]))
+            .collect()
+    };
+    let body = json!({ "id": "p1-chief", "argv": ["/bin/sh"], "dropEnv": [] });
+    let (shared, host, to_host, daemon, to_daemon) = sinks_over(host_env());
+    let shared = shared.naming(registry_names);
+    // The window the rig opens.
+    let sent = shared.window_to_send(&body).unwrap();
+    assert!(
+        sent["dropEnv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "REGISTRY_ONLY"),
+        "{sent}"
+    );
+    // The window the daemon asks.
+    let open = json!({ "v": 1, "id": "n-1", "kind": "req", "op": "pane.open", "body": body });
+    shared.route_daemon(&open.to_string(), &host, &daemon);
+    let relayed = to_host
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the pane host was sent no window");
+    assert!(relayed.contains("REGISTRY_ONLY"), "{relayed}");
+    // A registry that cannot be read.
+    let shared = shared.naming(registry_unreadable);
+    assert!(shared
+        .window_to_send(&body)
+        .unwrap_err()
+        .contains("error 5"));
+    shared.route_daemon(&open.to_string(), &host, &daemon);
+    let answer = to_daemon
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the daemon was not answered");
+    assert!(answer.contains("\"ok\":false"), "{answer}");
+    assert!(
+        to_host
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err(),
+        "the pane host was asked"
+    );
+}
+
 // ---- The helper's question. ----
 
 #[test]

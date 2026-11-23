@@ -282,7 +282,13 @@ pub(crate) struct Shared {
     /// over it before the host is asked ([`crate::door::window_admitted`]). None for routers a
     /// test makes without a host, which judge nothing.
     host_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// Where the names the account's registry stores are read from: the door's own
+    /// ([`crate::door::stored_names`]) but in a test, which says its own.
+    names: Option<StoredNames>,
 }
+
+/// A read of the names the account's registry stores.
+pub(crate) type StoredNames = fn() -> std::result::Result<Vec<std::ffi::OsString>, String>;
 
 impl Shared {
     /// The routers of a rig whose pane host has `host_env`.
@@ -290,6 +296,16 @@ impl Shared {
         Shared {
             host_env: Some(host_env),
             ..Shared::default()
+        }
+    }
+
+    /// These routers reading the registry's names from `names`, for a test of what a window is
+    /// sent (T-2119 B1-b: the Mac's registry stores none).
+    #[cfg(test)]
+    pub(crate) fn naming(self, names: StoredNames) -> Shared {
+        Shared {
+            names: Some(names),
+            ..self
         }
     }
 
@@ -316,7 +332,13 @@ impl Shared {
     /// now, [`crate::door::stored_names`]).
     pub fn window_to_send(&self, body: &Value) -> std::result::Result<Value, String> {
         match &self.host_env {
-            Some(host) => crate::door::window_to_send(host, body, &crate::door::stored_names()),
+            Some(host) => {
+                let stored = match self.names {
+                    Some(read) => read()?,
+                    None => crate::door::stored_names()?,
+                };
+                crate::door::window_to_send(host, body, &stored)
+            }
             None => Ok(body.clone()),
         }
     }

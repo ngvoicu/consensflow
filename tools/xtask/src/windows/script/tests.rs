@@ -299,6 +299,26 @@ fn the_variables_a_run_names_are_name_value_each_a_variable_of_its_own_with_the_
     );
 }
 
+/// T-2119 N1-b: `--env` cannot mark a machine a test machine, in any case of the name: the
+/// runner's own line is the only one that does, from the machine's record.
+#[test]
+fn the_test_machine_marker_is_refused_as_an_env_word_in_any_case() {
+    for name in [
+        "CONSENSFLOW_TEST_MACHINE",
+        "consensflow_test_machine",
+        "Consensflow_Test_Machine",
+    ] {
+        let said = parse_env(&[format!("{name}=zeewin2")])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            said,
+            format!("--env {name} says whether the machine is a test machine, which only the runner says, from the machine it runs on"),
+        );
+    }
+    assert!(parse_env(&strings(&["CONSENSFLOW_TEST_MACHINE_NOT=1"])).is_ok());
+}
+
 #[test]
 fn the_variables_are_refused_when_they_are_not_that_before_anything_is_sent() {
     for entry in ["NOVALUE", "=x", "1A=x", "A-B=x", "A B=x", "É=x", ""] {
