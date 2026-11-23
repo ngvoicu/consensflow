@@ -37,11 +37,9 @@ pub(super) fn unfinished(harness: Harness, path: Option<String>, checked_at: i64
         },
         update: Update::NotChecked,
         tested: Tested::of(harness, None),
+        // Said after the page's "ConsensFlow could not check it: ", so it names no subject of its own.
         setup: Some(Setup::Unchecked {
-            reason: format!(
-                "ConsensFlow could not finish checking {} in 40 seconds",
-                harness.as_str()
-            ),
+            reason: "the check didn't finish in 40 seconds.".to_owned(),
         }),
         distribution: Distribution::Unlooked,
         extension: None,

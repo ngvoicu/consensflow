@@ -28,7 +28,11 @@
   .host[data-state="unchecked"] { --dot: var(--amber); }
   .host[data-state="absent"] { --dot: var(--absent); }
   .head { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; }
-  .head strong { display: flex; align-items: center; gap: 10px; margin-right: auto; font-size: 16px; font-weight: 600; }
+  .head .who, .head .when { display: flex; align-items: center; gap: 8px 12px; }
+  .head .who { gap: 8px; }
+  .head .when { margin-left: auto; }
+  .head strong { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+  .head .cli { color: var(--muted); font: 12.5px "Geist Mono", ui-monospace, monospace; }
   .head strong::before { content: ''; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px var(--line); }
   .host[data-state="absent"] .head strong::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dot); }
   .head small { color: var(--muted); font-size: 12px; }
@@ -93,6 +97,9 @@ const el = (tag, className, text) => {
   return node;
 };
 let HARNESS_ROWS = [];
+// The product each command is, as the human knows it; a command that is not here is its own
+// product's name (agy), and is said once.
+const PRODUCTS = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', devin: 'Devin', muse: 'Muse Code' };
 // The newest look wins: the daemon stamps each row with the number its look took when it began
 // (one counter per harness), and a row is shown only if no row of a later look has shown that
 // harness's. Whatever order the answers arrive in, and across a reload (a new page takes what the
@@ -165,11 +172,17 @@ function renderHarness(row) {
     : setup?.state === 'update-required' || setupFailed ? 'blocked'
     : setup?.state === 'unchecked' ? 'unchecked'
     : 'ready';
+  // The name with its command, and the check's time with Refresh: two pairs that wrap whole.
   const head = el('div', 'head');
-  head.append(el('strong', null, row.id));
-  head.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
+  const who = el('div', 'who');
+  const product = PRODUCTS[row.id] ?? row.id;
+  who.append(el('strong', null, product));
+  if (product !== row.id) who.append(el('span', 'cli', '(' + row.id + ')'));
+  const when = el('div', 'when');
+  when.append(el('small', null, 'Checked: ' + new Date(row.checkedAt).toLocaleString()));
   const check = el('button', null, 'Refresh');
-  check.onclick = () => checkHarnesses(row.id, check); head.append(check);
+  check.onclick = () => checkHarnesses(row.id, check); when.append(check);
+  head.append(who, when);
   line.append(head);
   if (!row.installed) line.append(el('div', 'launch', 'Not installed'));
   if (row.installed) {
@@ -205,7 +218,7 @@ function renderHarness(row) {
       facts.append(el('div', null, 'Tested up to ' + row.tested.newest + '.'));
       if (row.tested.beyond) facts.append(el('div', 'beyond', 'This version is newer and has not been checked yet.'));
     }
-    facts.append(el('div', null, row.distribution ? 'Installed with ' + row.distribution : 'Installed in a way ConsensFlow does not recognize'));
+    if (row.distribution) facts.append(el('div', null, 'Installed with ' + row.distribution));
     const path = el('div', 'path', 'Installed: ');
     path.append(el('span', null, row.path));
     facts.append(path);
@@ -222,7 +235,7 @@ function renderHarness(row) {
         put.append(copy);
         line.append(put);
       } else {
-        line.append(el('p', 'manual', 'ConsensFlow does not recognize how ' + row.id + ' was installed: update it the way you installed it, as its own update instructions say.'));
+        line.append(el('p', 'manual', 'Update it the way you installed it, as its own update instructions say.'));
       }
     }
   }

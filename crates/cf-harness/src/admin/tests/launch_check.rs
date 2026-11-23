@@ -790,7 +790,7 @@ fn a_question_that_never_ends_leaves_the_row_unchecked_at_40_seconds_and_the_oth
     assert_eq!(
         by_id(Harness::Codex).setup,
         Some(Setup::Unchecked {
-            reason: "ConsensFlow could not finish checking codex in 40 seconds".to_owned()
+            reason: "the check didn't finish in 40 seconds.".to_owned()
         })
     );
     for id in [Harness::Claude, Harness::Pi] {

@@ -133,7 +133,7 @@ fn a_look_that_began_pi_does_not_hold_back_codexs_retry_after_the_cut() {
     assert_eq!(
         row_of(rows, Harness::Codex).setup,
         Some(Setup::Unchecked {
-            reason: "ConsensFlow could not finish checking codex in 40 seconds".to_owned()
+            reason: "the check didn't finish in 40 seconds.".to_owned()
         })
     );
     // The next plain look asks again, and is answered at once.
@@ -290,7 +290,7 @@ fn a_held_claude_code_or_pi_version_does_not_keep_the_whole_page_open_past_40_se
         assert_eq!(
             row_of(rows, Harness::from_name(held).unwrap()).setup,
             Some(Setup::Unchecked {
-                reason: format!("ConsensFlow could not finish checking {held} in 40 seconds")
+                reason: "the check didn't finish in 40 seconds.".to_owned()
             }),
             "{held}"
         );
