@@ -1259,6 +1259,15 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
     (rest != node_rest).then(|| format!("\n  rust {rest}\n  node {node_rest}"))
 }
 
+/// Scenarios left unplayed on purpose, each with why: Node read every file of Claude's status
+/// folder and the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3), so
+/// where a scenario's answer is the order of two files that one process wrote there is no such
+/// file to put in that order, and the order of two pids' names is the machine's. The rule it
+/// holds, a process keeps its first place with its last file's status, is
+/// `claude::status::tests::only_a_file_named_by_digits_is_read_and_a_process_keeps_its_first_place`.
+const UNPLAYED: [&str; 1] =
+    ["claude: a Claude keeps its place among the files, with its last file's status"];
+
 #[test]
 fn every_scenario_plays_as_node_played_it() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
@@ -1276,6 +1285,9 @@ fn every_scenario_plays_as_node_played_it() {
     let mut differ = Vec::new();
     for scenario in &scenarios {
         let name = scenario["name"].as_str().unwrap();
+        if UNPLAYED.contains(&name) {
+            continue;
+        }
         let records = play(scenario);
         let expected = scenario["records"].as_array().unwrap();
         if records.len() != expected.len() {
