@@ -225,6 +225,8 @@ fn tooling(scene: &Scene, on: bool) -> Rc<context::Context> {
 
 /// The lines of the trace of `context` that are the tooling's look at the API.
 fn answered_lines(context: &context::Context) -> Vec<(String, Value)> {
+    // The trace's one writer takes a line a moment after it was said.
+    assert!(context.trace.settled(std::time::Duration::from_secs(10)));
     std::fs::read_to_string(context.trace.file())
         .unwrap_or_default()
         .lines()

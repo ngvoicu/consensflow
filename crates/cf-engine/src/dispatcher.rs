@@ -796,24 +796,27 @@ impl Dispatcher {
         let deleted = self.seams.ledger.borrow_mut().delete_project(project)?;
         // What is remembered of its tasks and participants goes now, and so do its own lines in the trace.
         self.forget_project(deleted.id);
+        // The trace is asked here, where the ledger has just committed the delete, and awaited
+        // after the windows are closed: the thread is free meanwhile. The line that says the
+        // project was deleted is in the same job, so a stop that comes after this call cannot lose
+        // it: a deleted project leaves no trace but that line.
+        let notice = TraceLine {
+            at: iso(self.now()),
+            what: Traced::ProjectDeleted(deleted.clone()),
+        };
+        let forgetting = self.seams.trace.forget(project, notice);
+        let ids: Vec<i64> = found
+            .map(|found| found.participants.iter().map(|p| p.id).collect())
+            .unwrap_or_default();
+        self.forget(&ids).await?;
         // The project is gone from the ledger already: a trace that kept some of its
         // lines is said in the log, where the person who reads the trace looks.
-        // It is asked and awaited: the thread is free meanwhile.
-        if let Err(cause) = self.seams.trace.forget(project).await {
+        if let Err(cause) = forgetting.await {
             self.seams.log.error(
                 "a deleted project's lines could not be removed from the trace",
                 &cause,
             );
         }
-        let ids: Vec<i64> = found
-            .map(|found| found.participants.iter().map(|p| p.id).collect())
-            .unwrap_or_default();
-        self.forget(&ids).await?;
-        // A deleted project leaves no trace but the line that says it was.
-        self.seams.trace.line(TraceLine {
-            at: iso(self.now()),
-            what: Traced::ProjectDeleted(deleted.clone()),
-        });
         self.changed();
         Ok(deleted)
     }

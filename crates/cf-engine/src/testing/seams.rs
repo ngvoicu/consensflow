@@ -243,7 +243,7 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().push(line);
     }
 
-    fn forget(&self, project: i64) -> Work<'_, Result<(), String>> {
+    fn forget(&self, project: i64, notice: TraceLine) -> Work<'_, Result<(), String>> {
         let done = (|| {
             if !self.forgets.get() {
                 return Ok(());
@@ -259,7 +259,11 @@ impl Trace for FakeTrace {
             );
             Ok(())
         })();
-        Box::pin(async move { done })
+        // The line that says it was deleted is written once the job is awaited.
+        Box::pin(async move {
+            self.line(notice);
+            done
+        })
     }
 }
 

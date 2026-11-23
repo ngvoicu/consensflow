@@ -17,10 +17,12 @@
 //! is never left behind it and one sent after it is never lost to it.
 //!
 //! The queue holds [`QUEUE`] ordinary lines. Past that a line is dropped and
-//! counted, and the count is written as one `daemon.error` line once the queue
-//! has drained. A forgetting, the line that says a project was deleted and the
-//! count have room of their own, and are never dropped. A kill, or a stop whose
-//! writing does not end within [`SETTLE`], can leave the last lines unwritten.
+//! counted, and the first one reserves a place in the queue for the report, one
+//! `daemon.error` line, which later lines cannot put off. A forgetting, which
+//! carries the line that says the project was deleted, and the report have room
+//! of their own, and are never dropped. A kill, or a stop whose writing does not
+//! end within [`SETTLE`], can leave the last lines unwritten; a stop that does
+//! end the writing in time lets the home go only then.
 
 use std::collections::VecDeque;
 use std::fs::{self, File};
@@ -29,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use cf_base::file::{append_rotating, aside, flush, rename_durably};
+use cf_base::file::{append_rotating, aside, flush, flush_folder, rename_durably};
 use cf_base::time::{iso, Clock, SystemClock};
 use cf_ledger::Event;
 use cf_proto::trace::{TraceLine, Traced};
@@ -46,18 +48,20 @@ pub const QUEUE: usize = 4096;
 /// How long a stop waits for the thread that writes the file.
 pub const SETTLE: Duration = Duration::from_millis(250);
 
-/// Where a replaced file is made durable: its bytes, then its rename. A
-/// test's own fails one of them.
+/// Where a replaced file is made durable: its bytes, its rename, and the folder
+/// that holds the new name. A test's own fails one of them.
 #[derive(Clone, Copy)]
 pub(crate) struct Durable {
     pub(crate) flush: fn(&File) -> io::Result<()>,
     pub(crate) rename: fn(&Path, &Path) -> io::Result<()>,
+    pub(crate) folder: fn(&Path) -> io::Result<()>,
 }
 
 impl Durable {
     const DISK: Self = Self {
         flush,
         rename: rename_durably,
+        folder: flush_folder,
     };
 }
 
@@ -65,11 +69,14 @@ impl Durable {
 enum Job {
     /// An ordinary line, which a full queue drops.
     Line(String),
-    /// A line that is never dropped: the one that says a project was deleted.
-    Notice(String),
-    /// A deleted project's lines to drop, and who waits to hear it is done.
+    /// The place the report of the lines a full queue dropped has: reserved by
+    /// the first, so that later lines cannot put it off.
+    Count,
+    /// A deleted project's lines to drop, the line that says it was deleted to
+    /// write after them, and who waits to hear it is done.
     Forget {
         project: i64,
+        notice: Option<String>,
         answer: oneshot::Sender<io::Result<()>>,
     },
 }
@@ -79,12 +86,18 @@ struct State {
     jobs: VecDeque<Job>,
     /// Ordinary lines sent and not yet written, the one in hand included.
     ordinary: usize,
-    /// Ordinary lines dropped since the count was last written.
+    /// Ordinary lines dropped since the count was last written; the first has a
+    /// [`Job::Count`] waiting in the queue.
     dropped: u64,
     /// The writer has a job in hand.
     busy: bool,
     /// The trace is gone: the writer ends once it has done what is left.
     closed: bool,
+    /// The daemon is ending: what is sent from now on is refused, so that once
+    /// the writer has done what is there it can no longer change a file.
+    ending: bool,
+    /// Why the writer's thread could not be started.
+    failed: Option<String>,
 }
 
 struct Shared {
@@ -105,7 +118,7 @@ impl Shared {
     fn settled(&self, within: Duration) -> bool {
         let until = Instant::now() + within;
         let mut state = self.lock();
-        while !(state.jobs.is_empty() && !state.busy && state.dropped == 0) {
+        while !(state.jobs.is_empty() && !state.busy) {
             let Some(left) = until.checked_duration_since(Instant::now()) else {
                 return false;
             };
@@ -177,17 +190,39 @@ impl Trace {
             clock: Arc::clone(&clock),
             shared: Arc::clone(&shared),
             durable,
+            checked: false,
         };
         // The thread is the trace's own: it ends once the trace is dropped and
-        // what was sent is written. A trace that cannot get one loses its lines.
-        let _ = std::thread::Builder::new()
+        // what was sent is written.
+        let spawned = std::thread::Builder::new()
             .name("trace".to_owned())
             .spawn(move || writer.run());
+        if let Err(failed) = spawned {
+            shared.lock().failed = Some(failed.to_string());
+        }
         Self {
             file,
             clock,
             shared,
         }
+    }
+
+    /// Whether the thread that writes the file is there. A daemon whose trace has
+    /// none does not start: a forgetting would never be answered.
+    pub fn started(&self) -> io::Result<()> {
+        match &self.shared.lock().failed {
+            Some(why) => Err(io::Error::other(format!(
+                "the thread that writes {} could not be started: {why}",
+                self.file.display()
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// A trace whose writer's thread did not start, for a test.
+    #[cfg(test)]
+    pub(crate) fn shared_failed_for_test(&self, why: &str) {
+        self.shared.lock().failed = Some(why.to_owned());
     }
 
     /// Where the trace is.
@@ -203,9 +238,13 @@ impl Trace {
         };
         let text = format!("{json}\n");
         let mut state = self.shared.lock();
-        if matches!(line.what, Traced::ProjectDeleted(_)) {
-            state.jobs.push_back(Job::Notice(text));
-        } else if state.ordinary >= QUEUE {
+        if state.ending || state.failed.is_some() {
+            return;
+        }
+        if state.ordinary >= QUEUE {
+            if state.dropped == 0 {
+                state.jobs.push_back(Job::Count);
+            }
             state.dropped += 1;
         } else {
             state.ordinary += 1;
@@ -251,21 +290,53 @@ impl Trace {
         });
     }
 
-    /// Drops every line of `project` from the trace and the file moved aside,
-    /// after every line sent before this: the future ends with the writer's
-    /// answer. A file with nothing of the project is not written at all, and
-    /// one that is not there has nothing to forget; one that cannot be read or
-    /// rewritten keeps its lines, and the first such failure is the answer, said
-    /// with the file's name once the other file was done too. The answer is
-    /// that it is done only once each replaced file is on the disk: the new
-    /// file flushed, then its rename flushed through the folder.
-    pub fn forget(&self, project: i64) -> impl std::future::Future<Output = io::Result<()>> {
+    fn forgetting(
+        &self,
+        project: i64,
+        notice: Option<&TraceLine>,
+    ) -> oneshot::Receiver<io::Result<()>> {
         let (answer, answered) = oneshot::channel();
-        self.shared
-            .lock()
-            .jobs
-            .push_back(Job::Forget { project, answer });
-        self.shared.work.notify_one();
+        let notice = notice.and_then(|line| serde_json::to_string(line).ok());
+        let mut state = self.shared.lock();
+        if let Some(why) = state.failed.clone() {
+            drop(state);
+            let _ = answer.send(Err(io::Error::other(why)));
+        } else if state.ending {
+            drop(state);
+            let _ = answer.send(Err(io::Error::other(
+                "the trace has ended with the daemon",
+            )));
+        } else {
+            state.jobs.push_back(Job::Forget {
+                project,
+                notice: notice.map(|json| format!("{json}\n")),
+                answer,
+            });
+            drop(state);
+            self.shared.work.notify_one();
+        }
+        answered
+    }
+
+    /// Drops every line of `project` from the trace, the file moved aside and any
+    /// replacement a forgetting left behind, after every line sent before this,
+    /// and then writes `notice`, the line that says the project was deleted,
+    /// which no forgetting removes: the future ends with the writer's answer.
+    ///
+    /// The answer is `Ok` only when the project's lines are gone from every file
+    /// and cannot come back: each file that held some was replaced by a flushed
+    /// new file and a durable rename, and the folder was flushed, even where
+    /// there was nothing to remove (a retry after a rename whose folder flush
+    /// failed). A file that is not there when it is first read has nothing to
+    /// forget; one that cannot be read, rewritten or renamed keeps its lines and
+    /// the first such failure is the answer, said with the file's name once the
+    /// other file was done too.
+    pub fn forget(
+        &self,
+        project: i64,
+        notice: Option<&TraceLine>,
+    ) -> impl std::future::Future<Output = io::Result<()>> {
+        let answered = self.forgetting(project, notice);
         async move {
             answered
                 .await
@@ -274,21 +345,24 @@ impl Trace {
     }
 
     /// [`Trace::forget`] for a caller that is no task: waits on the thread.
-    pub fn forget_blocking(&self, project: i64) -> io::Result<()> {
-        let (answer, answered) = oneshot::channel();
-        self.shared
-            .lock()
-            .jobs
-            .push_back(Job::Forget { project, answer });
-        self.shared.work.notify_one();
-        answered
+    pub fn forget_blocking(&self, project: i64, notice: Option<&TraceLine>) -> io::Result<()> {
+        self.forgetting(project, notice)
             .blocking_recv()
             .unwrap_or_else(|_| Err(io::Error::other("the trace's writer ended")))
     }
 
-    /// Whether the writer wrote all that was sent before this, the count of
-    /// what was dropped too, within `within`.
+    /// Whether the writer wrote all that was sent before this, within `within`.
     pub fn settled(&self, within: Duration) -> bool {
+        self.shared.settled(within)
+    }
+
+    /// The end of the daemon's use of the trace: what is sent from now on is
+    /// refused, and the writer is waited for, within `within`. When this answers
+    /// `true` the writer has written all it was sent and can no longer change a
+    /// file, so the home may be let go; when it answers `false` it may still be at
+    /// work, and the home is kept until the process ends.
+    pub fn end(&self, within: Duration) -> bool {
+        self.shared.lock().ending = true;
         self.shared.settled(within)
     }
 }
@@ -335,18 +409,29 @@ struct Writer {
     clock: SharedClock,
     shared: Arc<Shared>,
     durable: Durable,
+    /// The file's tail was looked at, before the first line this writer wrote.
+    checked: bool,
+}
+
+/// `name` and `.tmp`: where a replacement is written.
+fn replacement(name: &Path) -> PathBuf {
+    let mut temporary = name.as_os_str().to_owned();
+    temporary.push(".tmp");
+    PathBuf::from(temporary)
 }
 
 impl Writer {
-    fn run(&self) {
+    fn run(mut self) {
+        // A replacement a daemon that was cut left half made keeps lines of a project
+        // that may be deleted since: it is not a file anyone reads.
+        for name in [self.file.clone(), aside(&self.file)] {
+            let _ = fs::remove_file(replacement(&name));
+        }
         loop {
             let mut state = self.shared.lock();
             let job = loop {
                 if let Some(job) = state.jobs.pop_front() {
-                    break Some(job);
-                }
-                if state.dropped > 0 {
-                    break None;
+                    break job;
                 }
                 if state.closed {
                     self.shared.done.notify_all();
@@ -360,28 +445,28 @@ impl Writer {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             };
             state.busy = true;
-            let counted = if job.is_none() {
+            let counted = if matches!(job, Job::Count) {
                 std::mem::take(&mut state.dropped)
             } else {
                 0
             };
             drop(state);
             let ordinary = match job {
-                Some(Job::Line(text)) => {
+                Job::Line(text) => {
                     self.append(&text);
                     true
                 }
-                Some(Job::Notice(text)) => {
-                    self.append(&text);
-                    false
-                }
-                Some(Job::Forget { project, answer }) => {
-                    // A caller that stopped waiting is no reason to stop.
-                    let _ = answer.send(self.forget(project));
-                    false
-                }
-                None => {
+                Job::Count => {
                     self.count(counted);
+                    false
+                }
+                Job::Forget {
+                    project,
+                    notice,
+                    answer,
+                } => {
+                    // A caller that stopped waiting is no reason to stop.
+                    let _ = answer.send(self.forget(project, notice.as_deref()));
                     false
                 }
             };
@@ -393,13 +478,23 @@ impl Writer {
         }
     }
 
-    fn append(&self, text: &str) {
+    fn append(&mut self, text: &str) {
+        // A file whose last line was cut (the daemon was killed in it) is ended
+        // before the first line this writer adds, so that the fragment stays a bad
+        // line of its own and the new line is a whole one.
+        let broken = !self.checked && ends_cut(&self.file);
+        self.checked = true;
+        let text = if broken {
+            format!("\n{text}")
+        } else {
+            text.to_owned()
+        };
         // The home may be read-only or gone mid-run; the ledger has the event.
-        let _ = append_rotating(&self.file, text, self.limit);
+        let _ = append_rotating(&self.file, &text, self.limit);
     }
 
     /// The one line that says how many lines the full queue dropped.
-    fn count(&self, dropped: u64) {
+    fn count(&mut self, dropped: u64) {
         let line = TraceLine {
             at: now(&self.clock),
             what: Traced::DaemonError {
@@ -414,27 +509,73 @@ impl Writer {
         }
     }
 
-    fn forget(&self, project: i64) -> io::Result<()> {
-        let mut failed = Ok(());
-        for name in [self.file.clone(), aside(&self.file)] {
-            match forget_in(&name, project, self.durable) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound && failed.is_ok() => {
-                    failed = Err(io::Error::new(
-                        error.kind(),
-                        format!("{}: {error}", name.display()),
-                    ));
-                }
-                _ => {}
+    fn forget(&mut self, project: i64, notice: Option<&str>) -> io::Result<()> {
+        let mut answer = Ok(());
+        let mut keep = |result: io::Result<()>, name: &Path| {
+            if let (Err(error), true) = (result, answer.is_ok()) {
+                answer = Err(io::Error::new(
+                    error.kind(),
+                    format!("{}: {error}", name.display()),
+                ));
             }
+        };
+        for name in [self.file.clone(), aside(&self.file)] {
+            let temporary = replacement(&name);
+            keep(
+                match fs::remove_file(&temporary) {
+                    Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+                    _ => Ok(()),
+                },
+                &temporary,
+            );
+            keep(forget_in(&name, project, self.durable), &name);
         }
-        failed
+        if let Some(notice) = notice {
+            self.append(notice);
+        }
+        // The names are clean: that they are on the disk is the folder's to say, even
+        // where this forgetting found nothing to remove.
+        let folder = self.file.parent().unwrap_or(Path::new(""));
+        keep(
+            match (self.durable.folder)(folder) {
+                Err(error)
+                    if error.kind() == io::ErrorKind::NotFound
+                        && !self.file.exists()
+                        && !aside(&self.file).exists() =>
+                {
+                    // A home that is not there has nothing that could come back.
+                    Ok(())
+                }
+                other => other,
+            },
+            folder,
+        );
+        answer
     }
 }
 
+/// Whether `file` has a last line that was cut: it is not empty and does not end
+/// in a newline.
+fn ends_cut(file: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut open) = File::open(file) else {
+        return false;
+    };
+    let mut last = [0_u8; 1];
+    open.seek(SeekFrom::End(-1)).is_ok()
+        && open.read_exact(&mut last).is_ok()
+        && last[0] != b'\n'
+}
+
 /// `name` without the lines of `project`, written beside it, flushed, and
-/// renamed over it, the rename flushed through the folder.
+/// renamed over it. A file that is not there has nothing to forget; a step that
+/// fails after it was read keeps the file and fails, whatever its kind.
 fn forget_in(name: &Path, project: i64, durable: Durable) -> io::Result<()> {
-    let text = String::from_utf8_lossy(&fs::read(name)?).into_owned();
+    let bytes = match fs::read(name) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        other => other?,
+    };
+    let text = String::from_utf8_lossy(&bytes).into_owned();
     let lines: Vec<&str> = text.split('\n').filter(|line| !line.is_empty()).collect();
     let kept: Vec<&str> = lines
         .iter()
@@ -444,9 +585,7 @@ fn forget_in(name: &Path, project: i64, durable: Durable) -> io::Result<()> {
     if kept.len() == lines.len() {
         return Ok(());
     }
-    let mut temporary = name.as_os_str().to_owned();
-    temporary.push(".tmp");
-    let temporary = PathBuf::from(temporary);
+    let temporary = replacement(name);
     let mut file = File::create(&temporary)?;
     file.write_all(
         kept.iter()
@@ -481,8 +620,12 @@ impl cf_engine::seams::Trace for Trace {
         self.write(&line);
     }
 
-    fn forget(&self, project: i64) -> cf_harness::contract::Work<'_, Result<(), String>> {
-        let answer = Trace::forget(self, project);
+    fn forget(
+        &self,
+        project: i64,
+        notice: TraceLine,
+    ) -> cf_harness::contract::Work<'_, Result<(), String>> {
+        let answer = Trace::forget(self, project, Some(&notice));
         Box::pin(async move { answer.await.map_err(|failed| failed.to_string()) })
     }
 }
@@ -625,7 +768,7 @@ mod tests {
         trace.event(&event(1, "one"));
         trace.event(&event(2, "two"));
         trace.error("kept: it names no project");
-        trace.forget_blocking(1).unwrap();
+        trace.forget_blocking(1, None).unwrap();
         assert_eq!(
             lines(&trace, &previous),
             ["not json", "{\"at\":\"b\",\"project\":2,\"kind\":\"x\"}"],
@@ -642,17 +785,17 @@ mod tests {
     fn a_file_with_nothing_of_the_project_is_not_written_and_a_missing_one_is_no_failure() {
         let dir = tempfile::tempdir().unwrap();
         let trace = trace_in(dir.path(), LIMIT);
-        trace.forget_blocking(9).unwrap();
+        trace.forget_blocking(9, None).unwrap();
         assert!(!trace.file().exists());
         trace.event(&event(2, "two"));
         assert!(trace.settled(Duration::from_secs(10)));
         // A rewrite renames another file over it, which is another file.
         let which = || cf_base::file::identity(&fs::File::open(trace.file()).unwrap()).unwrap();
         let before = which();
-        trace.forget_blocking(9).unwrap();
+        trace.forget_blocking(9, None).unwrap();
         assert_eq!(which(), before);
         assert_eq!(lines(&trace, trace.file()).len(), 1);
-        trace.forget_blocking(2).unwrap();
+        trace.forget_blocking(2, None).unwrap();
         assert_ne!(which(), before, "a file with a line of it is rewritten");
         assert!(lines(&trace, trace.file()).is_empty());
     }
@@ -678,7 +821,7 @@ mod tests {
         );
         trace.event(&event(1, "lost"));
         trace.error("lost");
-        trace.forget_blocking(1).unwrap();
+        trace.forget_blocking(1, None).unwrap();
         assert!(!trace.file().exists());
     }
 
@@ -691,7 +834,7 @@ mod tests {
         // A folder where the trace should be: it cannot be read.
         fs::create_dir(trace.file()).unwrap();
 
-        let failed = trace.forget_blocking(1).unwrap_err();
+        let failed = trace.forget_blocking(1, None).unwrap_err();
 
         assert!(failed.to_string().contains("events.jsonl"), "{failed}");
         assert!(
@@ -708,7 +851,7 @@ mod tests {
         // A folder where the new file is written beside it.
         fs::create_dir(dir.path().join("events.jsonl.tmp")).unwrap();
 
-        let failed = trace.forget_blocking(1).unwrap_err();
+        let failed = trace.forget_blocking(1, None).unwrap_err();
 
         assert!(failed.to_string().contains("events.jsonl"), "{failed}");
         assert_eq!(

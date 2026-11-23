@@ -209,7 +209,7 @@ fn forgetting_a_project_leaves_what_node_left() {
     let aside = cf_base::file::aside(trace.file());
     std::fs::write(&aside, text(&forget["beforeAside"])).unwrap();
     trace
-        .forget_blocking(forget["project"].as_i64().unwrap())
+        .forget_blocking(forget["project"].as_i64().unwrap(), None)
         .unwrap();
     assert_eq!(read(trace.file()).as_deref(), forget["after"].as_str());
     assert_eq!(read(&aside).as_deref(), forget["afterAside"].as_str());

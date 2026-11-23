@@ -14,9 +14,13 @@
 //!   to finish. What is open at the deadline is dropped. The app ends the
 //!   daemon 2 s after asking it to stop, and its own exit hooks must run
 //!   first.
-//! - **The tail** has no wait in it: the children are forced to end without
+//! - **The tail** waits for one thing only, the thread that writes the trace, a quarter
+//!   of a second at most, and lets the home go (the ledger is closed) only once it
+//!   has: past that it exits with the ledger still held, so that the writer ends with the
+//!   process and no daemon that takes the home meanwhile has lines written behind it.
+//!   The children are forced to end without
 //!   waiting (each group looked at once more, at once, for what it started as
-//!   the signal went round: `Ender::force`), the ledger is closed, `exit 0` is written, and the process exits. It
+//!   the signal went round: `Ender::force`), `exit 0` is written, and the process exits. It
 //!   never closes the bridge (a close refuses what waits on it, and the engine
 //!   would record a launch failed that Node left for the next start to
 //!   settle), and it never drops the runtime, whose read of its input cannot
@@ -126,21 +130,26 @@ impl Stopping {
         if let Err(panicked) = contain_now(|| (self.ends_children)()) {
             self.errors.caught("the children did not end", &panicked);
         }
-        let closed = contain_now(|| self.ledger.borrow_mut().close_in_place());
-        match closed {
-            Ok(Ok(())) => {}
-            Ok(Err(failed)) => self
-                .errors
-                .log()
-                .error("the ledger did not close", Some(&failed.to_string())),
-            Err(panicked) => self.errors.caught("the ledger did not close", &panicked),
-        }
-        // What the trace was told is written, if its file lets it within the
-        // tail's wait: a held file loses its last lines, never the exit.
-        if !self.errors.trace().settled(SETTLE) {
-            self.errors
-                .log()
-                .warn("the trace was not written in time; its last lines may be missing", None);
+        // What the trace was told is written first, if its file lets it within the
+        // tail's wait, and only then is the home let go: a daemon that took the home
+        // after this one must find no writer of this one's at the trace, or it would write
+        // lines of a project the next one deleted. A file that is held loses the last lines,
+        // never the exit, and the ledger stays held then: the writer ends with the process.
+        if self.errors.trace().end(SETTLE) {
+            let closed = contain_now(|| self.ledger.borrow_mut().close_in_place());
+            match closed {
+                Ok(Ok(())) => {}
+                Ok(Err(failed)) => self
+                    .errors
+                    .log()
+                    .error("the ledger did not close", Some(&failed.to_string())),
+                Err(panicked) => self.errors.caught("the ledger did not close", &panicked),
+            }
+        } else {
+            self.errors.log().warn(
+                "the trace was not written in time; its last lines may be missing",
+                None,
+            );
         }
         self.errors.log().info("exit 0");
         (self.exit)(0);

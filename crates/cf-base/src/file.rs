@@ -30,7 +30,7 @@ mod sync;
 mod write;
 
 pub use append::{append_rotating, aside, lock_beside};
-pub use durable::{flush, rename_durably};
+pub use durable::{flush, flush_folder, rename_durably};
 pub use errno::{errno_name, error_code, is_missing, known_code, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};

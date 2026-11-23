@@ -115,10 +115,12 @@ pub trait Credentials {
 /// is said, inside a ledger write too, and never waits.
 pub trait Trace {
     fn line(&self, line: TraceLine);
-    /// Drops the project's lines, after every line told before it, or says why
-    /// some stayed in the file. The work ends once each file that was rewritten
-    /// is on the disk.
-    fn forget(&self, project: i64) -> Work<'_, Result<(), String>>;
+    /// Drops the project's lines, after every line told before it, then writes
+    /// `notice`, the line that says the project was deleted, in the same job: a
+    /// daemon that stops after this was called has the notice in the trace. The work
+    /// ends with `Ok` only once the lines are gone from every file and that is on
+    /// the disk, or says why some stayed.
+    fn forget(&self, project: i64, notice: TraceLine) -> Work<'_, Result<(), String>>;
 }
 
 /// What the engine writes to the daemon's log: what failed apart from
