@@ -31,6 +31,29 @@ once, with the reason here and in the commit.
   `advance`, and the records of those steps as the Rust launch plays them; their first
   record is Node's own, but for the read's timer of 60000 in place of 10000.
 
+- **The Admin's verdict is the launch's own check (T-1969, P2 A2).** For Codex, Devin and Muse
+  Code a row's `setup` and its version are the launch's check of the CLI, asked through the
+  launches' own map of probes and not through the admin's capture: a probe runs in no folder of
+  its own, with 30 s and 128 KiB (Node's probe took 3 s and 8 KiB, in the home), and a Codex is
+  also asked `queue --help`, which Node's scenarios never scripted. In both platforms'
+  recordings every step that looked at a Codex gained its `setup` (`unchecked`: the scenario
+  scripts no queue), and every step that asked one of the three for its version moved its
+  recorded call. A CLI's `--version` is asked once as the file is on disk, so three scenarios
+  (the row kept five minutes, the look dated when it began, the update whose first look is
+  older than five minutes) no longer ask for the later answers their effects held: those are
+  dropped. The steps were moved by hand, once, to what the admin now says. A probe whose last
+  caller stopped waiting (a look cut at its time) leaves the map, so a CLI's version a cut look
+  never got is asked again at the next look: the look dated when it began holds a second answer
+  for it, and its step 4 records the second `--version` run (T-2068).
+
+- **Tested releases on the Admin row (T-1968).** Both platform scenarios now
+  include `tested` after `update`, including on missing harnesses. The installed
+  release is read only from the CLI's own complete version line (or Muse's pin),
+  and a recognized release is also the displayed and compared version. The
+  scenario runner masks `tested.newest` as `<newest tested>` so a declaration
+  bump does not rewrite the recordings. The threshold and the feed/CLI/declaration
+  round trip have separate assertions; the other recorded fields are unchanged.
+
 - **T-1715 shorter adapter text.** In each of the Darwin and Windows launch
   recordings, 88 recorded role files use the shorter Codex introduction and 88
   recorded child configuration files use its shorter identity/board sentence.

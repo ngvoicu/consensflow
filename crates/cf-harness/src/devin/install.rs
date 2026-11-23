@@ -20,7 +20,7 @@ mod version;
 // What the admin judges a Devin by: the rule a launch holds to.
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use config::native as native_config;
-pub(crate) use version::{at_least, minimum as minimum_version, supported as supported_version};
+pub(crate) use version::{at_least, minimum as minimum_version};
 
 use std::fs;
 use std::path::Path;
@@ -30,7 +30,8 @@ use cf_base::home::config_root;
 use cf_base::{js, path};
 use serde_json::{json, Map, Value};
 
-use crate::seams::processes::{probe, Unanswered};
+use crate::launch::{Check, Refused, Said};
+use crate::seams::processes::{probe, Asking, Unanswered};
 use crate::seams::Services;
 use crate::shared::shell::cf_hook;
 use crate::shared::window_args::Invocation;
@@ -128,6 +129,44 @@ pub(crate) fn added_hooks(
     ]
 }
 
+/// The check a launch makes of the Devin at `executable`, and the Admin page shows: its
+/// version, asked once as the file is on disk, is the one a window needs or newer. A
+/// Devin that answers with any exit code has answered. One that did not answer is refused
+/// in the words of why, and one that answered older is refused with the minimum.
+pub(crate) async fn version_check(asking: &Asking<'_>, executable: &str) -> Check {
+    match probe(
+        asking.probes,
+        asking.processes,
+        Path::new(executable),
+        &["--version"],
+        asking.env,
+    )
+    .await
+    {
+        Err(unanswered) => {
+            let why = said(unanswered);
+            Check {
+                said: Said::Unanswered(why.clone()),
+                verdict: Err(Refused {
+                    sentence: why,
+                    read: false,
+                }),
+            }
+        }
+        Ok(answered) => Check {
+            verdict: if version::supported(&answered.stdout) {
+                Ok(())
+            } else {
+                Err(Refused {
+                    sentence: version::required(),
+                    read: true,
+                })
+            },
+            said: Said::Read(answered.stdout),
+        },
+    }
+}
+
 /// Writes the config Devin's window of `launch` runs with, one per launch:
 /// the owner's, which is never changed, its hooks first and ours after, and
 /// its own updates off. A session the window shows starts with its role text
@@ -148,18 +187,14 @@ pub(super) async fn integration(
     if !valid(launch) {
         return Err("invalid Devin launch".to_owned());
     }
-    let answered = probe(
-        &services.probes,
-        &services.processes,
-        Path::new(executable),
-        &["--version"],
-        &services.env,
-    )
-    .await
-    .map_err(said)?;
-    if !version::supported(&answered.stdout) {
-        return Err(version::required());
+    let checked = version_check(&services.asking(), executable).await;
+    if let Err(refused) = checked.verdict {
+        return Err(refused.sentence);
     }
+    // A Devin that passes answered: its answer is what the check read.
+    let Said::Read(version) = checked.said else {
+        return Err(version::required());
+    };
     let mut configuration = config::native(&services.env)?;
     let home = config_root(&services.env).ok_or_else(|| "missing home in env".to_owned())?;
     let root = path::join(&[&home.to_string_lossy(), "integrations", "devin", launch]);
@@ -182,7 +217,7 @@ pub(super) async fn integration(
         args: vec!["--config".to_owned(), file],
         env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
         wire,
-        version: answered.stdout,
+        version,
         root,
     })
 }

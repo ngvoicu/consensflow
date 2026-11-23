@@ -69,8 +69,8 @@ pub fn claude_computer_use_decline(
 }
 
 pub use admin::{
-    Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,
-    Told,
+    Asked, BodyEnding, CaptureAsProcesses, Delivery, Response, Said, ScriptedCapture,
+    ScriptedLatest, ScriptedNetwork, Told,
 };
 pub use children::{called, name, named, ChildScript, Ends, ScriptedProcesses};
 pub use paste::paste_answers;

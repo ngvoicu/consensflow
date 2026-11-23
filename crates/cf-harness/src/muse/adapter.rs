@@ -181,13 +181,14 @@ impl Adapter for MuseAdapter {
                 ));
             }
             let integration = launch::integration(
-                env,
+                &self.services.asking(),
                 launch.id,
                 &executable,
                 &self.services.bundle.pane_cf,
                 &role.file,
                 session_hook::MOST_PARTS,
-            )?;
+            )
+            .await?;
             let agent = launch.agent.unwrap_or_default();
             let open = if launch.resume.is_none() {
                 window_args::start

@@ -23,7 +23,7 @@ const HARNESSES_PAGE: &str = include_str!("../goldens/pages/harnesses.html");
 /// '}' in JSON at position 1 (line 1 column 2)`) and the daemon says in its own
 /// (`the request body is not valid JSON: ` and `serde_json`'s, which say where):
 /// by trace, the exchange's `id`. Every other answer is held to its bytes.
-pub const DEPARTURES: [(&str, u64); 1] = [("corners-screens-009", 12)];
+pub const DEPARTURES: [(&str, u64); 0] = [];
 
 /// The words the daemon says where Node said V8's of a body that is no JSON.
 const OWN_WORDS: &str = "the request body is not valid JSON: ";
