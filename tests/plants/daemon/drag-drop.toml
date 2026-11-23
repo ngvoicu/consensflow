@@ -524,7 +524,9 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = "    typing = typing.then(dropped).catch(report)"
+find = """    typing = typing
+      .then(dropped)
+      .catch(report)"""
 replace = "    typing = dropped().catch(report)"
 
 [[plant]]
@@ -558,8 +560,8 @@ replace = '''    lastId = payload.id
 
 [[plant.edit]]
 file = "app/ui/core/file-drop.js"
-find = "    const dropped = () => type(target, payload, { invoke, focus, dock, report, still })"
-replace = "    const dropped = () => type(target, { ...payload, id: lastId }, { invoke, focus, dock, report, still })"
+find = "    const dropped = () => type(target, payload, { invoke, focus, dock, report, still, place })"
+replace = "    const dropped = () => type(target, { ...payload, id: lastId }, { invoke, focus, dock, report, still, place })"
 
 [[plant]]
 name = "file drop: the page does not listen for the app's drops at all"
@@ -781,8 +783,8 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    emulator.paste(text)"
-replace = "    void this.#link.input(pane, text)"
+find = "    else emulator.paste(text)"
+replace = "    else void this.#link.input(pane, text)"
 
 [[plant]]
 name = "file drop: the paths are typed as keys through the dock's input, with no markers"
@@ -791,8 +793,8 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    emulator.paste(text)"
-replace = "    void this.input(pane, text)"
+find = "    else emulator.paste(text)"
+replace = "    else void this.input(pane, text)"
 
 [[plant]]
 name = "file drop: the paths are typed a second time, as an emulator's reply"
@@ -801,8 +803,8 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = "    emulator.paste(text)"
-replace = '''    emulator.paste(text)
+find = "    else emulator.paste(text)"
+replace = '''    else emulator.paste(text)
     void this.#link.reply(pane, text)'''
 
 [[plant]]

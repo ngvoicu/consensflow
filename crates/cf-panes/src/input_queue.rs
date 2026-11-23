@@ -1548,7 +1548,7 @@ impl InputQueue {
             return Err(INPUT_STALE_PAGE.to_string());
         }
         let lane = page.lane(key);
-        if sequence <= lane.passed || lane.slots.contains_key(&sequence) {
+        if lane.slots.contains_key(&sequence) || sequence <= lane.passed {
             // The number was used before this was heard.
             return Ok(());
         }
