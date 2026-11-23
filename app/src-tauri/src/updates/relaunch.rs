@@ -170,8 +170,7 @@ pub(super) fn launch_services_with(handoff: Handoff) -> Result<std::process::Chi
 /// `sleep` (T-2114, T-2118).
 #[cfg(target_os = "macos")]
 const HELPER: &str = r#"old=$1; executable=$2; opener=$3; logger=$4; log=$5; keep=$6; shift 6
-say() { printf '%s
-' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }
+say() { printf '%s\n' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }
 while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done
 "$opener" "$@" && exit 0
 opened=$?
