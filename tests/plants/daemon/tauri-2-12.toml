@@ -21,7 +21,7 @@ runs = ["app-relaunch"]
 [[plant.edit]]
 file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
-    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
+    let mut command = std::process::Command::new(bundle_executable(app)?);
     command.args(args);"""
 replace = """
     let mut command = std::process::Command::new("/usr/bin/open");
