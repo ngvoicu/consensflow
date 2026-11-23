@@ -160,7 +160,7 @@ fn a_request_the_host_never_answered_is_a_transport_answer_in_the_hosts_word_els
 /// when it did, for the host to refuse it once more has been read since.
 #[test]
 fn a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at() {
-    let host = AnsweringHost::new(|_| json!({"ok": true, "admitted": true}));
+    let host = AnsweringHost::new(|_| Ok(json!({"ok": true, "admitted": true})));
     let answer = ReadEmpty {
         typed: 3,
         read: Some(260),
@@ -170,7 +170,7 @@ fn a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at() {
     assert_eq!(asked[0].1["readEmpty"], 3);
     assert_eq!(asked[0].1["readAt"], 260);
     drop(asked);
-    let host = AnsweringHost::new(|_| json!({"ok": true, "admitted": true}));
+    let host = AnsweringHost::new(|_| Ok(json!({"ok": true, "admitted": true})));
     finished(Box::pin(write_paste(
         &host,
         &pane(),
