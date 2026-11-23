@@ -981,6 +981,13 @@ impl Dispatcher {
         }) else {
             return Ok(());
         };
+        // A queued or held task's window the engine began to close in this step is not looked
+        // at, as a pass does not (`retiring`): its launch's first message was given up, or it
+        // is closing for a reassignment, a compaction or a Switch. A working task's is, as it
+        // always was.
+        if in_hand.task.state != "working" && record.window.borrow().retiring {
+            return Ok(());
+        }
         // The window's own look at its harness's record, which asks no one else.
         let Some(window) = record.window.borrow().window.clone() else {
             return Ok(());
@@ -988,7 +995,15 @@ impl Dispatcher {
         let Ok(observed) = returning(window.observe()).await else {
             return Ok(());
         };
-        if self.forgotten(record) || observed.shared || observed.switched.is_some() {
+        // Only a turn a pass would take as an answer is looked into here: settled, not failed,
+        // not another program's, nothing left running.
+        if self.forgotten(record)
+            || !observed.settled
+            || observed.failed
+            || observed.shared
+            || observed.switched.is_some()
+            || observed.pending().total() > 0
+        {
             return Ok(());
         }
         let Some(project) = self.project_of(record.id)? else {
@@ -1014,7 +1029,7 @@ impl Dispatcher {
             .is_some_and(|thread| {
                 thread.task.id == in_hand.task.id && thread.task.state == "working"
             });
-        if !working || !observed.settled || observed.failed || observed.pending().total() > 0 {
+        if !working {
             return Ok(());
         }
         // A refusal a pass would act on is the quota's to settle, not a result: the look
