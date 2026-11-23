@@ -628,7 +628,10 @@ impl Rig {
 
     /// The environment the window `body` asks for is judged on, on this rig's pane host: what the
     /// window must have, whatever the account stores (T-2086 B1).
-    pub fn judged_environment(&self, body: &Value) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
+    pub fn judged_environment(
+        &self,
+        body: &Value,
+    ) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
         self.shared
             .judged_environment(body)
             .ok_or_else(|| Error::LiveApp("the rig has no pane host's environment".to_owned()))?

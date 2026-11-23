@@ -172,7 +172,11 @@ mod tests {
     fn an_unavailable_check_fails_nothing_and_is_counted_and_printed_as_not_checked() {
         let checks = vec![
             Check::passed("claude", "the look", "2.1.330"),
-            Check::unavailable("muse", "the look", "the look would run Muse outside its sandbox"),
+            Check::unavailable(
+                "muse",
+                "the look",
+                "the look would run Muse outside its sandbox",
+            ),
         ];
         assert!(verdict(&checks).is_ok());
         assert!(table(&checks).contains("n/a  muse"), "{}", table(&checks));

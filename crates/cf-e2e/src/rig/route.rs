@@ -752,7 +752,13 @@ pub(crate) fn sinks_over(
     std::sync::mpsc::Receiver<String>,
 ) {
     let (host, host_lines, daemon, daemon_lines) = tests::sinks();
-    (Shared::over(host_env), host, host_lines, daemon, daemon_lines)
+    (
+        Shared::over(host_env),
+        host,
+        host_lines,
+        daemon,
+        daemon_lines,
+    )
 }
 
 #[cfg(test)]

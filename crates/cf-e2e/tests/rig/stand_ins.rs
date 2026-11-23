@@ -56,15 +56,14 @@ fn the_stand_in_agent_a_pane_host_closes_leaves_when_it_is_asked_to_end_and_is_n
 
     let rig = crate::rig()?;
     let opened = rig.open_pane(json!({
-            "id": "closed-1",
-            "generation": 1,
-            "cwd": "/tmp",
-            "argv": [FAKE_AGENT, "--session-id", "closed-session"],
-            "env": {},
-            "size": { "rows": 24, "cols": 80 },
-            "backlogBytes": 65536,
-        }),
-    )?;
+        "id": "closed-1",
+        "generation": 1,
+        "cwd": "/tmp",
+        "argv": [FAKE_AGENT, "--session-id", "closed-session"],
+        "env": {},
+        "size": { "rows": 24, "cols": 80 },
+        "backlogBytes": 65536,
+    }))?;
     assert_eq!(opened["ok"], true, "{opened}");
     // It says it is idle once it has set itself up to be asked to end.
     let sessions = Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default()).join("sessions");
@@ -373,10 +372,15 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
     ))?;
     assert_eq!(opened["ok"], true, "{opened}");
     rig.wait_for("the window's environment", crate::secs(10), || {
-        Ok(std::fs::read_to_string(&said).is_ok_and(|text| text.contains("\nHOME=") || text.starts_with("HOME=")))
+        Ok(std::fs::read_to_string(&said)
+            .is_ok_and(|text| text.contains("\nHOME=") || text.starts_with("HOME=")))
     })?;
     let env = std::fs::read_to_string(&said)?;
-    let root = rig.home().parent().map(Path::to_path_buf).unwrap_or_default();
+    let root = rig
+        .home()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     for name in cf_e2e::door::spawn::HOME_VARS {
         let line = env
             .lines()
@@ -403,7 +407,8 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
 /// judged environment has none. Nothing is written to the registry: it is read for its names only.
 #[cfg(windows)]
 #[test]
-fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores() -> Outcome {
+fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores() -> Outcome
+{
     let rig = crate::rig()?;
     let system = std::env::var_os("SystemRoot").ok_or("no SystemRoot")?;
     let shell = Path::new(&system).join("System32").join("cmd.exe");
@@ -421,7 +426,8 @@ fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account
     assert_eq!(opened["ok"], true, "{opened}");
     let said = rig.workspace().join("window-env.txt");
     rig.wait_for("the window's environment", crate::secs(20), || {
-        Ok(std::fs::read_to_string(&said).is_ok_and(|text| text.to_ascii_uppercase().contains("\nPATH=")))
+        Ok(std::fs::read_to_string(&said)
+            .is_ok_and(|text| text.to_ascii_uppercase().contains("\nPATH=")))
     })?;
     let text = std::fs::read_to_string(&said)?;
     let window: Vec<(String, String)> = text
@@ -430,7 +436,10 @@ fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account
         .map(|(name, value)| (name.to_owned(), value.to_owned()))
         .collect();
     let stored = cf_e2e::door::stored_names();
-    assert!(!stored.is_empty(), "the account's registry holds no variable (HKCU\\Environment has TEMP)");
+    assert!(
+        !stored.is_empty(),
+        "the account's registry holds no variable (HKCU\\Environment has TEMP)"
+    );
     let mut wrong = Vec::new();
     for name in &stored {
         let name = name.to_string_lossy();
@@ -451,7 +460,11 @@ fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account
             ));
         }
     }
-    assert!(wrong.is_empty(), "the window has what the account stores: {}", wrong.join("; "));
+    assert!(
+        wrong.is_empty(),
+        "the window has what the account stores: {}",
+        wrong.join("; ")
+    );
     let _ = rig.close_pane(json!({ "id": "the-window", "generation": 1 }));
     rig.close()?;
     Ok(())

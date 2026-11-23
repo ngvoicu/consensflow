@@ -317,7 +317,11 @@ mod tests {
         let muse = vouched_for(Harness::Muse, &installed.join("muse"), &path(&[&installed]));
         assert!(muse.unwrap_err().contains("outside its sandbox"));
         // A `pi` first on the daemon's path that is not the installed one is not asked.
-        let pi = vouched_for(Harness::Pi, &installed.join("pi"), &path(&[&other, &installed]));
+        let pi = vouched_for(
+            Harness::Pi,
+            &installed.join("pi"),
+            &path(&[&other, &installed]),
+        );
         assert!(pi.unwrap_err().contains("not the pi the kit found"));
         assert!(vouched_for(Harness::Pi, &installed.join("pi"), &path(&[&installed])).is_ok());
         // A link to the installed program is the installed program.

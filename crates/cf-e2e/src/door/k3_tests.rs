@@ -162,7 +162,12 @@ fn the_kits_own_variables_are_the_doors_and_no_callers() {
 fn a_harness_program_is_known_by_the_file_it_resolves_to() {
     let made = Path::new("/kit/run/bin");
     assert_eq!(
-        spawn::program_of(&made.join("x"), Some(Path::new("/opt/muse/muse-bin-1.4.14")), false, false),
+        spawn::program_of(
+            &made.join("x"),
+            Some(Path::new("/opt/muse/muse-bin-1.4.14")),
+            false,
+            false
+        ),
         Program::Harness("muse")
     );
     assert_eq!(
@@ -224,14 +229,26 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened() {
     for (case, body) in [
         // Another APPDATA, spelled in lower case: on Unix a spelling in another case of a home;
         // on Windows the decoy, which is no folder of the run's.
-        ("appdata", json!({ "id": "p-2", "argv": [program], "env": { "appdata": decoy_text } })),
-        ("APPDATA", json!({ "id": "p-3", "argv": [program], "env": { "APPDATA": decoy_text } })),
-        ("HOME dropped", json!({ "id": "p-4", "argv": [program], "dropEnv": ["HOME"] })),
+        (
+            "appdata",
+            json!({ "id": "p-2", "argv": [program], "env": { "appdata": decoy_text } }),
+        ),
+        (
+            "APPDATA",
+            json!({ "id": "p-3", "argv": [program], "env": { "APPDATA": decoy_text } }),
+        ),
+        (
+            "HOME dropped",
+            json!({ "id": "p-4", "argv": [program], "dropEnv": ["HOME"] }),
+        ),
         (
             "the kit's own dropped",
             json!({ "id": "p-5", "argv": [program], "dropEnv": [super::account::PROTECTED_FILE] }),
         ),
-        ("the Keychain", json!({ "id": "p-6", "argv": ["/usr/bin/security"] })),
+        (
+            "the Keychain",
+            json!({ "id": "p-6", "argv": ["/usr/bin/security"] }),
+        ),
     ] {
         assert!(
             super::window_admitted(&host, &body).is_err(),
@@ -307,7 +324,10 @@ fn a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_ha
     let mut env = serde_json::Map::new();
     env.insert("CF_TEST_HARNESS".into(), json!(wrapper));
     let on_wrapper = json!({ "id": "p-4", "argv": [shim], "env": env.clone() });
-    assert!(super::window_admitted(&host, &on_wrapper).is_err(), "the shim's wrapper was not seen");
+    assert!(
+        super::window_admitted(&host, &on_wrapper).is_err(),
+        "the shim's wrapper was not seen"
+    );
     for (name, value) in switches_of("claude").as_object().unwrap() {
         env.insert(name.clone(), value.clone());
     }
@@ -325,7 +345,12 @@ fn as_the_host_builds_it(
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = host
         .iter()
-        .map(|(name, value)| (name.to_string_lossy().into_owned(), value.to_string_lossy().into_owned()))
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
         .collect();
     let put = |env: &mut Vec<(String, String)>, name: &str, value: &str| {
         env.retain(|(held, _)| !held.eq_ignore_ascii_case(name));
@@ -340,7 +365,10 @@ fn as_the_host_builds_it(
     for name in body["dropEnv"].as_array().into_iter().flatten() {
         env.retain(|(held, _)| !held.eq_ignore_ascii_case(name.as_str().unwrap()));
     }
-    let mut env: Vec<_> = env.into_iter().map(|(name, value)| (name.to_ascii_lowercase(), value)).collect();
+    let mut env: Vec<_> = env
+        .into_iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect();
     env.sort();
     env
 }
@@ -357,7 +385,10 @@ fn a_window_is_sent_so_that_no_stored_variable_of_the_account_reaches_it() {
     let temp = root.path().join("temp");
     let host: Vec<(OsString, OsString)> = run_homes(&home.to_string_lossy())
         .into_iter()
-        .chain(vars(&[("PATH", "/usr/bin:/bin"), ("TEMP", &temp.to_string_lossy())]))
+        .chain(vars(&[
+            ("PATH", "/usr/bin:/bin"),
+            ("TEMP", &temp.to_string_lossy()),
+        ]))
         .chain(
             super::Door::child_vars()
                 .into_iter()
@@ -372,8 +403,12 @@ fn a_window_is_sent_so_that_no_stored_variable_of_the_account_reaches_it() {
         ("Path", "C:\\Users\\owner\\.local\\bin"),
         ("OneDrive", "C:\\Users\\owner\\OneDrive"),
     ];
-    let names: Vec<OsString> = stored.iter().map(|(name, _)| OsString::from(*name)).collect();
-    let body = json!({ "id": "p-1", "argv": ["/bin/sh"], "env": { "CF_ASKED": "1" }, "dropEnv": [] });
+    let names: Vec<OsString> = stored
+        .iter()
+        .map(|(name, _)| OsString::from(*name))
+        .collect();
+    let body =
+        json!({ "id": "p-1", "argv": ["/bin/sh"], "env": { "CF_ASKED": "1" }, "dropEnv": [] });
     let judged = spawn::pane_environment(&host, &body, true).unwrap();
     let sent = super::window_to_send(&host, &body, &names).unwrap();
     assert_eq!(
@@ -433,9 +468,11 @@ fn a_question_whose_environment_names_a_home_of_the_account_is_not_asked() {
         fine["env"]["CODEX_HOME"],
         json!(home.join(".codex").to_string_lossy())
     );
-    let mut owners = json!({ "op": "models", "kind": "codex", "env": { "HOME": home, "APPDATA": decoy } });
+    let mut owners =
+        json!({ "op": "models", "kind": "codex", "env": { "HOME": home, "APPDATA": decoy } });
     assert!(crate::live::ask::question_sealed(&mut owners).is_err());
-    let mut elsewhere = json!({ "op": "models", "kind": "codex", "env": { "HOME": "/not/the/runs" } });
+    let mut elsewhere =
+        json!({ "op": "models", "kind": "codex", "env": { "HOME": "/not/the/runs" } });
     assert!(crate::live::ask::question_sealed(&mut elsewhere).is_err());
 }
 
@@ -637,14 +674,22 @@ fn write_lock(file: &fs::File) -> bool {
 fn the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges() {
     const CHILD: &str = "CF_T2007_LOCK_CHILD";
     if let Some(file) = crate::process::own_var(CHILD) {
-        let open = fs::OpenOptions::new().read(true).write(true).open(file).unwrap();
+        let open = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(file)
+            .unwrap();
         assert!(!write_lock(&open), "the parent's lock was gone");
         return;
     }
     let root = made("k3-lock-").unwrap();
     let file = root.path().join("sessions.db-shm");
     super::write(&file, "shared memory").unwrap();
-    let held = fs::OpenOptions::new().read(true).write(true).open(&file).unwrap();
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&file)
+        .unwrap();
     assert!(write_lock(&held));
     for act in [Act::Write, Act::Remove, Act::Rename] {
         let _ = judge(&file, act);

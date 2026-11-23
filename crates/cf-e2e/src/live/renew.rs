@@ -360,7 +360,15 @@ pub fn one_shot_in(
     account: &[(String, String)],
     records: &[&Path],
 ) -> Result<Option<String>> {
-    one_shot_within(Some(machine), harness, program, words, account, LIMIT, records)
+    one_shot_within(
+        Some(machine),
+        harness,
+        program,
+        words,
+        account,
+        LIMIT,
+        records,
+    )
 }
 
 /// [`one_shot`], ended after `limit`, and its record in each of `records` taken away. The harness

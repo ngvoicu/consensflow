@@ -465,13 +465,12 @@ impl<'a> Open<'a> {
         let drop_env: Vec<String> = start.drop_env.into_iter().chain(self.drop_env).collect();
         let opened_at_ms = jiff::Timestamp::now().as_millisecond();
         let opened = self.rig.open_pane(open_request(
-                &self.id,
-                &workspace,
-                &argv,
-                (&window_vars, &drop_env),
-                ask::silent_paste(harness.kind())?,
-            ),
-        )?;
+            &self.id,
+            &workspace,
+            &argv,
+            (&window_vars, &drop_env),
+            ask::silent_paste(harness.kind())?,
+        ))?;
         if opened["ok"] != true {
             return Err(Error::Daemon(format!(
                 "{} did not open: {opened}",

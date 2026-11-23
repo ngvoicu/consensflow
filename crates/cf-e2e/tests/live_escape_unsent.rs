@@ -488,11 +488,10 @@ fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'
     let argv = ask::program(&argv, &env)?;
     let id = "escape-codex".to_owned();
     let opened = rig.open_pane(json!({
-            "id": id, "generation": 1, "cwd": workspace, "argv": argv,
-            "env": {}, "dropEnv": [],
-            "size": { "rows": 40, "cols": 120 },
-        }),
-    )?;
+        "id": id, "generation": 1, "cwd": workspace, "argv": argv,
+        "env": {}, "dropEnv": [],
+        "size": { "rows": 40, "cols": 120 },
+    }))?;
     if opened["ok"] != true {
         return Err(Error::Daemon(format!("codex did not open: {opened}")));
     }

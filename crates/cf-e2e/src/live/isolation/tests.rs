@@ -2563,9 +2563,9 @@ fn every_store_a_plan_names_is_a_row_of_the_table() {
         let mut named: Vec<&Path> = Vec::new();
         for seed in &plan.seeds {
             match seed {
-                Seed::Copy { from, .. } | Seed::PiLogin { from, .. } | Seed::PiProvider { from, .. } => {
-                    named.push(from)
-                }
+                Seed::Copy { from, .. }
+                | Seed::PiLogin { from, .. }
+                | Seed::PiProvider { from, .. } => named.push(from),
                 Seed::Fixed { .. } => {}
             }
         }

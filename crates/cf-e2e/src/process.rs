@@ -657,7 +657,9 @@ impl Run {
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
         cf_process::hold_only_the_streams(&mut command);
-        command.env_clear().envs(env.iter().map(|(name, value)| (name, value)));
+        command
+            .env_clear()
+            .envs(env.iter().map(|(name, value)| (name, value)));
         for arg in &self.args {
             arg.add_to(&mut command);
         }

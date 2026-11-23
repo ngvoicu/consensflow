@@ -112,21 +112,41 @@ pub const STORES: &[Store] = &[
     // Devin: the XDG folders on a Mac and Linux, `%APPDATA%` and `%LOCALAPPDATA%` on Windows,
     // each with the folder used without the variable.
     row(Devin, Login, under("XDG_CONFIG_HOME", ".config", "devin")),
-    row(Devin, Login, under("XDG_DATA_HOME", ".local/share", "devin")),
+    row(
+        Devin,
+        Login,
+        under("XDG_DATA_HOME", ".local/share", "devin"),
+    ),
     row(
         Devin,
         Program,
         under("XDG_DATA_HOME", ".local/share", "devin/cli/_versions"),
     ),
-    row(Devin, Records, under("XDG_STATE_HOME", ".local/state", "devin")),
+    row(
+        Devin,
+        Records,
+        under("XDG_STATE_HOME", ".local/state", "devin"),
+    ),
     row(Devin, Cache, under("XDG_CACHE_HOME", ".cache", "devin")),
     row(Devin, Login, under("APPDATA", "AppData/Roaming", "devin")),
-    row(Devin, Records, under("LOCALAPPDATA", "AppData/Local", "devin")),
+    row(
+        Devin,
+        Records,
+        under("LOCALAPPDATA", "AppData/Local", "devin"),
+    ),
     // Muse Code: the XDG folders (on Windows too, below the profile), its runtime folders, and on
     // a Mac its store below the home and below the home the system was told to give it.
     row(Muse, Login, under("XDG_CONFIG_HOME", ".config", "muse")),
-    row(Muse, Records, under("XDG_DATA_HOME", ".local/share", "muse")),
-    row(Muse, Records, under("XDG_STATE_HOME", ".local/state", "muse")),
+    row(
+        Muse,
+        Records,
+        under("XDG_DATA_HOME", ".local/share", "muse"),
+    ),
+    row(
+        Muse,
+        Records,
+        under("XDG_STATE_HOME", ".local/state", "muse"),
+    ),
     row(Muse, Cache, under("XDG_CACHE_HOME", ".cache", "muse")),
     row(
         Muse,
@@ -136,7 +156,11 @@ pub const STORES: &[Store] = &[
             suffix: "muse",
         },
     ),
-    row(Muse, Runtime, Place::System("/private/tmp/tbh-{uid}-rt/muse")),
+    row(
+        Muse,
+        Runtime,
+        Place::System("/private/tmp/tbh-{uid}-rt/muse"),
+    ),
     row(
         Muse,
         Settings,
@@ -194,7 +218,10 @@ pub fn roots(lookup: &dyn Fn(&str) -> Option<OsString>) -> Vec<Root> {
 
 /// [`roots`] with the user number `uid`.
 pub fn roots_for(lookup: &dyn Fn(&str) -> Option<OsString>, uid: Option<u32>) -> Vec<Root> {
-    let homes: Vec<PathBuf> = HOMES.iter().filter_map(|name| folder(lookup, name)).collect();
+    let homes: Vec<PathBuf> = HOMES
+        .iter()
+        .filter_map(|name| folder(lookup, name))
+        .collect();
     let mut roots = Vec::new();
     let mut add = |path: PathBuf, store: Store| {
         if !roots.iter().any(|root: &Root| root.path == path) {
@@ -241,7 +268,10 @@ pub fn roots_for(lookup: &dyn Fn(&str) -> Option<OsString>, uid: Option<u32>) ->
             }
             Place::System(template) => {
                 if let Some(uid) = uid {
-                    add(PathBuf::from(template.replace("{uid}", &uid.to_string())), *store);
+                    add(
+                        PathBuf::from(template.replace("{uid}", &uid.to_string())),
+                        *store,
+                    );
                 }
             }
         }
@@ -327,7 +357,9 @@ mod tests {
         .collect()
     }
 
-    fn lookup_of<'a>(vars: &'a HashMap<&'static str, PathBuf>) -> impl Fn(&str) -> Option<OsString> + 'a {
+    fn lookup_of<'a>(
+        vars: &'a HashMap<&'static str, PathBuf>,
+    ) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |name| vars.get(name).map(|path| path.clone().into_os_string())
     }
 
@@ -347,7 +379,14 @@ mod tests {
         let at = |name: &str, suffix: &str| below(&vars[name], suffix);
         // Each variable's folder, and the default below each home of the account, distinct.
         for home in ["HOME", "USERPROFILE"] {
-            for suffix in [".claude", ".claude.json", ".codex", ".pi", ".gemini", "Library/Keychains"] {
+            for suffix in [
+                ".claude",
+                ".claude.json",
+                ".codex",
+                ".pi",
+                ".gemini",
+                "Library/Keychains",
+            ] {
                 has(at(home, suffix));
             }
             // Windows Devin with no `APPDATA` falls to the profile; Windows Muse to its XDG
@@ -366,7 +405,12 @@ mod tests {
         has(vars["CODEX_HOME"].clone());
         has(vars["PI_CODING_AGENT_DIR"].clone());
         has(vars["PI_CODING_AGENT_SESSION_DIR"].clone());
-        for var in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] {
+        for var in [
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "XDG_CACHE_HOME",
+        ] {
             has(at(var, "muse"));
             has(at(var, "devin"));
         }
@@ -385,11 +429,16 @@ mod tests {
         } else {
             ("/one", "/two")
         };
-        let vars: HashMap<&'static str, PathBuf> =
-            [("HOME", PathBuf::from(one)), ("USERPROFILE", PathBuf::from(two))].into();
+        let vars: HashMap<&'static str, PathBuf> = [
+            ("HOME", PathBuf::from(one)),
+            ("USERPROFILE", PathBuf::from(two)),
+        ]
+        .into();
         let roots = roots_for(&lookup_of(&vars), None);
         for home in [one, two] {
-            assert!(roots.iter().any(|root| root.path == Path::new(home).join(".codex")));
+            assert!(roots
+                .iter()
+                .any(|root| root.path == Path::new(home).join(".codex")));
         }
     }
 
@@ -398,7 +447,10 @@ mod tests {
         // In the order a machine is asked: the first that is there says it is set up.
         assert_eq!(login_marks(Whose::Claude), [".claude.json", ".claude"]);
         assert_eq!(login_marks(Whose::Pi), [".pi"]);
-        assert_eq!(login_marks(Whose::Devin), [".config/devin", ".local/share/devin"]);
+        assert_eq!(
+            login_marks(Whose::Devin),
+            [".config/devin", ".local/share/devin"]
+        );
         assert_eq!(login_marks(Whose::Muse), [".config/muse"]);
     }
 }

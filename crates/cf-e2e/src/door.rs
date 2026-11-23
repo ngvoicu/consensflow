@@ -310,8 +310,7 @@ impl Door {
         // builds from its own environment ([`account`]); a run that cannot write them starts
         // nothing.
         vars.extend(
-            account::child_vars()
-                .unwrap_or_else(|why| panic!("the run starts no program: {why}")),
+            account::child_vars().unwrap_or_else(|why| panic!("the run starts no program: {why}")),
         );
         vars
     }
@@ -378,7 +377,10 @@ impl Door {
             // added to, and one taken away stops the run as a file that cannot be written does.
             Some(open) => {
                 let open = open.lock().unwrap_or_else(PoisonError::into_inner);
-                let same = match (self::identity::of_file(&open), self::identity::of_path(file)) {
+                let same = match (
+                    self::identity::of_file(&open),
+                    self::identity::of_path(file),
+                ) {
                     (Ok(held), Ok(now)) => held == now,
                     _ => false,
                 };
@@ -613,9 +615,9 @@ impl Door {
         }
         let judged = judge(path, place::Act::Remove);
         let under = judged.as_ref().is_ok_and(|real| {
-            registry()
-                .iter()
-                .any(|made| made.file.is_none() && real.starts_with(&made.real) && *real != made.real)
+            registry().iter().any(|made| {
+                made.file.is_none() && real.starts_with(&made.real) && *real != made.real
+            })
         });
         if !under {
             let why = match judged {
@@ -946,7 +948,9 @@ pub fn window_admitted(
         spawn::Program::Keychain => {
             Err("the window's program is the Keychain's utility, which only its door starts".into())
         }
-        spawn::Program::Cargo => Err("the window's program is cargo, which only its door starts".into()),
+        spawn::Program::Cargo => {
+            Err("the window's program is cargo, which only its door starts".into())
+        }
         program => spawn::has_update_switches(&program, &env),
     }
 }
@@ -985,7 +989,8 @@ pub fn window_to_send(
         return Ok(body.clone());
     }
     let judged = spawn::pane_environment(host, body, cfg!(windows))?;
-    let same = |left: &str, right: &std::ffi::OsStr| right.to_string_lossy().eq_ignore_ascii_case(left);
+    let same =
+        |left: &str, right: &std::ffi::OsStr| right.to_string_lossy().eq_ignore_ascii_case(left);
     let mut sent = body.clone();
     let mut env = sent["env"].as_object().cloned().unwrap_or_default();
     let mut dropped = sent["dropEnv"].as_array().cloned().unwrap_or_default();
@@ -1010,10 +1015,10 @@ pub fn window_to_send(
                 env.insert(held.to_string_lossy().into_owned(), value.into());
             }
             None => {
-                if !dropped
-                    .iter()
-                    .any(|out| out.as_str().is_some_and(|out| out.eq_ignore_ascii_case(text)))
-                {
+                if !dropped.iter().any(|out| {
+                    out.as_str()
+                        .is_some_and(|out| out.eq_ignore_ascii_case(text))
+                }) {
                     dropped.push(text.into());
                 }
             }
@@ -1121,7 +1126,10 @@ fn program_within(
     if depth < STARTERS_DEEP {
         match starter_of(judged) {
             Some(Starts::Wrapper(harness)) => return spawn::Program::Harness(harness),
-            Some(Starts::Shim { var, program: written }) => {
+            Some(Starts::Shim {
+                var,
+                program: written,
+            }) => {
                 let next = var
                     .as_deref()
                     .and_then(get)
@@ -1134,7 +1142,12 @@ fn program_within(
     }
     let in_store = inside_protected(judged);
     let made_by_run = is_made_or_below(judged);
-    spawn::program_of(found.as_deref().unwrap_or(program), real.as_deref(), in_store, made_by_run)
+    spawn::program_of(
+        found.as_deref().unwrap_or(program),
+        real.as_deref(),
+        in_store,
+        made_by_run,
+    )
 }
 
 /// The paths `value` hands down ([`MADE_ROOTS`]), each by its real path where it is there: the
@@ -1199,8 +1212,11 @@ fn forget_made(path: &Path) {
 
 /// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
 pub fn is_made(path: &Path) -> bool {
-    canonical(path)
-        .is_some_and(|real| registry().iter().any(|made| made.file.is_none() && made.real == real))
+    canonical(path).is_some_and(|real| {
+        registry()
+            .iter()
+            .any(|made| made.file.is_none() && made.real == real)
+    })
 }
 
 /// Whether `path` is a folder this process made through the door, or is below one, by real paths

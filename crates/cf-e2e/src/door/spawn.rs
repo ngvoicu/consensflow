@@ -216,7 +216,11 @@ pub fn seal(
     for (name, value) in judges.kit {
         match get(name) {
             Some(given) if given == OsStr::new(value) => {}
-            _ => return Err(format!("the kit's own variable {name} was changed or taken away")),
+            _ => {
+                return Err(format!(
+                    "the kit's own variable {name} was changed or taken away"
+                ))
+            }
         }
     }
     for owned in [

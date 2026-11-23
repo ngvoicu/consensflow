@@ -426,11 +426,20 @@ mod shell {
             "CONSENSFLOW_TOKEN",
             "CONSENSFLOW_PARTICIPANT",
         ] {
-            assert!(!names.iter().any(|name| name == given), "{given}: {names:?}");
+            assert!(
+                !names.iter().any(|name| name == given),
+                "{given}: {names:?}"
+            );
         }
         // What is the user's or the system's toolchain stays: the build the test is part of has
         // it too.
-        for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP", "HOME"] {
+        for kept in [
+            "CARGO",
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "RUSTC_BOOTSTRAP",
+            "HOME",
+        ] {
             assert!(names.iter().any(|name| name == kept), "{kept}: {names:?}");
         }
     }
@@ -966,7 +975,15 @@ fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
 /// of the run's, and the Keychain's utility, each before anything starts.
 #[test]
 fn a_plain_start_refuses_a_harness_program_and_the_keychains_utility() {
-    for program in ["codex", "claude", "pi", "devin", "muse", "/usr/bin/security", "cargo"] {
+    for program in [
+        "codex",
+        "claude",
+        "pi",
+        "devin",
+        "muse",
+        "/usr/bin/security",
+        "cargo",
+    ] {
         let refused = Run::new(program).arg("--version").run().unwrap_err();
         assert!(
             refused.to_string().contains("a door of its own"),
@@ -995,7 +1012,10 @@ fn an_inherited_home_of_the_accounts_is_not_handed_on() {
     assert!(!inheritable("HOME", OsStr::new("/the/owners/home")));
     assert!(inheritable("HOME", root.path().as_os_str()));
     assert!(!inheritable("HOME", store.as_os_str()));
-    assert!(!inheritable("GIT_CONFIG_GLOBAL", store.join("config").as_os_str()));
+    assert!(!inheritable(
+        "GIT_CONFIG_GLOBAL",
+        store.join("config").as_os_str()
+    ));
     assert!(inheritable("PATH", store.as_os_str()));
     assert!(inheritable("LANG", OsStr::new("en_US.UTF-8")));
 }
@@ -1009,10 +1029,28 @@ fn the_windows_machine_list_keeps_systemroot_and_the_system_variables() {
     let machine = |name: &str| Some(OsString::from(format!("machine-{name}")));
     let given = required_from(&named, true, true, &machine);
     let names: Vec<&str> = given.iter().map(|(name, _)| *name).collect();
-    for kept in ["SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATH", "TEMP", "USERNAME", "COMSPEC", "PATHEXT"] {
+    for kept in [
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "PATH",
+        "TEMP",
+        "USERNAME",
+        "COMSPEC",
+        "PATHEXT",
+    ] {
         assert!(names.contains(&kept), "{kept}: {names:?}");
     }
-    for name in ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERNAME", "LANG"] {
+    for name in [
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERNAME",
+        "LANG",
+    ] {
         assert!(is_machine_variable(name), "{name}");
     }
 }

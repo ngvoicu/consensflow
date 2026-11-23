@@ -62,7 +62,12 @@ const TOOLCHAIN: [&str; 21] = [
 
 /// The prefixes of the toolchain's variables cargo is given (its build, profile and target
 /// settings), but for what cargo gave the test.
-const TOOLCHAIN_PREFIXES: [&str; 4] = ["CARGO_BUILD_", "CARGO_PROFILE_", "CARGO_TARGET_", "CARGO_TERM_"];
+const TOOLCHAIN_PREFIXES: [&str; 4] = [
+    "CARGO_BUILD_",
+    "CARGO_PROFILE_",
+    "CARGO_TARGET_",
+    "CARGO_TERM_",
+];
 
 /// Whether `name` is a toolchain variable cargo is given.
 pub fn is_toolchain_variable(name: &str) -> bool {
@@ -228,9 +233,12 @@ mod tests {
         .into_iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
         .collect();
-        let env = environment_of(all, Some(Path::new(&at("/owner"))), Path::new(&at("/run/home")), &|_| {
-            false
-        })
+        let env = environment_of(
+            all,
+            Some(Path::new(&at("/owner"))),
+            Path::new(&at("/run/home")),
+            &|_| false,
+        )
         .unwrap();
         let get = |name: &str| {
             env.iter()
@@ -264,7 +272,10 @@ mod tests {
 
     #[test]
     fn cargo_is_refused_a_variable_that_names_a_store() {
-        let all = [(OsString::from("CARGO_TARGET_DIR"), OsString::from(at("/owner/.codex/t")))];
+        let all = [(
+            OsString::from("CARGO_TARGET_DIR"),
+            OsString::from(at("/owner/.codex/t")),
+        )];
         let refused = environment_of(all, None, Path::new(&at("/run/home")), &|path| {
             path.starts_with(at("/owner/.codex"))
         })

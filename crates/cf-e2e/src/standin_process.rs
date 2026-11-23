@@ -318,13 +318,10 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
 #[cfg(test)]
 fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
     let home = home.as_os_str().to_owned();
-    crate::live::stores::roots_for(
-        &|name| (name == "HOME").then(|| home.clone()),
-        None,
-    )
-    .into_iter()
-    .map(|root| root.path)
-    .collect()
+    crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
+        .into_iter()
+        .map(|root| root.path)
+        .collect()
 }
 
 /// Whether the folder a run would make its homes in is outside every protected one.
@@ -857,7 +854,9 @@ mod tests {
         .run()
         .expect_err("a stand-in on a layout of no run's was started");
         assert!(
-            refused.to_string().contains("which is no folder this run made"),
+            refused
+                .to_string()
+                .contains("which is no folder this run made"),
             "{refused}"
         );
         assert!(!foreign.exists(), "the foreign layout was made");
@@ -951,7 +950,11 @@ mod tests {
 
     #[test]
     fn the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file() {
-        let home = Path::new(if cfg!(windows) { r"C:\decoy\owner" } else { "/decoy/owner" });
+        let home = Path::new(if cfg!(windows) {
+            r"C:\decoy\owner"
+        } else {
+            "/decoy/owner"
+        });
         let held = personal_harness_homes(home);
         for suffix in [
             "Library/Application Support/Muse/session-name-authority/x",
@@ -977,7 +980,10 @@ mod tests {
         crate::door::make_dir(&held).unwrap();
         let link = root.path().join("tmp-link");
         std::os::unix::fs::symlink(&held, &link).unwrap();
-        crate::door::account::TEST_PROTECTED.lock().unwrap().push(held.clone());
+        crate::door::account::TEST_PROTECTED
+            .lock()
+            .unwrap()
+            .push(held.clone());
         let direct = crate::door::made_in(&held.join("tmp"), "h-");
         let through = crate::door::made_in(&link.join("sub/../tmp"), "h-");
         crate::door::account::TEST_PROTECTED

@@ -132,9 +132,13 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
     for (name, path) in cf_e2e::standin_process::home_vars(&decoy) {
         command = command.var(name, path);
     }
-    let refused = command.run().expect_err("a child on foreign homes was started");
+    let refused = command
+        .run()
+        .expect_err("a child on foreign homes was started");
     assert!(
-        refused.to_string().contains("which is no folder this run made"),
+        refused
+            .to_string()
+            .contains("which is no folder this run made"),
         "{refused}"
     );
     assert!(!decoy.exists(), "the foreign home was made");

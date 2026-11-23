@@ -105,13 +105,13 @@ fn stand_in_words(names: &[String]) -> Vec<String> {
     crate::stand_in_lists::MODELS
         .into_iter()
         .map(str::to_owned)
-    .chain(names.iter().cloned())
-    .fold(Vec::new(), |mut words, word| {
-        if !words.contains(&word) {
-            words.push(word);
-        }
-        words
-    })
+        .chain(names.iter().cloned())
+        .fold(Vec::new(), |mut words, word| {
+            if !words.contains(&word) {
+                words.push(word);
+            }
+            words
+        })
 }
 
 /// [`shimmed_claude`], whose real Claude Code also loads the MCP servers the file
@@ -602,7 +602,11 @@ mod tests {
         let own = home().join("own config");
         assert_eq!(run(Some(own.to_str().unwrap())), said(&own));
         // No folder of the shim's own: the one the door gives every program below its home.
-        assert_eq!(run(None), said(&home().join(".claude")), "a folder of the shim's own");
+        assert_eq!(
+            run(None),
+            said(&home().join(".claude")),
+            "a folder of the shim's own"
+        );
     }
 
     #[cfg(unix)]

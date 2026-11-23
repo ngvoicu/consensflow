@@ -224,12 +224,26 @@ mod tests {
         ]});
         assert_eq!(
             ids(&of_roster("claude-code", Some(&roster))),
-            ["fake", "fake-2", "fake-chief", "worker", "chief", "mybuilder"]
+            [
+                "fake",
+                "fake-2",
+                "fake-chief",
+                "worker",
+                "chief",
+                "mybuilder"
+            ]
         );
         let codex = of_roster("codex", Some(&roster));
         assert_eq!(
             ids(&codex),
-            ["fake", "fake-2", "fake-chief", "worker", "gpt-6-astra", "zed"]
+            [
+                "fake",
+                "fake-2",
+                "fake-chief",
+                "worker",
+                "gpt-6-astra",
+                "zed"
+            ]
         );
         let astra = codex
             .iter()

@@ -386,15 +386,17 @@ impl Installed {
         let Some(scratch) = scratch else {
             return "unknown".to_owned();
         };
-        let mut probe = Run::harness(self.harness.name(), &self.command).arg(word).vars(
-            probe_vars(&own_var, scratch.path(), config)
-                .into_iter()
-                .chain(
-                    super::launcher::updates_off_of(self.harness)
-                        .iter()
-                        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
-                ),
-        );
+        let mut probe = Run::harness(self.harness.name(), &self.command)
+            .arg(word)
+            .vars(
+                probe_vars(&own_var, scratch.path(), config)
+                    .into_iter()
+                    .chain(
+                        super::launcher::updates_off_of(self.harness)
+                            .iter()
+                            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+                    ),
+            );
         let _ = &mut probe;
         let ran = probe.run().ok().filter(|ran| ran.code == Some(0));
         let line = ran

@@ -197,14 +197,20 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
             roots.extend(extra);
             let (path, digest) = write_roots(&roots)?;
             return Ok(vec![
-                (PROTECTED_FILE.to_owned(), path.to_string_lossy().into_owned()),
+                (
+                    PROTECTED_FILE.to_owned(),
+                    path.to_string_lossy().into_owned(),
+                ),
                 (PROTECTED_DIGEST.to_owned(), digest),
             ]);
         }
     }
     let (path, digest) = own_file()?;
     Ok(vec![
-        (PROTECTED_FILE.to_owned(), path.to_string_lossy().into_owned()),
+        (
+            PROTECTED_FILE.to_owned(),
+            path.to_string_lossy().into_owned(),
+        ),
         (PROTECTED_DIGEST.to_owned(), digest),
     ])
 }
@@ -307,7 +313,10 @@ mod tests {
         let account = account_of(&lookup(&vars)).unwrap();
         assert_eq!(
             account.roots,
-            [PathBuf::from("/owner/.codex"), PathBuf::from("/owner/.claude")]
+            [
+                PathBuf::from("/owner/.codex"),
+                PathBuf::from("/owner/.claude")
+            ]
         );
         assert_eq!(account.home, None, "a child has no person's home");
         // A well-formed list with a root left out, put at the same path later, is refused.

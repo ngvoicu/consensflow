@@ -218,7 +218,13 @@ pub fn renewal(
             "PI_CODING_AGENT_DIR".to_owned(),
             agent.to_string_lossy().into_owned(),
         ));
-        let ended = renew::one_shot(&on, Harness::Pi, &program, &renew::pi_words(&model), &account)?;
+        let ended = renew::one_shot(
+            &on,
+            Harness::Pi,
+            &program,
+            &renew::pi_words(&model),
+            &account,
+        )?;
         let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);
         if changed.is_empty() {
             return Ok(ended);

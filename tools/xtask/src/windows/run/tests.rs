@@ -401,8 +401,17 @@ fn a_run_gives_its_command_the_name_of_the_machine_it_is_sent_to() {
         );
     }
     // zeewin2's account is its owner's own (T-2007 round 3): no marker there.
-    let plan = Plan::new(&Machine::named("zeewin2").unwrap(), &options, "0000abcd-12345678").unwrap();
-    assert!(!plan.script.contains("$env:CONSENSFLOW_TEST_MACHINE ="), "{}", plan.script);
+    let plan = Plan::new(
+        &Machine::named("zeewin2").unwrap(),
+        &options,
+        "0000abcd-12345678",
+    )
+    .unwrap();
+    assert!(
+        !plan.script.contains("$env:CONSENSFLOW_TEST_MACHINE ="),
+        "{}",
+        plan.script
+    );
 }
 
 #[test]

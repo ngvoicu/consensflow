@@ -34,7 +34,8 @@ fn names_in(root: HKEY, path: &str) -> Vec<OsString> {
         .collect();
     let mut key: HKEY = std::ptr::null_mut();
     // SAFETY: the path is a string ended by 0, and `key` is ours to fill.
-    if unsafe { RegOpenKeyExW(root, wide.as_ptr(), 0, KEY_QUERY_VALUE, &mut key) } != ERROR_SUCCESS {
+    if unsafe { RegOpenKeyExW(root, wide.as_ptr(), 0, KEY_QUERY_VALUE, &mut key) } != ERROR_SUCCESS
+    {
         return Vec::new();
     }
     let mut names = Vec::new();

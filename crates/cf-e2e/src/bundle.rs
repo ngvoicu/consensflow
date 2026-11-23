@@ -109,7 +109,15 @@ mod tests {
         for _ in 0..20 {
             let ran = crate::door::cargo::build(
                 &checkout::root(),
-                &["--offline", "--release", "--locked", "-p", "cf", "--bin", "cf"],
+                &[
+                    "--offline",
+                    "--release",
+                    "--locked",
+                    "-p",
+                    "cf",
+                    "--bin",
+                    "cf",
+                ],
             )
             .unwrap();
             assert_eq!(ran.code, Some(0), "{ran}");

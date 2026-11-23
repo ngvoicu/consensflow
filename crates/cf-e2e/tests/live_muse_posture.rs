@@ -317,7 +317,8 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
     tui::on_a_mac()?;
     // Before anything of the owner's Muse is read or copied (T-2086 N3): a real Muse window on a
     // Mac runs only on a marked test machine.
-    cf_e2e::muse::real_window_allowed("Muse's posture case").map_err(|refused| refused.to_string())?;
+    cf_e2e::muse::real_window_allowed("Muse's posture case")
+        .map_err(|refused| refused.to_string())?;
     let log = Log::own_agents(
         "live muse-posture",
         "it runs Muse on an enabled Spark from its account list",

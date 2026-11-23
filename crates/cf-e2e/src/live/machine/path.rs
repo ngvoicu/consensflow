@@ -135,11 +135,7 @@ pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf
         Some(harness) => Run::harness(harness.name(), &found),
         None => Run::new(&found),
     };
-    let ran = start
-        .args(probe)
-        .inheriting_env()
-        .closed_input()
-        .run()?;
+    let ran = start.args(probe).inheriting_env().closed_input().run()?;
     if ran.code == Some(0) {
         return Ok(found);
     }

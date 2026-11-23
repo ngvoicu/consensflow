@@ -108,7 +108,11 @@ where
 /// The first of the door's two reads: Claude Code's login item, of the account `user`, for the
 /// seed of a run's login copy ([`super::login`]).
 pub fn login_item(user: &str, limit: Duration) -> Result<Ran> {
-    security("keychain::login_item", super::login::keychain_args(user), limit)
+    security(
+        "keychain::login_item",
+        super::login::keychain_args(user),
+        limit,
+    )
 }
 
 /// The second: the names of the Keychain's items, for the guard that compares them before and

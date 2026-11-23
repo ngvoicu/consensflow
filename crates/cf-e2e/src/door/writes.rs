@@ -250,7 +250,10 @@ fn named(path: &Path) -> Result {
         ));
     }
     super::judge(path, super::place::Act::Name).map_err(Error::file("make", path))?;
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         super::make_missing(parent).map_err(Error::file("make", parent))?;
     }
     Ok(())

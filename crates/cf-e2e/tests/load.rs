@@ -296,11 +296,10 @@ fn a_window_that_prints_for_hours_holds_the_rig_and_its_report_to_a_bound() -> O
     let done = rig.workspace().join("noise-done");
     let pane = json!({ "id": "noisy-1", "generation": 1 });
     let opened = rig.open_pane(json!({
-            "id": "noisy-1", "generation": 1, "cwd": rig.workspace(),
-            "argv": [FAKE_AGENT, "--noise", (mib * 1024 * 1024).to_string(), done],
-            "env": {}, "size": { "rows": 24, "cols": 80 },
-        }),
-    )?;
+        "id": "noisy-1", "generation": 1, "cwd": rig.workspace(),
+        "argv": [FAKE_AGENT, "--noise", (mib * 1024 * 1024).to_string(), done],
+        "env": {}, "size": { "rows": 24, "cols": 80 },
+    }))?;
     assert_eq!(opened["ok"], true, "{opened}");
     let begun = Instant::now();
     let within = Duration::from_secs(60 + 2 * mib as u64);

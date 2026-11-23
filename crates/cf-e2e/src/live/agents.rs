@@ -1842,14 +1842,21 @@ mod tests {
             for model in MODELS {
                 let row = json!({ "id": "x", "kind": kind, "model": model });
                 assert_eq!(seat_of(kind, model), Seat::StandIn, "{kind} {model}");
-                assert_eq!(harness_of(&row), None, "{kind} {model}: a harness is installed");
+                assert_eq!(
+                    harness_of(&row),
+                    None,
+                    "{kind} {model}: a harness is installed"
+                );
                 let mut asked = Vec::new();
                 validate_rows(std::slice::from_ref(&row), |harness| {
                     asked.push(harness);
                     Ok(Vec::new())
                 })
                 .unwrap();
-                assert!(asked.is_empty(), "{kind} {model}: the real catalogue was asked");
+                assert!(
+                    asked.is_empty(),
+                    "{kind} {model}: the real catalogue was asked"
+                );
                 let listed = of_roster(kind, Some(&json!({ "agents": [row] })));
                 assert!(
                     listed.iter().any(|listed| listed.id == model),

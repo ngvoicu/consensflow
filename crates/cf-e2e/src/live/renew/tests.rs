@@ -308,7 +308,8 @@ mod running {
         // A link at the name, made before the renewal and made during it.
         let baseline = inventory(&[records.path()]);
         std::os::unix::fs::symlink(target.path(), &its).unwrap();
-        let said = forget(&[records.path()], own.path(), &baseline, Some(&machine())).expect("a link is refused");
+        let said = forget(&[records.path()], own.path(), &baseline, Some(&machine()))
+            .expect("a link is refused");
         assert!(said.contains("is a link"), "{said}");
         assert!(its.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(
@@ -320,7 +321,8 @@ mod running {
         fs::create_dir_all(its.join("memory")).unwrap();
         fs::write(its.join("memory/note.md"), "the owner's").unwrap();
         let baseline = inventory(&[records.path()]);
-        let said = forget(&[records.path()], own.path(), &baseline, Some(&machine())).expect("a baseline entry");
+        let said = forget(&[records.path()], own.path(), &baseline, Some(&machine()))
+            .expect("a baseline entry");
         assert!(said.contains("was there before the renewal"), "{said}");
         assert_eq!(
             fs::read_to_string(its.join("memory/note.md")).unwrap(),
@@ -382,7 +384,10 @@ mod running {
             outside.display()
         );
         let program = stand_in(scratch.path(), &log, &leaving, 0);
-        assert_eq!(one_shot(&machine(), Harness::Pi, &program, &[], &[]).unwrap(), None);
+        assert_eq!(
+            one_shot(&machine(), Harness::Pi, &program, &[], &[]).unwrap(),
+            None
+        );
         let written = fs::read_to_string(&log).unwrap();
         let folder = Path::new(written.split_once('\n').unwrap().1.trim());
         assert!(!folder.exists(), "{}", folder.display());
@@ -417,16 +422,30 @@ mod running {
         let printing = format!("echo {SECRET}; echo 'Not   logged in' >&2");
         let program = stand_in(scratch.path(), &log, &printing, 3);
         // It ran and ended badly: how, not an error (the renewal is judged by the login it left).
-        let said = one_shot(&machine(), Harness::Pi, &program, &[], &[]).unwrap().unwrap();
+        let said = one_shot(&machine(), Harness::Pi, &program, &[], &[])
+            .unwrap()
+            .unwrap();
         assert!(said.contains("it ended 3 (Not logged in)"), "{said}");
         assert!(!said.contains(SECRET), "{said}");
         let silent = stand_in(scratch.path(), &log, "", 1);
-        let said = one_shot(&machine(), Harness::Pi, &silent, &[], &[]).unwrap().unwrap();
+        let said = one_shot(&machine(), Harness::Pi, &silent, &[], &[])
+            .unwrap()
+            .unwrap();
         assert!(said.contains("it ended 1 (saying nothing)"), "{said}");
         // One that ended well says nothing; one that is no program is the error.
         let well = stand_in(scratch.path(), &log, "", 0);
-        assert_eq!(one_shot(&machine(), Harness::Pi, &well, &[], &[]).unwrap(), None);
-        assert!(one_shot(&machine(), Harness::Pi, &scratch.path().join("none"), &[], &[]).is_err());
+        assert_eq!(
+            one_shot(&machine(), Harness::Pi, &well, &[], &[]).unwrap(),
+            None
+        );
+        assert!(one_shot(
+            &machine(),
+            Harness::Pi,
+            &scratch.path().join("none"),
+            &[],
+            &[]
+        )
+        .is_err());
     }
 
     /// T-2007 round 3 (N1): the renewal runs the harness as the owner on the account's own login,
@@ -449,9 +468,17 @@ mod running {
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
-        let said = one_shot_within(Some(&machine()), Harness::Pi, &program, &[], &[], Duration::from_secs(1), &[])
-            .unwrap()
-            .unwrap();
+        let said = one_shot_within(
+            Some(&machine()),
+            Harness::Pi,
+            &program,
+            &[],
+            &[],
+            Duration::from_secs(1),
+            &[],
+        )
+        .unwrap()
+        .unwrap();
         assert!(said.contains("it was ended after 1 s"), "{said}");
         assert!(
             started.elapsed() < Duration::from_secs(20),
@@ -553,7 +580,10 @@ fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
     std::fs::create_dir_all(other.join("memory")).unwrap();
     std::fs::write(other.join("memory").join("note.md"), "the owner's").unwrap();
 
-    assert_eq!(forget(&[records.path()], own.path(), &baseline, Some(&machine())), None);
+    assert_eq!(
+        forget(&[records.path()], own.path(), &baseline, Some(&machine())),
+        None
+    );
 
     assert!(!its.exists(), "the renewal's own record is left");
     assert!(

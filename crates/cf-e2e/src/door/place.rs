@@ -105,12 +105,10 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
                 return Ok(vec![Resolved { there, absent }]);
             }
             Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
-            Err(failed) => {
-                return Err(refused(format!(
-                    "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
-                    at.display()
-                )))
-            }
+            Err(failed) => return Err(refused(format!(
+                "{} cannot be resolved ({failed}), and a place that cannot be is no place to act",
+                at.display()
+            ))),
         }
         match fs::symlink_metadata(&at) {
             Ok(found) if found.file_type().is_symlink() => {
@@ -198,7 +196,10 @@ pub fn any_case_at(folder: &Path) -> bool {
             .collect();
         if other != name {
             let spelled = at.with_file_name(other);
-            return match (super::identity::of_path(&at), super::identity::of_path(&spelled)) {
+            return match (
+                super::identity::of_path(&at),
+                super::identity::of_path(&spelled),
+            ) {
                 (Ok(one), Ok(other)) => one == other,
                 _ => false,
             };

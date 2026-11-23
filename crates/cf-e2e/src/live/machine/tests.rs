@@ -349,17 +349,18 @@ fn a_machine_with_no_login_is_told_where_the_harness_keeps_it_and_what_to_do() {
 fn no_install_gives_its_window_a_profile_variable_of_the_persons() {
     for harness in Harness::ALL {
         let install = Installed::at(harness, "bin/x", "/the/persons/home");
-        assert_eq!(install.project_home(), Path::new("/the/persons/home"), "{harness:?}");
+        assert_eq!(
+            install.project_home(),
+            Path::new("/the/persons/home"),
+            "{harness:?}"
+        );
         // A rig of Muse makes its launcher's folders, which a stand-in process holds to its own.
         if harness == Harness::Muse {
             continue;
         }
         let debug = format!("{:?}", rig(&[install], "/the/stand-in"));
         assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
-        assert!(
-            !debug.contains("(\"HOME\", \"/the/persons/home"),
-            "{debug}"
-        );
+        assert!(!debug.contains("(\"HOME\", \"/the/persons/home"), "{debug}");
     }
 }
 

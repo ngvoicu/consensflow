@@ -221,11 +221,10 @@ fn bare(rig: &Rig, install: &Installed, folder: &Path, id: &str, out: &Path) -> 
     let program = install.command().to_string_lossy().into_owned();
     let argv = ask::program(&[program], rig.environment())?;
     let opened = rig.open_pane(json!({
-            "id": id, "generation": 1, "cwd": folder, "argv": argv,
-            "env": { "PROBE_OUT": out }, "dropEnv": [],
-            "size": { "rows": 40, "cols": 120 },
-        }),
-    )?;
+        "id": id, "generation": 1, "cwd": folder, "argv": argv,
+        "env": { "PROBE_OUT": out }, "dropEnv": [],
+        "size": { "rows": 40, "cols": 120 },
+    }))?;
     if opened["ok"] != true {
         return Err(Error::Daemon(format!("bare Pi did not open: {opened}")));
     }
