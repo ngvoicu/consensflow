@@ -155,21 +155,23 @@ fn unwrapped(text: &str) -> &str {
 /// Where the cut falls is the product's own (`delivery_text::fits_whole`).
 const OPENING: usize = 15_000;
 
-/// The commands the window's `cf` may be named by in what it is given: the path of the rig's
-/// own `cf` as the product's formatter writes it for a POSIX shell and for PowerShell (quoted
-/// where it holds a space), or the bare word where no path is known. No other program.
-fn cf_words_of(path: &std::path::Path) -> Vec<String> {
+/// The command the window of `recipient` names its `cf` by in what it is given, as the product
+/// writes it: the rig's own `cf` at `path`, written as the daemon writes its bundle's
+/// (`machine::bundle_of`: with forward slashes on Windows) and quoted for the shell of the
+/// recipient's harness on that platform (`seams::cf_word_of`, `Harness::shell`); `windows` where
+/// the window runs on Windows. Only that form: never another platform's, nor the bare `cf`,
+/// which the product writes only where it knows no path.
+fn cf_word_of(path: &Path, recipient: Harness, windows: bool) -> String {
     use cf_proto::cf_word::{CfWord, Shell};
-    let raw = path.to_string_lossy().into_owned();
-    let mut words = vec![CfWord::bare().as_str().to_owned()];
-    for spelled in [raw.clone(), raw.replace('\\', "/")] {
-        for shell in [Shell::Posix, Shell::PowerShell] {
-            words.push(CfWord::new(&spelled, shell).as_str().to_owned());
-        }
-    }
-    words.sort();
-    words.dedup();
-    words
+    let written = path.to_string_lossy();
+    let written = if windows {
+        written.replace('\\', "/")
+    } else {
+        written.into_owned()
+    };
+    let shell = cf_proto::agents::Harness::from_kind(recipient.kind())
+        .map_or(Shell::Posix, |harness| harness.shell(windows));
+    CfWord::new(&written, shell).as_str().to_owned()
 }
 
 /// The body of the message `id` as ConsensFlow gives it to a window whose `cf` is called
@@ -191,14 +193,12 @@ fn given_as(message: &str, id: i64, cf: &str) -> String {
 }
 
 /// Whether `text` holds the body of message `id` as ConsensFlow gives it to a window: whole, or
-/// its opening, its length and the command that reads all of it, spelled with one of `cf_words`.
-fn window_has(text: &str, body: &str, id: i64, cf_words: &[String]) -> bool {
+/// its opening, its length and the command that reads all of it, started by `cf`.
+fn window_has(text: &str, body: &str, id: i64, cf: &str) -> bool {
     if cf_engine::delivery_text::fits_whole(body) {
         return text.contains(body);
     }
-    cf_words
-        .iter()
-        .any(|cf| text.contains(&given_as(body, id, cf)))
+    text.contains(&given_as(body, id, cf))
 }
 
 /// What one task of a worker showed.
@@ -331,19 +331,39 @@ fn message_with(members: &Members, number: i64, word: &str) -> Result<Option<(i6
         .and_then(|message| Some((message["id"].as_i64()?, live::text(&message["body"])))))
 }
 
+/// The two steps of a worker's task: the brief given in a window opened afresh, the first user
+/// message of the conversation, and the follow-up given in a window opened on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Fresh,
+    Resumed,
+}
+
+impl Step {
+    fn name(self) -> &'static str {
+        match self {
+            Step::Fresh => "fresh",
+            Step::Resumed => "resumed",
+        }
+    }
+}
+
 /// One step held to what the owner should have seen: the task done, its result at the
 /// chief with the word, the word on no command line and in no process, and the record
-/// holding the message once, whole, as a user's message; `first` where it is the first
+/// holding the message once, whole (the rest of a long one read with the `cf` the product
+/// wrote for the window of `recipient`), as a user's message; the fresh step's the first
 /// user message of the conversation.
 fn judge(
     account: &mut Account,
-    step: &str,
+    step: Step,
+    recipient: Harness,
     members: &Members,
     number: i64,
     seen: &Seen,
     word: &str,
-    first: bool,
 ) -> Result {
+    let first = step == Step::Fresh;
+    let step = step.name();
     account.say(format!(
         "{step}: T-{number} is {} after {} looks",
         seen.state, seen.looks
@@ -376,7 +396,7 @@ fn judge(
         format!("{:?}", seen.matched),
     );
     let stored = message_with(members, number, word)?;
-    let cf_words = cf_words_of(members.rig().cf());
+    let cf = cf_word_of(members.rig().cf(), recipient, cfg!(windows));
     let marker = stored
         .as_ref()
         .map(|(id, _)| format!("[ConsensFlow m-{id} "));
@@ -405,7 +425,7 @@ fn judge(
             .is_some_and(|marker| text.contains(marker))
             && stored
                 .as_ref()
-                .is_some_and(|(id, body)| window_has(text, body, *id, &cf_words))
+                .is_some_and(|(id, body)| window_has(text, body, *id, &cf))
     });
     account.check(
         &format!("{step}: whole, its header and every line"),
@@ -460,7 +480,15 @@ fn steps(members: &mut Members, harness: Harness, log: &Log) -> Result<Account> 
         brief.len()
     ));
     let seen = watch(members, &agent, number, &fresh, log)?;
-    judge(&mut account, "fresh", members, number, &seen, &fresh, true)?;
+    judge(
+        &mut account,
+        Step::Fresh,
+        harness,
+        members,
+        number,
+        &seen,
+        &fresh,
+    )?;
     // Claude Code asks whether to trust a new repository before it starts, and the brief
     // is pasted only once ConsensFlow has answered (it says so to the human once).
     let answered = members
@@ -500,12 +528,12 @@ fn steps(members: &mut Members, harness: Harness, log: &Log) -> Result<Account> 
     ));
     judge(
         &mut account,
-        "resumed",
+        Step::Resumed,
+        harness,
         members,
         number,
         &seen,
         &resumed,
-        false,
     )?;
     Ok(account)
 }
@@ -575,6 +603,15 @@ mod tests {
         assert_eq!(unwrapped("  plain  "), "plain");
     }
 
+    /// The tail of a long message whose rest is read with `command`, of message `id`, of
+    /// `length` units.
+    fn tail(command: &str, id: i64, length: usize) -> String {
+        format!(
+            "{}\n… ({length} characters; read all of it with: {command} inbox read m-{id})",
+            "x".repeat(OPENING)
+        )
+    }
+
     /// The window reads the rest of a long message with its own `cf`, as the product's
     /// formatter writes it; the opening, the length and the message's own id are exactly right,
     /// and no other program is taken for it (K3 review T-1978, 8).
@@ -582,76 +619,128 @@ mod tests {
     fn a_long_message_is_found_in_a_window_by_the_cf_command_the_product_wrote() {
         let long = "x".repeat(OPENING + 1_001);
         let length = OPENING + 1_001;
-        let tail = |command: &str, id: i64, length: usize| {
-            format!(
-                "{}\n… ({length} characters; read all of it with: {command} inbox read m-{id})",
-                "x".repeat(OPENING)
-            )
-        };
-        for path in [
-            // An installed bundle's shape, named for no app a test may reach.
-            "/Applications/Some Board.app/Contents/Resources/cli/bin/cf",
-            "/Users/some one/Library/Application Support/ConsensFlow/cf",
-            r"C:\Program Files\ConsensFlow\cf.exe",
-        ] {
-            let words = cf_words_of(std::path::Path::new(path));
-            for shell in [
-                cf_proto::cf_word::Shell::Posix,
-                cf_proto::cf_word::Shell::PowerShell,
-            ] {
-                let command = cf_proto::cf_word::CfWord::new(path, shell);
-                let window = format!("header\n{}\nafter", tail(command.as_str(), 4, length));
-                assert!(
-                    window_has(&window, &long, 4, &words),
-                    "{}",
-                    command.as_str()
-                );
-            }
-        }
-        let words = cf_words_of(std::path::Path::new("/opt/consensflow/cf"));
-        assert!(window_has(&tail("cf", 4, length), &long, 4, &words));
+        let word = cf_word_of(Path::new("/opt/consensflow/cf"), Harness::Claude, false);
+        let cf = "/opt/consensflow/cf";
+        assert!(window_has(&tail(cf, 4, length), &long, 4, &word));
         // Not another message's id, another length, a cut opening, no command at all, nor another
         // program, one of the same name in another folder included.
-        assert!(!window_has(&tail("cf", 5, length), &long, 4, &words));
-        assert!(!window_has(&tail("cf", 4, length + 1), &long, 4, &words));
+        assert!(!window_has(&tail(cf, 5, length), &long, 4, &word));
+        assert!(!window_has(&tail(cf, 4, length + 1), &long, 4, &word));
         assert!(!window_has(
-            &tail("cf", 4, length).replacen('x', "", 1),
+            &tail(cf, 4, length).replacen('x', "", 1),
             &long,
             4,
-            &words
+            &word
         ));
-        assert!(!window_has(&tail("", 4, length), &long, 4, &words));
-        assert!(!window_has(&tail("rm", 4, length), &long, 4, &words));
+        assert!(!window_has(&tail("", 4, length), &long, 4, &word));
+        assert!(!window_has(&tail("rm", 4, length), &long, 4, &word));
         assert!(!window_has(
             &tail("/tmp/evil/cf", 4, length),
             &long,
             4,
-            &words
+            &word
         ));
         assert!(!window_has(
             &tail("\"/opt/consensflow/cf\"", 4, length),
             &long,
             4,
-            &words
+            &word
         ));
         // A short message is whole or it is not there.
-        assert!(window_has("a short one", "short", 1, &words));
-        assert!(!window_has("a shirt one", "short", 1, &words));
+        assert!(window_has("a short one", "short", 1, &word));
+        assert!(!window_has("a shirt one", "short", 1, &word));
+    }
+
+    /// T-1997 finding 8 (round 2): a window on a bash-like shell (Claude Code, Pi and Devin
+    /// everywhere, Codex and Muse off Windows) is given its `cf` as one POSIX word: the path
+    /// quoted as a POSIX shell quotes it where it holds a space. PowerShell's call of the same
+    /// path, and the bare `cf`, are another window's or no window's, and refused.
+    #[test]
+    fn a_posix_recipient_reads_the_rest_by_the_posix_word_alone() {
+        let long = "x".repeat(OPENING + 1_001);
+        let length = OPENING + 1_001;
+        let path = "/Users/some one/Library/Application Support/ConsensFlow/cf";
+        for (recipient, windows) in [
+            (Harness::Claude, false),
+            (Harness::Codex, false),
+            (Harness::Pi, true),
+            (Harness::Devin, true),
+        ] {
+            let word = cf_word_of(Path::new(path), recipient, windows);
+            let said = format!("{recipient:?}, on Windows: {windows}");
+            let posix = format!("'{path}'");
+            assert!(
+                window_has(&tail(&posix, 4, length), &long, 4, &word),
+                "{said}"
+            );
+            let powershell = format!("& '{path}'");
+            assert!(
+                !window_has(&tail(&powershell, 4, length), &long, 4, &word),
+                "{said}: PowerShell's call"
+            );
+            assert!(
+                !window_has(&tail("cf", 4, length), &long, 4, &word),
+                "{said}: the bare cf"
+            );
+        }
+        // On Windows the product writes the path with forward slashes, which Git Bash keeps.
+        let installed = r"C:\Program Files\ConsensFlow\cf.exe";
+        let word = cf_word_of(Path::new(installed), Harness::Claude, true);
+        let forward = "'C:/Program Files/ConsensFlow/cf.exe'";
+        assert!(window_has(&tail(forward, 4, length), &long, 4, &word));
+        for other in [
+            "& 'C:/Program Files/ConsensFlow/cf.exe'",
+            r"'C:\Program Files\ConsensFlow\cf.exe'",
+            "cf",
+        ] {
+            assert!(
+                !window_has(&tail(other, 4, length), &long, 4, &word),
+                "{other}"
+            );
+        }
+    }
+
+    /// T-1997 finding 8 (round 2): a window on PowerShell (Codex and Muse on Windows) is given
+    /// its `cf` as PowerShell's call of the path, quoted as PowerShell quotes it; the POSIX
+    /// word of the same path, and the bare `cf`, are refused.
+    #[test]
+    fn a_powershell_recipient_reads_the_rest_by_the_powershell_call_alone() {
+        let long = "x".repeat(OPENING + 1_001);
+        let length = OPENING + 1_001;
+        let installed = r"C:\Program Files\Some Board\cf.exe";
+        for recipient in [Harness::Codex, Harness::Muse] {
+            let word = cf_word_of(Path::new(installed), recipient, true);
+            let call = "& 'C:/Program Files/Some Board/cf.exe'";
+            assert!(
+                window_has(&tail(call, 4, length), &long, 4, &word),
+                "{recipient:?}"
+            );
+            for other in [
+                "'C:/Program Files/Some Board/cf.exe'",
+                r"& 'C:\Program Files\Some Board\cf.exe'",
+                "cf",
+            ] {
+                assert!(
+                    !window_has(&tail(other, 4, length), &long, 4, &word),
+                    "{recipient:?}: {other}"
+                );
+            }
+        }
     }
 
     /// A body the product sends whole is whole in the window: 15,500 and 16,000 units are not
     /// cut, 16,001 is (the production boundary, not a copy of it).
     #[test]
     fn a_body_the_product_delivers_whole_is_not_expected_cut() {
-        let words = cf_words_of(std::path::Path::new("/opt/consensflow/cf"));
+        let word = cf_word_of(Path::new("/opt/consensflow/cf"), Harness::Claude, false);
         for units in [OPENING + 500, 16_000] {
             let body = "y".repeat(units);
-            assert!(window_has(&format!("[h]\n{body}"), &body, 4, &words));
+            assert!(window_has(&format!("[h]\n{body}"), &body, 4, &word));
             assert_eq!(given_as(&body, 4, "cf"), body);
         }
         let over = "y".repeat(16_001);
         assert_ne!(given_as(&over, 4, "cf"), over);
-        assert!(!window_has(&over, &over, 4, &words));
+        assert!(!window_has(&over, &over, 4, &word));
     }
 
     #[test]

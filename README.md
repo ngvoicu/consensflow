@@ -206,6 +206,12 @@ its download page.
   use them with full permissions while you aren't watching, so keep in a
   harness only what you would let any agent use.
 
+## Contributing
+
+Most tests run on stand-in agents and need no login. The live test kit runs
+the real harnesses on your own logins and spends real quota: read
+[the live test kit guide](docs/live-kit.md) before you run it.
+
 ## License
 
 [MIT](LICENSE)
