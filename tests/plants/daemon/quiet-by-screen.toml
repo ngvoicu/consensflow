@@ -32,9 +32,9 @@ meant = "a_window_that_repaints_what_it_shows_is_quiet_by_its_screen_and_not_by_
 runs = ["qs-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = "    printed.note(changed);"
-replace = "    printed.note(changed || !changed);"
+file = "crates/cf-panes/src/screen.rs"
+find = "        feeding.noted(changed);"
+replace = "        feeding.noted(changed || !changed);"
 
 [[plant]]
 name = "quiet by screen: a chunk that draws again what is shown is a change"

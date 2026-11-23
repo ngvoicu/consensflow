@@ -319,11 +319,11 @@ meant = "tiny_read_a_screen_that_changes_and_changes_back_across_reads_moves_the
 runs = ["tiny-output"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''    let changed = screen.feed(bytes);
-    printed.note(changed);'''
-replace = '''    let changed = screen.feed(bytes);
-    printed.note(changed && bytes.len() > 2);'''
+file = "crates/cf-panes/src/screen.rs"
+find = '''        let changed = screen.feed(bytes);
+        feeding.noted(changed);'''
+replace = '''        let changed = screen.feed(bytes);
+        feeding.noted(changed && bytes.len() > 2);'''
 
 [[plant]]
 name = "tiny read: a joined read's output is not stamped as it is taken in"
@@ -331,13 +331,15 @@ meant = "tiny_read_every_read_of_a_batch_stamps_the_output_clock_as_it_is_taken_
 runs = ["tiny-output"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''    let changed = screen.feed(bytes);
-    printed.note(changed);'''
-replace = '''    let changed = screen.feed(bytes);
-    if bytes != b"x" {
-        printed.note(changed);
-    }'''
+file = "crates/cf-panes/src/screen.rs"
+find = '''        let changed = screen.feed(bytes);
+        feeding.noted(changed);'''
+replace = '''        let changed = screen.feed(bytes);
+        if bytes != b"x" {
+            feeding.noted(changed);
+        } else {
+            std::mem::forget(feeding);
+        }'''
 
 [[plant]]
 name = "kept digest: a fill looks at every blank cell first"

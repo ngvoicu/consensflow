@@ -347,6 +347,17 @@ impl PaneTable {
         Ok(screen.tail(max))
     }
 
+    /// A pane's screen, to read with its clocks at one moment ([`PaneScreen::observe`]).
+    pub(crate) fn screen(&self, key: &PaneKey) -> Result<Arc<PaneScreen>, PaneError> {
+        Ok(Arc::clone(
+            &self
+                .lock_panes()?
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?
+                .screen,
+        ))
+    }
+
     /// The last `max` lines of a pane's screen as it is drawn ([`PaneScreen::bottom`]).
     pub fn bottom(&self, key: &PaneKey, max: usize) -> Result<Drawn, PaneError> {
         let screen = Arc::clone(

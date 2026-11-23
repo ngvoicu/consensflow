@@ -21,7 +21,7 @@ use crate::pty::{
     validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneOutput, PaneTable,
     StreamedPane,
 };
-use crate::screen::PaneScreen;
+use crate::screen::{PaneScreen, Screen};
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
@@ -380,33 +380,54 @@ fn register(
     builder.on("pane.snapshot", move |_bridge, body| {
         let request: SnapshotRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        let snapshot = snapshot_arbiter
-            .snapshot(&key)
-            .map_err(|error| error.to_string())?;
-        let mut answer = snapshot_answer(&snapshot);
-        // The screen's last lines, for a request that asks for them. A pane
-        // the table no longer holds has none to give.
-        if let Some(lines) = request.tail {
-            if let Some(tail) = screen_read(snapshot_panes.tail(&key, lines.min(TAIL_LINES)))? {
-                answer["tail"] = json!(tail);
-            }
-        }
-        // The screen's last lines as drawn, for an adapter that reads its
-        // harness's input box.
-        if let Some(lines) = request.bottom {
-            if let Some(drawn) = screen_read(snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)))?
-            {
-                answer["bottom"] = json!(drawn.lines);
-                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
-                    json!({
-                        "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
-                        "plainAfter": cursor.plain_after,
-                    })
-                });
-            }
-        }
-        Ok(answer)
+        snapshot_of(
+            &snapshot_arbiter,
+            &key,
+            screen_read(snapshot_panes.screen(&key))?,
+            request.tail,
+            request.bottom,
+        )
     });
+}
+
+/// `pane.snapshot`'s answer: the arbiter's counts and clocks, and the screen's lines for a
+/// request that asks for them, all of one moment: the clocks are read with the screen's lock
+/// held, so a read the output thread is feeding is in both or in neither.
+fn snapshot_of(
+    arbiter: &InputArbiter,
+    key: &PaneKey,
+    screen: Option<Arc<PaneScreen>>,
+    tail: Option<usize>,
+    bottom: Option<usize>,
+) -> Result<Value, String> {
+    // The screen's last lines, for a request that asks for them (a pane the table no longer
+    // holds has none to give), and its last lines as drawn, for an adapter that reads its
+    // harness's input box.
+    let lines = |screen: &Screen| {
+        (
+            tail.map(|lines| screen.tail(lines.min(TAIL_LINES))),
+            bottom.map(|lines| screen.bottom(lines.min(BOTTOM_LINES))),
+        )
+    };
+    let counts = || arbiter.snapshot(key).map_err(|error| error.to_string());
+    let ((tail, drawn), counts) = match screen {
+        Some(screen) => screen.observe(lines, counts),
+        None => ((None, None), counts()),
+    };
+    let mut answer = snapshot_answer(&counts?);
+    if let Some(tail) = tail {
+        answer["tail"] = json!(tail);
+    }
+    if let Some(drawn) = drawn {
+        answer["bottom"] = json!(drawn.lines);
+        answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
+            json!({
+                "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
+                "plainAfter": cursor.plain_after,
+            })
+        });
+    }
+    Ok(answer)
 }
 
 /// A launch whose input could not be registered ends its window, and the answer says how
@@ -557,8 +578,7 @@ fn next_output(
 /// now, and whether it changed what the screen shows. One call for each read, in the
 /// order the reads came: the paste's Enter and the engine's quiet checks read these.
 fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
-    let changed = screen.feed(bytes);
-    printed.note(changed);
+    screen.feed_noting(bytes, printed);
 }
 
 fn forward_output(
@@ -735,6 +755,9 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_tests;
+
+#[cfg(test)]
+mod feeding_tests;
 
 #[cfg(test)]
 mod tests {

@@ -26,6 +26,8 @@ use std::sync::{Mutex, PoisonError};
 use grid::Grid;
 use parser::Parser;
 
+use crate::arbiter::OutputClock;
+
 /// The last lines of a screen as drawn ([`Screen::bottom`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drawn {
@@ -134,6 +136,46 @@ impl Screen {
 #[derive(Debug)]
 pub struct PaneScreen {
     screen: Mutex<Screen>,
+    #[cfg(test)]
+    pub(crate) hook: FeedHook,
+}
+
+/// Where a test holds a read on its way into the screen.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FeedStage {
+    /// The host has the read; the screen's lock is not yet taken.
+    Read,
+    /// The screen's lock is held; the read is not yet fed.
+    Locked,
+    /// A reader has the screen's lines and not yet the clocks.
+    Snapshot,
+}
+
+/// A test's hold on [`FeedStage`]s: called at each, on the feeding thread.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct FeedHook(Mutex<Option<std::sync::Arc<dyn Fn(FeedStage) + Send + Sync>>>);
+
+#[cfg(test)]
+impl FeedHook {
+    pub(crate) fn set(&self, hold: impl Fn(FeedStage) + Send + Sync + 'static) {
+        *self.0.lock().unwrap() = Some(std::sync::Arc::new(hold));
+    }
+
+    fn at(&self, stage: FeedStage) {
+        let hold = self.0.lock().unwrap().clone();
+        if let Some(hold) = hold {
+            hold(stage);
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for FeedHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FeedHook")
+    }
 }
 
 impl PaneScreen {
@@ -141,6 +183,8 @@ impl PaneScreen {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {
             screen: Mutex::new(Screen::new(rows, cols)),
+            #[cfg(test)]
+            hook: FeedHook::default(),
         }
     }
 
@@ -148,6 +192,38 @@ impl PaneScreen {
     /// shows changed with them.
     pub fn feed(&self, bytes: &[u8]) -> bool {
         self.locked().feed(bytes)
+    }
+
+    /// The program printed `bytes` ([`Screen::feed`]) and the output clock says so, both under
+    /// the screen's one lock: no reader of [`PaneScreen::observe`] sees the clock past a read
+    /// whose bytes the screen does not yet show. Whether the screen changed.
+    pub(crate) fn feed_noting(&self, bytes: &[u8], printed: &OutputClock) -> bool {
+        #[cfg(test)]
+        self.hook.at(FeedStage::Read);
+        let mut screen = self.locked();
+        // Announced under the lock: a reader that takes the lock (`observe`) never sees the
+        // window busy with a read its screen does not yet show.
+        let feeding = printed.feeding();
+        #[cfg(test)]
+        self.hook.at(FeedStage::Locked);
+        let changed = screen.feed(bytes);
+        feeding.noted(changed);
+        changed
+    }
+
+    /// What `read` makes of the screen and what `clocks` reads, both with the screen's lock
+    /// held: the output clock and the screen of one moment (a read that is being fed is in
+    /// both or in neither).
+    pub(crate) fn observe<R, C>(
+        &self,
+        read: impl FnOnce(&Screen) -> R,
+        clocks: impl FnOnce() -> C,
+    ) -> (R, C) {
+        let screen = self.locked();
+        let drawn = read(&screen);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Snapshot);
+        (drawn, clocks())
     }
 
     /// The pty has another size now ([`Screen::resize`]).

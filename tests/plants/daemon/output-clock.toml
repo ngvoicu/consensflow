@@ -1,0 +1,77 @@
+# The window's output clock while a read is taken into its screen (N17). The paste's Enter waits
+# for the window to be quiet, and a box reader asks whether the window answered the human's last
+# key. A read of erases on the biggest screen takes longer than the 120 ms the Enter waits when
+# the machine is loaded, and the clock was stamped only where a read ended: the Enter went while
+# two reads the host had already read were still on their way into the screen. Now:
+#
+# - the clock says output is active while a read is fed, from the moment the screen's lock is
+#   held to the moment the read is in the screen;
+# - the feed announces itself under that lock, and a snapshot reads the clocks with the same lock
+#   held, so no reader sees a clock past a key with the screen before its echo (a paste would go
+#   over what the human typed);
+# - a panic in the feed notes the window as printed, and its screen as changed, now.
+#
+# Every name holds `output clock`, so `cargo xtask plants daemon "output clock"` runs them.
+
+[run]
+oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::feeding_tests::"]
+
+[[plant]]
+name = "output clock: the mark that a read is being fed is left out"
+meant = "the_enter_goes_after_a_read_that_the_host_has_and_the_screen_does_not_yet_show"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = '''        if self.feeding.load(Ordering::Acquire) {
+            return Some(0);
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "output clock: the feed is announced before the screen's lock is taken"
+meant = "a_snapshot_never_has_the_clock_of_a_read_whose_echo_the_screen_does_not_show"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = '''        #[cfg(test)]
+        self.hook.at(FeedStage::Read);
+        let mut screen = self.locked();
+        // Announced under the lock: a reader that takes the lock (`observe`) never sees the
+        // window busy with a read its screen does not yet show.
+        let feeding = printed.feeding();
+'''
+replace = '''        let feeding = printed.feeding();
+        #[cfg(test)]
+        self.hook.at(FeedStage::Read);
+        let mut screen = self.locked();
+'''
+
+[[plant]]
+name = "output clock: the clock is read apart from the screen"
+meant = "a_reader_between_the_screens_lines_and_the_clocks_keeps_the_next_read_out_of_both"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = '''        let screen = self.locked();
+        let drawn = read(&screen);
+'''
+replace = '''        let drawn = read(&self.locked());
+'''
+
+[[plant]]
+name = "output clock: a panic in the feed leaves the window busy for good"
+meant = "a_panic_in_the_feed_leaves_the_window_printed_now_and_not_busy_for_good"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = '''        if !self.noted {
+            self.clock.note(true);
+        }
+'''
+replace = '''        if !self.noted {}
+'''

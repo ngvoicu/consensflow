@@ -302,8 +302,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {'
-replace = '                answer["cursor"] = drawn.cursor.filter(|_| false).map_or(Value::Null, |cursor| {'
+find = '        answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {'
+replace = '        answer["cursor"] = drawn.cursor.filter(|_| false).map_or(Value::Null, |cursor| {'
 
 
 [[plant]]
@@ -328,8 +328,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = "        if let Some(lines) = request.bottom {"
-replace = "        if let Some(lines) = request.bottom.filter(|_| false) {"
+find = "    if let Some(drawn) = drawn {"
+replace = "    if let Some(drawn) = drawn.filter(|_| false) {"
 
 [[plant]]
 name = "escape-unsent rig: Escape clears the count, and the result is pasted into the words left in the box"

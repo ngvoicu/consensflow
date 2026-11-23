@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -47,6 +47,12 @@ pub struct OutputClock {
     /// Milliseconds after `started` of the last chunk that changed what the screen
     /// shows, plus one; 0 before any has.
     shown: AtomicU64,
+    /// A read of the window's output is being taken into its screen (`PaneScreen::feed_noting`,
+    /// under the screen's lock): it has been read, and the screen does not yet show it, so the
+    /// window is not quiet however long the feed takes (on the biggest screen a read of erases
+    /// takes about 85 ms of CPU and, on a loaded machine, more than the 120 ms the paste's
+    /// Enter waits for quiet).
+    feeding: AtomicBool,
 }
 
 impl OutputClock {
@@ -56,6 +62,17 @@ impl OutputClock {
             clock,
             printed: AtomicU64::new(0),
             shown: AtomicU64::new(0),
+            feeding: AtomicBool::new(false),
+        }
+    }
+
+    /// A read of the window's output is about to be taken into its screen: until the
+    /// [`Feeding`] says it was, or is dropped by a panic, the window is not quiet.
+    pub(crate) fn feeding(&self) -> Feeding<'_> {
+        self.feeding.store(true, Ordering::Release);
+        Feeding {
+            clock: self,
+            noted: false,
         }
     }
 
@@ -67,6 +84,7 @@ impl OutputClock {
         if changed {
             self.shown.store(now, Ordering::Release);
         }
+        self.feeding.store(false, Ordering::Release);
     }
 
     /// [`OutputClock::note`] for a test of another crate that plays the pane host's output
@@ -78,6 +96,9 @@ impl OutputClock {
 
     /// How long the pane had printed nothing at `now`, once it has printed anything.
     pub(super) fn quiet_ms(&self, now: Instant) -> Option<u64> {
+        if self.feeding.load(Ordering::Acquire) {
+            return Some(0);
+        }
         self.since(&self.printed, now)
     }
 
@@ -90,6 +111,30 @@ impl OutputClock {
     fn since(&self, clock: &AtomicU64, now: Instant) -> Option<u64> {
         let at = clock.load(Ordering::Acquire);
         (at != 0).then(|| millis_since(now, self.started).saturating_sub(at - 1))
+    }
+}
+
+/// A read being taken into the screen ([`OutputClock::feeding`]). [`Feeding::noted`] ends it
+/// as [`OutputClock::note`] does. Dropped without that, as a panic in the feed drops it, it
+/// notes the window as printed and its screen as changed, now: the screen was partly written,
+/// and the clock goes on from there instead of staying busy for good.
+pub(crate) struct Feeding<'a> {
+    clock: &'a OutputClock,
+    noted: bool,
+}
+
+impl Feeding<'_> {
+    pub(crate) fn noted(mut self, changed: bool) {
+        self.noted = true;
+        self.clock.note(changed);
+    }
+}
+
+impl Drop for Feeding<'_> {
+    fn drop(&mut self) {
+        if !self.noted {
+            self.clock.note(true);
+        }
     }
 }
 
