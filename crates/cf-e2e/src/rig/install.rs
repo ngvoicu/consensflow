@@ -162,13 +162,29 @@ pub(super) fn environment(
     env
 }
 
+/// The profile half `wanted` as `env` gives it, or as the rig's own home says it.
+fn other_half(env: &[(String, String)], defaults: &[(&str, PathBuf)], wanted: &str) -> String {
+    env.iter()
+        .rev()
+        .find(|(key, _)| same_environment_name(key, wanted))
+        .map(|(_, value)| value.clone())
+        .or_else(|| {
+            defaults
+                .iter()
+                .find(|(name, _)| *name == wanted)
+                .map(|(_, value)| value.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default()
+}
+
 /// Bound every home variable the harnesses can consult in a stand-in rig.
 /// This is applied after the case's variables and harness homes have won.
 pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, subject: &str) {
     if own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
         return;
     }
-    for (name, default) in crate::standin_process::home_vars(&root.join("home")) {
+    let defaults = crate::standin_process::home_vars(&root.join("home"));
+    for (name, default) in defaults.clone() {
         let value = env
             .iter()
             .rev()
@@ -179,32 +195,24 @@ pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, 
                 !value.is_empty(),
                 "stand-in {subject} {name} lookup: empty path"
             );
-            // The profile's two halves (`C:`, `\Users\x`) name no folder each: they are held
-            // joined, below (T-2007 round 3: every rig on Windows stopped here).
-            if !crate::door::spawn::PROFILE_HALVES.contains(&name) {
-                crate::standin_process::require_home(
-                    Path::new(&value),
-                    &format!("stand-in {subject} {name} lookup"),
-                );
-            }
+            // The profile's two halves (`C:`, `\Users\x`) name no folder each: each is held
+            // joined with the other, as the seal holds them (T-2007 round 3: every rig on
+            // Windows stopped here).
+            let judged = match name {
+                "HOMEDRIVE" => format!("{value}{}", other_half(env, &defaults, "HOMEPATH")),
+                "HOMEPATH" => format!("{}{value}", other_half(env, &defaults, "HOMEDRIVE")),
+                _ => value.clone(),
+            };
+            crate::standin_process::require_home(
+                Path::new(&judged),
+                &format!("stand-in {subject} {name} lookup"),
+            );
             value
         } else {
             default.to_string_lossy().into_owned()
         };
         env.retain(|(key, _)| !same_environment_name(key, name));
         env.push((name.to_owned(), value));
-    }
-    let half = |wanted: &str| {
-        env.iter()
-            .rev()
-            .find(|(key, _)| same_environment_name(key, wanted))
-            .map(|(_, value)| value.clone())
-    };
-    if let (Some(drive), Some(path)) = (half("HOMEDRIVE"), half("HOMEPATH")) {
-        crate::standin_process::require_home(
-            Path::new(&format!("{drive}{path}")),
-            &format!("stand-in {subject} HOMEDRIVE and HOMEPATH lookup"),
-        );
     }
     if let Some((_, path)) = env
         .iter()
