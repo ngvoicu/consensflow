@@ -410,6 +410,7 @@ fn the_largest_paste_goes_in_whole() {
 /// writing, and the test, not a timer, decides when the program reads on. The last is the
 /// way to let it go.
 #[allow(clippy::unwrap_used, reason = "a test fixture failure must fail the test")]
+#[allow(clippy::disallowed_methods, reason = "a test's own FIFO")]
 fn begun_reader(
     panes: &Arc<PaneTable>,
     arbiter: &Arc<InputArbiter>,

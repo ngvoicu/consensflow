@@ -735,6 +735,7 @@ fn run(seed: u64, steps: usize) -> Reached {
 /// seeds `CF_SCHEDULE_FIRST_SEED` onwards, 40 to 120 steps each. Every seed run is appended to
 /// `CF_SCHEDULE_LOG` if it names a file; a failure is reported with its seed.
 #[test]
+#[allow(clippy::disallowed_methods, reason = "a gate run names its count and seeds in the environment")]
 fn a_randomized_schedule_over_the_native_queue_holds_its_invariants() {
     let count: u64 = std::env::var("CF_SCHEDULES")
         .ok()
