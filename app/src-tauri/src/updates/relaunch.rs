@@ -76,14 +76,6 @@ pub(super) fn start_installed(
     }
 }
 
-/// How long the helper waits for the old app to end, in polls of a tenth of a second: five
-/// minutes. The old app's own shutdown is bounded (the panes' drain at five seconds, then the
-/// daemon's stop), so a minute past that is a hang, not a slow end; five minutes is long enough
-/// for a Mac under swap, and bounded so that a helper does not outlive a hung app for good. When
-/// it passes, no second app is started: the old one stays and the update applies at its next start.
-#[cfg(target_os = "macos")]
-const WAIT_POLLS: u32 = 3000;
-
 /// What the helper that starts the installed app is given.
 #[cfg(target_os = "macos")]
 pub(super) struct Handoff<'a> {
@@ -97,7 +89,8 @@ pub(super) struct Handoff<'a> {
     pub home: Option<&'a Path>,
     /// The bundle's executable: started directly where the opener fails.
     pub executable: &'a Path,
-    pub polls: u32,
+    /// The system's `logger`, where the log cannot be written.
+    pub logger: &'a Path,
     /// Where the helper says what it did and why: the app's error log.
     pub log: Option<&'a Path>,
 }
@@ -118,7 +111,7 @@ pub(super) fn launch_services(installed: &Path) -> Result<std::process::Child, S
         args: std::env::args_os().skip(1).collect(),
         home: home.as_deref(),
         executable: &executable,
-        polls: WAIT_POLLS,
+        logger: Path::new("/usr/bin/logger"),
         log: log.as_deref(),
     })
 }
@@ -128,7 +121,9 @@ pub(super) fn launch_services(installed: &Path) -> Result<std::process::Child, S
 #[allow(clippy::disallowed_methods)] // The helper is a shell of the system's, started as this app starts the installed one: holding only its streams, older than cf-process's rule.
 pub(super) fn launch_services_with(handoff: Handoff) -> Result<std::process::Child, String> {
     use std::os::unix::process::CommandExt;
-    let mut prefix: Vec<std::ffi::OsString> = vec!["-n".into()];
+    // No `-n`: where a person reopened the app while the helper waited, `open` brings that one
+    // up and starts no second (T-2118).
+    let mut prefix: Vec<std::ffi::OsString> = Vec::new();
     if let Some(home) = handoff.home {
         let mut variable = std::ffi::OsString::from("CONSENSFLOW_HOME=");
         variable.push(home);
@@ -138,57 +133,54 @@ pub(super) fn launch_services_with(handoff: Handoff) -> Result<std::process::Chi
     if !handoff.args.is_empty() {
         prefix.push("--args".into());
     }
-    let log = handoff.log.and_then(|log| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log)
-            .ok()
-    });
     let mut command = std::process::Command::new("/bin/sh");
     command
         .arg("-c")
         .arg(HELPER)
         .arg("sh")
         .arg(handoff.old.to_string())
-        .arg(handoff.polls.to_string())
         .arg(handoff.executable)
         .arg(handoff.opener)
+        .arg(handoff.logger)
+        .arg(handoff.log.unwrap_or_else(|| Path::new("")))
         .arg(prefix.len().to_string())
         .args(&prefix)
         .args(&handoff.args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(log.map_or_else(std::process::Stdio::null, std::process::Stdio::from))
+        .stderr(std::process::Stdio::null())
         .process_group(0);
     cf_process::hold_only_the_streams(&mut command);
     command.spawn().map_err(|e| e.to_string())
 }
 
-/// The helper's script, given the old app's pid, the polls to wait, the bundle's executable,
-/// the opener, the number of the opener's arguments that are not the old app's own, and then the
-/// opener's arguments (`-n`, the home, the bundle, `--args` where there are any) and the old
-/// app's arguments. It waits for the old app to end and starts nothing while it runs: past its
-/// bound it says so and ends, the old app staying (the update applies at its next start). A
-/// failed opener is said with its status and the app is started directly, the way it was
-/// before LaunchServices (T-2114). `/bin/sleep` is the system's by its path: the helper keeps
-/// the old app's environment, whose PATH may hold no `sleep`.
+/// The helper's script, given the old app's pid, the bundle's executable, the opener, `logger`,
+/// the app's log, the number of the opener's arguments that are not the old app's own, and then
+/// the opener's arguments (the home, the bundle, `--args` where there are any) and the old app's
+/// arguments.
+///
+/// It waits for the old app to end, however long that takes, and nothing else decides: an app
+/// that hangs is one the person force-quits, and the helper goes on. Then it opens the bundle
+/// with no `-n`, so that where the person reopened the app meanwhile that one is brought up and
+/// no second starts. A failed `open` is said and the app is started directly, the way it was
+/// before LaunchServices. Where that fails too the old app is gone and no one else will start
+/// one, so the helper says what failed and to open ConsensFlow from the Finder: in the app's log,
+/// and where that cannot be written, in the system log (`logger`). `/bin/sleep` is the
+/// system's by its path: the helper keeps the old app's environment, whose PATH may hold no
+/// `sleep` (T-2114, T-2118).
 #[cfg(target_os = "macos")]
-const HELPER: &str = r#"old=$1; polls=$2; executable=$3; opener=$4; keep=$5; shift 5
-waited=0
-while kill -0 "$old" 2>/dev/null; do
-  if [ "$waited" -ge "$polls" ]; then
-    echo "ConsensFlow relaunch: the old app (pid $old) is still running after $polls polls; no second app is started, the update applies at its next start" >&2
-    exit 0
-  fi
-  /bin/sleep 0.1
-  waited=$((waited + 1))
-done
+const HELPER: &str = r#"old=$1; executable=$2; opener=$3; logger=$4; log=$5; keep=$6; shift 6
+say() { printf '%s
+' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }
+while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done
 "$opener" "$@" && exit 0
-status=$?
-echo "ConsensFlow relaunch: $opener failed with status $status; starting the installed app directly" >&2
+opened=$?
+say "ConsensFlow relaunch: $opener failed with status $opened; starting the installed app directly"
 shift "$keep"
-exec "$executable" "$@"
+"$executable" "$@" && exit 0
+started=$?
+say "ConsensFlow could not start after the update: $opener failed with status $opened and $executable failed with status $started. Open ConsensFlow from the Finder."
+exit 1
 "#;
 
 /// The executable of the bundle at `app`: its Info.plist names it, and it is one file of

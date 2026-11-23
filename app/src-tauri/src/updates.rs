@@ -1430,9 +1430,9 @@ mod tests {
         assert_eq!(run(true), ["direct /Applications/ConsensFlow.app"]);
     }
 
-    /// A folder holding stand-ins for the opener and the bundle's executable, each writing what
-    /// it was asked to a file of its own (the opener exits with `opener_status`), and the
-    /// log the helper writes to.
+    /// A folder holding stand-ins for the opener, the bundle's executable and the system's
+    /// `logger`, each writing what it was asked to a file of its own (the first two exit with
+    /// the statuses given), and a log the helper writes to, or none that can be written.
     #[cfg(target_os = "macos")]
     struct Handoff {
         directory: tempfile::TempDir,
@@ -1440,15 +1440,19 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     impl Handoff {
-        fn new(opener_status: i32) -> Self {
+        fn new(opener_status: i32, executable_status: i32) -> Self {
             use std::os::unix::fs::PermissionsExt;
             let directory = tempfile::tempdir().expect("a folder");
-            for (name, status) in [("open", opener_status), ("executable", 0)] {
+            for (name, status) in [
+                ("open", opener_status),
+                ("executable", executable_status),
+                ("logger", 0),
+            ] {
                 let path = directory.path().join(name);
                 std::fs::write(
                     &path,
                     format!(
-                        "#!/bin/sh\necho \"$@\" > '{}'\nexit {status}\n",
+                        "#!/bin/sh\necho \"$@\" >> '{}'\nexit {status}\n",
                         directory.path().join(format!("{name}-asked")).display()
                     ),
                 )
@@ -1467,7 +1471,8 @@ mod tests {
             std::fs::read_to_string(self.path(&format!("{name}-asked"))).ok()
         }
 
-        fn start(&self, old: u32, polls: u32) -> std::process::Child {
+        /// The helper, its log at `log` (a folder that is not there makes it unwritable).
+        fn start(&self, old: u32, log: &str) -> std::process::Child {
             relaunch::launch_services_with(relaunch::Handoff {
                 opener: &self.path("open"),
                 old,
@@ -1475,8 +1480,8 @@ mod tests {
                 args: vec![std::ffi::OsString::from("--first")],
                 home: Some(self.directory.path()),
                 executable: &self.path("executable"),
-                polls,
-                log: Some(&self.path("log")),
+                logger: &self.path("logger"),
+                log: Some(&self.path(log)),
             })
             .expect("start the helper")
         }
@@ -1486,19 +1491,24 @@ mod tests {
         }
     }
 
-    /// The LaunchServices start waits for this app to end, then opens a fresh process on the
-    /// bundle's path (`open -n`), from a helper that is not this app's child group. A stand-in
-    /// opener writes what it was asked; a child that ends later stands for the old app.
+    /// The helper waits for the old app to end, however long that takes, and then opens the
+    /// bundle without `-n` (T-2118): `open` starts the app where none runs and brings up the
+    /// one a person reopened by hand where one does, never two. A stand-in opener writes what
+    /// it was asked; a child that ends later stands for the old app.
     #[cfg(target_os = "macos")]
     #[test]
-    fn the_launch_services_start_waits_for_the_old_app_and_opens_a_fresh_process() {
-        let fixture = Handoff::new(0);
+    fn the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance() {
+        let fixture = Handoff::new(0, 0);
         let mut old = crate::testing::command("/bin/sleep")
-            .arg("1")
+            .arg("2")
             .spawn()
             .expect("the old app's stand-in");
-        let mut helper = fixture.start(old.id(), 3000);
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        let mut helper = fixture.start(old.id(), "log");
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        assert!(
+            helper.try_wait().expect("the helper").is_none(),
+            "the helper ended while the old app lived"
+        );
         assert!(
             fixture.asked("open").is_none(),
             "opened while the old app was alive"
@@ -1508,10 +1518,11 @@ mod tests {
         assert_eq!(
             fixture.asked("open"),
             Some(format!(
-                "-n --env CONSENSFLOW_HOME={} {} --args --first\n",
+                "--env CONSENSFLOW_HOME={} {} --args --first\n",
                 fixture.directory.path().display(),
                 fixture.path("ConsensFlow.app").display()
-            ))
+            )),
+            "the opener is asked for no new instance"
         );
         assert_eq!(fixture.asked("executable"), None, "started it directly too");
     }
@@ -1521,8 +1532,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn a_failed_open_starts_the_installed_app_directly_and_says_why() {
-        let fixture = Handoff::new(1);
-        let mut helper = fixture.start(u32::MAX, 3000);
+        let fixture = Handoff::new(1, 0);
+        let mut helper = fixture.start(u32::MAX, "log");
         helper.wait().expect("the helper ends");
         assert_eq!(fixture.asked("executable"), Some("--first\n".into()));
         assert!(
@@ -1532,33 +1543,37 @@ mod tests {
         );
     }
 
-    /// Never two apps (T-2114): where the old app is still alive at the helper's bound, the
-    /// helper starts nothing (no opener, no direct start), says so in the log, and the old app
-    /// runs on. A stand-in old app that outlives a bound of five polls stands for the
-    /// review's 32.01 s case.
+    /// Both starts failing is told (T-2118): in the app's log, and where that cannot be written,
+    /// in the system log by `logger`, naming what failed and saying to open the app from the
+    /// Finder; the old app is gone, so no one else will.
     #[cfg(target_os = "macos")]
     #[test]
-    fn an_old_app_still_alive_at_the_bound_is_not_started_over() {
-        let fixture = Handoff::new(0);
-        let mut old = crate::testing::command("/bin/sleep")
-            .arg("5")
-            .spawn()
-            .expect("the old app's stand-in");
-        let mut helper = fixture.start(old.id(), 5);
-        assert!(helper.wait().expect("the helper ends").success());
-        assert!(old.try_wait().expect("the old app").is_none(), "it ended");
-        let _ = old.kill();
-        let _ = old.wait();
-        assert_eq!(fixture.asked("open"), None, "a second app was opened");
-        assert_eq!(
-            fixture.asked("executable"),
-            None,
-            "a second app was started"
-        );
+    fn two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log() {
+        let fixture = Handoff::new(1, 7);
+        fixture
+            .start(u32::MAX, "log")
+            .wait()
+            .expect("the helper ends");
+        let said = fixture.log();
         assert!(
-            fixture.log().contains("still running"),
-            "the log says nothing: {:?}",
-            fixture.log()
+            said.contains("failed with status 7") && said.contains("Finder"),
+            "the log: {said:?}"
+        );
+        assert_eq!(fixture.asked("logger"), None, "the system log was used too");
+
+        let fixture = Handoff::new(1, 7);
+        fixture
+            .start(u32::MAX, "no-folder/log")
+            .wait()
+            .expect("the helper ends");
+        let said = fixture
+            .asked("logger")
+            .expect("the system log heard nothing");
+        assert!(
+            said.contains("failed with status 1")
+                && said.contains("failed with status 7")
+                && said.contains("Finder"),
+            "the system log: {said:?}"
         );
     }
 
