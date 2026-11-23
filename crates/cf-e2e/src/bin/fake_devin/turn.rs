@@ -135,19 +135,15 @@ const QUOTA_WORDS: &str = "Your daily usage quota has been exhausted.";
 /// Whether a turn on `text` is refused for its account's quota: the message says `QUOTA-OUT`, the
 /// window is of the member `CF_TEST_QUOTA_OUT` names, and the file `CF_TEST_QUOTA_FILE` names is
 /// there (from the window's folder; taking it away is the human logging Devin into another
-/// account), as the other stand-ins take theirs (T-1207). `CF_TEST_QUOTA_SPENT`
-/// names members whose every turn is refused, including retries.
+/// account), as the other stand-ins take theirs (T-1207).
 fn refused_for_quota(text: &str) -> bool {
     let wanted = cf_e2e::process::own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
     let participant = cf_e2e::process::own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
-    let named = |name: &str| {
-        !name.is_empty() && (participant == name || participant.starts_with(&format!("{name}-")))
-    };
-    let all_turns = cf_e2e::process::own_var("CF_TEST_QUOTA_SPENT")
-        .is_some_and(|names| names.split(',').map(str::trim).any(named));
+    let ours = !wanted.is_empty()
+        && (participant == wanted || participant.starts_with(&format!("{wanted}-")));
     let spent = cf_e2e::process::own_var("CF_TEST_QUOTA_FILE")
         .is_none_or(|file| std::path::Path::new(&file).exists());
-    spent && (all_turns || (text.contains("QUOTA-OUT") && named(&wanted)))
+    text.contains("QUOTA-OUT") && ours && spent
 }
 
 /// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.

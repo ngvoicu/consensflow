@@ -35,8 +35,8 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_retry.rs"
-find = "let wait = if n == 0 { unit } else { SECOND_TRY_UNITS * unit };"
-replace = "let wait = unit;"
+find = "        let wait = if n == 0 {\n            unit\n        } else {\n            SECOND_TRY_UNITS * unit\n        };"
+replace = "        let wait = unit;"
 
 [[plant]]
 name = "n35 hold: the count kept for the task rather than read from the last paste"

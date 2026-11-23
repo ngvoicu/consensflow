@@ -721,18 +721,15 @@ static FAILS: OnceLock<Regex> = OnceLock::new();
 /// Whether the usage limit refuses this window the message `text`: it says
 /// `QUOTA-OUT`, the window is a session of the member `CF_TEST_QUOTA_OUT` names,
 /// and the account is the refused one (`CF_TEST_QUOTA_FILE`, when it is set, is
-/// still there). `CF_TEST_QUOTA_SPENT` names members whose every turn is refused
-/// while that file exists, including retries.
+/// still there).
 fn refused(text: &str) -> bool {
     let member = own_var("CF_TEST_QUOTA_OUT").unwrap_or_default();
     let participant = own_var("CONSENSFLOW_PARTICIPANT").unwrap_or_default();
     let account = own_var("CF_TEST_QUOTA_FILE").is_none_or(|file| Path::new(&file).exists());
-    let named = |name: &str| {
-        !name.is_empty() && (participant == name || participant.starts_with(&format!("{name}-")))
-    };
-    let all_turns = own_var("CF_TEST_QUOTA_SPENT")
-        .is_some_and(|names| names.split(',').map(str::trim).any(named));
-    account && (all_turns || (text.contains("QUOTA-OUT") && named(&member)))
+    text.contains("QUOTA-OUT")
+        && !member.is_empty()
+        && account
+        && (participant == member || participant.starts_with(&format!("{member}-")))
 }
 
 /// The id of an item of the model's, as Codex numbers them.
