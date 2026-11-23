@@ -292,6 +292,7 @@ pub(crate) fn page_commands<R: Runtime>(
         commands::pane_page_prepare,
         commands::pane_page_activate,
         commands::pane_lost_told,
+        commands::pane_lost_pull,
         commands::pane_input_enqueue,
         commands::pane_reply_enqueue,
         commands::pane_input_skip,

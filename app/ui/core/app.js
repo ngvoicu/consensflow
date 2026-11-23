@@ -379,6 +379,9 @@ const pageSession = canAdvancePage ? savedPage[1] : crypto.randomUUID()
 const pageNumber = canAdvancePage ? priorPage + 1 : 1
 const pageId = `${pageSession}:${pageNumber}`
 window.name = `consensflow-page-v1:${pageId}`
+// This document's own nonce: the host answers a preparation with its epoch for it, and this
+// page echoes that exact pair to activate. A dead document cannot echo a fresh one.
+const pageNonce = crypto.randomUUID()
 const terminals = new TerminalsView(stage, {
   pageId,
   invoke: (command, args) => {
@@ -1024,23 +1027,31 @@ $('#specs-settings-button').addEventListener('click', () =>
 $('#specs-dialog').addEventListener('close', () => settingsButton.focus())
 
 async function establishPanePage() {
+  let epoch = null
   for (const command of ['pane_page_prepare', 'pane_page_activate']) {
     let failures = 0
     for (;;) {
       let timer
       try {
+        const args =
+          command === 'pane_page_prepare'
+            ? { pageId, nonce: pageNonce }
+            : { pageId, nonce: pageNonce, epoch }
         const answer = await Promise.race([
-          invoke(command, { pageId }),
+          invoke(command, args),
           new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error('pane page call timed out')), 1500)
           }),
         ])
-        if (answer?.ok === true) {
-          // Typing the host knows may not have arrived, told while no page was current: the
-          // host keeps each notice until this page says it has told the person.
-          if (command === 'pane_page_activate') {
-            const told = (answer.lost ?? []).filter((loss) => terminals.typingLost(loss))
-            void terminals.told(told)
+        if (answer?.ok === true && Number.isSafeInteger(answer.epoch)) {
+          if (command === 'pane_page_prepare') {
+            if (answer.nonce !== pageNonce) throw new Error('pane page answer is not this document')
+            epoch = answer.epoch
+          } else {
+            // The terminals take input only now; what the host owes the person is shown, then
+            // confirmed.
+            terminals.open(epoch)
+            void terminals.receive(answer)
           }
           break
         }
@@ -1049,7 +1060,7 @@ async function establishPanePage() {
           return false
         }
       } catch {
-        // Both page registration steps are idempotent for this identity.
+        // Both page registration steps are idempotent for this document.
       } finally {
         clearTimeout(timer)
       }
@@ -1060,6 +1071,32 @@ async function establishPanePage() {
   }
   return true
 }
+
+// What the host owes the person is asked for at activation, once the board has loaded, on a
+// timer while the page sits idle, and when the page comes into view: an event can be lost, an
+// answer too, and a notice nobody asked for again would sit on the host for good.
+const LOSS_PULL_MS = 3000
+function keepAskingForLosses() {
+  let pulling = false
+  const pull = async () => {
+    if (pulling) return
+    pulling = true
+    try {
+      await terminals.pull()
+    } catch {
+      // Asked again at the next turn.
+    } finally {
+      pulling = false
+    }
+  }
+  setInterval(pull, LOSS_PULL_MS)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void pull()
+  })
+  return pull
+}
+
+let pullLosses = () => {}
 
 async function start() {
   if (typeof invoke !== 'function') {
@@ -1085,9 +1122,8 @@ async function start() {
         }, 50)
       })
       await listen('daemon-status', (event) => daemonStatus(event.payload))
-      await listen('pane-input-lost', (event) => {
-        if (terminals.typingLost(event.payload)) void terminals.told([event.payload])
-      })
+      // The host's event is a hint to ask: what it owes is pulled, whatever the event said.
+      await listen('pane-input-lost', () => void pullLosses())
       // A file dropped on a terminal window types its path there.
       await listenForFileDrops({
         listen,
@@ -1136,6 +1172,9 @@ async function start() {
   }
   await refresh()
   document.body.dataset.ready = 'true'
+  // The board has loaded: what the host owes the person is asked for again, and on a timer.
+  pullLosses = keepAskingForLosses()
+  void pullLosses()
   const selftest = window.__CONSENSFLOW_SELFTEST__
   if (selftest !== null && typeof selftest === 'object') {
     const { runSelftest } = await import('../selftest.js')

@@ -1068,6 +1068,36 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
   scroll-padding-inline: 8px;
 }
 .stage .terminal-card { scroll-snap-align: start; }
+/* Until the host has acknowledged this document, the terminals are read-only, and say so. */
+.stage[data-input="closed"] { position: relative; }
+.stage[data-input="closed"] .terminal-host { opacity: 0.55; }
+.stage[data-input="closed"]::before {
+  content: attr(data-reconnecting);
+  position: sticky;
+  left: 8px;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--surface-2, #3a3a3a);
+  color: var(--text, #eee);
+  font-size: 12px;
+}
+/* One row for each window whose typing may not have arrived: shown apart, never one line over another. */
+.input-notices { list-style: none; margin: 0; padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
+.input-notices[hidden] { display: none; }
+.input-notice {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--surface-2, #3a3a3a);
+  font-size: 12px;
+}
+.input-notice[data-state="closed"] { font-style: italic; }
+.input-notice-dismiss { flex: 0 0 auto; }
 @media (min-width: 761px) {
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }

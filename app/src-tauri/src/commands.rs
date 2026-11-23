@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, PageInputCompletion, PendingNotices};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{
     decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
@@ -59,13 +59,16 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
         Ok(completion) => completion,
         Err(error) => return json!({"ok":false,"error":error}),
     };
-    match completion.receiver.await {
+    match completion.receiver.clone().await {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({
             "ok":false,
             "error":error.to_string(),
             "uncertain":error.is_uncertain(),
             "failedUntilRestart":error.failed_until_restart(),
+            // The host recorded this call's outcome itself: the page confirms its number once
+            // it has said so.
+            "loss":completion.loss(),
         }),
     }
 }
@@ -88,11 +91,13 @@ fn page_input_finished(
     result
 }
 
+/// A page announces itself with a nonce of its document's own; the host answers with its
+/// epoch for this document, and the page echoes that exact pair to activate.
 #[tauri::command]
-pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String, nonce: String) -> Value {
     let state = app.state::<AppRuntime>();
-    match state.inputs.prepare_page(&page_id) {
-        Ok(()) => json!({"ok":true}),
+    match state.inputs.prepare_page(&page_id, &nonce) {
+        Ok(epoch) => json!({"ok":true,"epoch":epoch,"nonce":nonce}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -122,18 +127,30 @@ impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
     }
 }
 
-/// The page has told the person what was lost in these windows, up to the numbers it gives:
-/// those notices are done.
+fn notices_json(notices: &PendingNotices) -> Value {
+    json!({
+        "lost":notices.losses.iter().map(|notice| json!({
+            "id":notice.key.id,
+            "generation":notice.key.generation,
+            "loss":notice.loss,
+            "closed":notice.closed,
+        })).collect::<Vec<_>>(),
+        "overflow":notices.overflow.map(|overflow| json!({"version":overflow.version,"count":overflow.count})),
+    })
+}
+
+/// The page has shown the person what was lost in these windows (each version it shows) and
+/// the count past the host's bound: those notices are done, if this is the current page of the
+/// current epoch.
 #[tauri::command]
 pub fn pane_lost_told<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     keys: Vec<LostArgs>,
+    overflow: Option<OverflowArgs>,
 ) -> Value {
     let state = app.state::<AppRuntime>();
-    if state.inputs.page_is_current(&page_id).is_err() {
-        return json!({"ok":false,"error":"pane-input-stale-page"});
-    }
     let mut told = Vec::with_capacity(keys.len());
     for each in keys {
         match pane_key(&each.id, each.generation) {
@@ -141,7 +158,8 @@ pub fn pane_lost_told<R: Runtime>(
             Err(error) => return json!({"ok":false,"error":error}),
         }
     }
-    match state.inputs.lost_told(&told) {
+    let overflow = overflow.map(|overflow| (overflow.version, overflow.count));
+    match state.inputs.lost_told(&page_id, epoch, &told, overflow) {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
@@ -154,16 +172,44 @@ pub struct LostArgs {
     loss: u64,
 }
 
-/// The page becomes current. The windows whose typing may not have reached them come back,
-/// for it to say so.
+#[derive(serde::Deserialize)]
+pub struct OverflowArgs {
+    version: u64,
+    count: u64,
+}
+
+/// What the host still owes the person, for the page that is current to show. The page asks at
+/// its activation, after its board loads, on a timer and when it comes into view.
 #[tauri::command]
-pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+pub fn pane_lost_pull<R: Runtime>(app: AppHandle<R>, page_id: String, epoch: u64) -> Value {
     let state = app.state::<AppRuntime>();
-    match state.inputs.activate_page(&page_id) {
-        Ok(lost) => json!({
-            "ok":true,
-            "lost":lost.iter().map(|(key, loss)| json!({"id":key.id,"generation":key.generation,"loss":loss})).collect::<Vec<_>>(),
-        }),
+    match state.inputs.pending_losses(&page_id, epoch) {
+        Ok(notices) => {
+            let mut answer = notices_json(&notices);
+            answer["ok"] = true.into();
+            answer
+        }
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// The page becomes current, echoing the epoch and nonce its preparation was answered. The
+/// windows whose typing may not have reached them come back, for it to say so.
+#[tauri::command]
+pub fn pane_page_activate<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    nonce: String,
+    epoch: u64,
+) -> Value {
+    let state = app.state::<AppRuntime>();
+    match state.inputs.activate_page(&page_id, &nonce, epoch) {
+        Ok(notices) => {
+            let mut answer = notices_json(&notices);
+            answer["ok"] = true.into();
+            answer["epoch"] = epoch.into();
+            answer
+        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -171,6 +217,7 @@ pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Val
 /// What a page call says of itself: its page, pane and number.
 struct PageCall {
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -196,7 +243,7 @@ fn enqueue_page_text<R: Runtime>(
                 if let Ok(loss) =
                     state
                         .inputs
-                        .refuse_page_sequence(&call.page_id, &key, call.sequence)
+                        .refuse_page_sequence(&call.page_id, call.epoch, &key, call.sequence)
                 {
                     return json!({"ok":false,"error":error,"loss":loss});
                 }
@@ -225,7 +272,7 @@ fn enqueue_page_call<R: Runtime>(
     } else {
         InputWork::Typed(bytes)
     };
-    match inputs.enqueue_page_told(&call.page_id, key, call.sequence, work, !reply) {
+    match inputs.enqueue_page_told(&call.page_id, call.epoch, key, call.sequence, work, !reply) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
         Err(refusal) => match refusal.loss {
             Some(loss) => json!({"ok":false,"error":refusal.error,"loss":loss}),
@@ -240,6 +287,7 @@ fn enqueue_page_call<R: Runtime>(
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -248,6 +296,7 @@ pub fn pane_input_enqueue<R: Runtime>(
 ) -> Value {
     let call = PageCall {
         page_id,
+        epoch,
         id,
         generation,
         sequence,
@@ -259,6 +308,7 @@ pub fn pane_input_enqueue<R: Runtime>(
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -267,6 +317,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
 ) -> Value {
     let call = PageCall {
         page_id,
+        epoch,
         id,
         generation,
         sequence,
@@ -280,6 +331,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
 pub fn pane_input_skip<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -289,8 +341,15 @@ pub fn pane_input_skip<R: Runtime>(
         Err(error) => return json!({"ok":false,"error":error}),
     };
     let state = app.state::<AppRuntime>();
-    match state.inputs.skip_page_sequence(&page_id, &key, sequence) {
+    match state
+        .inputs
+        .skip_page_sequence(&page_id, epoch, &key, sequence)
+    {
         Ok(loss) => json!({"ok":true,"loss":loss}),
+        // Its number cannot be spent yet: the page asks again, and the skip stays pending.
+        Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
+            json!({"ok":false,"error":error,"retry":true})
+        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -613,6 +672,9 @@ mod tests {
         if args["pageId"].is_null() {
             args["pageId"] = "test-page".into();
         }
+        if args["epoch"].is_null() {
+            args["epoch"] = 0.into();
+        }
         if let Some(list) = args["bytes"].as_array() {
             let bytes = list
                 .iter()
@@ -643,10 +705,12 @@ mod tests {
         sequence: u64,
         bytes: &[u8],
     ) -> Value {
+        let epoch = app.state::<AppRuntime>().inputs.epoch();
         enqueue_page_call(
             app,
             &PageCall {
                 page_id: page.into(),
+                epoch,
                 id: key.id.clone(),
                 generation: key.generation,
                 sequence,
@@ -1325,15 +1389,14 @@ mod tests {
         drop(app);
     }
 
-    /// A page reloads while its first call is still on the way (P4-B). The program reads what
-    /// the host wrote: `typed` calls are made as the page `s:1` (B, C, and A after `hold`), the
-    /// page `s:2` follows at once with D. Returns what the program read, A's answer, and the
-    /// windows the host said had lost typing. Every call goes through Tauri's own decoding.
+    /// A page reloads while its first call is still on the way (P4-B, by epoch). The program
+    /// reads what the host wrote: the page `s:1` made calls 2 and 3 (B, C: number 1 never
+    /// came), the host's epoch moved with the navigation, the page `s:2` prepared, echoed its
+    /// epoch and typed D at once, and A (number 1 of `s:1`) came after. Returns what the
+    /// program read, A's answer, and the windows the host said had lost typing. Every call
+    /// goes through Tauri's own decoding.
     #[cfg(unix)]
-    fn a_reload_with_a_held_first_call(
-        hold: Duration,
-        expected: usize,
-    ) -> (Vec<u8>, Value, Vec<Value>) {
+    fn a_reload_with_a_held_first_call(expected: usize) -> (Vec<u8>, Value, Vec<Value>) {
         use std::sync::Mutex;
         use tauri::Listener as _;
 
@@ -1397,25 +1460,29 @@ mod tests {
                 .deserialize::<Value>()
                 .expect("command response JSON")
         };
-        let call = |page: &str, sequence: u64, bytes: &[u8]| {
+        let call = |page: &str, epoch: u64, sequence: u64, bytes: &[u8]| {
             invoke(
                 "pane_input_enqueue",
-                json!({"pageId":page,"id":key.id,"generation":1,"sequence":sequence,"bytes":bytes}),
+                json!({"pageId":page,"epoch":epoch,"id":key.id,"generation":1,"sequence":sequence,"bytes":bytes}),
             )
         };
-        assert_eq!(call("s:1", 2, b"B")["ok"], true);
-        assert_eq!(call("s:1", 3, b"C")["ok"], true);
-        // Navigation begins; the next page announces itself and types at once.
+        assert_eq!(call("s:1", 0, 2, b"B")["ok"], true);
+        assert_eq!(call("s:1", 0, 3, b"C")["ok"], true);
+        // Navigation begins; the next page announces itself with a nonce of its own, is
+        // answered the host's epoch for it, echoes that pair, and types at once.
         inputs.end_page().unwrap();
-        assert_eq!(
-            invoke("pane_page_prepare", json!({"pageId":"s:2"}))["ok"],
-            true
+        let prepared = invoke("pane_page_prepare", json!({"pageId":"s:2","nonce":"n-2"}));
+        assert_eq!(prepared["ok"], true, "{prepared:?}");
+        assert_eq!(prepared["nonce"], "n-2");
+        let epoch = prepared["epoch"].as_u64().expect("the host's epoch");
+        assert_eq!(epoch, 1, "one navigation, one epoch");
+        let activated = invoke(
+            "pane_page_activate",
+            json!({"pageId":"s:2","nonce":"n-2","epoch":epoch}),
         );
-        let activated = invoke("pane_page_activate", json!({"pageId":"s:2"}));
         assert_eq!(activated["ok"], true, "{activated:?}");
-        assert_eq!(call("s:2", 1, b"D")["ok"], true);
-        thread::sleep(hold);
-        let a = call("s:1", 1, b"A");
+        assert_eq!(call("s:2", epoch, 1, b"D")["ok"], true);
+        let a = call("s:1", 0, 1, b"A");
         // The program ends when it has read what it should have. One that never does is a
         // failure, not a hang.
         let (ended, ending) = mpsc::channel();
@@ -1436,26 +1503,17 @@ mod tests {
         (received, a, heard)
     }
 
-    /// The reload (D4's red 3): A's call is still on its way when the page goes, B and C had
-    /// come, the next page types D at once. The program reads A, B, C, D, each once.
+    /// The reload, through the commands: number 1 never came, B and C waited behind it and are
+    /// cancelled as a loss when the page reloads, D of the new page is written at once, and A
+    /// comes after the reload and is refused. The program reads D alone, and the page that is
+    /// current is told which window.
     #[cfg(unix)]
     #[test]
-    fn a_reload_with_a_held_call_loses_nothing_and_writes_each_once() {
-        let (received, a, notices) = a_reload_with_a_held_first_call(Duration::from_millis(500), 4);
-        assert_eq!(received, b"ABCD");
-        assert_eq!(a["ok"], true, "A is admitted: {a:?}");
-        assert!(notices.is_empty(), "nothing was lost: {notices:?}");
-    }
-
-    /// The same with A held past the bound (red 4): B, C and D go in, A is refused when it
-    /// comes, and the page that is current is told which window.
-    #[cfg(unix)]
-    #[test]
-    fn a_first_call_held_past_the_bound_is_refused_and_the_current_page_is_told() {
-        let (received, a, notices) =
-            a_reload_with_a_held_first_call(Duration::from_millis(1800), 3);
-        assert_eq!(received, b"BCD");
-        assert_eq!(a, json!({"ok":false,"error":"pane-input-stale-page"}));
+    fn a_reload_cancels_what_waited_in_order_and_the_current_page_is_told() {
+        let (received, a, notices) = a_reload_with_a_held_first_call(1);
+        assert_eq!(received, b"D");
+        assert_eq!(a["ok"], false, "A is refused: {a:?}");
+        assert_eq!(a["error"], "pane-input-stale-page");
         assert!(
             !notices.is_empty()
                 && notices
@@ -1671,12 +1729,15 @@ mod tests {
             .expect("build mock app");
         let handle = app.handle().clone();
         let subscribe = |page: &str| {
+            let prepared = pane_page_prepare(handle.clone(), page.to_string(), "nonce".into());
+            assert_eq!(prepared["ok"], true);
             assert_eq!(
-                pane_page_prepare(handle.clone(), page.to_string()),
-                json!({"ok":true})
-            );
-            assert_eq!(
-                pane_page_activate(handle.clone(), page.to_string())["ok"],
+                pane_page_activate(
+                    handle.clone(),
+                    page.to_string(),
+                    "nonce".into(),
+                    prepared["epoch"].as_u64().expect("an epoch")
+                )["ok"],
                 true
             );
             let subscribed = tauri::async_runtime::block_on(subscribe_output(
@@ -1777,12 +1838,15 @@ mod tests {
             .manage(runtime)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
+        let prepared = pane_page_prepare(app.handle().clone(), "new-page".into(), "nonce".into());
+        assert_eq!(prepared["ok"], true);
         assert_eq!(
-            pane_page_prepare(app.handle().clone(), "new-page".into()),
-            json!({"ok":true})
-        );
-        assert_eq!(
-            pane_page_activate(app.handle().clone(), "new-page".into())["ok"],
+            pane_page_activate(
+                app.handle().clone(),
+                "new-page".into(),
+                "nonce".into(),
+                prepared["epoch"].as_u64().expect("an epoch")
+            )["ok"],
             true
         );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(

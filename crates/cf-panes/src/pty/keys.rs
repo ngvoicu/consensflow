@@ -422,9 +422,11 @@ mod conpty {
 
     /// What a Node program that reads its terminal raw is given of what the host's input queue
     /// writes for a page that reloads (P4-B on Windows, the byte order a page can see): the page
-    /// `s:1` sent B and C and its first call (`A`) comes `hold` after the reload began, the page
-    /// `s:2` typed D at once. Every chunk the program was handed, as the characters it read.
-    fn node_reads_a_reload(hold: Duration) -> (String, String) {
+    /// `s:1` handed A (number 1) over, and C (number 3, with number 2 missing), the reload began,
+    /// the page `s:2` typed D at once, and the old page's number 2 (B) came after. Every chunk
+    /// the program was handed, as the characters it read, and whether the host kept a notice
+    /// for the window.
+    fn node_reads_a_reload() -> (String, String, bool) {
         use crate::input_queue::{InputQueue, InputWork};
         let node = node().expect("a node.exe on the PATH, which the app's own Windows tests need");
         let _pty_guard = serial_pty_test();
@@ -444,20 +446,27 @@ mod conpty {
         inputs.open(&key).expect("open the pane's input");
         read_until(&table, &key, &output, "READY");
         let typed = |text: &[u8]| InputWork::Typed(text.to_vec());
-        inputs.begin_page("s:1").expect("the first page");
-        for (number, text) in [(2, b"B"), (3, b"C")] {
+        let first = inputs.begin_page("s:1").expect("the first page");
+        for (number, text) in [(1, b"A"), (3, b"C")] {
             inputs
-                .enqueue_page("s:1", key.clone(), number, typed(text), true)
+                .enqueue_page("s:1", first, key.clone(), number, typed(text), true)
                 .expect("a call of the first page");
         }
         inputs.end_page().expect("navigation begins");
-        inputs.begin_page("s:2").expect("the next page");
+        let next = inputs.begin_page("s:2").expect("the next page");
         inputs
-            .enqueue_page("s:2", key.clone(), 1, typed(b"D"), true)
+            .enqueue_page("s:2", next, key.clone(), 1, typed(b"D"), true)
             .expect("the next page types at once");
-        std::thread::sleep(hold);
-        // Admitted within the bound, or refused after it.
-        let _ = inputs.enqueue_page("s:1", key.clone(), 1, typed(b"A"), true);
+        // The old page's number 2 comes after the cut: it is never written.
+        assert!(inputs
+            .enqueue_page("s:1", first, key.clone(), 2, typed(b"B"), true)
+            .is_err());
+        let owed = inputs
+            .pending_losses("s:2", next)
+            .expect("the page is current")
+            .losses
+            .iter()
+            .any(|notice| notice.key == key);
         let mut seen = String::new();
         let settled = Instant::now() + Duration::from_secs(3);
         while Instant::now() < settled {
@@ -480,23 +489,18 @@ mod conpty {
             .filter_map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
             .map(char::from)
             .collect();
-        (text, seen)
+        (text, seen, owed)
     }
 
-    /// The reload's order (D4's red 3) at the program's own end, through the shipped console
-    /// host: A's call is on its way when the page goes, B and C had come, the next page typed D
-    /// at once. The program is given A, B, C, D (not D, A).
+    /// The reload at the program's own end, through the shipped console host: A was handed over
+    /// before the page went, C waited behind a missing number and is cancelled as a loss, the next
+    /// page typed D at once, and the old page's B came after. The program is given A and D, and the
+    /// host owes the person a notice for the window.
     #[test]
-    fn a_reload_with_a_held_call_reaches_a_node_program_as_abcd() {
-        let (text, seen) = node_reads_a_reload(Duration::from_millis(500));
-        assert_eq!(text, "ABCD", "its screen: {seen:?}");
-    }
-
-    /// The same with A held past the bound: B, C and D are given, A is refused when it comes.
-    #[test]
-    fn a_first_call_held_past_the_bound_reaches_a_node_program_as_bcd() {
-        let (text, seen) = node_reads_a_reload(Duration::from_millis(1800));
-        assert_eq!(text, "BCD", "its screen: {seen:?}");
+    fn a_reload_reaches_a_node_program_as_ad_and_tells_what_was_cancelled() {
+        let (text, seen, owed) = node_reads_a_reload();
+        assert_eq!(text, "AD", "its screen: {seen:?}");
+        assert!(owed, "the host kept a notice for the window");
     }
 
     /// What a terminal answers a program's questions with (xterm.js: an OSC colour ended by ST or

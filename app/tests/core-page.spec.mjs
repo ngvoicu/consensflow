@@ -335,7 +335,7 @@ function groupsOpen(data) {
   }
 }
 
-async function open(page, given = model()) {
+async function open(page, given = model(), { ready = true } = {}) {
   const data = { roles: ROLES, ...given }
   await page.addInitScript(groupsOpen, data)
   await page.addInitScript((data) => {
@@ -929,9 +929,23 @@ async function open(page, given = model()) {
       if (command === 'pane_input_skip') {
         return window.__paneSkipHook ? window.__paneSkipHook(args) : { ok: true }
       }
-      // A host that outlives the page (`orderedHost`) hears the page's own start as well.
-      if (command === 'pane_page_activate' && window.__paneActivateHook) {
-        return window.__paneActivateHook(args)
+      // The page's own start: the host answers a preparation with its epoch and the
+      // document's nonce, and an activation of that pair with what it owes the person. A host
+      // that outlives the page (`epochHost`) answers them itself.
+      if (command === 'pane_page_prepare') {
+        return window.__panePrepareHook
+          ? window.__panePrepareHook(args)
+          : { ok: true, epoch: 1, nonce: args.nonce }
+      }
+      if (command === 'pane_page_activate') {
+        return window.__paneActivateHook
+          ? window.__paneActivateHook(args)
+          : { ok: true, epoch: args.epoch, lost: [], overflow: null }
+      }
+      if (command === 'pane_lost_pull') {
+        return window.__paneLostPullHook
+          ? window.__paneLostPullHook(args)
+          : { ok: true, lost: [], overflow: null }
       }
       if (command === 'pane_lost_told' && window.__paneLostToldHook) {
         return window.__paneLostToldHook(args)
@@ -1035,7 +1049,7 @@ async function open(page, given = model()) {
     }
   }, data)
   await page.goto(`${ui.origin}/index.html`)
-  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  if (ready) await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
 /** Buttons as the human reads them: an icon button by its tip, any other by its text. */
@@ -4811,7 +4825,7 @@ for (const [failure, typed, lost] of [
       })
       .toEqual(lost ? [1] : [])
     if (lost)
-      await expect(page.locator('#status')).toHaveText(
+      await expect(notices(page).last()).toContainText(
         'Some of your typing may not have reached this window. Check what appeared.',
       )
   })
@@ -4918,7 +4932,7 @@ test('a full window refuses a key once, with its words, and the typing after it 
     for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
   })
   await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('BC')
-  await expect(page.locator('#status')).toHaveText(
+  await expect(notices(page).last()).toContainText(
     'This window is still taking in what you sent before, so your last typing was not sent. Wait a moment, then type it again.',
   )
   // Once: A was not sent again.
@@ -4929,203 +4943,185 @@ test('a full window refuses a key once, with its words, and the typing after it 
   ).toBe(3)
 })
 
-// The host as it keeps a window's order (P4-B), outside the page so that it outlives a reload:
-// calls are written in the numbers of their page, a call that comes early waits for the ones
-// before it, a number that never comes is given up after the bound, a page that has gone is
-// heard for the bound and the next page's calls for a window wait until it has closed, and
-// every loss it knows of is kept, numbered, until a page says it has told the person. It
-// counts what it was given. Nothing is handed over from page to page.
-function orderedHost({ bound = 1500, hold = () => null, holdSkip = () => null } = {}) {
+// The host's side of P4-B by epoch, outside the page so that it outlives a reload: each
+// navigation moves its epoch, a page is current once it echoes the pair its preparation was
+// answered, calls of any other epoch are refused and recorded as a loss for their window, and
+// every loss is kept, numbered, until a page says it has shown that version. The native tests
+// (`input_queue::boundary`) hold the rules; here the page's own part is under test: what it
+// sends and when, what it shows, and what it confirms.
+function epochHost({ holdActivation = null } = {}) {
   const st = {
-    received: '',
+    epoch: 0,
     current: null,
-    serial: 0,
-    serials: new Map(),
-    left: new Map(),
-    lanes: new Map(),
+    pending: new Map(),
     losses: new Map(),
     nextLoss: 0,
-    told: [],
+    overflow: null,
+    received: '',
+    sent: [],
     acks: [],
-    tell: async () => {},
+    overflowAcks: [],
+    pulls: 0,
+    failPulls: 0,
+    skipsRetry: 0,
+    skips: [],
+    activations: 0,
+    activated: [],
   }
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const split = (key) => ({
     id: key.slice(0, key.lastIndexOf(':')),
     generation: Number(key.slice(key.lastIndexOf(':') + 1)),
   })
-  const laneOf = (key, page) => {
-    if (!st.lanes.has(key)) st.lanes.set(key, [])
-    const lanes = st.lanes.get(key)
-    let lane = lanes.find((each) => each.page === page)
-    if (lane === undefined) {
-      lane = {
-        page,
-        serial: st.serials.get(page) ?? 0,
-        passed: 0,
-        parked: new Map(),
-        until: st.left.has(page) ? st.left.get(page) + bound : null,
-      }
-      lanes.push(lane)
-      lanes.sort((a, b) => a.serial - b.serial)
-    }
-    return lane
-  }
-  const lost = (key) => {
+  const keyOf = (args) => `${args.id}:${args.generation}`
+  const lose = (key, closed = false) => {
     st.nextLoss += 1
-    st.losses.set(key, st.nextLoss)
-    st.told.push(key)
-    if (st.current !== null) void st.tell({ ...split(key), loss: st.nextLoss })
+    st.losses.set(key, { loss: st.nextLoss, closed })
     return st.nextLoss
   }
-  const pump = () => {
-    const now = Date.now()
-    for (const [key, lanes] of st.lanes) {
-      let blocked = false
-      for (const lane of [...lanes]) {
-        const forced = lane.until !== null && now >= lane.until
-        for (;;) {
-          if (lane.parked.size === 0) break
-          const first = Math.min(...lane.parked.keys())
-          if (first > lane.passed + 1) {
-            const expired = Math.max(
-              0,
-              ...[...lane.parked].filter(([, call]) => call.deadline <= now).map(([n]) => n),
-            )
-            if (forced || expired >= first) {
-              lane.passed = first - 1
-              lost(key)
-              continue
-            }
-            break
-          }
-          if (blocked) break
-          const call = lane.parked.get(first)
-          lane.parked.delete(first)
-          lane.passed = first
-          if (call.text !== undefined) st.received += call.text
-        }
-        if (blocked) continue
-        if (lane.until !== null && now >= lane.until && lane.parked.size === 0) {
-          lanes.splice(lanes.indexOf(lane), 1)
-          continue
-        }
-        if (lane.until !== null) blocked = true
-      }
-    }
-  }
-  const clock = setInterval(pump, 20)
-  const keyOf = (args) => `${args.id}:${args.generation}`
-  const admits = (page) =>
-    st.current === page || (st.left.has(page) && Date.now() < st.left.get(page) + bound)
+  const owed = () => ({
+    lost: [...st.losses].map(([key, each]) => ({ ...split(key), loss: each.loss, closed: each.closed })),
+    overflow: st.overflow,
+  })
+  // The earlier head's page sends no epoch or nonce: where one is absent, the page alone is
+  // the identity, and `the page echoes ...` below says so on its own.
+  const admits = (args) =>
+    st.current === args.pageId && (args.epoch === undefined || st.epoch === args.epoch)
   const host = {
-    stop: () => clearInterval(clock),
     get received() {
       return st.received
     },
-    get told() {
-      return st.told
+    get sent() {
+      return st.sent
     },
     get acks() {
       return st.acks
     },
+    get overflowAcks() {
+      return st.overflowAcks
+    },
+    get pulls() {
+      return st.pulls
+    },
     get unshown() {
       return [...st.losses.keys()]
     },
-    /** Calls parked, by page, behind numbers that have not come. */
-    waiting: (page) =>
-      [...st.lanes.values()]
-        .flat()
-        .filter((lane) => lane.page === page)
-        .reduce((sum, lane) => sum + lane.parked.size, 0),
-    onLost: (tell) => {
-      st.tell = tell
+    get epoch() {
+      return st.epoch
     },
-    /** Navigation has begun: the current page has gone, and is heard for the bound. */
+    get skips() {
+      return st.skips
+    },
+    get activations() {
+      return st.activations
+    },
+    get activated() {
+      return st.activated
+    },
+    /** A loss the host recorded by itself (a writer that failed, a window that closed). */
+    lose: (key, closed = false) => lose(key, closed),
+    setOverflow: (version, count) => {
+      st.overflow = { version, count }
+    },
+    failNextPulls: (count) => {
+      st.failPulls = count
+    },
+    retryNextSkips: (count) => {
+      st.skipsRetry = count
+    },
+    /** A new main document begins: the epoch moves, and the page that was current is not. */
     endPage: () => {
-      if (st.current === null) return
-      st.left.set(st.current, Date.now())
-      for (const lanes of st.lanes.values())
-        for (const lane of lanes) if (lane.page === st.current) lane.until = Date.now() + bound
+      st.epoch += 1
       st.current = null
-      pump()
+      st.pending.clear()
     },
     handle: async (command, args) => {
+      if (command === 'pane_page_prepare') {
+        st.pending.set(args.pageId, { nonce: args.nonce, epoch: st.epoch })
+        return { ok: true, epoch: st.epoch, nonce: args.nonce }
+      }
       if (command === 'pane_page_activate') {
-        host.endPage()
+        st.activations += 1
+        if (holdActivation !== null && st.activations === 1) await holdActivation.promise
+        st.activated.push(args)
+        const prepared = st.pending.get(args.pageId)
+        const retry = st.current === args.pageId && args.epoch === st.epoch
+        const echoed =
+          args.nonce === undefined
+            ? prepared !== undefined
+            : prepared?.nonce === args.nonce &&
+              prepared.epoch === args.epoch &&
+              args.epoch === st.epoch
+        if (!retry && !echoed) return { ok: false, error: 'pane-input-stale-page' }
+        st.pending.delete(args.pageId)
         st.current = args.pageId
-        st.serial += 1
-        st.serials.set(args.pageId, st.serial)
-        pump()
-        return {
-          ok: true,
-          lost: [...st.losses].map(([key, loss]) => ({ ...split(key), loss })),
+        return { ok: true, epoch: st.epoch, ...owed() }
+      }
+      if (command === 'pane_lost_pull') {
+        st.pulls += 1
+        if (st.failPulls > 0) {
+          st.failPulls -= 1
+          throw new Error('test: the pull failed')
         }
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        return { ok: true, ...owed() }
       }
       if (command === 'pane_lost_told') {
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
         for (const each of args.keys) {
           st.acks.push(each)
-          const key = keyOf(each)
-          if ((st.losses.get(key) ?? Infinity) <= each.loss) st.losses.delete(key)
+          const held = st.losses.get(keyOf(each))
+          if (held !== undefined && held.loss <= each.loss) st.losses.delete(keyOf(each))
+        }
+        if (args.overflow) {
+          st.overflowAcks.push(args.overflow)
+          if (st.overflow && st.overflow.version <= args.overflow.version) st.overflow = null
         }
         return { ok: true }
       }
-      const key = keyOf(args)
       if (command === 'pane_input_skip') {
-        const ms = holdSkip(args)
-        if (ms !== null) await (typeof ms === 'number' ? sleep(ms) : ms)
-        if (!admits(args.pageId)) {
-          if (st.left.has(args.pageId)) lost(key)
-          return { ok: false, error: 'pane-input-stale-page' }
+        st.skips.push(args)
+        if (st.skipsRetry > 0) {
+          st.skipsRetry -= 1
+          return { ok: false, error: 'pane-input-skip-pending', retry: true }
         }
-        const lane = laneOf(key, args.pageId)
-        if (args.sequence > lane.passed && !lane.parked.has(args.sequence))
-          lane.parked.set(args.sequence, { deadline: Date.now() + bound })
-        pump()
-        return { ok: true, loss: lost(key) }
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        return { ok: true, loss: lose(keyOf(args)) }
       }
-      const ms = hold(args)
-      if (ms !== null) await (typeof ms === 'number' ? sleep(ms) : ms)
-      if (!admits(args.pageId)) {
-        if (st.left.has(args.pageId)) lost(key)
+      // pane_input_enqueue / pane_reply_enqueue
+      st.sent.push(args)
+      if (!admits(args)) {
+        lose(keyOf(args))
         return { ok: false, error: 'pane-input-stale-page' }
       }
-      const lane = laneOf(key, args.pageId)
-      if (args.sequence <= lane.passed || lane.parked.has(args.sequence)) {
-        return { ok: false, error: 'pane-input-sequence-stale' }
-      }
-      lane.parked.set(args.sequence, {
-        text: String.fromCharCode(...args.bytes),
-        deadline: Date.now() + bound,
-      })
-      pump()
+      st.received += String.fromCharCode(...args.bytes)
       return { ok: true, ticket: `ticket-${args.pageId}-${args.sequence}` }
     },
   }
   return host
 }
 
-/** A page whose calls to the host go to `host`, and which the host tells what was lost. */
-async function openWithHost(page, host) {
+/** A page whose calls to the host go to `host`; the page's own navigation moves the host's epoch. */
+async function openWithHost(page, host, { ready = true } = {}) {
   await page.exposeFunction('__host', (command, args) => host.handle(command, args))
   await page.addInitScript(() => {
     window.__paneInputHook = (command, args) => window.__host(command, args)
     window.__paneSkipHook = (args) => window.__host('pane_input_skip', args)
+    window.__panePrepareHook = (args) => window.__host('pane_page_prepare', args)
     window.__paneActivateHook = (args) => window.__host('pane_page_activate', args)
     window.__paneLostToldHook = (args) => window.__host('pane_lost_told', args)
+    window.__paneLostPullHook = (args) => window.__host('pane_lost_pull', args)
   })
-  page.on('framenavigated', () => host.endPage())
-  host.onLost((payload) =>
-    page
-      .evaluate((payload) => window.__listeners.get('pane-input-lost')?.({ payload }), payload)
-      .catch(() => {}),
-  )
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) host.endPage()
+  })
+  host.endPage()
+  await open(page, model(), { ready })
+  if (ready) await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
 }
 
 const LOST_TYPING_WORDS =
   'Some of your typing may not have reached this window. Check what appeared.'
+const notices = (page) => page.locator('.input-notices .input-notice')
 
 /** A promise a test settles by hand, for a call held in transit. */
 function held() {
@@ -5144,209 +5140,210 @@ const typeKeys = (page, keys) =>
   page.evaluate((keys) => {
     for (const key of keys) window.__emulators[0].type(key)
   }, keys)
-const firstPage = (args) => args.sequence === 1 && args.pageId.endsWith(':1')
-const sleeps = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-test('a reload loses none of what was typed: A held, B and C sent, D typed at once, all once and in order', async ({
+test('R3: until the document is acknowledged nothing typed, pasted or answered is sent, the board reads, and the terminals say they are read-only', async ({
   page,
 }) => {
-  const first = held()
-  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A', 'B', 'C'])
-    const pageId = () =>
-      page.evaluate(() => window.__calls.find(([name]) => name === 'subscribe_output')[1].pageId)
-    const oldPage = await pageId()
-    // B and C came and wait for A, which is still on its way.
-    await expect.poll(() => host.waiting(oldPage)).toBe(2)
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    // D, of the new page, waits behind all of them.
-    await expect.poll(async () => host.waiting(await pageId())).toBe(1)
-    await sleeps(300)
-    expect(host.received).toBe('')
-    first.release()
-    await expect.poll(() => host.received, { timeout: 4000 }).toBe('ABCD')
-    expect(host.told).toEqual([])
-    await expect(page.locator('#status')).toHaveText('')
-  } finally {
-    host.stop()
-  }
-})
-
-test('A held past the bound: B, C and D go in, A is refused when it comes, and the new page says so', async ({
-  page,
-}) => {
-  const first = held()
-  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A', 'B', 'C'])
-    await sleeps(200)
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    await expect.poll(() => host.received, { timeout: 4000 }).toBe('BCD')
-    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
-    // The page said so, by the host's number, and the host forgot it.
-    await expect.poll(() => host.acks.length).toBeGreaterThan(0)
-    await expect.poll(() => host.unshown).toEqual([])
-    first.release()
-    await sleeps(300)
-    expect(host.received, 'A is refused when it comes').toBe('BCD')
-  } finally {
-    host.stop()
-  }
-})
-
-test("A's answer lost: A is written once, the notice shows, and B, C and D follow in order", async ({
-  page,
-}) => {
-  await open(page)
+  const activation = held()
+  const host = epochHost({ holdActivation: activation })
+  await openWithHost(page, host, { ready: false })
+  // The daemon's state changes before the activation is answered: the board is read, and a
+  // terminal is drawn and takes input in the emulator.
+  await expect.poll(() => host.activations).toBe(1)
+  await page.evaluate(() => window.__listeners.get('state-changed')?.({ payload: { project: 1 } }))
   await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(
-    ({ hostSource }) => {
-      const admit = new Function(`return (${hostSource})()`)()
-      window.__paneInputHook = async (_command, args) => {
-        const answer = admit(args)
-        if (args.sequence === 1) throw new Error('test: answer lost')
-        return answer
+  const stage = page.locator('#stage')
+  await expect(stage).toHaveAttribute('data-input', 'closed')
+  await expect(stage).toHaveAttribute('data-reconnecting', /Reconnecting/)
+  await page.evaluate(() => {
+    window.__emulators[0].type('k')
+    window.__emulators[0].type('\x1b[200~pasted\x1b[201~')
+    window.__emulators[0].type('/path/dropped')
+    window.__emulators[0].reply('\x1b[1;1R')
+  })
+  await expect(page.locator('#status')).toContainText('reconnecting')
+  expect(host.sent, 'zero input is enqueued before the acknowledgement').toEqual([])
+  activation.release()
+  await expect(stage).toHaveAttribute('data-input', 'open')
+  await typeKeys(page, ['D'])
+  await expect.poll(() => host.received).toBe('D')
+  expect(host.sent.map((call) => [call.sequence, call.epoch])).toEqual([[1, host.epoch]])
+})
+
+test("the page echoes the host's epoch and its own nonce to activate, and the epoch on every call", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  const [activation] = host.activated
+  expect(Number.isSafeInteger(activation.epoch), 'the activation echoes an epoch').toBe(true)
+  expect(typeof activation.nonce, 'and the nonce of its own').toBe('string')
+  expect(host.sent.every((call) => call.epoch === host.epoch)).toBe(true)
+})
+
+test('R3: a lost activation answer is asked again and the first key then goes in as number 1', async ({
+  page,
+}) => {
+  const activation = held()
+  const host = epochHost({ holdActivation: activation })
+  await openWithHost(page, host, { ready: false })
+  await expect.poll(() => host.activations).toBe(1)
+  // The answer never comes; the page asks again and is answered the same.
+  activation.release()
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  expect(host.sent[0].sequence).toBe(1)
+})
+
+test("a reload moves the page to its own epoch: its first key is number 1 of that epoch, and what was parked before is told once", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const first = host.epoch
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  await reloaded(page)
+  expect(host.epoch).toBeGreaterThan(first)
+  await typeKeys(page, ['D'])
+  await expect.poll(() => host.received).toBe('AD')
+  const calls = host.sent.map((call) => [call.sequence, call.epoch])
+  expect(calls).toEqual([
+    [1, first],
+    [1, host.epoch],
+  ])
+})
+
+test('R10: an idle page recovers a notice whose event was lost and whose first pull failed, and shows each window apart, once', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.failNextPulls(1)
+  host.lose('chief-a:1')
+  host.lose('chief-b:1')
+  // No event reaches the page, and nobody types: its own timer asks, the first pull fails,
+  // the next one is answered.
+  await expect(notices(page)).toHaveCount(2, { timeout: 12_000 })
+  await expect(notices(page).nth(0)).toContainText('Some of your typing may not have reached')
+  await expect.poll(() => host.unshown, { timeout: 8000 }).toEqual([])
+  // A known version asked again on this page is not shown twice.
+  host.lose('chief-a:1')
+  await expect.poll(() => host.acks.length, { timeout: 8000 }).toBe(3)
+  await expect(notices(page)).toHaveCount(2)
+  expect(host.pulls).toBeGreaterThan(1)
+})
+
+test('R10: an event is a hint to ask, and the same version through the event, a refusal and a pull shows once', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  await page.evaluate(() =>
+    window.__listeners.get('pane-input-lost')?.({ payload: { id: 'chief-a', generation: 1, loss: 1 } }),
+  )
+  await expect(notices(page)).toHaveCount(1)
+  await page.evaluate(() =>
+    window.__listeners.get('pane-input-lost')?.({ payload: { id: 'chief-a', generation: 1, loss: 1 } }),
+  )
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => host.unshown).toEqual([])
+  await expect(notices(page)).toHaveCount(1)
+  // A later version of the same window updates its row, and is confirmed on its own.
+  host.lose('chief-a:1')
+  await page.evaluate(() =>
+    window.__listeners.get('pane-input-lost')?.({ payload: { id: 'chief-a', generation: 1, loss: 2 } }),
+  )
+  await expect.poll(() => host.acks.map((each) => each.loss)).toContain(2)
+  await expect(notices(page)).toHaveCount(1)
+})
+
+test('R10: the page comes into view and asks again for what the host owes', async ({ page }) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const before = host.pulls
+  host.lose('chief-a:1')
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(notices(page)).toHaveCount(1)
+  expect(host.pulls).toBeGreaterThan(before)
+})
+
+test('R7: a window that has closed is named in its notice on the current page, and confirmed once the row is shown', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('gone-window:5', true)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  const row = notices(page).first()
+  await expect(row).toContainText('gone-window')
+  await expect(row).toContainText('has closed')
+  await expect(row).not.toContainText('this window')
+  await expect.poll(() => host.acks.map((each) => each.loss)).toEqual([1])
+})
+
+test('R7: a notice for generation 5 is never worded as this window beside a card of generation 6', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const chief = await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return { id: lane.pane.id, generation: lane.pane.generation }
+  })
+  host.lose(`${chief.id}:${chief.generation + 5}`, true)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  const row = notices(page).first()
+  await expect(row).toContainText(`${chief.id}`)
+  await expect(row).toContainText('closed')
+  await expect.poll(() => host.unshown).toEqual([])
+})
+
+test('R11: the losses past the host\'s bound are one row of their own, confirmed apart, and a further eviction survives', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.setOverflow(1, 3)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  const row = page.locator('.input-notice[data-window="overflow"]')
+  await expect(row).toContainText('3 more')
+  await expect.poll(() => host.overflowAcks).toEqual([{ version: 1, count: 3 }])
+  host.setOverflow(2, 1)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(row).toContainText('1 more window')
+  await expect.poll(() => host.overflowAcks.at(-1)).toEqual({ version: 2, count: 1 })
+})
+
+test('a skip the host cannot make final stays pending: the page asks again until it is, and then says so', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.retryNextSkips(3)
+  await page.evaluate(() => {
+    let first = true
+    const hook = window.__paneInputHook
+    window.__paneInputHook = (command, args) => {
+      if (first) {
+        first = false
+        return new Promise(() => {})
       }
-      for (const key of ['A', 'B', 'C', 'D']) window.__emulators[0].type(key)
-    },
-    { hostSource: hostWithCount.toString() },
-  )
-  await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('ABCD')
-  await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
-  const enqueues = await page.evaluate(
-    () => window.__calls.filter(([name]) => name === 'pane_input_enqueue').length,
-  )
-  expect(enqueues, 'each number was sent once').toBe(4)
-})
-
-test('a second reload inside the first keeps every page in its order, each once', async ({
-  page,
-}) => {
-  const first = held()
-  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A', 'B'])
-    await sleeps(200)
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    await sleeps(200)
-    await reloaded(page)
-    await typeKeys(page, ['E'])
-    await sleeps(300)
-    expect(host.received).toBe('')
-    first.release()
-    await expect.poll(() => host.received, { timeout: 4000 }).toBe('ABDE')
-    expect(host.told).toEqual([])
-  } finally {
-    host.stop()
-  }
-})
-
-test('a number that never comes, from a page two reloads back, is told to the page that is current', async ({
-  page,
-}) => {
-  const first = held()
-  const host = orderedHost({
-    bound: 3000,
-    hold: (args) => (firstPage(args) ? first.promise : null),
+      return hook(command, args)
+    }
+    window.__emulators[0].type('A')
   })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A', 'B'])
-    await sleeps(200)
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    await reloaded(page)
-    await typeKeys(page, ['E'])
-    await expect.poll(() => host.received, { timeout: 9000 }).toBe('BDE')
-    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
-  } finally {
-    host.stop()
-  }
+  await expect.poll(() => host.skips.length, { timeout: 8000 }).toBe(4)
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page).first()).toContainText('may not have reached')
 })
 
-test('repeated reloads while the host answers no activation keep the notice until a page has shown it', async ({
-  page,
-}) => {
-  const first = held()
-  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
-  const handle = host.handle
-  host.handle = (command, args) =>
-    command === 'pane_page_activate' && /:[23]$/.test(args.pageId)
-      ? new Promise(() => {})
-      : handle(command, args)
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A', 'B'])
-    await sleeps(200)
-    // Two pages that load and are never told they are current, then a third.
-    await page.reload()
-    await page.reload()
-    await sleeps(1800)
-    await reloaded(page)
-    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS, { timeout: 6000 })
-    await expect.poll(() => host.unshown, { timeout: 4000 }).toEqual([])
-  } finally {
-    host.stop()
-  }
-})
-
-test('the limit: a key typed last before a reload that never reached the host is not told', async ({
-  page,
-}) => {
-  const first = held()
-  const host = orderedHost({ hold: (args) => (firstPage(args) ? first.promise : null) })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A'])
-    await sleeps(200)
-    // A's call is still on its way when the page goes, and nothing was typed after it: the
-    // host has no number past A to show that it is missing.
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    await expect.poll(() => host.received, { timeout: 4000 }).toBe('D')
-    await sleeps(2000)
-    expect(host.told).toEqual([])
-    await expect(page.locator('#status')).toHaveText('')
-  } finally {
-    host.stop()
-  }
-})
-
-test("an old page's timeout skip that comes after the reload is told to the page that is current", async ({
-  page,
-}) => {
-  const first = held()
-  const lateSkip = held()
-  const host = orderedHost({
-    hold: (args) => (firstPage(args) ? first.promise : null),
-    holdSkip: (args) => (args.pageId.endsWith(':1') ? lateSkip.promise : null),
-  })
-  try {
-    await openWithHost(page, host)
-    await typeKeys(page, ['A'])
-    // The page's own timeout skips A (held in transit), and the page reloads before the skip is answered.
-    await expect
-      .poll(() => page.evaluate(() => window.__calls.some(([name]) => name === 'pane_input_skip')))
-      .toBe(true)
-    await reloaded(page)
-    await typeKeys(page, ['D'])
-    await expect.poll(() => host.received).toBe('D')
-    await expect(page.locator('#status')).toHaveText('')
-    lateSkip.release()
-    await expect(page.locator('#status')).toHaveText(LOST_TYPING_WORDS)
-  } finally {
-    host.stop()
-  }
-})
-
-test("a refusal that came with its loss's number is confirmed once the page has said it, and the host's own event for it says nothing more", async ({
+test('a refusal that came with its loss number is shown as its window\'s row and confirmed once, and the host\'s own event adds nothing', async ({
   page,
 }) => {
   await open(page)
@@ -5360,7 +5357,7 @@ test("a refusal that came with its loss's number is confirmed once the page has 
   })
   const words =
     'This window is still taking in what you sent before, so your last typing was not sent. Wait a moment, then type it again.'
-  await expect(page.locator('#status')).toHaveText(words)
+  await expect(notices(page)).toContainText(words)
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -5368,48 +5365,14 @@ test("a refusal that came with its loss's number is confirmed once the page has 
       ),
     )
     .toEqual([[{ id: expect.any(String), generation: expect.any(Number), loss: 7 }]])
-  // The event for the same loss comes: the words stay.
   await page.evaluate(() => {
     const [, args] = window.__calls.find(([name]) => name === 'pane_input_enqueue')
     window.__listeners.get('pane-input-lost')?.({
       payload: { id: args.id, generation: args.generation, loss: 7 },
     })
   })
-  await expect(page.locator('#status')).toHaveText(words)
-})
-
-test('the page confirms only a notice it showed: a window it has let go of is not confirmed', async ({
-  page,
-}) => {
-  await open(page)
-  const told = await page.evaluate(async () => {
-    const { TerminalLink } = await import('/terminal-link.js')
-    const calls = []
-    const reports = []
-    const link = new TerminalLink({
-      invoke: async (command, args) => {
-        calls.push([command, args])
-        return { ok: true }
-      },
-      registry: { retire: () => {} },
-      report: (cause) => reports.push(cause.message),
-      pageId: 'p:1',
-    })
-    link.retire('gone:1')
-    const shown = link.typingLost({ id: 'gone', generation: 1, loss: 3 })
-    const here = link.typingLost({ id: 'here', generation: 1, loss: 4 })
-    // A loss it was told of, and one the host numbered earlier, show once.
-    const again = link.typingLost({ id: 'here', generation: 1, loss: 2 })
-    await link.told([{ id: 'here', generation: 1, loss: 4 }])
-    return { shown, here, again, reports, calls }
-  })
-  expect(told.shown).toBe(false)
-  expect(told.here).toBe(true)
-  expect(told.again).toBe(true)
-  expect(told.reports).toEqual([LOST_TYPING_WORDS])
-  expect(told.calls).toEqual([
-    ['pane_lost_told', { pageId: 'p:1', keys: [{ id: 'here', generation: 1, loss: 4 }] }],
-  ])
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page)).toContainText(words)
 })
 
 // A paste is one call with both of its markers: whole, or not at all.
@@ -5435,7 +5398,7 @@ test('a paste goes in as one call, whole with both markers, however long', async
       text: new TextDecoder().decode(new Uint8Array(args.bytes)),
     }
   })
-  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'])
+  expect(call.keys).toEqual(['pageId', 'epoch', 'id', 'generation', 'sequence', 'length', 'bytes'])
   expect(call.sequence).toBe(1)
   expect(call.text).toBe(paste)
   expect(call.length).toBe(new TextEncoder().encode(paste).length)
@@ -5483,7 +5446,7 @@ for (const [lost, bracketed] of [
     if (!bracketed) expect(new TextEncoder().encode(paste).length).toBe(71680)
     expect(result.sent, 'one call for the paste, never sent again').toEqual([1, 2])
     expect(result.skips).toEqual([1])
-    await expect(page.locator('#status')).toHaveText(
+    await expect(notices(page).last()).toContainText(
       'Some of your typing may not have reached this window. Check what appeared.',
     )
   })
@@ -5642,7 +5605,7 @@ test('a write the host refuses says some typing may be missing, not to restart',
     window.__emulators[0].type('B')
   })
   await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('B')
-  await expect(page.locator('#status')).toHaveText(
+  await expect(notices(page).last()).toContainText(
     'Some of your typing may not have reached this window. Check what appeared.',
   )
 })
@@ -5672,7 +5635,7 @@ for (const [error, written, uncertain] of [
       { error, written, uncertain },
     )
     await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe(written)
-    await expect(page.locator('#status')).toHaveText(
+    await expect(notices(page).last()).toContainText(
       'Check whether your last typing appeared, then restart the project before typing again.',
     )
   })
@@ -5701,7 +5664,7 @@ test('a late pane refusal cannot replace restart advice with a generic notice', 
   })
   const restart =
     'Check whether your last typing appeared, then restart the project before typing again.'
-  await expect(page.locator('#status')).toHaveText(restart)
+  await expect(notices(page).first()).toContainText(restart)
   await expect.poll(() => page.evaluate(() => typeof window.__releaseFirstInput)).toBe('function')
   await page.evaluate(() =>
     window.__releaseFirstInput({
@@ -5716,7 +5679,7 @@ test('a late pane refusal cannot replace restart advice with a generic notice', 
       page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
     )
     .toBe(2)
-  await expect(page.locator('#status')).toHaveText(restart)
+  await expect(notices(page).first()).toContainText(restart)
 })
 
 test('a lost pane admission answer is followed by restart advice from the failed pane', async ({
@@ -5738,7 +5701,7 @@ test('a lost pane admission answer is followed by restart advice from the failed
     window.__emulators[0].type('A')
     window.__emulators[0].type('B')
   })
-  await expect(page.locator('#status')).toHaveText(
+  await expect(notices(page).last()).toContainText(
     'Check whether your last typing appeared, then restart the project before typing again.',
   )
 })
@@ -5765,14 +5728,14 @@ test('another pane cannot replace failed pane restart advice with a generic noti
   })
   const restart =
     'Check whether your last typing appeared, then restart the project before typing again.'
-  await expect(page.locator('#status')).toHaveText(restart)
+  await expect(notices(page).first()).toContainText(restart)
   await page.evaluate(() => window.__emulators[1].type('B'))
   await expect
     .poll(() =>
       page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
     )
     .toBe(2)
-  await expect(page.locator('#status')).toHaveText(restart)
+  await expect(notices(page).first()).toContainText(restart)
 
   // Once the failed generation leaves, a different pane's refusal is no
   // longer described as needing a project restart.
@@ -5783,7 +5746,7 @@ test('another pane cannot replace failed pane restart advice with a generic noti
   })
   await expect.poll(() => page.evaluate(() => window.__emulators[0].disposed)).toBe(true)
   await page.evaluate(() => window.__emulators[1].type('C'))
-  await expect(page.locator('#status')).toHaveText(
+  await expect(notices(page).last()).toContainText(
     'Some of your typing may not have reached this window. Check what appeared.',
   )
 })

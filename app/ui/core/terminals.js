@@ -85,6 +85,10 @@ export class TerminalsView {
    * terminal alone, and Show terminal brings a session's back.
    */
   #showing = new Set()
+  /** The notices of typing that may be missing, one row for each window, above the dock. */
+  #noticeList
+  /** By window: the name it was last shown under, kept for the row of a window that has closed. */
+  #names = new Map()
 
   constructor(
     stage,
@@ -103,6 +107,11 @@ export class TerminalsView {
     },
   ) {
     this.#stage = stage
+    this.#noticeList = element('ul', 'input-notices')
+    this.#noticeList.setAttribute('aria-label', 'Typing that may not have arrived')
+    this.#noticeList.setAttribute('role', 'status')
+    this.#noticeList.hidden = true
+    stage.parentElement?.insertBefore(this.#noticeList, stage)
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
@@ -117,19 +126,95 @@ export class TerminalsView {
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
       onLink: (url) => void this.#openLink(url),
     })
-    this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId })
+    this.#link = new TerminalLink({
+      invoke,
+      registry: this.#registry,
+      report,
+      pageId,
+      notices: {
+        show: (notice) => this.#showNotice(notice),
+        showOverflow: (notice) => this.#showOverflow(notice),
+      },
+      // Until this document's epoch is acknowledged, the terminals are visibly read-only.
+      onGate: (open) => {
+        this.#stage.dataset.input = open ? 'open' : 'closed'
+        if (open) delete this.#stage.dataset.reconnecting
+        else this.#stage.dataset.reconnecting = 'Reconnecting: typing is paused'
+      },
+    })
     this.#invoke = invoke
     this.#report = report
   }
 
-  /** The host says a window's typing may not have reached it; whether the person was told. */
-  typingLost(loss) {
-    return this.#link.typingLost(loss)
+  /** This document's activation was answered with its epoch: the terminals take input. */
+  open(epoch) {
+    this.#link.open(epoch)
   }
 
-  /** The person was told of these losses: the host may forget them. */
-  told(losses) {
-    return this.#link.told(losses)
+  /** What the host owes the person (at activation, by a pull, or from its event): shown, then confirmed. */
+  receive(owed) {
+    return this.#link.receive(owed)
+  }
+
+  /** Ask the host what it owes the person. */
+  pull() {
+    return this.#link.pull()
+  }
+
+  /**
+   * One window's row: the window by name (a window that has closed, by the name it last had),
+   * what may be missing, and a way to dismiss it. A newer version of the same window's loss
+   * updates its row. True once the row is there to read.
+   */
+  #showNotice({ pane, loss, closed, text }) {
+    const key = paneKey(pane)
+    const name = this.#nameOf(pane)
+    const said = closed
+      ? `${name} has closed. Typing sent to it just before may not have arrived.`
+      : `${name}: ${text}`
+    let row = [...this.#noticeList.children].find((item) => item.dataset.window === key)
+    if (row === undefined) {
+      row = element('li', 'input-notice')
+      row.dataset.window = key
+      const words = element('span', 'input-notice-text')
+      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+        row.remove()
+        this.#noticeList.hidden = this.#noticeList.children.length === 0
+      })
+      row.append(words, dismiss)
+      this.#noticeList.append(row)
+    }
+    row.dataset.loss = String(loss ?? '')
+    row.dataset.state = closed ? 'closed' : 'open'
+    row.firstElementChild.textContent = said
+    this.#noticeList.hidden = false
+    return true
+  }
+
+  /** The losses past the host's bound, as one row of their own. */
+  #showOverflow({ version, count }) {
+    let row = [...this.#noticeList.children].find((item) => item.dataset.window === 'overflow')
+    if (row === undefined) {
+      row = element('li', 'input-notice')
+      row.dataset.window = 'overflow'
+      const words = element('span', 'input-notice-text')
+      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+        row.remove()
+        this.#noticeList.hidden = this.#noticeList.children.length === 0
+      })
+      row.append(words, dismiss)
+      this.#noticeList.append(row)
+    }
+    row.dataset.version = String(version)
+    row.firstElementChild.textContent = `and ${count} more window${count === 1 ? '' : 's'} may not have received what you typed. Check what appeared in your other windows.`
+    this.#noticeList.hidden = false
+    return true
+  }
+
+  #nameOf(pane) {
+    const entry = this.#cards.get(paneKey(pane))
+    if (entry?.participant) return laneName(entry.participant)
+    return this.#names.get(paneKey(pane)) ?? `Window ${pane.id}`
   }
 
   /**
@@ -514,6 +599,7 @@ export class TerminalsView {
     const now = Date.now()
     // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
+    this.#names.set(entry.key, name)
     entry.meeting = Boolean(board.project?.meeting)
     entry.ownHands = board.project?.ownHands === true
     const history = button(
