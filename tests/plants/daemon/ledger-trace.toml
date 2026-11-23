@@ -1,0 +1,111 @@
+# P19-A: the ledger tells its trace only after commit, in log order.
+[run]
+p19a-store = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "store::tests"]
+p19a-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::trace"]
+
+[[plant]]
+name = "ledger trace: tell inside the transaction"
+meant = "a_refused_ask_leaves_no_task_state_line_in_the_trace"
+runs = ["p19a-trace"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if self.db.is_autocommit() {"
+replace = "        if true {"
+
+[[plant]]
+name = "ledger trace: tell what rolled back"
+meant = "a_refused_operation_tells_the_trace_nothing"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        self.logged.clear();"
+replace = '''
+        for event in std::mem::take(&mut self.logged) {
+            (self.trace)(&event);
+        }'''
+
+[[plant]]
+name = "ledger trace: tell before COMMIT returns"
+meant = "a_commit_that_fails_tells_nothing"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''
+            Ok(Ok(value)) => match self.db.execute_batch("COMMIT") {
+                Ok(()) => {
+                    for event in std::mem::take(&mut self.logged) {
+                        (self.trace)(&event);
+                    }
+                    Ok(value)
+                }'''
+replace = '''
+            Ok(Ok(value)) => match {
+                for event in std::mem::take(&mut self.logged) {
+                    (self.trace)(&event);
+                }
+                self.db.execute_batch("COMMIT")
+            } {
+                Ok(()) => Ok(value),'''
+
+[[plant]]
+name = "ledger trace: tell committed events in reverse"
+meant = "what_committed_is_told_in_the_order_it_was_logged"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "                    for event in std::mem::take(&mut self.logged) {"
+replace = "                    for event in std::mem::take(&mut self.logged).into_iter().rev() {"
+
+[[plant]]
+name = "ledger trace: keep rolled back events for a later commit"
+meant = "a_refused_operation_tells_the_trace_nothing"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        self.logged.clear();"
+replace = ""
+
+[[plant]]
+name = "ledger trace: keep panicked events for a later commit"
+meant = "an_operation_that_panics_tells_nothing"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''
+            Err(unwound) => {
+                self.roll_back();'''
+replace = '''
+            Err(unwound) => {
+                let _ = self.db.execute_batch("ROLLBACK");'''
+
+[[plant]]
+name = "ledger trace: do not tell an event committed on its own"
+meant = "an_event_logged_outside_an_operation_is_told_at_once"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if self.db.is_autocommit() {"
+replace = "        if false {"
+
+[[plant]]
+name = "ledger trace: allow a batch inside an operation"
+meant = "a_batch_inside_an_operation_is_still_refused"
+runs = ["p19a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''
+        if !self.db.is_autocommit() {
+            return Err(LedgerError::refused(
+                "nested-batch",'''
+replace = '''
+        if false && !self.db.is_autocommit() {
+            return Err(LedgerError::refused(
+                "nested-batch",'''

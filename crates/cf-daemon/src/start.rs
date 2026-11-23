@@ -193,6 +193,9 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     make_folder(&home, 0o777, Mkdir::Sync)
         .map_err(|failed| StartError::System(failed.to_string()))?;
     let trace = Rc::new(Trace::new(&home));
+    trace
+        .started()
+        .map_err(|failed| StartError::System(failed.to_string()))?;
     let log = Rc::new(Log::new(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
     log.info(&format!(

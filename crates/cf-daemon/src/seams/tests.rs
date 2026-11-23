@@ -483,7 +483,7 @@ async fn a_panic_in_work_apart_is_written_down_and_the_work_after_it_runs() {
     assert!(log.contains("panic: a launch went wrong"), "{log}");
     assert!(log.contains("error a window's exit failed"), "{log}");
     assert!(log.contains("panic: an exit went wrong"), "{log}");
-    let trace = std::fs::read_to_string(home.path().join("events.jsonl")).unwrap();
+    let trace = crate::files::settled_trace(home.path()).unwrap();
     assert!(
         trace.contains(r#""reason":"a task failed: a launch went wrong""#),
         "{trace}"

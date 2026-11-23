@@ -299,7 +299,7 @@ async fn an_operation_that_panics_at_its_first_poll_answers_not_ok_and_the_bridg
                 "{log}"
             );
             assert!(log.contains("panic: a bug before the first wait"), "{log}");
-            let trace = std::fs::read_to_string(rig.home.path().join("events.jsonl")).unwrap();
+            let trace = crate::files::settled_trace(rig.home.path()).unwrap();
             assert!(
                 trace.contains(
                     r#""reason":"page operation board.get failed: a bug before the first wait""#
