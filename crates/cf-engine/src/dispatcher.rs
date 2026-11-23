@@ -1018,6 +1018,14 @@ impl Dispatcher {
         if record.delivery.borrow().delivering.is_some() {
             self.confirm_arrival(record, &observed)?;
         }
+        // A member held for its quota is settled as it was: its windows' turns are the hold's, and
+        // a held task of its window stays held to the reset, as on main (T-2131). A pass moves
+        // such a task on only where the turn that got through marks the member back first; the
+        // exit does not.
+        let owner = self.member_of(&project, participant);
+        if self.is_out(&owner) {
+            return Ok(());
+        }
         if participant.role != "chief" {
             self.went_on_by_itself(&project, participant, &observed)?;
         }
@@ -1034,7 +1042,6 @@ impl Dispatcher {
         }
         // A refusal a pass would act on is the quota's to settle, not a result: the look
         // reads it as the pass does (`refused_here`, and `refused_unhandled` for a member already out) and leaves what it recorded as it was.
-        let owner = self.member_of(&project, participant);
         let before = record.quota.borrow().reported.clone();
         self.record_quota(record, observed.quota.clone());
         let refused = self.refused_here(record, &owner) || self.refused_unhandled(record);
@@ -1045,7 +1052,7 @@ impl Dispatcher {
         );
         self.record_quota(record, before);
         // A member held for its quota is settled as it was: its windows' turns are the hold's.
-        if (refused && !counted) || self.is_out(&owner) {
+        if refused && !counted {
             return Ok(());
         }
         self.collect(

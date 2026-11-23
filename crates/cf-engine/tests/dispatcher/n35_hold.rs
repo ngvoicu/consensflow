@@ -1013,3 +1013,120 @@ fn with_the_tries_off_a_failed_end_fails_the_task_at_once_as_before() {
     assert!(task.retry.is_none());
     assert_eq!(resumes(&c, "zeus"), 0);
 }
+
+// ---- round 2 (T-2131's two blockers) ----
+
+#[test]
+fn an_out_member_s_held_window_that_finished_by_itself_and_exits_stays_held_to_the_reset() {
+    // T-2131 blocker 1, at both paces: main leaves a task held for its member's quota held
+    // through the exit, and one Resume at the reset takes the window up again.
+    for tries in [30_000, 0] {
+        let c = Context::made(Made {
+            turn_retry_ms: tries,
+            ..Made::default()
+        });
+        let (t, window) = working(&c);
+        let quota = super::fixtures::exhausted(
+            Some(&super::fixtures::now(&c)),
+            Some(&super::fixtures::soon(&c, 1)),
+        );
+        c.adapter.refuse(&window, quota);
+        passes(&c, 3);
+        assert!(
+            t.out_until("zeus").is_some(),
+            "tries {tries}: the member is out"
+        );
+        let typed = c
+            .adapter
+            .item(Role::User, "The limit is back. Finish the report.");
+        c.adapter.with(&window, |agent| {
+            agent.items.push(typed);
+            agent.failed = false;
+            agent.failure = None;
+            agent.quota = None;
+        });
+        c.adapter
+            .answer("zeus", "Receipt 42, the requested action is complete.");
+        c.exit("zeus");
+        let after = t.task(1).task;
+        assert_eq!(after.state, "paused", "tries {tries}");
+        assert!(
+            after.held_until.is_some(),
+            "tries {tries}: still held to the reset, as on main"
+        );
+        c.advance(3_700_000);
+        passes(&c, 8);
+        let later = t.task(1).task;
+        assert!(
+            matches!(later.state.as_str(), "queued" | "working" | "done"),
+            "tries {tries}: resumed at the reset, not stranded: {}",
+            later.state
+        );
+    }
+}
+
+#[test]
+fn a_turn_the_harness_woke_after_turns_that_went_through_is_the_first_try_not_the_next() {
+    // T-2131 blocker 2: the retry's turn ended well and left a job; an hour later a turn the
+    // harness woke by itself fails. Twice over, the task is never failed at once.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.adapter
+        .answer_leaving_a_job("zeus", "The build runs in the background; I wait for it.");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.state, "working");
+    c.advance(3_600_000);
+    c.adapter.wake(
+        "zeus",
+        "<task-notification>the build ended</task-notification>",
+    );
+    fail(&c, &window);
+    passes(&c, 3);
+    let held = t.task(1).task;
+    assert_eq!(held.state, "paused");
+    assert_eq!(
+        held.retry.expect("tried again").which,
+        1,
+        "1 of 2, not 2 of 2"
+    );
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.adapter
+        .answer_leaving_a_job("zeus", "Building again in the background.");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.state, "working");
+    c.advance(3_600_000);
+    c.adapter.wake(
+        "zeus",
+        "<task-notification>the build ended</task-notification>",
+    );
+    fail(&c, &window);
+    passes(&c, 3);
+    let again = t.task(1).task;
+    assert_eq!(again.state, "paused", "tried again, not failed at once");
+    assert_eq!(again.retry.expect("tried again").which, 1);
+}
+
+#[test]
+fn a_failed_turn_straight_after_a_retry_that_failed_is_still_the_second_try() {
+    // The mend must not lose the count where nothing went through between the two failures.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.retry.expect("held").which, 2);
+}

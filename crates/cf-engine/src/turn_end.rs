@@ -500,7 +500,15 @@ impl Dispatcher {
             if still && !self.forgotten(record) {
                 // Two tries, each a hold of the task and main's own Resume, before it fails
                 // (`turn_retry`).
-                match self.failed_end(project, participant, &thread.task, &why.said, &why.key)? {
+                let went_through = crate::turn_retry::turn_went_through(items, start);
+                match self.failed_end(
+                    project,
+                    participant,
+                    &thread.task,
+                    &why.said,
+                    &why.key,
+                    went_through,
+                )? {
                     crate::turn_retry::Tried::Held => {}
                     crate::turn_retry::Tried::Fails(said) => {
                         self.fail_task(project, participant.id, &thread.task, &said, &why.key)?;

@@ -42,6 +42,17 @@ pub(crate) fn turn_at_work(observed: &Observed) -> bool {
         )
 }
 
+/// Whether a turn ended well in the record after the paste at `start`: an assistant answer its
+/// harness marks complete and wrote itself. A failed end writes none (Claude Code's error
+/// record, Pi's error step and Codex's failed end are not complete answers).
+pub(crate) fn turn_went_through(items: &[cf_harness::records::Item], start: usize) -> bool {
+    items.get(start + 1..).is_some_and(|after| {
+        after.iter().any(|item| {
+            item.role == cf_harness::records::Role::Assistant && item.complete && !item.synthetic
+        })
+    })
+}
+
 /// What a failed turn comes to for its task.
 pub(crate) enum Tried {
     /// The task is held, and main's Resume at its time is the try.
@@ -63,12 +74,18 @@ impl Dispatcher {
         task: &TaskView,
         said: &str,
         cause: &str,
+        went_through: bool,
     ) -> Result<Tried, EngineError> {
         let unit = self.seams.limits.turn_retry_ms;
         if unit == 0 || participant.role == "chief" {
             return Ok(Tried::Fails(said.to_owned()));
         }
-        let n = {
+        // The try the last paste carried, unless a turn ended well since: a turn that began
+        // with no paste of ours (a job's end, a notice) and failed is the first try's, not the
+        // next (T-2131). Read at this look from the record, nothing kept.
+        let n = if went_through {
+            0
+        } else {
             let ledger = self.seams.ledger.borrow();
             match ledger.last_pasted(participant.id, task.id)? {
                 Some(message) => ledger.turn_retry_tries(message.id)?,
