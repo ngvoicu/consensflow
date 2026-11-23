@@ -1276,7 +1276,7 @@ mod tests {
             crate::door::write(path, "sentinel\n").unwrap();
         }
         let alias = owned.join("foreign-link");
-        std::os::unix::fs::symlink(&protected[0], &alias).unwrap();
+        crate::door::symlink(&protected[0], &alias).unwrap();
         let script = "own=$1; shift; IFS= read -r line < \"$own\" || exit 13; [ \"$line\" = before ] || exit 14; printf after > \"$own\" || exit 15; for file in \"$@\"; do if IFS= read -r line < \"$file\"; then exit 11; fi; if printf changed > \"$file\"; then exit 12; fi; done; exit 0";
         let profile = super::sandbox_profile(
             &foreign,
@@ -1478,7 +1478,6 @@ mod tests {
             "muse::tests::standin_isolation_muse_search_passes_over_an_inherited_harness_home",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .arg("--nocapture")
         .var(CHILD_PATH, &said)
         .run()
@@ -1527,7 +1526,7 @@ mod tests {
         let real = crate::door::made("cf-test-").unwrap();
         install(real.path(), "1.4.14-R7309.1");
         let linked = crate::door::made("cf-test-").unwrap();
-        std::os::unix::fs::symlink(real.path().join("muse"), linked.path().join("muse")).unwrap();
+        crate::door::symlink(real.path().join("muse"), linked.path().join("muse")).unwrap();
         let found = installed_on(linked.path().to_str().unwrap(), None).unwrap();
         assert_eq!(found.version, "1.4.14-R7309.1");
         assert!(found
@@ -1612,7 +1611,6 @@ mod tests {
         .unwrap();
         // Muse's program by its name, started as a harness's is.
         let mut run = crate::process::Run::harness("muse", dir.path().join("muse-bin-9.9.9"))
-            .finding_programs()
             .limit(std::time::Duration::from_secs(20));
         if let Some(ms) = repaint_ms {
             run = run.var("CF_TEST_MUSE_REPAINT_MS", ms);
@@ -1891,9 +1889,9 @@ mod tests {
         let person = crate::door::made("cf-test-").unwrap();
         let rig = crate::door::made("cf-test-").unwrap();
         let theirs = person.path().join(".config").join("muse").join("auth.json");
-        std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
+        crate::door::make_dir(theirs.parent().unwrap()).unwrap();
         let login = json!({ "providers": { "meta": { "access_token": "a-SECRET", "refresh_token": "r-SECRET" } } });
-        std::fs::write(&theirs, login.to_string()).unwrap();
+        crate::door::write(&theirs, login.to_string()).unwrap();
         super::seed_live_home(rig.path(), person.path()).unwrap();
         let ours = rig.path().join(".config").join("muse");
         let copy = std::fs::read_to_string(ours.join("auth.json")).unwrap();
@@ -1905,7 +1903,7 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&theirs).unwrap(), login.to_string());
         // A person with no login stops the seed, naming the file.
-        std::fs::remove_file(&theirs).unwrap();
+        crate::door::remove(&theirs).unwrap();
         let said = super::seed_live_home(rig.path(), person.path())
             .unwrap_err()
             .to_string();
@@ -1917,17 +1915,17 @@ mod tests {
         let person = crate::door::made("cf-muse-model-person-").unwrap();
         let rig = crate::door::made("cf-muse-model-rig-").unwrap();
         let auth = person.path().join(".config/muse/auth.json");
-        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
-        std::fs::write(auth, "{}").unwrap();
+        crate::door::make_dir(auth.parent().unwrap()).unwrap();
+        crate::door::write(auth, "{}").unwrap();
         let catalog = person.path().join(".local/share/muse/model-catalog");
-        std::fs::create_dir_all(&catalog).unwrap();
-        std::fs::write(catalog.join("models.json"), "synthetic catalog").unwrap();
+        crate::door::make_dir(&catalog).unwrap();
+        crate::door::write(catalog.join("models.json"), "synthetic catalog").unwrap();
         super::seed_live_home(rig.path(), person.path()).unwrap();
         let copy = rig
             .path()
             .join(".local/share/muse/model-catalog/models.json");
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "synthetic catalog");
-        std::fs::write(copy, "changed in the run").unwrap();
+        crate::door::write(copy, "changed in the run").unwrap();
         assert_eq!(
             std::fs::read_to_string(catalog.join("models.json")).unwrap(),
             "synthetic catalog"
@@ -1939,10 +1937,10 @@ mod tests {
         let person = crate::door::made("cf-muse-person-").unwrap();
         let rig = crate::door::made("cf-muse-rig-").unwrap();
         let auth = person.path().join(".config/muse/auth.json");
-        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
-        std::fs::write(&auth, r#"{"access":"first"}"#).unwrap();
+        crate::door::make_dir(auth.parent().unwrap()).unwrap();
+        crate::door::write(&auth, r#"{"access":"first"}"#).unwrap();
         super::seed_live_home(rig.path(), person.path()).unwrap();
-        std::fs::write(&auth, r#"{"access":"second","refreshToken":"synthetic"}"#).unwrap();
+        crate::door::write(&auth, r#"{"access":"second","refreshToken":"synthetic"}"#).unwrap();
         super::seed_live_home(rig.path(), person.path()).unwrap();
         let copy = rig.path().join(".config/muse/auth.json");
         let copied: serde_json::Value =
@@ -1972,10 +1970,10 @@ mod tests {
         let person = crate::door::made("cf-muse-login-person-").unwrap();
         let rig = crate::door::made("cf-muse-login-rig-").unwrap();
         let auth = person.path().join(".config/muse/auth.json");
-        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        crate::door::make_dir(auth.parent().unwrap()).unwrap();
         let login = json!({"access": "synthetic", "refreshToken": "synthetic"}).to_string();
-        std::fs::write(&auth, &login).unwrap();
-        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o400)).unwrap();
+        crate::door::write(&auth, &login).unwrap();
+        crate::door::set_permissions(&auth, std::fs::Permissions::from_mode(0o400)).unwrap();
         super::seed_live_home(rig.path(), person.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&auth).unwrap(), login);
         assert_eq!(

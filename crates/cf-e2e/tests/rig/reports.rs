@@ -264,7 +264,7 @@ fn a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_returns_the_e
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -281,7 +281,7 @@ fn a_rig_a_step_dropped_on_an_error_keeps_its_report_once_the_case_fails_a_check
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -305,7 +305,7 @@ fn a_rig_started_after_a_case_failed_on_its_thread_is_judged_by_its_own_case() -
     // An error the thread returned before this rig was started is none of its failure.
     let mut failed_home = None;
     assert!(a_case_that_waits_for_what_never_comes(&mut failed_home).is_err());
-    fs::remove_file(report_beside(
+    cf_e2e::door::remove(report_beside(
         &failed_home.ok_or("no rig for the failed case")?,
     ))?;
     let mut home = None;
@@ -333,7 +333,7 @@ fn a_rig_dropped_unclosed_while_a_check_fails_keeps_its_report() -> Outcome {
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -347,7 +347,7 @@ fn a_rig_not_judged_by_what_its_case_returns_keeps_its_report_for_every_drop_unc
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -367,7 +367,7 @@ fn a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given() -> Outcome
     assert!(failed, "the wait for what never comes ended well");
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     assert!(
         kept.contains("case: a_suite::a_case_that_fails\n"),
         "the report does not name its test: {kept}"
@@ -378,7 +378,7 @@ fn a_report_names_the_test_that_left_it_and_the_case_a_rig_is_given() -> Outcome
     assert!(failed.is_err(), "the wait for what never comes ended well");
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     assert!(
         kept.contains("case: a run that is no test\n"),
         "the report does not name the case its rig was given: {kept}"
@@ -469,7 +469,7 @@ fn a_rig_its_case_left_on_an_error_it_returned_keeps_its_report() -> Outcome {
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -487,7 +487,7 @@ fn a_rig_whose_close_fails_keeps_its_report() -> Outcome {
     assert!(report.exists(), "a close that failed kept no report");
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -500,7 +500,7 @@ fn a_report_of_a_rig_whose_close_was_tried_does_not_ask_the_daemon_what_it_says(
     assert!(failed.is_err(), "a close given no time ended well");
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     // Its input gone, the daemon is asked nothing (it would be waited on for ten
     // seconds where it is there and answers nothing). On Unix it is there, stopped, and
     // that is all the report may say; on Windows it may have ended of its input's end.
@@ -543,7 +543,7 @@ fn a_rig_whose_case_holds_its_close_to_fail_and_never_tries_it_keeps_its_report(
         report.exists(),
         "a case that failed before its close kept no report"
     );
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -575,8 +575,8 @@ fn a_live_rigs_report_is_kept_under_the_checkouts_build_folder_and_not_in_the_te
     let kept = checkout::path(LIVE_REPORTS).join(beside.file_name().unwrap_or_default());
     let (under_target, in_temp) = (kept.exists(), beside.exists());
     // Taken away before anything is said of them.
-    let _ = fs::remove_file(&kept);
-    let _ = fs::remove_file(&beside);
+    let _ = cf_e2e::door::remove(&kept);
+    let _ = cf_e2e::door::remove(&beside);
     assert!(
         under_target,
         "a live rig's report is not in {}",
@@ -602,7 +602,7 @@ fn a_rig_shut_down_and_dropped_while_a_check_fails_keeps_its_report() -> Outcome
     let report = report_beside(&home.ok_or("the case never started its rig")?);
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
     Ok(())
 }
 
@@ -1336,7 +1336,6 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let rust = std::env::temp_dir().to_string_lossy().into_owned();
     let temp = match Run::new(Path::new("node"))
         .args(["-p", &asked])
-        .inheriting_env()
         .run()
     {
         Ok(ran) if ran.code == Some(0) => ran.stdout.trim().to_owned(),
@@ -1376,7 +1375,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         COLLECTED_LIVE.trim_start_matches("path: ")
     );
     assert!(!finds(&live, &report.to_string_lossy())?, "{live}");
-    fs::remove_file(report)?;
+    cf_e2e::door::remove(report)?;
 
     // A rig built for the real harnesses keeps its report where that upload looks, and
     // the first finds none of it: the ten cases CI runs on such a rig with the stand-in
@@ -1388,7 +1387,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         checkout::path(LIVE_REPORTS).join(report_beside(&home).file_name().unwrap_or_default());
     let found = finds(&live, &kept.to_string_lossy())?;
     let in_the_temp_pattern = finds(&collected, &kept.to_string_lossy())?;
-    let _ = fs::remove_file(&kept);
+    let _ = cf_e2e::door::remove(&kept);
     assert!(found, "`{live}` does not find {}", kept.display());
     assert!(!in_the_temp_pattern, "{collected}");
     Ok(())
@@ -1456,7 +1455,7 @@ fn ci_collects_only_its_own_standin_process_reports() -> Outcome {
             .join(report.file_name().ok_or("report has no name")?);
         assert!(!finds(&pattern, &outside.to_string_lossy())?);
     }
-    fs::remove_file(&report)?;
+    cf_e2e::door::remove(&report)?;
     assert!(!report.exists(), "an absent report must stay absent");
     Ok(())
 }

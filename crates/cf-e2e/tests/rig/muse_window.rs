@@ -124,7 +124,7 @@ fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> 
     }
     let config = muse_rig()?;
     // A pretend owner, with a Devin login and a Muse of their own.
-    let owner = tempfile::tempdir()?;
+    let owner = cf_e2e::door::made("t-")?;
     let at = |below: &str| owner.path().join(below);
     for file in [
         ".local/share/devin/credentials.toml",
@@ -133,14 +133,14 @@ fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> 
         ".local/share/muse/session-index.db",
     ] {
         let file = at(file);
-        std::fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
-        std::fs::write(&file, "the owner's own")?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file has a folder")?)?;
+        cf_e2e::door::write(&file, "the owner's own")?;
     }
-    std::fs::write(
+    cf_e2e::door::write(
         at(".local/share/devin/credentials.toml"),
         "api_key = 'fixture'\n",
     )?;
-    std::fs::create_dir_all(at(".local/share/muse/sessions"))?;
+    cf_e2e::door::make_dir(at(".local/share/muse/sessions"))?;
     let devin = Isolation::devin(owner.path(), &at(".config"), &at(".local/share"));
     let rig = Rig::start(config.isolated(Arc::new(devin)))?;
     let project = project(&rig, &echo_worker())?;
@@ -675,7 +675,7 @@ fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result(
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let folder = rig.workspace().join("zo\u{eb}-\u{65e5}\u{672c}");
-    std::fs::create_dir_all(&folder).map_err(|source| cf_e2e::Error::File {
+    cf_e2e::door::make_dir(&folder).map_err(|source| cf_e2e::Error::File {
         action: "make",
         path: folder.clone(),
         source,

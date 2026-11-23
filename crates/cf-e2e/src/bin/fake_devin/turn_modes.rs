@@ -43,7 +43,7 @@ fn case(bypass: bool) -> Case {
 
 impl Case {
     fn nodes(&self) -> Vec<Value> {
-        let db = Connection::open(self.folder.path().join("sessions.db")).unwrap();
+        let db = cf_e2e::door::database::write(self.folder.path().join("sessions.db")).unwrap();
         let mut rows = db
             .prepare("SELECT chat_message FROM message_nodes ORDER BY row_id")
             .unwrap();

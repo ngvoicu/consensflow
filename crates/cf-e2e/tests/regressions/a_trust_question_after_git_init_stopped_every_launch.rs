@@ -54,7 +54,6 @@ pub(crate) fn git_init(folder: &Path) -> Outcome {
     let ran = Run::new(Path::new("git"))
         .args(["init", "-q"])
         .arg(folder)
-        .inheriting_env()
         .run()?;
     assert_eq!(ran.code, Some(0), "git init {}: {ran}", folder.display());
     Ok(())
@@ -226,7 +225,7 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     // Each task works 3 s, as a real one takes a while: one done at once has its window
     // closed before a look under load reads its prompt, and the yes is not taken as the
@@ -340,7 +339,7 @@ fn a_worker_the_human_said_yes_in_that_starts_slowly_has_its_first_messages_whol
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
@@ -616,7 +615,7 @@ fn a_humans_no_in_one_window_is_no_yes_for_the_others() -> Outcome {
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     two_tasks(&rig, &project, "")?;
     rig.wait_for("both of the worker's windows to ask", secs(60), || {
@@ -652,7 +651,6 @@ fn git(folder: &Path, words: &[&str]) -> Outcome {
             "user.email=rig@example.invalid",
         ])
         .args(words)
-        .inheriting_env()
         .run()?;
     assert_eq!(ran.code, Some(0), "git {words:?}: {ran}");
     Ok(())
@@ -663,7 +661,7 @@ fn a_project_on_a_linked_worktree_leaves_the_main_checkouts_trust_to_the_human()
     // Claude Code keeps a yes in a linked worktree for the checkout it belongs to.
     let rig = Rig::start(asking())?;
     let main = rig.workspace().join("main");
-    std::fs::create_dir(&main)?;
+    cf_e2e::door::make_dir(&main)?;
     git_init(&main)?;
     git(&main, &["commit", "-q", "--allow-empty", "-m", "first"])?;
     let tree = rig.workspace().join("tree");
@@ -701,10 +699,10 @@ fn a_link_in_the_projects_path_leaves_the_repository_it_leads_into_to_the_human(
     // folder of its own path is in.
     let rig = Rig::start(asking())?;
     let repository = rig.workspace().join("B").join("repo");
-    std::fs::create_dir_all(repository.join("x").join("sub"))?;
+    cf_e2e::door::make_dir(repository.join("x").join("sub"))?;
     git_init(&repository)?;
-    std::fs::create_dir(rig.workspace().join("A"))?;
-    std::os::unix::fs::symlink(repository.join("x"), rig.workspace().join("A").join("link"))?;
+    cf_e2e::door::make_dir(rig.workspace().join("A"))?;
+    cf_e2e::door::symlink(repository.join("x"), rig.workspace().join("A").join("link"))?;
     let folder = rig.workspace().join("A").join("link").join("sub");
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
@@ -733,7 +731,7 @@ fn a_window_opened_again_that_asks_is_given_nothing_until_the_human_has_answered
     let rig = Rig::start(asking())?;
     let root = rig.workspace().to_path_buf();
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
@@ -846,7 +844,7 @@ fn chief_opened_again_at_rest_and_asking(shown: Shown) -> Outcome {
     let mut rig = Rig::start(config())?;
     let root = rig.workspace().to_path_buf();
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     // The worker is the staff from the start: a member added later changes the
     // chief's role, which a note would then say to it first.
     let project = Project::open(
@@ -1100,7 +1098,7 @@ fn chief_quoting_before_its_prompt(vars: &[(&str, &str)]) -> Outcome {
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
@@ -1151,7 +1149,7 @@ fn a_record_that_grows_as_a_no_ends_the_window_is_no_yes() -> Outcome {
     ])?;
     let root = rig.workspace().to_path_buf();
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
@@ -1230,10 +1228,10 @@ fn a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered(
         .join("projects")
         .join("integration")
         .join(format!("{session}.jsonl"));
-    std::fs::rename(&transcript, transcript.with_extension("away"))?;
+    cf_e2e::door::rename(&transcript, transcript.with_extension("away"))?;
     // An empty record in its place: the conversation is there to resume, and its
     // first looks read nothing of it.
-    std::fs::write(&transcript, "")?;
+    cf_e2e::door::write(&transcript, "")?;
     // A follow-up of a task with its result in waits for the chief to accept it.
     rig.tell(project.id(), "CF task accept T-1")?;
     rig.tell(
@@ -1273,7 +1271,7 @@ fn a_window_whose_screen_the_host_cannot_show_while_it_asks_is_still_held() -> O
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
@@ -1322,7 +1320,7 @@ fn a_question_whose_cursor_is_drawn_otherwise_is_told_of_again_once_the_human_an
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     two_tasks(&rig, &project, "SLEEP 3 ")?;
     rig.wait_for("both windows to ask, and the human told", secs(60), || {
@@ -1431,7 +1429,7 @@ fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
@@ -1499,7 +1497,7 @@ fn a_window_whose_screen_the_host_cannot_show_is_past_the_question_once_its_reco
     ])?;
     let root = rig.workspace().to_path_buf();
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"]
@@ -1593,7 +1591,7 @@ fn below_a_repository(rig: &Rig) -> Result<std::path::PathBuf, Failed> {
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
-    std::fs::create_dir(&folder)?;
+    cf_e2e::door::make_dir(&folder)?;
     Ok(folder)
 }
 
@@ -1951,7 +1949,7 @@ fn local_settings(folder: &Path) -> Value {
 /// The stand-in told to trust `folder`, as a yes the human gave before.
 fn trusted_before(rig: &Rig, folder: &Path) -> Outcome {
     let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default();
-    std::fs::write(
+    cf_e2e::door::write(
         Path::new(config).join("trusted-folders"),
         format!("{}\n", real(folder)),
     )?;
@@ -2160,10 +2158,10 @@ fn a_server_added_to_the_projects_mcp_json_later_and_used_in_a_later_window_is_t
     // Calliope's review (T-415): the note was once a project and folder, for good.
     let rig = Rig::start(asking_of_servers("worker", "mcp.json"))?;
     let file = rig.workspace().join(".mcp.json");
-    std::fs::write(&file, r#"{"mcpServers":{"probe":{"command":"true"}}}"#)?;
+    cf_e2e::door::write(&file, r#"{"mcpServers":{"probe":{"command":"true"}}}"#)?;
     let (project, tier) = a_worker_asking_of_a_server(&rig, rig.workspace())?;
     first_done(&rig, &project, 60)?;
-    std::fs::write(
+    cf_e2e::door::write(
         &file,
         r#"{"mcpServers":{"probe":{"command":"true"},"later":{"command":"true"}}}"#,
     )?;
@@ -2256,8 +2254,8 @@ fn a_worker_asked_of_a_new_server_where_a_folder_above_the_project_has_servers_i
     // which Claude Code asks of in the same dialog.
     let rig = Rig::start(asking_of_a_server("worker"))?;
     let folder = rig.workspace().join("app");
-    std::fs::create_dir(&folder)?;
-    std::fs::write(
+    cf_e2e::door::make_dir(&folder)?;
+    cf_e2e::door::write(
         rig.workspace().join(".mcp.json"),
         r#"{"mcpServers":{"above":{"command":"true"}}}"#,
     )?;
@@ -2276,8 +2274,8 @@ fn a_worker_asked_of_a_new_server_where_a_folder_above_has_a_mcp_json_naming_non
     // Calliope's review (T-415): a file above that names no server asks of nothing.
     let rig = Rig::start(asking_of_a_server("worker"))?;
     let folder = rig.workspace().join("app");
-    std::fs::create_dir(&folder)?;
-    std::fs::write(rig.workspace().join(".mcp.json"), r#"{"mcpServers":{}}"#)?;
+    cf_e2e::door::make_dir(&folder)?;
+    cf_e2e::door::write(rig.workspace().join(".mcp.json"), r#"{"mcpServers":{}}"#)?;
     let (project, _) = a_worker_asking_of_a_server(&rig, &folder)?;
     first_done(&rig, &project, 60)?;
     assert_eq!(keys_given(&rig), ["up", "up", "enter"]);

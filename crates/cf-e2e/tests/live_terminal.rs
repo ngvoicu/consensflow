@@ -136,7 +136,6 @@ mod on_windows {
     fn console_hosts() -> Result<Vec<String>> {
         let ran = Run::new(live::command("powershell")?)
             .args(["-NoProfile", "-Command", CONSOLE_HOSTS])
-            .inheriting_env()
             .run()?;
         if ran.code != Some(0) {
             return Err(Error::Daemon(format!(
@@ -356,7 +355,7 @@ mod tests {
         use cf_e2e::rig::{Config, Rig};
 
         // Made before the rig starts, and long before a window runs it.
-        let slow = tempfile::tempdir()?;
+        let slow = cf_e2e::door::made("t-")?;
         let program = slow.path().join("slow-prompt");
         cf_e2e::files::write_executable(
             &program,

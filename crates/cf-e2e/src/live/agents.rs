@@ -644,24 +644,9 @@ fn list_route(
     }
 }
 
-/// What a direct read of a harness's models is given of the machine: the search path and the
-/// system's variables Windows needs to start a program (`SystemRoot` and `WINDIR` both).
-const READ_MACHINE: [&str; 11] = [
-    "PATH",
-    "PATHEXT",
-    "USER",
-    "LANG",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "SHELL",
-    "SystemRoot",
-    "WINDIR",
-    "ComSpec",
-];
-
-/// The environment a direct read of `harness`'s models is given: only what `home` says of the
-/// run-owned folders its isolation names, never a folder that is not the run's.
+/// The homes a direct read of `harness`'s models names: only what `home` says of the run-owned
+/// folders its isolation names, never a folder that is not the run's; the seal of the question
+/// that carries them ([`super::ask::question_sealed`]) gives the rest.
 fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<String, String>> {
     let names: &[&str] = match harness {
         Harness::Claude => &["CLAUDE_CONFIG_DIR"],
@@ -693,10 +678,8 @@ fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<
             )));
         }
     }
-    let mut env: BTreeMap<String, String> = READ_MACHINE
-        .into_iter()
-        .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
-        .collect();
+    // The machine's own variables are the question's seal's to give ([`super::ask::question_sealed`]).
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
     for name in names {
         env.insert(
             (*name).to_owned(),
@@ -1160,7 +1143,6 @@ mod tests {
             "live::agents::tests::standin_isolation_log_begin_never_reads_a_decoy_pi_auth",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .arg("--nocapture")
         .var(CHILD, "1")
         .var(OUTSIDE, inherited.path())
@@ -1180,8 +1162,20 @@ mod tests {
     #[test]
     fn the_roster_preflight_is_given_the_windows_system_variables_a_program_starts_by() {
         for name in ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "PATH"] {
-            assert!(READ_MACHINE.contains(&name), "{name}");
+            assert!(crate::process::is_machine_variable(name), "{name}");
         }
+        // The question's seal gives them to a read that names none of them.
+        let mut body = json!({
+            "op": "models", "kind": "codex",
+            "env": { "HOME": crate::door::made("t-").unwrap().hand_on() }
+        });
+        crate::live::ask::question_sealed(&mut body).unwrap();
+        assert!(
+            body["env"]
+                .as_object()
+                .is_some_and(|env| env.keys().any(|name| name.eq_ignore_ascii_case("PATH"))),
+            "{body}"
+        );
     }
 
     /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a

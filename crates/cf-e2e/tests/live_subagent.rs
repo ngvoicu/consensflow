@@ -442,7 +442,7 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
             continue;
         };
         copy_devin_store(&store, copy.path());
-        let Ok(db) = rusqlite::Connection::open(copy.path().join("sessions.db")) else {
+        let Ok(db) = cf_e2e::door::database::write(copy.path().join("sessions.db")) else {
             continue;
         };
         let Ok(heads) = read_rows(
@@ -903,17 +903,17 @@ mod tests {
     #[test]
     fn kit_round4_kept_wal_does_not_copy_linked_shm() {
         let run = cf_e2e::door::made("cf-subagent-kept-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
         let secret = foreign.path().join("secret");
-        fs::write(&secret, "fabricated foreign record").unwrap();
+        cf_e2e::door::write(&secret, "fabricated foreign record").unwrap();
         let store = run.path().join("sessions.db");
         let wal = run.path().join("sessions.db-wal");
-        fs::write(&store, "fabricated store").unwrap();
-        fs::write(&wal, "fabricated wal").unwrap();
+        cf_e2e::door::write(&store, "fabricated store").unwrap();
+        cf_e2e::door::write(&wal, "fabricated wal").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&secret, run.path().join("sessions.db-shm")).unwrap();
+        cf_e2e::door::symlink(&secret, run.path().join("sessions.db-shm")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&secret, run.path().join("sessions.db-shm")).unwrap();
+        cf_e2e::door::symlink_file(&secret, run.path().join("sessions.db-shm")).unwrap();
         let kept = run.path().join("kept");
         keep_holding(&[wal.to_string_lossy().into_owned()], &kept);
         assert!(kept.join("0-sessions.db").is_file());
@@ -926,9 +926,9 @@ mod tests {
 
     #[test]
     fn kit_round3_subagent_parent_record_refuses_a_foreign_file() {
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
         let file = foreign.path().join("record.jsonl");
-        fs::write(&file, "fabricated parent record").unwrap();
+        cf_e2e::door::write(&file, "fabricated parent record").unwrap();
         assert!(
             read_run_record(&file).is_empty(),
             "a foreign parent record was read"
@@ -940,12 +940,12 @@ mod tests {
     fn kit_round3_subagent_refuses_linked_out_sqlite_sidecars() {
         for suffix in ["-shm", "-wal"] {
             let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
-            let foreign = tempfile::tempdir().unwrap();
-            std::fs::write(foreign.path().join("secret"), "fabricated record").unwrap();
+            let foreign = cf_e2e::door::made("t-").unwrap();
+            cf_e2e::door::write(foreign.path().join("secret"), "fabricated record").unwrap();
             let store = run.path().join("sessions.db");
-            std::fs::write(&store, "fabricated store").unwrap();
+            cf_e2e::door::write(&store, "fabricated store").unwrap();
             let name = format!("sessions.db{suffix}");
-            std::os::unix::fs::symlink(foreign.path().join("secret"), run.path().join(&name))
+            cf_e2e::door::symlink(foreign.path().join("secret"), run.path().join(&name))
                 .unwrap();
             let copy = run.path().join("copy");
             cf_e2e::door::make_dir(&copy).unwrap();

@@ -156,7 +156,7 @@ fn compaction(folder: &Path, env: &[(String, String)]) -> Result<Option<Session>
     let store = store(cfg!(windows), env)?;
     let failed = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", store.display()));
     let db =
-        Connection::open_with_flags(&store, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(failed)?;
+        cf_e2e::door::database::read(&store).map_err(failed)?;
     db.busy_timeout(Duration::from_secs(5)).map_err(failed)?;
     let mut places = vec![folder.to_string_lossy().into_owned()];
     if let Ok(real) = folder.canonicalize() {
@@ -246,10 +246,10 @@ mod tests {
             .any(|file| { file.harness == Harness::Devin && file.variable == "XDG_CONFIG_HOME" }));
         let root = cf_e2e::door::made("finish-store-guard-").unwrap();
         // Exercise the kit's actual isolation layouts using only a fabricated owner and login.
-        let owner = tempfile::tempdir().unwrap();
+        let owner = cf_e2e::door::made("t-").unwrap();
         for folder in ["data/devin", "roaming/devin"] {
-            std::fs::create_dir_all(owner.path().join(folder)).unwrap();
-            std::fs::write(
+            cf_e2e::door::make_dir(owner.path().join(folder)).unwrap();
+            cf_e2e::door::write(
                 owner.path().join(folder).join("credentials.toml"),
                 "api_key = 'fixture'\n",
             )
@@ -296,7 +296,7 @@ mod tests {
                 found.starts_with(root.path()),
                 "Devin's store is outside the run's home"
             );
-            let foreign = tempfile::tempdir().unwrap();
+            let foreign = cf_e2e::door::made("t-").unwrap();
             let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
             let mut outside = env.to_vec();
             outside.push((
@@ -313,8 +313,8 @@ mod tests {
             );
         }
         let db_path = store(cfg!(windows), &env).unwrap();
-        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
-        let db = Connection::open(&db_path).unwrap();
+        cf_e2e::door::make_dir(db_path.parent().unwrap()).unwrap();
+        let db = cf_e2e::door::database::write(&db_path).unwrap();
         db.execute_batch(
             "create table sessions (id text, main_chain_id integer, working_directory text, created_at integer);
              create table message_nodes (session_id text, node_id integer, parent_node_id integer, chat_message text);",
@@ -340,13 +340,13 @@ mod tests {
         );
         #[cfg(unix)]
         {
-            let foreign = tempfile::tempdir().unwrap();
+            let foreign = cf_e2e::door::made("t-").unwrap();
             let other = foreign.path().join("sessions.db");
-            std::fs::write(&other, b"not this run's store").unwrap();
+            cf_e2e::door::write(&other, b"not this run's store").unwrap();
             let linked_data = root.path().join("linked-data");
             let link = linked_data.join("devin/cli/sessions.db");
-            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
-            std::os::unix::fs::symlink(&other, &link).unwrap();
+            cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();
+            cf_e2e::door::symlink(&other, &link).unwrap();
             let mut linked = env.to_vec();
             linked.push((
                 "XDG_DATA_HOME".to_owned(),
@@ -390,7 +390,7 @@ mod tests {
     fn the_owners_config_is_read_as_a_launch_reads_it_with_its_comments_and_none_as_empty() {
         // Calliope's P3-1 on T-655: the adapter reads the owner's config as JSONC, and
         // one that is not there as empty; the case read it as JSON, and required it.
-        let machine = tempfile::tempdir().unwrap();
+        let machine = cf_e2e::door::made("t-").unwrap();
         assert_eq!(
             given(machine.path()),
             json!({ "agent": { "compaction_threshold_tokens": THRESHOLD } })

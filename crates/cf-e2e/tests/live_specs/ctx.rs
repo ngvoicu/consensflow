@@ -49,9 +49,9 @@ fn chief_rollout(home: &Path, thread: &str) -> std::result::Result<String, Strin
 #[cfg(test)]
 #[test]
 fn kit_round3_specs_refuses_a_foreign_codex_home() {
-    let foreign = tempfile::tempdir().unwrap();
-    std::fs::create_dir(foreign.path().join("sessions")).unwrap();
-    std::fs::write(
+    let foreign = cf_e2e::door::made("t-").unwrap();
+    cf_e2e::door::make_dir(foreign.path().join("sessions")).unwrap();
+    cf_e2e::door::write(
         foreign.path().join("sessions/rollout-thread.jsonl"),
         "{\"fake\":true}\n",
     )

@@ -241,14 +241,13 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_wh
 ) {
     use crate::process::{is_alive, Run};
 
-    let folder = tempfile::tempdir().unwrap();
-    let elsewhere = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
+    let elsewhere = crate::door::made("t-").unwrap();
     // Another run's orphan: parent init's, in a folder of its own, begun after this window. Its
     // number is the one this test's shell printed; it is ended however the test ends.
     let ran = Run::new("/bin/sh")
         .args(["-c", "sleep 31 > /dev/null 2>&1 & echo $!"])
         .cwd(elsewhere.path())
-        .inheriting_env()
         .run()
         .unwrap();
     assert_eq!(ran.code, Some(0));
@@ -261,7 +260,6 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_wh
     let mut window = Run::new("/bin/sh")
         .args(["-c", "tail -f /dev/null | grep --line-buffered tick & wait"])
         .cwd(folder.path())
-        .inheriting_env()
         .spawn()
         .unwrap();
     let root = ThisMachine
@@ -462,13 +460,13 @@ fn a_sweep_that_watched_no_window_could_not_look_and_never_says_nothing() {
 #[test]
 fn a_path_is_a_ground_of_the_runs_only_under_its_temp_root_and_only_for_what_began_after_its_window(
 ) {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let inside = root.path().join("home");
     let live = inside.join("live");
-    std::fs::create_dir_all(&live).unwrap();
-    let person = tempfile::tempdir().unwrap();
+    crate::door::make_dir(&live).unwrap();
+    let person = crate::door::made("t-").unwrap();
     let theirs = person.path().join("live");
-    std::fs::create_dir_all(&theirs).unwrap();
+    crate::door::make_dir(&theirs).unwrap();
     let run_folder = |path: &Path| RunFolder::under(root.path(), path);
     let window = Identity {
         pid: 100,

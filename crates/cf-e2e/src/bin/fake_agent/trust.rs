@@ -593,11 +593,11 @@ mod tests {
         let config = cf_e2e::door::made("cf-test-").unwrap();
         let place = cf_e2e::door::made("cf-test-").unwrap();
         let folder = place.path().join("a-repository");
-        fs::create_dir(&folder).unwrap();
+        cf_e2e::door::make_dir(&folder).unwrap();
         #[cfg(unix)]
         let other = {
             let link = place.path().join("a-link");
-            std::os::unix::fs::symlink(&folder, &link).unwrap();
+            cf_e2e::door::symlink(&folder, &link).unwrap();
             link
         };
         #[cfg(windows)]

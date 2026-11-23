@@ -37,7 +37,7 @@ use cf_e2e::files;
 use cf_e2e::rig::{Config, Project, Rig, OPEN};
 use cf_e2e::Error;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use cf_e2e::door::Made;
 
 use crate::{config, secs, Outcome};
 
@@ -220,10 +220,8 @@ fn paused_only_for_quota(rig: &Rig) {
 }
 
 /// The account the worker's harness refuses while its file is there.
-fn account() -> cf_e2e::Result<(TempDir, PathBuf)> {
-    let folder = tempfile::Builder::new()
-        .prefix("cf-account-")
-        .tempdir()
+fn account() -> cf_e2e::Result<(Made, PathBuf)> {
+    let folder = cf_e2e::door::made("cf-account-")
         .map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
@@ -272,7 +270,7 @@ fn done_after_a_quota_wait<'a>(
     })?;
     // Held a while, its window waiting to continue.
     std::thread::sleep(secs(15));
-    let _ = std::fs::remove_file(refused);
+    let _ = cf_e2e::door::remove(refused);
     rig.wait_for("T-1's result to reach the chief", secs(90), || {
         Ok(state(&project, 1)? == "done" && results(&project)?.len() == 1)
     })?;
@@ -334,7 +332,7 @@ fn a_reopened_task_refused_for_quota_waits_in_its_window_and_goes_on_by_itself_o
     never_stopped(&rig, &project)?;
     assert_eq!(state(&project, 1)?, "paused", "held");
     // Quota is back: it goes on by itself, as its note said, and ends.
-    let _ = std::fs::remove_file(&refused);
+    let _ = cf_e2e::door::remove(&refused);
     rig.wait_for("T-1 to be done again", secs(120), || {
         Ok(state(&project, 1)? == "done" && results(&project)?.len() == 2)
     })?;

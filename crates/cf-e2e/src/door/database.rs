@@ -37,7 +37,8 @@ fn opened(file: &Path) -> impl Fn(rusqlite::Error) -> Error + '_ {
 }
 
 /// The database `file`, opened to read: only below a folder this run made, with its sidecars.
-pub fn read(file: &Path) -> Result<Connection> {
+pub fn read(file: impl AsRef<Path>) -> Result<Connection> {
+    let file = file.as_ref();
     judged(file)?;
     Connection::open_with_flags(
         file,
@@ -48,7 +49,8 @@ pub fn read(file: &Path) -> Result<Connection> {
 
 /// The database `file`, opened to write (made where it is not there): only below a folder this
 /// run made, with its sidecars.
-pub fn write(file: &Path) -> Result<Connection> {
+pub fn write(file: impl AsRef<Path>) -> Result<Connection> {
+    let file = file.as_ref();
     judged(file)?;
     Connection::open(file).map_err(opened(file))
 }

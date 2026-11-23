@@ -63,7 +63,7 @@ pub fn start(
     })?)
     .args(["-c", &format!("{command}; true")]);
     let shell = shell
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .closed_input()
         .spawn()
         .map_err(said)?;

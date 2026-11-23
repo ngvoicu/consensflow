@@ -386,7 +386,7 @@ mod tests {
         let run = crate::door::made("cf-codex-mcp-").unwrap();
         let program = run.path().join("fake-codex");
         let home = run.path().join("codex");
-        std::fs::create_dir_all(&home).unwrap();
+        crate::door::make_dir(&home).unwrap();
         crate::door::write_executable(&program, format!("#!/bin/sh\nif [ \"$CODEX_HOME\" = '{}' ]; then printf '[true]'; else printf '[false]'; fi\n", home.display())).unwrap();
         let env = vec![("CODEX_HOME".to_owned(), home.display().to_string())];
         assert_eq!(

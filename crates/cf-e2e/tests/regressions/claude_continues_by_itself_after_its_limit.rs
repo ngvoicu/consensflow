@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use cf_e2e::files;
 use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use cf_e2e::door::Made;
 
 use crate::{config, secs, Outcome};
 
@@ -42,10 +42,8 @@ const CONTINUED: &str = "Your claude.ai usage limit has reset.";
 const BRIEF: &str = "QUOTA-OUT Reply with exactly: WORKER_OK";
 
 /// The account the worker's harness refuses while its file is there.
-fn account() -> cf_e2e::Result<(TempDir, PathBuf)> {
-    let folder = tempfile::Builder::new()
-        .prefix("cf-account-")
-        .tempdir()
+fn account() -> cf_e2e::Result<(Made, PathBuf)> {
+    let folder = cf_e2e::door::made("cf-account-")
         .map_err(|source| cf_e2e::Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
@@ -134,7 +132,7 @@ fn claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_resul
     let project = held_on_a_spent_account(&rig)?;
     // The account has quota again long before the reset the refusal named: Claude
     // continues by itself, and ConsensFlow has not resumed the task.
-    let _ = std::fs::remove_file(&refused);
+    let _ = cf_e2e::door::remove(&refused);
     rig.wait_for("a result to reach the chief", secs(90), || {
         Ok(!results(&project)?.is_empty())
     })?;
@@ -188,7 +186,7 @@ fn the_chief_continuing_first_brings_the_worker_back_and_the_task_ends_once_with
             .var("CF_TEST_AUTO_CONTINUE_MS", "chief 500,worker 8000"),
     )?;
     let project = held_on_a_spent_account(&rig)?;
-    let _ = std::fs::remove_file(&refused);
+    let _ = cf_e2e::door::remove(&refused);
     rig.wait_for("a result to reach the chief", secs(90), || {
         Ok(!results(&project)?.is_empty())
     })?;
@@ -234,7 +232,7 @@ fn consensflow_resuming_before_claude_continues_the_task_ends_once_with_its_resu
     let project = held(&rig)?;
     // The human says the member is back: ConsensFlow resumes at once, and Claude's
     // own timer fires eight seconds later.
-    let _ = std::fs::remove_file(&refused);
+    let _ = cf_e2e::door::remove(&refused);
     let back = rig.page(
         "member.back",
         json!({ "project": project.id(), "participant": "worker" }),

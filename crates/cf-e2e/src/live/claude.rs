@@ -360,7 +360,6 @@ pub fn processes_with(text: &str) -> Result<Vec<Process>> {
     }
     let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,command="])
-        .inheriting_env()
         .run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {

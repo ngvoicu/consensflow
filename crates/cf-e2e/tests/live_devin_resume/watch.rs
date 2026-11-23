@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn a_screen_that_holds_a_window_still_is_noted_once_in_whatever_words_it_has() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let mut watch = bare_watch(folder.path());
         let trail = Trail::new();
         watch.stalled("", &trail);
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn the_wire_is_read_on_from_where_it_was_and_a_record_being_written_waits_for_its_line_end() {
         // The part of the watch that needs no window: what the wire adds, a look at a time.
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let file = folder.path().join("wire.jsonl");
         let mut watch = bare_watch(folder.path());
         assert!(watch.wired(at(1)).is_empty(), "no wire yet");
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn the_modes_the_wire_said_are_kept_with_when_and_the_last_one_is_the_mode() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let file = folder.path().join("wire.jsonl");
         let mut watch = bare_watch(folder.path());
         let line = |value: Value| format!("{value}\n");

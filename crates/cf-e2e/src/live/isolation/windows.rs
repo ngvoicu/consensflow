@@ -52,8 +52,8 @@ fn kit_round4_windows_devin_gets_generated_git_config() {
 }
 
 fn write(path: &Path, text: &str) {
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, text).unwrap();
+    crate::door::make_dir(path.parent().unwrap()).unwrap();
+    crate::door::write(path, text).unwrap();
 }
 
 /// Every file below `folder`, relative to it, sorted.
@@ -81,15 +81,15 @@ fn files_below(folder: &Path) -> Vec<String> {
 /// The owner's profile on Windows: `AppData\Roaming` and `AppData\Local` below it, Devin's files
 /// in both, another program's beside them, and the scratch folder the run's home is made in.
 struct Owner {
-    profile: tempfile::TempDir,
-    parent: tempfile::TempDir,
+    profile: crate::door::Made,
+    parent: crate::door::Made,
 }
 
 impl Owner {
     fn new() -> Self {
         let owner = Self {
-            profile: tempfile::tempdir().unwrap(),
-            parent: tempfile::tempdir().unwrap(),
+            profile: crate::door::made("t-").unwrap(),
+            parent: crate::door::made("t-").unwrap(),
         };
         for file in [
             "AppData/Roaming/devin/config.json",
@@ -240,7 +240,7 @@ fn a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_
 #[test]
 fn a_devin_login_that_is_not_there_stops_the_run_naming_the_file_before_anything_is_made() {
     let owner = Owner::new();
-    fs::remove_file(owner.path("AppData/Roaming/devin/credentials.toml")).unwrap();
+    crate::door::remove(owner.path("AppData/Roaming/devin/credentials.toml")).unwrap();
     let isolation = owner.devin();
     let said = isolation.made_at(NOW).unwrap_err().to_string();
     assert!(said.contains("devin's login is not in"), "{said}");
@@ -255,7 +255,7 @@ fn a_devin_login_that_is_not_there_stops_the_run_naming_the_file_before_anything
 #[test]
 fn a_devin_config_that_is_not_there_is_no_reason_to_stop() {
     let owner = Owner::new();
-    fs::remove_file(owner.path("AppData/Roaming/devin/config.json")).unwrap();
+    crate::door::remove(owner.path("AppData/Roaming/devin/config.json")).unwrap();
     let isolation = owner.devin();
     let home = isolation.made_at(NOW).unwrap();
     assert_eq!(
@@ -282,7 +282,7 @@ fn a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it() {
         "AppData/Roaming/devin/cli/trusted_workspaces.json",
     ] {
         let path = owner.path(file);
-        fs::write(&path, format!("{SENTINEL}-written-by-the-run")).unwrap();
+        crate::door::write(&path, format!("{SENTINEL}-written-by-the-run")).unwrap();
         let said = isolation.finish().unwrap_err().to_string();
         assert!(said.contains("DEVIN SETUP"), "{file}: {said}");
         assert!(
@@ -293,7 +293,7 @@ fn a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it() {
             !said.contains(SENTINEL),
             "nothing a file holds is said: {said}"
         );
-        fs::write(&path, SENTINEL).unwrap();
+        crate::door::write(&path, SENTINEL).unwrap();
     }
 }
 

@@ -233,11 +233,11 @@ fn a_monitor_whose_claude_was_killed_is_an_orphan_of_the_window_s_folder() {
 fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
     // The system says the real path of the folder a process runs in; the run may spell its own
     // through a link (a Mac's temporary folder is behind `/var`).
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::door::made("t-").unwrap();
     let real = dir.path().join("real");
-    std::fs::create_dir(&real).unwrap();
+    crate::door::make_dir(&real).unwrap();
     let link = dir.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
+    crate::door::symlink(&real, &link).unwrap();
     let real = real.canonicalize().unwrap();
     let all = [running(200, 101, 1, "sleep 4711")];
     let linked = RunFolder::under(dir.path(), &link).expect("under the root");
@@ -256,12 +256,12 @@ fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
 /// holds the person's home.
 #[test]
 fn a_folder_is_the_runs_only_under_the_runs_own_root() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let inside = root.path().join("home").join("live");
-    std::fs::create_dir_all(&inside).unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    crate::door::make_dir(&inside).unwrap();
+    let outside = crate::door::made("t-").unwrap();
     let alike = std::path::PathBuf::from(format!("{}-x", root.path().display()));
-    std::fs::create_dir_all(&alike).unwrap();
+    crate::door::make_dir(&alike).unwrap();
     let ours = RunFolder::under(root.path(), &inside).expect("a folder under the root");
     assert_eq!(ours.given(), inside);
     assert_eq!(ours.real(), inside.canonicalize().unwrap());
@@ -281,13 +281,13 @@ fn a_folder_is_the_runs_only_under_the_runs_own_root() {
             "the person's home is no run's"
         );
     }
-    std::fs::remove_dir(&alike).unwrap();
+    crate::door::remove(&alike).unwrap();
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::door::made("t-").unwrap();
     let mut child = crate::process::Run::new("/bin/sleep")
         .arg("20")
         .cwd(dir.path())

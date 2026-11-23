@@ -218,7 +218,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn t1744_review_muse_tree_sees_a_fifo_without_opening_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let fifo = root.path().join("unrecognized-login");
         nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
         let seen = tree(root.path()).expect("a FIFO can be stated without being opened");
@@ -230,25 +230,25 @@ mod tests {
     fn t1744_review_muse_tree_refuses_an_unreadable_folder() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let nested = root.path().join("nested");
-        std::fs::create_dir(&nested).unwrap();
-        std::fs::write(nested.join("unknown"), "synthetic").unwrap();
-        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o000)).unwrap();
+        cf_e2e::door::make_dir(&nested).unwrap();
+        cf_e2e::door::write(nested.join("unknown"), "synthetic").unwrap();
+        cf_e2e::door::set_permissions(&nested, std::fs::Permissions::from_mode(0o000)).unwrap();
         let seen = tree(root.path());
-        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o700)).unwrap();
+        cf_e2e::door::set_permissions(&nested, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(seen.is_err(), "an unreadable folder was silently skipped");
     }
 
     #[cfg(unix)]
     #[test]
     fn t1744_review_muse_tree_refuses_a_linked_root() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let actual = root.path().join("actual");
         let linked = root.path().join("linked");
-        std::fs::create_dir(&actual).unwrap();
-        std::fs::write(actual.join("unknown"), "synthetic").unwrap();
-        std::os::unix::fs::symlink(&actual, &linked).unwrap();
+        cf_e2e::door::make_dir(&actual).unwrap();
+        cf_e2e::door::write(actual.join("unknown"), "synthetic").unwrap();
+        cf_e2e::door::symlink(&actual, &linked).unwrap();
         assert!(
             tree(&linked).is_err(),
             "a linked root looked like an empty tree"
@@ -260,14 +260,14 @@ mod tests {
     fn t1744_review_muse_tree_does_not_open_other_files() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let unknown = root.path().join("other-name.json");
         let nested = root.path().join("nested");
-        std::fs::create_dir(&nested).unwrap();
+        cf_e2e::door::make_dir(&nested).unwrap();
         let nested_unknown = nested.join("another-name");
         for file in [&unknown, &nested_unknown] {
-            std::fs::write(file, "synthetic").unwrap();
-            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            cf_e2e::door::write(file, "synthetic").unwrap();
+            cf_e2e::door::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
         }
         let seen = tree(root.path()).expect("metadata does not need to open an unknown file");
         assert!(seen.contains_key(&unknown));
@@ -276,9 +276,9 @@ mod tests {
 
     #[test]
     fn t1744_muse_owner_tree_does_not_read_login_files() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         for name in ["auth.json", "auth.json.bak", "settings.json"] {
-            std::fs::write(root.path().join(name), "synthetic").unwrap();
+            cf_e2e::door::write(root.path().join(name), "synthetic").unwrap();
         }
         let observed = tree(root.path()).unwrap();
         for name in ["auth.json", "auth.json.bak", "settings.json"] {
@@ -292,10 +292,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kit_round3_muse_fingerprint_does_not_follow_links_out() {
-        let root = tempfile::tempdir().unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
-        std::os::unix::fs::symlink(foreign.path().join("login"), root.path().join("leak")).unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
+        cf_e2e::door::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+        cf_e2e::door::symlink(foreign.path().join("login"), root.path().join("leak")).unwrap();
         let found = tree(root.path()).unwrap();
         assert!(
             !found.contains_key(&root.path().join("leak")),

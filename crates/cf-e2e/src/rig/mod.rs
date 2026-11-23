@@ -770,7 +770,6 @@ impl Rig {
                 "CONSENSFLOW_TOKEN",
                 env["CONSENSFLOW_TOKEN"].as_str().unwrap_or_default(),
             )
-            .finding_programs()
             .cwd(checkout::root())
             .args(words)
             .run()
@@ -1165,7 +1164,7 @@ mod tests {
 
     #[test]
     fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {
-        let config = tempfile::tempdir().unwrap();
+        let config = crate::door::made("t-").unwrap();
         let file = config
             .path()
             .join("projects")

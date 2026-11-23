@@ -89,7 +89,6 @@ pub fn group_of(pid: u32) -> Option<u32> {
 pub fn started(pid: u32) -> Option<String> {
     let ran = Run::new("ps")
         .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .inheriting_env()
         .run()
         .ok()?;
     let said = ran.stdout.trim();
@@ -104,7 +103,6 @@ pub fn started(pid: u32) -> Option<String> {
 pub fn described(pid: u32) -> Option<String> {
     let ran = Run::new("ps")
         .args(["-o", "stat=,ppid=,etime=,command=", "-p", &pid.to_string()])
-        .inheriting_env()
         .run()
         .ok()?;
     let said = ran.stdout.trim();
@@ -129,7 +127,6 @@ pub fn described(pid: u32) -> Option<String> {
 pub fn command(pid: u32) -> Option<String> {
     let ran = Run::new("ps")
         .args(["-o", "command=", "-p", &pid.to_string()])
-        .inheriting_env()
         .run()
         .ok()?;
     let said = ran.stdout.trim();
@@ -143,7 +140,6 @@ pub fn command(pid: u32) -> Option<String> {
 pub fn age(pid: u32) -> Option<std::time::Duration> {
     let ran = Run::new("ps")
         .args(["-o", "etime=", "-p", &pid.to_string()])
-        .inheriting_env()
         .run()
         .ok()?;
     (ran.code == Some(0))
@@ -297,7 +293,6 @@ pub(super) fn when_started(pid: u32) -> Run {
     let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
     Run::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .finding_programs()
         .limit(super::POWERSHELL_LIMIT)
 }
 

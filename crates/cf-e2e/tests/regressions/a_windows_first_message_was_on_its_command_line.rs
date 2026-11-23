@@ -64,7 +64,6 @@ fn put(rig: &Rig, project: &Project, tier: &str, task: &str) -> Outcome {
 fn run(program: &str, args: &[&str]) -> cf_e2e::Result<(Option<i32>, String)> {
     let ran = Run::new(Path::new(program))
         .args(args.iter().copied())
-        .inheriting_env()
         .run()?;
     Ok((ran.code, ran.stdout.clone()))
 }

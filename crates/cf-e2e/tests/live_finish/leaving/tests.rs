@@ -34,10 +34,10 @@ fn good() -> Left {
 /// A folder of a run's own for a test's table of processes: made under a root of the test's, as
 /// the rig makes the run's under its temp root ([`RunFolder::under`] reads both); kept while the
 /// root is.
-fn run_folder(name: &str) -> (tempfile::TempDir, RunFolder) {
-    let root = tempfile::tempdir().unwrap();
+fn run_folder(name: &str) -> (cf_e2e::door::Made, RunFolder) {
+    let root = cf_e2e::door::made("t-").unwrap();
     let path = root.path().join(name);
-    std::fs::create_dir(&path).unwrap();
+    cf_e2e::door::make_dir(&path).unwrap();
     let folder = RunFolder::under(root.path(), &path).expect("under the root");
     (root, folder)
 }
@@ -588,7 +588,6 @@ fn the_project_of_a_worker_that_leaves_a_command_is_a_folder_of_its_own() {
 fn a_process_that_runs_is_there_and_one_that_never_was_is_not() {
     let mut shell = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", "sleep 8; true"])
-        .inheriting_env()
         .spawn()
         .unwrap();
     let pid = u64::from(shell.id());
@@ -856,7 +855,7 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
     );
     // A folder outside the run's temp root (a live rig's project folder is in the person's home)
     // is no ground of the run's: nothing is taken by it.
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = cf_e2e::door::made("t-").unwrap();
     let outside = RunFolder::under(root.path(), elsewhere.path());
     assert_eq!(outside, None, "a folder outside the run's root is refused");
     let mut live = Chosen::default();
@@ -893,7 +892,7 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     // A real orphan: a shell runs a short sleep in the background in a folder made for the test
     // and ends at once, so that the sleep's parent is init's. It is found by the folder and by
     // the window's start, and ended through the descent as any process the run chose.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = cf_e2e::door::made("t-").unwrap();
     let folder = dir.path().canonicalize().unwrap();
     let own = RunFolder::under(dir.path(), dir.path()).expect("the root itself");
     let began = ThisMachine
@@ -904,7 +903,6 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     let ran = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", "sleep 25 > /dev/null 2>&1 &"])
         .cwd(&folder)
-        .inheriting_env()
         .run()
         .unwrap();
     assert_eq!(ran.code, Some(0));
@@ -958,11 +956,10 @@ fn the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_somethi
 #[cfg(unix)]
 #[test]
 fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_escaped() {
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = cf_e2e::door::made("t-").unwrap();
     let mut decoy = cf_e2e::process::Run::new("sleep")
         .arg("4711")
         .cwd(elsewhere.path())
-        .inheriting_env()
         .spawn()
         .unwrap();
     let pid = decoy.id();
@@ -971,7 +968,7 @@ fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_esca
         .unwrap()
         .expect("this process is there")
         .started;
-    let folder = tempfile::tempdir().unwrap();
+    let folder = cf_e2e::door::made("t-").unwrap();
     let own = RunFolder::under(folder.path(), folder.path()).expect("the root itself");
     // The run's window began before the decoy did, and has a folder that is another.
     let chosen = Chosen {
@@ -1094,11 +1091,10 @@ impl Drop for Reaper {
 #[test]
 fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict(
 ) {
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = cf_e2e::door::made("t-").unwrap();
     let ran = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", &format!("{} > /dev/null 2>&1 & echo $!", command())])
         .cwd(elsewhere.path())
-        .inheriting_env()
         .run()
         .unwrap();
     let pid: u32 = ran.stdout.trim().parse().unwrap();
@@ -1179,7 +1175,6 @@ fn the_command_of_this_runs_word_is_found_by_it_anywhere_and_another_runs_word_i
         };
         Run::new(program)
             .args(args)
-            .inheriting_env()
             .spawn()
             .unwrap()
     };
@@ -1292,7 +1287,6 @@ fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of
         let program = words.next().unwrap().to_owned();
         Run::new(program)
             .args(words)
-            .inheriting_env()
             .spawn()
             .unwrap()
     };
@@ -1409,7 +1403,6 @@ fn an_observer_begun_after_the_window_that_quotes_the_whole_command_with_the_run
     } else {
         Run::new("grep").args(["-F", line.as_str()])
     }
-    .inheriting_env()
     .spawn()
     .unwrap();
     let ours = |all: &[Running]| -> Vec<Running> {
@@ -1473,7 +1466,6 @@ fn a_detached_command_of_the_runs_word_is_said_to_have_escaped_and_runs_on_after
     let mut words = line.split_whitespace();
     let mut own = Run::new(words.next().unwrap())
         .args(words)
-        .inheriting_env()
         .spawn()
         .unwrap();
     let pid = own.id();

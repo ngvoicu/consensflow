@@ -151,7 +151,6 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         Run::harness("codex", program)
             .args(rest)
             .cwd(&folder)
-            .machine_env()
             .vars(home.clone())
             .closed_input()
             .limit(TURN)
@@ -244,7 +243,7 @@ fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
     }
     let fail = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", file.display()));
     let db =
-        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        cf_e2e::door::database::read(file)
             .map_err(fail)?;
     let summaries: i64 = db
         .query_row(
@@ -341,7 +340,6 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
         let ran = Run::harness("devin", program)
             .args(rest)
             .cwd(&folder)
-            .machine_env()
             .vars(home.clone())
             .var("DEVIN_COMPACTION_THRESHOLDS", thresholds)
             .closed_input()
@@ -585,7 +583,7 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_folders_refuse_a_foreign_home() {
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
         let env = vec![(
             "XDG_DATA_HOME".to_owned(),
             foreign.path().display().to_string(),
@@ -598,9 +596,9 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_compaction_store_refuses_a_foreign_database() {
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
         let store = foreign.path().join("sessions.db");
-        let db = rusqlite::Connection::open(&store).unwrap();
+        let db = cf_e2e::door::database::write(&store).unwrap();
         db.execute_batch("CREATE TABLE message_nodes (metadata TEXT, chat_message TEXT, row_id INTEGER); INSERT INTO message_nodes VALUES ('{\"summarized_from\":1}', '{}', 1);").unwrap();
         drop(db);
         assert!(
@@ -611,9 +609,9 @@ mod tests {
 
     #[test]
     fn kit_disclosure_pi_compaction_refuses_foreign_session_root() {
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::create_dir(foreign.path().join("sessions")).unwrap();
-        std::fs::write(
+        let foreign = cf_e2e::door::made("t-").unwrap();
+        cf_e2e::door::make_dir(foreign.path().join("sessions")).unwrap();
+        cf_e2e::door::write(
             foreign.path().join("sessions/s.jsonl"),
             "{\"type\":\"compaction\",\"tokensBefore\":42}\n",
         )
@@ -625,7 +623,7 @@ mod tests {
         #[cfg(unix)]
         {
             let run = cf_e2e::door::made("cf-pi-sessions-").unwrap();
-            std::os::unix::fs::symlink(
+            cf_e2e::door::symlink(
                 foreign.path().join("sessions"),
                 run.path().join("sessions"),
             )

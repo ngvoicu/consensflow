@@ -388,12 +388,60 @@ fn copied_link(original: &Path, link: &Path, directory: bool) -> Result {
     made.map_err(Error::file("link", link))
 }
 
+/// Refuses a link that would lead inside a protected root: the judge looks at where a link is
+/// made, and a link made below a folder of the run's that points into a harness's store hands
+/// whoever follows it that store (T-2086 N6). `original` is read as the system reads it, a
+/// relative one from the folder `link` is in.
+fn leads_nowhere_protected(original: &Path, link: &Path) -> Result {
+    let target = if original.is_absolute() {
+        original.to_path_buf()
+    } else {
+        link.parent().unwrap_or(Path::new(".")).join(original)
+    };
+    super::judge(&target, super::place::Act::Allocate).map_err(|why| {
+        refused(
+            "link to",
+            &target,
+            format!("a link of the run's may not lead there: {why}"),
+        )
+    })?;
+    Ok(())
+}
+
+/// Makes `link` a link to the file `original`, below a folder this run made (Windows).
+#[cfg(windows)]
+pub fn symlink_file(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
+    let (original, link) = (original.as_ref(), link.as_ref());
+    leads_nowhere_protected(original, link)?;
+    copied_link(original, link, false)
+}
+
+/// Makes `link` a link to the folder `original`, below a folder this run made (Windows).
+#[cfg(windows)]
+pub fn symlink_dir(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
+    let (original, link) = (original.as_ref(), link.as_ref());
+    leads_nowhere_protected(original, link)?;
+    copied_link(original, link, true)
+}
+
 /// Makes `link` a link to `original`, below a folder this run made.
 #[cfg(unix)]
 pub fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
     let (original, link) = (original.as_ref(), link.as_ref());
     allowed("link", link, false)?;
+    leads_nowhere_protected(original, link)?;
     std::os::unix::fs::symlink(original, link).map_err(Error::file("link", link))
+}
+
+/// Takes away the file or the folder `path`, below a folder this run made ([`super::Door::remove_in_made`]):
+/// a path that is under none is an error that says so, and one that is not there is none. In a say-only
+/// run the door says it and leaves it.
+pub fn remove(path: impl AsRef<Path>) -> Result {
+    let path = path.as_ref();
+    match super::Door::of_run().remove_in_made(path) {
+        super::Removed::Left(path, why) => Err(refused("remove", &path, why)),
+        _ => Ok(()),
+    }
 }
 
 /// Writes `text` to the file `file` whole or not at all, for a program to say something to a case

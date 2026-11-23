@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn the_files_of_a_folder_are_listed_from_it_with_slashes_and_without_gits_own() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         for file in [
             "README.md",
             "images/honey.png",

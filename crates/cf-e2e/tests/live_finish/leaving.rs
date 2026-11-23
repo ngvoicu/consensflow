@@ -1150,7 +1150,6 @@ fn on_the_machine(of_the_run: impl Fn(&[Running]) -> Vec<Running>) -> Vec<String
     }
     Run::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,tty=,command="])
-        .inheriting_env()
         .run()
         .ok()
         .filter(|ran| ran.code == Some(0))

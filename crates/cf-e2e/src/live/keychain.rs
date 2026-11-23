@@ -39,13 +39,12 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
 use super::login::SERVICE;
-use crate::process::{own_var, Ran, Run};
-use crate::{Error, Result};
+use crate::process::own_var;
+use crate::Result;
 
 /// Whether this process belongs to the two explicitly selected hosted tests.
 pub fn hosted_test() -> bool {
@@ -70,78 +69,10 @@ pub(crate) fn watching() -> bool {
     hosted_test() || live_case()
 }
 
-/// The Keychain's utility, which no other start of the kit's starts: a plain start refuses it
-/// ([`crate::door::spawn::Program::Keychain`]).
-const UTILITY: &str = "/usr/bin/security";
-
-/// The Keychain's door (K3, `live-kit-isolation-doors.md` section 2): `/usr/bin/security` with
-/// fixed words, the machine's variables and the account's home by name. A stand-in cannot reach
-/// the real program: an accidental call fails naming its caller.
-fn security<I, S>(caller: &str, args: I, limit: Duration) -> Result<Ran>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    #[cfg(test)]
-    if let Some(result) = fake::next() {
-        return Ok(result);
-    }
-    assert!(watching(), "stand-in run attempted security from {caller}");
-    let home = if hosted_test() {
-        crate::standin_process::inherited_home().map(PathBuf::from)
-    } else {
-        crate::door::account::project_home()
-    }
-    .ok_or_else(|| {
-        crate::Error::Daemon(format!(
-            "the Keychain is read for {caller} on the account's home, and this run has none"
-        ))
-    })?;
-    Run::operation("keychain", UTILITY)
-        .args(args)
-        .machine_env()
-        .var("HOME", home)
-        .limit(limit)
-        .run()
-}
-
-/// The first of the door's two reads: Claude Code's login item, of the account `user`, for the
-/// seed of a run's login copy ([`super::login`]).
-pub fn login_item(user: &str, limit: Duration) -> Result<Ran> {
-    security(
-        "keychain::login_item",
-        super::login::keychain_args(user),
-        limit,
-    )
-}
-
-/// The second: the names of the Keychain's items, for the guard that compares them before and
-/// after a run ([`super::login::keychain_services`]).
-pub fn item_names(limit: Duration) -> Result<Ran> {
-    security("keychain::item_names", ["dump-keychain"], limit)
-}
-
-/// The Keychain control's own words (the live control case and the hosted test of the launcher
-/// guard, which make an item of a folder of their own and delete it): only on a machine marked as
-/// a test machine, or on the hosted runner the guard's test is made for. The study of a marked
-/// machine (T-2006) narrows it to the one item the control made.
-pub fn control<I, S>(caller: &str, args: I, limit: Duration) -> Result<Ran>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    #[cfg(test)]
-    if fake::active() {
-        return security(caller, args, limit);
-    }
-    if !hosted_test() {
-        super::renew::TestMachine::required_for(caller)?;
-    }
-    security(caller, args, limit)
-}
+pub use crate::door::keychain::{item_names, login_item, Control, Listing, OwnItem};
 
 #[cfg(test)]
-pub(super) mod fake {
+pub(crate) mod fake {
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
@@ -249,30 +180,6 @@ pub fn gained_words(name: &str) -> String {
          (delete it with `security delete-generic-password -s \"{name}\"`; the kit never does)"
     );
     words
-}
-
-/// Deletes the item Claude Code made for `folder`, a config folder that the caller made itself for a
-/// Claude Code that it ran on purpose to show the hazard: that item and no other, by the name
-/// [`item_of`] makes of it, for the account of the user. An item with a folder's hash is never the
-/// owner's own (that one has none), and the kit deletes no other (a run that leaves one is failed
-/// by the guard, which names it for the owner to delete). Whether it was there; none where the
-/// machine has no Keychain.
-pub fn forget(folder: &Path) -> Result<bool> {
-    if !cfg!(target_os = "macos") {
-        return Ok(false);
-    }
-    let name = item_of(folder);
-    let user = own_var("USER")
-        .filter(|user| !user.is_empty())
-        .ok_or_else(|| {
-            Error::Daemon("this run has no USER, which names the account of the item".to_owned())
-        })?;
-    let ran = control(
-        "keychain::forget",
-        ["delete-generic-password", "-s", &name, "-a", &user],
-        Duration::from_secs(60),
-    )?;
-    Ok(ran.code == Some(0))
 }
 
 /// The name of the program the stand-in for `security` is.

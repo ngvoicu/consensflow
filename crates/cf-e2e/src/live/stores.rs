@@ -101,6 +101,23 @@ pub const STORES: &[Store] = &[
     row(Claude, Login, Place::Home(".claude.json")),
     row(Claude, Login, Place::Home(".claude")),
     row(Claude, Settings, Place::Var("CLAUDE_CONFIG_DIR")),
+    // Claude Code's own installer: its versions and launcher (`~/.local/bin/claude`, a link into
+    // them), and what it keeps of a run beside them. A live Claude window can add to each, and the
+    // preface's rule for a case that moved the launcher is the owner's (T-2086 section 5).
+    row(
+        Claude,
+        Program,
+        under("XDG_DATA_HOME", ".local/share", "claude"),
+    ),
+    row(
+        Claude,
+        Records,
+        under("XDG_STATE_HOME", ".local/state", "claude"),
+    ),
+    row(Claude, Cache, under("XDG_CACHE_HOME", ".cache", "claude")),
+    row(Claude, Program, Place::Home(".local/bin/claude")),
+    // Its per-user runtime folder: the scratch and task output of every session, by project path.
+    row(Claude, Runtime, Place::System("/private/tmp/claude-{uid}")),
     // Codex.
     row(Codex, Login, Place::Home(".codex")),
     row(Codex, Login, Place::Var("CODEX_HOME")),
@@ -166,8 +183,16 @@ pub const STORES: &[Store] = &[
         Settings,
         Place::FixedHome("Library/Application Support/Muse"),
     ),
-    // agy.
+    // Muse's launcher and the file that says its version, beside which its program (`muse-bin-<
+    // version>`) is put: read and started, never written by the door. The program's own name holds
+    // a version no table can spell, and it is the launcher guard's to compare.
+    row(Muse, Program, Place::Home(".local/bin/muse")),
+    row(Muse, Program, Place::Home(".local/bin/.muse-version")),
+    // agy, as far as this branch knows it: its seat is on a branch of its own, which gives its
+    // list (Gemini's folder is the one place known here).
     row(Agy, Login, Place::Home(".gemini")),
+    // Not in the table, because no path or variable names it: Windows' Credential Manager, where
+    // a harness keeps a login it does not keep in a file. Design section 7 says what that is.
     // The account's Keychain.
     row(Account, Login, Place::Home("Library/Keychains")),
 ];

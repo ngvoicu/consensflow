@@ -624,13 +624,12 @@ mod tests {
         let Some(home) = cf_e2e::process::own_var(CHILD) else {
             let home_root = cf_e2e::door::made("cf-parity-owner-home-").unwrap();
             let home = home_root.path().join("owner");
-            fs::create_dir(&home).unwrap();
+            cf_e2e::door::make_dir(&home).unwrap();
             let output = cf_e2e::process::case_of(
                 std::env::current_exe().unwrap(),
                 "claude::tests::t1700_run_config_excludes_owner_and_contains_its_own_items",
                 Duration::from_secs(30),
             )
-            .inheriting_env()
             .var(CHILD, &home)
             .var("HOME", &home)
             .var("USERPROFILE", &home)
@@ -648,22 +647,22 @@ mod tests {
         let owner = home.join(".claude");
         let config = root.path().join("run");
         let project = root.path().join("project with spaces");
-        fs::create_dir_all(owner.join("skills/owner-secret")).unwrap();
-        fs::write(owner.join("skills/owner-secret/SKILL.md"), "owner skill").unwrap();
+        cf_e2e::door::make_dir(owner.join("skills/owner-secret")).unwrap();
+        cf_e2e::door::write(owner.join("skills/owner-secret/SKILL.md"), "owner skill").unwrap();
         for part in ["plugins", "agents", "commands"] {
-            fs::create_dir(owner.join(part)).unwrap();
-            fs::write(owner.join(part).join("owner-secret"), "owner content").unwrap();
+            cf_e2e::door::make_dir(owner.join(part)).unwrap();
+            cf_e2e::door::write(owner.join(part).join("owner-secret"), "owner content").unwrap();
         }
         // A read and parse of either fabricated owner file would fail.
-        fs::write(owner.join("settings.json"), "invalid owner settings").unwrap();
-        fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
+        cf_e2e::door::write(owner.join("settings.json"), "invalid owner settings").unwrap();
+        cf_e2e::door::write(home.join(".claude.json"), "invalid owner config").unwrap();
         let source = json!({"claudeAiOauth": {"accessToken": "fake-access",
             "refreshToken": "fake-refresh", "nested": [{"REFRESH_key": "fake"}]}})
         .to_string();
         cf_e2e::door::make_dir_private(&config).unwrap();
         let login_copy = cf_e2e::live::login::json_copy(&source, "fabricated Claude").unwrap();
-        fs::write(config.join(".credentials.json"), login_copy).unwrap();
-        fs::write(
+        cf_e2e::door::write(config.join(".credentials.json"), login_copy).unwrap();
+        cf_e2e::door::write(
             config.join(".claude.json"),
             r#"{"hasCompletedOnboarding":true,"projects":{}}"#,
         )
@@ -783,7 +782,7 @@ mod tests {
         let root = cf_e2e::door::made("cf-parity-sync-").unwrap();
         let config = root.path().join("config");
         cf_e2e::door::make_dir_private(&config).unwrap();
-        fs::write(config.join(".claude.json"), "{}").unwrap();
+        cf_e2e::door::write(config.join(".claude.json"), "{}").unwrap();
         let login = FakeLogin {
             config: config.clone(),
             calls: AtomicUsize::new(0),
@@ -802,7 +801,7 @@ mod tests {
         let root = cf_e2e::door::made("cf-parity-account-connectors-").unwrap();
         let config = root.path().join("config");
         cf_e2e::door::make_dir_private(&config).unwrap();
-        fs::write(config.join(".claude.json"), "{}").unwrap();
+        cf_e2e::door::write(config.join(".claude.json"), "{}").unwrap();
         let login = FakeLogin {
             config: config.clone(),
             calls: AtomicUsize::new(0),
@@ -864,10 +863,10 @@ mod tests {
         let root = cf_e2e::door::made("cf-parity-actual-login-").unwrap();
         let home = root.path().join("owner");
         let temp = root.path().join("temp");
-        fs::create_dir_all(home.join(".claude/skills/owner-secret")).unwrap();
-        fs::create_dir_all(home.join("login-source")).unwrap();
-        fs::create_dir(&temp).unwrap();
-        fs::write(
+        cf_e2e::door::make_dir(home.join(".claude/skills/owner-secret")).unwrap();
+        cf_e2e::door::make_dir(home.join("login-source")).unwrap();
+        cf_e2e::door::make_dir(&temp).unwrap();
+        cf_e2e::door::write(
             home.join(".claude/skills/owner-secret/SKILL.md"),
             "owner skill",
         )
@@ -881,28 +880,27 @@ mod tests {
             ] {
                 nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
             }
-            fs::create_dir(home.join("bin")).unwrap();
-            fs::write(home.join("bin/claude"), "stand-in; never executed").unwrap();
-            fs::set_permissions(home.join("bin/claude"), fs::Permissions::from_mode(0o700))
+            cf_e2e::door::make_dir(home.join("bin")).unwrap();
+            cf_e2e::door::write(home.join("bin/claude"), "stand-in; never executed").unwrap();
+            cf_e2e::door::set_permissions(home.join("bin/claude"), fs::Permissions::from_mode(0o700))
                 .unwrap();
         }
         #[cfg(windows)]
         {
-            fs::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
-            fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
+            cf_e2e::door::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
+            cf_e2e::door::write(home.join(".claude.json"), "invalid owner config").unwrap();
         }
         let credentials = json!({"claudeAiOauth": {"accessToken": "fake-access",
                 "refreshToken": "fake-refresh", "expiresAt": now_ms() + 3_600_000,
                 "nested": [{"REFRESH_key": "fake"}]}})
         .to_string();
-        fs::write(home.join("login-source/.credentials.json"), &credentials).unwrap();
-        fs::write(home.join(".claude/.credentials.json"), &credentials).unwrap();
+        cf_e2e::door::write(home.join("login-source/.credentials.json"), &credentials).unwrap();
+        cf_e2e::door::write(home.join(".claude/.credentials.json"), &credentials).unwrap();
         let child = cf_e2e::process::case_of(
             std::env::current_exe().unwrap(),
             "claude::tests::t1700_actual_kit_login_composes_with_parity_setup",
             Duration::from_secs(30),
         )
-        .inheriting_env()
         .var(CHILD, &home)
         .var("HOME", &home)
         .var("USERPROFILE", &home)

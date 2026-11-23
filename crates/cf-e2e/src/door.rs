@@ -68,18 +68,23 @@ mod again;
 pub mod cargo;
 pub mod database;
 pub mod identity;
+pub mod keychain;
 pub mod place;
+pub mod renewal;
 pub mod spawn;
+pub mod terminal;
 mod windows_registry;
 mod writes;
 
 pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
+#[cfg(windows)]
+pub use writes::{symlink_dir, symlink_file};
 pub use writes::{
     append, copy, copy_cloning, copy_keeping_mode, copy_tree, create, create_new,
-    create_new_private, made_dir, made_file, make_dir, make_dir_private, rename, say_its_process,
-    set_modified, set_permissions, write, write_executable, write_whole,
+    create_new_private, made_dir, made_file, make_dir, make_dir_private, remove, rename,
+    say_its_process, set_modified, set_permissions, write, write_executable, write_whole,
 };
 
 /// The variable that makes the door say only.
@@ -668,6 +673,11 @@ impl Door {
                     crate::live::renew::TEST_MACHINE
                 ),
             );
+        }
+        // The record is taken whole: the tree it is must hold no root (a folder of a store that
+        // was linked in, say), judged as every removal is (T-2002 finding 3).
+        if let Err(refused) = place::tree_holds_no_root(&path, &account::protected()) {
+            return Removed::Left(path, refused.to_string());
         }
         remove_whole(&path)
     }

@@ -6,15 +6,12 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::{agents, machine, Log};
 use cf_e2e::process::Run;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::Value;
 
 pub type Outcome = Result<(), String>;
@@ -236,9 +233,9 @@ fn tui_setup_copies_no_refresh_keys() {
     let root = cf_e2e::door::made("cf-muse-tui-login-").unwrap();
     let owner = root.path().join("owner");
     let run = root.path().join("run");
-    std::fs::create_dir_all(owner.join(".config/muse")).unwrap();
-    std::fs::create_dir_all(run.join("config/muse")).unwrap();
-    std::fs::write(
+    cf_e2e::door::make_dir(owner.join(".config/muse")).unwrap();
+    cf_e2e::door::make_dir(run.join("config/muse")).unwrap();
+    cf_e2e::door::write(
         owner.join(".config/muse/auth.json"),
         r#"{"access":"fake","refreshToken":"fake","nested":[{"REFRESH_key":"fake"}]}"#,
     )
@@ -306,11 +303,11 @@ fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
 #[test]
 fn kit_round3_muse_feature_config_skips_links_out() {
     let root = cf_e2e::door::made("cf-muse-feature-").unwrap();
-    let foreign = tempfile::tempdir().unwrap();
-    fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+    let foreign = cf_e2e::door::made("t-").unwrap();
+    cf_e2e::door::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
     let source = root.path().join("features");
-    fs::create_dir(&source).unwrap();
-    std::os::unix::fs::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
+    cf_e2e::door::make_dir(&source).unwrap();
+    cf_e2e::door::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
     let target = root.path().join("copy");
     copy_feature_config(&source, &target).unwrap();
     assert!(
@@ -405,11 +402,11 @@ fn the_model_switch_check_compares_with_the_selected_model() {
     );
 }
 
-/// A window of Muse in a pty: its screen's bytes kept, its keys written.
+/// A window of Muse in a pty: its screen's bytes kept, its keys written. The pty is the door's
+/// ([`Run::terminal`]), and the program is started as Muse is: on the run's homes, in its file
+/// sandbox, with its update switch.
 pub struct Window {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
-    screen: Arc<Mutex<Vec<u8>>>,
+    terminal: cf_e2e::door::terminal::Terminal,
 }
 
 impl Window {
@@ -427,81 +424,45 @@ impl Window {
         // an account that is its owner's).
         cf_e2e::muse::real_window_allowed("Muse's direct TUI window")
             .map_err(|refused| refused.to_string())?;
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 50,
-                cols: 150,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| error.to_string())?;
         let launch = cf_e2e::muse::isolated_command(binary, &[root.to_path_buf()], &[])
             .map_err(|error| error.to_string())?;
-        let mut command = CommandBuilder::new(&launch.program);
-        command.args(&launch.prefix);
-        command.args(["--trust-workspace", "--model", &model.name]);
+        let mut words: Vec<String> = vec![
+            "--trust-workspace".into(),
+            "--model".into(),
+            model.name.clone(),
+        ];
         if let Some(effort) = &model.effort {
-            command.args(["--reasoning-effort", effort]);
+            words.extend(["--reasoning-effort".into(), effort.clone()]);
         }
-        command.args(["--contributor-mode", "off"]);
-        command.args(posture);
-        command.args([
-            "-c",
-            "context.foreign_personal_rules=false",
-            "-c",
-            "context.foreign_personal_skills=false",
-            "-c",
-            "telemetry.enabled=false",
-            "-c",
-            "local_session_messaging.enabled=false",
-            "-c",
-            r#"run.reminder_roster={"agents":[]}"#,
-        ]);
-        command.env_clear();
-        for (name, value) in env {
-            command.env(name, value);
-        }
-        command.cwd(root.join("work"));
-        let child = pair
-            .slave
-            .spawn_command(command)
+        words.extend(["--contributor-mode".into(), "off".into()]);
+        words.extend(posture.iter().map(|word| (*word).to_owned()));
+        words.extend(
+            [
+                "-c",
+                "context.foreign_personal_rules=false",
+                "-c",
+                "context.foreign_personal_skills=false",
+                "-c",
+                "telemetry.enabled=false",
+                "-c",
+                "local_session_messaging.enabled=false",
+                "-c",
+                r#"run.reminder_roster={"agents":[]}"#,
+            ]
+            .map(str::to_owned),
+        );
+        let terminal = launch
+            .run()
+            .args(&words)
+            .vars(env)
+            .cwd(root.join("work"))
+            .terminal((50, 150))
             .map_err(|error| error.to_string())?;
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|error| error.to_string())?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|error| error.to_string())?;
-        let screen = Arc::new(Mutex::new(Vec::new()));
-        let kept = Arc::clone(&screen);
-        thread::spawn(move || {
-            let mut chunk = [0_u8; 8192];
-            while let Ok(read) = reader.read(&mut chunk) {
-                if read == 0 {
-                    break;
-                }
-                let Ok(mut screen) = kept.lock() else {
-                    break;
-                };
-                screen.extend_from_slice(&chunk[..read]);
-                let len = screen.len();
-                if len > 200_000 {
-                    screen.drain(..len - 200_000);
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            writer,
-            screen,
-        })
+        Ok(Self { terminal })
     }
 
     pub fn keys(&mut self, bytes: &[u8]) {
-        let _ = self.writer.write_all(bytes);
-        let _ = self.writer.flush();
+        self.terminal.keys(bytes);
     }
 
     /// Pastes `text`, bracketed, and sends it with Enter a moment after.
@@ -512,35 +473,32 @@ impl Window {
     }
 
     pub fn tail(&self) -> String {
-        let Ok(screen) = self.screen.lock() else {
-            return String::new();
-        };
-        let from = screen.len().saturating_sub(1500);
-        String::from_utf8_lossy(&screen[from..]).into_owned()
+        self.terminal.tail(1500)
     }
 
     /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left. The two keys are
     /// typed through the door ([`cf_e2e::door::Door::quit_own_terminal`]): a say-only run says them
     /// and types none.
     pub fn close(mut self) {
+        let terminal = &mut self.terminal;
         let typed = cf_e2e::door::Door::of_run().quit_own_terminal("Muse's terminal", || {
-            self.keys(b"\x03");
+            terminal.keys(b"\x03");
             thread::sleep(Duration::from_secs(1));
-            self.keys(b"\x03");
+            terminal.keys(b"\x03");
         });
         if !typed {
             return;
         }
         let deadline = Instant::now() + Duration::from_secs(8);
         while Instant::now() < deadline {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
+            if self.terminal.ended() {
                 return;
             }
             thread::sleep(Duration::from_millis(200));
         }
-        let child = &mut self.child;
+        let terminal = &mut self.terminal;
         cf_e2e::door::Door::of_run().close_own_terminal("Muse's terminal", || {
-            let _ = child.kill();
+            terminal.kill();
         });
     }
 }

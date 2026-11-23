@@ -110,7 +110,7 @@ impl Watched<'_> {
         if !live::guard::run_owned_devin_store(&self.store) {
             return None;
         }
-        Connection::open_with_flags(&self.store, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
+        cf_e2e::door::database::read(&self.store).ok()
     }
 
     /// Whether the session's history has a row that holds `marker`.

@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 use super::login::span;
 use super::machine::Harness;
 use crate::door::Door;
-use crate::process::{own_var, Run};
+use crate::process::own_var;
 use crate::{Error, Result};
 
 /// The variable the Windows runner gives the command it runs on a test machine, with the name of
@@ -89,7 +89,34 @@ impl TestMachine {
     /// The machine this run is on, if the runner started it on one: none on the owner's Mac, which
     /// has no runner to give the variable.
     pub fn detect() -> Option<Self> {
-        Self::signalled(own_var(TEST_MACHINE).as_deref())
+        Self::signalled_unless_stored(
+            own_var(TEST_MACHINE).as_deref(),
+            crate::door::stored_names(),
+        )
+    }
+
+    /// [`TestMachine::signalled`], but not for a marker the account itself stores (T-2119 N1-c):
+    /// on Windows `setx` and the registry's `Environment` keys put a variable in every process the
+    /// account starts, with no runner and no person saying it for this run, so a marker there
+    /// would mark a run of an account that was never given as a test account (the runner takes
+    /// the marker away on the one it does not mark, and a run started without the runner has no
+    /// such hand). A contributor marks a run in its own shell (`$env:CONSENSFLOW_TEST_MACHINE`),
+    /// or has the runner's `--host` give it. Where the registry cannot be read the marker marks
+    /// nothing.
+    pub(crate) fn signalled_unless_stored(
+        signal: Option<&str>,
+        stored: std::result::Result<Vec<std::ffi::OsString>, String>,
+    ) -> Option<Self> {
+        let stored_here = match stored {
+            Ok(names) => names
+                .iter()
+                .any(|name| name.to_string_lossy().eq_ignore_ascii_case(TEST_MACHINE)),
+            Err(_) => true,
+        };
+        if stored_here {
+            return None;
+        }
+        Self::signalled(signal)
     }
 
     /// The machine a signal names; none where there is none, or it names nothing. (The tests of
@@ -385,26 +412,26 @@ fn one_shot_within(
 ) -> Result<Option<String>> {
     // It runs as the owner on the account's own login: only on an account that is a test
     // machine's own (T-2007 round 3), before anything is made or started.
-    TestMachine::required_by("the renewal of a login", machine.cloned())?;
+    let machine = TestMachine::required_by("the renewal of a login", machine.cloned())?;
+    // The records as they are before the harness runs, read whole: a folder that cannot be
+    // listed is no baseline to take a record against, and nothing runs.
+    let baseline = crate::door::renewal::Listing::of(records)?;
     let folder = crate::door::made(FOLDER).map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,
     })?;
-    let baseline = inventory(records);
-    // The renewal's own door: the account's home by name, which no other start is given (it
-    // runs only on a marked test machine, `renew_on_a_test_machine`).
-    let ran = Run::operation("renewal", program)
-        .args(words)
-        .machine_env()
-        .vars(account.iter().cloned())
-        .vars(super::launcher::updates_off_of(harness).iter().copied())
-        .finding_programs()
-        .cwd(folder.path())
-        .closed_input()
-        .limit(limit)
-        .run()?;
-    let leftover = forget(records, folder.path(), &baseline, machine);
+    // The renewal's own door: the account's home by name, which no other start is given.
+    let ran = crate::door::renewal::start(
+        &machine,
+        harness,
+        program,
+        words,
+        account,
+        folder.path(),
+        limit,
+    )?;
+    let leftover = forget(records, folder.path(), &baseline, Some(&machine));
     let said = if ran.timed_out {
         Some(format!("it was ended after {} s", limit.as_secs()))
     } else if ran.code == Some(0) {
@@ -438,22 +465,6 @@ fn one_shot_within(
     }
 }
 
-/// The entries of each folder in `records` as they are before the harness runs: what the
-/// renewal may not take away, whatever its name.
-fn inventory(records: &[&Path]) -> Vec<std::collections::BTreeSet<std::ffi::OsString>> {
-    records
-        .iter()
-        .map(|folder| {
-            std::fs::read_dir(folder)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|entry| entry.file_name())
-                .collect()
-        })
-        .collect()
-}
-
 /// Whether `path` is a link: a symbolic link anywhere, a junction or other reparse point on
 /// Windows. Whatever it points at is never followed.
 fn is_link(path: &Path) -> bool {
@@ -476,7 +487,7 @@ fn is_link(path: &Path) -> bool {
 /// Takes away of each folder in `records` the one entry the harness made there for the folder
 /// `own`, by its whole name ([`crate::door::Record`]: the real path of `own` spelt as Claude Code
 /// spells a folder into a name), through the door, and only an entry that is a folder of the
-/// harness's making: one that was in the folder before the run (`baseline`, [`inventory`]) or is
+/// harness's making: one that was in the folder before the run (`baseline`, [`crate::door::renewal::Listing`]) or is
 /// a link is the owner's and is left as it was, and said (T-1557, finding 5; K3 review T-1978,
 /// 9). Nothing else of the owner's is touched: an entry of theirs whose name ends the same is
 /// theirs. One that cannot be taken away is left (the kit's watch then names it). Why one was
@@ -484,7 +495,7 @@ fn is_link(path: &Path) -> bool {
 fn forget(
     records: &[&Path],
     own: &Path,
-    baseline: &[std::collections::BTreeSet<std::ffi::OsString>],
+    baseline: &crate::door::renewal::Listing,
     machine: Option<&TestMachine>,
 ) -> Option<String> {
     let door = crate::door::Door::of_run();
@@ -496,8 +507,7 @@ fn forget(
         let path = record.path();
         let there_before = path
             .file_name()
-            .zip(baseline.get(at))
-            .is_some_and(|(name, held)| held.contains(name));
+            .is_some_and(|name| baseline.held(at, name));
         if there_before {
             refused.push(format!(
                 "{} was there before the renewal, so it is the owner's and was left",
@@ -509,7 +519,11 @@ fn forget(
                 path.display()
             ));
         } else {
-            let _ = door.remove_record_on(&record, machine);
+            // A record that stayed is the renewal's error: said, never dropped.
+            let removed = door.remove_record_on(&record, machine);
+            if !removed.is_gone() {
+                refused.push(format!("{removed}"));
+            }
         }
     }
     (!refused.is_empty()).then(|| {

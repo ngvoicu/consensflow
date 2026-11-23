@@ -14,7 +14,6 @@ fn waiting() -> Spawned {
         Run::new("sleep").args(["30"])
     };
     program
-        .inheriting_env()
         .closed_input()
         .spawn()
         .expect("the program starts")

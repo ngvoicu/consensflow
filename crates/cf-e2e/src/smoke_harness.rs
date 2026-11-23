@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn each_script_answers_the_read_of_its_models_with_every_model_the_selftest_names() {
         let asked = models_the_selftest_asks_for();
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         for (which, script) in scripts() {
             let file = folder.path().join("claude");
             crate::files::write_executable(&file, script).unwrap();

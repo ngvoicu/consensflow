@@ -429,7 +429,6 @@ pub fn fixture(folder: &Path) -> Vec<Check> {
     let checked = Run::new("node")
         .args(["-e", CHECK])
         .cwd(folder)
-        .inheriting_env()
         .run();
     vec![
         Check::new(
@@ -824,9 +823,9 @@ mod tests {
 
     #[test]
     fn the_fixture_passes_once_the_change_is_made_and_not_before() {
-        let folder = tempfile::tempdir().unwrap();
-        std::fs::write(folder.path().join("check.cjs"), CHECK).unwrap();
-        std::fs::write(folder.path().join("greet.cjs"), GREET).unwrap();
+        let folder = crate::door::made("t-").unwrap();
+        crate::door::write(folder.path().join("check.cjs"), CHECK).unwrap();
+        crate::door::write(folder.path().join("greet.cjs"), GREET).unwrap();
         let before = fixture(folder.path());
         assert_eq!(
             failed(&before),
@@ -835,15 +834,15 @@ mod tests {
                 "fixture: the checker passes on it"
             ]
         );
-        std::fs::write(
+        crate::door::write(
             folder.path().join("greet.cjs"),
             "module.exports = (name) => `Hello, ${name}!`;\n",
         )
         .unwrap();
         assert_eq!(failed(&fixture(folder.path())), Vec::<String>::new());
         // A checker the worker rewrote to pass is no pass.
-        std::fs::write(folder.path().join("greet.cjs"), GREET).unwrap();
-        std::fs::write(folder.path().join("check.cjs"), "console.log('OK')").unwrap();
+        crate::door::write(folder.path().join("greet.cjs"), GREET).unwrap();
+        crate::door::write(folder.path().join("check.cjs"), "console.log('OK')").unwrap();
         assert_eq!(
             failed(&fixture(folder.path())),
             [

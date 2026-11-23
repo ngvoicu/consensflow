@@ -290,7 +290,6 @@ fn build(
             .arg("build")
             .args(&words)
             .cwd(root)
-            .inheriting_env()
             .unlimited()
             .run(),
     }

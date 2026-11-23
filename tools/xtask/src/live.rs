@@ -124,7 +124,7 @@ use cf_base::env::Env;
 
 use crate::context::Context;
 use crate::dispatch::{self, Command, Console, Failure, Run};
-use crate::process::{self, Invocation};
+use crate::process::{self, Cargo};
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
@@ -195,7 +195,7 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
     if args.first().is_some_and(|word| word == SWEEP) && !names.iter().any(|name| name == SWEEP) {
         // The kit's own program lists and takes nothing in any mode, and under `CF_LIVE_AUDIT`
         // leaves with 1, which a say-only run does whatever it came to.
-        return Ok(process::run(&sweep(context, &args[1..]), &context.env)?);
+        return Ok(process::run_cargo(&sweep(context, &args[1..]), &context.env)?);
     }
     let asked = parse(args, &names)?;
     let audit = audit_file(&context.env);
@@ -206,9 +206,9 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
         return Ok(code);
     }
     let Some(file) = audit else {
-        return Ok(process::run(&started(context, &asked), &context.env)?);
+        return Ok(process::run_cargo(&started(context, &asked), &context.env)?);
     };
-    let code = process::run(
+    let code = process::run_cargo(
         &started(context, &asked).var(AUDIT_FILE, &file),
         &context.env,
     )?;
@@ -312,8 +312,8 @@ fn audit_file(env: &Env) -> Option<std::path::PathBuf> {
 }
 
 /// `cargo xtask live sweep <args>`: the kit's own program for it.
-fn sweep(context: &Context, args: &[OsString]) -> Invocation {
-    Invocation::new("cargo", &context.root)
+fn sweep(context: &Context, args: &[OsString]) -> Cargo {
+    process::cargo(&context.root)
         .args(["run", "-q", "-p", "cf-e2e", "--bin", "live-sweep", "--"])
         .args(args)
 }
@@ -383,7 +383,7 @@ fn run_set(
         if let Some(file) = &file {
             invoked = invoked.var(AUDIT_FILE, file);
         }
-        let status = process::run(&invoked, &context.env)?;
+        let status = process::run_cargo(&invoked, &context.env)?;
         came.push(set_line(status, line, file.is_some()));
         if let Some(file) = &file {
             writeln!(console.err, "{}", audit_report(file))?;
@@ -529,7 +529,7 @@ fn gives_threads(given: &[OsString]) -> bool {
 
 /// The `cargo test` of the live test `asked` names: its ignored tests, with what
 /// it is asked for in the variables it reads.
-fn invocation(context: &Context, asked: &Asked) -> Invocation {
+fn invocation(context: &Context, asked: &Asked) -> Cargo {
     let at = asked.rest.iter().position(|word| word == "--");
     let (cargo, test_program) = match at {
         Some(at) => (&asked.rest[..at], &asked.rest[at + 1..]),
@@ -542,7 +542,7 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
             !test_program.iter().any(|given| given == word)
         }
     });
-    let mut invocation = Invocation::new("cargo", &context.root)
+    let mut invocation = process::cargo(&context.root)
         .args(["test", "-p", "cf-e2e", "--test"])
         .arg(format!("live_{}", asked.test))
         .args(cargo)
@@ -640,13 +640,13 @@ fn build_words(cargo: &[OsString]) -> Vec<OsString> {
 
 /// The builds of the programs a live case can need ([`programs`]), each in the checkout's own
 /// build folder as `cargo build` there makes them, with the caller's switches ([`build_words`]).
-fn builds(context: &Context, asked: &Asked) -> Vec<Invocation> {
+fn builds(context: &Context, asked: &Asked) -> Vec<Cargo> {
     let at = asked.rest.iter().position(|word| word == "--");
     let cargo = &asked.rest[..at.unwrap_or(asked.rest.len())];
     programs()
         .into_iter()
         .map(|(package, bin, more)| {
-            Invocation::new("cargo", &context.root)
+            process::cargo(&context.root)
                 .args([
                     "build",
                     "--release",
@@ -678,7 +678,7 @@ fn prepare(
             "live: preparing the programs of the run: {}",
             build.display()
         )?;
-        let code = process::run(&build, &context.env)?;
+        let code = process::run_cargo(&build, &context.env)?;
         if code != 0 {
             writeln!(
                 console.err,
@@ -705,7 +705,7 @@ fn prepare(
 
 /// [`invocation`] of a run whose programs are built ([`prepare`]): told where they are, and that
 /// a case builds none.
-fn started(context: &Context, asked: &Asked) -> Invocation {
+fn started(context: &Context, asked: &Asked) -> Cargo {
     let folder = built_in(&context.root);
     invocation(context, asked)
         .var(BUILT, &folder)

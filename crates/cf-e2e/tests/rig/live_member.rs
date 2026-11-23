@@ -505,7 +505,6 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     let command = LongCommand::new("sleep 613");
     let mut outsider = Run::new("/bin/sh")
         .args(["-c", "exec sleep 613"])
-        .inheriting_env()
         .spawn()?;
     let window = Open::new(&rig, &install, "work", "work-devin")
         .agent(json!({ "kind": "devin", "model": "fake" }))

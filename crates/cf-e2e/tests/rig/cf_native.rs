@@ -71,7 +71,6 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
             question.display(),
             cf::binary()?.display()
         ))
-        .finding_programs()
         // A cold Windows PowerShell on a CI runner can take more than the
         // usual limit just to start.
         .limit(Duration::from_secs(180))

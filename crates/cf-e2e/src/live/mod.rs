@@ -668,7 +668,6 @@ pub fn git_repository(folder: &Path) -> Result {
     let ran = Run::new(command("git")?)
         .args(["init", "--quiet"])
         .cwd(folder)
-        .inheriting_env()
         .run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {

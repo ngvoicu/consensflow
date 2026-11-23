@@ -27,14 +27,14 @@ fn windows_of(codex: &Installed) -> Result<(String, Vec<String>), Box<dyn std::e
 fn a_rig_for_a_codex_gives_its_windows_its_login_and_the_folders_it_needs_after_the_stand_in_claude(
 ) -> Outcome {
     let (installed, node, login) = (
-        tempfile::tempdir()?,
-        tempfile::tempdir()?,
-        tempfile::tempdir()?,
+        cf_e2e::door::made("t-")?,
+        cf_e2e::door::made("t-")?,
+        cf_e2e::door::made("t-")?,
     );
     let command = installed
         .path()
         .join(if cfg!(windows) { "codex.cmd" } else { "codex" });
-    let text = |folder: &tempfile::TempDir| folder.path().to_string_lossy().into_owned();
+    let text = |folder: &cf_e2e::door::Made| folder.path().to_string_lossy().into_owned();
 
     // The command's folder follows the stand-in's, and the system's follow it.
     let codex = Installed::at(Harness::Codex, &command, login.path());
@@ -78,7 +78,7 @@ fn a_rig_keeps_its_home_when_told_to_and_takes_it_away_when_not() -> Outcome {
         saved.join("workspace").is_dir() && saved.join("consensflow").is_dir(),
         "a rig told to keep its home leaves it whole"
     );
-    std::fs::remove_dir_all(&saved)?;
+    cf_e2e::door::remove(&saved)?;
     Ok(())
 }
 

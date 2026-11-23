@@ -289,7 +289,7 @@ mod win {
         if !ps.is_file() || !layer {
             return None;
         }
-        let ran = Run::new(ps).args(["-W"]).inheriting_env().run().ok()?;
+        let ran = Run::new(ps).args(["-W"]).run().ok()?;
         (ran.code == Some(0)).then_some(ran.stdout)
     }
 

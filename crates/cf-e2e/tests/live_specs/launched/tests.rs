@@ -103,9 +103,9 @@ fn each_harness_is_given_its_role_text_where_its_adapter_puts_it_and_the_run_fin
         )),
         Some(RoleText::Inline("/r/role/SKILL.md".to_owned()))
     );
-    let root = tempfile::tempdir().unwrap();
+    let root = cf_e2e::door::made("t-").unwrap();
     let file = root.path().join("SKILL.md");
-    std::fs::write(&file, "the role in a file").unwrap();
+    cf_e2e::door::write(&file, "the role in a file").unwrap();
     assert_eq!(
         text_of(&file.display().to_string()).unwrap(),
         "the role in a file"
@@ -415,8 +415,8 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
             })
             .join("skills")
             .join("tdd-by-the-human");
-        std::fs::create_dir_all(&skills).unwrap();
-        std::fs::write(
+        cf_e2e::door::make_dir(&skills).unwrap();
+        cf_e2e::door::write(
             skills.join("SKILL.md"),
             "---\nname: specmint-tdd\n---\nthe human's own\n",
         )
@@ -463,16 +463,16 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
 
 #[test]
 fn a_copy_of_the_skill_names_the_project_s_folder_and_no_other() {
-    let root = tempfile::tempdir().unwrap();
+    let root = cf_e2e::door::made("t-").unwrap();
     let skill = root.path().join("specmint-core");
-    std::fs::create_dir_all(skill.join("references")).unwrap();
+    cf_e2e::door::make_dir(skill.join("references")).unwrap();
     // The vendored copy: the folder the skill's files call canonical.
-    std::fs::write(
+    cf_e2e::door::write(
         skill.join("SKILL.md"),
         "---\nname: specmint-core\n---\nRegistry: `.specs/registry.md`\n",
     )
     .unwrap();
-    std::fs::write(
+    cf_e2e::door::write(
         skill.join("references/spec-format.md"),
         "Per-spec files: `.specs/<id>/SPEC.md`\n",
     )
@@ -483,7 +483,7 @@ fn a_copy_of_the_skill_names_the_project_s_folder_and_no_other() {
     let failed = names_the_folder_alone(&skill, "docs/specs").unwrap_err();
     assert!(failed.contains("still says .specs"), "{failed}");
     // The copy ConsensFlow writes for the folder: every `.specs` is the folder.
-    std::fs::write(
+    cf_e2e::door::write(
         skill.join("SKILL.md"),
         "---\nname: specmint-core\n---\nRegistry: `docs/specs/registry.md`\n",
     )
@@ -493,7 +493,7 @@ fn a_copy_of_the_skill_names_the_project_s_folder_and_no_other() {
         failed.contains("spec-format.md") && failed.contains("still says .specs"),
         "a file under references says it too: {failed}"
     );
-    std::fs::write(
+    cf_e2e::door::write(
         skill.join("references/spec-format.md"),
         "Per-spec files: `docs/specs/<id>/SPEC.md`\n",
     )
@@ -504,6 +504,6 @@ fn a_copy_of_the_skill_names_the_project_s_folder_and_no_other() {
         "{said}"
     );
     // A copy that names no folder at all is no copy of the project's.
-    std::fs::write(skill.join("SKILL.md"), "---\nname: specmint-core\n---\n").unwrap();
+    cf_e2e::door::write(skill.join("SKILL.md"), "---\nname: specmint-core\n---\n").unwrap();
     assert!(names_the_folder_alone(&skill, "docs/specs").is_err());
 }

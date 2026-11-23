@@ -378,7 +378,7 @@ fn a_write_in_the_live_zone_goes_only_below_a_folder_this_run_made() {
     let other = live.join("bench");
     fs::create_dir_all(&other).unwrap();
     fs::write(other.join("AGENTS.md"), "another run's").unwrap();
-    let wrong = |path: &Path| crate::files::guard(path).is_err();
+    let wrong = |path: &Path| crate::door::writable(path, false).is_err();
 
     // Another run's folder, a name nobody made, and the live folder itself: refused.
     assert!(wrong(&other.join("AGENTS.md")));
@@ -913,4 +913,30 @@ fn a_renewals_record_is_taken_away_only_on_a_marked_test_machine() {
         Removed::Removed(record.path())
     );
     assert!(!record.path().exists());
+}
+
+/// T-2002 finding 3: the renewal's record is taken whole, and goes through the write door's tree
+/// check: a record whose tree holds a protected root is left, as every removal is.
+#[test]
+fn a_renewals_record_whose_tree_holds_a_protected_root_is_not_taken() {
+    let parent = tempfile::tempdir().unwrap();
+    let records = parent.path().join("records");
+    let own = made_in(parent.path(), "consensflow-door-own-").unwrap();
+    let record = Record::of(&records, own.path()).unwrap();
+    let inner = record.path().join("memory");
+    fs::create_dir_all(&inner).unwrap();
+    let marked = crate::live::renew::TestMachine::signalled(Some("kit"));
+    let door = Door::acting();
+    let held = crate::door::account::TestRoot::add(&inner);
+    let left = door.remove_record_on(&record, marked.as_ref());
+    assert!(
+        matches!(&left, Removed::Left(path, why) if *path == record.path() && why.contains("holds")),
+        "{left:?}"
+    );
+    assert!(inner.is_dir(), "a tree that holds a root was taken");
+    drop(held);
+    assert_eq!(
+        door.remove_record_on(&record, marked.as_ref()),
+        Removed::Removed(record.path())
+    );
 }

@@ -471,14 +471,12 @@ mod tests {
 
         let mut decoy = cf_e2e::process::Run::new("/bin/sh")
             .args(["-c", "read line; : hook claude"])
-            .inheriting_env()
             .spawn()
             .unwrap();
         let pid = decoy.id();
         // The case's window: another process, which the decoy does not descend from.
         let mut window = cf_e2e::process::Run::new("sleep")
             .arg("30")
-            .inheriting_env()
             .spawn()
             .unwrap();
         let own = ThisMachine.identity(window.id()).unwrap();

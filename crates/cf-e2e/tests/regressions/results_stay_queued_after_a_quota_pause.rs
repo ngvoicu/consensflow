@@ -37,7 +37,7 @@ use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use cf_e2e::door::Made;
 
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief};
 use crate::{config, secs, Outcome};
@@ -45,15 +45,13 @@ use crate::{config, secs, Outcome};
 /// The account the chief and its worker share: spent while its file is there
 /// (`CF_TEST_QUOTA_FILE`).
 struct Account {
-    folder: TempDir,
+    folder: Made,
 }
 
 impl Account {
     /// An account with quota.
     fn new() -> Result<Self> {
-        let folder = tempfile::Builder::new()
-            .prefix("cf-account-")
-            .tempdir()
+        let folder = cf_e2e::door::made("cf-account-")
             .map_err(|source| cf_e2e::Error::File {
                 action: "make a folder in",
                 path: std::env::temp_dir(),
@@ -73,7 +71,7 @@ impl Account {
 
     /// The human logs the harness into another account, which has quota.
     fn switch(&self) {
-        let _ = std::fs::remove_file(self.file());
+        let _ = cf_e2e::door::remove(self.file());
     }
 }
 

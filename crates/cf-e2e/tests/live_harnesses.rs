@@ -38,39 +38,16 @@ use cf_e2e::rig::HarnessHome;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
-/// What the daemon is given of the machine, besides the home of its own: where the programs are
-/// and what describes the machine. Never a variable that says where a login or a setting is
-/// (`HOME`, `USERPROFILE`, `APPDATA`, a harness's own home, the XDG folders): the daemon's home
-/// is the kit's, so that what the daemon reads of a harness's setting (Claude's release source in
-/// `~/.claude/settings.json`) is read in the kit's home and never the owner's (T-1957).
-const MACHINE: [&str; 11] = [
-    "PATH",
-    "USER",
-    "LOGNAME",
-    "ProgramData",
-    "ProgramFiles",
-    "ProgramFiles(x86)",
-    "CommonProgramFiles",
-    "NUMBER_OF_PROCESSORS",
-    "PROCESSOR_ARCHITECTURE",
-    "OS",
-    "SystemRoot",
-];
-
-/// The daemon's environment: the home's own (`home`), then the machine's `MACHINE` variables as
-/// `lookup` has them, with `first` first on its `PATH` where there is one.
+/// The daemon's environment: the home's own (`home`), the switches that keep every harness from
+/// updating, and `first` first on its `PATH` (as `lookup` has the search path) where there is one.
+/// What the machine is (where programs are, what the system is called) is the spawn door's to
+/// give ([`cf_e2e::process::Run`]); never a variable that says where a login or a setting is.
 fn daemon_vars(
     home: Vec<(String, String)>,
     lookup: &dyn Fn(&str) -> Option<String>,
     first: Option<&Path>,
 ) -> Result<Vec<(String, String)>> {
     let mut vars = home;
-    for name in MACHINE {
-        if let Some(value) = lookup(name) {
-            vars.retain(|(known, _)| known != name);
-            vars.push((name.to_owned(), value));
-        }
-    }
     // No harness the daemon starts for its look updates or installs anything.
     for (name, value) in launcher::updates_off() {
         vars.retain(|(known, _)| known != name);
@@ -370,22 +347,10 @@ mod tests {
         // the machine on top of them (`Run`'s own merge) is never the owner's drive or path.
         assert_eq!(get("HOMEDRIVE"), Some("K:"));
         assert_eq!(get("HOMEPATH"), Some("\\kit\\home"));
-        let child_vars: Vec<(std::ffi::OsString, std::ffi::OsString)> =
-            vars.iter().map(|(k, v)| (k.into(), v.into())).collect();
-        let merged = cf_e2e::process::required_from(&child_vars, true, true, &|name| {
-            owner(name).map(Into::into)
-        });
-        for (name, value) in &merged {
-            assert!(
-                !value.to_string_lossy().contains("the-owners"),
-                "{name} is the owner's after Run's merge"
-            );
-        }
         assert!(
             vars.iter().all(|(_, value)| !value.contains("the-owners")),
             "{vars:?}"
         );
-        assert_eq!(get("OS"), Some("Windows_NT"));
         assert!(get("PATH")
             .is_some_and(|path| path.starts_with("/pi/bin") && path.contains("/usr/bin")));
     }

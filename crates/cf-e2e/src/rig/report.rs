@@ -484,7 +484,6 @@ mod tests {
             "rig::report::tests::a_nested_dropped_rig_report_is_said",
             std::time::Duration::from_secs(30),
         )
-        .inheriting_env()
         .args(["--ignored", "--nocapture"])
         .run()
         .unwrap();
@@ -656,15 +655,15 @@ mod tests {
         let config = crate::door::made("cf-test-").unwrap();
         assert_eq!(written(config.path()), "  nothing\n");
         let at = |relative: &str| config.path().join(relative);
-        fs::create_dir_all(at("sessions")).unwrap();
-        fs::create_dir_all(at("projects/integration")).unwrap();
+        crate::door::make_dir(at("sessions")).unwrap();
+        crate::door::make_dir(at("projects/integration")).unwrap();
         // A process id no 32-bit integer holds is a process that is gone.
-        fs::write(
+        crate::door::write(
             at("sessions/2.json"),
             r#"{"pid":4000000000,"sessionId":"b","status":"idle"}"#,
         )
         .unwrap();
-        fs::write(
+        crate::door::write(
             at("sessions/1.json"),
             format!(
                 r#"{{"pid":{},"sessionId":"a","status":"busy"}}"#,
@@ -672,8 +671,8 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::write(at("sessions/notes.txt"), "not a status").unwrap();
-        fs::write(
+        crate::door::write(at("sessions/notes.txt"), "not a status").unwrap();
+        crate::door::write(
             at("projects/integration/a.jsonl"),
             "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
         )

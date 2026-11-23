@@ -541,7 +541,6 @@ fn ps(pid: Option<u32>) -> Result<Vec<Running>> {
     };
     let ran = Run::new("ps")
         .args(words)
-        .inheriting_env()
         .var("LC_ALL", "C")
         .run()?;
     // `ps -p` of a number no process has says nothing, and ends with 1.
@@ -621,7 +620,6 @@ fn table_script(which: &str) -> String {
 fn table_run() -> Run {
     Run::new("powershell")
         .args(["-NoProfile", "-Command", &table_script("")])
-        .inheriting_env()
         .limit(crate::process::POWERSHELL_LIMIT)
 }
 

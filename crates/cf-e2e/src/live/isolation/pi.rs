@@ -457,8 +457,6 @@ pub fn git_copy(package: &Path) -> std::result::Result<String, String> {
             .arg("-C")
             .arg(package)
             .args(args.iter().copied())
-            .finding_programs()
-            .inheriting_env()
             .run()
             .map_err(|why| format!("could not be read with git ({why})"))?;
         if ran.code != Some(0) {

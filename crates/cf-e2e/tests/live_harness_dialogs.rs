@@ -388,10 +388,10 @@ mod tests {
     #[test]
     fn kit_round3_dialog_marketplace_root_does_not_follow_a_link_out() {
         let root = cf_e2e::door::made("cf-dialog-tree-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        fs::write(foreign.path().join("login"), "fabricated secret").unwrap();
+        let foreign = cf_e2e::door::made("t-").unwrap();
+        cf_e2e::door::write(foreign.path().join("login"), "fabricated secret").unwrap();
         let source = root.path().join("marketplace");
-        std::os::unix::fs::symlink(foreign.path(), &source).unwrap();
+        cf_e2e::door::symlink(foreign.path(), &source).unwrap();
         let target = root.path().join("copy");
         let _ = copy_tree(&source, &target);
         assert!(
@@ -436,13 +436,13 @@ mod tests {
         let mut layout = Layout::new().unwrap();
         let home = owners_home(&mut layout);
         // A caller's config folder, with files in it, that no run made: a person's own.
-        let callers = tempfile::tempdir().unwrap();
+        let callers = cf_e2e::door::made("t-").unwrap();
         let (settings, record) = (
             callers.path().join("settings.json"),
             callers.path().join(".claude.json"),
         );
-        fs::write(&settings, "{\"theme\":\"dark\"}").unwrap();
-        fs::write(&record, "{\"projects\":{}}").unwrap();
+        cf_e2e::door::write(&settings, "{\"theme\":\"dark\"}").unwrap();
+        cf_e2e::door::write(&record, "{\"projects\":{}}").unwrap();
         let refused = seed_marketplace_from(&home, callers.path());
         assert!(refused.is_err(), "a caller's config folder was written in");
         assert!(!callers.path().join("plugins").exists());

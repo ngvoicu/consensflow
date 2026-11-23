@@ -86,7 +86,7 @@ mod tests {
     #[ignore = "relinks target/release/cf 20 times: cargo test -p cf-e2e --lib -- --ignored a_cargo_build_of_cf --nocapture"]
     fn a_cargo_build_of_cf_takes_it_away_for_a_moment_and_the_copy_stays() {
         let built = cf::binary().unwrap().to_path_buf();
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let copy = copy_of(&built, folder.path()).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let (built_gone, copy_gone) =

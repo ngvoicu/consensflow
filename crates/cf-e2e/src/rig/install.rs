@@ -515,7 +515,6 @@ mod tests {
             "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var(CHILD, "1")
         .var(DECOY, &said)
         .run()
@@ -595,9 +594,9 @@ mod tests {
     fn a_rig_that_runs_muse_names_its_data_folder_by_its_real_path() {
         let folder = crate::door::made("cf-test-").unwrap();
         let real = folder.path().join("real");
-        std::fs::create_dir_all(real.join("home").join(".local").join("share")).unwrap();
+        crate::door::make_dir(real.join("home").join(".local").join("share")).unwrap();
         let linked = folder.path().join("linked");
-        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        crate::door::symlink(&real, &linked).unwrap();
         let muse = crate::muse::Installed {
             binary: PathBuf::from("/bin/muse-bin-1.4.14"),
             version: "1.4.14".to_owned(),

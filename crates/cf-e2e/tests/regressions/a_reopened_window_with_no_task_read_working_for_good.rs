@@ -55,7 +55,7 @@ const STAYS_AT_REST: u64 = 6;
 /// Devin's store as a GPT model's session leaves it: its messages carry no
 /// `finish_reason`.
 fn as_a_gpt_models_session_ends(store: &Path) -> Result<()> {
-    let db = Connection::open(store).map_err(|error| Error::Daemon(error.to_string()))?;
+    let db = cf_e2e::door::database::write(store).map_err(|error| Error::Daemon(error.to_string()))?;
     db.busy_timeout(secs(5))
         .map_err(|error| Error::Daemon(error.to_string()))?;
     let changed = db
@@ -118,7 +118,7 @@ fn a_finished_devin_worker_opened_again_with_no_task_reads_at_rest_whatever_its_
     as_a_gpt_models_session_ends(&store)?;
     let launches = rig.home().join("integrations").join("devin");
     if launches.is_dir() {
-        fs::remove_dir_all(&launches)?;
+        cf_e2e::door::remove(&launches)?;
     }
 
     // The human opens its window, with no task.

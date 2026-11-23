@@ -152,11 +152,11 @@ mod tests {
     #[test]
     fn kit_round3_muse_catalog_skips_links_out() {
         let root = crate::door::made("cf-muse-catalog-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+        let foreign = crate::door::made("t-").unwrap();
+        crate::door::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
         let catalog = root.path().join("catalog");
-        std::fs::create_dir(&catalog).unwrap();
-        std::os::unix::fs::symlink(foreign.path().join("login"), catalog.join("leak")).unwrap();
+        crate::door::make_dir(&catalog).unwrap();
+        crate::door::symlink(foreign.path().join("login"), catalog.join("leak")).unwrap();
         let target = root.path().join("copy");
         super::copy_folder_kept(&catalog, &target).unwrap();
         assert!(
@@ -188,10 +188,10 @@ mod tests {
         #[cfg(unix)]
         {
             let store = run.path().join("devin/cli/sessions.db");
-            std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+            crate::door::make_dir(store.parent().unwrap()).unwrap();
             let foreign = owner.path().join("sessions.db");
-            std::fs::write(&foreign, "fabricated").unwrap();
-            std::os::unix::fs::symlink(&foreign, &store).unwrap();
+            crate::door::write(&foreign, "fabricated").unwrap();
+            crate::door::symlink(&foreign, &store).unwrap();
             for (windows, key) in [(false, "XDG_DATA_HOME"), (true, "APPDATA")] {
                 let env = vec![(key.to_owned(), run.path().display().to_string())];
                 assert!(devin_store_path(windows, &env).is_err());
@@ -205,11 +205,11 @@ mod tests {
         let run = crate::door::made("cf-devin-sidecar-").unwrap();
         let foreign = crate::standin_process::unowned_tempdir();
         let store = run.path().join("devin/cli/sessions.db");
-        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-        std::fs::write(&store, "fabricated").unwrap();
+        crate::door::make_dir(store.parent().unwrap()).unwrap();
+        crate::door::write(&store, "fabricated").unwrap();
         let target = foreign.path().join("foreign-wal");
-        std::fs::write(&target, "fabricated").unwrap();
-        std::os::unix::fs::symlink(&target, store.with_file_name("sessions.db-wal")).unwrap();
+        crate::door::write(&target, "fabricated").unwrap();
+        crate::door::symlink(&target, store.with_file_name("sessions.db-wal")).unwrap();
         let env = vec![("XDG_DATA_HOME".to_owned(), run.path().display().to_string())];
         assert!(
             devin_store_path(false, &env).is_err(),
@@ -222,16 +222,16 @@ mod tests {
         let root = crate::door::made("cf-test-muse-login-").unwrap();
         let home = root.path().join("owner");
         let scratch = root.path().join("run");
-        std::fs::create_dir_all(home.join(".config/muse")).unwrap();
-        std::fs::create_dir_all(home.join(".local/share/muse/model-catalog")).unwrap();
-        std::fs::write(
+        crate::door::make_dir(home.join(".config/muse")).unwrap();
+        crate::door::make_dir(home.join(".local/share/muse/model-catalog")).unwrap();
+        crate::door::write(
             home.join(".config/muse/auth.json"),
             r#"{"providers":{"meta":{"storage":"keychain","refreshToken":"fake","nested":[{"ReFrEsH_secret":"fake"}],"access":"kept"}}}"#,
         ).unwrap();
         let auth = std::fs::read_to_string(home.join(".config/muse/auth.json")).unwrap();
         login_in_keychain(&auth).unwrap();
         // A later owner change must not replace the login the caller checked in memory.
-        std::fs::write(
+        crate::door::write(
             home.join(".config/muse/auth.json"),
             "changed after the read",
         )
@@ -275,8 +275,8 @@ mod tests {
     #[test]
     fn the_scratch_folder_goes_when_the_run_fails_as_when_it_ends() {
         let fill = |folder: &Path| {
-            std::fs::create_dir_all(folder.join("config/muse")).unwrap();
-            std::fs::write(folder.join("config/muse/auth.json"), "{}").unwrap();
+            crate::door::make_dir(folder.join("config/muse")).unwrap();
+            crate::door::write(folder.join("config/muse/auth.json"), "{}").unwrap();
         };
         let scratch = Scratch::made("muse-reads-test-").unwrap();
         let folder = scratch.path().to_path_buf();
@@ -302,8 +302,8 @@ mod tests {
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         let root = crate::door::made("cf-test-").unwrap();
         let source = root.path().join("auth.json");
-        std::fs::write(&source, "{}").unwrap();
-        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        crate::door::write(&source, "{}").unwrap();
+        crate::door::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
         let target = root.path().join("scratch/config/muse/auth.json");
         copy_kept(&source, &target).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{}");
@@ -313,10 +313,10 @@ mod tests {
         }
         // A file that was readable stays so, and a folder copies file by file.
         let catalog = root.path().join("model-catalog");
-        std::fs::create_dir_all(catalog.join("inner")).unwrap();
-        std::fs::write(catalog.join("rows.json"), "[]").unwrap();
-        std::fs::write(catalog.join("inner/more.json"), "[]").unwrap();
-        std::fs::set_permissions(
+        crate::door::make_dir(catalog.join("inner")).unwrap();
+        crate::door::write(catalog.join("rows.json"), "[]").unwrap();
+        crate::door::write(catalog.join("inner/more.json"), "[]").unwrap();
+        crate::door::set_permissions(
             catalog.join("rows.json"),
             std::fs::Permissions::from_mode(0o644),
         )
@@ -333,8 +333,8 @@ mod tests {
         let (home, scratch) = (root.path().join("home"), root.path().join("scratch"));
         let config = home.join(".config/muse");
         let catalog = home.join(".local/share/muse/model-catalog");
-        std::fs::create_dir_all(&config).unwrap();
-        std::fs::create_dir_all(&catalog).unwrap();
+        crate::door::make_dir(&config).unwrap();
+        crate::door::make_dir(&catalog).unwrap();
         // The files of the human's folder: the login, the settings and their backup, what it
         // trusts, a lock; and the one cache.
         for name in [
@@ -344,12 +344,12 @@ mod tests {
             "trust.json",
             ".auth.json.lock",
         ] {
-            std::fs::write(config.join(name), "{}").unwrap();
+            crate::door::write(config.join(name), "{}").unwrap();
         }
-        std::fs::write(catalog.join("6d657461__p746268.json"), "{}").unwrap();
+        crate::door::write(catalog.join("6d657461__p746268.json"), "{}").unwrap();
         // Something else of the data folder, a session, which is the human's.
-        std::fs::create_dir_all(home.join(".local/share/muse/sessions")).unwrap();
-        std::fs::write(home.join(".local/share/muse/sessions/one.jsonl"), "{}").unwrap();
+        crate::door::make_dir(home.join(".local/share/muse/sessions")).unwrap();
+        crate::door::write(home.join(".local/share/muse/sessions/one.jsonl"), "{}").unwrap();
         let auth = std::fs::read_to_string(config.join("auth.json")).unwrap();
         copy_muse_into(&home, &scratch, &auth).unwrap();
         let mut found: Vec<String> = Vec::new();

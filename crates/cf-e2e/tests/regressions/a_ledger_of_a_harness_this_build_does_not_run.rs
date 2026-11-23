@@ -58,7 +58,7 @@ fn tier(added: &Value) -> &str {
 /// worker and their conversations on it.
 fn written_by_an_older_build(root: &Path) -> Outcome {
     let home = root.join("consensflow");
-    let ledger = Connection::open(home.join("consensflow.db"))?;
+    let ledger = cf_e2e::door::database::write(home.join("consensflow.db"))?;
     // Every participant that runs on a harness: the chief, the worker and its session.
     let moved = ledger.execute(
         "UPDATE participant SET harness = ?1 WHERE harness IS NOT NULL",

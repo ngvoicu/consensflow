@@ -378,13 +378,11 @@ mod tests {
         let command = LongCommand::new(mark);
         let mut decoy = crate::process::Run::new("node")
             .args(["-e", "setTimeout(() => {}, 30000)", mark])
-            .inheriting_env()
             .spawn()
             .unwrap();
         // The command this run starts, as a member is told to run it.
         let mut own = crate::process::Run::new("node")
             .args(["-e", "setTimeout(() => {}, 30000)", run_word(), mark])
-            .inheriting_env()
             .spawn()
             .unwrap();
         let (pid, own_pid) = (decoy.id(), own.id());
@@ -445,7 +443,7 @@ mod tests {
         } else {
             crate::process::Run::new("/bin/sh").args(["-c", &format!("sleep 30; : {mark}")])
         };
-        let mut outsider = outsider.inheriting_env().spawn().unwrap();
+        let mut outsider = outsider.spawn().unwrap();
         // The window's program (100), its agent (101, Devin's runs its commands), the
         // command the agent runs (102) and what that started (103); and outside the window
         // the process that says the mark too, and one that says nothing of it.
@@ -512,8 +510,6 @@ mod tests {
         // And the script does what it says, run by this machine's Node.
         let ran = crate::process::Run::new("node")
             .args(["-e", &ticking_script(3, 1)])
-            .inheriting_env()
-            .finding_programs()
             .run()
             .unwrap();
         assert_eq!(ran.code, Some(0), "{ran}");
@@ -726,7 +722,6 @@ mod tests {
         let shell = |line: String| {
             Run::new("/bin/sh")
                 .args(["-c", &line])
-                .inheriting_env()
                 .spawn()
                 .unwrap()
         };

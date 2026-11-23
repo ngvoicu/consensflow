@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use cf_e2e::live::keychain::{self, forget, item_of, without_keychain};
+use cf_e2e::live::keychain::{without_keychain, Control, Listing, OwnItem};
 use cf_e2e::live::launcher::{updates_off, Guard};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, Harness, Installed, Log, ISOLATION};
@@ -177,22 +177,34 @@ fn answer(mut stream: TcpStream, port: u16, count: &AtomicUsize) {
     let _ = stream.write_all(reply.as_bytes());
 }
 
-/// The throwaway folders of a run, whose Keychain items are deleted (those, by name, that the
-/// controls made) when the run ends, however it ends.
+/// The throwaway folders of a run, and the Keychain items the run gained for them: those, and no
+/// other, are deleted when the case is done with them or the run ends, however it ends. An item
+/// is the run's only where a listing before and a listing after, both of which succeeded, show it
+/// gained for a folder this run made ([`Listing::issue`], T-2002).
 struct Folders {
-    made: Vec<PathBuf>,
+    issued: Vec<OwnItem>,
+    control: Control,
     // Last, as every temporary folder goes in what owns it (Windows removes none from under
     // a file still open in it).
     parent: cf_e2e::door::Made,
 }
 
 impl Folders {
-    fn new() -> Result<Self> {
+    fn new(control: Control) -> Result<Self> {
         Ok(Self {
             parent: cf_e2e::door::made("live-keychain-")
                 .map_err(io("make a folder", Path::new("tmp")))?,
-            made: Vec::new(),
+            issued: Vec::new(),
+            control,
         })
+    }
+
+    /// Deletes the items this run gained so far, each the run's own.
+    fn forget_issued(&mut self) -> Result {
+        for item in self.issued.drain(..) {
+            let _ = item.forget(&self.control)?;
+        }
+        Ok(())
     }
 
     /// A config folder with the onboarding answered, the servers of `servers` in its own config
@@ -225,7 +237,6 @@ impl Folders {
                 .map_err(std::io::Error::from)
                 .map_err(io("write", &file))?;
         }
-        self.made.push(folder.clone());
         Ok(folder)
     }
 
@@ -280,8 +291,10 @@ impl Folders {
 
 impl Drop for Folders {
     fn drop(&mut self) {
-        for folder in &self.made {
-            let _ = forget(folder);
+        // Only the items this run issued: an item another run or the account's own holds, of a
+        // folder of this name or not, is none of these.
+        for item in self.issued.drain(..) {
+            let _ = item.forget(&self.control);
         }
     }
 }
@@ -305,6 +318,7 @@ struct Came {
 /// the folder came to, and how often `mcp` (the servers that ask for OAuth) was asked. The made-up
 /// login is the only secret in play. `front` is put first on the `PATH`.
 fn run(
+    folders: &mut Folders,
     claude: &Path,
     args: &[&str],
     folder: &Path,
@@ -312,7 +326,7 @@ fn run(
     (model, mcp): (&Server, &Server),
     front: Option<&Path>,
 ) -> Result<Came> {
-    let before = keychain::names().unwrap_or_default();
+    let before = Listing::take()?;
     let asked = mcp.asked();
     let path = front.map_or_else(
         || "/usr/bin:/bin:/usr/sbin:/sbin".to_owned(),
@@ -353,47 +367,21 @@ fn run(
         .limit(LIMIT)
         .run()?;
     thread::sleep(Duration::from_millis(500));
-    let now = keychain::names().unwrap_or_default();
-    let gained: BTreeSet<String> = now.difference(&before).cloned().collect();
-    let own = item_of(folder);
+    let now = Listing::take()?;
+    let gained: BTreeSet<String> = before.gained(&now);
+    let own = before.issue(&now, folder);
+    let named_for_the_folder = own.is_some();
+    let holds = own
+        .as_ref()
+        .map_or_else(Vec::new, |item| item.shape(&folders.control));
+    folders.issued.extend(own);
     Ok(Came {
-        named_for_the_folder: gained.contains(&own),
-        holds: if gained.contains(&own) {
-            shape_of(&own)
-        } else {
-            Vec::new()
-        },
+        named_for_the_folder,
+        holds,
         gained,
         asked: mcp.asked() - asked,
         login_kept: folder.join(".credentials.json").is_file(),
     })
-}
-
-/// The names of the top-level keys that the item `name` (made by this case, holding made-up data
-/// alone) holds, and the number of entries of each that is an object; never a value.
-fn shape_of(name: &str) -> Vec<String> {
-    let user = own_var("USER").unwrap_or_default();
-    let Ok(ran) = keychain::control(
-        "live_keychain::shape_of",
-        ["find-generic-password", "-s", name, "-a", &user, "-w"],
-        Duration::from_secs(60),
-    ) else {
-        return Vec::new();
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(ran.stdout.trim()) else {
-        return Vec::new();
-    };
-    value
-        .as_object()
-        .map(|keys| {
-            keys.iter()
-                .map(|(key, inner)| match inner.as_object() {
-                    Some(entries) => format!("{key}({})", entries.len()),
-                    None => key.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// What a run came to, in a line for a check's detail.
@@ -414,7 +402,7 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
 ) -> Result {
     // The controls make, read and delete an item in the login Keychain of the account that runs
     // them: only a test machine with an account of its own (K3, T-1979).
-    cf_e2e::live::renew::TestMachine::required_for("the Keychain control")?;
+    let control = Control::required_for("the Keychain control")?;
     let log = Log::own_agents("live keychain", "it opens no window and runs no model")?;
     let command = live::command("claude")?;
     let home = live::machine::home()?;
@@ -422,18 +410,14 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     // The binary itself, so that this run follows no link the owner's updater could move.
     let claude = fs::canonicalize(&command).map_err(io("read the link", &command))?;
     log.say(format!("claude is {} ({version})", claude.display()));
-    if keychain::names().is_none() {
-        return Err(Error::Daemon(
-            "the login Keychain cannot be listed here".to_owned(),
-        ));
-    }
+    Listing::take()?;
     let guard = Guard::new(Harness::Claude, &command, &home);
     guard.vars()?;
     // One server is the model's (it answers 401 to all), the other is the MCP servers' that ask for OAuth.
     let model = Server::start()?;
     let server = Server::start()?;
     let both = (&model, &server);
-    let mut folders = Folders::new()?;
+    let mut folders = Folders::new(control)?;
     let mut checks = Vec::new();
     let servers = [
         ("fake-oauth-0", server.url("/mcp-0")),
@@ -445,18 +429,18 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     // 1. The controls.
     let folder = folders.config("control-list", &servers, false)?;
     let project = folders.project("project-control-list", &[])?;
-    let came = run(&claude, &["mcp", "list"], &folder, &project, both, None)?;
+    let came = run(&mut folders, &claude, &["mcp", "list"], &folder, &project, both, None)?;
     checks.push(Check::new(
         "claude",
         "the control: `mcp list` on a folder with no login makes the folder's Keychain item, of the name the kit computes, holding the servers' OAuth state alone",
         came.named_for_the_folder && came.holds == ["mcpOAuth(2)"] && !came.login_kept && came.asked > 0,
         line(&came),
     ));
-    let _ = forget(&folder)?;
+    folders.forget_issued()?;
 
     let folder = folders.config("control-login", &servers, true)?;
     let project = folders.project("project-control-login", &[])?;
-    let came = run(&claude, &session, &folder, &project, both, None)?;
+    let came = run(&mut folders, &claude, &session, &folder, &project, both, None)?;
     checks.push(Check::new(
         "claude",
         "the control: a session on a folder with a made-up login makes the item hold the login and the servers' state, and takes the login out of the folder",
@@ -466,7 +450,7 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
             && !came.login_kept,
         line(&came),
     ));
-    let _ = forget(&folder)?;
+    folders.forget_issued()?;
 
     let folder = folders.config("control-plugin", &[], true)?;
     let project = folders.project("project-control-plugin", &[])?;
@@ -477,14 +461,14 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
         .copied()
         .chain(["--plugin-dir", plugin_flag.as_str()])
         .collect();
-    let came = run(&claude, &with_plugin, &folder, &project, both, None)?;
+    let came = run(&mut folders, &claude, &with_plugin, &folder, &project, both, None)?;
     checks.push(Check::new(
         "claude",
         "the control: a plugin's server that asks for OAuth makes the item too",
         came.named_for_the_folder && came.asked > 0,
         line(&came),
     ));
-    let _ = forget(&folder)?;
+    folders.forget_issued()?;
 
     // 2. The kit's flags.
     for (what, in_config, in_project, with_a_plugin) in [
@@ -508,14 +492,14 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
         if with_a_plugin {
             args.extend(["--plugin-dir", plugin_flag.as_str()]);
         }
-        let came = run(&claude, &args, &folder, &project, both, None)?;
+        let came = run(&mut folders, &claude, &args, &folder, &project, both, None)?;
         checks.push(Check::new(
             "claude",
             &format!("with the kit's flags, a session reaches none of {what}, makes no item, and leaves the login in the folder"),
             came.asked == 0 && came.gained.is_empty() && came.login_kept,
             line(&came),
         ));
-        let _ = forget(&folder)?;
+        folders.forget_issued()?;
     }
 
     // 3. A probe that cannot take the flag.
@@ -526,6 +510,7 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     let folder = folders.config("probe-no-keychain", &servers, false)?;
     let project = folders.project("project-probe", &[])?;
     let came = run(
+        &mut folders,
         &claude,
         &["mcp", "list"],
         &folder,
@@ -539,7 +524,7 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
         came.asked > 0 && came.gained.is_empty() && came.login_kept,
         line(&came),
     ));
-    let _ = forget(&folder)?;
+    folders.forget_issued()?;
 
     // 4. The guard saw the whole run.
     let closed = guard.finish();

@@ -23,7 +23,6 @@
 //! queued at the end of its record (as Claude Code 2.1.302 writes one), and the project is
 //! closed and resumed, or the app quits with the chief's window open and starts again.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
@@ -49,7 +48,7 @@ fn queued_at_the_quit(config: &str, session: &str) -> std::io::Result<()> {
         .join("projects")
         .join("integration")
         .join(format!("{session}.jsonl"));
-    let mut out = OpenOptions::new().append(true).open(file)?;
+    let mut out = cf_e2e::door::append(file)?;
     out.write_all(format!("{record}\n").as_bytes())
 }
 

@@ -223,7 +223,6 @@ fn start_host(
     let (mut host, host_env) = Run::new(pane_host)
         .vars(env.iter().map(|(name, value)| (name, value)))
         .var(HUMAN_KEYS, "1")
-        .finding_programs()
         .cwd(checkout::root())
         .spawn_on()?;
     let output = host

@@ -149,7 +149,7 @@ impl StatusLine {
     fn run(self, script: &Path, jobs: &Jobs) -> Result<(), String> {
         let mut run = Run::new("/bin/bash")
             .arg(script)
-            .inheriting_window_env()
+            .as_this_window(cf_e2e::door::spawn::Window::this())
             .closed_input();
         if self == Self::InAGroupOfItsOwn {
             run = run.own_group();
@@ -259,8 +259,8 @@ mod tests {
 
         let machine = cf_e2e::door::made("cf-test-").unwrap();
         let slow = machine.path().join("git");
-        fs::write(&slow, "#!/bin/sh\n/bin/sleep 3\necho machine\n").unwrap();
-        fs::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
+        cf_e2e::door::write(&slow, "#!/bin/sh\n/bin/sleep 3\necho machine\n").unwrap();
+        cf_e2e::door::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
         let config = cf_e2e::door::made("cf-test-").unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
         let ran = Run::new("/bin/bash")

@@ -201,13 +201,10 @@ pub fn any_case_at(folder: &Path) -> bool {
             .collect();
         if other != name {
             let spelled = at.with_file_name(other);
-            return match (
+            return same_file_or_default(
                 super::identity::of_path(&at),
                 super::identity::of_path(&spelled),
-            ) {
-                (Ok(one), Ok(other)) => one == other,
-                _ => false,
-            };
+            );
         }
         match at.parent() {
             Some(parent) => at = parent.to_path_buf(),
@@ -215,6 +212,19 @@ pub fn any_case_at(folder: &Path) -> bool {
         }
     }
     cfg!(any(windows, target_os = "macos"))
+}
+
+/// What the probe of a volume's case says, from the identity of a name and of its other
+/// spelling: the same file is a volume that compares names in any case, another file or a
+/// spelling that leads nowhere is one that does not. A probe that failed for another reason says
+/// nothing, and reads as the platform's default, never as a case-sensitive volume (T-2086 N8: a
+/// refused listing read as case-sensitive let `.CODEX` through on a Mac).
+fn same_file_or_default<T: PartialEq>(one: io::Result<T>, other: io::Result<T>) -> bool {
+    match (one, other) {
+        (Ok(one), Ok(other)) => one == other,
+        (Ok(_), Err(failed)) if failed.kind() == io::ErrorKind::NotFound => false,
+        _ => cfg!(any(windows, target_os = "macos")),
+    }
 }
 
 /// The names of `path`, each folded where `any_case`.
@@ -247,6 +257,52 @@ pub trait Registry {
     fn is_made_file(&self, real: &Path, any_case: bool) -> bool;
 }
 
+/// Every protected root as the judge holds it: where it resolves, and as it is spelled.
+fn resolved_roots(protected: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for root in protected {
+        // A root that cannot be resolved is held as spelled, and as nothing less.
+        match resolve(root) {
+            Ok(found) => roots.extend(found.iter().map(Resolved::whole)),
+            Err(_) => roots.push(std::path::absolute(root).unwrap_or_else(|_| root.clone())),
+        }
+        roots.push(std::path::absolute(root).unwrap_or_else(|_| root.clone()));
+    }
+    roots
+}
+
+/// The tree check of a removal, alone: refused where a protected root resolves to `path` (by its
+/// own name, where it is a link) or inside it. For the renewal's record, which lies inside a
+/// store and is taken whole: the judge's inside check cannot be asked of it, but the tree it
+/// takes must hold no root (T-2002 finding 3).
+pub fn tree_holds_no_root(path: &Path, protected: &[PathBuf]) -> io::Result<()> {
+    let last_is_link = fs::symlink_metadata(path).is_ok_and(|found| found.file_type().is_symlink());
+    let ways = if last_is_link {
+        let parent = path.parent().unwrap_or(path);
+        let name = path.file_name().map(OsString::from).unwrap_or_default();
+        let mut ways = resolve(parent)?;
+        for way in &mut ways {
+            way.absent.push(name.clone());
+        }
+        ways
+    } else {
+        resolve(path)?
+    };
+    let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));
+    let roots = resolved_roots(protected);
+    for way in &ways {
+        let place = way.whole();
+        if let Some(root) = roots.iter().find(|root| within(root, &place, any_case)) {
+            return Err(refused(format!(
+                "{} holds {}, a store of a harness or of the account, which no run takes away",
+                place.display(),
+                root.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Judges `path` for `act`, with the roots `protected` (as spelled) and what the run made
 /// (`made`): the place resolved, the one to act on, or why not.
 pub fn judge_with(
@@ -275,15 +331,7 @@ pub fn judge_with(
         )));
     }
     let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));
-    let mut roots = Vec::new();
-    for root in protected {
-        // A root that cannot be resolved is held as spelled, and as nothing less.
-        match resolve(root) {
-            Ok(found) => roots.extend(found.iter().map(Resolved::whole)),
-            Err(_) => roots.push(std::path::absolute(root).unwrap_or_else(|_| root.clone())),
-        }
-        roots.push(std::path::absolute(root).unwrap_or_else(|_| root.clone()));
-    }
+    let roots = resolved_roots(protected);
     for way in &ways {
         let place = way.whole();
         if let Some(root) = roots.iter().find(|root| within(&place, root, any_case)) {
@@ -333,4 +381,23 @@ pub fn judge_with(
         }));
     }
     Ok(place)
+}
+
+#[cfg(test)]
+mod case_probe_tests {
+    use super::*;
+
+    #[test]
+    fn a_case_probe_that_failed_reads_as_the_platforms_default_and_one_that_found_nothing_as_case_sensitive(
+    ) {
+        let default = cfg!(any(windows, target_os = "macos"));
+        let denied = || Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        let missing = || Err(io::Error::from(io::ErrorKind::NotFound));
+        assert!(same_file_or_default(Ok(1), Ok(1)));
+        assert!(!same_file_or_default(Ok(1), Ok(2)));
+        assert!(!same_file_or_default(Ok(1), missing()));
+        assert_eq!(same_file_or_default(Ok(1), denied()), default);
+        assert_eq!(same_file_or_default(denied(), Ok(1)), default);
+        assert_eq!(same_file_or_default::<u8>(denied(), denied()), default);
+    }
 }

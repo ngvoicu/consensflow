@@ -37,7 +37,6 @@ fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {
         "live::machine::tests::standin_isolation_muse_launcher_refuses_an_inherited_harness_home",
         std::time::Duration::from_secs(120),
     )
-    .inheriting_env()
     .arg("--nocapture")
     .var("CODEX_HOME", &codex)
     .var(CHILD, &codex)
@@ -176,13 +175,12 @@ fn t1700_login_only_needs_no_owner_configuration_mark() {
     }
     let root = crate::door::made("cf-parity-no-mark-").unwrap();
     let home = root.path().join("owner");
-    fs::create_dir(&home).unwrap();
+    crate::door::make_dir(&home).unwrap();
     let output = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
         Duration::from_secs(30),
     )
-    .inheriting_env()
     .var(CHILD, "1")
     .var("HOME", &home)
     .var("USERPROFILE", &home)
@@ -220,8 +218,8 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
     // holds its output for twenty seconds.
     let folder = crate::door::made("cf-test-").unwrap();
     let wrapper = folder.path().join("pi");
-    std::fs::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
+    crate::door::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
     let started = std::time::Instant::now();
     let said = Installed::at(Harness::Pi, &wrapper, "home").version();
     assert!(started.elapsed() < std::time::Duration::from_secs(15));
@@ -258,10 +256,10 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Codex) {
         assert!(!held(harness, home.path()), "{harness:?}");
     }
-    fs::write(home.path().join(".claude.json"), "{}").unwrap();
+    crate::door::write(home.path().join(".claude.json"), "{}").unwrap();
     assert!(held(Harness::Claude, home.path()));
     assert!(!held(Harness::Pi, home.path()));
-    fs::create_dir_all(home.path().join(".config").join("devin")).unwrap();
+    crate::door::make_dir(home.path().join(".config").join("devin")).unwrap();
     assert!(held(Harness::Devin, home.path()));
     // Codex's home is the folder itself: any folder that is there.
     assert!(held(Harness::Codex, home.path()));
@@ -273,14 +271,14 @@ fn devin_keeps_its_login_in_devin_under_appdata_on_windows_and_in_the_xdg_places
     // A Windows profile as zeewin has it: Devin's login, config and sessions are in
     // `AppData\Roaming\devin`, and `.config` and `.local` are not there at all.
     let windows = crate::door::made("cf-test-").unwrap();
-    fs::create_dir_all(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
+    crate::door::make_dir(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
     assert!(held(Harness::Devin, windows.path(), None, true));
     assert!(!held(Harness::Devin, windows.path(), None, false));
     // A Mac's or Linux's: the XDG places, either of them.
     for place in [".config/devin", ".local/share/devin"] {
         let unix = crate::door::made("cf-test-").unwrap();
         assert!(!held(Harness::Devin, unix.path(), None, false), "{place}");
-        fs::create_dir_all(unix.path().join(place)).unwrap();
+        crate::door::make_dir(unix.path().join(place)).unwrap();
         assert!(held(Harness::Devin, unix.path(), None, false), "{place}");
         assert!(!held(Harness::Devin, unix.path(), None, true), "{place}");
     }
@@ -292,12 +290,12 @@ fn where_windows_names_its_appdata_devin_is_looked_for_there_and_not_in_the_prof
     let redirected = crate::door::made("cf-test-").unwrap();
     let appdata = redirected.path().to_string_lossy().into_owned();
     let own = profile.path().join("AppData").join("Roaming").join("devin");
-    fs::create_dir_all(&own).unwrap();
+    crate::door::make_dir(&own).unwrap();
     let places =
         |appdata: Option<&str>| login_places(Harness::Devin, profile.path(), appdata, true);
     assert_eq!(places(Some(&appdata)), [redirected.path().join("devin")]);
     assert!(!held(Harness::Devin, profile.path(), Some(&appdata), true));
-    fs::create_dir_all(redirected.path().join("devin")).unwrap();
+    crate::door::make_dir(redirected.path().join("devin")).unwrap();
     assert!(held(Harness::Devin, profile.path(), Some(&appdata), true));
     // A machine that names none, or names it empty, has it in the profile's own.
     assert_eq!(places(None), std::slice::from_ref(&own));
@@ -651,7 +649,7 @@ fn a_muse_version_is_read_from_its_version_file_and_no_muse_starts_for_it() {
     assert_eq!(install.version(), "1.4.25-R9361.1");
     assert!(!started.exists(), "Muse was started for its version");
     // With no version file there is no version, and still no start.
-    std::fs::remove_file(root.path().join(".muse-version")).unwrap();
+    crate::door::remove(root.path().join(".muse-version")).unwrap();
     assert_eq!(install.version(), "unknown");
     assert!(!started.exists(), "Muse was started for its version");
 }
@@ -716,8 +714,8 @@ fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name
     let home = crate::door::made("cf-test-").unwrap();
     // Another run's folder of the name the case asks for: it is not this case's.
     let live = live_root(home.path());
-    fs::create_dir_all(live.join("paste")).unwrap();
-    fs::write(live.join("paste").join("README.md"), "another run's").unwrap();
+    crate::door::make_dir(live.join("paste")).unwrap();
+    crate::door::write(live.join("paste").join("README.md"), "another run's").unwrap();
 
     let folder = live_folder_in(home.path(), "paste").unwrap();
     assert_eq!(folder.parent(), Some(live.as_path()));
@@ -768,7 +766,7 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
 {
     let home = crate::door::made("cf-test-").unwrap();
     let config = crate::door::made("consensflow-seed-test-").unwrap();
-    fs::write(
+    crate::door::write(
         config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"projects":{"/elsewhere":{"hasTrustDialogAccepted":false}}}"#,
     )
@@ -812,13 +810,12 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
     // A synthetic folder outside the run's handed roots stays foreign to the
     // child, including when this test runs again under a say-only audit.
     let given = crate::standin_process::unowned_tempdir();
-    fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    crate::door::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
     let child = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed",
         std::time::Duration::from_secs(120),
     )
-    .inheriting_env()
     .var(FOREIGN, given.path())
     .run()
     .unwrap();
@@ -829,7 +826,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         let home = crate::door::made("cf-test-").unwrap();
         let made = crate::door::made("consensflow-seed-test-").unwrap();
         let target = given.path().join("elsewhere.json");
-        fs::write(&target, "{}").unwrap();
+        crate::door::write(&target, "{}").unwrap();
         crate::door::symlink(&target, made.path().join(".claude.json")).unwrap();
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
@@ -893,7 +890,7 @@ fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
 fn the_owners_own_claude_config_is_never_seeded() {
     let home = crate::door::made("cf-test-").unwrap();
     let owners = home.path().join(".claude");
-    fs::create_dir_all(&owners).unwrap();
+    crate::door::make_dir(&owners).unwrap();
     for config in [home.path().to_path_buf(), owners.clone()] {
         assert!(
             seed_claude_trust(&config, home.path()).is_err(),
@@ -956,7 +953,7 @@ fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
     let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
     assert!(why.contains("home"), "{why}");
     let home = crate::door::made("cf-test-").unwrap();
-    std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
+    crate::door::make_dir(home.path().join(".config").join("muse")).unwrap();
     assert_eq!(
         login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
         None
@@ -990,8 +987,8 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
 fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons() {
     let person = crate::door::made("cf-test-").unwrap();
     let theirs = person.path().join(".codex");
-    fs::create_dir_all(&theirs).unwrap();
-    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    crate::door::make_dir(&theirs).unwrap();
+    crate::door::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
     let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
         super::super::isolation::Isolation::codex(person.path(), &theirs),
     ));
@@ -1038,8 +1035,8 @@ fn a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables() {
     }
     // One whose isolation is variables still answers with them.
     let theirs = person.path().join(".codex");
-    fs::create_dir_all(&theirs).unwrap();
-    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    crate::door::make_dir(&theirs).unwrap();
+    crate::door::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
     let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
         super::super::isolation::Isolation::codex(person.path(), &theirs),
     ));

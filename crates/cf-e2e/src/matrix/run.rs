@@ -422,7 +422,6 @@ pub fn source() -> Value {
         crate::process::Run::new("git")
             .args(words)
             .cwd(crate::checkout::root())
-            .inheriting_env()
             .run()
             .map(|ran| ran.stdout.trim().to_owned())
             .unwrap_or_default()

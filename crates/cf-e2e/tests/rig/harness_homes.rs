@@ -24,7 +24,7 @@ const SENTINEL: &str = "SENTINEL-the-owners-own";
 /// A pretend owner: a home with the three harnesses' setups in it, each file holding the
 /// sentinel, and a Pi login of a key.
 struct Owner {
-    home: tempfile::TempDir,
+    home: cf_e2e::door::Made,
 }
 
 type Made<T> = Result<T, Box<dyn std::error::Error>>;
@@ -32,7 +32,7 @@ type Made<T> = Result<T, Box<dyn std::error::Error>>;
 impl Owner {
     fn new() -> Made<Self> {
         let owner = Self {
-            home: tempfile::tempdir()?,
+            home: cf_e2e::door::made("t-")?,
         };
         for file in [
             ".pi/agent/settings.json",
@@ -72,8 +72,8 @@ impl Owner {
 
     fn write(&self, below: &str, text: &str) -> Made<()> {
         let file = self.path(below);
-        fs::create_dir_all(file.parent().ok_or("a file below the home has a folder")?)?;
-        fs::write(file, text)?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file below the home has a folder")?)?;
+        cf_e2e::door::write(file, text)?;
         Ok(())
     }
 
@@ -187,8 +187,8 @@ fn a_run_that_writes_only_in_its_homes_leaves_the_owners_setup_as_it_was() -> Ou
     // What the harnesses write as they run: sessions, settings, a trust table, a database.
     let write = |folder: PathBuf, file: &str| -> Made<()> {
         let file = folder.join(file);
-        fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
-        fs::write(file, "the run's own")?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file has a folder")?)?;
+        cf_e2e::door::write(file, "the run's own")?;
         Ok(())
     };
     write(
@@ -296,7 +296,7 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
     let before = owner.everything()?;
     // No window runs Muse here; a live rig asks Muse its allowance before it writes its
     // launcher (T-1076), which this one answers, at 10% of its window and its week.
-    let bin = tempfile::tempdir()?;
+    let bin = cf_e2e::door::made("t-")?;
     let binary = bin.path().join("muse-bin-1.4.14-R7309.1");
     cf_e2e::files::write_executable(
         &binary,
@@ -357,8 +357,8 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
             .join(".local/share/muse/sessions/2026/11/02")
             .join(session)
             .join("session.jsonl");
-        fs::create_dir_all(log.parent().ok_or("a log has a folder")?)?;
-        fs::write(&log, "{}\n")?;
+        cf_e2e::door::make_dir(log.parent().ok_or("a log has a folder")?)?;
+        cf_e2e::door::write(&log, "{}\n")?;
         let found = named(&rig, "XDG_DATA_HOME")
             .join("muse/sessions/2026/11/02")
             .join(session)

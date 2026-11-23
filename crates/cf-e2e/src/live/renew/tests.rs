@@ -244,14 +244,14 @@ mod running {
             "#!/bin/sh\nprintf '%s\\n' \"$*\" > '{log}'\npwd >> '{log}'\n{body}\nexit {status}\n",
             log = log.display()
         );
-        fs::write(&program, script).unwrap();
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::door::write(&program, script).unwrap();
+        crate::door::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
         program
     }
 
     #[test]
     fn the_harness_runs_once_in_a_folder_of_a_run_that_goes_with_it() {
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "", 0);
         one_shot(
@@ -300,14 +300,14 @@ mod running {
     /// the renewal, is the owner's: it is left as it was, its target with it, and said.
     #[test]
     fn a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said() {
-        let records = tempfile::tempdir().unwrap();
-        let target = tempfile::tempdir().unwrap();
-        fs::write(target.path().join("private"), "keep private").unwrap();
-        let own = tempfile::Builder::new().prefix(FOLDER).tempdir().unwrap();
+        let records = crate::door::made("t-").unwrap();
+        let target = crate::door::made("t-").unwrap();
+        crate::door::write(target.path().join("private"), "keep private").unwrap();
+        let own = crate::door::made(FOLDER).unwrap();
         let its = records.path().join(record_name_of(own.path()));
         // A link at the name, made before the renewal and made during it.
-        let baseline = inventory(&[records.path()]);
-        std::os::unix::fs::symlink(target.path(), &its).unwrap();
+        let baseline = crate::door::renewal::Listing::of(&[records.path()]).unwrap();
+        crate::door::symlink(target.path(), &its).unwrap();
         let said = forget(&[records.path()], own.path(), &baseline, Some(&machine()))
             .expect("a link is refused");
         assert!(said.contains("is a link"), "{said}");
@@ -316,11 +316,11 @@ mod running {
             fs::read_to_string(target.path().join("private")).unwrap(),
             "keep private"
         );
-        fs::remove_file(&its).unwrap();
+        crate::door::remove(&its).unwrap();
         // A real folder that was there before the renewal began.
-        fs::create_dir_all(its.join("memory")).unwrap();
-        fs::write(its.join("memory/note.md"), "the owner's").unwrap();
-        let baseline = inventory(&[records.path()]);
+        crate::door::make_dir(its.join("memory")).unwrap();
+        crate::door::write(its.join("memory/note.md"), "the owner's").unwrap();
+        let baseline = crate::door::renewal::Listing::of(&[records.path()]).unwrap();
         let said = forget(&[records.path()], own.path(), &baseline, Some(&machine()))
             .expect("a baseline entry");
         assert!(said.contains("was there before the renewal"), "{said}");
@@ -334,7 +334,7 @@ mod running {
     /// the account's home by name, never the caller's environment passed on.
     #[test]
     fn the_renewal_is_given_the_accounts_home_by_name_and_nothing_of_the_callers() {
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let seen = scratch.path().join("env");
         let program = stand_in(
@@ -374,11 +374,11 @@ mod running {
     fn the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error(
     ) {
         use std::os::unix::fs::PermissionsExt;
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let outside = scratch.path().join("outside");
-        fs::create_dir_all(&outside).unwrap();
-        fs::write(outside.join("theirs"), "theirs").unwrap();
+        crate::door::make_dir(&outside).unwrap();
+        crate::door::write(outside.join("theirs"), "theirs").unwrap();
         let leaving = format!(
             "mkdir -p .claude/deep && echo x > .claude/deep/f && ln -s '{}' link",
             outside.display()
@@ -411,13 +411,13 @@ mod running {
             "{said}"
         );
         // Put right what the test made unremovable, so that the scratch can go.
-        let _ = fs::set_permissions(stuck.join("stuck/inner"), fs::Permissions::from_mode(0o700));
-        let _ = fs::remove_dir_all(stuck);
+        let _ = crate::door::set_permissions(stuck.join("stuck/inner"), fs::Permissions::from_mode(0o700));
+        let _ = crate::door::remove(stuck);
     }
 
     #[test]
     fn a_harness_that_ended_badly_says_how_in_what_it_said_and_not_what_it_printed() {
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let printing = format!("echo {SECRET}; echo 'Not   logged in' >&2");
         let program = stand_in(scratch.path(), &log, &printing, 3);
@@ -452,7 +452,7 @@ mod running {
     /// so on an account that is no test machine it starts nothing and refuses.
     #[test]
     fn a_renewal_on_an_account_that_is_no_test_machine_starts_nothing_and_refuses() {
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "", 0);
         let refused = one_shot_within(None, Harness::Pi, &program, &[], &[], LIMIT, &[])
@@ -464,7 +464,7 @@ mod running {
 
     #[test]
     fn a_harness_that_goes_on_past_its_limit_is_ended_and_the_renewal_has_failed() {
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "sleep 30", 0);
         let started = Instant::now();
@@ -565,11 +565,11 @@ fn record_name_of(path: &std::path::Path) -> String {
 /// owner's (T-1557, finding 5).
 #[test]
 fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
-    let records = tempfile::tempdir().unwrap();
-    let own = tempfile::Builder::new().prefix(FOLDER).tempdir().unwrap();
+    let records = crate::door::made("t-").unwrap();
+    let own = crate::door::made(FOLDER).unwrap();
     let its = records.path().join(record_name_of(own.path()));
-    let baseline = inventory(&[records.path()]);
-    std::fs::create_dir_all(its.join("memory")).unwrap();
+    let baseline = crate::door::renewal::Listing::of(&[records.path()]).unwrap();
+    crate::door::make_dir(its.join("memory")).unwrap();
     let tail = own
         .path()
         .file_name()
@@ -577,8 +577,8 @@ fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
         .to_string_lossy()
         .into_owned();
     let other = records.path().join(format!("-Users-someone-work-{tail}"));
-    std::fs::create_dir_all(other.join("memory")).unwrap();
-    std::fs::write(other.join("memory").join("note.md"), "the owner's").unwrap();
+    crate::door::make_dir(other.join("memory")).unwrap();
+    crate::door::write(other.join("memory").join("note.md"), "the owner's").unwrap();
 
     assert_eq!(
         forget(&[records.path()], own.path(), &baseline, Some(&machine())),
@@ -590,4 +590,102 @@ fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
         other.join("memory").join("note.md").is_file(),
         "a record of the owner's whose name ends the same was taken"
     );
+}
+
+/// T-2119 N1-c: a marker the account itself stores marks nothing; one given for the run does, and
+/// where the registry cannot be read the marker marks nothing too.
+#[test]
+fn a_marker_the_account_stores_marks_no_test_machine() {
+    let stored = |names: &[&str]| -> std::result::Result<Vec<std::ffi::OsString>, String> {
+        Ok(names.iter().map(std::ffi::OsString::from).collect())
+    };
+    assert!(TestMachine::signalled_unless_stored(Some("kit"), stored(&["Path", "TEMP"])).is_some());
+    assert!(TestMachine::signalled_unless_stored(Some("kit"), stored(&[])).is_some());
+    for spelled in ["CONSENSFLOW_TEST_MACHINE", "consensflow_test_machine"] {
+        assert!(
+            TestMachine::signalled_unless_stored(Some("kit"), stored(&["Path", spelled]))
+                .is_none(),
+            "{spelled}"
+        );
+    }
+    assert!(
+        TestMachine::signalled_unless_stored(Some("kit"), Err("access denied".to_owned()))
+            .is_none()
+    );
+    assert!(TestMachine::signalled_unless_stored(None, stored(&[])).is_none());
+}
+
+/// T-1997 finding 9: a records folder that cannot be listed gives no listing, and the renewal
+/// does not run on a baseline that would take a record of the owner's for its own.
+#[cfg(unix)]
+#[test]
+fn a_records_folder_that_cannot_be_listed_gives_no_listing() {
+    use std::os::unix::fs::PermissionsExt;
+    let records = crate::door::made("t-").unwrap();
+    crate::door::make_dir(records.path().join("kept")).unwrap();
+    crate::door::set_permissions(records.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Whoever may read it anyway (a superuser) has a listing to show: the case is the refusal.
+    let listing = crate::door::renewal::Listing::of(&[records.path()]);
+    let readable = std::fs::read_dir(records.path()).is_ok();
+    crate::door::set_permissions(records.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(listing.is_ok(), readable);
+}
+
+/// T-1997 finding 9: a record named in another case is the one listed, and a folder that is not
+/// there holds no name.
+#[test]
+fn a_record_named_in_another_case_is_the_one_listed() {
+    let records = crate::door::made("t-").unwrap();
+    crate::door::make_dir(records.path().join("-Users-Someone-Work")).unwrap();
+    let listing = crate::door::renewal::Listing::of(&[records.path(), &records.path().join("absent")])
+        .unwrap();
+    assert!(listing.held(0, std::ffi::OsStr::new("-users-someone-work")));
+    assert!(!listing.held(0, std::ffi::OsStr::new("-users-someone-other")));
+    assert!(!listing.held(1, std::ffi::OsStr::new("-Users-Someone-Work")));
+}
+
+/// A record that stayed is the renewal's error, said and not dropped (T-1997 finding 9).
+#[test]
+fn a_record_that_stayed_is_the_renewals_error() {
+    let records = crate::door::made("t-").unwrap();
+    let own = crate::door::made(FOLDER).unwrap();
+    let baseline = crate::door::renewal::Listing::of(&[records.path()]).unwrap();
+    let its = records.path().join(record_name_of(own.path()));
+    crate::door::make_dir(&its).unwrap();
+    // No marked machine: the door leaves the record where it is, and the renewal says so.
+    let said = forget(&[records.path()], own.path(), &baseline, None)
+        .expect("a record that stayed is said");
+    assert!(said.contains("not taken away"), "{said}");
+    assert!(its.exists());
+}
+
+/// The renewal's door runs Claude Code's and Pi's logins alone, and only in a folder this run made.
+#[test]
+fn the_renewals_door_runs_two_harnesses_in_a_folder_the_run_made() {
+    let outside = std::env::temp_dir();
+    let program = Path::new("/bin/true");
+    let refused = crate::door::renewal::start(
+        &machine(),
+        Harness::Codex,
+        program,
+        &[],
+        &[],
+        &outside,
+        Duration::from_secs(5),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("is not renewed by the kit"), "{refused}");
+    let refused = crate::door::renewal::start(
+        &machine(),
+        Harness::Pi,
+        program,
+        &[],
+        &[],
+        &outside,
+        Duration::from_secs(5),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("a folder this run made"), "{refused}");
 }

@@ -393,13 +393,13 @@ mod tests {
     fn the_quota_files_removal_is_the_doors_and_only_below_a_folder_the_run_made() {
         let own = crate::door::made("consensflow-quota-test-").unwrap();
         let spent = own.path().join(".matrix-quota-spent");
-        std::fs::write(&spent, "").unwrap();
+        crate::door::write(&spent, "").unwrap();
         super::taken(&spent).unwrap();
         assert!(!spent.exists());
         // A file below a folder this run did not make is another's: the step fails and it stays.
         let other = crate::standin_process::unowned_tempdir();
         let theirs = other.path().join(".matrix-quota-spent");
-        std::fs::write(&theirs, "").unwrap();
+        crate::door::write(&theirs, "").unwrap();
         assert!(super::taken(&theirs).is_err());
         assert!(theirs.exists());
     }

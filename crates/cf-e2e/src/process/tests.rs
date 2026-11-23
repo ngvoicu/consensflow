@@ -15,8 +15,7 @@ fn t1778_fixture_child_does_not_inherit_the_callers_board_connection() {
                 CASE,
                 Duration::from_secs(120),
             )
-            .arg("--nocapture")
-            .inheriting_env();
+            .arg("--nocapture");
             if depth.is_none() {
                 run = run
                     .var("CF_E2E_T1778_DEPTH", "parent")
@@ -84,63 +83,6 @@ fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
     assert_eq!(said, "clear\n");
 }
 
-#[test]
-fn windows_is_given_what_it_needs_of_the_tests_where_the_case_names_none_and_others_nothing() {
-    let names = |vars: &[(OsString, OsString)], finding_programs| -> Vec<&'static str> {
-        required_on_windows(vars, finding_programs)
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect()
-    };
-    if cfg!(windows) {
-        // Every Windows process has a system folder.
-        assert!(names(&[], false).contains(&"SYSTEMROOT"));
-        // What a case names is its own, in whichever case it writes the name.
-        let named = [(OsString::from("SystemRoot"), OsString::from("C:\\x"))];
-        assert!(!names(&named, false).contains(&"SYSTEMROOT"));
-        // The command interpreter and the list of extensions only where asked.
-        assert!(!names(&[], false).contains(&"COMSPEC"));
-        assert!(names(&[], true).contains(&"COMSPEC"));
-        assert!(names(&[], true).contains(&"PATHEXT"));
-    } else {
-        assert_eq!(names(&[], false), Vec::<&str>::new());
-        assert_eq!(names(&[], true), Vec::<&str>::new());
-    }
-}
-
-/// K3 review T-1978, 3: a case that names a home on Windows is not given the caller's home drive
-/// and path back from the machine; one that names none still is.
-#[test]
-fn a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back() {
-    let caller = |name: &str| match name {
-        "HOMEDRIVE" => Some(OsString::from("Z:")),
-        "HOMEPATH" => Some(OsString::from("\\DecoyProfile")),
-        "USERPROFILE" => Some(OsString::from("Z:\\DecoyProfile")),
-        "SYSTEMROOT" => Some(OsString::from("C:\\Windows")),
-        _ => None,
-    };
-    let given = |vars: &[(&str, &str)]| -> Vec<&'static str> {
-        let vars: Vec<(OsString, OsString)> = vars
-            .iter()
-            .map(|(k, v)| (OsString::from(k), OsString::from(v)))
-            .collect();
-        required_from(&vars, false, true, &caller)
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect()
-    };
-    for named in [["HOME"], ["USERPROFILE"], ["userprofile"]] {
-        let got = given(&[(named[0], "C:\\kit\\home")]);
-        assert_eq!(got, vec!["SYSTEMROOT"], "{named:?}: {got:?}");
-    }
-    let none = given(&[]);
-    assert!(
-        none.contains(&"HOMEDRIVE") && none.contains(&"HOMEPATH"),
-        "{none:?}"
-    );
-    assert!(required_from(&[], false, false, &caller).is_empty());
-}
-
 /// A child given the machine's variables has the search path and the system's, and no home of
 /// the account that starts it, nor a harness's folder, nor an XDG one.
 #[test]
@@ -180,7 +122,6 @@ fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
     let kit = crate::door::made("kits-home-").unwrap();
     let home = kit.path().join("home");
     let ran = Run::new("/usr/bin/env")
-        .machine_env()
         .var("HOME", &home)
         .run()
         .unwrap();
@@ -370,7 +311,6 @@ mod shell {
         // Cargo sets the manifest's folder for the tests it runs.
         let with_the_tests = sh(probe)
             .var("CF_E2E_A", "1")
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(
@@ -384,7 +324,6 @@ mod shell {
         let probe = r#"printf '%s|%s' "${CF_E2E_A-unset}" "${CARGO_MANIFEST_DIR-unset}""#;
         let ran = sh(probe)
             .var("CF_E2E_A", "1")
-            .inheriting_env()
             .without("CARGO_MANIFEST_DIR")
             .run()
             .unwrap();
@@ -449,7 +388,6 @@ mod shell {
         let ran = sh(r#"printf '%s|%s' "$A" "$CARGO_MANIFEST_DIR""#)
             .vars([("A", "1"), ("A", "2")])
             .var("CARGO_MANIFEST_DIR", "told")
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(ran.stdout, "2|told");
@@ -457,7 +395,7 @@ mod shell {
 
     #[test]
     fn a_program_runs_in_the_folder_it_is_given() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let ran = sh("pwd").cwd(folder.path()).run().unwrap();
         let there = std::fs::canonicalize(folder.path()).unwrap();
         assert_eq!(ran.stdout.trim_end(), there.to_string_lossy());
@@ -798,8 +736,8 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
 
     let app = root.join(identity).join("ConsensFlow.app");
     let macos = app.join("Contents").join("MacOS");
-    std::fs::create_dir_all(&macos).unwrap();
-    std::fs::write(
+    crate::door::make_dir(&macos).unwrap();
+    crate::door::write(
         app.join("Contents").join("Info.plist"),
         format!(
             "<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"
@@ -808,8 +746,8 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
     .unwrap();
     let ran = root.join(format!("{identity}.ran"));
     let program = macos.join("app");
-    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    crate::door::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     (program, ran)
 }
 
@@ -819,7 +757,7 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
 #[cfg(unix)]
 #[test]
 fn no_case_starts_an_app_of_the_live_apps_identity() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
     let refused = Run::new(&live).run().unwrap_err().to_string();
     assert!(refused.contains("the live app's identity"), "{refused}");
@@ -871,8 +809,8 @@ fn reaching_stand_in(
 
     let ran = folder.join(format!("{name}.ran"));
     let program = folder.join(name);
-    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    crate::door::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     (program, ran)
 }
 
@@ -881,7 +819,7 @@ fn reaching_stand_in(
 #[cfg(unix)]
 #[test]
 fn the_shipped_bundle_is_started_only_with_leave_for_it() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
     let app = cf_base::bundle::bundle_of(&live).unwrap();
     let elsewhere = crate::shipped::Shipped::for_a_test(&root.path().join("Other.app"));
@@ -912,13 +850,13 @@ fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded
 /// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
 #[test]
 fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
-    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let file = |folder: &tempfile::TempDir| {
+    let (first, second) = (crate::door::made("t-").unwrap(), crate::door::made("t-").unwrap());
+    let file = |folder: &crate::door::Made| {
         folder
             .path()
             .join(if cfg!(windows) { "cf.EXE" } else { "cf" })
     };
-    std::fs::write(file(&second), "").unwrap();
+    crate::door::write(file(&second), "").unwrap();
     let path = std::env::join_paths([first.path(), second.path()]).unwrap();
     let path = path.to_str().unwrap();
     let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
@@ -926,7 +864,7 @@ fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
         found.canonicalize().unwrap(),
         file(&second).canonicalize().unwrap()
     );
-    std::fs::write(file(&first), "").unwrap();
+    crate::door::write(file(&first), "").unwrap();
     let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
     assert_eq!(
         found.canonicalize().unwrap(),
@@ -940,11 +878,11 @@ fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
 #[cfg(windows)]
 #[test]
 fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let touch = |relative: &str| {
         let file = root.path().join(relative);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, b"").unwrap();
+        crate::door::make_dir(file.parent().unwrap()).unwrap();
+        crate::door::write(&file, b"").unwrap();
         file
     };
     let named = touch(r"named\bash.exe");
@@ -962,7 +900,7 @@ fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
     assert_eq!(git_bash_in(None, &path), Some(beside));
     // A folder of the path with no `git.exe` names no Git, though a `bin\bash.exe` is beside it.
     let other = touch(r"Other\bin\bash.exe");
-    std::fs::create_dir_all(root.path().join(r"Other\cmd")).unwrap();
+    crate::door::make_dir(root.path().join(r"Other\cmd")).unwrap();
     let path = root
         .path()
         .join(r"Other\cmd")
@@ -1022,25 +960,9 @@ fn an_inherited_home_of_the_accounts_is_not_handed_on() {
 
 /// T-2002 correction 9: Windows' fixed list keeps `SYSTEMROOT` and the other system variables a
 /// models read is given (without it Codex's model list comes back stale, with no default:
-/// T-1937), whatever homes the case names.
+/// T-1937), whatever homes the case names, and the interpreter and extensions that find programs.
 #[test]
 fn the_windows_machine_list_keeps_systemroot_and_the_system_variables() {
-    let named: Vec<(OsString, OsString)> = vec![("HOME".into(), "K:\\kit\\home".into())];
-    let machine = |name: &str| Some(OsString::from(format!("machine-{name}")));
-    let given = required_from(&named, true, true, &machine);
-    let names: Vec<&str> = given.iter().map(|(name, _)| *name).collect();
-    for kept in [
-        "SYSTEMROOT",
-        "SYSTEMDRIVE",
-        "WINDIR",
-        "PATH",
-        "TEMP",
-        "USERNAME",
-        "COMSPEC",
-        "PATHEXT",
-    ] {
-        assert!(names.contains(&kept), "{kept}: {names:?}");
-    }
     for name in [
         "SystemRoot",
         "WINDIR",
@@ -1049,6 +971,15 @@ fn the_windows_machine_list_keeps_systemroot_and_the_system_variables() {
         "TEMP",
         "TMP",
         "USERNAME",
+        "USERDOMAIN",
+        "LOGONSERVER",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "PSModulePath",
+        "OS",
         "LANG",
     ] {
         assert!(is_machine_variable(name), "{name}");

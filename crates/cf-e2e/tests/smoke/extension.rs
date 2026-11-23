@@ -208,8 +208,8 @@ const name = 'from'
 
     /// A folder written the way `cf setup` writes an extension, with `files`
     /// (names under it, and what they say) in it.
-    fn written(files: &[(&str, &str)]) -> tempfile::TempDir {
-        let root = tempfile::tempdir().unwrap();
+    fn written(files: &[(&str, &str)]) -> cf_e2e::door::Made {
+        let root = cf_e2e::door::made("t-").unwrap();
         for (name, source) in files {
             let path = name
                 .split('/')

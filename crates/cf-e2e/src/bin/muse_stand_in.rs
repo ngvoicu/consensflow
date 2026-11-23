@@ -52,7 +52,7 @@ fn main() -> ExitCode {
     // over it, sealed as every start of the kit's is, on this program's console and handles.
     let muse = cf_e2e::process::Run::harness("muse", &stand_in.binary)
         .args(args)
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .vars(stand_in.env())
         .unlimited();
     match muse.relay() {

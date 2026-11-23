@@ -1047,10 +1047,10 @@ mod tests {
         // Another run's file (or the old fixed name) is read under no name of this run's.
         assert_ne!(Some(file), earlier.counts_in());
         assert_ne!(file, "restart-cut-job-ticks.txt");
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let mut counted = Moving::default();
         for count in 1..=4 {
-            std::fs::write(
+            cf_e2e::door::write(
                 folder.path().join(earlier.counts_in().unwrap()),
                 count.to_string(),
             )

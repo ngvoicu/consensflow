@@ -133,7 +133,6 @@ mod tests {
         let ran = cf_e2e::process::Run::new(perl)
             .arg(folder.path().join(SCRIPT))
             .arg("1")
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(ran.code, Some(0), "{ran}");

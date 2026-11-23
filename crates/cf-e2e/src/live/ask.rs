@@ -94,7 +94,6 @@ fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
     let ran = Run::new(executable)
         .args(prefix)
         .input(format!("{body}\n"))
-        .machine_env()
         .run()?;
     answered(name, ran.code, &ran.stdout)
 }
@@ -127,6 +126,17 @@ pub fn question_sealed(body: &mut Value) -> Result {
             }
         }
     }
+    // What the machine is, as every start of the kit is given it (the search path, the system's
+    // variables, the temporary folders, the language): under what the caller named. The helper
+    // starts the harness's program on this environment alone, so a caller no longer builds it.
+    for (name, value) in crate::process::machine_vars(std::env::vars_os()) {
+        if !env
+            .iter()
+            .any(|(held, _)| held.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
+        {
+            env.push((name, value));
+        }
+    }
     let named_home = ["HOME", "USERPROFILE"].into_iter().find_map(|wanted| {
         env.iter()
             .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(wanted))
@@ -139,6 +149,16 @@ pub fn question_sealed(body: &mut Value) -> Result {
     };
     let missing = crate::door::spawn::missing_homes(&env, &base);
     env.extend(missing);
+    // The helper starts the installed harness's program to read what it holds (a model list, a
+    // version, a record): whichever it is, none of them may update or install anything itself
+    // on the way (T-2086 N5: Pi's `PI_OFFLINE` and Claude Code's `DISABLE_AUTOUPDATER` were not
+    // there). The switches of every harness are given, over what the caller said.
+    for harness in ["claude", "codex", "devin", "muse", "pi"] {
+        for (name, value) in crate::door::spawn::update_switches(harness) {
+            env.retain(|(held, _)| !held.to_string_lossy().eq_ignore_ascii_case(name));
+            env.push(((*name).into(), (*value).into()));
+        }
+    }
     let sealed = crate::door::sealed(env, &[], windows).map_err(|why| {
         Error::LiveApp(format!(
             "the question {} is not asked: {why}",

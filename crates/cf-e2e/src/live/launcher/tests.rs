@@ -11,11 +11,11 @@ use super::*;
 mod links;
 
 /// A pretend owner's home.
-struct OwnerHome(tempfile::TempDir);
+struct OwnerHome(crate::door::Made);
 
 impl OwnerHome {
     fn new() -> Self {
-        Self(tempfile::tempdir().unwrap())
+        Self(crate::door::made("t-").unwrap())
     }
 
     fn path(&self, below: &str) -> PathBuf {
@@ -24,8 +24,8 @@ impl OwnerHome {
 
     fn write(&self, below: &str, text: &str) {
         let file = self.path(below);
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, text).unwrap();
+        crate::door::make_dir(file.parent().unwrap()).unwrap();
+        crate::door::write(&file, text).unwrap();
     }
 }
 
@@ -140,7 +140,7 @@ fn a_launcher_that_is_a_file_and_is_removed_or_made_is_named_for_it() {
             .any(|said| said.ends_with(&format!("{name} was made"))),
         "{found:?}"
     );
-    let found = changes(&watch, &home, || fs::remove_file(&command).unwrap());
+    let found = changes(&watch, &home, || crate::door::remove(&command).unwrap());
     assert!(
         found
             .iter()
@@ -230,14 +230,14 @@ fn the_guard_of_a_launcher_that_is_a_file_fails_what_ends_and_names_it_and_is_si
 
 #[test]
 fn the_hash_of_a_big_file_reads_it_whole_and_tells_two_files_of_one_size_apart() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let a = folder.path().join("a");
     let b = folder.path().join("b");
     // Bigger than the buffer, and one byte apart at the end.
     let mut bytes = vec![7_u8; (1 << 20) * 2 + 5];
-    fs::write(&a, &bytes).unwrap();
+    crate::door::write(&a, &bytes).unwrap();
     *bytes.last_mut().unwrap() = 8;
-    fs::write(&b, &bytes).unwrap();
+    crate::door::write(&b, &bytes).unwrap();
     let (a, b) = (Bytes::of(&a).unwrap(), Bytes::of(&b).unwrap());
     assert_eq!(a.size, b.size);
     assert_ne!(a.hash, b.hash);

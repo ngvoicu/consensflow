@@ -259,17 +259,12 @@ mod tests {
         crate::door::write(&path, b"one").unwrap();
         crate::door::write(&replacement, b"two").unwrap();
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&replacement)
-            .unwrap()
-            .set_times(fs::FileTimes::new().set_modified(modified))
-            .unwrap();
+        crate::door::set_modified(&replacement, modified).unwrap();
         let files = [path.clone()];
         let before = Seen::look(&files, &[], None, &files);
         let original = cf_base::file::stat(&path).unwrap();
-        fs::rename(&path, root.path().join("old.json")).unwrap();
-        fs::rename(&replacement, &path).unwrap();
+        crate::door::rename(&path, root.path().join("old.json")).unwrap();
+        crate::door::rename(&replacement, &path).unwrap();
         let replaced = cf_base::file::stat(&path).unwrap();
         assert_eq!(original.size, replaced.size);
         assert_eq!(original.mtime_ms, replaced.mtime_ms);
@@ -285,7 +280,7 @@ mod tests {
     fn t1744_an_unstatable_login_cannot_be_said_unchanged() {
         let root = crate::door::made("cf-login-unstatable-").unwrap();
         let path = root.path().join("auth.json");
-        std::os::unix::fs::symlink("auth.json", &path).unwrap();
+        crate::door::symlink("auth.json", &path).unwrap();
         let files = [path];
         let before = Seen::look(&files, &[], None, &files);
         let after = Seen::look(&files, &[], None, &files);
@@ -317,8 +312,8 @@ mod tests {
         crate::door::write(&owner, "[old]\nkey = 'synthetic'\n").unwrap();
         let files = [owner.clone()];
         let before = Seen::look(&files, &[], Some(&owner), &[]);
-        std::fs::remove_file(&owner).unwrap();
-        std::fs::create_dir(&owner).unwrap();
+        crate::door::remove(&owner).unwrap();
+        crate::door::make_dir(&owner).unwrap();
         let after = Seen::look(&files, &[], Some(&owner), &[]);
         let said = before
             .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
@@ -331,7 +326,7 @@ mod tests {
     fn t1744_two_unreadable_codex_snapshots_cannot_prove_the_config_unchanged() {
         let root = crate::door::made("cf-codex-unreadable-both-").unwrap();
         let owner = root.path().join("owner.toml");
-        std::fs::create_dir(&owner).unwrap();
+        crate::door::make_dir(&owner).unwrap();
         let files = [owner.clone()];
         let before = Seen::look(&files, &[], Some(&owner), &[]);
         let after = Seen::look(&files, &[], Some(&owner), &[]);
@@ -362,7 +357,7 @@ mod tests {
         let owner = root.path().join("owner.toml");
         let files = [owner.clone()];
         let before = Seen::look(&files, &[], Some(&owner), &[]);
-        std::fs::create_dir(&owner).unwrap();
+        crate::door::make_dir(&owner).unwrap();
         let after = Seen::look(&files, &[], Some(&owner), &[]);
         let said = before.codex_tables_to(&after, &owner, &owner).unwrap();
         assert!(said.contains("could not be compared"), "{said}");

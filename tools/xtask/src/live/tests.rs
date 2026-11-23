@@ -614,7 +614,7 @@ fn a_variable_that_hands_the_made_folders_on_is_never_a_persons_to_set_for_the_t
     let (_, vars) = {
         let asked = parse(&words("paste"), &names()).unwrap();
         let invocation = invocation(&context(), &asked);
-        (invocation.display(), invocation.vars)
+        (invocation.display(), invocation.vars.clone())
     };
     // The folders a run may write below, and the roots it never writes in, are the run's own to
     // hand down: none is a person's to set (K3, `cf_e2e::door::account`).
@@ -636,7 +636,7 @@ fn build_lines(line: &str) -> Vec<String> {
     let asked = parse(&words(line), &names()).unwrap();
     builds(&context(), &asked)
         .iter()
-        .map(Invocation::display)
+        .map(Cargo::display)
         .collect()
 }
 

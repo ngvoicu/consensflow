@@ -123,7 +123,6 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
             "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var(CHILD, "1")
     };
     // K3: a child named homes of no run's is not started at all; the spawn door's seal refuses it

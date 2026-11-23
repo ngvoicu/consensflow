@@ -681,7 +681,6 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
         let made = Run::new(Path::new("git"))
             .args(["init", "-q"])
             .arg(&folder)
-            .inheriting_env()
             .run()?;
         if made.code != Some(0) {
             return Err(Error::Daemon(format!(

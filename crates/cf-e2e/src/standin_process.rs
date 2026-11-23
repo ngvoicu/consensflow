@@ -753,7 +753,6 @@ mod tests {
             "standin_process::tests::standin_isolation_missing_inherited_home_refuses_before_searching_path",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var(CHILD, "1")
         .var("PATH", &path);
         for (name, _) in super::home_vars(root.path()) {
@@ -791,7 +790,6 @@ mod tests {
             "standin_process::tests::standin_isolation_inherited_account_home_is_not_searched_on_path",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var("HOME", &home)
         .var("USERPROFILE", &home)
         .var("PATH", &target)
@@ -811,7 +809,6 @@ mod tests {
             "standin_process::tests::standin_isolation_unowned_audit_file_is_refused_before_it_is_opened",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .arg("--list")
         .var(crate::door::AUDIT, "1")
         .var(crate::door::AUDIT_MADE, "1")
@@ -843,7 +840,6 @@ mod tests {
             "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var("CF_E2E_STAND_IN", "1")
         .var(super::FIXTURE_HOME, foreign.join("home"))
         .var("HOME", foreign.join("home"))
@@ -910,7 +906,7 @@ mod tests {
         );
         // A link in the run that ends in the home, and a path through it.
         let link = run.join("link");
-        std::os::unix::fs::symlink(&forbidden, &link).unwrap();
+        crate::door::symlink(&forbidden, &link).unwrap();
         assert!(!safe_path_entry(
             &link.join("auth.json"),
             std::slice::from_ref(&forbidden)
@@ -921,7 +917,7 @@ mod tests {
         let deep = forbidden.join("sub");
         crate::door::make_dir(&deep).unwrap();
         let through = run.join("through");
-        std::os::unix::fs::symlink(&deep, &through).unwrap();
+        crate::door::symlink(&deep, &through).unwrap();
         let parent_of_link = through.join("..");
         assert!(!safe_path_entry(
             &parent_of_link,
@@ -940,7 +936,7 @@ mod tests {
         ));
         // A link to the folder above the home: the home is below it.
         let above = run.join("above");
-        std::os::unix::fs::symlink(&owner, &above).unwrap();
+        crate::door::symlink(&owner, &above).unwrap();
         assert!(!safe_path_entry(&above.join(".codex/bin"), &[forbidden]));
         // What is the run's, spelled plainly, is still its own and safe.
         let plain = run.join("home/x");
@@ -979,7 +975,7 @@ mod tests {
         let held = root.path().join("owner/.claude");
         crate::door::make_dir(&held).unwrap();
         let link = root.path().join("tmp-link");
-        std::os::unix::fs::symlink(&held, &link).unwrap();
+        crate::door::symlink(&held, &link).unwrap();
         crate::door::account::TEST_PROTECTED
             .lock()
             .unwrap()
@@ -1006,7 +1002,7 @@ mod tests {
         let held = root.path().join("owner/.codex");
         crate::door::make_dir(&held).unwrap();
         let link = root.path().join("tmp-link");
-        std::os::unix::fs::symlink(&held, &link).unwrap();
+        crate::door::symlink(&held, &link).unwrap();
         let forbidden = [held.clone()];
         assert!(super::temp_parent_is_outside(&held.join("tmp"), &forbidden).is_err());
         assert!(super::temp_parent_is_outside(&link, &forbidden).is_err());

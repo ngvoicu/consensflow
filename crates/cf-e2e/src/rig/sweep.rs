@@ -320,36 +320,25 @@ mod tests {
     /// Stamps the folder `folder` as last changed `ago` ago. Windows opens a folder only with
     /// the flag that asks for it (`FILE_FLAG_BACKUP_SEMANTICS`).
     fn aged(folder: &Path, ago: Duration) {
-        let mut open = fs::OpenOptions::new();
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            open.write(true).custom_flags(0x0200_0000);
-        }
-        #[cfg(not(windows))]
-        open.read(true);
-        open.open(folder)
-            .unwrap()
-            .set_modified(SystemTime::now() - ago)
-            .unwrap();
+        crate::door::set_modified(folder, SystemTime::now() - ago).unwrap();
     }
 
     /// A home called `name` in `folder`, last changed `ago` ago, with a note in it.
     fn home(folder: &Path, name: &str, ago: Duration) -> PathBuf {
         let home = folder.join(name);
-        fs::create_dir_all(home.join("workspace")).unwrap();
-        fs::write(home.join("workspace").join("note"), "a note").unwrap();
+        crate::door::make_dir(home.join("workspace")).unwrap();
+        crate::door::write(home.join("workspace").join("note"), "a note").unwrap();
         aged(&home, ago);
         home
     }
 
     #[test]
     fn only_a_rig_folder_older_than_a_day_is_counted() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let old = home(folder.path(), "consensflow-integration-old", DAY * 2);
         home(folder.path(), "consensflow-integration-young", DAY / 2);
         home(folder.path(), "another-old-folder", DAY * 2);
-        fs::write(
+        crate::door::write(
             folder.path().join("consensflow-integration-old-left.txt"),
             "a report",
         )
@@ -357,7 +346,7 @@ mod tests {
         #[cfg(unix)]
         {
             let elsewhere = home(folder.path(), "elsewhere", DAY * 2);
-            std::os::unix::fs::symlink(
+            crate::door::symlink(
                 &elsewhere,
                 folder.path().join("consensflow-integration-link"),
             )
@@ -372,9 +361,9 @@ mod tests {
     /// nobody's process is asked about. The rig only counts them (T-1557, finding 3a).
     #[test]
     fn a_rig_start_leaves_the_folders_older_runs_left_and_only_counts_them() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let kept = home(folder.path(), "consensflow-integration-kept", DAY * 2);
-        fs::write(kept.join("consensflow-kept.txt"), "kept on purpose").unwrap();
+        crate::door::write(kept.join("consensflow-kept.txt"), "kept on purpose").unwrap();
         aged(&kept, DAY * 2);
         let left = home(folder.path(), "consensflow-integration-left", DAY * 2);
 

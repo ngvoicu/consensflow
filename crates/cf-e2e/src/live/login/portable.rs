@@ -58,13 +58,13 @@ fn a_folder_of_a_run_is_known_by_the_separator_windows_wrote_it_with_as_well_as_
 
 #[test]
 fn what_a_run_on_windows_left_in_the_owners_setup_is_found_out_by_the_folders_written_there() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("t-").unwrap();
     let owner = Owner {
         home: home.path().to_path_buf(),
     };
     let before = owner.look();
     let folder = r"C:\Users\AGV\.consensflow-candidate\live\first-message";
-    std::fs::write(
+    crate::door::write(
         home.path().join(".claude.json"),
         json!({ "projects": { folder: { "hasTrustDialogAccepted": true } } }).to_string(),
     )
@@ -78,7 +78,7 @@ fn what_a_run_on_windows_left_in_the_owners_setup_is_found_out_by_the_folders_wr
     );
     assert!(found[1].contains("1 prompt(s)"), "{found:?}");
     // A project of the owner's own is not the run's, whatever its separators.
-    std::fs::write(
+    crate::door::write(
         home.path().join(".claude.json"),
         json!({ "projects": { r"C:\Users\AGV\Projects\mine": {} } }).to_string(),
     )
@@ -149,7 +149,7 @@ fn what_a_run_left_of_the_copy_is_told_by_the_names_of_the_fields_that_differ() 
 #[test]
 fn a_copy_only_rewritten_beside_its_tokens_is_no_failure_and_a_refreshed_one_names_its_fields_and_no_value(
 ) {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("t-").unwrap();
     let owner = Owner {
         home: home.path().to_path_buf(),
     };
@@ -163,7 +163,7 @@ fn a_copy_only_rewritten_beside_its_tokens_is_no_failure_and_a_refreshed_one_nam
         renewed: None,
     };
     let write = |now: &Value| {
-        std::fs::write(
+        crate::door::write(
             made.folder.path().join(".credentials.json"),
             wrapped(now).to_string(),
         )

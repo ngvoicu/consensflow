@@ -465,7 +465,7 @@ fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and
     }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
-    let owner = tempfile::tempdir()?;
+    let owner = cf_e2e::door::made("t-")?;
     let files = [owner.path().join("one.txt"), owner.path().join("two.txt")];
     owners_say(&files, &[None, None])?;
     owner_hooks(&rig, &files)?;
@@ -569,7 +569,7 @@ fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_te
     }
     let config = muse_rig_of(500)?;
     let rig = Rig::start(config)?;
-    let owner = tempfile::tempdir()?;
+    let owner = cf_e2e::door::made("t-")?;
     let files = [owner.path().join("one.txt")];
     owners_say(&files, &[Some("OWNER-ONE-1")])?;
     owner_hooks(&rig, &files)?;
@@ -948,7 +948,7 @@ fn muse_run_in(
     let mut hooks = Vec::new();
     for (number, bytes) in printing.iter().enumerate() {
         let file = at(&format!("hook-{number}.txt"));
-        fs::write(&file, bytes)?;
+        cf_e2e::door::write(&file, bytes)?;
         let file = file.to_string_lossy().into_owned();
         hooks.push(json!({
             "type": "command",
@@ -976,8 +976,8 @@ fn muse_exec(
     let install = muse::echo_required()?;
     let at = |below: &str| home.path().join(below);
     let workspace = at("work");
-    fs::create_dir_all(&workspace)?;
-    fs::create_dir_all(at("runtime"))?;
+    cf_e2e::door::make_dir(&workspace)?;
+    cf_e2e::door::make_dir(at("runtime"))?;
     let launch = muse::isolated_command(&install.binary, &[home.path().to_path_buf()], &[])?;
     let mut run = launch
         .run()
@@ -1004,7 +1004,6 @@ fn muse_exec(
         .var("XDG_RUNTIME_DIR", at("runtime"))
         .var("MUSE_NO_AUTO_UPDATE", "1")
         .var("PATH", "/usr/bin:/bin")
-        .finding_programs()
         .closed_input()
         .limit(Duration::from_secs(120))
         .run()?;

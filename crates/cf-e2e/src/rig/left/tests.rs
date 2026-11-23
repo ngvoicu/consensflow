@@ -20,7 +20,6 @@ const SLEEPS: &str = "/bin/sleep 60";
 fn sleeper() -> Spawned {
     Run::new("ping")
         .args(["-n", "61", "127.0.0.1"])
-        .finding_programs()
         .closed_input()
         .spawn()
         .unwrap()
@@ -37,28 +36,23 @@ const SLEEPER: &str = "ping";
 /// The file `pids`, with `pid` in it, last written `ago` ago.
 fn noted(folder: &Path, pid: u32, ago: Duration) -> std::path::PathBuf {
     let file = folder.join("pids.jsonl");
-    fs::write(&file, format!("{pid}\n")).unwrap();
+    crate::door::write(&file, format!("{pid}\n")).unwrap();
     let written = fs::metadata(&file).unwrap().modified().unwrap();
-    File::options()
-        .write(true)
-        .open(&file)
-        .unwrap()
-        .set_modified(written - ago)
-        .unwrap();
+    crate::door::set_modified(&file, written - ago).unwrap();
     file
 }
 
 /// `began.jsonl` beside the `pids` file, saying the process `pid` began `started`,
 /// in the words [`start_of`] would say them.
 fn began(folder: &Path, pid: u32, started: &str) {
-    fs::write(folder.join("began.jsonl"), format!("{pid}\t{started}\n")).unwrap();
+    crate::door::write(folder.join("began.jsonl"), format!("{pid}\t{started}\n")).unwrap();
 }
 
 /// A process that began when the note says the window's began is the window's
 /// own, still there.
 #[test]
 fn a_process_that_began_when_its_note_says_is_the_windows() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let window = sleeper();
     let file = noted(folder.path(), window.id(), Duration::ZERO);
     began(folder.path(), window.id(), &start_of(window.id()).unwrap());
@@ -71,7 +65,7 @@ fn a_process_that_began_when_its_note_says_is_the_windows() {
 /// when this one began: it is no window's.
 #[test]
 fn a_program_that_took_an_ended_windows_number_is_none_of_the_windows() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let squatter = sleeper();
     let file = noted(folder.path(), squatter.id(), Duration::ZERO);
     began(
@@ -87,7 +81,7 @@ fn a_program_that_took_an_ended_windows_number_is_none_of_the_windows() {
 
 #[test]
 fn a_window_still_there_is_said_with_what_it_is() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let window = sleeper();
     let file = noted(folder.path(), window.id(), Duration::ZERO);
     let left = left_behind(&file, Duration::from_millis(200), SLEEPER).expect("a window was left");
@@ -99,7 +93,7 @@ fn a_window_still_there_is_said_with_what_it_is() {
 
 #[test]
 fn a_window_that_has_gone_is_none() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let mut window = sleeper();
     let pid = window.id();
     window.kill();
@@ -115,7 +109,7 @@ fn a_window_that_has_gone_is_none() {
 #[cfg(unix)]
 #[test]
 fn a_program_that_began_after_the_last_note_is_none_of_the_windows() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let another = sleeper();
     let file = noted(folder.path(), another.id(), Duration::from_secs(3600));
     assert_eq!(
@@ -160,7 +154,7 @@ fn a_number_is_looked_at_for_what_it_is_in_the_words_of_ps() {
 /// and is none of the windows.
 #[test]
 fn a_number_held_by_another_program_than_the_stand_in_is_none_of_the_windows_whenever_it_began() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let another = sleeper();
     let file = noted(folder.path(), another.id(), Duration::ZERO);
     assert_eq!(

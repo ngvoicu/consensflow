@@ -126,7 +126,6 @@ fn relaying(
     let started = std::time::Instant::now();
     let mut asked = Run::new(program)
         .input(format!("{body}\n"))
-        .inheriting_env()
         .spawn()?;
     let output = asked
         .take_output()

@@ -81,22 +81,22 @@ fn files_below(folder: &Path) -> Vec<String> {
 }
 
 fn write(path: &Path, text: &str) {
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, text).unwrap();
+    crate::door::make_dir(path.parent().unwrap()).unwrap();
+    crate::door::write(path, text).unwrap();
 }
 
 /// The owner: a home with the setups of the three harnesses in it, each file holding the
 /// sentinel, and the scratch folder their homes are made in.
 struct Owner {
-    home: tempfile::TempDir,
-    parent: tempfile::TempDir,
+    home: crate::door::Made,
+    parent: crate::door::Made,
 }
 
 impl Owner {
     fn new() -> Self {
         let owner = Self {
-            home: tempfile::tempdir().unwrap(),
-            parent: tempfile::tempdir().unwrap(),
+            home: crate::door::made("t-").unwrap(),
+            parent: crate::door::made("t-").unwrap(),
         };
         let h = owner.home.path();
         for file in [
@@ -417,18 +417,18 @@ fn kit_round3_devin_does_not_carry_git_credentials() {
 fn kit_round3_pi_package_skips_links_out_and_keeps_links_inside() {
     let owner = Owner::new();
     owner.cliproxyapi(&proxy_answering());
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::door::made("t-").unwrap();
     write(
         &foreign.path().join("login.json"),
         "fabricated refresh token",
     );
     let package = owner.path(".pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
-    std::os::unix::fs::symlink(
+    crate::door::symlink(
         foreign.path().join("login.json"),
         package.join("extensions/leak.json"),
     )
     .unwrap();
-    std::os::unix::fs::symlink("lib.ts", package.join("extensions/internal.ts")).unwrap();
+    crate::door::symlink("lib.ts", package.join("extensions/internal.ts")).unwrap();
     let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
     let home = isolation.made_at(at(NOW)).unwrap();
     let copy =
@@ -460,14 +460,14 @@ fn kit_round3_pi_package_skips_links_out_and_keeps_links_inside() {
 fn kit_round3_pi_model_cache_does_not_follow_a_link_out() {
     let owner = Owner::new();
     owner.cliproxyapi(&proxy_answering());
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::door::made("t-").unwrap();
     write(
         &foreign.path().join("login.json"),
         "fabricated refresh token",
     );
     let cache = owner.path(".pi/agent/cliproxyapi-models.json");
-    fs::remove_file(&cache).unwrap();
-    std::os::unix::fs::symlink(foreign.path().join("login.json"), &cache).unwrap();
+    crate::door::remove(&cache).unwrap();
+    crate::door::symlink(foreign.path().join("login.json"), &cache).unwrap();
     let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
     if let Ok(home) = isolation.made_at(at(NOW)) {
         assert!(
@@ -975,7 +975,7 @@ fn a_copied_pi_package_keeps_each_files_mode() {
     let below = "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/bin/helper";
     let helper = owner.path(&format!(".pi/agent/{below}"));
     write(&helper, "#!/bin/sh\necho helper\n");
-    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
     let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
     let home = isolation.made_at(at(NOW)).unwrap();
     assert_eq!(mode(&home.join(format!("pi/agent/{below}"))), 0o755);
@@ -995,8 +995,6 @@ fn git_checkout(folder: &Path) -> String {
             ])
             .args(args.iter().copied())
             .cwd(folder)
-            .finding_programs()
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(ran.code, Some(0), "git {args:?}: {}", ran.stderr);
@@ -1042,7 +1040,7 @@ fn a_pi_run_on_a_package_from_git_is_refused_where_its_checkout_is_not_clean() {
             "{how}: {said}"
         );
         assert_eq!(owner.made(), 0, "{how}");
-        fs::remove_file(package.join(dirty)).ok();
+        crate::door::remove(package.join(dirty)).ok();
         git_checkout_reset(&package);
     }
 }
@@ -1052,8 +1050,6 @@ fn git_checkout_reset(folder: &Path) {
     let ran = Run::new("git")
         .args(["checkout", "-q", "--", "."])
         .cwd(folder)
-        .finding_programs()
-        .inheriting_env()
         .run()
         .unwrap();
     assert_eq!(ran.code, Some(0), "{}", ran.stderr);
@@ -1218,7 +1214,7 @@ fn a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missin
     };
     // The provider's own config is missing.
     owner.cliproxyapi(&proxy_gone());
-    fs::remove_file(owner.path(".pi/agent/cliproxyapi.json")).unwrap();
+    crate::door::remove(owner.path(".pi/agent/cliproxyapi.json")).unwrap();
     let said = refused(&owner);
     assert!(said.contains("`cliproxyapi`"), "{said}");
     assert!(said.contains("cliproxyapi.json"), "{said}");
@@ -1226,7 +1222,7 @@ fn a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missin
     assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
     // The package Pi loads the provider from is missing.
     owner.cliproxyapi(&proxy_gone());
-    fs::remove_dir_all(owner.path(".pi/agent/npm/node_modules")).unwrap();
+    crate::door::remove(owner.path(".pi/agent/npm/node_modules")).unwrap();
     let said = refused(&owner);
     assert!(
         said.contains("npm/node_modules/@router-for-me/pi-cliproxyapi-provider"),
@@ -1355,7 +1351,7 @@ fn a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_ca
     // flag naming a Pi folder; no flag names one now, and the settings go in the folder the kit
     // made for the run, whatever the owner's shell or a caller's folder holds.
     let owner = Owner::new();
-    let caller = tempfile::tempdir().unwrap();
+    let caller = crate::door::made("t-").unwrap();
     let callers = caller.path().join("agent");
     write(&callers.join("settings.json"), "{\"theirs\":true}");
     write(&callers.join("sessions/a.jsonl"), "a session of theirs");
@@ -1402,7 +1398,7 @@ fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
     // resolved to `/private/var/folders/…`.
     let owner = Owner::new();
     let linked = owner.home.path().join("linked-temp");
-    std::os::unix::fs::symlink(owner.parent.path(), &linked).unwrap();
+    crate::door::symlink(owner.parent.path(), &linked).unwrap();
     let isolation = owner.devin().made_in(&linked);
     let home = isolation.made_at(at(NOW)).unwrap();
     assert!(home.starts_with(&linked), "{}", home.display());
@@ -1610,7 +1606,7 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
                 file.strip_prefix(owner.home.path()).unwrap().display()
             );
             // The file written (a refresh, a trust table, a setting).
-            fs::write(&file, format!("{SENTINEL}-written-by-the-run")).unwrap();
+            crate::door::write(&file, format!("{SENTINEL}-written-by-the-run")).unwrap();
             let said = isolation.finish().unwrap_err().to_string();
             assert!(
                 said.contains(&format!("{shown} is not as it was")),
@@ -1632,7 +1628,7 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
             );
             assert!(!said.contains(SENTINEL) && !said_anywhere(&said), "{said}");
             // The file gone.
-            fs::remove_file(&file).unwrap();
+            crate::door::remove(&file).unwrap();
             let said = isolation.finish().unwrap_err().to_string();
             assert!(
                 said.contains(&format!("{shown} is gone")),
@@ -1640,7 +1636,7 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
             );
             // Restoring bytes restores a content comparison, but a replaced login has
             // a different identity and must still be reported as changed.
-            fs::write(&file, &before).unwrap();
+            crate::door::write(&file, &before).unwrap();
             if isolation.plan.login_watched.contains(&file) {
                 assert!(isolation.finish().is_err(), "{which}: {shown} was replaced");
             } else {
@@ -1714,7 +1710,7 @@ fn t1744_a_read_only_pi_login_can_still_be_copied_without_refresh() {
     let owner = Owner::new();
     let source = owner.path(".pi/agent/auth.json");
     let expected = auth(hours(9)).into_bytes();
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o400)).unwrap();
+    crate::door::set_permissions(&source, fs::Permissions::from_mode(0o400)).unwrap();
     let copied = pi_discovery_copy(&source).unwrap();
     let text = fs::read_to_string(copied.folder.path().join("auth.json")).unwrap();
     assert!(!text.to_ascii_lowercase().contains("refresh"));
@@ -1734,13 +1730,13 @@ fn t1744_pi_discovery_reuses_the_seed_and_refuses_a_changed_source() {
     let names = pi_provider_names(&source).unwrap();
     assert!(names.iter().any(|name| name == "openai"));
     // The file can be stated but not opened. Seeding must reuse the by-design read.
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
+    crate::door::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
     let seeded = pi_seed_text(&source);
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    crate::door::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(seeded.unwrap().as_bytes() == expected);
 
     pi_provider_names(&source).unwrap();
-    fs::write(&source, "{} ").unwrap();
+    crate::door::write(&source, "{} ").unwrap();
     let refused = pi_seed_text(&source).unwrap_err().to_string();
     assert!(refused.contains("changed between model selection"));
 }
@@ -1785,7 +1781,7 @@ fn t1744_unused_pi_discovery_copy_is_removed_when_the_process_exits() {
 #[test]
 fn a_file_the_run_makes_in_the_owners_folder_is_named_too() {
     let owner = Owner::new();
-    fs::remove_file(owner.path(".pi/agent/models.json")).unwrap();
+    crate::door::remove(owner.path(".pi/agent/models.json")).unwrap();
     let isolation = owner.pi("openrouter/x", hours(1));
     isolation.made_at(at(NOW)).unwrap();
     write(&owner.path(".pi/agent/models.json"), "{}");
@@ -1814,7 +1810,7 @@ fn a_session_the_run_leaves_in_the_owners_pi_folder_is_the_runs_and_the_owners_o
             said.contains(&format!("~/.pi/agent/sessions gained {run}")),
             "{said}"
         );
-        fs::remove_dir_all(sessions.join(run)).unwrap();
+        crate::door::remove(sessions.join(run)).unwrap();
         assert!(isolation.finish().is_ok());
     }
 }
@@ -1827,10 +1823,10 @@ fn a_login_the_run_wrote_again_is_said_and_one_written_the_same_is_not() {
     let login = home.join("pi/agent/auth.json");
     // Written again with nothing in it changed (another layout of the same JSON).
     let same: Value = serde_json::from_str(&fs::read_to_string(&login).unwrap()).unwrap();
-    fs::write(&login, serde_json::to_string_pretty(&same).unwrap()).unwrap();
+    crate::door::write(&login, serde_json::to_string_pretty(&same).unwrap()).unwrap();
     assert!(isolation.finish().is_ok());
     // A token refreshed in the run's copy.
-    fs::write(
+    crate::door::write(
         &login,
         json!({ "openrouter": { "type": "api_key", "key": "refreshed-ZZZ" } }).to_string(),
     )
@@ -1849,9 +1845,9 @@ fn a_login_the_run_wrote_again_is_said_and_one_written_the_same_is_not() {
         "{said}"
     );
     // The owner's own was not touched by it.
-    fs::write(&login, "gone").unwrap();
+    crate::door::write(&login, "gone").unwrap();
     assert!(isolation.finish().is_err());
-    fs::remove_file(&login).unwrap();
+    crate::door::remove(&login).unwrap();
     let said = isolation.finish().unwrap_err().to_string();
     assert!(said.contains("pi/agent/auth.json"), "{said}");
 }
@@ -1881,7 +1877,7 @@ fn a_run_that_left_the_owners_setup_as_it_was_says_which_files_it_checked_by_a_h
         before.chars().all(|digit| digit.is_ascii_hexdigit()),
         "{said}"
     );
-    fs::write(owner.path(".pi/agent/settings.json"), "changed").unwrap();
+    crate::door::write(owner.path(".pi/agent/settings.json"), "changed").unwrap();
     // Evidence is of a run that passed: a changed file is a failure's, not evidence's.
     assert_ne!(
         hash(&isolation.evidence().unwrap(), "settings.json"),
@@ -2014,7 +2010,7 @@ fn auth_ending(expires: i64, access: &str) -> String {
 /// and ends with `status`.
 struct Renewing {
     owner: Owner,
-    tools: tempfile::TempDir,
+    tools: crate::door::Made,
 }
 
 impl Renewing {
@@ -2022,7 +2018,7 @@ impl Renewing {
     fn new() -> Self {
         let renewing = Self {
             owner: Owner::new(),
-            tools: tempfile::tempdir().unwrap(),
+            tools: crate::door::made("t-").unwrap(),
         };
         write(
             &renewing.owner.path(".pi/agent/auth.json"),
@@ -2388,7 +2384,7 @@ fn a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_i
         .unwrap()
         .contains(REFRESH));
     // A Pi that failed to renew what it could not, and wrote its copy: said, without the old fear.
-    fs::write(
+    crate::door::write(
         home.join("pi/agent/auth.json"),
         json!({ "openai": { "type": "oauth", "access": ACCESS, "expires": 1 } }).to_string(),
     )
@@ -2499,7 +2495,7 @@ fn t1744_review_guard_does_not_open_any_owner_login_file() {
         "roaming/devin/credentials.toml",
     ] {
         let path = home.join(file);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::door::make_dir(path.parent().unwrap()).unwrap();
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
     }
     let ran = crate::process::case_of(
@@ -2532,7 +2528,7 @@ fn a_changed_owner_config_is_a_failure_that_says_who_could_have_written_it() {
     let isolation = owner.codex();
     isolation.made_at(at(NOW)).unwrap();
     let config = owner.path(".codex/config.toml");
-    fs::write(
+    crate::door::write(
         &config,
         "[tables_of_someone_else]\nkey = \"VALUE-NEVER-SAID\"\n",
     )

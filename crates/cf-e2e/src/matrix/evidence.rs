@@ -376,7 +376,7 @@ mod tests {
         let login = folder.path().join("auth.json");
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         assert!(before.unchanged(&before.again()).ok);
-        std::fs::write(&login, "synthetic login").unwrap();
+        crate::door::write(&login, "synthetic login").unwrap();
         let after = before.again();
         let changed = before.unchanged(&after);
         assert!(!changed.ok);
@@ -394,19 +394,14 @@ mod tests {
         let folder = crate::door::made("cf-matrix-owner-").unwrap();
         let login = folder.path().join("auth.json");
         let replacement = folder.path().join("replacement");
-        std::fs::write(&login, "one").unwrap();
-        std::fs::write(&replacement, "two").unwrap();
+        crate::door::write(&login, "one").unwrap();
+        crate::door::write(&replacement, "two").unwrap();
         let modified = std::fs::metadata(&login).unwrap().modified().unwrap();
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&replacement)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(modified))
-            .unwrap();
+        crate::door::set_modified(&replacement, modified).unwrap();
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         let old = cf_base::file::stat(&login).unwrap();
-        std::fs::rename(&login, folder.path().join("old")).unwrap();
-        std::fs::rename(&replacement, &login).unwrap();
+        crate::door::rename(&login, folder.path().join("old")).unwrap();
+        crate::door::rename(&replacement, &login).unwrap();
         let new = cf_base::file::stat(&login).unwrap();
         assert_eq!((old.size, old.mtime_ms), (new.size, new.mtime_ms));
         assert_ne!(old.identity, new.identity);
@@ -418,7 +413,7 @@ mod tests {
     fn t1744_review_matrix_cannot_pass_an_unstatable_login() {
         let folder = crate::door::made("cf-matrix-owner-").unwrap();
         let login = folder.path().join("auth.json");
-        std::os::unix::fs::symlink("auth.json", &login).unwrap();
+        crate::door::symlink("auth.json", &login).unwrap();
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         let check = before.unchanged(&before.again());
         assert!(!check.ok);
@@ -432,13 +427,13 @@ mod tests {
             folder.path().join("auth.json"),
             folder.path().join("claude"),
         );
-        std::fs::write(&file, "{}").unwrap();
+        crate::door::write(&file, "{}").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink("versions/2.1.316", &link).unwrap();
+        crate::door::symlink("versions/2.1.316", &link).unwrap();
         let missing = folder.path().join("none.json");
         let before = Owner::look(std::slice::from_ref(&link), &[file.clone(), missing]);
         assert!(before.unchanged(&before.again()).ok);
-        std::fs::write(&file, "{\"a\":1}").unwrap();
+        crate::door::write(&file, "{\"a\":1}").unwrap();
         let after = before.again();
         let check = before.unchanged(&after);
         assert!(!check.ok);
@@ -446,9 +441,9 @@ mod tests {
         assert!(!check.detail.contains("none.json"), "{}", check.detail);
         #[cfg(unix)]
         {
-            std::fs::write(&file, "{}").unwrap();
-            std::fs::remove_file(&link).unwrap();
-            std::os::unix::fs::symlink("versions/2.1.400", &link).unwrap();
+            crate::door::write(&file, "{}").unwrap();
+            crate::door::remove(&link).unwrap();
+            crate::door::symlink("versions/2.1.400", &link).unwrap();
             let moved = before.unchanged(&before.again());
             assert!(!moved.ok);
             assert!(
@@ -533,10 +528,10 @@ mod tests {
     #[test]
     fn the_evidence_holds_no_token_and_a_ledger_is_copied_whole_while_it_is_held() {
         let folder = crate::door::made("cf-test-").unwrap();
-        std::fs::write(folder.path().join("a.json"), "{\"said\":\"hello\"}").unwrap();
+        crate::door::write(folder.path().join("a.json"), "{\"said\":\"hello\"}").unwrap();
         let tokens = ["0123456789abcdef".to_owned(), "short".to_owned()];
         assert!(holds_none(folder.path(), &tokens).ok);
-        std::fs::write(
+        crate::door::write(
             folder.path().join("b.log"),
             "env CONSENSFLOW_TOKEN=0123456789abcdef",
         )
@@ -553,16 +548,17 @@ mod tests {
         );
 
         let db = folder.path().join("ledger.db");
-        let held = rusqlite::Connection::open(&db).unwrap();
+        let held = crate::door::database::write(&db).unwrap();
         // Held as the daemon holds its ledger: no reader can join it.
         held.execute_batch("PRAGMA journal_mode=WAL; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE task(n INTEGER); INSERT INTO task VALUES (1), (2);").unwrap();
-        assert!(rusqlite::Connection::open(&db)
-            .and_then(|reader| reader
-                .query_row("SELECT count(*) FROM task", [], |row| row.get::<_, i64>(0)))
-            .is_err());
+        assert!(crate::door::database::write(&db)
+            .map(|reader| {
+                reader.query_row("SELECT count(*) FROM task", [], |row| row.get::<_, i64>(0))
+            })
+            .is_ok_and(|counted| counted.is_err()));
         let copy = folder.path().join("copy/ledger.db");
         ledger_snapshot(&db, &copy).unwrap();
-        let read: i64 = rusqlite::Connection::open(&copy)
+        let read: i64 = crate::door::database::write(&copy)
             .unwrap()
             .query_row("SELECT count(*) FROM task", [], |row| row.get(0))
             .unwrap();

@@ -144,11 +144,11 @@ mod tests {
         let root = crate::door::made("cf-test-").unwrap();
         let wrapper = root.path().join("claude-shimmed.cmd");
         let text = "@echo off\r\n\"C:\\node.exe\" \"C:\\relay.mjs\" %*\r\n";
-        fs::write(&wrapper, text).unwrap();
+        crate::door::write(&wrapper, text).unwrap();
         assert_eq!(window_command(&wrapper).unwrap(), text);
         // The extension is a Windows file's, whatever its case.
         let upper = root.path().join("CLAUDE.CMD");
-        fs::write(&upper, text).unwrap();
+        crate::door::write(&upper, text).unwrap();
         assert_eq!(window_command(&upper).unwrap(), text);
         let agent = Path::new("/bin/fake-agent");
         assert_eq!(window_command(agent).unwrap(), window_shim(agent));
@@ -184,7 +184,7 @@ mod tests {
     fn a_stand_in_cannot_be_put_where_a_file_is_in_the_way() {
         let root = crate::door::made("cf-test-").unwrap();
         let in_the_way = root.path().join("bin");
-        fs::write(&in_the_way, "a file").unwrap();
+        crate::door::write(&in_the_way, "a file").unwrap();
         let failed = install(&in_the_way, "claude").unwrap_err();
         // Refused where the file would be: a folder of the run's with a file for a folder in it.
         assert!(matches!(failed, Error::File { .. }), "{failed}");

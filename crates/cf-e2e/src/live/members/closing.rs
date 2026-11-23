@@ -73,7 +73,6 @@ fn listing() -> Listing {
     }
     let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,command="])
-        .inheriting_env()
         .run()
         .map_err(|failed| failed.to_string())?;
     if ran.code == Some(0) {

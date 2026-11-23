@@ -112,13 +112,13 @@ mod tests {
     }
 
     fn touch(path: &Path) {
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, "").unwrap();
+        crate::door::make_dir(path.parent().unwrap()).unwrap();
+        crate::door::write(path, "").unwrap();
     }
 
     #[test]
     fn the_files_below_a_folder_are_listed_in_order_without_the_folders_skipped() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         for file in [
             "b.md",
             "a/z.rs",
@@ -145,9 +145,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_to_a_folder_is_a_file_here_and_is_not_entered() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         touch(&root.path().join("real").join("inside.txt"));
-        std::os::unix::fs::symlink(root.path().join("real"), root.path().join("link")).unwrap();
+        crate::door::symlink(root.path().join("real"), root.path().join("link")).unwrap();
         let listed = files_below(root.path(), &[]).unwrap();
         assert_eq!(
             listed,
@@ -161,10 +161,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_plain_file_is_neither_a_folder_nor_a_link_to_one_nor_to_a_file_nor_a_broken_link() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         touch(&root.path().join("real").join("inside.txt"));
         let link = |to: &str, name: &str| {
-            std::os::unix::fs::symlink(root.path().join(to), root.path().join(name)).unwrap();
+            crate::door::symlink(root.path().join(to), root.path().join(name)).unwrap();
         };
         link("real", "to-folder");
         link("real/inside.txt", "to-file");
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn a_folder_that_is_not_there_is_an_error_that_names_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let missing = root.path().join("missing");
         let failed = files_below(&missing, &[]).unwrap_err();
         assert!(

@@ -6,16 +6,16 @@ use super::*;
 #[cfg(unix)]
 #[test]
 fn kit_disclosure_claude_record_helpers_refuse_links_outside_the_run() {
-    use std::os::unix::fs::symlink;
+    use crate::door::symlink;
     let run = crate::door::made("cf-claude-records-").unwrap();
     let foreign = crate::standin_process::unowned_tempdir();
-    std::fs::write(
+    crate::door::write(
         foreign.path().join("123.json"),
         r#"{"sessionId":"s","status":"idle"}"#,
     )
     .unwrap();
-    std::fs::create_dir(foreign.path().join("project")).unwrap();
-    std::fs::write(foreign.path().join("project/s.jsonl"), "{}\n").unwrap();
+    crate::door::make_dir(foreign.path().join("project")).unwrap();
+    crate::door::write(foreign.path().join("project/s.jsonl"), "{}\n").unwrap();
     symlink(foreign.path(), run.path().join("sessions")).unwrap();
     symlink(foreign.path(), run.path().join("projects")).unwrap();
     assert!(

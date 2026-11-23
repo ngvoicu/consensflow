@@ -1,7 +1,8 @@
 // The tests for the machines that install by links: the Unix ones. The portable ones, a launcher that
 // is a file as Windows installs it, are in the parent.
 
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
+use crate::door::symlink;
 use std::path::Path;
 
 use super::*;
@@ -11,16 +12,16 @@ impl OwnerHome {
     /// An executable file at `below`.
     fn executable(&self, below: &str, text: &str) {
         self.write(below, text);
-        fs::set_permissions(self.path(below), fs::Permissions::from_mode(0o755)).unwrap();
+        crate::door::set_permissions(self.path(below), fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     /// A link at `below` to `to`, over one that is there, as an installer makes it.
     fn link(&self, below: &str, to: &Path) {
         let at = self.path(below);
-        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        crate::door::make_dir(at.parent().unwrap()).unwrap();
         let staged = at.with_extension("staged");
         symlink(to, &staged).unwrap();
-        fs::rename(&staged, &at).unwrap();
+        crate::door::rename(&staged, &at).unwrap();
     }
 
     /// Claude Code as its native installer leaves it.
@@ -95,8 +96,8 @@ fn a_link_taken_to_a_copy_of_the_same_binary_is_a_change_whatever_the_bytes_say(
     let command = home.claude();
     let was = fs::read_link(&command).unwrap();
     let elsewhere = home.path("rig/claude/versions/2.1.316");
-    fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
-    fs::copy(&was, &elsewhere).unwrap();
+    crate::door::make_dir(elsewhere.parent().unwrap()).unwrap();
+    crate::door::copy_keeping_mode(&was, &elsewhere).unwrap();
     let found = changes(
         &Watch::of(Harness::Claude, &command, home.0.path()),
         &home,
@@ -136,7 +137,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
     // The run's folder was removed when it ended (T-1068): the link reads what it read, and
     // ends nowhere.
     let found = changes(&watch, &home, || {
-        fs::remove_file(home.path(".local/share/claude/versions/2.1.316")).unwrap();
+        crate::door::remove(home.path(".local/share/claude/versions/2.1.316")).unwrap();
     });
     assert!(
         found
@@ -146,7 +147,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
     );
     // Gone; made; a link for a file.
     let found = changes(&watch, &home, || {
-        fs::remove_file(home.path(".local/bin/claude")).unwrap();
+        crate::door::remove(home.path(".local/bin/claude")).unwrap();
     });
     assert!(
         found
@@ -183,7 +184,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
         &Watch::of(Harness::Claude, &command, home.0.path()),
         &home,
         || {
-            fs::remove_file(home.path(".local/bin/claude")).unwrap();
+            crate::door::remove(home.path(".local/bin/claude")).unwrap();
             home.write(".local/bin/claude", "a file");
         },
     );

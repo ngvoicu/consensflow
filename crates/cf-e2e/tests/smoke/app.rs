@@ -270,8 +270,8 @@ mod tests {
 
     /// An app that is `script`, run by the shell (a script that has just been
     /// written may be refused as a file still open for writing).
-    fn app(script: &str, patience: Duration) -> (tempfile::TempDir, App) {
-        let root = tempfile::tempdir().unwrap();
+    fn app(script: &str, patience: Duration) -> (cf_e2e::door::Made, App) {
+        let root = cf_e2e::door::made("t-").unwrap();
         let state = root.path().join("state");
         let run = Run::new("/bin/sh").args(["-c", script]);
         let app = App::start(run, root.path(), &state, patience).unwrap();
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn a_report_that_does_not_come_is_a_timeout_that_says_what_did_and_where_to_look() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let state = root.path().join("state");
         files::write(&state.join("app").join("app.log"), "the app's own words\n").unwrap();
         let script = [

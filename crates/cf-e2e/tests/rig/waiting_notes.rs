@@ -27,7 +27,7 @@ use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use tempfile::TempDir;
+use cf_e2e::door::Made;
 
 use crate::{config, secs, session_of, Outcome};
 
@@ -39,14 +39,12 @@ const REFUSED: &str = "QUOTA-OUT Reply with exactly: WORKER_OK";
 /// (`CF_TEST_QUOTA_FILE`): [`Account::switched`] removes it, the human logging
 /// the harness into another account, after which the same brief is not refused.
 struct Account {
-    folder: TempDir,
+    folder: Made,
 }
 
 impl Account {
     fn new() -> Result<Self> {
-        let folder = tempfile::Builder::new()
-            .prefix("cf-account-")
-            .tempdir()
+        let folder = cf_e2e::door::made("cf-account-")
             .map_err(|source| cf_e2e::Error::File {
                 action: "make a folder in",
                 path: std::env::temp_dir(),
@@ -61,7 +59,7 @@ impl Account {
     }
 
     fn switched(&self) {
-        let _ = std::fs::remove_file(self.file());
+        let _ = cf_e2e::door::remove(self.file());
     }
 }
 

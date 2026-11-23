@@ -91,6 +91,35 @@ fn absolute(path: &str, windows: bool) -> bool {
             && (bytes[2] == b'\\' || bytes[2] == b'/'))
 }
 
+/// A stand-in program's window: the proof, once, that the environment the window gave the stand-in
+/// holds the seal (every home a folder of the run's, no store named by another variable), which the
+/// stand-in's children are then given as it is ([`crate::process::Run::as_this_window`]). Only the
+/// stand-in programs (`src/bin`) make one; where the environment breaks the seal, the window has no
+/// verdict to give and no child of the stand-in starts.
+#[derive(Debug)]
+pub struct Window {
+    verdict: Result<(), String>,
+}
+
+impl Window {
+    /// This process's window, judged once on its own environment.
+    pub fn this() -> &'static Window {
+        static THIS: std::sync::OnceLock<Window> = std::sync::OnceLock::new();
+        THIS.get_or_init(|| {
+            let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+            let kit = kit_vars(&env);
+            Window {
+                verdict: super::sealed(env, &kit, cfg!(windows)).map(drop),
+            }
+        })
+    }
+
+    /// Whether the seal held, or why not.
+    pub fn verdict(&self) -> Result<(), String> {
+        self.verdict.clone()
+    }
+}
+
 /// Seals `vars`, the whole environment a program will have, in the order given (a later value of
 /// the very same name wins): the environment to give it, its home variables by their canonical
 /// names, or why it is refused.

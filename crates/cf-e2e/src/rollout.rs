@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn the_rollouts_of_a_home_are_found_below_its_sessions_by_their_names() {
-        let home = tempfile::tempdir().unwrap();
+        let home = crate::door::made("t-").unwrap();
         let day = home.path().join("sessions/2026/10/13");
         files::write(
             &day.join("rollout-2026-10-13T10-00-00-thread-one.jsonl"),

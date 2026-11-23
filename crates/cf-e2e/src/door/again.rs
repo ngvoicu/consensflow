@@ -52,7 +52,6 @@ pub fn again_under_audit(test: &str) -> Result {
     ))?;
     let ran = Run::new(program)
         .args(["--exact", test, "--test-threads=1"])
-        .inheriting_env()
         .var(AUDIT, "1")
         .var(AUDIT_FILE, &audit)
         .without(AUDIT_MADE)

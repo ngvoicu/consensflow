@@ -6,20 +6,20 @@
 //!
 //! A program gets the environment a case names and no other: the case's home
 //! points `cf` at its own folders, and nothing of the machine's `~/.consensflow`
-//! or of a window this test may itself run in reaches it. A case that needs the
-//! test's own environment under its variables asks for it
-//! ([`Run::inheriting_env`]); board variables are never inherited implicitly.
-//! The program's input is closed, unless the case
+//! or of a window this test may itself run in reaches it. What a program is given of
+//! the test's own environment is what the machine is ([`is_machine_variable`]: where programs
+//! are, what the system is called, the temporary folders, the language), and nothing of the
+//! account: every home variable is a folder of the run's, and the door's seal says so before
+//! anything starts. A stand-in program in a window gives its children the window's own
+//! environment ([`Run::as_this_window`]); no program gets the test's whole. Board variables are
+//! never handed on implicitly. The program's input is closed, unless the case
 //! gives it some ([`Run::input`]) or drives it ([`Run::spawn`]).
 //!
-//! On Windows a program is also given the few variables the system needs to
-//! start it, where the case names none, from the test's own environment: the
-//! JavaScript suites started `cf` with Node, whose libuv does that for every
-//! child, and winsock does not start without `SYSTEMROOT`, for one. A program
-//! that starts other programs by their names asks for the two more that find
-//! them ([`Run::finding_programs`]). This module reads the test's environment
-//! for that, and for the few variables a stand-in program or a suite is told
-//! its settings by ([`own_var`]).
+//! On Windows the machine's variables are what the system needs to start a program: the
+//! JavaScript suites started `cf` with Node, whose libuv does that for every child, and winsock
+//! does not start without `SYSTEMROOT`, for one. This module reads the test's environment for
+//! that, and for the few variables a stand-in program or a suite is told its settings by
+//! ([`own_var`]).
 //!
 //! A program that leaves a child of its own holding its output after it has ended
 //! (a wrapper's helper started in the background) does not hold the run: what it
@@ -92,26 +92,6 @@ const POLL: Duration = Duration::from_millis(2);
 /// its pipes by then, and a process it left that holds them open (a helper a
 /// wrapper started in the background) would hold the run for as long as it lives.
 pub const HELD: Duration = Duration::from_secs(5);
-
-/// The variables a program on Windows is given from the test's own environment
-/// where the case names none (libuv's `required_vars`, as cf-process has them).
-const REQUIRED_ON_WINDOWS: [&str; 11] = [
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "LOGONSERVER",
-    "PATH",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
-    "TEMP",
-    "USERDOMAIN",
-    "USERNAME",
-    "USERPROFILE",
-    "WINDIR",
-];
-
-/// What a program that starts others by their names needs besides, on Windows:
-/// the command interpreter, and which extensions make a file a program.
-const PROGRAM_LOOKUP_ON_WINDOWS: [&str; 2] = ["COMSPEC", "PATHEXT"];
 
 /// The environment variable `name` of this process, or none when it is not set
 /// (or is not text). A stand-in program reads what the window it stands in for
@@ -213,10 +193,9 @@ pub struct Run {
     args: Vec<Arg>,
     vars: Vec<(OsString, OsString)>,
     removed: Vec<OsString>,
-    inherit: bool,
-    /// Only what the machine is ([`Run::machine_env`]).
-    machine: bool,
-    finding_programs: bool,
+    /// The verdict of a stand-in's window on its own environment, where the program is a child
+    /// of the stand-in that gives it that environment ([`Run::as_this_window`]).
+    window: Option<std::result::Result<(), String>>,
     cwd: Option<PathBuf>,
     limit: Option<Duration>,
     input: Input,
@@ -244,7 +223,7 @@ pub(crate) enum Kind {
 /// it: where programs are, what the system is called, the temporary folders, the language.
 /// (Names are not case-sensitive on Windows.)
 pub fn is_machine_variable(name: &str) -> bool {
-    const MACHINE: [&str; 28] = [
+    const MACHINE: [&str; 34] = [
         "PATH",
         "SYSTEMROOT",
         "SYSTEMDRIVE",
@@ -273,6 +252,15 @@ pub fn is_machine_variable(name: &str) -> bool {
         "LANG",
         "TERM",
         "SHELL",
+        "LOGONSERVER",
+        "USERDOMAIN",
+        // What a real harness on Windows reads of the machine, and a window no longer has from
+        // the account's registry (T-2119 B1-c): the processor's own words, and where PowerShell
+        // finds its modules.
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "PSMODULEPATH",
     ];
     let upper = name.to_ascii_uppercase();
     MACHINE.contains(&upper.as_str()) || upper == "LC_ALL" || upper == "LC_CTYPE"
@@ -312,9 +300,7 @@ impl Run {
             args: Vec::new(),
             vars: Vec::new(),
             removed: Vec::new(),
-            inherit: false,
-            machine: false,
-            finding_programs: false,
+            window: None,
             cwd: None,
             limit: Some(LIMIT),
             input: Input::Default,
@@ -401,49 +387,23 @@ impl Run {
     }
 
     /// Without the variable `name`, whichever way the program got it: told, or
-    /// the test's own under [`Run::inheriting_env`].
+    /// the window's own under [`Run::as_this_window`].
     #[must_use]
     pub fn without(mut self, name: impl AsRef<OsStr>) -> Self {
         self.removed.push(name.as_ref().to_os_string());
         self
     }
 
-    /// With the test's own environment underneath its variables, except for
-    /// `CONSENSFLOW_*` (which must be set explicitly by this run).
+    /// A child of a stand-in program, on the environment the window it runs in gave the
+    /// stand-in: the window's own board connection and homes, as a real harness's children have
+    /// them, and no other. `window` is the stand-in's own verdict on that environment
+    /// ([`crate::door::spawn::Window::this`]): where it breaks the seal, nothing starts. For the
+    /// stand-in programs in `src/bin` alone (the audit finds it elsewhere).
     #[must_use]
-    pub fn inheriting_env(mut self) -> Self {
-        self.inherit = true;
-        self
-    }
-
-    /// With what the machine is of the test's own environment and nothing of the account: the
-    /// search path, the system's variables and the temporary folders ([`is_machine_variable`]),
-    /// never a home, a profile, a harness's folder or an XDG one. The program's home is what its
-    /// case names (`vars`), by name; a case that names none leaves the program with none of the
-    /// caller's (K3: every child the live kit starts is given the kit's homes, never the
-    /// owner's).
-    #[must_use]
-    pub fn machine_env(mut self) -> Self {
-        self.machine = true;
-        self
-    }
-
-    /// A stand-in already launched inside a rig's window passes that window's
-    /// own board connection to commands it runs, as a real harness does.
-    #[must_use]
-    pub fn inheriting_window_env(mut self) -> Self {
-        self.inherit = true;
+    pub fn as_this_window(mut self, window: &crate::door::spawn::Window) -> Self {
+        self.window = Some(window.verdict());
         self.vars
             .extend(std::env::vars_os().filter(|(name, _)| board_variable(name)));
-        self
-    }
-
-    /// For a program that starts others by their names: on Windows it is given
-    /// the command interpreter and the list of extensions that make a file a
-    /// program too, from the test's own environment. Nothing elsewhere.
-    #[must_use]
-    pub fn finding_programs(mut self) -> Self {
-        self.finding_programs = true;
         self
     }
 
@@ -528,23 +488,24 @@ impl Run {
     /// error where the seal refuses it: nothing starts.
     pub fn environment(&self) -> Result<Vec<(OsString, OsString)>> {
         let windows = cfg!(windows);
-        let mut env: Vec<(OsString, OsString)> = if self.machine {
-            machine_vars(std::env::vars_os())
-        } else if !self.inherit {
-            required_on_windows(&self.vars, self.finding_programs)
-                .into_iter()
-                .map(|(name, value)| (OsString::from(name), value))
-                .collect()
-        } else {
-            // The test's own environment, but what of it is the account's: a home that is no
-            // folder of the run's, and any other variable but the search path that names a store
-            // of a harness's or of the account, is not handed on (the door gives the run's homes
-            // below). A case that names such a variable itself is refused by the seal instead.
+        if let Some(Err(why)) = &self.window {
+            return Err(Error::LiveApp(format!(
+                "{} is not started: the window it runs in broke the seal: {why}",
+                self.program.to_string_lossy()
+            )));
+        }
+        let mut env: Vec<(OsString, OsString)> = if self.window.is_some() {
+            // The window's own environment, but what of it is the account's: a home that is no
+            // folder of the run's, and any other variable but the search path that names a
+            // store, is not handed on (the door gives the run's homes below). A case that names
+            // such a variable itself is refused by the seal instead.
             let roots = crate::door::Roots::now();
             std::env::vars_os()
                 .filter(|(name, _)| !board_variable(name))
                 .filter(|(name, value)| inheritable(name, value, &roots))
                 .collect()
+        } else {
+            machine_vars(std::env::vars_os())
         };
         for (name, value) in &self.vars {
             set(&mut env, name, value, windows);
@@ -733,6 +694,26 @@ impl Run {
         self.spawn_on().map(|(spawned, _)| spawned)
     }
 
+    /// Starts the program on a pty of the kit's own, of `rows` and `cols`, sealed as every start is
+    /// ([`Run::environment`]) and admitted by the file it resolves to ([`Run::admitted`]): Muse's
+    /// direct window, and no other program of the kit's runs on a pty of its own
+    /// ([`crate::door::terminal`]).
+    pub fn terminal(self, size: (u16, u16)) -> Result<crate::door::terminal::Terminal> {
+        self.startable()?;
+        let env = self.environment()?;
+        self.admitted(&env)?;
+        let args: Vec<OsString> = self
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Plain(word) => word.clone(),
+                #[cfg(windows)]
+                Arg::Raw(word) => word.clone(),
+            })
+            .collect();
+        crate::door::terminal::open(&self.program, &args, &env, self.cwd.as_deref(), size)
+    }
+
     /// Starts the program as this program's one child on this program's own console and
     /// standard handles, sealed as every start is, and hands it over: for a stand-in that runs the
     /// harness it stands for as its child (Windows' Muse stand-in, which has no `exec`). Waiting
@@ -789,54 +770,8 @@ impl Arg {
     }
 }
 
-/// What Windows needs of the test's own environment, for each variable of
-/// [`REQUIRED_ON_WINDOWS`] (and of [`PROGRAM_LOOKUP_ON_WINDOWS`], where the
-/// program finds others) that `vars` do not name (the names of Windows'
-/// variables are not case-sensitive) and the test has. Nothing elsewhere.
-fn required_on_windows(
-    vars: &[(OsString, OsString)],
-    finding_programs: bool,
-) -> Vec<(&'static str, OsString)> {
-    required_from(vars, finding_programs, cfg!(windows), &|name| {
-        std::env::var_os(name)
-    })
-}
-
-/// [`required_on_windows`] for a `lookup` of the test's environment, on Windows or not.
-///
-/// Where `vars` name the home (`HOME` or `USERPROFILE`), the caller's profile is not given back
-/// by the two halves it is also written in (`HOMEDRIVE` and `HOMEPATH`), nor by the other of the
-/// pair: a launcher that joins them would reach the caller's profile.
-pub fn required_from(
-    vars: &[(OsString, OsString)],
-    finding_programs: bool,
-    windows: bool,
-    lookup: &dyn Fn(&str) -> Option<OsString>,
-) -> Vec<(&'static str, OsString)> {
-    if !windows {
-        return Vec::new();
-    }
-    let names = |wanted: &str| {
-        vars.iter()
-            .any(|(given, _)| given.eq_ignore_ascii_case(wanted))
-    };
-    let home_named = names("HOME") || names("USERPROFILE");
-    let lookup_names: &[&str] = if finding_programs {
-        &PROGRAM_LOOKUP_ON_WINDOWS
-    } else {
-        &[]
-    };
-    REQUIRED_ON_WINDOWS
-        .into_iter()
-        .chain(lookup_names.iter().copied())
-        .filter(|name| !names(name))
-        .filter(|name| !(home_named && ["HOMEDRIVE", "HOMEPATH", "USERPROFILE"].contains(name)))
-        .filter_map(|name| lookup(name).map(|value| (name, value)))
-        .collect()
-}
-
-/// Whether the test's own variable `name` is handed on to a program that inherits the test's
-/// environment ([`Run::inheriting_env`]): not a home of the account's (one that is no folder this
+/// Whether the window's own variable `name` is handed on to a stand-in's child
+/// ([`Run::as_this_window`]): not a home of the account's (one that is no folder this
 /// run made), and not another variable but the search path that names a store.
 fn inheritable(name: &OsStr, value: &OsStr, roots: &crate::door::Roots) -> bool {
     let text = name.to_string_lossy().to_ascii_uppercase();

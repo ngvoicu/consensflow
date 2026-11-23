@@ -543,6 +543,27 @@ fn a_question_whose_environment_names_a_home_of_the_account_is_not_asked() {
     assert!(crate::live::ask::question_sealed(&mut elsewhere).is_err());
 }
 
+/// T-2086 N5: a question starts the installed harness to read something of it, and carries the
+/// switches that keep every harness from updating or installing anything itself, over what its
+/// caller said.
+#[test]
+fn a_question_is_asked_with_every_harnesss_update_switches_over_what_its_caller_said() {
+    let root = made("k3-question-switches-").unwrap();
+    let home = root.path().join("home");
+    let mut body = json!({
+        "op": "models", "kind": "pi", "env": { "HOME": home, "PI_OFFLINE": "0" }
+    });
+    crate::live::ask::question_sealed(&mut body).unwrap();
+    for (name, value) in [
+        ("PI_OFFLINE", "1"),
+        ("DISABLE_AUTOUPDATER", "1"),
+        ("DISABLE_UPDATES", "1"),
+        ("MUSE_NO_AUTO_UPDATE", "1"),
+    ] {
+        assert_eq!(body["env"][name], json!(value), "{name}");
+    }
+}
+
 // ---- The judge. ----
 
 #[test]
@@ -767,7 +788,6 @@ fn the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges() {
         "door::k3_tests::the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges",
         std::time::Duration::from_secs(60),
     )
-    .inheriting_env()
     .var(CHILD, &file)
     .run()
     .unwrap();
