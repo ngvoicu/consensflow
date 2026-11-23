@@ -14,10 +14,12 @@
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use cf_base::env::Env;
+use cf_base::file::is_missing;
 use rusqlite::types::Value as Bound;
 use serde::Deserialize;
 use serde_json::Value;
@@ -32,6 +34,11 @@ use crate::shared::record::sqlite::{
 /// Why a look at a session Devin's store holds no row of fails: Devin writes
 /// the row with the session's first message.
 pub(crate) const MISSING_SESSION: &str = "missing Devin session";
+
+/// Why a look fails where Devin has no store at all yet: no session of it was written. A
+/// store that is there and cannot be read (SQLite's own error, a schema the reader does not
+/// know) is a look that failed, said in SQLite's words.
+pub(crate) const MISSING_STORE: &str = "missing Devin store";
 
 /// The last rows of a conversation each look reads again, in case one was rewritten.
 const RECHECKED: usize = 8;
@@ -90,6 +97,9 @@ impl Store {
         env: &Env,
     ) -> Result<(bool, &'a Store), String> {
         let file = paths::store(env)?;
+        if fs::metadata(&file).is_err_and(|error| is_missing(&error)) {
+            return Err(MISSING_STORE.to_owned());
+        }
         let opened = sqlite::Store::open(Path::new(&file))?;
         let previous = kept.take();
         let (store, changed) = opened.read(|reads| Store::look(previous, reads, keys, session))?;

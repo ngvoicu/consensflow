@@ -857,6 +857,14 @@ mod tests {
         let failed = json!({ "settled": true, "read": "failed", "reading": { "unknown": true, "reason": "unreadable: denied" } });
         let refused = record_of(&failed).unwrap_err().to_string();
         assert!(refused.contains("unreadable: denied"), "{refused}");
+        // Devin's native reader, on a store whose schema it does not know: an error naming
+        // SQLite's own words, never a record of no rows; a session the store has no row of yet
+        // is absent (round 2).
+        let devin = json!({ "settled": true, "read": "failed", "reading": { "unknown": true, "reason": "unreadable: no such column: id" } });
+        let refused = record_of(&devin).unwrap_err().to_string();
+        assert!(refused.contains("no such column: id"), "{refused}");
+        let no_row = json!({ "settled": true, "read": "absent", "reading": { "unknown": true, "reason": "unreadable: missing Devin session" } });
+        assert_eq!(record_of(&no_row).unwrap(), None);
         let unsaid = json!({ "settled": true, "reading": { "unknown": true, "reason": "x" } });
         assert!(record_of(&unsaid).is_err());
     }
