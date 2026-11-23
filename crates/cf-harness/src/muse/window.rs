@@ -157,9 +157,6 @@ impl MuseWindow {
     /// none where the host says nothing.
     async fn screen(host: &dyn PaneHost, pane: &Pane) -> Option<(Vec<String>, Option<Cursor>)> {
         let snapshot = pane::snapshot_drawn(host, pane).await.ok()?;
-        if !crate::shared::input_box::screen_current(&snapshot) {
-            return None;
-        }
         let lines = snapshot
             .get("bottom")?
             .as_array()?
@@ -261,7 +258,6 @@ impl Window for MuseWindow {
             self.input.replace(HumanInput::of(&snapshot));
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
-                || !crate::shared::input_box::screen_current(&snapshot)
             {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
