@@ -1130,3 +1130,40 @@ fn a_failed_turn_straight_after_a_retry_that_failed_is_still_the_second_try() {
     passes(&c, 3);
     assert_eq!(t.task(1).task.retry.expect("held").which, 2);
 }
+
+#[test]
+fn a_second_try_after_an_earlier_quota_hold_says_no_old_quota_line() {
+    // `cf task list` reads the task's newest "waits with @…" note while it is held and has no
+    // line of its own: at a retry's second hold that was the old quota hold's (T-2131).
+    let c = retrying();
+    let (t, window) = working(&c);
+    let quota = super::fixtures::exhausted(
+        Some(&super::fixtures::now(&c)),
+        Some(&super::fixtures::soon(&c, 1)),
+    );
+    c.adapter.refuse(&window, quota);
+    passes(&c, 3);
+    c.advance(3_700_000);
+    until_resumed(&c, "zeus", 1);
+    c.adapter.with(&window, |agent| agent.quota = None);
+    next_turn_opens(&c, &window);
+    passes(&c, 3);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 3);
+    let second = t.task(1).task;
+    assert_eq!(second.retry.expect("held").which, 2);
+    assert!(
+        second
+            .aside
+            .as_deref()
+            .is_none_or(|aside| !aside.contains("waits with")),
+        "no old quota line: {:?}",
+        second.aside
+    );
+}

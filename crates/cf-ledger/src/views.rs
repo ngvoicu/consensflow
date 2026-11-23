@@ -47,6 +47,8 @@ pub(crate) const TASK_SELECT: &str = "
              AND h.state IN ('queued', 'delivering', 'delivered', 'read')
              AND NOT (json_valid(h.receipt) AND json_extract(h.receipt, '$.shown') IS NOT NULL)
              AND h.body LIKE 'T-' || t.number || ' waits with @%'
+             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id
+                              AND r.paused_at = t.paused_at)
              AND h.id > coalesce((SELECT max(s.id) FROM message s
                    WHERE s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
                      AND s.kind = 'note' AND json_valid(s.receipt)

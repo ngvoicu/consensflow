@@ -21,7 +21,7 @@
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
-use crate::{config_with_codex, secs, Outcome};
+use crate::{config_with_codex_tries_off, secs, Outcome};
 
 /// The brief whose turn fails, three seconds in.
 const BRIEF: &str = "SLEEP 3 TURN-FAILS Reply with exactly: CODEX_OK";
@@ -61,7 +61,7 @@ fn failed_notes(project: &Project) -> cf_e2e::Result<Vec<String>> {
 /// A Codex worker is given `brief`, its turn fails, and the note T-1's failure makes: the
 /// worker's session, and the note.
 fn the_note_of_a_failed_turn(brief: &str) -> cf_e2e::Result<(String, String)> {
-    let rig = Rig::start(config_with_codex())?;
+    let rig = Rig::start(config_with_codex_tries_off())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;

@@ -197,3 +197,33 @@ runs = ["n35-devin"]
 file = "crates/cf-harness/src/devin/record/wires.rs"
 find = "if self.active.is_none() && self.open && event.get(\"turnClientMessageId\").is_some() {"
 replace = "if false && self.active.is_none() && self.open && event.get(\"turnClientMessageId\").is_some() {"
+
+[[plant]]
+name = "n35 hold: the exit's look takes an out member's held window"
+meant = "an_out_member_s_held_window_that_finished_by_itself_and_exits_stays_held_to_the_reset"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if self.is_out(&owner) {\n            return Ok(());\n        }\n        if participant.role != \"chief\" {"
+replace = "        if participant.role != \"chief\" {"
+
+[[plant]]
+name = "n35 hold: a failed end after a good turn counted from the old try"
+meant = "a_turn_the_harness_woke_after_turns_that_went_through_is_the_first_try_not_the_next"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        let n = if went_through {"
+replace = "        let n = if false && went_through {"
+
+[[plant]]
+name = "n35 hold: a second try's line is the old quota hold's"
+meant = "a_second_try_after_an_earlier_quota_hold_says_no_old_quota_line"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id\n                              AND r.paused_at = t.paused_at)\n"
+replace = ""
