@@ -155,8 +155,7 @@ impl Session {
 fn compaction(folder: &Path, env: &[(String, String)]) -> Result<Option<Session>> {
     let store = store(cfg!(windows), env)?;
     let failed = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", store.display()));
-    let db =
-        cf_e2e::door::database::read(&store).map_err(failed)?;
+    let db = cf_e2e::door::database::read(&store)?;
     db.busy_timeout(Duration::from_secs(5)).map_err(failed)?;
     let mut places = vec![folder.to_string_lossy().into_owned()];
     if let Ok(real) = folder.canonicalize() {

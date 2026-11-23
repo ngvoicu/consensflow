@@ -180,11 +180,7 @@ impl Machine {
 
     /// Takes the machine away, once the run it was for has passed.
     pub fn cleanup(self) -> Result {
-        cf_e2e::door::remove(&self.root).map_err(|source| Error::File {
-            action: "remove",
-            path: self.root.clone(),
-            source,
-        })
+        cf_e2e::door::remove(&self.root)
     }
 
     /// Says where the machine is kept to `out`, if it is to be: the run is

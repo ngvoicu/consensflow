@@ -675,11 +675,7 @@ fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result(
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let folder = rig.workspace().join("zo\u{eb}-\u{65e5}\u{672c}");
-    cf_e2e::door::make_dir(&folder).map_err(|source| cf_e2e::Error::File {
-        action: "make",
-        path: folder.clone(),
-        source,
-    })?;
+    cf_e2e::door::make_dir(&folder)?;
     let roster = json!({
         "schemaVersion": 1,
         "agents": [

@@ -171,11 +171,7 @@ fn a_full_round_writes_nothing_outside_the_home_and_the_projects_own_files() -> 
     assert_eq!(results.len(), 1, "the worker's result reached the chief");
     let root = rig.close_keeping_the_root()?;
     let project_after = snapshot(&workspace);
-    cf_e2e::door::remove(&root).map_err(|source| Error::File {
-        action: "remove",
-        path: root.clone(),
-        source,
-    })?;
+    cf_e2e::door::remove(&root)?;
 
     let mut written = changes("home", &home_before, &snapshot(&home));
     written.retain(|change| !the_harnesses_own(change));

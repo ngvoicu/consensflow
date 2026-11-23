@@ -199,10 +199,6 @@ fn a_member_window_is_given_what_the_app_took_of_the_humans_terminal() -> Outcom
     holds_none(&home, &[VALUE, KEY_VALUE], "while the daemon runs");
     let root = rig.close_keeping_the_root()?;
     holds_none(&home, &[VALUE, KEY_VALUE], "once the daemon ended");
-    cf_e2e::door::remove(&root).map_err(|source| Error::File {
-        action: "remove",
-        path: root.clone(),
-        source,
-    })?;
+    cf_e2e::door::remove(&root)?;
     Ok(())
 }

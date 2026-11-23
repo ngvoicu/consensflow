@@ -242,9 +242,7 @@ fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
         ));
     }
     let fail = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", file.display()));
-    let db =
-        cf_e2e::door::database::read(file)
-            .map_err(fail)?;
+    let db = cf_e2e::door::database::read(file)?;
     let summaries: i64 = db
         .query_row(
             "SELECT count(*) FROM message_nodes WHERE json_extract(metadata, '$.summarized_from') IS NOT NULL",
