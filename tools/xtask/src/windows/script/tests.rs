@@ -117,6 +117,7 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
         env,
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     })
 }
@@ -364,6 +365,22 @@ fn a_run_gives_its_command_no_variable_that_was_not_named() {
     // Only what is named: this machine's environment is not in the script.
     let one = parse_env(&strings(&["A=1"])).unwrap();
     assert_eq!(given(&plain(&one)), ["A"]);
+}
+
+/// T-2007 round 3 (N1): on a machine that is no test machine (zeewin2, whose account is its
+/// owner's own) the run gives no marker, and takes away one the account itself may hold.
+#[test]
+fn a_run_on_an_unmarked_machine_gives_its_command_no_test_machine_marker() {
+    let text = run_script(&Script {
+        marked: false,
+        ..longest(&[])
+    });
+    assert!(!text.contains("$env:CONSENSFLOW_TEST_MACHINE ="), "{text}");
+    assert!(
+        text.contains("Remove-Item Env:\\CONSENSFLOW_TEST_MACHINE -ErrorAction SilentlyContinue"),
+        "{text}"
+    );
+    assert!(text.contains("== test machine: none"), "{text}");
 }
 
 #[test]
@@ -702,6 +719,7 @@ fn script_of_run(id: &str) -> String {
         env: &[],
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     })
 }
@@ -996,6 +1014,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
             env,
             node: r"C:\Program Files\nodejs",
             machine: "zeewin2",
+            marked: true,
             limits: None,
         }
     }
@@ -1172,6 +1191,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         env,
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     }
 }

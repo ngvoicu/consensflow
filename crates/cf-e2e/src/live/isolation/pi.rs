@@ -204,6 +204,7 @@ pub fn renewal(
     program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
 ) -> Renewal {
     let (home, agent, model) = (home.to_path_buf(), agent.to_path_buf(), model.to_owned());
+    let on = machine.clone();
     Renewal::new(machine, "Pi", "only once the entry has ended", move || {
         let program = program()?;
         let files: Vec<_> = ["settings.json", "models.json", "mcp-auth.json"]
@@ -217,7 +218,7 @@ pub fn renewal(
             "PI_CODING_AGENT_DIR".to_owned(),
             agent.to_string_lossy().into_owned(),
         ));
-        let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model), &account)?;
+        let ended = renew::one_shot(&on, Harness::Pi, &program, &renew::pi_words(&model), &account)?;
         let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);
         if changed.is_empty() {
             return Ok(ended);

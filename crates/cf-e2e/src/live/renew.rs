@@ -53,8 +53,9 @@ use crate::door::Door;
 use crate::process::{own_var, Run};
 use crate::{Error, Result};
 
-/// The variable the Windows runner gives the command it runs, with the name of the machine
-/// (`zeewin2`): the one signal that a run is on a machine that is there to test on. The runner
+/// The variable the Windows runner gives the command it runs on a test machine, with the name of
+/// the machine (`zeewin`): the one signal that a run is on an account that is there to test on.
+/// zeewin2 is given none: its account is its owner's own (T-2007 round 3). The runner
 /// spells it in `tools/xtask/src/windows/script.rs`.
 pub const TEST_MACHINE: &str = "CONSENSFLOW_TEST_MACHINE";
 
@@ -93,7 +94,7 @@ impl TestMachine {
 
     /// The machine a signal names; none where there is none, or it names nothing. (The tests of
     /// the logins make a test machine with it.)
-    pub(super) fn signalled(signal: Option<&str>) -> Option<Self> {
+    pub(crate) fn signalled(signal: Option<&str>) -> Option<Self> {
         let name = signal?.trim();
         (!name.is_empty()).then(|| Self(name.to_owned()))
     }
@@ -111,7 +112,7 @@ impl TestMachine {
     pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {
         detected.ok_or_else(|| {
             Error::Daemon(format!(
-                "{what} uses the login store of the account that runs it, and runs only on a machine marked as a test machine ({TEST_MACHINE}, which the Windows runner gives), with an account of its own: this is not one, so it is refused and nothing was touched"
+                "{what} uses the login store of the account that runs it, and runs only on a machine marked as a test machine ({TEST_MACHINE}, which the Windows runner gives on such a machine), with an account of its own: this is not one, so it is refused and nothing was touched"
             ))
         })
     }
@@ -322,12 +323,13 @@ impl Renewal {
 /// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
 /// it could not be run at all.
 pub fn one_shot(
+    machine: &TestMachine,
     harness: Harness,
     program: &Path,
     words: &[String],
     account: &[(String, String)],
 ) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, account, LIMIT, &[])
+    one_shot_within(Some(machine), harness, program, words, account, LIMIT, &[])
 }
 
 /// What the harness is told of the account it renews for, by name: its home, in every variable a
@@ -351,19 +353,21 @@ pub fn account_vars(home: &Path) -> Vec<(String, String)> {
 /// `projects/<the folder's path>/memory`, even with no session saved) leaves nothing of the
 /// renewal's behind, so that the owner's setup is compared with what it was ([`FOLDER`] names it).
 pub fn one_shot_in(
+    machine: &TestMachine,
     harness: Harness,
     program: &Path,
     words: &[String],
     account: &[(String, String)],
     records: &[&Path],
 ) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, account, LIMIT, records)
+    one_shot_within(Some(machine), harness, program, words, account, LIMIT, records)
 }
 
 /// [`one_shot`], ended after `limit`, and its record in each of `records` taken away. The harness
 /// is told what every window of the kit's is ([`super::launcher::updates_off_of`]): it runs on the
 /// owner's own folders, where an update or an install would land in what is theirs.
 fn one_shot_within(
+    machine: Option<&TestMachine>,
     harness: Harness,
     program: &Path,
     words: &[String],
@@ -371,6 +375,9 @@ fn one_shot_within(
     limit: Duration,
     records: &[&Path],
 ) -> Result<Option<String>> {
+    // It runs as the owner on the account's own login: only on an account that is a test
+    // machine's own (T-2007 round 3), before anything is made or started.
+    TestMachine::required_by("the renewal of a login", machine.cloned())?;
     let folder = crate::door::made(FOLDER).map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
@@ -389,7 +396,7 @@ fn one_shot_within(
         .closed_input()
         .limit(limit)
         .run()?;
-    let leftover = forget(records, folder.path(), &baseline);
+    let leftover = forget(records, folder.path(), &baseline, machine);
     let said = if ran.timed_out {
         Some(format!("it was ended after {} s", limit.as_secs()))
     } else if ran.code == Some(0) {
@@ -470,6 +477,7 @@ fn forget(
     records: &[&Path],
     own: &Path,
     baseline: &[std::collections::BTreeSet<std::ffi::OsString>],
+    machine: Option<&TestMachine>,
 ) -> Option<String> {
     let door = crate::door::Door::of_run();
     let mut refused = Vec::new();
@@ -493,7 +501,7 @@ fn forget(
                 path.display()
             ));
         } else {
-            let _ = door.remove_record(&record);
+            let _ = door.remove_record_on(&record, machine);
         }
     }
     (!refused.is_empty()).then(|| {

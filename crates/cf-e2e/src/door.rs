@@ -102,7 +102,7 @@ pub const STILL_ACTS: &[&str] = &[
     "a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it",
     "the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door; among them the machine's own program of each harness the run seats, asked for its version, and on a Mac `security`, which reads the Keychain item of Claude Code's login (the first read asks the person once to allow it) and lists the names of its items",
     "the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written; besides them the run makes new files of its own outside its folders and never writes over one that is there (the audit file, a fixture or a report file a caller names, a failure report), and makes a folder that is missing on the way to them",
-    "an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never starts that renewal: where a login would need it, the rig that needed it does not start and the run ends with one line that says so, which is in the audit file too; what was done by then stays done: the builds, the questions to the installed harnesses for their versions, the reads of the logins, and the run's first folders (the folder of its shims in the temp folder)",
+    "an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets on a machine whose account is a test account of its own, and not on zeewin2, whose account is its owner's) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never starts that renewal: where a login would need it, the rig that needed it does not start and the run ends with one line that says so, which is in the audit file too; what was done by then stays done: the builds, the questions to the installed harnesses for their versions, the reads of the logins, and the run's first folders (the folder of its shims in the temp folder)",
     "a say-only run uses the real model's quota, and keeps what it made for reading until a person removes it: its folders, its transcripts, the whole command lines in the audit file, and its copies of the logins",
     "what a run's copy of a login holds, and a say-only run removes none of them: Claude Code's access token, Pi's discovery copy and the providers the run needs, and Muse's auth.json have every key whose name contains refresh removed at every depth; Codex's auth.json keeps its other fields, including its access token, with refresh-named keys removed at every depth; a token-backed copy then has an empty tokens.refresh_token and last_refresh set to the time of the copy, so no refresh-token value is copied; Devin's credentials.toml is copied only if it parses and has no such key, otherwise the case refuses to run; a Claude window on a Mac may move its access token into a Keychain item named for the run's folder, which outlives the run and which the kit never deletes; on a Mac Muse's file holds metadata and its secret stays in the Keychain",
     "to check that Codex's owner setup stayed unchanged, the kit compares auth.json by size, modification time and file identity, and reads and hashes config.toml before and after; it keeps the config's hash and TOML table names in memory and on a changed config reports added or removed table names and those also in the run's own config, never values",
@@ -635,6 +635,15 @@ impl Door {
 
     /// Takes away `record`, the one entry a harness wrote for the renewal's own folder.
     pub fn remove_record(&self, record: &Record) -> Removed {
+        self.remove_record_on(record, crate::live::renew::TestMachine::detect().as_ref())
+    }
+
+    /// [`Door::remove_record`] on the machine `marked` says this account is, if any.
+    pub(crate) fn remove_record_on(
+        &self,
+        record: &Record,
+        marked: Option<&crate::live::renew::TestMachine>,
+    ) -> Removed {
         let path = record.path();
         if fs::symlink_metadata(&path).is_err() {
             return Removed::Absent(path);
@@ -646,6 +655,17 @@ impl Door {
                 "the record named for the renewal's own folder",
             );
             return Removed::Said(path);
+        }
+        // The record is in the account's own records folder: only an account that is a test
+        // machine's own (T-2007 round 3) has one the kit may take away.
+        if marked.is_none() {
+            return Removed::Left(
+                path,
+                format!(
+                    "the records folder is the account's own, and this account is no test machine ({}), so nothing of it is taken away",
+                    crate::live::renew::TEST_MACHINE
+                ),
+            );
         }
         remove_whole(&path)
     }

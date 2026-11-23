@@ -887,3 +887,30 @@ fn a_test_run_again_under_audit_is_run_by_a_say_only_door_and_held_to_a_pass() {
         "a name that is no test passed: {failed}"
     );
 }
+
+/// T-2007 round 3 (N1): a renewal's record is in the account's own records folder, so on an
+/// account that is no test machine (no `CONSENSFLOW_TEST_MACHINE`: the owner's Mac, and zeewin2
+/// since its account is its owner's) the door takes it away nowhere; on a marked one it does.
+#[test]
+fn a_renewals_record_is_taken_away_only_on_a_marked_test_machine() {
+    let parent = tempfile::tempdir().unwrap();
+    let records = parent.path().join("records");
+    let own = made_in(parent.path(), "consensflow-door-own-").unwrap();
+    let record = Record::of(&records, own.path()).unwrap();
+    fs::create_dir_all(record.path()).unwrap();
+    let door = Door::acting();
+
+    let left = door.remove_record_on(&record, None);
+    assert!(
+        matches!(&left, Removed::Left(path, why) if *path == record.path() && why.contains("CONSENSFLOW_TEST_MACHINE")),
+        "{left:?}"
+    );
+    assert!(record.path().is_dir(), "taken on an unmarked account");
+
+    let marked = crate::live::renew::TestMachine::signalled(Some("zeewin"));
+    assert_eq!(
+        door.remove_record_on(&record, marked.as_ref()),
+        Removed::Removed(record.path())
+    );
+    assert!(!record.path().exists());
+}

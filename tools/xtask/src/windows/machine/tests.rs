@@ -820,3 +820,13 @@ esac
         );
     }
 }
+
+/// T-2007 round 3 (N1): zeewin2's account is its owner's own since 2026-11-22, so it is no test
+/// machine: a run there is given no `CONSENSFLOW_TEST_MACHINE`, and nothing the kit does writes or
+/// removes in that account's login store. A machine reached by `--host`, and zeewin, keep it.
+#[test]
+fn zeewin2_is_no_marked_test_machine_and_the_others_are() {
+    assert!(!Machine::named("zeewin2").unwrap().marked);
+    assert!(Machine::named("zeewin").unwrap().marked);
+    assert!(Machine::at("a-contributors-vm").marked);
+}

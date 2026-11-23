@@ -904,6 +904,7 @@ fn claude_renewal(
     home: PathBuf,
     program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
 ) -> Renewal {
+    let on = machine.clone();
     Renewal::new(
         machine,
         "Claude Code",
@@ -915,6 +916,7 @@ fn claude_renewal(
             let before = owner.look();
             let projects = home.join(".claude").join("projects");
             let ended = renew::one_shot_in(
+                &on,
                 Harness::Claude,
                 &program,
                 &renew::claude_words(&model),
