@@ -176,6 +176,9 @@ struct Played {
     driver: Driver<Settled>,
     /// The SQLite stores a scenario writes, by their names.
     dbs: HashMap<String, Connection>,
+    /// The name a recorded status file's name stands for now: Node read every file of the folder,
+    /// the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3).
+    status_files: HashMap<String, String>,
     _dir: TempDir,
 }
 
@@ -911,7 +914,14 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
     }
     if step.get("remove").is_some() {
         let file = names.real(&step["remove"]);
-        let _ = fs::remove_file(file.as_str().unwrap());
+        let mut file = PathBuf::from(file.as_str().unwrap());
+        let renamed = file
+            .file_name()
+            .and_then(|name| played.status_files.get(&*name.to_string_lossy()));
+        if let Some(renamed) = renamed {
+            file.set_file_name(renamed);
+        }
+        let _ = fs::remove_file(file);
         return true;
     }
     if step.get("status").is_some() || step.get("statusText").is_some() {
@@ -923,7 +933,9 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
         ]);
         fs::create_dir_all(&folder).unwrap();
         if let Some(text) = step["statusText"].as_str() {
-            let file = path::join(&[&folder, step["file"].as_str().unwrap()]);
+            // Its text is of the test's own process, under the name that process has.
+            let own = names.real_text("$PID");
+            let file = path::join(&[&folder, &format!("{own}.json")]);
             fs::write(file, names.real_text(text)).unwrap();
             return true;
         }
@@ -939,9 +951,13 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
                 .filter(|(key, _)| *key != "pid")
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
-        let named = step["file"]
-            .as_str()
-            .map_or_else(|| format!("{pid}.json"), str::to_owned);
+        // Under the name Claude writes it by, whatever name the recording gave it.
+        let named = format!("{pid}.json");
+        if let Some(recorded) = step["file"].as_str() {
+            played
+                .status_files
+                .insert(recorded.to_owned(), named.clone());
+        }
         let file = path::join(&[&folder, &named]);
         fs::write(file, serde_json::to_string(&Value::Object(row)).unwrap()).unwrap();
         return true;
@@ -1177,6 +1193,7 @@ pub(crate) fn play(scenario: &Value) -> Vec<Value> {
     let services = fakes.services(&env_vars, &root);
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
+        status_files: HashMap::new(),
         _dir: dir,
         _other: other,
         names,
