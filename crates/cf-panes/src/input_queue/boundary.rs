@@ -581,3 +581,231 @@ fn r12_a_failed_or_vanished_write_leaves_a_host_owned_outcome() {
     assert!(rig.input(&page, &w, 1, b"AB").is_err(), "the same number is not written again");
     assert_eq!(text(rig.written(&w)), "");
 }
+
+// Round 2 (T-2134's findings): each is a boundary the built head did not hold.
+
+/// Finding 2. A refusal on the idle path keeps the gap's deadline: number 1 is missing, a valid
+/// number 2 is refused for the window's byte budget (two committed 4 MiB pastes), and the gap
+/// still raises its clock and its warning.
+#[test]
+fn f2_an_idle_refusal_keeps_the_gaps_deadline() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    let paste = vec![b'p'; crate::validation::MAX_PAGE_INPUT_BYTES];
+    // Two committed pastes hold the whole allowance (the test's writer has not drained them).
+    rig.input(&page, &w, 1, &paste).unwrap();
+    rig.input(&page, &w, 2, &paste).unwrap();
+    rig.navigate();
+    let next = rig.open_page("s:2");
+    let refused = rig.input(&next, &w, 2, b"K").unwrap_err();
+    let first = refused.1.expect("the refusal is numbered");
+    rig.told(&next, &[(w.key.clone(), first)]).unwrap();
+    thread::sleep(ORDER_BOUND + Duration::from_millis(250));
+    let owed = rig.pull(&next).unwrap();
+    assert!(
+        owed.iter().any(|notice| notice.key == w.key && notice.loss > first),
+        "the known gap below the refused number is told when its bound passes: {owed:?}"
+    );
+}
+
+/// Finding 2. A bounds clock that cannot start never leaves a parked key unwritten, its
+/// ticket unresolved or its bytes reserved: it ends in a numbered loss.
+#[test]
+fn f2_a_clock_that_cannot_start_leaves_nothing_parked() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    rig.refuse_threads(true);
+    let ticket = rig.input(&page, &w, 2, b"B").unwrap();
+    rig.refuse_threads(false);
+    assert_eq!(text(rig.written(&w)), "B", "the key is not left unwritten");
+    assert!(matches!(rig.wait(&page, &ticket), Some(Ok(Ok(())))), "its ticket resolves");
+    assert_eq!(rig.reserved(&w), 0, "no byte stays reserved");
+    assert!(names(&rig.pull(&page).unwrap(), &w.key), "the missing number is a numbered loss");
+}
+
+/// Finding 3. A skip confirmed final removes the parked job: `A` after a confirmed skip of
+/// `B` writes `A` only.
+#[test]
+fn f3_a_final_skip_removes_its_parked_job() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    rig.input(&page, &w, 2, b"B").unwrap();
+    rig.skip(&page, &w, 2).unwrap();
+    rig.input(&page, &w, 1, b"A").unwrap();
+    assert_eq!(text(rig.written(&w)), "A");
+}
+
+/// Finding 3. At the slot limit a refused number stays spent: it is not admitted once the lane
+/// has drained.
+#[test]
+fn f3_a_refused_number_at_the_limit_stays_spent() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    for number in 2..=MAX_LANE_SLOTS as u64 + 1 {
+        rig.input(&page, &w, number, b"x").unwrap();
+    }
+    let absent = MAX_LANE_SLOTS as u64 + 2;
+    assert!(rig.input(&page, &w, absent, b"K").is_err(), "the lane is full");
+    thread::sleep(ORDER_BOUND + Duration::from_millis(300));
+    assert!(rig.input(&page, &w, absent, b"K").is_err(), "its number was spent by the refusal");
+    assert!(!rig.written(&w).contains(&b'K'));
+}
+
+/// Finding 4. A committed write that fails after its window retired is reported closed.
+#[test]
+fn f4_a_failed_write_after_retirement_names_the_closed_window() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    rig.input(&page, &w, 1, b"A").unwrap();
+    rig.retire(&w);
+    rig.writer_finishes(&w, Err(InputError::Uncertain("the window ended".into())));
+    let owed = rig.pull(&page).unwrap();
+    assert!(owed.iter().any(|notice| notice.key == w.key && notice.closed), "{owed:?}");
+}
+
+/// Finding 4. A notice whose wording changes (open, then closed) changes its version, so the
+/// receipt of the wording the person saw cannot clear the one they did not.
+#[test]
+fn f4_a_changed_notice_has_a_new_version() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    let open = rig.skip(&page, &w, 1).unwrap();
+    rig.retire(&w);
+    let owed = rig.pull(&page).unwrap();
+    assert!(owed.iter().any(|n| n.key == w.key && n.closed && n.loss > open), "{owed:?}");
+    rig.told(&page, &[(w.key.clone(), open)]).unwrap();
+    assert!(names(&rig.pull(&page).unwrap(), &w.key), "the old receipt clears nothing unseen");
+}
+
+/// Finding 5. The count past the bound: a repeated receipt clears nothing it did not show, and
+/// the same windows evicted twice are counted once.
+#[test]
+fn f5_overflow_receipts_match_exactly_and_count_windows_once() {
+    let rig = Rig::new();
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    for index in 0..=MAX_PENDING_LOSSES {
+        rig.skip_key(&page, &PaneKey::new(format!("window-{index}"), 1), 1).unwrap();
+    }
+    let (first, count) = rig.overflow(&page).expect("one evicted");
+    assert_eq!(count, 1);
+    rig.skip_key(&page, &PaneKey::new("window-513", 1), 1).unwrap();
+    let (second, count) = rig.overflow(&page).unwrap();
+    assert_eq!(count, 2);
+    rig.told_overflow(&page, first, 1).unwrap();
+    assert_eq!(rig.overflow(&page).map(|(_, count)| count), Some(1));
+    rig.told_overflow(&page, first, 1).unwrap();
+    assert_eq!(
+        rig.overflow(&page).map(|(version, count)| (version >= second, count)),
+        Some((true, 1)),
+        "the repeated receipt clears no unseen eviction"
+    );
+    // The same windows again (their losses evict each other): still the same distinct windows.
+    for index in 0..=MAX_PENDING_LOSSES + 1 {
+        rig.skip_key(&page, &PaneKey::new(format!("window-{index}"), 1), 2).unwrap();
+    }
+    let (_, distinct) = rig.overflow(&page).unwrap();
+    assert!(distinct <= 3, "two rounds through the same windows are not counted twice: {distinct}");
+}
+
+/// Finding 6. A receipt clears the exact version it showed, for its own window only.
+#[test]
+fn f6_a_receipt_clears_the_exact_version_for_its_own_window() {
+    let rig = Rig::new();
+    let w1 = rig.window("W1", 1);
+    let w2 = rig.window("W2", 1);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    let one = rig.skip(&page, &w1, 1).unwrap();
+    let two = rig.skip(&page, &w2, 1).unwrap();
+    assert!(two > one);
+    rig.told(&page, &[(w1.key.clone(), two)]).unwrap();
+    assert!(names(&rig.pull(&page).unwrap(), &w1.key), "X's higher version does not clear W");
+    rig.told(&page, &[(w1.key.clone(), one)]).unwrap();
+    assert!(!names(&rig.pull(&page).unwrap(), &w1.key));
+    assert!(names(&rig.pull(&page).unwrap(), &w2.key));
+}
+
+/// Finding 7. A writer that goes while the state lock is held still gives its call a loss
+/// number, and one that cannot start its helper still leaves a notice.
+#[test]
+fn f7_a_writer_gone_with_the_lock_held_still_gets_its_number_and_notice() {
+    for helper_fails in [false, true] {
+        let rig = Rig::new();
+        let w = rig.window("W", 5);
+        rig.navigate();
+        let page = rig.open_page("s:1");
+        let ticket = rig.input(&page, &w, 1, b"A").unwrap();
+        let completion = rig.completion(&page, &ticket);
+        rig.refuse_threads(helper_fails);
+        {
+            let _held = rig.hold_state();
+            rig.writer_vanishes(&w);
+            assert!(
+                completion.loss().is_some(),
+                "helper fails={helper_fails}: the wait finds its loss number at once"
+            );
+        }
+        rig.refuse_threads(false);
+        rig.navigate();
+        let next = rig.open_page("s:2");
+        thread::sleep(Duration::from_millis(100));
+        assert!(names(&rig.pull(&next).unwrap(), &w.key), "helper fails={helper_fails}");
+    }
+}
+
+/// Finding 7. A timed-out call whose skip was confirmed, and whose writer then fails, makes one
+/// loss and not two.
+#[test]
+fn f7_a_skipped_call_whose_writer_then_fails_makes_one_loss() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    let page = rig.open_page("s:1");
+    rig.input(&page, &w, 1, b"A").unwrap();
+    let skip = rig.skip(&page, &w, 1).unwrap();
+    rig.told(&page, &[(w.key.clone(), skip)]).unwrap();
+    rig.writer_finishes(&w, Err(InputError::Uncertain("half".into())));
+    assert!(rig.pull(&page).unwrap().is_empty(), "the skip's confirmed loss was this call's");
+}
+
+/// Finding 8. A surviving host recovers a poisoned admission lock: navigation and the next
+/// document's handshake still work.
+#[test]
+fn f8_a_poisoned_lock_is_recovered() {
+    let rig = Rig::new();
+    let w = rig.window("W", 5);
+    rig.navigate();
+    rig.open_page("s:1");
+    rig.poison_state();
+    rig.navigate();
+    let next = rig.open_page("s:2");
+    rig.input(&next, &w, 1, b"D").unwrap();
+    assert_eq!(text(rig.written(&w)), "D");
+}
+
+/// Finding 9. A cut keeps no departed identity: a hundred reloads leave the host holding a
+/// handful of identities, not a hundred.
+#[test]
+fn f9_cuts_keep_no_departed_identities() {
+    let rig = Rig::new();
+    rig.navigate();
+    rig.open_page("s:1");
+    for index in 2..=101 {
+        rig.navigate();
+        rig.open_page(&format!("s:{index}"));
+    }
+    assert!(rig.held_identities() < 8, "{} identities held", rig.held_identities());
+}

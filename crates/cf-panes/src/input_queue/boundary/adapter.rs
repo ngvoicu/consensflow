@@ -276,6 +276,35 @@ impl Rig {
         completion.receiver.now_or_never().map(Ok)
     }
 
+    /// The wait for a ticket, as the page's `pane_input_wait` holds it.
+    pub fn completion(&self, doc: &Doc, ticket: &str) -> PageInputCompletion {
+        self.q.page_completion(&doc.page, ticket).unwrap()
+    }
+
+    /// The host's state lock, held by the test: a worker that goes meanwhile finds it busy.
+    pub fn hold_state(&self) -> MutexGuard<'_, PageInputState> {
+        self.q.page.state.lock().unwrap()
+    }
+
+    /// A caught panic with the host's state held: the lock is poisoned.
+    pub fn poison_state(&self) {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = self.q.page.state.lock().unwrap();
+            panic!("a test panics holding the host's state");
+        }));
+        assert!(outcome.is_err());
+    }
+
+    /// The page identities the host holds after its cuts.
+    pub fn held_identities(&self) -> usize {
+        self.q.held_identities()
+    }
+
+    /// The next thread the host starts (its bounds clock, its outcome helper) fails to start.
+    pub fn refuse_threads(&self, refuse: bool) {
+        super::super::FAIL_THREAD_SPAWN.with(|fail| fail.set(refuse));
+    }
+
     /// Whether this document may subscribe to the windows' output.
     pub fn may_subscribe(&self, doc: &Doc) -> bool {
         self.q.with_current_page(&doc.page, || ()).is_ok()

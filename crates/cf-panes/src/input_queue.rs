@@ -180,6 +180,12 @@ impl Drop for Reserved {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test makes the thread that starts the bounds clock, or the outcome's helper, fail to.
+    static FAIL_THREAD_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A page job's one host-owned outcome. The host settles it itself, under its lock, whatever
 /// becomes of the page's wait, ticket or window: written (nothing to say), refused, or
 /// uncertain. A job dropped with none (its worker vanished, its queue was dropped whole) is
@@ -266,6 +272,10 @@ impl Drop for Outcome {
         if free {
             record(shared);
         } else {
+            #[cfg(test)]
+            if FAIL_THREAD_SPAWN.with(|fail| fail.get()) {
+                return;
+            }
             let _ = thread::Builder::new()
                 .name("consensflow-input-outcome".to_owned())
                 .spawn(move || record(shared));
@@ -810,6 +820,13 @@ impl InputQueue {
             .map_err(|_| "pane input admission lock is poisoned".to_string())
     }
 
+    /// How many page identities the host holds, for a test that counts what a cut leaves.
+    #[cfg(test)]
+    fn held_identities(&self) -> usize {
+        let state = self.page.state.lock().unwrap();
+        state.retired.len() + state.pending_pages.len()
+    }
+
     /// The host's epoch: how many main documents have loaded.
     pub fn epoch(&self) -> u64 {
         self.page
@@ -827,9 +844,17 @@ impl InputQueue {
         }
         state.reaper = true;
         let shared = Arc::downgrade(&self.page);
-        let spawned = thread::Builder::new()
-            .name("consensflow-input-bounds".to_owned())
-            .spawn(move || bounds_clock(shared));
+        #[cfg(test)]
+        let refused_by_test = FAIL_THREAD_SPAWN.with(|fail| fail.get());
+        #[cfg(not(test))]
+        let refused_by_test = false;
+        let spawned = if refused_by_test {
+            Err(std::io::Error::other("a test refused the thread"))
+        } else {
+            thread::Builder::new()
+                .name("consensflow-input-bounds".to_owned())
+                .spawn(move || bounds_clock(shared))
+        };
         if spawned.is_err() {
             state.reaper = false;
         }

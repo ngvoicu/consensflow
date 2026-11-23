@@ -942,6 +942,9 @@ async function open(page, given = model(), { ready = true } = {}) {
           ? window.__paneActivateHook(args)
           : { ok: true, epoch: args.epoch, lost: [], overflow: null }
       }
+      if (command === 'pane_window_name') {
+        return window.__paneNameHook ? window.__paneNameHook(args) : { ok: true }
+      }
       if (command === 'pane_lost_pull') {
         return window.__paneLostPullHook
           ? window.__paneLostPullHook(args)
@@ -4949,7 +4952,7 @@ test('a full window refuses a key once, with its words, and the typing after it 
 // every loss is kept, numbered, until a page says it has shown that version. The native tests
 // (`input_queue::boundary`) hold the rules; here the page's own part is under test: what it
 // sends and when, what it shows, and what it confirms.
-function epochHost({ holdActivation = null } = {}) {
+function epochHost({ holdActivation = null, holdPrepare = null, holdTold = false } = {}) {
   const st = {
     epoch: 0,
     current: null,
@@ -4967,6 +4970,8 @@ function epochHost({ holdActivation = null } = {}) {
     skips: [],
     activations: 0,
     activated: [],
+    names: new Map(),
+    toldCalls: 0,
   }
   const split = (key) => ({
     id: key.slice(0, key.lastIndexOf(':')),
@@ -4979,7 +4984,12 @@ function epochHost({ holdActivation = null } = {}) {
     return st.nextLoss
   }
   const owed = () => ({
-    lost: [...st.losses].map(([key, each]) => ({ ...split(key), loss: each.loss, closed: each.closed })),
+    lost: [...st.losses].map(([key, each]) => ({
+      ...split(key),
+      loss: each.loss,
+      closed: each.closed,
+      ...(st.names.has(key) ? { name: st.names.get(key) } : {}),
+    })),
     overflow: st.overflow,
   })
   // The earlier head's page sends no epoch or nonce: where one is absent, the page alone is
@@ -5011,6 +5021,12 @@ function epochHost({ holdActivation = null } = {}) {
     get skips() {
       return st.skips
     },
+    get toldCalls() {
+      return st.toldCalls
+    },
+    get names() {
+      return st.names
+    },
     get activations() {
       return st.activations
     },
@@ -5035,7 +5051,12 @@ function epochHost({ holdActivation = null } = {}) {
       st.pending.clear()
     },
     handle: async (command, args) => {
+      if (command === 'pane_window_name') {
+        st.names.set(keyOf(args), args.name)
+        return { ok: true }
+      }
       if (command === 'pane_page_prepare') {
+        if (holdPrepare !== null) await holdPrepare.promise
         st.pending.set(args.pageId, { nonce: args.nonce, epoch: st.epoch })
         return { ok: true, epoch: st.epoch, nonce: args.nonce }
       }
@@ -5066,6 +5087,8 @@ function epochHost({ holdActivation = null } = {}) {
         return { ok: true, ...owed() }
       }
       if (command === 'pane_lost_told') {
+        st.toldCalls += 1
+        if (holdTold && st.toldCalls === 1) return new Promise(() => {})
         if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
         for (const each of args.keys) {
           st.acks.push(each)
@@ -5101,7 +5124,7 @@ function epochHost({ holdActivation = null } = {}) {
 }
 
 /** A page whose calls to the host go to `host`; the page's own navigation moves the host's epoch. */
-async function openWithHost(page, host, { ready = true } = {}) {
+async function openWithHost(page, host, { ready = true, data = model() } = {}) {
   await page.exposeFunction('__host', (command, args) => host.handle(command, args))
   await page.addInitScript(() => {
     window.__paneInputHook = (command, args) => window.__host(command, args)
@@ -5110,13 +5133,15 @@ async function openWithHost(page, host, { ready = true } = {}) {
     window.__paneActivateHook = (args) => window.__host('pane_page_activate', args)
     window.__paneLostToldHook = (args) => window.__host('pane_lost_told', args)
     window.__paneLostPullHook = (args) => window.__host('pane_lost_pull', args)
+    window.__paneNameHook = (args) => window.__host('pane_window_name', args)
   })
   page.on('framenavigated', (frame) => {
     if (frame === page.mainFrame()) host.endPage()
   })
   host.endPage()
-  await open(page, model(), { ready })
-  if (ready) await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await open(page, data, { ready })
+  if (ready && !data.realTerminals)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
 }
 
 const LOST_TYPING_WORDS =
@@ -5318,6 +5343,108 @@ test('R11: the losses past the host\'s bound are one row of their own, confirmed
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await expect(row).toContainText('1 more window')
   await expect.poll(() => host.overflowAcks.at(-1)).toEqual({ version: 2, count: 1 })
+})
+
+// Round 2 (T-2134's findings): what the page shows, confirms and sends.
+
+test('a quiet board with a held prepare reads, with no daemon event to start it', async ({
+  page,
+}) => {
+  const prepare = held()
+  const host = epochHost({ holdPrepare: prepare })
+  await openWithHost(page, host, { ready: false })
+  await expect(page.locator('#project-title')).not.toHaveText('No project', { timeout: 4000 })
+  prepare.release()
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+})
+
+test('a notice is confirmed only once a person can see it: not under a dialog, not out of view', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  await page.evaluate(() => document.querySelector('dialog').showModal())
+  host.lose('chief-a:1')
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect.poll(() => host.pulls).toBeGreaterThan(1)
+  await page.waitForTimeout(600)
+  expect(host.acks, 'a row under a modal dialog is not seen').toEqual([])
+  await page.evaluate(() => document.querySelector('dialog').close())
+  await expect.poll(() => host.acks.length, { timeout: 8000 }).toBe(1)
+})
+
+test('only the rows in view are confirmed, and Dismiss is reachable with the pointer', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  const host = epochHost()
+  await openWithHost(page, host)
+  for (let index = 0; index < 60; index += 1) host.lose(`crowd-${index}:1`)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(notices(page)).toHaveCount(60, { timeout: 8000 })
+  await expect.poll(() => host.acks.length).toBeGreaterThan(0)
+  expect(host.acks.length, 'not the rows nobody can see').toBeLessThan(60)
+  await notices(page).first().locator('.input-notice-dismiss').click({ timeout: 3000 })
+  await expect(notices(page)).toHaveCount(59)
+})
+
+test('an unanswered confirmation never blocks a later pull', async ({ page }) => {
+  const host = epochHost({ holdTold: true })
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(notices(page)).toHaveCount(1)
+  await expect.poll(() => host.toldCalls).toBe(1)
+  host.lose('chief-b:1')
+  await expect(notices(page)).toHaveCount(2, { timeout: 8000 })
+})
+
+test('a dismissed version does not come back from a late refusal', async ({ page }) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const pane = await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return `${lane.pane.id}:${lane.pane.generation}`
+  })
+  host.lose(pane)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(notices(page)).toHaveCount(1)
+  await notices(page).first().locator('.input-notice-dismiss').click()
+  await expect(notices(page)).toHaveCount(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = () => ({ ok: false, error: 'x', loss: 1 })
+    window.__emulators[0].type('A')
+  })
+  await page.waitForTimeout(600)
+  await expect(notices(page)).toHaveCount(0)
+})
+
+test('a closed window keeps its name and its generation, so two generations are two different rows', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const chief = await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return { id: lane.pane.id, generation: lane.pane.generation }
+  })
+  await expect.poll(() => host.names.size).toBeGreaterThan(0)
+  host.lose(`${chief.id}:${chief.generation}`, true)
+  host.lose(`${chief.id}:${chief.generation - 1}`, true)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(notices(page)).toHaveCount(2)
+  const texts = await notices(page).allTextContents()
+  expect(new Set(texts).size, 'two generations, two different rows').toBe(2)
+  expect(texts.join(' ')).toContain('chief')
+  expect(texts.join(' ')).toContain(String(chief.generation))
+})
+
+test('the overflow row counts windows, not records', async ({ page }) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.setOverflow(5, 1)
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await expect(page.locator('.input-notice[data-window="overflow"]')).toContainText('1 more window')
 })
 
 test('a skip the host cannot make final stays pending: the page asks again until it is, and then says so', async ({
@@ -17408,6 +17535,72 @@ test.describe('file drop on Windows', () => {
     // A human paste into it goes as it was typed (T-548).
     await humanPaste(page, 'chief', 'a — b')
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a — b')
+  })
+
+
+  // A drop is a gesture like a key (T-2134): it keeps its place among what is typed, or is
+  // refused with the reconnect advice, and one the reload took is told.
+  const dropOn = async (page) =>
+    dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+  const enqueued = (page) =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([name]) => name === 'pane_input_enqueue')
+        .map(([, args]) => [args.sequence, new TextDecoder().decode(new Uint8Array(args.bytes))]),
+    )
+
+  test('a drop made before the document is acknowledged is refused with the reconnect advice, and sends nothing', async ({
+    page,
+  }) => {
+    const activation = held()
+    const host = epochHost({ holdActivation: activation })
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { ready: false, data: { ...chiefOn('devin'), realTerminals: true } })
+    await expect(page.locator('#stage .terminal-card[data-handle="chief"]')).toBeVisible()
+    await dropOn(page)
+    await expect(page.locator('#status')).toContainText('reconnecting')
+    activation.release()
+    await expect(page.locator('#stage')).toHaveAttribute('data-input', 'open')
+    expect(await enqueued(page), 'the refused drop is not typed later').toEqual([])
+  })
+
+  test('a drop whose short-name lookup is pending keeps its place before a key typed after it', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    const lookup = held()
+    await page.evaluate((promise) => (window.__hold.short_paths = promise), null).catch(() => {})
+    await page.evaluate(() => {
+      window.__hold.short_paths = new Promise((resolve) => (window.__releaseLookup = resolve))
+    })
+    await dropOn(page)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await page.keyboard.type('D')
+    await expect.poll(async () => (await enqueued(page)).length).toBe(1)
+    await page.evaluate(() => window.__releaseLookup())
+    await expect.poll(async () => (await enqueued(page)).length).toBe(2)
+    const calls = await enqueued(page)
+    const drop = calls.find(([, text]) => text.includes('A-B~1'))
+    const key = calls.find(([, text]) => text === 'D')
+    expect(drop[0], 'the drop was numbered where it was dropped').toBeLessThan(key[0])
+    void lookup
+  })
+
+  test('a drop whose lookup is pending when the page reloads is told on the next page', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    await page.evaluate(() => {
+      window.__hold.short_paths = new Promise(() => {})
+    })
+    await dropOn(page)
+    await page.reload()
+    await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+    await expect(page.locator('.input-notices')).toContainText('dropped')
   })
 
   // What a drop may carry is the harness the window was launched with, which the daemon says with
