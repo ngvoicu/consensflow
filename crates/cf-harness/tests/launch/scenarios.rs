@@ -176,6 +176,9 @@ struct Played {
     driver: Driver<Settled>,
     /// The SQLite stores a scenario writes, by their names.
     dbs: HashMap<String, Connection>,
+    /// The name a recorded status file's name stands for now: Node read every file of the folder,
+    /// the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3).
+    status_files: HashMap<String, String>,
     _dir: TempDir,
 }
 
@@ -927,7 +930,14 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
     }
     if step.get("remove").is_some() {
         let file = names.real(&step["remove"]);
-        let _ = fs::remove_file(file.as_str().unwrap());
+        let mut file = PathBuf::from(file.as_str().unwrap());
+        let renamed = file
+            .file_name()
+            .and_then(|name| played.status_files.get(&*name.to_string_lossy()));
+        if let Some(renamed) = renamed {
+            file.set_file_name(renamed);
+        }
+        let _ = fs::remove_file(file);
         return true;
     }
     if step.get("status").is_some() || step.get("statusText").is_some() {
@@ -939,7 +949,9 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
         ]);
         fs::create_dir_all(&folder).unwrap();
         if let Some(text) = step["statusText"].as_str() {
-            let file = path::join(&[&folder, step["file"].as_str().unwrap()]);
+            // Its text is of the test's own process, under the name that process has.
+            let own = names.real_text("$PID");
+            let file = path::join(&[&folder, &format!("{own}.json")]);
             fs::write(file, names.real_text(text)).unwrap();
             return true;
         }
@@ -955,9 +967,13 @@ fn set_up(played: &mut Played, step: &Value) -> bool {
                 .filter(|(key, _)| *key != "pid")
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
-        let named = step["file"]
-            .as_str()
-            .map_or_else(|| format!("{pid}.json"), str::to_owned);
+        // Under the name Claude writes it by, whatever name the recording gave it.
+        let named = format!("{pid}.json");
+        if let Some(recorded) = step["file"].as_str() {
+            played
+                .status_files
+                .insert(recorded.to_owned(), named.clone());
+        }
         let file = path::join(&[&folder, &named]);
         fs::write(file, serde_json::to_string(&Value::Object(row)).unwrap()).unwrap();
         return true;
@@ -1203,6 +1219,7 @@ pub(crate) fn play(scenario: &Value) -> Vec<Value> {
     let services = fakes.services(&env_vars, &root);
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
+        status_files: HashMap::new(),
         _dir: dir,
         _other: other,
         names,
@@ -1268,6 +1285,15 @@ fn differs(step: &Value, index: u64, record: &Value, node: &Value) -> Option<Str
     (rest != node_rest).then(|| format!("\n  rust {rest}\n  node {node_rest}"))
 }
 
+/// Scenarios left unplayed on purpose, each with why: Node read every file of Claude's status
+/// folder and the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3), so
+/// where a scenario's answer is the order of two files that one process wrote there is no such
+/// file to put in that order, and the order of two pids' names is the machine's. The rule it
+/// holds, a process keeps its first place with its last file's status, is
+/// `claude::status::tests::only_a_file_named_by_digits_is_read_and_a_process_keeps_its_first_place`.
+const UNPLAYED: [&str; 1] =
+    ["claude: a Claude keeps its place among the files, with its last file's status"];
+
 #[test]
 fn every_scenario_plays_as_node_played_it() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
@@ -1285,6 +1311,9 @@ fn every_scenario_plays_as_node_played_it() {
     let mut differ = Vec::new();
     for scenario in &scenarios {
         let name = scenario["name"].as_str().unwrap();
+        if UNPLAYED.contains(&name) {
+            continue;
+        }
         let records = play(scenario);
         let expected = scenario["records"].as_array().unwrap();
         if records.len() != expected.len() {

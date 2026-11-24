@@ -4,7 +4,6 @@
 //! it privately; nothing outside the crate reaches the connection.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::{cell::RefCell, rc::Rc};
 
 use cf_base::time::{iso, Clock};
 use cf_proto::ledger::MessageView;
@@ -35,8 +34,13 @@ pub(crate) struct Store {
     /// The write that dated a holding's end failed: the operation's commit fails with it.
     end_failed: Option<rusqlite::Error>,
     names: Box<dyn FnMut() -> String>,
-    /// Told every event as it is logged.
+    /// Told each event once it is committed, in the order it was logged.
     trace: Box<dyn FnMut(&Event)>,
+    /// Events of the open transaction, discarded if it does not commit.
+    logged: Vec<Event>,
+    /// An operation's write is open: what it logs waits for its commit, even where SQLite
+    /// has ended the transaction under it (a full disk rolls it back).
+    open: bool,
 }
 
 impl Store {
@@ -55,6 +59,8 @@ impl Store {
             end_failed: None,
             names,
             trace,
+            logged: Vec::new(),
+            open: false,
         }
     }
 
@@ -65,37 +71,45 @@ impl Store {
 
     /// One transaction around `work`; an operation called inside another
     /// joins it. A panic in `work` rolls it back too: a transaction left open
-    /// would take every later operation in, and none would commit.
+    /// would take every later operation in, and none would commit. The trace
+    /// is told the transaction's events only after its commit returns.
     pub(crate) fn write<T>(
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        if self.open {
+            self.lost()?;
+            return work(self);
+        }
         if !self.db.is_autocommit() {
             return work(self);
         }
         self.db.execute_batch("BEGIN IMMEDIATE")?;
+        self.open = true;
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
             Ok(Ok(value)) => match self
                 .settle_ends_unread()
                 .and_then(|()| self.end_failed.take().map_or(Ok(()), Err))
                 .and_then(|()| self.db.execute_batch("COMMIT"))
             {
-                Ok(()) => Ok(value),
+                Ok(()) => {
+                    self.open = false;
+                    for event in std::mem::take(&mut self.logged) {
+                        (self.trace)(&event);
+                    }
+                    Ok(value)
+                }
                 Err(cause) => {
-                    let _ = self.db.execute_batch("ROLLBACK");
+                    self.roll_back();
                     Err(cause.into())
                 }
             },
             Ok(Err(cause)) => {
-                self.ending = false;
-                self.end_failed = None;
-                let _ = self.db.execute_batch("ROLLBACK");
+                self.roll_back();
                 Err(cause)
             }
             Err(unwound) => {
-                self.ending = false;
-                self.end_failed = None;
-                let _ = self.db.execute_batch("ROLLBACK");
+                self.roll_back();
                 panic::resume_unwind(unwound)
             }
         }
@@ -111,38 +125,36 @@ impl Store {
         Ok(())
     }
 
-    /// A batch is one visible operation: do not send its tentative events to
-    /// the external trace unless the enclosing transaction actually commits.
+    /// Rolls back the transaction and drops everything it logged.
+    fn roll_back(&mut self) {
+        self.open = false;
+        self.ending = false;
+        self.end_failed = None;
+        let _ = self.db.execute_batch("ROLLBACK");
+        self.logged.clear();
+    }
+
+    /// The operation stops where SQLite ended its transaction (a settlement that failed
+    /// and rolled it back): the saved error is the operation's.
+    fn lost(&mut self) -> Result<(), LedgerError> {
+        match self.end_failed.take() {
+            Some(cause) => Err(cause.into()),
+            None => Ok(()),
+        }
+    }
+
+    /// A batch is one visible operation and needs a transaction of its own.
     pub(crate) fn write_batch<T>(
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
-        if !self.db.is_autocommit() {
+        if self.open || !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",
                 "a batch needs its own transaction",
             ));
         }
-        let events = Rc::new(RefCell::new(Vec::<Event>::new()));
-        let pending = Rc::clone(&events);
-        let trace = std::mem::replace(
-            &mut self.trace,
-            Box::new(move |event| {
-                pending.borrow_mut().push(event.clone());
-            }),
-        );
-        let result = panic::catch_unwind(AssertUnwindSafe(|| self.write(work)));
-        self.trace = trace;
-        match result {
-            Ok(Ok(value)) => {
-                for event in events.borrow().iter() {
-                    (self.trace)(event);
-                }
-                Ok(value)
-            }
-            Ok(Err(cause)) => Err(cause),
-            Err(unwound) => panic::resume_unwind(unwound),
-        }
+        self.write(work)
     }
 
     /// The time now, as the ledger writes it: one reading of the clock.
@@ -345,7 +357,7 @@ impl Store {
         Ok(())
     }
 
-    /// Logs an event of the project, and tells the trace.
+    /// Logs an event of the project, telling the trace after it commits.
     pub(crate) fn log(
         &mut self,
         project_id: i64,
@@ -353,17 +365,23 @@ impl Store {
         data: Value,
     ) -> Result<(), LedgerError> {
         let at = self.at();
+        self.lost()?;
         let data = cf_base::json::js_order(data);
         self.db.execute(
             "INSERT INTO event (project_id, at, kind, data) VALUES (?, ?, ?, ?)",
             rusqlite::params![project_id, at, kind, data.to_string()],
         )?;
-        (self.trace)(&Event {
+        let event = Event {
             at,
             project: project_id,
             kind: kind.to_string(),
             data,
-        });
+        };
+        if self.open || !self.db.is_autocommit() {
+            self.logged.push(event);
+        } else {
+            (self.trace)(&event);
+        }
         Ok(())
     }
 }
@@ -481,5 +499,137 @@ mod tests {
             (at.as_str(), 7, "task.state")
         );
         assert_eq!(store.at(), "1970-01-01T00:00:02.000Z", "the next reading");
+    }
+
+    fn kinds(events: &Rc<RefCell<Vec<Event>>>) -> Vec<String> {
+        events
+            .borrow()
+            .iter()
+            .map(|event| event.kind.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_refused_operation_tells_the_trace_nothing() {
+        let (mut store, events) = store();
+        let refused = store.write(|store| {
+            store.log(1, "refused", json!({}))?;
+            Err::<(), _>(LedgerError::refused("no", "no"))
+        });
+        assert!(refused.is_err());
+        assert_eq!(logged(&store), 0);
+        assert!(kinds(&events).is_empty());
+        store
+            .write(|store| store.log(1, "after", json!({})))
+            .unwrap();
+        assert_eq!(kinds(&events), ["after"]);
+    }
+
+    #[test]
+    fn an_inner_operation_goes_untold_with_the_outer_that_failed() {
+        let (mut store, events) = store();
+        let refused = store.write(|store| {
+            store.log(1, "outer", json!({}))?;
+            store.write(|store| store.log(1, "inner", json!({})))?;
+            Err::<(), _>(LedgerError::refused("no", "no"))
+        });
+        assert!(refused.is_err());
+        assert_eq!(logged(&store), 0);
+        assert!(kinds(&events).is_empty());
+        store
+            .write(|store| store.log(1, "after", json!({})))
+            .unwrap();
+        assert_eq!(kinds(&events), ["after"]);
+    }
+
+    #[test]
+    fn a_commit_that_fails_tells_nothing() {
+        let (mut store, events) = store();
+        // The insert succeeds; the deferred key is checked by COMMIT itself.
+        store.db.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE child (parent INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED);",
+        ).unwrap();
+        let failed = store.write(|store| {
+            store.log(1, "uncommitted", json!({}))?;
+            store.db.execute("INSERT INTO child VALUES (99)", [])?;
+            Ok(())
+        });
+        assert!(failed.is_err(), "COMMIT must fail on the deferred key");
+        assert!(store.db.is_autocommit());
+        assert_eq!(logged(&store), 0);
+        assert!(kinds(&events).is_empty());
+        store
+            .write(|store| store.log(1, "after", json!({})))
+            .unwrap();
+        assert_eq!(kinds(&events), ["after"]);
+    }
+
+    #[test]
+    fn an_operation_that_panics_tells_nothing() {
+        let (mut store, events) = store();
+        let unwound = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = store.write(|store| -> Result<(), LedgerError> {
+                store.log(1, "lost", json!({}))?;
+                panic!("in the middle of an operation");
+            });
+        }));
+        assert!(unwound.is_err());
+        assert!(store.db.is_autocommit());
+        assert_eq!(logged(&store), 0);
+        assert!(kinds(&events).is_empty());
+        store
+            .write(|store| store.log(1, "after", json!({})))
+            .unwrap();
+        assert_eq!(kinds(&events), ["after"]);
+    }
+
+    #[test]
+    fn what_committed_is_told_in_the_order_it_was_logged() {
+        let (mut store, events) = store();
+        store
+            .write(|store| {
+                store.log(1, "first", json!({}))?;
+                store.write(|store| store.log(1, "inner", json!({})))?;
+                store.log(1, "last", json!({}))?;
+                assert!(kinds(&events).is_empty(), "nothing is told before COMMIT");
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(kinds(&events), ["first", "inner", "last"]);
+        store
+            .write_batch(|store| {
+                store.log(1, "batch-one", json!({}))?;
+                store.log(1, "batch-two", json!({}))?;
+                assert_eq!(kinds(&events), ["first", "inner", "last"]);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            kinds(&events),
+            ["first", "inner", "last", "batch-one", "batch-two"]
+        );
+    }
+
+    #[test]
+    fn an_event_logged_outside_an_operation_is_told_at_once() {
+        let (mut store, events) = store();
+        store.log(1, "alone", json!({})).unwrap();
+        assert_eq!(logged(&store), 1);
+        assert_eq!(kinds(&events), ["alone"]);
+    }
+
+    #[test]
+    fn a_batch_inside_an_operation_is_still_refused() {
+        let (mut store, events) = store();
+        store
+            .write(|store| {
+                let refused = store.write_batch(|store| store.log(1, "batch", json!({})));
+                assert_eq!(refused.unwrap_err().code(), Some("nested-batch"));
+                store.log(1, "outer", json!({}))
+            })
+            .unwrap();
+        assert_eq!(kinds(&events), ["outer"]);
     }
 }

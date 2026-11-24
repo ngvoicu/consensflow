@@ -119,11 +119,10 @@ async fn the_public_font_stylesheet_and_every_font_it_names_are_bundled_read_onl
 }
 
 #[test]
-fn the_screens_paths_are_the_harnesses_page_and_its_two_routes() {
+fn the_screens_paths_are_the_harnesses_page_and_its_check() {
     for (path, screen) in [
         ("/harnesses", Screen::Page),
         ("/api/harnesses/check", Screen::HarnessCheck),
-        ("/api/harnesses/update", Screen::HarnessUpdate),
     ] {
         assert_eq!(recognize(path), Some(screen), "{path}");
     }
@@ -179,7 +178,6 @@ async fn without_the_token_every_screen_is_a_bare_401_and_nothing_is_read() {
     for (method, target) in [
         (Method::GET, "/harnesses"),
         (Method::POST, "/api/harnesses/check"),
-        (Method::POST, "/api/harnesses/update"),
         (Method::HEAD, "/harnesses"),
         (Method::PUT, "/api/harnesses/check"),
     ] {
@@ -260,7 +258,7 @@ async fn a_get_reads_nothing_of_its_body_and_every_other_method_reads_it_before_
         (Method::POST, "/harnesses"),
         (Method::HEAD, "/harnesses"),
         (Method::OPTIONS, "/api/harnesses/check"),
-        (Method::PUT, "/api/harnesses/update"),
+        (Method::PUT, "/api/harnesses/check"),
         (Method::DELETE, "/api/harnesses/check"),
     ] {
         let (status, body) = json_of(ask_as_the_app(&screens, method.clone(), target, "{}").await);
@@ -286,7 +284,7 @@ async fn a_body_over_64_k_units_is_refused_in_its_own_words_by_every_method_that
     let big = "x".repeat(64 * 1024 + 1);
     for (method, target) in [
         (Method::POST, "/api/harnesses/check"),
-        (Method::DELETE, "/api/harnesses/update"),
+        (Method::PUT, "/api/harnesses/check"),
         (Method::POST, "/harnesses"),
     ] {
         let answered = ask_as_the_app(&screens, method.clone(), target, &big).await;

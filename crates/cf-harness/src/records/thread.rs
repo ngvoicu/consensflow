@@ -44,6 +44,7 @@ use super::{
     has_transcript, open, took, transcript_boundary, transcript_left, Boundary, Cache, Open,
     Options, Reading, IDLE_MS,
 };
+use crate::claude::{Scanner, Status};
 use crate::contract::{Records, Work};
 use crate::seams::Time;
 use crate::shared::record::torn::{say_with, Say};
@@ -75,6 +76,22 @@ pub struct Thread {
     time: Rc<dyn Time>,
     /// The worker's queue.
     asks: mpsc::Sender<Ask>,
+    /// The queue of the worker of Claude's statuses, a thread of its own: a scan of them
+    /// waits behind no transcript's first look, nor a look behind a scan (P22-1).
+    scans: mpsc::Sender<Scan>,
+}
+
+/// What the engine asks of the statuses' worker, owned.
+enum Scan {
+    Statuses {
+        folder: String,
+        answer: oneshot::Sender<Vec<(u32, Status)>>,
+    },
+    Holders {
+        folder: String,
+        session: String,
+        answer: oneshot::Sender<Option<Vec<u32>>>,
+    },
 }
 
 /// What the engine asks of the worker, owned: nothing borrowed crosses.
@@ -141,7 +158,11 @@ impl Thread {
                 say_with(say);
                 serve(waiting, &env, caches);
             })?;
-        Ok(Self { time, asks })
+        let (scans, scanning) = mpsc::channel(queue);
+        std::thread::Builder::new()
+            .name("statuses".to_owned())
+            .spawn(move || scan(scanning))?;
+        Ok(Self { time, asks, scans })
     }
 
     /// What the worker answers to the ask that `ask` makes with the place to
@@ -154,6 +175,39 @@ impl Thread {
 }
 
 impl Records for Thread {
+    fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, Status)>> {
+        Box::pin(async move {
+            let (answer, answered) = oneshot::channel();
+            let ask = Scan::Statuses {
+                folder: folder.to_owned(),
+                answer,
+            };
+            if self.scans.send(ask).await.is_err() {
+                return Vec::new();
+            }
+            answered.await.unwrap_or_default()
+        })
+    }
+
+    fn claude_holders<'a>(
+        &'a self,
+        folder: &'a str,
+        session: &'a str,
+    ) -> Work<'a, Option<Vec<u32>>> {
+        Box::pin(async move {
+            let (answer, answered) = oneshot::channel();
+            let ask = Scan::Holders {
+                folder: folder.to_owned(),
+                session: session.to_owned(),
+                answer,
+            };
+            if self.scans.send(ask).await.is_err() {
+                return None;
+            }
+            answered.await.ok().flatten()
+        })
+    }
+
     fn look<'a>(
         &'a self,
         harness: Harness,
@@ -355,6 +409,30 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
                     .ok()
                     .flatten();
                 let _ = answer.send(took);
+            }
+        }
+    }
+}
+
+/// The statuses' worker: owns the scanner, answers each ask in turn, and ends once
+/// the queue is closed. A scan that panics answers as a folder that cannot be read.
+fn scan(mut waiting: mpsc::Receiver<Scan>) {
+    let mut scanner = Scanner::default();
+    while let Some(ask) = waiting.blocking_recv() {
+        match ask {
+            Scan::Statuses { folder, answer } => {
+                let found = panics_to_text(|| scanner.statuses(&folder)).unwrap_or_default();
+                let _ = answer.send(found);
+            }
+            Scan::Holders {
+                folder,
+                session,
+                answer,
+            } => {
+                let found = panics_to_text(|| scanner.holders(&folder, &session))
+                    .ok()
+                    .flatten();
+                let _ = answer.send(found);
             }
         }
     }

@@ -515,6 +515,11 @@ impl Members {
         self.rig.events()
     }
 
+    /// [`Members::events`] once the daemon's trace is written out: for the end of something.
+    pub fn events_settled(&self) -> Vec<Value> {
+        self.rig.events_settled()
+    }
+
     /// Whether the project is open, as the daemon says: it is not after the app
     /// started again, until the human resumes it ([`Members::resume`]).
     pub fn is_open(&self) -> Result<bool> {

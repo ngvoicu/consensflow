@@ -228,6 +228,53 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   banner.append(bannerText, bannerOpen, bannerDismiss)
   document.body.append(banner)
 
+  // The notice of the first launch after an update on a Mac (local_network_notice): drawn only
+  // once the app says to show it, so no other launch has it in the page at all.
+  async function showLocalNetworkNotice() {
+    const answer = await call('local_network_notice')
+    if (!record(answer) || answer.ok !== true || answer.show !== true) return
+    const notice = named('aside', 'local-network-notice', 'update-banner local-network-notice')
+    notice.setAttribute('role', 'status')
+    notice.setAttribute('aria-live', 'polite')
+    const words = element('div', 'local-network-words')
+    words.append(
+      element(
+        'p',
+        null,
+        "If Pi can't reach your local model after this update, macOS may need you to allow Local Network access again.",
+      ),
+    )
+    const way = text(answer.path)
+    if (way.length > 0) words.append(element('p', null, `You find it in ${way}.`))
+    words.append(
+      element(
+        'p',
+        null,
+        // The list has its remove and add buttons from macOS 27.2 only (TN3179): the app says so.
+        `If ConsensFlow is already on there, quit ConsensFlow fully and open it again from the Finder.${
+          answer.removeAndAdd === true
+            ? " If that doesn't help, remove ConsensFlow from the list and add it again."
+            : ''
+        }`,
+      ),
+    )
+    const problem = element('p', 'local-network-problem')
+    problem.hidden = true
+    words.append(problem)
+    const open = updaterButton('quiet-button', text(answer.button, 'Open settings'))
+    const dismiss = updaterButton('icon-button', '×')
+    dismiss.setAttribute('aria-label', 'Dismiss Local Network notice')
+    open.addEventListener('click', async () => {
+      const result = await call('local_network_notice_open')
+      const failure = commandFailure(result)
+      problem.textContent = failure ?? ''
+      problem.hidden = failure === null
+    })
+    dismiss.addEventListener('click', () => notice.remove())
+    notice.append(words, open, dismiss)
+    document.body.append(notice)
+  }
+
   let snapshot = null
   let feedbackText = ''
   let feedbackTone = 'info'
@@ -369,7 +416,10 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     try {
       return await invoke(command, args)
     } catch (cause) {
-      return { ok: false, error: cause instanceof Error ? cause.message : String(cause) }
+      return {
+        ok: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+      }
     }
   }
 
@@ -526,6 +576,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   }
 
   if (!window.__CONSENSFLOW_SELFTEST__) {
+    void showLocalNetworkNotice()
     const schedule = (delay) => {
       window.setTimeout(async () => {
         await checkForUpdates({ quiet: true })

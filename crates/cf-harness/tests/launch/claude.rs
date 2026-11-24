@@ -35,7 +35,10 @@ mod closed_at_rest;
 mod compact_cancelled;
 mod compaction_window;
 mod dialogs;
+mod follows;
 mod moves;
+#[cfg(unix)]
+mod off_thread;
 mod outside;
 mod private_folders;
 mod prompt_suggestion_off;
