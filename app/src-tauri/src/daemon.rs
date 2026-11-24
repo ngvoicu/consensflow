@@ -2,6 +2,7 @@
 //! and again after a start that failed, stops with the app, and every change
 //! is told to the page as `daemon-status`.
 
+use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::process::Child;
@@ -179,9 +180,11 @@ struct DaemonState {
     up_since: Option<Instant>,
     /// The restarts in a row ([`Backoff::restarts`]).
     restarts: u32,
-    /// What a daemon said as it ended because its ledger cannot save, and which process
-    /// said it: the words are the person's, and only the daemon in hand may give them.
-    broken: Option<(u32, String)>,
+    /// What each daemon said as it ended because its ledger cannot save, by the process
+    /// that said it (a frame can come before the daemon is in hand): the words are the
+    /// person's, and only the daemon in hand gives them. What an older daemon says only adds
+    /// a word nobody asks for, and displaces nothing.
+    broken: HashMap<u32, String>,
     /// The process in hand, and the ledger it was launched with: only its words count.
     pid: Option<u32>,
     ledger: Option<PathBuf>,
@@ -210,7 +213,7 @@ impl Daemon {
                 restart: None,
                 up_since: None,
                 restarts: 0,
-                broken: None,
+                broken: HashMap::new(),
                 pid: None,
                 ledger: None,
             }),
@@ -242,12 +245,13 @@ impl Daemon {
                 .and_then(Value::as_u64)
                 .and_then(|pid| u32::try_from(pid).ok());
             if let (Some(from), Some(words)) = (from, body.get("words").and_then(Value::as_str)) {
-                // Only the process in hand is heard: a late frame of an older daemon changes
-                // nothing, whatever it says.
+                // Kept by the process that says it, and asked for by the one in hand only: a
+                // late frame of an older daemon changes nothing, whatever it says.
                 let mut state = daemon.lock();
-                if state.pid == Some(from) {
-                    state.broken = Some((from, words.to_owned()));
+                if state.broken.len() >= 8 {
+                    state.broken.clear();
                 }
+                state.broken.insert(from, words.to_owned());
             }
         })
     }
@@ -368,7 +372,9 @@ impl Daemon {
         state.current = start;
         state.pid = Some(started.daemon.id());
         state.ledger = Some(started.ledger);
-        state.broken = None;
+        // Words of any other process are of no use to this one.
+        let in_hand = state.pid;
+        state.broken.retain(|pid, _| Some(*pid) == in_hand);
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
         state.up_since = Some(Instant::now());
@@ -439,12 +445,9 @@ impl Daemon {
         // windows are closed, as for any stop, and the person is told why. Its status says
         // it; the words come from what it said, if it said them and this daemon is the one
         // that did, and from the app otherwise.
-        let from = state.daemon.as_ref().map(Child::id);
-        let said = state
-            .broken
-            .take()
-            .filter(|(pid, _)| Some(*pid) == from)
-            .map(|(_, words)| words);
+        let from = state.pid;
+        let said = from.and_then(|pid| state.broken.remove(&pid));
+        state.broken.clear();
         let ledger = state.ledger.clone().unwrap_or_default();
         let broken = (exit == Some(LEDGER_EXIT) || said.is_some())
             .then(|| said.unwrap_or_else(|| cf_base::home::unsaved_words(&ledger)));
@@ -1423,7 +1426,7 @@ mod tests {
         hears: &Arc<dyn Fn(Value) + Send + Sync>,
         frames: &[String],
         then: Then,
-        home: &Path,
+        home: &std::path::Path,
     ) -> DaemonStarter {
         let (counted, hears, frames, home) = (
             Arc::clone(starts),
@@ -1449,7 +1452,10 @@ mod tests {
     /// (a long one).
     #[test]
     fn a_stream_that_ends_before_the_process_does_is_read_from_the_process_s_own_end() {
-        for wait in [700, 1900, 3200] {
+        // (the stream ends after, the process ends after): a stream that ends before the daemon
+        // is in hand, and one that ends after; a process that ends within the time the app
+        // used to give it, and one that ends well after.
+        for (closes, wait) in [(0, 700), (0, 1900), (400, 700), (400, 1900), (400, 3200)] {
             let panes = Arc::new(PaneTable::new());
             let starts = Arc::new(AtomicUsize::new(0));
             let (report, heard) = listener();
@@ -1459,7 +1465,7 @@ mod tests {
                 &starts,
                 &daemon.hears_broken(),
                 &[],
-                Then::CloseThenExit(wait, LEDGER_EXIT),
+                Then::CloseThenExit(closes, wait, LEDGER_EXIT),
             );
             daemon.start(starter, panes, QUICK);
             // Told up first where the stream ended after the daemon was in hand, and not
@@ -1474,18 +1480,18 @@ mod tests {
             assert_eq!(
                 told.last(),
                 Some(&DaemonStatus::ledger(&fallback_words())),
-                "{wait}"
+                "{closes}/{wait}"
             );
             assert!(
                 told.iter()
                     .all(|status| *status != DaemonStatus::started_again()),
-                "{wait}: {told:?}"
+                "{closes}/{wait}: {told:?}"
             );
             assert!(heard.recv_timeout(Duration::from_millis(500)).is_err());
             assert_eq!(
                 starts.load(Ordering::SeqCst),
                 1,
-                "{wait}: not started again"
+                "{closes}/{wait}: not started again"
             );
         }
     }
@@ -1698,9 +1704,10 @@ mod tests {
         StayUp,
         /// Ends after this many milliseconds with this status.
         ExitAfter(u64, i32),
-        /// Closes its output at once (the app reads the end of the stream), and ends only
-        /// after this many milliseconds with this status: the stream ends before the process.
-        CloseThenExit(u64, i32),
+        /// Closes its output after the first number of milliseconds (the app reads the end of
+        /// the stream), and ends only after the second, with this status: the stream ends
+        /// before the process does.
+        CloseThenExit(u64, u64, i32),
     }
 
     /// The command of a stand-in for `cf ui --json` on either system: a shell on a Mac, a
@@ -1722,9 +1729,10 @@ mod tests {
                 Then::ExitAfter(milliseconds, code) => {
                     format!("sleep {}; exit {code}", milliseconds as f64 / 1000.0)
                 }
-                Then::CloseThenExit(milliseconds, code) => {
+                Then::CloseThenExit(closes, milliseconds, code) => {
                     format!(
-                        "exec 1>&-; sleep {}; exit {code}",
+                        "sleep {}; exec 1>&-; sleep {}; exit {code}",
+                        closes as f64 / 1000.0,
                         milliseconds as f64 / 1000.0
                     )
                 }
@@ -1754,8 +1762,8 @@ mod tests {
                 Then::ExitAfter(milliseconds, code) => {
                     format!("Start-Sleep -Milliseconds {milliseconds}; exit {code}")
                 }
-                Then::CloseThenExit(milliseconds, code) => format!(
-                    "[Console]::Out.Close(); Start-Sleep -Milliseconds {milliseconds}; exit {code}"
+                Then::CloseThenExit(closes, milliseconds, code) => format!(
+                    "Start-Sleep -Milliseconds {closes}; [Console]::Out.Close(); Start-Sleep -Milliseconds {milliseconds}; exit {code}"
                 ),
             });
             let mut command = crate::testing::command("powershell.exe");

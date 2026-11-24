@@ -118,6 +118,10 @@ async fn no_page_request_is_served_once_the_ledger_cannot_save() {
             assert_eq!(broke["ok"], false, "{broke}");
             assert!(rig.daemon.parts.ledger.borrow().broken().is_some());
             assert_eq!(behind["ok"], false, "{behind}");
+            assert_eq!(
+                behind["error"], "the daemon is stopping",
+                "refused by the fence, before any handler"
+            );
             assert!(
                 !settings.exists(),
                 "agents.json was written after the break"
