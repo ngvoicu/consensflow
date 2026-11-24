@@ -55,6 +55,9 @@
 # runs nothing. It writes only in a folder of its own under TMPDIR, removed at
 # the end, and in the folder the app goes to.
 
+# A search path for `cd` would send a relative folder elsewhere and print where.
+unset CDPATH
+
 usage() {
     cat <<'HELP'
 Install ConsensFlow on this Mac.
@@ -136,16 +139,26 @@ newer_than() {
 # version order: end
 
 # Whether this shell runs inside the app at $1: one of the programs it runs
-# under is a program of that bundle. Only this shell's own ancestors are read.
+# under is a program of that bundle, the bundle being told by its device and
+# inode (never by spelling: a link, another capitalization on a volume that
+# ignores it, or a relative name all name the same folder). Each ancestor's
+# program is walked up folder by folder, and each folder is compared. Only this
+# shell's own ancestors are read.
 runs_inside() {
+    [ -d "$1" ] || return 1
+    bundle=$(stat -f '%d:%i' "$1" 2>/dev/null) || return 1
     pid=$$
     while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
         program=$(ps -o comm= -p "$pid" 2>/dev/null || true)
         case "$program" in
-            /*) program=$(cd "${program%/*}" 2>/dev/null && pwd -P)/${program##*/} ;;
-        esac
-        case "$program" in
-            "$1"/Contents/*) return 0 ;;
+            /*)
+                while [ -n "$program" ]; do
+                    program=${program%/*}
+                    if [ -n "$program" ] && [ -d "$program" ] && [ "$(stat -f '%d:%i' "$program" 2>/dev/null)" = "$bundle" ]; then
+                        return 0
+                    fi
+                done
+                ;;
         esac
         pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
     done
@@ -157,8 +170,8 @@ runs_inside() {
 # and the seconds to wait, and answers with one word and what follows it: `none`,
 # `many` (and how many), `ended`, `refused` or `open` (quit mode); the count
 # (count mode). The apps it names are the ones of that identifier whose bundle is
-# that folder, found once among the running applications as the system lists
-# them. In quit mode the one it found is asked to quit through that same object
+# that folder (told by device and inode, never by spelling), found once among the
+# running applications as the system lists them. In quit mode the one it found is asked to quit through that same object
 # and watched through it until it has ended: no process number is read or used,
 # so a number another program has taken since can never reach it.
 # shellcheck disable=SC2016 # JavaScript for osascript: nothing in it is for the shell
@@ -167,14 +180,20 @@ ObjC.import("AppKit");
 ObjC.import("Foundation");
 function run(argv) {
     const mode = argv[0], id = argv[1], wait = Number(argv[3]);
-    const home = (p) => $(p).stringByResolvingSymlinksInPath.js;
-    const folder = home(argv[2]);
+    const manager = $.NSFileManager.defaultManager;
+    const identity = (p) => {
+        const attributes = manager.attributesOfItemAtPathError(p, $());
+        if (attributes.isNil()) return "";
+        return attributes.objectForKey("NSFileSystemNumber").js + ":" + attributes.objectForKey("NSFileSystemFileNumber").js;
+    };
+    const folder = identity(argv[2]);
+    if (folder === "") return mode === "count" ? "0" : "none";
     const list = $.NSWorkspace.sharedWorkspace.runningApplications;
     const found = [];
     for (let i = 0; i < list.count; i++) {
         const app = list.objectAtIndex(i);
         if (app.bundleIdentifier.isNil() || app.bundleURL.isNil()) continue;
-        if (app.bundleIdentifier.js === id && home(app.bundleURL.path.js) === folder) found.push(app);
+        if (app.bundleIdentifier.js === id && identity(app.bundleURL.path.js) === folder) found.push(app);
     }
     if (mode === "count") return String(found.length);
     if (found.length === 0) return "none";
@@ -494,7 +513,7 @@ main() {
     # One destination for everything below: absolute, its folders' links resolved,
     # so the count, the quit and the check of this shell's own ancestors all
     # compare against the same path whatever the folder was spelled as.
-    dir=$(cd "$dir" 2>/dev/null && pwd -P) || refuse "could not read the folder $dir."
+    dir=$(cd "$dir" >/dev/null 2>&1 && pwd -P) || refuse "could not read the folder $dir."
     dest="$dir/ConsensFlow.app"
     if [ -L "$dest" ]; then
         refuse "$dest is a link to $(readlink "$dest"). Replace the link with the app (or install into the folder it points to) and run this again."

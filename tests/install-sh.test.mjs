@@ -1725,6 +1725,49 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assert.equal(installedVersion(at), '3.0.7-alpha.1')
     })
 
+    test('a shell inside the app is refused when the install folder is spelled in another capitalization', async (t) => {
+      const at = freshCase()
+      const other = path.join(path.dirname(at.apps), path.basename(at.apps).toLowerCase())
+      if (!existsSync(other)) return t.skip('this volume tells capitals apart')
+      const app = fakeApp(at.apps, '3.0.7-alpha.1')
+      const launcher = path.join(app, 'Contents/MacOS/launcher')
+      writeFileSync(path.join(work, 'launcher.c'), LAUNCHER)
+      run('cc', ['-o', launcher, path.join(work, 'launcher.c')])
+      const ran = await install(at, ['--version', '3.0.7'], {
+        launcher,
+        env: { CONSENSFLOW_INSTALL_DIR: other },
+      })
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(ran.out, /this shell runs inside the ConsensFlow at .*Run this from Terminal/)
+      assert.equal(installedVersion(at), '3.0.7-alpha.1')
+    })
+
+    test('the open app is found when the install folder is spelled in another capitalization', async (t) => {
+      const at = freshCase()
+      const other = path.join(path.dirname(at.apps), path.basename(at.apps).toLowerCase())
+      if (!existsSync(other)) return t.skip('this volume tells capitals apart')
+      const app = applet(at.apps, false)
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        env: { CONSENSFLOW_INSTALL_DIR: other },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /was asked to quit/)
+    })
+
+    test('a CDPATH in the environment does not move a relative install folder', async () => {
+      const at = freshCase()
+      const search = path.join(at.dir, 'search')
+      mkdirSync(path.join(search, 'Applications'), { recursive: true })
+      const ran = await install(at, ['--version', '3.0.7'], {
+        cwd: at.dir,
+        env: { CONSENSFLOW_INSTALL_DIR: 'Applications', CDPATH: search },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.deepEqual(readdirSync(path.join(search, 'Applications')), [])
+    })
+
     test('a ConsensFlow.app that is a link is refused, with where it points', async () => {
       const at = freshCase()
       const real = fakeApp(mkdtempSync(path.join(work, 'real-')), '3.0.7-alpha.1')

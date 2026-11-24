@@ -175,11 +175,12 @@ for (const [label, shell] of shells) {
         ...replacements,
       ])
       // Stop-Process is a recorder in the test copy: the shipped script never calls it, and a
-      // plant that makes it end the open app's processes ends nothing and leaves its mark.
+      // plant that makes it end the open app's processes ends nothing and leaves its mark. The
+      // marker's path comes through the environment: no quoting of a path in the script.
       const stopped = path.join(dir, 'stopped')
       writeFileSync(
         script,
-        `function Stop-Process { [IO.File]::AppendAllText('${stopped}', "stop\`n") }\n${readFileSync(script, 'utf8')}`,
+        `function Stop-Process { [IO.File]::AppendAllText($env:CF_TEST_STOPPED, "stop\`n") }\n${readFileSync(script, 'utf8')}`,
       )
       if (boundStarts) {
         writeFileSync(script, `Write-Output '${POWERSHELL_READY}'\n${readFileSync(script, 'utf8')}`)
@@ -234,6 +235,7 @@ for (const [label, shell] of shells) {
             TMP: at.tmp,
             TMPDIR: at.tmp,
             LOCALAPPDATA: at.local,
+            CF_TEST_STOPPED: at.stopped,
             CONSENSFLOW_RELEASES_URL: `${server.url}/releases`,
             CONSENSFLOW_CHANNEL: '',
             CONSENSFLOW_VERSION: '',
