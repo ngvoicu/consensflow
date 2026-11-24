@@ -189,9 +189,17 @@ impl Sched {
         panic!("{} never reached {name}", self.names[actor.0]);
     }
 
-    /// The steps taken so far, one a line.
+    /// The last of the steps taken so far, one a line: a schedule that does not end has taken
+    /// hundreds of thousands, and a failure's words are not a log.
     pub(crate) fn trace(&self) -> String {
-        self.shared.core.lock().unwrap().trace.join("\n")
+        const LAST: usize = 120;
+        let core = self.shared.core.lock().unwrap();
+        let from = core.trace.len().saturating_sub(LAST);
+        let mut shown = core.trace[from..].join("\n");
+        if from > 0 {
+            shown = format!("({from} steps before)\n{shown}");
+        }
+        shown
     }
 
     /// Lets every actor go to its end, a thread's join.

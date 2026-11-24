@@ -377,6 +377,61 @@ fn t2139_a_look_read_before_the_echo_admits_no_paste_over_a_pending_or_a_drawn_x
     });
 }
 
+/// T-2160: the digest of what the screen shows and the check that nothing is pending are made
+/// with the screen's lock held, both: a feed that draws the key's echo between them would leave a
+/// digest of the box before the key and a count that says nothing is pending.
+#[test]
+fn t2160_the_digest_and_the_pending_check_are_under_one_lock() {
+    each_harness(|harness| {
+        let answer = kept();
+        let kept_answer = Arc::clone(&answer);
+        let case = Case::new(harness, move |world| {
+            world.program.lock().unwrap().late = true;
+            world.echo_as([Echo::Prefix]);
+            world.type_keys(b"X");
+            sched::wait_until("the key is written", || {
+                world.program.lock().unwrap().draft == "X"
+            });
+            sched::at("case.typed");
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(20));
+            sched::at("case.answered");
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(1_500));
+            let look = world.look().expect("a look before the key's echo is read");
+            sched::at("case.looked");
+            *kept_answer.lock().unwrap() = world.paste_on(&look);
+        });
+        case.until_script_but("case.answered", &[case.reader, case.consumer]);
+        case.run(&[case.script, case.consumer, case.worker], |case| case.world.fed_len() > 0);
+        case.to(case.reader, "took.before");
+        case.run(&[case.script, case.reader], |case| {
+            let (read, drawn) = sched::without_points(|| case.world.printed.counts().both());
+            read == drawn
+                && case.world.fed_len() == 0
+                && matches!(case.sched.stands(case.consumer), Stands::Blocked(_))
+        });
+        case.until_script_but("case.looked", &[case.reader, case.consumer]);
+        // The host has made the digest of the box before the key's echo, and has not yet asked
+        // whether anything is pending.
+        case.run(&[case.reader, case.consumer], |case| {
+            matches!(case.sched.stands(case.worker), Stands::At("seen.locked"))
+        });
+        // Now the window's echo is read, and the screen is asked to draw it.
+        for _ in 0..300 {
+            case.steps(case.reader, 1);
+            case.steps(case.consumer, 1);
+        }
+        case.finish();
+        let outcome = answer.lock().unwrap().take().expect("asked");
+        assert!(
+            matches!(outcome, Err(ArbiterError::LookAgain(_)) | Err(ArbiterError::Unsent)),
+            "{harness:?}: {outcome:?}"
+        );
+        assert!(case.held().is_empty(), "{harness:?}: nothing pasted over the key");
+        case.rules();
+        case.end();
+    });
+}
+
 /// T-2139: the recovery Enter (`pane.enter`) is never written while output is pending: it waits,
 /// and at the grace it is refused; on a look taken once the screen has what was read, it goes.
 #[test]

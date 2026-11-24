@@ -157,7 +157,7 @@ replace = """            Some(_) => 1u8.hash(&mut hasher),
 
 [[plant]]
 name = "output clock: what the screen shows is named by the grid's digest"
-meant = "t2160_a_wrap_a_scroll_and_a_resize"
+meant = "t2160_a_key_typed_and_erased_since_the_look"
 runs = ["oc-model", "oc-walks", "oc-feed"]
 
 [[plant.edit]]
@@ -167,7 +167,7 @@ replace = """        Seen(self.shows)"""
 
 [[plant]]
 name = "output clock: admission's digest and pending check are made without the screen's lock"
-meant = "t2160_an_echo_drawn_during_admission"
+meant = "t2160_the_digest_and_the_pending_check_are_under_one_lock"
 runs = ["oc-model", "oc-walks"]
 
 [[plant.edit]]
@@ -250,8 +250,8 @@ replace = """        let count"""
 
 [[plant]]
 name = "output clock: a whole wait with no look pastes the message again"
-meant = "t2160_the_arrivals_old_look_pastes_nothing_again"
-runs = ["oc-model", "oc-harness"]
+meant = "after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets_an_enter"
+runs = ["oc-model", "oc-harness", "oc-engine"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
@@ -266,7 +266,7 @@ replace = """    let Ok(look) = look else {
 
 [[plant]]
 name = "output clock: a paste goes into a box the reader reads as holding words"
-meant = "after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets_an_enter"
+meant = "a_box_that_holds_the_humans_draft_waits_whatever_the_counts_say_after"
 runs = ["oc-harness"]
 
 [[plant.edit]]
