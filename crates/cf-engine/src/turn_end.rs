@@ -480,9 +480,9 @@ impl Dispatcher {
             }
             _ => false,
         };
-        let Some(thread) = task.filter(|thread| {
-            (thread.task.state == "working" || went_past) && !waiting
-        }) else {
+        let Some(thread) =
+            task.filter(|thread| (thread.task.state == "working" || went_past) && !waiting)
+        else {
             record.held.borrow_mut().drop_hold();
             if observed.failed {
                 self.tell_failed_turn(project, participant, record, observed)
@@ -732,7 +732,7 @@ impl Dispatcher {
         self.seams
             .ledger
             .borrow_mut()
-            .record_result(project.id, thread.task.number, &body)?;
+            .record_result_past_questions(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Turn::Answered)
     }

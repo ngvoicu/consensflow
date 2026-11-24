@@ -35,10 +35,10 @@ use super::{
     task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, open_questions, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
-    queued_paused_answers, recover_after_lost_answer, release_carried, say_again, tell_sent_back,
-    warnings_on_their_way, warnings_queued, withdraw_at_work, withdraw_open_questions,
-    withdraw_paused_answers, Afterwards, Dropped,
+    drop_queued_but_told, fold, leave_pause_notes, notes_waiting, open_questions,
+    put_back_paused_answers, queued_paused_answers, recover_after_lost_answer, release_carried,
+    say_again, tell_sent_back, warnings_on_their_way, warnings_queued, withdraw_at_work,
+    withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
@@ -66,6 +66,27 @@ pub(crate) fn record_result(
     record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)
 }
 
+/// The window's turn ended with its result past questions of its task that are still open
+/// (`turn_end`'s `went_past`): the result as [`record_result`] takes it, and each question still
+/// open is closed with it and named in its words.
+pub(crate) fn record_result_past_questions(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+) -> Result<TaskMoved, LedgerError> {
+    record_counted(
+        store,
+        project_id,
+        number,
+        body,
+        &ACTIVE_TASK_STATES,
+        false,
+        (0, 0),
+        true,
+    )
+}
+
 /// The chief or the human takes what the worker said last as the result (Finish):
 /// of a task at work, or of a paused one, whose worker's turn ended with its
 /// answer after the tell that paused it (`turn_end`'s paused answer). The pause
@@ -88,6 +109,7 @@ pub(crate) fn record_finished(
         &FINISHABLE_TASK_STATES,
         true,
         left,
+        false,
     )
 }
 
@@ -138,6 +160,7 @@ fn record(
         states,
         finished_by_word,
         (0, 0),
+        false,
     )
 }
 
@@ -151,6 +174,7 @@ fn record_counted(
     states: &[&str],
     finished_by_word: bool,
     left: (usize, usize),
+    past_questions: bool,
 ) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
@@ -218,8 +242,8 @@ fn record_counted(
         // them, so nobody waits for them now. They close, and the result names each.
         let mut body = body.to_owned();
         let mut closed = finished_by_word;
-        if let (false, "waiting", Some(window)) =
-            (finished_by_word, task.state.as_str(), task.assignee_id)
+        if let (true, "waiting", Some(window)) =
+            (past_questions, task.state.as_str(), task.assignee_id)
         {
             let left = open_questions(store, task.id, window)?;
             if !left.is_empty() {

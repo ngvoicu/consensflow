@@ -112,6 +112,16 @@ impl Ledger {
         tasks::record_result(&mut self.store, project_id, number, body)
     }
 
+    /// The window's result past questions of its task still open: they are closed with it.
+    pub fn record_result_past_questions(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::record_result_past_questions(&mut self.store, project_id, number, body)
+    }
+
     /// The chief or the human takes what the worker said last as the task's result: of a
     /// task at work, or of a paused one. `left` is how many background jobs and agents its
     /// window was counted running ([`Ledger::left_running`]).

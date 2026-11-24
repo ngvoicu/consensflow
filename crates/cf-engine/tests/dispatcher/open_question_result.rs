@@ -56,8 +56,16 @@ fn a_result_is_delivered_when_the_first_of_two_questions_is_still_open() {
         !results[0].contains(&format!("m-{second} was left")),
         "the answered one is not named: {results:?}"
     );
-    assert_eq!(context.message(first).state, "cancelled", "the question is closed");
-    assert_ne!(context.message(second).state, "cancelled", "the answered one is not closed");
+    assert_eq!(
+        context.message(first).state,
+        "cancelled",
+        "the question is closed"
+    );
+    assert_ne!(
+        context.message(second).state,
+        "cancelled",
+        "the answered one is not closed"
+    );
     // Its question can no longer be answered, and the refusal says how to tell the worker.
     let chief = tiers.id("chief");
     let refused = context
