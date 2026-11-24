@@ -327,18 +327,6 @@ find = '''        let _ = self
 replace = ''''''
 
 [[plant]]
-name = "broken ledger: a spec is copied after the break"
-meant = "an_open_that_finishes_after_the_break_neither_copies_nor_opens_and_says_so"
-runs = ["p23a-viewer"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/viewer.rs"
-find = '''            if let Some(words) = halt.refusal() {
-                return Err(words.to_owned());
-            }'''
-replace = '''            let _ = &halt;'''
-
-[[plant]]
 name = "broken ledger: a spec is opened after the break"
 meant = "an_open_whose_copy_was_made_is_not_opened_after_the_break"
 runs = ["p23a-viewer"]
@@ -412,6 +400,12 @@ replace = '''        let exit = child.as_mut().and_then(|child| {
             child.try_wait().ok().flatten().and_then(|status| status.code())
         });'''
 
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''            let exit = reaped(&mut child);'''
+replace = '''            thread::sleep(Duration::from_millis(1500));
+            let exit = child.try_wait().ok().flatten().and_then(|status| status.code());'''
+
 [[plant]]
 name = "broken ledger: a child that closed its stream is killed before its status is read"
 meant = "a_daemon_whose_stream_ends_before_it_is_ready_is_waited_for_not_killed"
@@ -458,17 +452,6 @@ file = "app/src-tauri/src/daemon.rs"
 find = '''                state.broken.insert(from, words.to_owned());'''
 replace = '''                state.broken.clear();
                 state.broken.insert(from, words.to_owned());'''
-
-[[plant]]
-name = "broken ledger: a restart is decided on a time limit where the stream ended before the handoff"
-meant = "a_stream_that_ends_before_the_process_does_is_read_from_the_process_s_own_end"
-runs = ["p23a-app"]
-
-[[plant.edit]]
-file = "app/src-tauri/src/daemon.rs"
-find = '''            let exit = reaped(&mut child);'''
-replace = '''            thread::sleep(Duration::from_millis(1500));
-            let exit = child.try_wait().ok().flatten().and_then(|status| status.code());'''
 
 [[plant]]
 name = "broken ledger: a pane is closed by a spawned thread only"

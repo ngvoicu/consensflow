@@ -578,7 +578,7 @@ replace = "        match root.new_child(if name.is_empty() { &name } else { \"co
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer/copies.rs"
 find = "            Ok(None) => {}"
-replace = "            Ok(None) => return root.child(\"copy\").map_err(|_| \"taken\".to_owned()),"
+replace = "            Ok(None) => return root.child(\"copy\").map(|folder| (folder, name.clone())).map_err(|_| \"taken\".to_owned()),"
 
 [[plant]]
 name = "specs viewer: the copies' folder is reached through a link"
