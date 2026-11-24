@@ -8,6 +8,9 @@ import { FitAddon, Terminal } from './vendor/xterm.js'
  */
 const SETTLE_MS = 200
 
+/** The pane host's bounds for a size (`MAX_TERMINAL_DIMENSION`): the page asks for none past it. */
+export const MAX_PANE_DIMENSION = 4096
+
 /** A Mac, where Cmd+C copies and Ctrl+C is always the program's. */
 const MAC = /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '')
 
@@ -334,9 +337,10 @@ const shortcutLetter = (event) =>
 export class XtermEmulator {
   constructor(host, { onReply = () => {}, onResize = () => {}, onLink = () => {} } = {}) {
     this.host = host
+    this.callbacks = { onReply, onResize }
     // Both OSC 8 and visible plain web addresses use the same click, hover and app opener.
     // OSC 8 takes priority and carries its destination whole, even when its text is wrapped.
-    const link = {
+    this.link = {
       activate: (event, uri) => {
         if (opensLink(event)) onLink(uri)
       },
@@ -345,6 +349,31 @@ export class XtermEmulator {
       },
       leave: () => this.terminal.element?.removeAttribute('title'),
     }
+    this.humanListeners = new Set()
+    this.replaying = false
+    this.#build()
+    /** Whether the terminal has taken its host's size once. */
+    this.sized = false
+    this.settling = null
+    /** The size the settle waits to take, "colsxrows". */
+    this.pending = null
+    this.resizeObserver = new ResizeObserver(() => this.fit())
+    this.resizeObserver.observe(host)
+    /** An unfinished UTF-8 suffix, at most three bytes, for the next output. */
+    this.utf8Pending = null
+    /** The replay's writes not yet done: an error of the page while they are fails them. */
+    this.inflight = new Set()
+    /** Whether anything was written to this xterm. */
+    this.written = false
+    this.failureWatch = (event) => {
+      const failed = new Error(`xterm failed while a window's history was written: ${event.message}`)
+      for (const fail of [...this.inflight]) fail(failed)
+      this.inflight.clear()
+    }
+  }
+
+  /** Make the xterm of this emulator, in its host: once, and again where a replay starts clean. */
+  #build() {
     const colours = theme()
     this.terminal = new Terminal({
       allowProposedApi: false,
@@ -354,7 +383,7 @@ export class XtermEmulator {
       fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
       fontSize: 12,
       lineHeight: 1.16,
-      linkHandler: { ...link, allowNonHttpProtocols: false },
+      linkHandler: { ...this.link, allowNonHttpProtocols: false },
       // A program's words, in any colour on any background it asks for (ESC[41m and the
       // like), drawn at WCAG AA's 4.5 to 1 at least: the palette is bright for words on the
       // well, which no colour can be and still be dark enough under light words. xterm moves
@@ -364,11 +393,11 @@ export class XtermEmulator {
       scrollback: 10_000,
       theme: colours,
     })
-    this.terminal.registerLinkProvider(plainWebLinks(this.terminal, link))
+    this.terminal.registerLinkProvider(plainWebLinks(this.terminal, this.link))
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
-    this.terminal.open(host)
-    dimWords(host.ownerDocument, colours)
+    this.terminal.open(this.host)
+    dimWords(this.host.ownerDocument, colours)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.awaitingPaste = false
     this.clearPaste = () => {
@@ -398,7 +427,6 @@ export class XtermEmulator {
       this.terminal.textarea?.addEventListener('blur', this.clearPaste)
     }
     this.humanDataPending = 0
-    this.humanListeners = new Set()
     // xterm's public onData event erases the internal `wasUserInput` bit. In
     // v6, onUserInput fires immediately before the matching onData event. Keep
     // that one-shot signal so a queued parser write can never steal a real
@@ -416,19 +444,13 @@ export class XtermEmulator {
         this.humanDataPending -= 1
         for (const listener of this.humanListeners) listener(data)
       } else {
-        onReply(data)
+        this.callbacks.onReply(data)
       }
     })
-    this.resizeSubscription = this.terminal.onResize(({ cols, rows }) => onResize(cols, rows))
-    /** Whether the terminal has taken its host's size once. */
-    this.sized = false
-    this.settling = null
-    /** The size the settle waits to take, "colsxrows". */
-    this.pending = null
-    this.resizeObserver = new ResizeObserver(() => this.fit())
-    this.resizeObserver.observe(host)
-    /** An unfinished UTF-8 suffix, at most three bytes, for the next output. */
-    this.utf8Pending = null
+    this.resizeSubscription = this.terminal.onResize(({ cols, rows }) => {
+      // The sizes a replay takes are the journal's own: the pane host has them.
+      if (!this.replaying) this.callbacks.onResize(cols, rows)
+    })
   }
 
   /**
@@ -499,11 +521,85 @@ export class XtermEmulator {
         payload = payload.subarray(0, start - 1)
       }
     }
-    return new Promise((resolve) => {
+    this.written = true
+    return new Promise((resolve, reject) => {
       // Even an empty prefix must be queued behind earlier writes: callers can
       // acknowledge this message only once those earlier bytes have been parsed.
-      this.terminal.write(payload, resolve)
+      // While a replay is written, a write xterm fails on never calls back: it is told as
+      // the failure it is (`mute`), where live it stays as it was.
+      if (this.replaying) this.inflight.add(reject)
+      this.terminal.write(payload, () => {
+        this.inflight.delete(reject)
+        resolve()
+      })
     })
+  }
+
+  /** How many bytes of an unfinished character it holds back for the next write (three at most). */
+  get held() {
+    return this.utf8Pending?.length ?? 0
+  }
+
+  /** The terminal's size now. */
+  size() {
+    return { cols: this.terminal.cols, rows: this.terminal.rows }
+  }
+
+  /**
+   * A replay is written (`on`) or it is over. While it is written the terminal asks the program
+   * nothing and takes no typing (`disableStdin`: a key, a paste, the page's own input, a cursor
+   * report and a focus report, measured in Chromium and WebKit; the switch goes on before the
+   * first write because xterm reports its focus by itself once a program sets 1004), takes no
+   * fit, and tells nobody of the sizes it is given; a write xterm fails on is told as a
+   * rejection. Over, it fits as a new window does.
+   */
+  mute(on) {
+    if (on === this.replaying) return
+    this.replaying = on
+    this.terminal.options.disableStdin = on
+    if (on) {
+      window.addEventListener('error', this.failureWatch)
+    } else {
+      window.removeEventListener('error', this.failureWatch)
+      this.inflight.clear()
+      this.fit()
+    }
+  }
+
+  /**
+   * The terminal starts clean at `cols` by `rows`: a new xterm in the same place, with nothing
+   * of the one before (the replay's start, or after xterm failed on a write). Nothing is
+   * reported of the size.
+   */
+  restart(cols, rows) {
+    const muted = this.replaying
+    this.inflight.clear()
+    this.utf8Pending = null
+    clearTimeout(this.settling)
+    this.settling = null
+    this.pending = null
+    // One nothing was written to is clean already.
+    if (this.written) {
+      this.#teardown()
+      this.#build()
+      this.written = false
+    }
+    this.sized = false
+    this.replaying = true
+    if (Number.isInteger(cols) && Number.isInteger(rows)) this.terminal.resize(cols, rows)
+    this.replaying = muted
+    this.terminal.options.disableStdin = muted
+  }
+
+  /** A size the journal holds, taken in order with the bytes (the host has it already). */
+  resizeTo(cols, rows) {
+    const was = this.replaying
+    this.replaying = true
+    try {
+      this.terminal.resize(cols, rows)
+    } finally {
+      this.replaying = was
+    }
   }
 
   onData(callback) {
@@ -522,13 +618,14 @@ export class XtermEmulator {
 
   /** Take the host's size: the first at once, a later one once it holds still. */
   fit() {
+    if (this.replaying) return
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
     if (!this.sized) {
       this.#fitNow()
       return
     }
-    const size = this.fitAddon.proposeDimensions()
-    if (!Number.isInteger(size?.cols) || !Number.isInteger(size?.rows)) return
+    const size = this.#proposed()
+    if (size === null) return
     // Every redraw asks again: the size already waited for keeps its wait,
     // so redraws faster than the settle cannot hold a resize off for good.
     const target = `${size.cols}x${size.rows}`
@@ -541,12 +638,27 @@ export class XtermEmulator {
     this.settling = setTimeout(() => this.#fitNow(), SETTLE_MS)
   }
 
+  /** The size the host's box holds, in whole cells and within the pane host's bounds: it refuses more. */
+  #proposed() {
+    const size = this.fitAddon.proposeDimensions()
+    if (!Number.isInteger(size?.cols) || !Number.isInteger(size?.rows)) return null
+    return {
+      cols: Math.min(size.cols, MAX_PANE_DIMENSION),
+      rows: Math.min(size.rows, MAX_PANE_DIMENSION),
+    }
+  }
+
   #fitNow() {
     this.settling = null
     this.pending = null
+    if (this.replaying) return
     if (this.host.clientWidth < 2 || this.host.clientHeight < 2) return
     try {
-      this.fitAddon.fit()
+      const size = this.#proposed()
+      if (size !== null && (size.cols !== this.terminal.cols || size.rows !== this.terminal.rows)) {
+        this.terminal._core?._renderService?.clear()
+        this.terminal.resize(size.cols, size.rows)
+      }
       this.sized = true
     } catch {
       // A card can move between the visible grid and the off-screen parking
@@ -554,17 +666,27 @@ export class XtermEmulator {
     }
   }
 
+  /** The xterm and what listens to it, taken down. */
+  #teardown() {
+    this.terminal.element?.removeEventListener('paste', this.imagePaste, true)
+    this.terminal.textarea?.removeEventListener('blur', this.clearPaste)
+    this.userInputSubscription.dispose()
+    this.dataSubscription.dispose()
+    this.resizeSubscription.dispose()
+    // An xterm that failed on a write may not take down cleanly: it is left to go.
+    try {
+      this.terminal.dispose()
+    } catch {}
+  }
+
   dispose() {
     clearTimeout(this.settling)
     // There is no page-side EOF event. A suffix left at close cannot form a glyph.
     this.utf8Pending = null
-    this.terminal.element?.removeEventListener('paste', this.imagePaste, true)
-    this.terminal.textarea?.removeEventListener('blur', this.clearPaste)
+    window.removeEventListener('error', this.failureWatch)
+    this.inflight.clear()
     this.resizeObserver.disconnect()
-    this.userInputSubscription.dispose()
-    this.dataSubscription.dispose()
-    this.resizeSubscription.dispose()
-    this.terminal.dispose()
+    this.#teardown()
   }
 }
 

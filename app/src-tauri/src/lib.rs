@@ -296,6 +296,8 @@ pub(crate) fn page_commands<R: Runtime>(
         commands::pane_input_forget,
         commands::pane_resize,
         commands::pane_ack,
+        commands::pane_history,
+        commands::pane_history_done,
         commands::agents_screen,
         commands::subscribe_output,
         file_drop::short_paths,

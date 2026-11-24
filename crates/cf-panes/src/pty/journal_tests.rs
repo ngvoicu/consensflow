@@ -428,3 +428,57 @@ fn a_page_that_does_not_acknowledge_is_waited_for_and_never_let_go() {
     assert_eq!(at as usize, 3 * MIB);
     assert_eq!(journal.published_to(), at);
 }
+
+/// The room (T-2191, the owner's decision on T-2127): a window of a table that keeps journals,
+/// opened as the app opens one (no room named), may have 8 MiB handed to a page and not
+/// acknowledged, because the journal keeps those bytes anyway. A hidden page that acknowledges
+/// a few messages a second then holds no program that prints a burst under 8 MiB. Past it the
+/// program waits. Unix only: the program is python's.
+#[cfg(unix)]
+#[test]
+fn a_hidden_pages_slow_acknowledgements_hold_no_program_that_prints_under_eight_mebibytes() {
+    use super::PaneEnvironment;
+    use std::sync::mpsc::RecvTimeoutError;
+    const MIB: usize = 1 << 20;
+    let table = Arc::new(PaneTable::new());
+    table.keep_journals();
+    let key = PaneKey::new("room", 1);
+    // 7 MiB, then one byte more past 8 MiB in all: 8 MiB + 1 is where the program must wait.
+    let program = "import os\nfor n in [7<<20,(1<<20)+1]:\n v=memoryview(b'x'*n)\n while v:v=v[os.write(1,v):]\n";
+    let pane = table
+        .open_streamed_at_while(
+            &|| true,
+            key,
+            &std::env::current_dir().unwrap(),
+            &[
+                "/usr/bin/python3".into(),
+                "-I".into(),
+                "-S".into(),
+                "-c".into(),
+                program.into(),
+            ],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize::default(),
+            crate::pane_handlers::backlog_for(table.journals_kept(), None),
+        )
+        .unwrap();
+    // Nothing is acknowledged: a page that draws a message every few seconds.
+    let mut bytes = 0;
+    while bytes < 8 * MIB {
+        match pane.output.recv_timeout(Duration::from_secs(10)) {
+            Ok(got) => bytes += got.bytes.len(),
+            Err(RecvTimeoutError::Timeout) => panic!("the program waited at {bytes} bytes"),
+            Err(error) => panic!("{error}"),
+        }
+    }
+    assert_eq!(
+        bytes,
+        8 * MIB,
+        "everything under the room came unacknowledged"
+    );
+    // The one byte past the room waits for an acknowledgement.
+    assert!(matches!(
+        pane.output.recv_timeout(Duration::from_millis(500)),
+        Err(RecvTimeoutError::Timeout)
+    ));
+}

@@ -1149,7 +1149,22 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
-.terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
+.terminal-host { position: relative; min-height: 0; padding: 4px 2px 2px 6px; }
+/* A window whose history begins after its start says so on a line of its own at the top: the
+   room it takes is the terminal's no more, so a fit counts it. */
+.terminal-host[data-truncated="true"] { padding-top: 22px; }
+.terminal-truncated {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  right: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
    would otherwise hide the last of them with no sign they are there. */

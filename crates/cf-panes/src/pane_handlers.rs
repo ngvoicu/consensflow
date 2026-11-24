@@ -31,6 +31,20 @@ use cf_proto::panes::{
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
+/// The room of a window whose table keeps journals: its output handed to a page and not yet
+/// acknowledged may reach the journal's own 8 MiB, since the journal keeps those bytes anyway
+/// (a hidden page that acknowledges a few a second no longer holds a program that prints a
+/// burst). Past it the program waits, as it does at 1 MiB elsewhere.
+const JOURNAL_BACKLOG_BYTES: usize = 8 * 1024 * 1024;
+
+/// The room a `pane.open` that names none gets: the journal's where the table keeps journals.
+pub(crate) fn backlog_for(journals_kept: bool, requested: Option<usize>) -> usize {
+    requested.unwrap_or(if journals_kept {
+        JOURNAL_BACKLOG_BYTES
+    } else {
+        DEFAULT_BACKLOG_BYTES
+    })
+}
 /// A bound on a page message, even if a pane has much more output waiting.
 const MAX_OUTPUT_MESSAGE_BYTES: usize = 64 * 1024;
 /// A screen update hashes the whole screen, so bound the number before a handoff too.
@@ -56,8 +70,8 @@ struct OpenRequest {
     drop_env: Vec<String>,
     #[serde(default)]
     size: SizeRequest,
-    #[serde(default = "default_backlog_bytes")]
-    backlog_bytes: usize,
+    #[serde(default)]
+    backlog_bytes: Option<usize>,
     /// How the window's harness reads a human's paste, where its adapter says it reads one
     /// silently: the human's keys after a paste then wait until it has drawn it.
     #[serde(default)]
@@ -119,10 +133,6 @@ struct AckRequest {
     seq: u64,
 }
 
-fn default_backlog_bytes() -> usize {
-    DEFAULT_BACKLOG_BYTES
-}
-
 pub fn register_pane_handlers(
     builder: &mut BridgeBuilder,
     panes: Arc<PaneTable>,
@@ -180,7 +190,7 @@ fn register(
             &request.argv,
             PaneEnvironment::new(&request.env, &request.drop_env),
             size,
-            request.backlog_bytes,
+            backlog_for(open_panes.journals_kept(), request.backlog_bytes),
         ) {
             Ok(streamed) => streamed,
             // The system would not start the program, and named why: the answer says so beside
@@ -762,7 +772,7 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
     if request.argv.is_empty() || !Path::new(&request.argv[0]).is_absolute() {
         return Err("pane argv[0] must be absolute".to_string());
     }
-    if request.backlog_bytes == 0 {
+    if request.backlog_bytes == Some(0) {
         return Err("backlogBytes must be greater than zero".to_string());
     }
     validate_drop_env(&request.drop_env).map_err(|error| error.to_string())?;

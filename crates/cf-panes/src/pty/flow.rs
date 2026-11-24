@@ -116,6 +116,11 @@ impl PaneTable {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
+    /// Whether windows opened from now on keep a journal ([`PaneTable::keep_journals`]).
+    pub fn journals_kept(&self) -> bool {
+        self.journals.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// A page subscribes. Its sink becomes the hub's destination, and, in the one step that
     /// swaps it, the boundary of every window that keeps a journal is fixed: what had been
     /// handed to a page before it. The new page's history is the journal before the

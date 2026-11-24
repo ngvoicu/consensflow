@@ -1,0 +1,101 @@
+# Plants in D4's P5-C: the page that replays a window's journal muted and then takes everything
+# from the boundary live (app/ui/terminal-link.js, app/ui/term.js), the app's commands
+# (app/src-tauri/src/commands.rs) and the room of a window (crates/cf-panes/src/pane_handlers.rs).
+# A replay that answers the program, a live byte written twice or not at all, a failed replay that
+# stays stuck, a room left at 1 MiB and a pull answered to a page that is not current are
+# silent: the screen still shows something. The page's tests are app/tests/terminal-replay.spec.mjs.
+
+[run]
+page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/terminal-replay.spec.mjs", "--workers=2"]
+room = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "a_hidden_pages_slow"]
+pull = ["cargo", "test", "--offline", "-p", "app", "--", "a_pull_from_a_page_that_is_no_longer_current_is_refused"]
+
+[[plant]]
+name = "replay page: a replay is not muted"
+meant = "a replay answers no question of the program and the first live question is answered once"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.options.disableStdin = on\n    if (on) {"
+replace = "    if (on) {"
+
+[[plant]]
+name = "replay page: a live message that straddles the boundary is written whole, twice"
+meant = "a replay that begins past the boundary drops what is below it and writes the rest of a straddling message"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "        bytes = bytes.subarray(window.next - offset)\n"
+replace = ""
+
+[[plant]]
+name = "replay page: a live message ends where the history ends and is written again"
+meant = "a reloaded page equals a continuous xterm in every case the reviews ran"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "        if (end <= window.next) {\n          this.#drawn(window.key, message)\n          continue\n        }"
+replace = "        if (end < window.next) {\n          this.#drawn(window.key, message)\n          continue\n        }"
+
+[[plant]]
+name = "replay page: the first live byte is lost at the boundary"
+meant = "a reloaded page equals a continuous xterm in every case the reviews ran"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    window.next = piece.from + bytes.length\n    window.parsed"
+replace = "    window.next = piece.from + bytes.length + 1\n    window.parsed"
+
+[[plant]]
+name = "replay page: a replay that xterm fails on is left stuck"
+meant = "a window that xterm fails on is drawn clean from the boundary, marked truncated, every time"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      window.addEventListener('error', this.failureWatch)\n    } else {"
+replace = "    } else {"
+
+[[plant]]
+name = "replay page: a pull that fails is not tried again"
+meant = "a pull that fails is tried again from the same offset, and a stale page stops"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "      await pause(retryDelay(failures))\n    }\n  }\n\n  /** The window's history is in"
+replace = "      return null\n    }\n  }\n\n  /** The window's history is in"
+
+[[plant]]
+name = "replay page: the page's own size is journaled at the end, not where its emulator took it"
+meant = "a character cut between messages is drawn whole, live and after a reload"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "      ...(window?.parsed == null ? {} : { at: window.parsed }),"
+replace = ""
+
+[[plant]]
+name = "replay page: the room is left at 1 MiB"
+meant = "a_hidden_pages_slow_acknowledgements_hold_no_program_that_prints_under_eight_mebibytes"
+runs = ["room"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "const JOURNAL_BACKLOG_BYTES: usize = 8 * 1024 * 1024;"
+replace = "const JOURNAL_BACKLOG_BYTES: usize = 1024 * 1024;"
+
+[[plant]]
+name = "replay page: a pull from a page that is no longer current is answered"
+meant = "a_pull_from_a_page_that_is_no_longer_current_is_refused"
+runs = ["pull"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = "    match inputs.with_current_page(page_id, || panes.history(&key, from)) {\n        Err(error) => history_refusal(&error),\n        Ok(Err(PaneError::NotFound(_)))"
+replace = "    match Ok::<_, String>(panes.history(&key, from)) {\n        Err(error) => history_refusal(&error),\n        Ok(Err(PaneError::NotFound(_)))"

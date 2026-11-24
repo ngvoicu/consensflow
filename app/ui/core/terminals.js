@@ -117,7 +117,13 @@ export class TerminalsView {
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
       onLink: (url) => void this.#openLink(url),
     })
-    this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId })
+    this.#link = new TerminalLink({
+      invoke,
+      registry: this.#registry,
+      report,
+      pageId,
+      onTruncated: (pane) => this.#truncated(pane),
+    })
     this.#invoke = invoke
     this.#report = report
   }
@@ -453,6 +459,8 @@ export class TerminalsView {
       }
       this.#cards.set(key, entry)
       this.#registry.ensure(pane, host)
+      // A page that reloaded gets the window's history before anything live.
+      this.#link.begin(pane)
     }
     if (placed !== null) {
       const { lane, board } = placed
@@ -475,6 +483,23 @@ export class TerminalsView {
       entry.session = lane.participant.member !== null
     }
     return entry
+  }
+
+  /**
+   * The window's history begins after what it printed first (the host keeps the last of it): a
+   * line at the top of the window says what scrolled off before is not shown.
+   */
+  #truncated(pane) {
+    const host = this.#cards.get(paneKey(pane))?.host
+    if (host === undefined || host.querySelector('.terminal-truncated') !== null) return
+    host.dataset.truncated = 'true'
+    host.prepend(
+      element(
+        'div',
+        'terminal-truncated',
+        'What this window printed before this is not shown. Only the last part of it is kept.',
+      ),
+    )
   }
 
   /** The chief's card while its window is down: its head, and no terminal. */
