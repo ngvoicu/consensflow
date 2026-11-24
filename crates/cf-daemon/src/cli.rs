@@ -38,6 +38,44 @@ struct Flags {
 /// its input and writes its output from other threads, which would wait for a
 /// held lock for good.
 pub fn ui(env: &Env, args: &[OsString]) -> i32 {
+    ui_with(env, args, serve)
+}
+
+/// `ui`, with `serve` the daemon it hands to its thread (the tests give it another).
+fn ui_with(env: &Env, args: &[OsString], serve: fn(&Env, &[OsString]) -> i32) -> i32 {
+    let (env, args) = (env.clone(), args.to_vec());
+    match on_a_stack_of_its_own(move || serve(&env, &args)) {
+        Ok(code) => code,
+        Err(failed) => fail(&format!("could not start its thread: {failed}")),
+    }
+}
+
+/// The stack of the thread the daemon runs on: 16 MiB. A process's main thread has the system's
+/// default, which is 1 MiB on Windows (8 MiB on Linux and macOS), and the calls a launch nests
+/// in a debug build take more than 1 MiB there: the daemon overflowed its stack on Windows when
+/// it was asked for a chief's window, once a launch asked its harness its version first
+/// (T-1360, found by CI's `daemon_stop` and `background_close`).
+pub(crate) const DAEMON_STACK_BYTES: usize = 16 * 1024 * 1024;
+
+/// What the daemon's thread is called.
+pub(crate) const DAEMON_THREAD: &str = "consensflow-daemon";
+
+/// `work` on a thread of its own with [`DAEMON_STACK_BYTES`] of stack, waited for: what it
+/// returns, or its panic carried on to this thread as it would have been on its own.
+pub(crate) fn on_a_stack_of_its_own<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> io::Result<T> {
+    let thread = std::thread::Builder::new()
+        .name(DAEMON_THREAD.to_owned())
+        .stack_size(DAEMON_STACK_BYTES)
+        .spawn(work)?;
+    Ok(thread
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+}
+
+/// `ui` on the thread it was given.
+fn serve(env: &Env, args: &[OsString]) -> i32 {
     let env = &outside_parent_sessions(env);
     let words: Vec<String> = args
         .iter()

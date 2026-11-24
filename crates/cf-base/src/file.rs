@@ -5,6 +5,7 @@
 //!
 //! - `append`: a file only appended to, moved aside once it is past its
 //!   limit, as the daemon's log and trace are;
+//! - `durable`: a file replaced so that the replacement is on the disk;
 //! - `errno`: libuv's names and words for a failure;
 //! - `error`: a failed file operation, said as Node's error says it;
 //! - `write`: a folder made with every level above it, a file written in
@@ -21,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 mod append;
+mod durable;
 mod errno;
 mod error;
 mod promises;
@@ -28,6 +30,7 @@ mod sync;
 mod write;
 
 pub use append::{append_rotating, aside, lock_beside};
+pub use durable::{flush, flush_folder, rename_durably};
 pub use errno::{errno_name, error_code, is_missing, known_code, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};

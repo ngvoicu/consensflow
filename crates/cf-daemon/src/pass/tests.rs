@@ -401,6 +401,7 @@ async fn a_failed_pass_is_written_down_and_said_and_the_next_one_runs() {
         assert_eq!(passes.get(), 2);
         assert_eq!(rig.lines(), ["error a pass failed", "    boom"]);
         assert_eq!(rig.said.text(), "consensflow dispatcher: boom\n");
+        crate::files::settle_in(rig.home.path());
         assert!(
             !rig.home.path().join("events.jsonl").exists(),
             "a failure that was returned is no uncaught error"
@@ -437,7 +438,7 @@ async fn a_pass_that_panics_is_written_down_traced_and_said_and_the_next_one_run
             ["error a pass failed", "    panic: a bug in a step"]
         );
         assert_eq!(rig.said.text(), "consensflow dispatcher: a bug in a step\n");
-        let trace = std::fs::read_to_string(rig.home.path().join("events.jsonl")).unwrap();
+        let trace = crate::files::settled_trace(rig.home.path()).unwrap();
         assert!(
             trace.contains(
                 r#""kind":"daemon.error","project":null,"reason":"a pass failed: a bug in a step""#

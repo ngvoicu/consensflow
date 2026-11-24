@@ -1,0 +1,306 @@
+# The Admin page's verdict is the launch's own check (P2, A2, T-1969): one function a harness
+# (`crates/cf-harness/src/launch.rs`, `check`), asked through the map of answers the launches
+# keep, called at every look and kept by nothing in the Admin, with a deadline of 40 seconds
+# a row (`crates/cf-harness/src/admin.rs`, `admin/inspect.rs`). Every name here begins
+# `harness window:`, so `cargo xtask plants daemon harness window` runs them.
+
+[run]
+harness-window-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
+# The page's own suite, in Chromium: the commands it shows, and that it installs nothing.
+harness-window-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/harnesses.spec.mjs", "-g", "shows the exact command|below the version|installs nothing"]
+harness-window-screens = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::tests::harnesses"]
+harness-window-recorded = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin"]
+harness-window-commands = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::source"]
+harness-window-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "harness_check::"]
+
+# The row says what the check said: a refusal is the launch's sentence, and nothing is "Ready"
+# where the launch is refused.
+[[plant]]
+name = "harness window: the row's setup is Ready whatever the check said"
+meant = "the_page_says_what_the_launch_says_of_each_answer_a_cli_gives"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+        Ok(()) => Setup::Ready,
+        Err(refused) if refused.read => Setup::UpdateRequired {
+'''
+replace = '''
+        Ok(()) | Err(_) => Setup::Ready,
+        Err(refused) if refused.read => Setup::UpdateRequired {
+'''
+
+# One map of answers for the launch and the page: a look through a map of its own asks the
+# queue again after a launch has, and again in the daemon.
+[[plant]]
+name = "harness window: the Admin asks through a map of its own"
+meant = "a_prepare_that_passes_then_a_look_asks_the_queue_once_and_the_version_once"
+runs = ["harness-window-admin", "harness-window-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+    let asking = Asking {
+        probes: &inner.probes,
+'''
+replace = '''
+    let asking = Asking {
+        probes: &crate::seams::processes::Probes::default(),
+'''
+
+# The Admin keeps no verdict: a look inside five minutes shows what a launch gets now.
+[[plant]]
+name = "harness window: the verdict is kept with its row"
+meant = "a_changed_file_behind_the_same_path_is_seen_at_the_next_look_and_no_verdict_is_kept"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+        if !refresh && !checked {
+            if let Some(row) = kept {
+'''
+replace = '''
+        if !refresh {
+            if let Some(row) = kept {
+'''
+
+# A Refresh forgets what the launches kept of the CLI before it asks.
+[[plant]]
+name = "harness window: a refresh forgets nothing"
+meant = "a_refresh_during_a_question_starts_a_new_one_and_does_not_take_the_old_answer"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+        if refresh && checked {
+            if let Some(path) = &path {
+                inner.probes.forget(std::path::Path::new(path));
+            }
+        }
+'''
+replace = ""
+
+# Each installed row has a deadline: a question that never ends leaves the row unchecked at 40
+# seconds.
+[[plant]]
+name = "harness window: a row has no deadline"
+meant = "a_question_that_never_ends_leaves_the_row_unchecked_at_40_seconds_and_the_others_whole"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let row = if path.is_some() {
+'''
+replace = '''
+    let row = if false && path.is_some() {
+'''
+
+# One question for the look: a check that asks its own version beside the page's asks it twice
+# where the first failed early, and its second answer crosses the row's deadline.
+[[plant]]
+name = "harness window: the check asks its own version beside the page's"
+meant = "a_version_that_failed_early_is_not_asked_again_when_the_queue_answers_late"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''
+        let shared = own_question.then(|| version.clone().boxed_local());
+'''
+replace = '''
+        let shared = None;
+'''
+
+# The newest look is the one kept: an older look that ends last does not take its place.
+[[plant]]
+name = "harness window: an older look ending last takes the place of the newer"
+meant = "an_older_look_ending_last_does_not_take_the_place_of_a_newer_one"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let stale = cache.get(&harness).is_some_and(|(held, _)| *held > look);
+'''
+replace = '''
+    let stale = false;
+'''
+
+# A held Claude Code or Pi version is cut at 40 seconds too: the whole page is answered by then.
+[[plant]]
+name = "harness window: only the harnesses that check have a row deadline"
+meant = "a_held_claude_code_or_pi_version_does_not_keep_the_whole_page_open_past_40_seconds"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let row = if path.is_some() {
+'''
+replace = '''
+    let row = if inspect::checks(harness) && path.is_some() {
+'''
+
+# The probes are told apart by the name a CLI is invoked by: two commands of one launcher file
+# each have their own answer.
+[[plant]]
+name = "harness window: the probes are told apart by the file alone"
+meant = "two_command_names_for_one_dispatcher_each_keep_their_own_version"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+        invoked: invoked(executable),
+'''
+replace = '''
+        invoked: None,
+'''
+
+# A run whose last caller stopped waiting (a look cut at its time) leaves the map: left there,
+# the next look joins it and waits for what never ends.
+[[plant]]
+name = "harness window: a timed-out probe stays in the map"
+meant = "a_version_cut_at_35_seconds_is_not_left_to_hold_the_next_look"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/processes.rs"
+find = '''
+        if !self.answered && alone {
+'''
+replace = '''
+        if false && !self.answered && alone {
+'''
+
+# A cut lets go of its own probes alone: what a newer launch was answered is kept.
+[[plant]]
+name = "harness window: a cut forgets everything kept of the file"
+meant = "an_old_cut_keeps_what_a_newer_launch_was_answered"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+                cut = true;
+                inspect::unfinished(harness, path, checked_at)
+'''
+replace = '''
+                cut = true;
+                if let Some(path) = &path {
+                    inner.probes.forget(std::path::Path::new(path));
+                }
+                inspect::unfinished(harness, path, checked_at)
+'''
+
+# The daemon decides which look is newest (T-2074): the stamp is taken when a look begins, and
+# one update of a harness runs at a time, whichever page asks.
+[[plant]]
+name = "harness window: the stamp is taken at the answer"
+meant = "a_look_begun_later_has_the_higher_stamp_whatever_order_the_answers_arrive_in"
+runs = ["harness-window-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin.rs"
+find = '''
+    let stamped = (look, Rc::clone(&row));
+'''
+replace = '''
+    let answered = {
+        let mut looks = inner.looks.borrow_mut();
+        let counted = looks.entry(harness).or_insert(0);
+        *counted += 1;
+        *counted
+    };
+    let stamped = (answered, Rc::clone(&row));
+'''
+
+# One update of a harness runs at a time across a daemon's replacement: the record an installer
+# leaves in the home (its number and when it began) is looked at before a second one begins.
+
+# No row older than an update that has ended: the look is made again when one ended meanwhile.
+
+# The refusal is the daemon's `error`, and the page shows its words and keeps Update off.
+
+# Nothing polls: a page that is told an update runs asks again only when the person says Refresh.
+
+# The page is read-only (the owner, 2026-11-23): no route of the daemon installs a harness.
+[[plant]]
+name = "harness window: an install route is put back"
+meant = "the_daemon_has_no_route_that_installs_a_harness"
+runs = ["harness-window-screens"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/mod.rs"
+find = '''
+        "/api/harnesses/check" => Some(Screen::HarnessCheck),
+'''
+replace = '''
+        "/api/harnesses/check" => Some(Screen::HarnessCheck),
+        "/api/harnesses/update" => Some(Screen::HarnessCheck),
+'''
+
+# The command shown is the one that updates it the way it was installed: a Homebrew cask is
+# upgraded as a cask.
+[[plant]]
+name = "harness window: a Homebrew cask is upgraded as a formula"
+meant = "every_scenario_answers_as_node_answered_step_by_step"
+runs = ["harness-window-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+                update.push("--cask".to_owned());
+'''
+replace = '''
+                update.push("--formula".to_owned());
+'''
+
+# What a person pastes is quoted where the shell would split it.
+[[plant]]
+name = "harness window: a command with a space in its path is not quoted"
+meant = "a_command_a_person_copies_quotes_what_the_shell_would_split"
+runs = ["harness-window-commands"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/source.rs"
+find = '''
+        let plain = !word.is_empty()
+'''
+replace = '''
+        let plain = true || !word.is_empty()
+'''
+
+# The page shows the command the daemon said, not another.
+[[plant]]
+name = "harness window: the page shows the release in the place of the command"
+meant = "a harness installed with Homebrew cask shows the exact command that updates it, with Copy"
+runs = ["harness-window-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/harnesses.html"
+find = '''
+        put.append(el('code', null, command));
+'''
+replace = '''
+        put.append(el('code', null, update.value));
+'''
+
+# A harness ConsensFlow cannot start shows its command too, not only one with a newer release.
+[[plant]]
+name = "harness window: a required version shows no command"
+meant = "a harness below the version ConsensFlow needs shows its reason and its command"
+runs = ["harness-window-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/harnesses.html"
+find = '''
+    if (update.state === 'available' || required) {
+'''
+replace = '''
+    if (update.state === 'available') {
+'''

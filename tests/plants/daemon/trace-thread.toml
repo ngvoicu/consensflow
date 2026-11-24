@@ -1,0 +1,278 @@
+# One thread writes events.jsonl (D2's P19-D, R70): a trace line is queued where it is said and
+# never waits, so a held file holds that thread and nothing of the daemon's; the thread appends in
+# the order sent and forgets a deleted project's lines in that order, answering that it is done
+# only once each replaced file is on the disk; the queue holds 4,096 ordinary lines and counts
+# what it drops; each file has its own lock in the process; the stop waits a quarter of a second
+# for the writer. `cargo xtask plants daemon "trace thread:"` runs them.
+
+[run]
+tt-held = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::held::"]
+tt-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "file::append::"]
+
+[[plant]]
+name = "trace thread: the line is appended on the caller's thread"
+meant = "a_held_trace_file_holds_neither_a_timer_nor_a_ping"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = '''        let text = format!("{json}\n");
+        let mut state = self.shared.lock();'''
+replace = '''        let text = format!("{json}\n");
+        let _ = append_rotating(&self.file, &text, LIMIT);
+        let mut state = self.shared.lock();'''
+
+[[plant]]
+name = "trace thread: a forgetting goes ahead of the lines sent before it"
+meant = "lines_a_move_aside_and_a_forgetting_are_done_in_the_order_they_were_sent"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "            state.jobs.push_back(Job::Forget {"
+replace = "            state.jobs.push_front(Job::Forget {"
+
+[[plant]]
+name = "trace thread: a line the full queue drops is not counted"
+meant = "lines_past_the_queue_behind_a_held_file_are_one_count_once_it_drains"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "            state.dropped += 1;"
+replace = "            state.dropped += 0;"
+
+[[plant]]
+name = "trace thread: the queue is not bounded"
+meant = "lines_past_the_queue_behind_a_held_file_are_one_count_once_it_drains"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        if state.ordinary >= QUEUE {"
+replace = "        if state.ordinary >= QUEUE && false {"
+
+[[plant]]
+name = "trace thread: a forgetting is refused by a full queue like any line"
+meant = "a_forgetting_and_the_deletes_notice_get_through_a_full_queue_and_the_caller_does_not_wait"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        } else if state.ending {"
+replace = "        } else if state.ending || state.ordinary >= QUEUE {"
+
+[[plant]]
+name = "trace thread: the one static lock is put back"
+meant = "a_held_trace_file_holds_neither_a_timer_nor_a_ping_nor_does_a_warning_meanwhile"
+runs = ["tt-held", "tt-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/append.rs"
+find = "    Arc::clone(turns.entry(file.to_path_buf()).or_default())"
+replace = "    Arc::clone(turns.entry(PathBuf::new()).or_default())"
+
+[[plant]]
+name = "trace thread: a forgetting answers before its new file is flushed"
+meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_renamed_and_the_folder_flushed"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "    (durable.flush)(&file)?;"
+replace = "    let _ = &file;"
+
+[[plant]]
+name = "trace thread: a forgetting answers before its rename is flushed through the folder"
+meant = "a_forgetting_answers_done_only_once_both_files_were_flushed_renamed_and_the_folder_flushed"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "    (durable.rename)(&temporary, name)\n}"
+replace = "    fs::rename(&temporary, name)\n}"
+
+[[plant]]
+name = "trace thread: a forgetting whose flush failed answers that it is done"
+meant = "a_forgetting_whose_flush_failed_is_an_error_and_keeps_the_lines"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "    (durable.flush)(&file)?;"
+replace = "    let _ = (durable.flush)(&file);"
+
+[[plant]]
+name = "trace thread: the stop does not wait for the writer"
+meant = "the_stop_waits_a_quarter_of_a_second_for_a_held_trace_and_ends_without_it"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "        if self.errors.trace().end(SETTLE) {"
+replace = "        if true || self.errors.trace().end(SETTLE) {"
+
+[[plant]]
+name = "trace thread: the stop waits for the writer without a bound"
+meant = "the_stop_waits_a_quarter_of_a_second_for_a_held_trace_and_ends_without_it"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "        if self.errors.trace().end(SETTLE) {"
+replace = "        if self.errors.trace().end(std::time::Duration::from_secs(8)) {"
+
+[[plant]]
+name = "trace thread: the delete's notice is appended on the caller's thread"
+meant = "a_forgetting_and_the_deletes_notice_get_through_a_full_queue_and_the_caller_does_not_wait"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        let notice = notice.and_then(|line| serde_json::to_string(line).ok());"
+replace = '''        let notice = notice.and_then(|line| serde_json::to_string(line).ok());
+        if let Some(inline) = &notice {
+            let _ = append_rotating(&self.file, &format!("{inline}\n"), LIMIT);
+        }'''
+
+[[plant]]
+name = "trace thread: the ledger is closed before the trace is drained"
+meant = "the_home_is_let_go_only_after_the_trace_is_written"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "        if self.errors.trace().end(SETTLE) {"
+replace = "        let _ = self.ledger.borrow_mut().close_in_place();\n        if self.errors.trace().end(SETTLE) {"
+
+[[plant]]
+name = "trace thread: the ledger is closed though the trace was not written in time"
+meant = "a_trace_that_is_not_written_in_time_keeps_the_home_until_the_process_ends"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = "        if self.errors.trace().end(SETTLE) {"
+replace = "        self.errors.trace().end(SETTLE);\n        if true {"
+
+[[plant]]
+name = "trace thread: the notice is not in the forgetting's job"
+meant = "a_stop_after_a_delete_that_is_asked_has_the_deletes_notice_and_none_of_its_lines"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = '''        if let Some(notice) = notice {
+            self.append(notice);
+        }'''
+replace = "        let _ = notice;"
+
+[[plant]]
+name = "trace thread: a forgetting that finds clean names answers done with no folder flush"
+meant = "a_retry_that_finds_nothing_to_remove_still_needs_the_folder_flushed"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        keep((self.durable.folder)(folder), folder);"
+replace = "        keep(Ok::<(), io::Error>(()), folder);"
+
+[[plant]]
+name = "trace thread: a replacement that vanished before its rename is no failure"
+meant = "a_replacement_that_is_not_there_for_its_rename_is_no_success"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "    (durable.rename)(&temporary, name)\n}"
+replace = '''    match (durable.rename)(&temporary, name) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}'''
+
+[[plant]]
+name = "trace thread: a forgetting leaves an abandoned replacement"
+meant = "an_abandoned_replacement_is_removed_by_a_forgetting_and_by_a_start_before_any_answer"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "                match fs::remove_file(&temporary) {"
+replace = "                match Ok::<(), io::Error>(()) {"
+
+[[plant]]
+name = "trace thread: a start leaves an abandoned replacement"
+meant = "an_abandoned_replacement_is_removed_by_a_forgetting_and_by_a_start_before_any_answer"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "            let _ = fs::remove_file(replacement(&name));"
+replace = "            let _ = &name;"
+
+[[plant]]
+name = "trace thread: a cut last line is not ended before the next line"
+meant = "a_file_whose_last_line_was_cut_is_ended_before_the_first_line_written_after"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        let broken = !self.checked && ends_cut(&self.file);"
+replace = "        let broken = !self.checked && ends_cut(&self.file) && false;"
+
+[[plant]]
+name = "trace thread: the report of dropped lines has no place of its own"
+meant = "the_dropped_lines_report_has_a_place_of_its_own_that_later_lines_cannot_put_off"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "            if state.dropped == 0 {\n                state.jobs.push_back(Job::Count);\n            }"
+replace = "            if state.dropped == 0 && state.jobs.is_empty() {\n                state.jobs.push_back(Job::Count);\n            }"
+
+[[plant]]
+name = "trace thread: a writer that panicked leaves the forgettings queued behind it waiting"
+meant = "a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        for job in std::mem::take(&mut state.jobs) {"
+replace = "        for job in Vec::<Job>::new() {"
+
+[[plant]]
+name = "trace thread: a forgetting asked after the writer panicked is queued, not refused"
+meant = "a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        if let Some(why) = state.failed.clone() {"
+replace = "        if let Some(why) = state.failed.clone().filter(|_| false) {"
+
+[[plant]]
+name = "trace thread: a home that is not there answers done"
+meant = "a_home_that_is_not_there_answers_an_error_not_done"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        keep((self.durable.folder)(folder), folder);"
+replace = '''        keep(
+            match (self.durable.folder)(folder) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+            folder,
+        );'''
+
+[[plant]]
+name = "trace thread: a rewrite keeps a line that does not parse"
+meant = "a_rewrite_drops_every_line_that_does_not_parse_so_no_fragment_of_a_deleted_project_stays"
+runs = ["tt-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = "        .filter(|line| serde_json::from_str::<Value>(line).is_ok() && !is_of(line, project))"
+replace = "        .filter(|line| !is_of(line, project))"

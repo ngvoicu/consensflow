@@ -251,7 +251,7 @@ fn once_each(settle: Option<&str>) -> Outcome {
     // proof: the stand-in runs a message it is handed in a turn when that turn ends, so
     // a second copy of a note is read by the chief only after the turns before it,
     // later than this looks.
-    let events = rig.events();
+    let events = rig.events_settled();
     for (id, what) in notes {
         let of_note = |kind: &str| -> Vec<&Value> {
             events

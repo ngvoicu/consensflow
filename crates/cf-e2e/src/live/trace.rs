@@ -29,6 +29,13 @@ impl Trace {
         }
     }
 
+    /// [`Trace::read`] once the daemon's trace is written out: for the end of something.
+    pub fn read_settled(rig: &Rig) -> Self {
+        Self {
+            events: rig.events_settled(),
+        }
+    }
+
     /// The events of the file's `text`.
     pub fn of(text: &str) -> Self {
         Self {

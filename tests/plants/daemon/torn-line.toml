@@ -250,10 +250,11 @@ runs = ["base-append"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/file/append.rs"
-find = '''    let _turn = APPENDING
+find = '''    let turn = turn_of(file);
+    let _turn = turn
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);'''
-replace = "    let _turn = &APPENDING;"
+replace = "    let _turn = ();"
 
 [[plant.edit]]
 file = "crates/cf-base/src/file/append.rs"
