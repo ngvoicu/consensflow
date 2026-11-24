@@ -325,17 +325,28 @@ impl Run {
         run
     }
 
+    /// A script of the kit's own or a fixture's, run by `shell` with `flags` before it
+    /// (`/bin/sh -c`, `powershell -NoProfile -Command`, `cmd /c`): the one start through a shell
+    /// whose command the door does not read. A script with a word that names a harness's program,
+    /// cargo or the Keychain's utility is refused here; the audit holds this function to the files
+    /// that call it ([`crate::door::rule`]).
+    pub fn script_in(shell: impl AsRef<OsStr>, flags: &[&str], script: impl AsRef<str>) -> Self {
+        let mut run = Self::new(shell);
+        for flag in flags {
+            run.args.push(Arg::Plain(OsString::from(flag)));
+        }
+        run.args.push(Arg::Plain(OsString::from(script.as_ref())));
+        run.kind = Kind::Script;
+        run
+    }
+
     /// An offline fixture's own script, run by `/bin/sh -c`: the one start through a shell whose
     /// command the door does not read (the door refuses any other, where it cannot read the
     /// command, T-2219). A script with a word that names a harness's program, cargo or the
     /// Keychain's utility is refused here too. The audit holds this function to the files that
     /// call it ([`crate::door::rule`]): a new caller fails it.
     pub fn fixture_script(script: impl AsRef<str>) -> Self {
-        let mut run = Self::new("/bin/sh");
-        run.args.push(Arg::Plain(OsString::from("-c")));
-        run.args.push(Arg::Plain(OsString::from(script.as_ref())));
-        run.kind = Kind::Script;
-        run
+        Self::script_in("/bin/sh", &["-c"], script)
     }
 
     /// One of the door's own operations (`name`), on `program` with the environment it names: a

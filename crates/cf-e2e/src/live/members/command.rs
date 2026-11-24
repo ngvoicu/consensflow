@@ -438,8 +438,11 @@ mod tests {
         let mark = "cf-live-members-outsider-mark-5113";
         let command = LongCommand::new(mark);
         let outsider = if cfg!(windows) {
-            crate::process::Run::new("cmd")
-                .args(["/c", &format!("ping -n 30 127.0.0.1 > nul & rem {mark}")])
+            crate::process::Run::script_in(
+                "cmd",
+                &["/c"],
+                format!("ping -n 30 127.0.0.1 > nul & rem {mark}"),
+            )
         } else {
             crate::process::Run::fixture_script(format!("sleep 30; : {mark}"))
         };

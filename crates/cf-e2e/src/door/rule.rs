@@ -640,6 +640,30 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         Class::Operation,
         "an offline fixture's own script, started through `Run::fixture_script`",
     ),
+    (
+        "src/process/pid.rs",
+        "when_started",
+        Class::Operation,
+        "a script of the kit's own or a fixture's, started through `Run::script_in`",
+    ),
+    (
+        "src/live/members/descent.rs",
+        "table_run",
+        Class::Operation,
+        "a script of the kit's own or a fixture's, started through `Run::script_in`",
+    ),
+    (
+        "tests/live_terminal.rs",
+        "console_hosts",
+        Class::Operation,
+        "a script of the kit's own or a fixture's, started through `Run::script_in`",
+    ),
+    (
+        "tests/rig/cf_native.rs",
+        "take_a_many_line_argument_whole_from_powershell",
+        Class::Operation,
+        "a script of the kit's own or a fixture's, started through `Run::script_in`",
+    ),
 ];
 
 /// The functions of `std::fs` (and `std::os::*::fs`) that write, copy, rename, link, make or set
@@ -893,7 +917,7 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
             format!("{}(…) (a door's operation, made outside the files that make them)", segments.join("::")),
         ));
     }
-    if before == Some("Run") && last == "fixture_script" {
+    if before == Some("Run") && matches!(last, "fixture_script" | "script_in") {
         return Some((
             Class::Operation,
             "Run::fixture_script(…) (the one start through a shell whose command is not read, made outside the files that call it)".into(),

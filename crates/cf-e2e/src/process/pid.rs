@@ -291,8 +291,7 @@ const STARTED_TRIES: usize = 3;
 #[cfg(any(windows, test))]
 pub(super) fn when_started(pid: u32) -> Run {
     let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
-    Run::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    Run::script_in("powershell", &["-NoProfile", "-NonInteractive", "-Command"], &script)
         .limit(super::POWERSHELL_LIMIT)
 }
 

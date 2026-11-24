@@ -1012,7 +1012,9 @@ fn a_window_started_through_a_shell_is_judged_by_the_program_the_shell_is_told_t
     let admitted = |argv: serde_json::Value, env: serde_json::Value| {
         super::window_admitted(&host, &json!({ "id": "p", "argv": argv, "env": env }))
     };
-    let command = format!("{} --version", muse.display());
+    // A POSIX shell reads a backslash as an escape: the path is spelled with `/`.
+    let posix = muse.display().to_string().replace('\\', "/");
+    let command = format!("{posix} --version");
     // A harness through a shell wants its switches, as it does started alone.
     let refused = admitted(json!(["/bin/sh", "-c", command]), json!({})).unwrap_err();
     assert!(refused.contains("MUSE"), "{refused}");
@@ -1021,9 +1023,9 @@ fn a_window_started_through_a_shell_is_judged_by_the_program_the_shell_is_told_t
         Ok(())
     );
     for argv in [
-        json!(["bash", "-lc", format!("exec {}", muse.display())]),
-        json!(["/bin/zsh", "-c", format!("'{}' x", muse.display())]),
-        json!(["sh", "-c", format!("sh -c '{}'", muse.display())]),
+        json!(["bash", "-lc", format!("exec {posix}")]),
+        json!(["/bin/zsh", "-c", format!("'{posix}' x")]),
+        json!(["sh", "-c", format!("sh -c '{posix}'")]),
         json!(["cmd.exe", "/d", "/c", muse.display().to_string()]),
         json!(["C:\\Windows\\System32\\cmd.exe", "/c", muse.display().to_string()]),
         json!(["powershell.exe", "-NoProfile", "-Command", muse.display().to_string()]),

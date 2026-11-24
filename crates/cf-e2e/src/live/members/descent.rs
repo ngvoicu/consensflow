@@ -618,8 +618,7 @@ fn table_script(which: &str) -> String {
 /// ran (T-1161).
 #[cfg(any(windows, test))]
 fn table_run() -> Run {
-    Run::new("powershell")
-        .args(["-NoProfile", "-Command", &table_script("")])
+    Run::script_in("powershell", &["-NoProfile", "-Command"], table_script(""))
         .limit(crate::process::POWERSHELL_LIMIT)
 }
 

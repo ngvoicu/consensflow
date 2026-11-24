@@ -507,11 +507,11 @@ pub fn in_a_shell_as(program: &Path, words: Vec<OsString>, detach: Detach) -> Re
     #[cfg(windows)]
     {
         let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
-        Ok(Run::new(format!(
-            r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+        Ok(Run::script_in(
+            format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            &["-NoProfile", "-NonInteractive", "-Command"],
+            powershell_script(program, &words, detach != Detach::No),
         ))
-        .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(powershell_script(program, &words, detach != Detach::No)))
     }
     #[cfg(not(windows))]
     {
