@@ -126,13 +126,13 @@ impl PaneTable {
     }
 }
 
-pub(super) struct ActivityReader {
-    pub(super) inner: Box<dyn Read + Send>,
-    pub(super) last_activity: Arc<Mutex<Instant>>,
+pub(crate) struct ActivityReader {
+    pub(crate) inner: Box<dyn Read + Send>,
+    pub(crate) last_activity: Arc<Mutex<Instant>>,
     /// The window's byte counts: a read is counted here, the moment it returns and before the
     /// lock of the activity time, so that the two move together and a thread that waits for the
     /// lock has already told the paste's Enter and the input box's readers of its bytes.
-    pub(super) counts: Arc<OutputCount>,
+    pub(crate) counts: Arc<OutputCount>,
 }
 
 impl Read for ActivityReader {

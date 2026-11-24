@@ -13,7 +13,6 @@ use cf_proto::agents::Harness;
 
 use super::clock::ModelClock;
 use super::sched;
-use crate::arbiter::Clock as _;
 
 /// What the program printed, in one read of the pty, and when it must have been read at the latest.
 pub(crate) struct Chunk {
@@ -28,11 +27,15 @@ pub(crate) struct Pty {
     queue: Mutex<VecDeque<Chunk>>,
     /// The dues of the reads not yet counted: in the queue, or in the reader's hand.
     unread: Mutex<Vec<Duration>>,
+    /// How many reads the program printed that the host has not yet counted.
+    in_flight: std::sync::atomic::AtomicUsize,
     closed: Mutex<bool>,
 }
 
 impl Pty {
     pub(crate) fn emit(&self, bytes: Vec<u8>, due: Option<Duration>) {
+        self.in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(due) = due {
             self.unread.lock().unwrap().push(due);
         }
@@ -49,6 +52,8 @@ impl Pty {
 
     /// The host counted that read.
     pub(crate) fn counted(&self, due: Option<Duration>) {
+        self.in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(due) = due {
             let mut unread = self.unread.lock().unwrap();
             if let Some(at) = unread.iter().position(|each| *each == due) {
@@ -62,8 +67,9 @@ impl Pty {
         self.unread.lock().unwrap().iter().any(|due| *due < time)
     }
 
+    /// Whether every read the program printed is counted.
     pub(crate) fn empty(&self) -> bool {
-        self.queue.lock().unwrap().is_empty()
+        self.in_flight.load(std::sync::atomic::Ordering::SeqCst) == 0
     }
 
     pub(crate) fn close(&self) {
@@ -81,6 +87,11 @@ pub(crate) enum Echo {
     /// The cursor's move alone, a faint hint still where the key will be, and then the box drawn
     /// again.
     CursorOnly,
+    /// The cursor's move to where it is, and then the key: the window's first read of an echo
+    /// that says nothing yet (T-2139).
+    Prefix,
+    /// Nothing: a fixed schedule prints the echo itself, a read at a time.
+    Silent,
 }
 
 const ROWS: u16 = 24;
@@ -105,8 +116,12 @@ pub(crate) struct Program {
     /// The next Enters are dropped: they came before the window had read the paste (T-760).
     pub(crate) swallow: u32,
     hint: bool,
+    /// How wide the window draws its rules: its screen's width, as a program sizes them.
+    pub(crate) rule: usize,
     pasting: Option<Vec<u8>>,
     echoes: VecDeque<Echo>,
+    /// The window's echoes are owed no time: a fixed schedule's window that echoes a key late.
+    pub(crate) late: bool,
 }
 
 impl Program {
@@ -121,8 +136,10 @@ impl Program {
             violations: Vec::new(),
             swallow: 0,
             hint: true,
+            rule: 40,
             pasting: None,
             echoes: VecDeque::new(),
+            late: false,
         }
     }
 
@@ -146,12 +163,12 @@ impl Program {
     }
 
     fn due(&self) -> Option<Duration> {
-        Some(self.clock.elapsed() + ECHO_WITHIN)
+        (!self.late).then(|| self.clock.elapsed() + ECHO_WITHIN)
     }
 
     /// The window's whole screen, as it first draws it.
     pub(crate) fn frame(&self) -> Vec<u8> {
-        let rule = "─".repeat(40);
+        let rule = "─".repeat(self.rule);
         let (top, status) = match self.harness {
             Harness::Devin => (format!("{rule} (bypass permissions on) ─"), "SWE-2 Medium"),
             Harness::Muse => ("── Voice input (⌥ + v to start) ────────".to_owned(), "  echo · YOLO"),
@@ -186,6 +203,27 @@ impl Program {
         self.pty.emit(bytes, due);
     }
 
+    /// What a window that draws a suggestion draws of a key at its place, faint, the cursor where
+    /// it was (the first read of a cursor-only echo, T-2160).
+    pub(crate) fn faint_key(&self, typed: char) {
+        let at = self.column() - 1;
+        self.emit(
+            format!("\x1b[{BOX};{at}H\x1b[2m{typed}\x1b[0m\x1b[{BOX};{at}H").into_bytes(),
+            None,
+        );
+    }
+
+    /// The echo's cursor move alone, past the key's place.
+    pub(crate) fn cursor_past_key(&self) {
+        let at = self.column();
+        self.emit(format!("\x1b[{BOX};{at}H").into_bytes(), None);
+    }
+
+    /// The box drawn again, as the window's own words.
+    pub(crate) fn redraw_box(&self) {
+        self.emit(self.box_line(), None);
+    }
+
     /// The window prints its box again where it is: a colour reset and the cursor put back.
     pub(crate) fn repaint(&self) {
         let mut bytes = b"\x1b[0m".to_vec();
@@ -212,10 +250,14 @@ impl Program {
         self.emit(bytes, None);
     }
 
-    /// The window scrolls its lines by one and draws its frame again.
+    /// The window scrolls its lines by one, says so on its first line, and draws its frame again.
     pub(crate) fn scroll(&self) {
         let mut bytes = format!("\x1b[{ROWS};1H\n").into_bytes();
         bytes.extend(self.frame());
+        bytes.extend(
+            format!("\x1b[1;1H\x1b[2Kscrolled at {:?}", self.clock.elapsed()).into_bytes(),
+        );
+        bytes.extend(format!("\x1b[{BOX};{}H", self.cursor()).into_bytes());
         self.emit(bytes, None);
     }
 
@@ -283,7 +325,18 @@ impl Program {
                 self.emit(format!("\x1b[{BOX};{}H", before + 1).into_bytes(), due);
                 self.emit(format!("\x1b[{BOX};{before}H{typed}").into_bytes(), due);
             }
-            (Echo::CursorOnly, Some(_)) if faint => {
+            (Echo::Silent, Some(_)) => {}
+            (Echo::Prefix, Some(typed)) => {
+                self.emit(format!("\x1b[{BOX};{before}H").into_bytes(), due);
+                self.emit(format!("\x1b[{BOX};{before}H{typed}").into_bytes(), due);
+            }
+            (Echo::CursorOnly, Some(typed)) if faint => {
+                // The key is drawn where it will be, faint, the cursor where it was; the cursor's
+                // move and the box drawn again come after.
+                self.emit(
+                    format!("\x1b[{BOX};{before}H\x1b[2m{typed}\x1b[0m\x1b[{BOX};{before}H").into_bytes(),
+                    due,
+                );
                 self.emit(format!("\x1b[{BOX};{}H", before + 1).into_bytes(), due);
                 self.emit(self.box_line(), due);
             }
@@ -318,7 +371,9 @@ impl Program {
 
     /// Enter: the window takes what its box holds, unless it came before the window read it.
     fn enter(&mut self) {
-        if self.swallow > 0 {
+        // An Enter that comes before the window has read what was pasted is dropped; the human's
+        // own is not.
+        if self.swallow > 0 && !self.held.is_empty() {
             self.swallow -= 1;
             return;
         }

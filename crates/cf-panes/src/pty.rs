@@ -40,6 +40,8 @@ pub use error::PaneError;
 #[cfg(all(test, unix))]
 use flow::terminal_of;
 use flow::OutputFlow;
+#[cfg(test)]
+pub(crate) use flow::ActivityReader;
 pub(crate) use output_end::Handed;
 pub use owed::ExitOwed;
 #[cfg(all(any(test, feature = "test-support"), unix))]

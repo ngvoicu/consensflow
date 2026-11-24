@@ -433,7 +433,7 @@ fn register(
 /// `pane.snapshot`'s answer: the arbiter's counts and clocks, and the screen's lines for a
 /// request that asks for them, all of one moment: the clocks are read with the screen's lock
 /// held, so a read the output thread is feeding is in both or in neither.
-fn snapshot_of(
+pub(crate) fn snapshot_of(
     arbiter: &InputArbiter,
     key: &PaneKey,
     screen: Option<Arc<PaneScreen>>,
@@ -627,7 +627,7 @@ fn next_output(
 /// A read of the window's output, taken into its screen, and the clocks told: it printed
 /// now, and whether it changed what the screen shows. One call for each read, in the
 /// order the reads came: the paste's Enter and the engine's quiet checks read these.
-fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
+pub(crate) fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
     screen.feed_noting(bytes, printed);
 }
 

@@ -531,6 +531,15 @@ impl Shared {
                     });
                 }
             }
+            // An Enter of a delivery that is not a paste's first goes as `pane.enter` (N17): the
+            // key it presses, once the host has checked the look it was licensed by.
+            if frame["kind"] == "req" && frame["op"] == "pane.enter" {
+                seen.presses.push(Press {
+                    pane: frame["body"]["id"].as_str().unwrap_or_default().to_owned(),
+                    bytes: vec![13],
+                    at_ms: jiff::Timestamp::now().as_millisecond(),
+                });
+            }
         }
         if frame["kind"] == "res"
             && (self.pending.answer(id, &frame["body"]) || id.starts_with(PAGE))

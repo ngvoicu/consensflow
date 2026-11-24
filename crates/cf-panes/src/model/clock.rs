@@ -43,6 +43,7 @@ impl Clock for ModelClock {
     /// unread: the host reads it within a second of the key.
     fn rest(&self, duration: Duration) {
         sched::at("rest");
+        sched::resting();
         let to = self.elapsed() + duration;
         let pty = self.pty.lock().unwrap().clone();
         if let Some(pty) = pty {

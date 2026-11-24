@@ -20,6 +20,8 @@ test-support = ["dep:cf-process", "cf-base/test-support"]
 # The helper's own tests (tests/headless.rs) start a sentinel too, and start the helper holding
 # only its streams.
 [dev-dependencies]
+# The model of N17's checks (src/model) runs the readers and the licences of the harnesses.
+cf-harness = { workspace = true }
 cf-panes = { path = ".", features = ["test-support"] }
 cf-process = { workspace = true, features = ["test-support"] }
 

@@ -25,6 +25,9 @@ pub(crate) enum Stands {
     At(&'static str),
     /// Waiting for a lock another actor holds, or for a condition: chosen only when no other can run.
     Blocked(&'static str),
+    /// Resting: time passes for it when it is chosen, which is when no other actor has anything to
+    /// do, and now and then before: work takes no time that a rest does not.
+    Resting,
     Done,
     /// It panicked: its message.
     Failed(String),
@@ -45,6 +48,17 @@ struct Shared {
 
 thread_local! {
     static CURRENT: RefCell<Option<(Arc<Shared>, usize)>> = const { RefCell::new(None) };
+    /// Points are not taken while it is set: the oracle reads the host between two steps of an
+    /// actor, and its read is no step.
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `read` with no point taken in it.
+pub(crate) fn without_points<T>(read: impl FnOnce() -> T) -> T {
+    QUIET.with(|quiet| quiet.set(true));
+    let read = read();
+    QUIET.with(|quiet| quiet.set(false));
+    read
 }
 
 /// A schedule: its actors and the choice of who runs.
@@ -123,14 +137,14 @@ impl Sched {
 
     /// Whether `actor` can be chosen: it is at a point, or waits (and may find what it waits for).
     pub(crate) fn alive(&self, actor: Actor) -> bool {
-        matches!(self.stands(actor), Stands::At(_) | Stands::Blocked(_))
+        matches!(self.stands(actor), Stands::At(_) | Stands::Blocked(_) | Stands::Resting)
     }
 
     /// Lets `actor` run to its next point, or its end. The steps are written down.
     pub(crate) fn step(&self, actor: Actor) -> Stands {
         let mut core = self.shared.core.lock().unwrap();
         assert!(
-            matches!(core.stands[actor.0], Stands::At(_) | Stands::Blocked(_)),
+            matches!(core.stands[actor.0], Stands::At(_) | Stands::Blocked(_) | Stands::Resting),
             "{} is not parked: {:?}",
             self.names[actor.0],
             core.stands[actor.0]
@@ -160,8 +174,14 @@ impl Sched {
         for _ in 0..100_000 {
             match self.stands(actor) {
                 Stands::At(at) if at == name => return Stands::At(at),
-                Stands::At(_) => {
+                Stands::At(_) | Stands::Resting => {
                     self.step(actor);
+                }
+                Stands::Blocked(_) => {
+                    // It may find what it waits for now: one turn, and if it still waits, it waits.
+                    if let waiting @ Stands::Blocked(_) = self.step(actor) {
+                        return waiting;
+                    }
                 }
                 other => return other,
             }
@@ -196,6 +216,9 @@ fn park(shared: &Arc<Shared>, index: usize, stands: Stands) {
 
 /// A point: where the schedule may choose another actor to run. Does nothing outside a schedule.
 pub(crate) fn at(name: &'static str) {
+    if QUIET.with(std::cell::Cell::get) {
+        return;
+    }
     CURRENT.with(|slot| {
         if let Some((shared, index)) = slot.borrow().as_ref() {
             park(shared, *index, Stands::At(name));
@@ -229,6 +252,15 @@ pub(crate) fn wait_until(why: &'static str, mut done: impl FnMut() -> bool) {
     while !done() {
         waiting(why);
     }
+}
+
+/// The calling actor rests: time passes for it when it is chosen.
+pub(crate) fn resting() {
+    CURRENT.with(|slot| {
+        if let Some((shared, index)) = slot.borrow().as_ref() {
+            park(shared, *index, Stands::Resting);
+        }
+    });
 }
 
 /// The calling actor waits one turn: chosen again only when no other can run, or at random.
