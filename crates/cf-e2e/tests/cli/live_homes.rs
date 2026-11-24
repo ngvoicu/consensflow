@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 27] = [
+const BY_HAND: [(&str, &str, &str); 28] = [
     (
         "crates/cf-e2e/src/live/ask.rs",
         "HOME",
@@ -183,6 +183,11 @@ const BY_HAND: [(&str, &str, &str); 27] = [
         "the control's start of Claude Code (`Control::start_claude`) is given a folder of the case's own, holding a made-up login: the folder is the thing it shows the Keychain item of; the door gives HOME itself",
     ),
     (
+        "crates/cf-e2e/src/live/launcher.rs",
+        "XDG_DATA_HOME",
+        "the launcher guard READS the account's data folder (`Account::variable`) to find where Claude's and Devin's versions are listed before and after a run; it gives it to no program",
+    ),
+    (
         "crates/cf-e2e/tests/live_launcher.rs",
         "XDG_DATA_HOME",
         "it gives a window the incident's environment on purpose (T-1082): the owner's HOME and a \
@@ -228,7 +233,7 @@ const DOORS_OWN: [(&str, &str, &str); 6] = [
     ),
     (
         "crates/cf-e2e/src/live/renew.rs",
-        "(\"USERPROFILE\".to_owned(), text)",
+        "(\"USERPROFILE\".to_owned(), text.clone())",
         "the same account home, as Windows names it: safe only behind the test machine's marker",
     ),
     (
