@@ -1,0 +1,217 @@
+# Plants in D4's P5-B: the journal a window keeps of its output and resizes, and the boundary a
+# page's subscription fixes (crates/cf-panes/src/journal*, output_hub.rs, pty/flow.rs,
+# pane_handlers.rs). What a reloaded page shows is the journal replayed, so a wrong byte, a byte
+# twice or a byte in neither is silent.
+
+[run]
+journal = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "journal::"]
+host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "--test-threads", "2", "pty::journal_tests"]
+
+[[plant]]
+name = "journal: a byte is in the history and on the live path"
+meant = "a_subscription_splits_the_bytes_into_the_history_and_the_live_path_with_no_byte_twice"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/output_hub.rs"
+find = """        let boundaries = state.handed.clone();
+        state.sink = Some(sink);
+        let pending = std::mem::take(&mut state.pending);
+        for message in pending {
+            Self::deliver_or_park(&mut state, message);
+        }
+        boundaries"""
+replace = """        state.sink = Some(sink);
+        let pending = std::mem::take(&mut state.pending);
+        for message in pending {
+            Self::deliver_or_park(&mut state, message);
+        }
+        state.handed.clone()"""
+
+[[plant]]
+name = "journal: a byte is in neither the history nor the live path"
+meant = "a_subscription_splits_the_bytes_into_the_history_and_the_live_path_with_no_byte_twice"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/output_hub.rs"
+find = "                state.handed.insert(key, end);"
+replace = "                state.handed.insert(key, end.saturating_sub(1));"
+
+[[plant]]
+name = "journal: the boundary is read outside the step that swaps the sink"
+meant = "each_of_many_subscriptions_against_a_running_consumer_has_the_stream_exactly_once"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/output_hub.rs"
+find = """        let boundaries = state.handed.clone();
+        state.sink = Some(sink);"""
+replace = """        let boundaries = state.handed.clone();
+        drop(state);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.sink = Some(sink);"""
+
+[[plant]]
+name = "journal: a subscription does not settle the room the old page left"
+meant = "a_program_stops_at_one_mebibyte_and_a_subscription_settles_the_room_the_old_page_left"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """        self.ack_all();
+        boundaries"""
+replace = """        boundaries"""
+
+[[plant]]
+name = "journal: a message's offset drifts from its bytes"
+meant = "each_of_many_subscriptions_against_a_running_consumer_has_the_stream_exactly_once"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            offset += message.bytes.len() as u64;"
+replace = "            offset += message.bytes.len() as u64 + u64::from(message.bytes.len() > 20);"
+
+[[plant]]
+name = "journal: a mark ignores the margins the program set after a size"
+meant = "a_mark_respects_a_margin_set_after_a_size_and_loses_one_set_before"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "            Some(changed) if set.at <= changed => MarginSet::default(),"
+replace = "            Some(_) => MarginSet::default(),"
+
+[[plant]]
+name = "journal: a size at the byte the margins ended does not reset them"
+meant = "a_mark_respects_a_margin_set_after_a_size_and_loses_one_set_before"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "            Some(changed) if set.at <= changed => MarginSet::default(),"
+replace = "            Some(changed) if set.at < changed => MarginSet::default(),"
+
+[[plant]]
+name = "journal: a resize flood starts the journal again inside a sequence"
+meant = "a_flood_of_sizes_inside_a_sequence_starts_again_at_the_last_mark_not_inside_it"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        if self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES {"
+replace = "        if true {"
+
+[[plant]]
+name = "journal: a size at the same byte replaces the one before it"
+meant = "eight_rows_then_ten_then_eight_at_one_byte_keeps_both_and_resets_the_margins"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        if self.size_at(self.end) == size {
+            return;
+        }
+        self.resizes.push(Resize {"""
+replace = """        if self.size_at(self.end) == size {
+            return;
+        }
+        if self.resizes.last().is_some_and(|r| r.at == at) {
+            self.resizes.pop();
+        }
+        self.resizes.push(Resize {"""
+
+[[plant]]
+name = "journal: a size before the boundary is kept where the page took it"
+meant = "a_size_before_the_boundary_takes_the_boundary"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        .max(floor);\n        if self.size_at(self.end) == size {"
+replace = "        ;\n        let _ = floor;\n        if self.size_at(self.end) == size {"
+
+[[plant]]
+name = "journal: a reset piece drops the sizes at its first byte"
+meant = "a_reset_piece_gives_every_size_since_the_start_and_a_continuation_those_after_it"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "                .filter(|r| (if reset { r.at >= from } else { r.at > from }) && r.at <= to)"
+replace = "                .filter(|r| r.at > from && r.at <= to)"
+
+[[plant]]
+name = "journal: a mark is taken where the parser is not at rest"
+meant = "no_mark_is_taken_inside_a_sequence_or_a_character_and_one_follows_its_end"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        if (self.tracker.at_rest() && since >= MARK_AFTER) || since >= FORCE_MARK_AFTER {"
+replace = "        if since >= MARK_AFTER {"
+
+[[plant]]
+name = "journal: bracketed paste is left out of a mark's seed"
+meant = "a_mark_holds_the_modes_and_the_margins_and_nothing_drawn"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/modes.rs"
+find = "            (2004, self.paste),"
+replace = "            (2004, false),"
+
+[[plant]]
+name = "journal: DEL ends a CSI"
+meant = "no_mark_is_taken_inside_a_sequence_or_a_character_and_one_follows_its_end"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/parser.rs"
+find = """        if byte == 0x7f {
+            return;
+        }"""
+replace = """        if byte == 0x7f {
+            self.state = State::Ground;
+            return;
+        }"""
+
+[[plant]]
+name = "journal: a byte is changed at a segment's edge"
+meant = "the_pieces_are_exactly_the_bytes_in_order_across_segment_edges"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """            tail.extend_from_slice(&bytes[..take]);
+            self.end += take as u64;
+            bytes = &bytes[take..];"""
+replace = """            tail.extend_from_slice(&bytes[..take]);
+            if tail.len() == SEGMENT_BYTES {
+                tail[SEGMENT_BYTES - 1] ^= 0x20;
+            }
+            self.end += take as u64;
+            bytes = &bytes[take..];"""
+
+[[plant]]
+name = "journal: an ended window keeps nothing a page behind could continue from"
+meant = "an_ended_window_keeps_its_last_mebibyte_and_a_continuation_from_it_finds_its_bytes"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        let target = self.end.saturating_sub(ENDED_KEPT_BYTES);"
+replace = "        let target = self.end;"
+
+[[plant]]
+name = "journal: the table keeps more than sixteen ended journals"
+meant = "the_journals_of_ended_windows_are_sixteen_and_a_page_forgets_one_by_asking"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "const ENDED_JOURNALS_KEPT: usize = 16;"
+replace = "const ENDED_JOURNALS_KEPT: usize = 64;"
