@@ -43,6 +43,10 @@ pub struct WindowEnv {
     /// window is told how a command starts in it ([`cf_proto::cf_word::ENV`]), for the
     /// harness it is and the platform, and every `cf` it runs says its own hints so.
     cf: Option<(String, bool)>,
+    /// The `ZDOTDIR` the daemon was given, which the person's own zsh reads its files from.
+    zdotdir: Option<String>,
+    /// What the guard's shell layer adds to a window's environment (`member_guard::shell_vars`).
+    guard_vars: Vec<(String, String)>,
 }
 
 impl WindowEnv {
@@ -58,7 +62,14 @@ impl WindowEnv {
             },
             terminal: terminal_of(env),
             cf: None,
+            zdotdir: env.text("ZDOTDIR").map(str::to_owned),
+            guard_vars: Vec::new(),
         }
+    }
+
+    /// What the guard's shell layer adds to every window's environment.
+    pub fn guard_vars(&self) -> &[(String, String)] {
+        &self.guard_vars
     }
 
     /// The PATH every window starts with.
@@ -72,6 +83,15 @@ impl WindowEnv {
     pub fn with_guard(mut self, folder: &std::path::Path) -> Self {
         let delimiter = if cfg!(windows) { ';' } else { ':' };
         self.path = format!("{}{delimiter}{}", folder.display(), self.path);
+        // A login shell puts the system's folders before the PATH's first: zsh and bash get
+        // functions of the same names as well, which no PATH reaches past.
+        let person = self
+            .terminal
+            .iter()
+            .find(|(name, _)| name == "ZDOTDIR")
+            .map(|(_, value)| value.clone())
+            .or_else(|| self.zdotdir.clone());
+        self.guard_vars = crate::member_guard::shell_vars(folder, person.as_deref());
         self
     }
 
@@ -118,6 +138,7 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
 impl PaneEnv for WindowEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
         let mut env = self.terminal.clone();
+        env.retain(|(name, _)| !self.guard_vars.iter().any(|(own, _)| own == name));
         env.extend([
             ("CONSENSFLOW_URL".to_owned(), self.url.clone()),
             ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),
@@ -127,6 +148,7 @@ impl PaneEnv for WindowEnv {
             ),
         ]);
         env.push(("PATH".to_owned(), self.path.clone()));
+        env.extend(self.guard_vars.iter().cloned());
         if let Some((pane_cf, windows)) = &self.cf {
             let word = cf_word_of(participant, pane_cf, *windows);
             env.push((CF_ENV.to_owned(), word.as_str().to_owned()));

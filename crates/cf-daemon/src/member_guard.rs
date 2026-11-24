@@ -30,10 +30,78 @@ pub fn install(home: &Path, cf: &Path) -> Result<PathBuf, (PathBuf, io::Error)> 
             first.get_or_insert((folder.join(&file), failed));
         }
     }
+    #[cfg(unix)]
+    if let Err(failed) = write_zshenv(&folder) {
+        first.get_or_insert((folder.join("zsh").join(".zshenv"), failed));
+    }
     match first {
         None => Ok(folder),
         Some(failed) => Err(failed),
     }
+}
+
+/// `text` in single quotes, for a POSIX shell.
+fn quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The folder zsh is given as its `ZDOTDIR` in a window: its `.zshenv` puts the person's own
+/// `ZDOTDIR` back (or none), reads the person's own `.zshenv`, and then defines `pkill` and
+/// `killall`, so that the person's other startup files are read from their own place and
+/// `/etc/zprofile`'s `path_helper` has no PATH to reorder past them. It prints nothing.
+pub fn zshenv(folder: &Path) -> String {
+    let mut text = String::from(
+        "# ConsensFlow's member guard: makes pkill and killall refuse in a member's window.\n\
+         if [[ -n ${CONSENSFLOW_ZDOTDIR_WAS+x} ]]; then\n  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse\n  unset ZDOTDIR\nfi\n\
+         unset CONSENSFLOW_ZDOTDIR_WAS\n\
+         [[ -r ${ZDOTDIR:-$HOME}/.zshenv ]] && source \"${ZDOTDIR:-$HOME}/.zshenv\"\n",
+    );
+    for (file, _) in file_names() {
+        text.push_str(&format!(
+            "{file}() {{ {} \"$@\"; }}\n",
+            quoted(&folder.join(&file).to_string_lossy())
+        ));
+    }
+    text
+}
+
+#[cfg(unix)]
+fn write_zshenv(folder: &Path) -> io::Result<()> {
+    let dir = folder.join("zsh");
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join(".zshenv");
+    let text = zshenv(folder);
+    if std::fs::read_to_string(&file).is_ok_and(|had| had == text) {
+        return Ok(());
+    }
+    std::fs::write(file, text)
+}
+
+/// What a window's environment holds for the shells' function layer, on a Mac: `ZDOTDIR` the
+/// folder of the `.zshenv` above and the person's own, when there was one, in
+/// `CONSENSFLOW_ZDOTDIR_WAS`; and a function for each name in both forms bash reads from the
+/// environment, the system's bash 3.2 (`name`) and bash 4.3's (`BASH_FUNC_name%%`). None on
+/// Windows, whose shells read the PATH as it is given.
+pub fn shell_vars(folder: &Path, person_zdotdir: Option<&str>) -> Vec<(String, String)> {
+    if cfg!(windows) {
+        return Vec::new();
+    }
+    let mut vars = vec![(
+        "ZDOTDIR".to_owned(),
+        folder.join("zsh").to_string_lossy().into_owned(),
+    )];
+    if let Some(person) = person_zdotdir {
+        vars.push(("CONSENSFLOW_ZDOTDIR_WAS".to_owned(), person.to_owned()));
+    }
+    for (file, _) in file_names() {
+        let body = format!(
+            "() {{ {} \"$@\"; }}",
+            quoted(&folder.join(&file).to_string_lossy())
+        );
+        vars.push((file.clone(), body.clone()));
+        vars.push((format!("BASH_FUNC_{file}%%"), body));
+    }
+    vars
 }
 
 #[cfg(unix)]

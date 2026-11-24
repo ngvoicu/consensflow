@@ -44,14 +44,14 @@ fn the_guards_folder_holds_cf_under_each_name_of_the_platform_and_is_made_again_
     let expected: &[&str] = if cfg!(windows) {
         &["taskkill.exe", "tskill.exe"]
     } else {
-        &["killall", "pkill"]
+        &["killall", "pkill", "zsh"]
     };
     assert_eq!(names, expected);
     // Again, with the files in place, and with one gone.
     install(&home, &cf).unwrap();
     std::fs::remove_file(folder.join(expected[0])).unwrap();
     install(&home, &cf).unwrap();
-    for name in expected {
+    for name in expected.iter().filter(|name| **name != "zsh") {
         assert_eq!(std::fs::read(folder.join(name)).unwrap(), b"cf");
     }
     std::fs::remove_dir_all(&home).unwrap();
@@ -81,4 +81,32 @@ fn tempfile_dir(what: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[cfg(unix)]
+#[test]
+fn the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_in_both_forms_bash_reads() {
+    let folder = Path::new("/h/member-guard");
+    let vars = shell_vars(folder, Some("/own"));
+    let get = |name: &str| {
+        vars.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(get("ZDOTDIR"), Some("/h/member-guard/zsh"));
+    assert_eq!(get("CONSENSFLOW_ZDOTDIR_WAS"), Some("/own"));
+    for name in ["pkill", "killall"] {
+        let body = format!("() {{ '/h/member-guard/{name}' \"$@\"; }}");
+        assert_eq!(get(name), Some(body.as_str()));
+        assert_eq!(get(&format!("BASH_FUNC_{name}%%")), Some(body.as_str()));
+    }
+    // A person with no ZDOTDIR is told none.
+    assert!(shell_vars(folder, None)
+        .iter()
+        .all(|(n, _)| n != "CONSENSFLOW_ZDOTDIR_WAS"));
+    let zshenv = zshenv(folder);
+    assert!(
+        zshenv.contains("pkill() { '/h/member-guard/pkill' \"$@\"; }"),
+        "{zshenv}"
+    );
 }

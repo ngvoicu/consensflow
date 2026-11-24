@@ -11,6 +11,7 @@
 [run]
 guard-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "member_guard::"]
 guard-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "member_guard::"]
+guard-shells = ["cargo", "test", "--offline", "-p", "cf", "--test", "member_guard_shells"]
 guard-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "member_guard"]
 
 [[plant]]
@@ -42,3 +43,43 @@ runs = ["guard-base"]
 file = "crates/cf-base/src/member_guard.rs"
 find = "    [\"/im\", \"/fi\", \"-im\", \"-fi\"].contains(&text.as_str())"
 replace = "    [\"/zz\"].contains(&text.as_str())"
+
+[[plant]]
+name = "member-guard: zsh is given no ZDOTDIR of ours, so a login zsh puts the real pkill first and no function stands"
+meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
+runs = ["guard-shells"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = '        "ZDOTDIR".to_owned(),'
+replace = '        "ZDOTDIR_UNUSED".to_owned(),'
+
+[[plant]]
+name = "member-guard: bash 3.2's exported function is left out, so a login bash finds the real pkill"
+meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
+runs = ["guard-shells"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = "        vars.push((file.clone(), body.clone()));"
+replace = "        vars.push((format!(\"UNUSED_{file}\"), body.clone()));"
+
+[[plant]]
+name = "member-guard: the zsh files define no function, so a login zsh finds the real pkill"
+meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
+runs = ["guard-shells"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = '            "{file}() {{ {} \"$@\"; }}\n",'
+replace = '            "{file}_unused() {{ {} \"$@\"; }}\n",'
+
+[[plant]]
+name = "member-guard: the guard's .zshenv does not put the person's ZDOTDIR back, so their zsh files are never read"
+meant = "a_window_zsh_reads_the_files_of_a_zdotdir_the_person_had_before_consensflow_started"
+runs = ["guard-shells"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = '  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse'
+replace = '  :\nelse'
