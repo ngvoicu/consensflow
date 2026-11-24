@@ -2003,7 +2003,13 @@ fn a_read_is_counted_while_the_activity_lock_is_held() {
 fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
     let _serial = serial_pty_test();
     let table = Arc::new(PaneTable::new());
-    let pane = open_shell(&table, "exec /bin/cat");
+    let OpenedPane { key: pane_key, mut reader } = open_shell(&table, "exec /bin/cat");
+    // The window's output is read, as the host reads it: a program that ends with its terminal
+    // output unread waits for it to drain.
+    let drain = thread::spawn(move || {
+        let mut sink = [0; 256];
+        while reader.read(&mut sink).is_ok_and(|read| read > 0) {}
+    });
     let (asked_tx, asked) = std::sync::mpsc::channel();
     let (held_tx, held) = std::sync::mpsc::channel();
     let (looked_tx, looked) = std::sync::mpsc::channel();
@@ -2018,7 +2024,7 @@ fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
             waited
         })
     };
-    let (writing, key) = (Arc::clone(&table), pane.key.clone());
+    let (writing, key) = (Arc::clone(&table), pane_key.clone());
     let writer = thread::spawn(move || {
         writing
             .write_gated(&key, b"x", &mut |screening| {
@@ -2034,7 +2040,8 @@ fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
     });
     let written = writer.join().unwrap();
     let waited = holder.join().unwrap();
-    table.kill(&pane.key).expect("kill the pane");
+    table.kill(&pane_key).expect("kill the pane");
+    drain.join().unwrap();
     assert!(written, "the write went");
     assert!(
         !waited,
