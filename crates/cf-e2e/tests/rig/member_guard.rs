@@ -6,14 +6,14 @@
 //! kit's. The windows run scripts, so this is Unix's; `cf/tests/member_guard.rs` holds
 //! Windows's.
 //!
-//! No case here runs a command by its name: it finds the program the window's PATH names first,
-//! shows it is the stand-in, and runs that file itself.
+//! No case here runs a command by its name (the kit refuses to): it finds the program the window's
+//! PATH names first and shows it is the bundle's `cf`, which the other cases run under those names.
 
 #[cfg(unix)]
 use std::path::PathBuf;
 
 #[cfg(unix)]
-use cf_e2e::process::{first_on_path, Run};
+use cf_e2e::process::first_on_path;
 #[cfg(unix)]
 use cf_e2e::rig::{Project, Rig, OPEN};
 #[cfg(unix)]
@@ -76,15 +76,13 @@ fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and
                 frame["id"],
                 found.display()
             );
-            let ran = Run::new(&found).args(["-f", "x"]).run()?;
-            assert_eq!(ran.code, Some(1), "{ran}");
-            assert!(
-                ran.stderr.starts_with(&format!(
-                    "ConsensFlow: {name} isn't run in member windows. It ends every program \
-                     whose name matches, other members' and the owner's among them. End a \
-                     program you started by its number, after checking it's yours."
-                )),
-                "{ran}"
+            // The stand-in is the bundle's `cf`, which refuses (`cf/tests/member_guard.rs`). The
+            // kit never starts a program by these names, so it is not run here.
+            assert_eq!(
+                std::fs::canonicalize(&found)?,
+                std::fs::canonicalize(cf_e2e::cf::binary()?)?,
+                "{}: {name}",
+                frame["id"]
             );
         }
     }

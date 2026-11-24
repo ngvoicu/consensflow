@@ -87,24 +87,27 @@ impl Drop for Window {
 }
 
 /// A recorder named `command` in `folder`: it writes `<command>.reached` beside itself.
+#[cfg(windows)]
 fn record(folder: &Path, command: &str) {
-    if cfg!(windows) {
-        let marker = folder.join(format!("{command}.reached"));
-        std::fs::write(
-            folder.join(format!("{command}.cmd")),
-            format!("@echo off\r\necho x> \"{}\"\r\n", marker.display()),
-        )
-        .unwrap();
-    } else {
-        use std::os::unix::fs::PermissionsExt;
-        let file = folder.join(command);
-        std::fs::write(
-            &file,
-            format!("#!/bin/sh\n: > \"{}/{command}.reached\"\n", folder.display()),
-        )
-        .unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    let marker = folder.join(format!("{command}.reached"));
+    std::fs::write(
+        folder.join(format!("{command}.cmd")),
+        format!("@echo off\r\necho x> \"{}\"\r\n", marker.display()),
+    )
+    .unwrap();
+}
+
+/// A recorder named `command` in `folder`: it writes `<command>.reached` beside itself.
+#[cfg(unix)]
+fn record(folder: &Path, command: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let file = folder.join(command);
+    std::fs::write(
+        &file,
+        format!("#!/bin/sh\n: > \"{}/{command}.reached\"\n", folder.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 #[cfg(unix)]
@@ -138,19 +141,34 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
         assert!(!window.reached("taskkill") && !window.reached("tskill"), "{line}");
     }
     // By number it is the real program, with the arguments as they were: a SystemRoot of the
-    // test's holds, as the real taskkill, a program that names the option it was given and ends
-    // nothing (`whoami`).
+    // test's holds a harmless program as the real taskkill: the test's own executable.
     let root = window.home.join("root");
     std::fs::create_dir_all(root.join("System32")).unwrap();
-    let whoami = Path::new(&std::env::var("SystemRoot").unwrap()).join(r"System32\whoami.exe");
-    std::fs::copy(whoami, root.join(r"System32\taskkill.exe")).unwrap();
-    let ran = Command::new("cmd")
-        .args(["/c", "taskkill /PID 123"])
-        .env("PATH", &window.path)
-        .env("SystemRoot", &root)
-        .output()
-        .unwrap();
-    let said = String::from_utf8_lossy(&ran.stdout).to_string() + &String::from_utf8_lossy(&ran.stderr);
-    assert!(said.contains("/PID") && !said.contains("ConsensFlow:"), "{said}");
+    std::fs::copy(
+        std::env::current_exe().unwrap(),
+        root.join(r"System32\taskkill.exe"),
+    )
+    .unwrap();
+    let taskkill = window.home.join("member-guard").join("taskkill.exe");
+    let through = |args: &[&str]| {
+        let ran = Command::new(&taskkill)
+            .args(args)
+            .env("SystemRoot", &root)
+            .output()
+            .unwrap();
+        (
+            ran.status.code(),
+            String::from_utf8_lossy(&ran.stdout).to_string()
+                + &String::from_utf8_lossy(&ran.stderr),
+        )
+    };
+    // The real program here is this test's own executable, which lists its tests for `--list`
+    // and takes `/PID 123` for a filter of them: it ran, with the arguments as they were given.
+    let (code, said) = through(&["--list"]);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("taskkill_by_name_in_a_window"), "{said}");
+    let (code, said) = through(&["/PID", "123"]);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(!said.contains("ConsensFlow:"), "{said}");
     assert!(!window.reached("taskkill"));
 }

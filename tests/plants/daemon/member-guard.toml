@@ -1,0 +1,44 @@
+# A member's window refuses the commands that end every program by its name (T-2213): the daemon
+# makes a folder of stand-ins (`cf` under the names `pkill` and `killall`, `taskkill.exe` and
+# `tskill.exe`) and puts it first on every window's PATH; `cf` started under one of those names
+# refuses a call by name in the owner's words and never runs the real command.
+# One plant leaves the folder off the PATH; one makes a stand-in that goes on to the real command
+# (it names a program that is not there on a Mac, so no plant ever runs the real `pkill`); one
+# lets `taskkill /IM` through.
+#
+# Every name holds `member-guard`, so `npm run plants:daemon -- "member-guard:"` runs them all.
+
+[run]
+guard-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "member_guard::"]
+guard-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "member_guard::"]
+guard-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "member_guard"]
+
+[[plant]]
+name = "member-guard: the stand-ins' folder is left off the PATH of every window, so pkill is the real one"
+meant = "member_guard::tests::every_window_has_the_guards_folder_first_on_its_path_before_the_bundle"
+runs = ["guard-daemon", "guard-cf"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = "        Ok(folder) => windows.with_guard(&folder),"
+replace = "        Ok(_) => windows,"
+
+[[plant]]
+name = "member-guard: a stand-in for pkill goes on to the real command instead of refusing"
+meant = "member_guard::tests::pkill_and_killall_refuse_every_call_in_the_owners_words"
+runs = ["guard-base", "guard-cf"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/member_guard.rs"
+find = "        Guarded::Pkill | Guarded::Killall => true,"
+replace = "        Guarded::Pkill | Guarded::Killall => false,"
+
+[[plant]]
+name = "member-guard: taskkill /IM and /FI are let through to the real taskkill"
+meant = "member_guard::tests::taskkill_by_name_or_filter_is_refused_and_by_number_goes_to_the_real_one"
+runs = ["guard-base"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/member_guard.rs"
+find = "    [\"/im\", \"/fi\", \"-im\", \"-fi\"].contains(&text.as_str())"
+replace = "    [\"/zz\"].contains(&text.as_str())"
