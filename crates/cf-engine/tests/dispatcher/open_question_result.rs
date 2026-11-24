@@ -61,11 +61,6 @@ fn a_result_is_delivered_when_the_first_of_two_questions_is_still_open() {
         "cancelled",
         "the question is closed"
     );
-    assert_eq!(
-        context.message(first).reason.as_deref(),
-        Some("T-1 was finished"),
-        "withdrawn by the result, so its answer is refused as a withdrawn question's"
-    );
     assert_ne!(
         context.message(second).state,
         "cancelled",

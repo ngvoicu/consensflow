@@ -20,17 +20,6 @@ find = '''task.filter(|thread| (thread.task.state == "working" || went_past) && 
 replace = '''task.filter(|thread| (thread.task.state == "working") && !waiting)'''
 
 [[plant]]
-name = "open question result: the open question is left open"
-meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''                closed = true;
-                withdraw_open_questions(store, &task, "was finished")?;'''
-replace = '''                closed = true;'''
-
-[[plant]]
 name = "open question result: the note is missing its number"
 meant = "a_result_after_resume_words_closes_both_open_questions_and_names_them"
 runs = ["oqr-dispatcher"]

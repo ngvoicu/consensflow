@@ -409,25 +409,18 @@ pub(crate) fn answer(
         } else {
             None
         };
-        let finished = finished_task.as_ref().is_some_and(|task| {
+        let finished = finished_task.is_some_and(|task| {
             question.reason.as_deref() == Some(&format!("T-{} was finished", task.number))
         });
         if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {
             return Err(LedgerError::refused_with(
                 "question-withdrawn",
                 format!(
-                    "m-{question_id} was withdrawn{}: nobody waits for this answer{}",
+                    "m-{question_id} was withdrawn{}: nobody waits for this answer",
                     question
                         .reason
                         .as_deref()
-                        .map_or_else(String::new, |reason| format!(" ({reason})")),
-                    match (&finished_task, finished) {
-                        (Some(task), true) => format!(
-                            ". Say it with `cf tell T-{} \"…\"` if it still matters",
-                            task.number
-                        ),
-                        _ => String::new(),
-                    }
+                        .map_or_else(String::new, |reason| format!(" ({reason})"))
                 ),
                 409,
             ));

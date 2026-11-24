@@ -248,7 +248,6 @@ fn record_counted(
             let left = open_questions(store, task.id, window)?;
             if !left.is_empty() {
                 closed = true;
-                withdraw_open_questions(store, &task, "was finished")?;
                 for question in left {
                     body.push_str(&format!(
                         "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. Say what it needed with `cf tell T-{number} \"…\"`.)"
