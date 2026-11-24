@@ -1,0 +1,51 @@
+# A window's result is delivered while a question of its task is still open (T-2197): a turn
+# that ends settled, begun by a message that came after every open question was asked, is the
+# task's result (`crates/cf-engine/src/turn_end.rs`, `went_past`); the ledger closes each open
+# question with the result and names it there (`crates/cf-ledger/src/tasks/finishing.rs`).
+#
+# Every name holds `open question result`, so `npm run plants:daemon -- "open question result"`
+# runs them all.
+
+[run]
+oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::"]
+
+[[plant]]
+name = "open question result: the result is held while a question is open"
+meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            (thread.task.state == "working" || went_past) && !waiting'''
+replace = '''            (thread.task.state == "working") && !waiting'''
+
+[[plant]]
+name = "open question result: the open question is left open"
+meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''                closed = true;
+                withdraw_open_questions(store, &task, "was finished")?;'''
+replace = '''                closed = true;'''
+
+[[plant]]
+name = "open question result: the note is missing its number"
+meant = "a_result_after_resume_words_closes_both_open_questions_and_names_them"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''(ConsensFlow: m-{question} was left unanswered'''
+replace = '''(ConsensFlow: a question was left unanswered'''
+
+[[plant]]
+name = "open question result: a turn that asked again is taken for a result"
+meant = "a_turn_that_asks_again_after_an_answer_and_ends_on_it_is_still_a_wait"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    Ok(if open.iter().all(|question| *question < pasted.id) {'''
+replace = '''    Ok(if open.iter().all(|question| *question < pasted.id + 1_000_000) {'''
