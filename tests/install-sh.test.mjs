@@ -235,7 +235,7 @@ function install(at, args = [], { env = {}, shell = '/bin/sh', launcher, cwd, on
     child.stderr.on('data', (chunk) => {
       out += chunk
     })
-    child.on('close', (status) => resolve({ status, out }))
+    child.on('close', (status, signal) => resolve({ status, signal, out }))
   })
 }
 
@@ -1862,16 +1862,56 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
     })
 
+    test('a copy opened after the marked install counted none is never asked to quit: the last look refuses', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'applet-asked')
+      const app = applet(at.apps, false, { record })
+      // The first count answers none; then the destination's copy is opened, and the install
+      // is let go on (the stand-in waits until it runs).
+      const first = path.join(at.dir, 'counted')
+      const stand = [
+        'case "$5" in count)',
+        `  if [ ! -e "${first}" ]; then`,
+        `    : > "${first}"`,
+        '    out=$(/usr/bin/osascript "$@"); status=$?',
+        `    /usr/bin/open -g -j "${app}"`,
+        '    for i in $(seq 1 100); do',
+        `      /bin/ps -axo comm= | /usr/bin/grep -qF "${app}/Contents/" && break`,
+        '      /bin/sleep 0.1',
+        '    done',
+        '    echo "$out"; exit $status',
+        '  fi ;;',
+        'esac',
+        'exec /usr/bin/osascript "$@"',
+      ].join('\n')
+      const log = path.join(at.dir, 'osascript')
+      const PATH = standIns(at, { osascript: `${SHOW_MODE(log).split('\n')[0]}\n${stand}` })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      try {
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
+        assert.ok(!/quit/.test(asked(log)), `no quit lookup at all: ${asked(log)}`)
+        assert.ok(!existsSync(record), 'the copy was never asked to quit')
+        assert.ok(processesOf(app).length > 0, 'the copy still runs')
+        assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'nothing was swapped or left')
+      } finally {
+        // Ended by the install of its own folder, without the marker.
+        await install(at, ['--version', '3.0.7'])
+      }
+    })
+
     test('GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through', async () => {
       const gnu = 'case "$1" in -f) echo "stat: cannot read file system information for \'$2\'" >&2; exit 1 ;; esac\nexec /usr/bin/stat "$@"'
       const at = freshCase(undefined, { fullPaths: true })
-      const app = await startCopy(at.apps)
-      const log = path.join(at.dir, 'osascript')
-      const PATH = standIns(at, { stat: gnu, osascript: SHOW_MODE(log) })
+      // The script calls the system's osascript by its path, so no recorder on PATH sees it:
+      // the applet's own receipt tells whether it was asked to quit.
+      const record = path.join(at.dir, 'applet-asked')
+      const app = await startCopy(at.apps, record)
+      const PATH = standIns(at, { stat: gnu })
       const refused = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
       assert.equal(refused.status, 1, refused.out)
       assert.match(refused.out, /This shell runs inside ConsensFlow/)
-      assert.ok(!/quit/.test(asked(log)), asked(log))
+      assert.ok(!existsSync(record), 'the app was never asked to quit')
       assert.ok(processesOf(app).length > 0, 'the app still runs')
       // And a copy an earlier run left is told a folder by the system's stat, not the GNU one.
       const dead = Number(run('/bin/sh', ['-c', 'echo $$']).trim())
@@ -1881,6 +1921,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assertInstalled(at, ran, '3.0.7')
       assert.match(ran.out, /removed .*\.ConsensFlow\.app\.installing\.\d+/)
       assert.ok(!existsSync(left))
+      assert.ok(existsSync(record), 'without the marker the app was asked to quit')
     })
 
     test('every system tool is called by its path: stand-ins that fail for each of them first on PATH change nothing', async () => {
@@ -1918,9 +1959,11 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       })
       try {
         await waitFor(() => existsSync(waiting), 'the install waiting for the quit')
+        const waited = existsSync(waiting)
         child.kill('SIGKILL')
         const ran = await running
-        assert.notEqual(ran.status, 0, ran.out)
+        assert.ok(waited, 'the stand-in was waiting when the signal was sent')
+        assert.equal(ran.signal, 'SIGKILL', `the install was ended by the signal: ${ran.out}`)
         assert.equal(installedVersion(at), '3.0.7-alpha.1', 'the installed app is as it was')
         assert.ok(
           !readdirSync(at.apps).some((name) => name.startsWith('.ConsensFlow.app.previous.')),

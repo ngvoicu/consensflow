@@ -236,8 +236,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ] && [ "$(open_copies "$1")" != 0 ]; then'''
-replace = '''    if false; then'''
+find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+replace = '''    if false; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
 
 [[plant]]
 name = "installers: install.sh refuses a marked shell where nothing would be quit"
@@ -247,8 +249,20 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ] && [ "$(open_copies "$1")" != 0 ]; then'''
-replace = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then'''
+find = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+replace = '''        refuse "$inside"'''
+
+[[plant]]
+name = "installers: install.sh asks a marked shell's destination to quit once it counts none"
+meant = "a copy opened after the marked install's count of none is never asked to quit: the last look refuses"
+runs = [["node", "--test", "--test-name-pattern", "opened after the marked install", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"
+        return 0'''
+replace = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
 
 [[plant]]
 name = "installers: install.sh calls a system tool by its name"

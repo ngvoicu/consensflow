@@ -36,9 +36,10 @@
 # version. If you open ConsensFlow in the moment between the installer's last
 # check and its swap, the install replaces it while it starts. A shell inside
 # ConsensFlow (every window its pane host opens has CF_PANE_PROCESS_OWNER in its
-# environment) is refused before any quit where a ConsensFlow runs from the app
-# it would replace: quitting ConsensFlow would end the install too. Where none
-# runs from it, nothing is quit and the install goes on. A shell inside ConsensFlow that has cleared its environment isn't
+# environment) never asks for a quit: it only counts the copies that run from the
+# app it would replace, refuses where one does (quitting ConsensFlow would end the
+# install too), and goes on where none does; its last look before the swap refuses
+# with the same words if one runs by then. A shell inside ConsensFlow that has cleared its environment isn't
 # recognized. Quitting ConsensFlow then ends the install before it changes
 # anything. Every system tool is called by its path, so a tool earlier on PATH
 # (Homebrew's GNU ones among them) changes nothing. `cf` comes inside
@@ -197,11 +198,12 @@ open_copies() {
 # does, and waits for that one instance to end. It is never stopped: one that
 # stays open, or refuses, ends the install.
 quit_open_app() {
-    # Every window ConsensFlow's pane host opens has its marker in the environment. A
-    # quit follows only where a copy runs from $1 (a lookup that fails is taken as one):
-    # a shell inside another copy may upgrade this one while it is closed.
-    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ] && [ "$(open_copies "$1")" != 0 ]; then
-        refuse "This shell runs inside ConsensFlow, and quitting ConsensFlow would end the install too. Run this from Terminal or another terminal app."
+    # Every window ConsensFlow's pane host opens has its marker in the environment. A marked
+    # install never asks for a quit, on any path: it only counts. A copy running from $1
+    # (a count that fails is taken as one) ends it; none, and it goes on to the last look.
+    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"
+        return 0
     fi
     answer=$("$osascript" -l JavaScript -e "$quit_script" quit "$running_id" "$1" "$quit_wait" 2>/dev/null) ||
         refuse "could not ask the open ConsensFlow at $1 to quit. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."
@@ -427,6 +429,7 @@ main() {
     plistbuddy=/usr/libexec/PlistBuddy
     # system tools: end
     quit_wait=120
+    inside="This shell runs inside ConsensFlow, and quitting ConsensFlow would end the install too. Run this from Terminal or another terminal app."
     # The bundle identifier of the app to quit; the tests give their own stand-in's.
     running_id="${CONSENSFLOW_TEST_APP_ID:-dev.ngvoicu.consensflow}"
 
@@ -593,6 +596,9 @@ main() {
     check_app "$stage" "the copy of the app made in $dir"
     # The last look, after every check of the copy and right before the move.
     if [ "$(open_copies "$dest")" != 0 ]; then
+        if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+            refuse "$inside"
+        fi
         refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
     fi
     if [ -e "$dest" ]; then
