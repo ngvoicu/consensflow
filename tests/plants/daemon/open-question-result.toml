@@ -16,8 +16,8 @@ runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''            (thread.task.state == "working" || went_past) && !waiting'''
-replace = '''            (thread.task.state == "working") && !waiting'''
+find = '''task.filter(|thread| (thread.task.state == "working" || went_past) && !waiting)'''
+replace = '''task.filter(|thread| (thread.task.state == "working") && !waiting)'''
 
 [[plant]]
 name = "open question result: the open question is left open"
