@@ -230,7 +230,7 @@ replace = '''        open) return 0 ;;'''
 
 [[plant]]
 name = "installers: install.sh asks the ConsensFlow it runs inside to quit"
-meant = "a shell with the pane host marker is refused before any quit, and without it the same install goes on"
+meant = "a shell with the pane host marker is refused before any quit where a copy runs from the app, and without it the same install goes on"
 runs = [["node", "--test", "--test-name-pattern", "pane host marker", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 

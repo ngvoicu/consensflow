@@ -1796,12 +1796,6 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       await waitFor(() => processesOf(app).length > 0, 'the applet starting')
       return app
     }
-    /** Asks a copy to quit, as its own Quit does, and waits for it to leave. */
-    async function endCopy(app) {
-      run('osascript', ['-e', `tell application ${JSON.stringify(app)} to quit`])
-      await waitFor(() => processesOf(app).length === 0, 'the applet leaving')
-    }
-
     test('a shell with the pane host marker is refused before any quit where a copy runs from the app, and without it the same install goes on', async () => {
       const at = freshCase()
       const record = path.join(at.dir, 'applet-asked')
@@ -1826,21 +1820,23 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
 
     test('a marked window in one running copy upgrades a closed copy in another folder, and no quit is asked', async () => {
       const at = freshCase()
-      const record = path.join(at.dir, 'applet-asked')
-      const other = await startCopy(mkdtempSync(path.join(work, 'elsewhere-')), record)
+      // The running copy is another case's; that case's own install ends it at the end.
+      const running = freshCase()
+      const record = path.join(running.dir, 'applet-asked')
+      const other = await startCopy(running.apps, record)
       fakeApp(at.apps, '3.0.7-alpha.1')
       const log = path.join(at.dir, 'osascript')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        env: { PATH: recorder(at, log), ...MARKER },
+      })
       try {
-        const ran = await install(at, ['--version', '3.0.7'], {
-          env: { PATH: recorder(at, log), ...MARKER },
-        })
         assertInstalled(at, ran, '3.0.7')
         assert.doesNotMatch(ran.out, /runs inside ConsensFlow/)
         // The lookup for a copy of this destination runs and finds none; nobody is asked.
         assert.ok(!existsSync(record), 'the running copy was never asked to quit')
         assert.ok(processesOf(other).length > 0, 'the running copy still runs')
       } finally {
-        await endCopy(other)
+        assertInstalled(running, await install(running, ['--version', '3.0.7']), '3.0.7')
       }
     })
 
@@ -1854,17 +1850,16 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       const entry = path.join(at.dir, 'entry')
       symlinkSync(tools, entry)
       const log = path.join(at.dir, 'osascript')
-      try {
-        const ran = await install(at, ['--version', '3.0.7'], {
-          launcher: path.join(entry, 'launcher'),
-          env: { PATH: recorder(at, log), ...MARKER },
-        })
-        assert.equal(ran.status, 1, ran.out)
-        assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
-        assert.ok(!/quit/.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
-      } finally {
-        await endCopy(app)
-      }
+      const ran = await install(at, ['--version', '3.0.7'], {
+        launcher: path.join(entry, 'launcher'),
+        env: { PATH: recorder(at, log), ...MARKER },
+      })
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
+      assert.ok(!/quit/.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
+      assert.ok(processesOf(app).length > 0, 'the app still runs')
+      // Without the marker the install asks it to quit, which ends it.
+      assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
     })
 
     test('GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through', async () => {
