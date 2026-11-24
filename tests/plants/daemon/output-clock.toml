@@ -24,7 +24,9 @@ oc-walks = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "mode
 oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::", "pane_handlers::native_tests::"]
 oc-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_read_is_counted"]
 oc-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::look::tests::", "shared::input_box::tests::"]
-oc-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pastes_nothing_again", "a_look_the_host_did_not_give", "presses_no_enter_once_more_while", "stale_box::", "still_there::"]
+oc-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pastes_nothing_again", "a_look_the_host_did_not_give", "presses_no_enter_once_more_while", "stale_box::", "still_there::", "a_paced_paste_goes_only_on_a_look_its_window_approved", "a_paste_into_a_box_read_empty_retires_the_mark"]
+oc-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "devin::adapter::tests::bypass::"]
+oc-gate = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_gate_asked_with_the_writer_held"]
 
 [[plant]]
 name = "output clock: a read is counted after the lock of the activity time"
@@ -303,3 +305,115 @@ replace = """        if let Some(key) = paste.clear_first {
         }
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&bracketed(&body));"""
+
+# T-2198 (the fixes of the review of N17's third build).
+
+[[plant]]
+name = "output clock: a paced paste goes on a look its window's readiness has not approved"
+meant = "a_paced_paste_goes_only_on_a_look_its_window_approved"
+runs = ["oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """                match self.readiness_of_look(record, window, pane, look).await? {"""
+replace = """                match match self.licence_of(record, pane, window, look) {
+                    cf_harness::PasteLicence::Wait(held) => Readiness::Held(held),
+                    cf_harness::PasteLicence::Go { .. } => Readiness::Ready,
+                } {"""
+
+[[plant]]
+name = "output clock: the mark of a stale paste outlives the replacement that went into an empty box"
+meant = "a_paste_into_a_box_read_empty_retires_the_mark_of_the_stale_paste_it_replaced"
+runs = ["oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """        if wrote && matches!(&licence, Some(PasteLicence::Go { .. })) {"""
+replace = """        if wrote
+            && matches!(
+                &licence,
+                Some(PasteLicence::Go {
+                    clear_first: Some(_),
+                    ..
+                })
+            )
+        {"""
+
+[[plant]]
+name = "output clock: the unsent count is overridden on a look behind the reader"
+meant = "the_override_of_the_humans_unsent_count_needs_a_look_that_is_not_behind"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        if !self.caught_up {
+            return false;
+        }"""
+replace = """"""
+
+[[plant]]
+name = "output clock: the host writes a paste over the unsent count while its reader is behind"
+meant = "a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """                    && (paste.read_empty != Some(at.typed)
+                        || !state.output.counts().caught_up())"""
+replace = """                    && (paste.read_empty != Some(at.typed))"""
+
+[[plant]]
+name = "output clock: a reader held at the page's credit says it has caught up"
+meant = "a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """    while let Some(allowance) = flow.read_allowance() {"""
+replace = """    while let Some(allowance) = {
+        counts.reader_waits();
+        flow.read_allowance()
+    } {"""
+
+[[plant]]
+name = "output clock: Devin's box known empty that lost its bypass is never pasted again"
+meant = "a_box_known_empty_that_lost_its_bypass_while_the_mode_is_normal_gets_the_command_again"
+runs = ["oc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = """                        paste = !look.unsent() && look.reads(Harness::Devin) == BoxReading::Empty;"""
+replace = """                        let _ = BoxReading::Empty;"""
+
+[[plant]]
+name = "output clock: a gate asks the pane table for the screen with the writer held"
+meant = "a_gate_asked_with_the_writer_held_asks_the_table_for_nothing"
+runs = ["oc-gate"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """        let screening = |under: &mut dyn FnMut(Option<Seen>)| {
+            screen.with_seen(&mut |seen| under(Some(seen)));
+        };"""
+replace = """        let _ = &screen;
+        let screening = |under: &mut dyn FnMut(Option<Seen>)| {
+            PaneInputWriter::with_seen(self, key, under);
+        };"""
+
+[[plant]]
+name = "output clock: a read is counted drawn before it is in the journal"
+meant = "a_read_is_in_the_screen_and_the_journal_before_it_is_counted_drawn"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """        between(bytes);
+        // The clock first: between the two the window still reads as having output pending.
+        printed.note(changed);
+        crate::sync::point("feed.noted");
+        printed.counts().drew(bytes.len());"""
+replace = """        // The clock first: between the two the window still reads as having output pending.
+        printed.note(changed);
+        crate::sync::point("feed.noted");
+        printed.counts().drew(bytes.len());
+        between(bytes);"""

@@ -673,3 +673,32 @@ fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
     window.paste(at, false).expect("the count was cleared by that paste");
     assert_eq!(window.pasted(), 2);
 }
+
+/// Main's journal and N17's counts meet in one step (T-2198 note 7): a window that keeps a journal
+/// takes a read into its screen, then into its journal, then notes the clock and counts it drawn,
+/// all with the screen's lock held, so that no look sees a read in the screen and not in the
+/// journal's offsets, nor counts it drawn before the journal has it.
+#[test]
+fn a_read_is_in_the_screen_and_the_journal_before_it_is_counted_drawn() {
+    let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+    let key = PaneKey::new("journaled", 1);
+    let printed = arbiter.register(&key).expect("register");
+    let screen = PaneScreen::new(24, 80);
+    let journal = crate::journal::Journal::new((24, 80));
+    printed.counts().took(3);
+    let mut between = None;
+    screen.feed_noting(b"abc", &printed, |bytes| {
+        between = Some((printed.counts().both().1, journal.end(), bytes.len()));
+        journal.append(bytes);
+    });
+    assert_eq!(
+        between,
+        Some((0, 0, 3)),
+        "inside the lock the read is not counted drawn, and the journal appends there"
+    );
+    assert_eq!((journal.end(), printed.counts().both()), (3, (3, 3)));
+    // And the production step does both.
+    printed.counts().took(2);
+    super::took_in_journaled(&screen, &printed, &journal, b"de");
+    assert_eq!((journal.end(), printed.counts().both()), (5, (5, 5)));
+}

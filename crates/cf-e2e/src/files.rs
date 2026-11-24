@@ -191,6 +191,24 @@ fn has_drive(text: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A folder reached through a link, so that its path as given is never its real one, whatever
+    /// the temporary folder's own name is (a runner's private folder is already a real path, and
+    /// a check that compared two names that are the same would pass without the guard).
+    #[cfg(unix)]
+    #[test]
+    fn a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones() {
+        let folder = tempfile::tempdir().unwrap();
+        let real = folder.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let linked = folder.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let canonical = fs::canonicalize(&linked).unwrap();
+        assert_ne!(canonical, linked, "the link leads elsewhere");
+        assert_eq!(real_path_on(&linked, true), linked);
+        assert_eq!(real_path_on(&linked, false), canonical);
+    }
+
+    #[cfg(not(unix))]
     #[test]
     fn a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones() {
         let folder = tempfile::tempdir().unwrap();
