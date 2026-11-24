@@ -148,7 +148,7 @@ impl Bridge {
             // Its answer may wait for room in the writer queue, which the reader
             // must not: it goes on to the frames after this one.
             let bridge = self.clone();
-            thread::spawn(move || {
+            apart(move || {
                 bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
             });
             return;
@@ -158,7 +158,7 @@ impl Bridge {
         };
         let handler = entry.handler;
         let bridge = self.clone();
-        thread::spawn(move || {
+        apart(move || {
             let op = frame.op;
             let body = match handler(bridge.clone(), frame.body) {
                 Ok(body) => body,
@@ -237,7 +237,9 @@ impl Bridge {
         for handler in handlers {
             let handler = Arc::clone(handler);
             let body = frame.body.clone();
-            thread::spawn(move || handler(body));
+            // On a thread of its own where one can be made, and else here, on the reader's:
+            // an event (the daemon's last word) is never lost for want of a thread.
+            apart(move || handler(body));
         }
     }
 
@@ -300,5 +302,45 @@ struct HandlerAdmission {
 impl Drop for HandlerAdmission {
     fn drop(&mut self) {
         self.bridge.finish_handler(self.launches_panes);
+    }
+}
+
+#[cfg(feature = "test-support")]
+static REFUSE_THREADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes the bridge's own threads refuse to start, or lets them again (a test's).
+#[cfg(feature = "test-support")]
+pub fn refuse_threads(refuse: bool) {
+    REFUSE_THREADS.store(refuse, Ordering::SeqCst);
+}
+
+/// `work` on a thread of its own; where none can be made, on this one. The reader never
+/// panics for want of a thread, and what it was to deliver is delivered.
+pub(crate) fn apart(work: impl FnOnce() + Send + 'static) {
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(work)));
+    let held = std::sync::Arc::clone(&slot);
+    #[cfg(feature = "test-support")]
+    let refused = REFUSE_THREADS.load(Ordering::SeqCst);
+    #[cfg(not(feature = "test-support"))]
+    let refused = false;
+    let started = if refused {
+        Err(())
+    } else {
+        thread::Builder::new()
+            .name("consensflow-bridge-work".to_owned())
+            .spawn(move || {
+                let taken = held.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(work) = taken {
+                    work();
+                }
+            })
+            .map(|_| ())
+            .map_err(|_| ())
+    };
+    if started.is_err() {
+        let taken = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(work) = taken {
+            work();
+        }
     }
 }

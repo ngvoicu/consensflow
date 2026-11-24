@@ -308,8 +308,9 @@ fn a_bridge_that_asks_no_more_refuses_its_own_requests_and_writes_nothing() {
             "no line reached the peer: {:?}",
             wire.frames()
         );
-        // An event still goes: the break itself is told.
-        assert!(bridge.event("ledger.broken", json!({})));
+        // No ordinary event goes either; the daemon's last word does.
+        assert!(!bridge.event("state.changed", json!({})));
+        assert!(bridge.final_event("ledger.broken", json!({})));
         assert_eq!(wire.wait_for_frames(1).await[0]["op"], "ledger.broken");
     });
 }

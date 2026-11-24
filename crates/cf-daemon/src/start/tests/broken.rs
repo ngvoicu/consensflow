@@ -257,26 +257,164 @@ async fn a_home_that_was_used_and_has_no_ledger_is_refused_and_never_started_as_
 }
 
 #[tokio::test]
-async fn a_home_that_only_its_own_start_wrote_in_is_a_first_use() {
+async fn a_home_with_nothing_of_ours_in_it_is_a_first_use() {
     LocalSet::new()
         .run_until(async {
             let root = tempfile::tempdir().unwrap();
             let home = root.path().join("consensflow");
             std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(home.join("notes.txt"), "the person's own").unwrap();
+            assert!(!crate::broken::home_was_used(&home));
+            started_over(root.path()).await.expect("a first use starts");
+        })
+        .await;
+}
+
+/// A home is used if it holds any file ConsensFlow writes in a home, a link at the ledger's
+/// name included, and one that is used and has no usable ledger is refused and made nothing
+/// in: a home moved before its first start on the build that writes the marker as well.
+#[tokio::test]
+async fn any_file_of_ours_makes_a_home_used_and_a_used_home_with_no_ledger_is_refused() {
+    LocalSet::new()
+        .run_until(async {
+            let witnesses: Vec<(&str, fn(&Path))> = vec![
+                ("the marker", |home| crate::broken::mark(home).unwrap()),
+                ("daemon.log", |home| {
+                    std::fs::write(home.join("daemon.log"), "x\n").unwrap()
+                }),
+                ("daemon.log.lock", |home| {
+                    std::fs::write(home.join("daemon.log.lock"), "").unwrap()
+                }),
+                ("events.jsonl", |home| {
+                    std::fs::write(home.join("events.jsonl"), "{\"kind\":\"daemon.start\"}\n")
+                        .unwrap()
+                }),
+                ("a project's trace", |home| {
+                    std::fs::write(home.join("p1.jsonl"), "{}\n").unwrap()
+                }),
+                ("app/updates.json", |home| {
+                    std::fs::create_dir_all(home.join("app")).unwrap();
+                    std::fs::write(home.join("app/updates.json"), "{}").unwrap();
+                }),
+                ("app/app.log", |home| {
+                    std::fs::create_dir_all(home.join("app")).unwrap();
+                    std::fs::write(home.join("app/app.log"), "x\n").unwrap();
+                }),
+                ("a wal", |home| {
+                    std::fs::write(home.join("consensflow.db-wal"), "").unwrap()
+                }),
+                #[cfg(unix)]
+                ("a dangling link", |home| {
+                    std::os::unix::fs::symlink(
+                        home.join("away/consensflow.db"),
+                        home.join("consensflow.db"),
+                    )
+                    .unwrap();
+                }),
+            ];
+            for (row, make) in witnesses {
+                let root = tempfile::tempdir().unwrap();
+                let home = root.path().join("consensflow");
+                std::fs::create_dir_all(&home).unwrap();
+                make(&home);
+                assert!(crate::broken::home_was_used(&home), "{row}");
+                let before = std::fs::read_dir(&home).unwrap().count();
+                let refused = started_over(root.path()).await.err();
+                let Some(StartError::CannotSave(words)) = refused else {
+                    panic!("{row}: it was started: {refused:?}");
+                };
+                assert!(
+                    words.contains("move") && words.contains("a new folder"),
+                    "{row}: {words}"
+                );
+                assert_eq!(
+                    std::fs::read_dir(&home).unwrap().count(),
+                    before,
+                    "{row}: something was made"
+                );
+                assert!(!home.join("away").exists(), "{row}");
+            }
+        })
+        .await;
+}
+
+/// An existing empty file in a used home is refused, not initialized: the file stays empty
+/// and the start is the ledger's lost words; the same through the handle the open holds
+/// where the file was swapped for an empty one after the look.
+#[tokio::test]
+async fn an_empty_file_in_a_used_home_is_refused_and_stays_empty() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = a_marked_home(root.path());
+            let ledger = home.join("consensflow.db");
+            std::fs::write(&ledger, b"").unwrap();
+            let refused = started_over(root.path()).await.err();
+            assert!(
+                matches!(refused, Some(StartError::CannotSave(_))),
+                "{refused:?}"
+            );
+            assert_eq!(std::fs::metadata(&ledger).unwrap().len(), 0, "initialized");
+            // Swapped after the look: opened with no leave to make it, the handle is empty.
+            let failed = cf_ledger::open_existing_ledger(&ledger, LedgerOptions::default())
+                .err()
+                .expect("an empty file is no ledger");
+            assert!(matches!(
+                at_start_of_used(&ledger, false, failed),
+                StartError::CannotSave(words) if words == crate::broken::lost_words(&ledger)
+            ));
+            assert_eq!(std::fs::metadata(&ledger).unwrap().len(), 0);
+        })
+        .await;
+}
+
+/// A non-empty file that is no ledger, in a used home, ends the start with 74 and the
+/// new-board words, never with 1: the app never retries it.
+#[tokio::test]
+async fn an_unreadable_ledger_in_a_used_home_exits_74_with_the_new_board_words() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = a_marked_home(root.path());
+            let ledger = home.join("consensflow.db");
             std::fs::write(
-                home.join("events.jsonl"),
-                "{\"at\":\"2026-11-22T10:00:00.000Z\",\"kind\":\"daemon.start\"}\n",
+                &ledger,
+                b"this is not a database, but it is not empty either, no",
             )
             .unwrap();
-            std::fs::write(home.join("daemon.log"), "an earlier start that ended\n").unwrap();
-            assert!(!crate::broken::home_was_used(&home));
-            let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
-            let (options, _app) = options(root.path(), &said, &exited, &handles);
-            let daemon = start(environment(root.path()), options)
-                .await
-                .expect("a first use starts");
-            daemon.stop("SIGTERM");
-            daemon.finished().await;
+            let refused = started_over(root.path()).await.err().expect("refused");
+            assert_eq!(refused.exit_code(), crate::broken::EXIT);
+            let StartError::CannotSave(words) = refused else {
+                panic!("{refused:?}");
+            };
+            assert_eq!(words, crate::broken::lost_words(&ledger));
+            assert!(words.contains("move"), "{words}");
+        })
+        .await;
+}
+
+/// A marker that cannot be written stops the start with 74 and words that name the file.
+#[tokio::test]
+async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("consensflow");
+            std::fs::create_dir_all(&home).unwrap();
+            // Where the marker's temporary file would go.
+            std::fs::create_dir(home.join(format!(
+                "{}.{}.tmp",
+                crate::broken::MARKER,
+                std::process::id()
+            )))
+            .unwrap();
+            let refused = started_over(root.path()).await.err().expect("refused");
+            assert_eq!(refused.exit_code(), crate::broken::EXIT);
+            let StartError::CannotSave(words) = refused else {
+                panic!("{refused:?}");
+            };
+            assert!(words.contains(crate::broken::MARKER), "{words}");
+            assert!(!home.join(crate::broken::MARKER).exists());
         })
         .await;
 }
@@ -398,18 +536,18 @@ async fn the_marker_is_written_at_first_use_and_at_the_first_open_of_an_older_ho
                 home.join(crate::broken::MARKER).exists(),
                 "marked at first use"
             );
-            // An older home: a ledger and no marker.
-            std::fs::remove_file(home.join(crate::broken::MARKER)).unwrap();
-            for suffix in ["-wal", "-shm"] {
-                let mut side = home.join("consensflow.db").into_os_string();
-                side.push(suffix);
-                let _ = std::fs::remove_file(side);
+            // An older home: a ledger and none of what this build writes beside it.
+            for entry in std::fs::read_dir(&home).unwrap().flatten() {
+                if entry.file_name() != "consensflow.db" {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        std::fs::remove_dir_all(path).unwrap();
+                    } else {
+                        std::fs::remove_file(path).unwrap();
+                    }
+                }
             }
-            let _ = std::fs::remove_file(home.join("events.jsonl"));
-            assert!(
-                !crate::broken::home_was_used(&home),
-                "as an alpha.16 home with no sign left"
-            );
+            assert!(!home.join(crate::broken::MARKER).exists());
             started_over(root.path()).await.expect("it opens");
             assert!(
                 home.join(crate::broken::MARKER).exists(),
@@ -428,41 +566,6 @@ async fn the_marker_is_written_at_first_use_and_at_the_first_open_of_an_older_ho
             assert!(!home.join("consensflow.db").exists());
         })
         .await;
-}
-
-/// A home with no marker and no ledger, whose only witness is a trace that cannot be read
-/// whole (a first line that is no text before a line of the board, or a file that cannot be
-/// opened), is a used one.
-#[tokio::test]
-async fn an_unreadable_or_garbled_trace_is_a_trace_the_board_may_be_in() {
-    let root = tempfile::tempdir().unwrap();
-    let home = root.path().join("consensflow");
-    std::fs::create_dir_all(&home).unwrap();
-    let mut bytes = vec![0xff, 0xfe, b'\n'];
-    bytes.extend_from_slice(
-        b"{\"at\":\"2026-11-22T10:00:01.000Z\",\"project\":1,\"kind\":\"project.created\"}\n",
-    );
-    std::fs::write(home.join("events.jsonl"), bytes).unwrap();
-    assert!(
-        crate::broken::home_was_used(&home),
-        "a bad first line hides nothing"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let trace = home.join("events.jsonl");
-        std::fs::write(&trace, "{\"kind\":\"daemon.start\"}\n").unwrap();
-        assert!(!crate::broken::home_was_used(&home), "its own lines only");
-        std::fs::set_permissions(&trace, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let readable = std::fs::File::open(&trace).is_ok();
-        if !readable {
-            assert!(
-                crate::broken::home_was_used(&home),
-                "a trace that cannot be opened is not none"
-            );
-        }
-        std::fs::set_permissions(&trace, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
 }
 
 /// A ledger that was there at the look and is not at the open is refused and never made again,

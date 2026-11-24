@@ -611,3 +611,34 @@ async fn after_the_break_no_page_answer_says_it_worked() {
         })
         .await;
 }
+
+/// The break comes while the file is being written into the copy, between the checkpoints
+/// of the look: nothing reaches the copies' folder, and the opener is not asked.
+#[tokio::test]
+async fn a_break_inside_the_copy_leaves_no_file_at_the_destination() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.during_each_file(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                copies_in(asked.home.path()).is_empty(),
+                "a file reached its place"
+            );
+            assert!(asked.opened.borrow().is_empty());
+        })
+        .await;
+}

@@ -118,9 +118,23 @@ impl Bridge {
     /// that the output then fails to take fails the bridge.
     pub fn event(&self, op: &str, body: Value) -> bool {
         let inner = &self.inner;
-        if inner.is_closed() {
+        if inner.is_closed() || inner.asks_no_more() {
             return false;
         }
+        self.event_now(op, body)
+    }
+
+    /// An event that goes whatever the bridge asks no more of its peer: the daemon's last
+    /// word (`ledger.broken`), which every ordinary event must come before.
+    pub fn final_event(&self, op: &str, body: Value) -> bool {
+        if self.inner.is_closed() {
+            return false;
+        }
+        self.event_now(op, body)
+    }
+
+    fn event_now(&self, op: &str, body: Value) -> bool {
+        let inner = &self.inner;
         let frame = Frame {
             v: PROTOCOL_VERSION,
             id: inner.next_id(),

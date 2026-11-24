@@ -108,6 +108,8 @@ pub struct Specs {
     before: Arc<dyn Fn() + Send + Sync>,
     /// Called as each look ends, on its thread, before the page hears of it (a test's).
     after: Arc<dyn Fn() + Send + Sync>,
+    /// Called after each file of a copy is written, in the staging folder (a test's).
+    during: Arc<dyn Fn() + Send + Sync>,
     /// How many looks run, each counted until its thread is done with it.
     jobs: Arc<AtomicUsize>,
     /// Whether each folder (by its path) held a file, and when that was read.
@@ -132,6 +134,7 @@ impl Specs {
             open_within: OPEN_WITHIN,
             before: Arc::new(|| {}),
             after: Arc::new(|| {}),
+            during: Arc::new(|| {}),
             jobs: Arc::default(),
             remembered: RefCell::default(),
             looking: RefCell::default(),
@@ -156,6 +159,13 @@ impl Specs {
     #[cfg(test)]
     pub(super) fn opening_within(mut self, within: Duration) -> Self {
         self.open_within = within;
+        self
+    }
+
+    /// With `during` called after each file of a copy is written.
+    #[cfg(test)]
+    pub(super) fn during_each_file(mut self, during: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.during = during;
         self
     }
 
@@ -348,6 +358,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let read = path.clone();
     let kept_for = page.specs.kept_for;
     let halt = std::sync::Arc::clone(&page.halt);
+    let during = Arc::clone(&page.specs.during);
     let copy = page
         .specs
         .look(move || {
@@ -356,7 +367,10 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             if let Some(words) = halt.refusal() {
                 return Err(words.to_owned());
             }
-            copies::place(&home, &found, kept_for)
+            // The copy is staged and put in place by one rename, after the last check.
+            copies::place_checked(&home, &found, kept_for, &*during, &|| {
+                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))
+            })
         })
         .await?;
     if asked.elapsed() > page.specs.open_within {

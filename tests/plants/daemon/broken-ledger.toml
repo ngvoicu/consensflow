@@ -10,6 +10,9 @@ p23a-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/te
 p23a-log = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::log::tests"]
 p23a-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::trace::tests::once_the_ledger_broke"]
 p23a-viewer = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::viewer::"]
+p23a-copies = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::viewer::copies"]
+p23a-console = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "console::tests"]
+p23a-pageops = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::a_change_made_before"]
 p23a-bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::tests::input"]
 
 [[plant]]
@@ -505,14 +508,44 @@ find = '''    if let Err(failed) = crate::broken::mark(&home) {'''
 replace = '''    if let Err(failed) = Ok::<(), std::io::Error>(()) {'''
 
 [[plant]]
-name = "broken ledger: a trace that cannot be opened is taken for none"
-meant = "an_unreadable_or_garbled_trace_is_a_trace_the_board_may_be_in"
+name = "broken ledger: a file of ours in a home does not make it used"
+meant = "any_file_of_ours_makes_a_home_used_and_a_used_home_with_no_ledger_is_refused"
 runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
-find = '''            Err(failed) => failed.kind() != std::io::ErrorKind::NotFound,'''
-replace = '''            Err(_) => false,'''
+find = '''    if WRITTEN.iter().any(|name| named(name)) || named(LEDGER) {'''
+replace = '''    if named(MARKER) {'''
+
+[[plant]]
+name = "broken ledger: an empty file in a used home is initialized"
+meant = "an_empty_file_in_a_used_home_is_refused_and_stays_empty"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''            if pages == 0 {'''
+replace = '''            if false && pages == 0 {'''
+
+[[plant]]
+name = "broken ledger: an unreadable ledger of a used home exits 1"
+meant = "an_unreadable_ledger_in_a_used_home_exits_74_with_the_new_board_words"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = ''' || failed.code() == Some("ledger-unreadable")'''
+replace = ''''''
+
+[[plant]]
+name = "broken ledger: a marker that cannot be written is let go"
+meant = "a_marker_that_cannot_be_written_stops_the_start_and_names_the_file"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''        return Err(StartError::CannotSave(cf_base::home::marker_words('''
+replace = '''        let _ = (StartError::CannotSave(cf_base::home::marker_words('''
 
 [[plant]]
 name = "broken ledger: a ledger that went before the open is made again"
@@ -523,3 +556,75 @@ runs = ["p23a-daemon"]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''    open_ledger_as(file, options, false)'''
 replace = '''    open_ledger_as(file, options, true)'''
+
+[[plant]]
+name = "broken ledger: a copy is put in place without the last check"
+meant = "a_copy_that_is_refused_midway_or_at_the_last_check_leaves_nothing_at_its_name"
+runs = ["p23a-copies"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies.rs"
+find = '''        Ok(()) => check(),'''
+replace = '''        Ok(()) => Ok(()),'''
+
+[[plant]]
+name = "broken ledger: the viewer's copy is not checked at its last step"
+meant = "a_break_inside_the_copy_leaves_no_file_at_the_destination"
+runs = ["p23a-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))'''
+replace = '''                Ok(())'''
+
+[[plant]]
+name = "broken ledger: an ordinary event follows the fatal one"
+meant = "a_bridge_that_asks_no_more_refuses_its_own_requests_and_writes_nothing"
+runs = ["p23a-bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/request.rs"
+find = '''        if inner.is_closed() || inner.asks_no_more() {'''
+replace = '''        if inner.is_closed() {'''
+
+[[plant]]
+name = "broken ledger: the bridge starts a thread for the fatal event or goes without it"
+meant = "with_no_thread_to_make_the_windows_are_closed_on_the_current_one"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/requests.rs"
+find = '''    if started.is_err() {
+        let taken = slot'''
+replace = '''    if false && started.is_err() {
+        let taken = slot'''
+
+[[plant]]
+name = "broken ledger: the console writes on the runtime during a stop"
+meant = "a_line_said_while_the_daemon_ends_does_not_wait_for_a_pipe_nobody_drains"
+runs = ["p23a-console"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/console.rs"
+find = '''        if self.halt.get().is_some_and(|halt| halt.stopping()) {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "broken ledger: a change made before the break is reported as not made"
+meant = "a_change_made_before_the_break_is_reported_as_done_with_the_break_said_after_it"
+runs = ["p23a-pageops"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = '''        Ok(Ok(fields)) if halt.broke() && operation.kicks() => {'''
+replace = '''        Ok(Ok(fields)) if halt.broke() && operation.kicks() && false => {'''
+
+[[plant]]
+name = "broken ledger: the unreadable ledger's words are the plain ones"
+meant = "a_start_refused_for_an_unreadable_ledger_says_how_to_start_a_new_board"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/home.rs"
+find = '''    if is_a_ledger(ledger) {'''
+replace = '''    if true {'''

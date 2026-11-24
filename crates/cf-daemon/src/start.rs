@@ -82,7 +82,7 @@ pub struct Options {
     /// What the bridge writes, nothing but frames: the standard output.
     pub output: Box<dyn AsyncWrite + Unpin>,
     /// The error output, for what Node said with `console.error`.
-    pub stderr: Box<dyn Write>,
+    pub stderr: Box<dyn Write + Send>,
     /// Says the handle line before anything else is written to the output:
     /// the app reads it as JSON, a person gets the address in words. A reader
     /// that has gone from it stops the daemon.
@@ -166,7 +166,7 @@ fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
 /// [`at_start`] for the open of the ledger: one that was there and is not any more, between
 /// the look at it and the open, is a ledger lost, said as one.
 fn at_start_of_used(file: &std::path::Path, create: bool, failed: LedgerError) -> StartError {
-    if !create && failed.cannot_save() {
+    if !create && (failed.cannot_save() || failed.code() == Some("ledger-unreadable")) {
         StartError::CannotSave(crate::broken::lost_words(file))
     } else {
         at_start(file, failed)
@@ -289,11 +289,16 @@ async fn run(
     };
     let ledger = opened.map_err(|failed| at_start_of_used(&ledger_file, create, failed))?;
     // The ledger is there: the home says it has a board from now on.
+    // A marker that cannot be written stops the start: a home that would not be known to
+    // have a board is one that could open empty at the next start.
     if let Err(failed) = crate::broken::mark(&home) {
-        log.warn(
+        log.error(
             "the home could not be marked as having a board",
             Some(&failed.to_string()),
         );
+        return Err(StartError::CannotSave(cf_base::home::marker_words(
+            &home.join(crate::broken::MARKER),
+        )));
     }
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
@@ -341,6 +346,7 @@ async fn run(
         // The drain of `cf ui`: no reader, no point.
         move || latch.trip("asked to stop")
     }));
+    console.ends_with(latch.halt());
     let (bridge, connection) = daemon_bridge(&spawn)
         .on_fatal({
             let (log, latch) = (Rc::clone(&log), Rc::clone(&latch));
@@ -363,9 +369,11 @@ async fn run(
     // One throttle for both the engine's changes and the agents' API writes:
     // neither source may send an extra core event during the other's wait.
     let board_changed = {
-        let bridge = bridge.clone();
+        let (bridge, halt) = (bridge.clone(), latch.halt());
         throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "core" }));
+            if !halt.broke() {
+                bridge.event("state.changed", json!({ "reason": "core" }));
+            }
         })
     };
     // The tokens, and the HTTP front the agents' and the human's requests come
@@ -548,9 +556,11 @@ async fn run(
     {
         // A window that wrote more changes only a view of what it did: the
         // page reads that again, not the board.
-        let bridge = bridge.clone();
+        let (bridge, halt) = (bridge.clone(), latch.halt());
         dispatcher.on_transcript(throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "transcript" }));
+            if !halt.broke() {
+                bridge.event("state.changed", json!({ "reason": "transcript" }));
+            }
         }));
     }
 

@@ -130,6 +130,12 @@ impl Folder {
         };
     }
 
+    /// The folder `from` of this one put at the name `to`, which an empty folder holds: one
+    /// rename, within this folder (none of the folders is held open at the time).
+    pub(super) fn replace(&self, from: &str, to: &str) -> io::Result<()> {
+        fs::rename(self.path.join(from), self.path.join(to))
+    }
+
     /// Writes `bytes` to a file `name` made new in this folder.
     pub(super) fn write_new(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
         OpenOptions::new()

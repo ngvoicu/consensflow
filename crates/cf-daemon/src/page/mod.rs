@@ -151,7 +151,17 @@ async fn answer(
     )
     .await;
     match begun.await {
-        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),
+        // Made before the break and finished after it: an operation that changes something
+        // changed it (the ledger committed it), and the answer says so, the break after it.
+        // One that only reads shows nothing, for the ledger is shut.
+        Ok(Ok(fields)) if halt.broke() && operation.kicks() => {
+            let mut answered = Map::new();
+            answered.insert("ok".to_owned(), Value::Bool(true));
+            answered.extend(fields);
+            answered.insert("ledgerBroken".to_owned(), json!(crate::halt::BROKEN_WORDS));
+            Ok(Value::Object(answered))
+        }
+        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_REFUSED.to_owned()),
         Ok(Ok(fields)) => {
             if operation.kicks() {
                 kick();

@@ -1520,7 +1520,7 @@ mod tests {
                 command
                     .args(["-NoProfile", "-NonInteractive", "-Command"])
                     .arg(format!(
-                        "[Console]::Out.Close(); Start-Sleep -Milliseconds 900; exit {LEDGER_EXIT}"
+                        "{CLOSE_STDOUT}; Start-Sleep -Milliseconds 900; exit {LEDGER_EXIT}"
                     ));
                 command
             };
@@ -1603,6 +1603,7 @@ mod tests {
         impl Drop for Allowed {
             fn drop(&mut self) {
                 cf_panes::headless::refuse_threads(false);
+                cf_bridge::refuse_threads(false);
             }
         }
         let _allowed = Allowed;
@@ -1628,6 +1629,8 @@ mod tests {
         let daemon = Daemon::new(report);
         daemon.fail_the_cleanup_thread();
         cf_panes::headless::refuse_threads(true);
+        // The bridge's own threads for what it delivers (the daemon's last word among them).
+        cf_bridge::refuse_threads(true);
         let starter = a_ledger_stand_in(
             &panes,
             &starts,
@@ -1648,6 +1651,39 @@ mod tests {
             panes.list().expect("a list").is_empty(),
             "no window is left"
         );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A start refused for a ledger that is no ledger carries the same new-board words as the
+    /// daemon's own command line, and is never tried again.
+    #[test]
+    fn a_start_refused_for_an_unreadable_ledger_says_how_to_start_a_new_board() {
+        let home = tempfile::tempdir().expect("a home");
+        let ledger = home.path().join("consensflow.db");
+        std::fs::write(&ledger, b"not a database, but not empty either, not at all")
+            .expect("a file");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (counted, at) = (Arc::clone(&starts), home.path().to_path_buf());
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.on_close(closed);
+            let mut command = an_exit_with(LEDGER_EXIT);
+            command.env("CONSENSFLOW_HOME", &at);
+            connect_daemon(command, builder, Duration::from_secs(30))
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let told = told_of(&heard, 1);
+        assert!(told[0].ledger, "{:?}", told[0]);
+        let said = told[0].cause.clone().unwrap_or_default();
+        assert_eq!(said, cf_base::home::lost_ledger_words(&ledger));
+        assert!(
+            said.contains("move") && said.contains("a new folder"),
+            "{said}"
+        );
+        assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
@@ -1694,6 +1730,12 @@ mod tests {
             command
         }
     }
+
+    /// PowerShell that closes the process's own standard output handle, which `[Console]::Out.Close()`
+    /// does not (it leaves the native handle open until the process ends, so the reader sees no
+    /// end of stream).
+    #[cfg(windows)]
+    const CLOSE_STDOUT: &str = "Add-Type -Name K -Namespace W -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern System.IntPtr GetStdHandle(int n); [DllImport(\"kernel32.dll\")] public static extern bool CloseHandle(System.IntPtr h);'; $null = [W.K]::CloseHandle([W.K]::GetStdHandle(-11))";
 
     /// What a stand-in daemon does once it has said its handle line and its frames.
     #[derive(Clone, Copy)]
@@ -1763,7 +1805,7 @@ mod tests {
                     format!("Start-Sleep -Milliseconds {milliseconds}; exit {code}")
                 }
                 Then::CloseThenExit(closes, milliseconds, code) => format!(
-                    "Start-Sleep -Milliseconds {closes}; [Console]::Out.Close(); Start-Sleep -Milliseconds {milliseconds}; exit {code}"
+                    "Start-Sleep -Milliseconds {closes}; {CLOSE_STDOUT}; Start-Sleep -Milliseconds {milliseconds}; exit {code}"
                 ),
             });
             let mut command = crate::testing::command("powershell.exe");

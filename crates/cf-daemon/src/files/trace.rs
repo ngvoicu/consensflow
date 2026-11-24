@@ -705,6 +705,25 @@ mod tests {
     }
 
     #[test]
+    fn a_forgetting_that_was_sent_before_the_break_is_still_done_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = trace_in(dir.path(), LIMIT);
+        let halt = crate::halt::Halt::new();
+        trace.ends_with(std::sync::Arc::clone(&halt));
+        trace.event(&event(1, "gone"));
+        trace.event(&event(2, "kept"));
+        let forgetting = trace.forget_blocking(1, None);
+        halt.break_ledger();
+        forgetting.unwrap();
+        let said = lines(&trace, trace.file()).join("\n");
+        assert!(!said.contains("gone"), "{said}");
+        assert!(said.contains("kept"), "{said}");
+        // And one asked after it is still done: the deletion it follows was committed.
+        trace.forget_blocking(2, None).unwrap();
+        assert!(!lines(&trace, trace.file()).join("\n").contains("kept"));
+    }
+
+    #[test]
     fn once_the_ledger_broke_no_event_is_appended_and_an_error_still_is() {
         let dir = tempfile::tempdir().unwrap();
         let trace = trace_in(dir.path(), LIMIT);

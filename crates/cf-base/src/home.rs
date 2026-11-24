@@ -68,14 +68,40 @@ pub fn lost_ledger_words(ledger: &std::path::Path) -> String {
     )
 }
 
+/// What the person is told when ConsensFlow cannot write the file that says a home has a
+/// board: the start is refused, for a home that would not be known to have one could open
+/// empty at the next start.
+pub fn marker_words(marker: &std::path::Path) -> String {
+    let whole = std::path::absolute(marker).unwrap_or_else(|_| marker.to_path_buf());
+    format!(
+        "ConsensFlow can't write {}, the file that says this home has a board, so it has not \
+         started. The disk may be full, failing or disconnected, or you may have lost write \
+         permission. Restore access to it, then open ConsensFlow again. Nothing of the board \
+         was changed.",
+        whole.display()
+    )
+}
+
 /// The words for a ledger that ended a daemon with [`CANNOT_SAVE_EXIT`], where the one that
 /// ended did not say them: a ledger that is not there as a file with something in it is a
 /// home that lost its board ([`lost_ledger_words`]); any other cannot be saved to.
 pub fn unsaved_words(ledger: &std::path::Path) -> String {
-    match std::fs::metadata(ledger) {
-        Ok(found) if found.is_file() && found.len() > 0 => cannot_save_words(ledger),
-        _ => lost_ledger_words(ledger),
+    if is_a_ledger(ledger) {
+        cannot_save_words(ledger)
+    } else {
+        lost_ledger_words(ledger)
     }
+}
+
+/// Whether `file` is a readable file with an SQLite header: what a ledger that cannot be
+/// saved to still is, as against one that is gone, empty, unreadable or something else.
+fn is_a_ledger(file: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut header = [0_u8; 16];
+    std::fs::File::open(file)
+        .and_then(|mut open| open.read_exact(&mut header))
+        .is_ok()
+        && &header == b"SQLite format 3\0"
 }
 
 /// The variable as text when it is set to something, a byte that is no UTF-8

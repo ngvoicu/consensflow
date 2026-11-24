@@ -137,6 +137,12 @@ impl Folder {
         let _ = unlinkat(&self.fd, name, AtFlags::REMOVEDIR);
     }
 
+    /// The folder `from` of this one put at the name `to`, which an empty folder holds: one
+    /// rename, within this folder.
+    pub(super) fn replace(&self, from: &str, to: &str) -> io::Result<()> {
+        rustix::fs::renameat(&self.fd, from, &self.fd, to).map_err(io::Error::from)
+    }
+
     /// Writes `bytes` to a file `name` made new in this folder, for the user.
     pub(super) fn write_new(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let fd = openat(

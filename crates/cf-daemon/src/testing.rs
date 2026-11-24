@@ -81,18 +81,21 @@ fn connected(daemon: BridgeBuilder) -> (Bridge, Bridge) {
 
 /// A place for what the daemon says on its error output, which the test reads.
 #[derive(Clone, Default)]
-pub struct Said(Rc<RefCell<Vec<u8>>>);
+pub struct Said(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl Said {
     /// Everything said so far.
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0.borrow()).into_owned()
+        String::from_utf8_lossy(&self.0.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
     }
 }
 
 impl std::io::Write for Said {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().extend_from_slice(bytes);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend_from_slice(bytes);
         Ok(bytes.len())
     }
 

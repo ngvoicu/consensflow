@@ -126,6 +126,17 @@ fn open_ledger_as(file: &Path, options: Options, create: bool) -> Result<Ledger,
     db.busy_timeout(Duration::ZERO)?;
     db.execute_batch("PRAGMA foreign_keys = ON")?;
     let ready = (|| {
+        if !create {
+            // Through the handle this open holds: a file with no page in it is no ledger
+            // that was, and is not made into one.
+            let pages: i64 = db.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+            if pages == 0 {
+                return Err(LedgerError::Sqlite(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                    Some("the ledger file is empty".to_owned()),
+                )));
+            }
+        }
         db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
         // In exclusive mode the first write lock is kept until the connection
         // closes; taking it here is what makes this connection the only one.

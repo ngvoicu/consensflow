@@ -444,3 +444,46 @@ mod suspended;
 mod turns;
 mod viewer;
 mod wake_up;
+
+/// An operation that changed something before the ledger broke, and ended after it, says that
+/// it was done, the break after it: never that nothing was changed. One that only reads shows
+/// nothing, for the ledger is shut.
+#[tokio::test]
+async fn a_change_made_before_the_break_is_reported_as_done_with_the_break_said_after_it() {
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            let halt = std::sync::Arc::clone(&rig.page.halt);
+            let serve = serving(move |_, operation, _| {
+                let halt = std::sync::Arc::clone(&halt);
+                Box::pin(async move {
+                    // The change is committed; then the ledger breaks (another operation's).
+                    halt.break_ledger();
+                    let mut fields = Map::new();
+                    fields.insert("operation".to_owned(), json!(operation.as_str()));
+                    Ok(fields)
+                })
+            });
+            register_with(&daemon, &rig.page, &rig.spawn, &serve);
+            // Asked before the break: it makes its change, and the break comes before the answer.
+            let deleted = ask(&app, "project.delete", json!({ "project": 1 })).await;
+            assert_eq!(deleted["ok"], true, "{deleted}");
+            let said = deleted["ledgerBroken"].as_str().unwrap();
+            assert!(said.contains("can't save"), "{said}");
+            assert!(!said.contains("nothing was changed"), "{said}");
+            assert!(
+                !deleted.to_string().contains("nothing was changed"),
+                "{deleted}"
+            );
+            assert_eq!(rig.kicks.get(), 0, "nothing is woken after the break");
+            // Asked after it: refused before it begins, and nothing was changed.
+            let later = ask(&app, "project.delete", json!({ "project": 2 })).await;
+            assert_eq!(later["ok"], false, "{later}");
+            assert!(later["error"]
+                .as_str()
+                .unwrap()
+                .contains("nothing was changed"));
+        })
+        .await;
+}

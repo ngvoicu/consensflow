@@ -13,11 +13,9 @@
 //! process holds must not keep the daemon from ending.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::rc::Rc;
 
-use cf_base::file::aside;
 use cf_bridge::local::Bridge;
 use serde_json::json;
 
@@ -68,9 +66,10 @@ pub fn reaction(
         // goes off the runtime.
         latch.trip_broken();
         bridge.fence();
+        // From here no ordinary event or request goes: the daemon's last word is the only one.
         bridge.ask_no_more();
         // The app hears it before the bridge closes with the stop.
-        bridge.event(
+        bridge.final_event(
             EVENT,
             json!({ "words": words(&file), "pid": std::process::id() }),
         );
@@ -103,40 +102,40 @@ pub fn mark(home: &Path) -> std::io::Result<()> {
         .map_err(|failed| std::io::Error::other(failed.to_string()))
 }
 
-/// Whether `home` shows that ConsensFlow has had a board in it: the marker, or what an
-/// earlier build left that says the same (the ledger's own side files `-wal` and `-shm`, or
-/// a trace, `events.jsonl` or the one aside it, that holds a line of the board: an event
-/// that is not the daemon's own `daemon.*`, which a start that ended before it made its
-/// ledger leaves alone). A trace that cannot be read, or has a line that is no text, is
-/// read as far as it goes and is not taken for none. Where the whole folder is another,
-/// empty one (a mount point whose disk is not there) nothing says it was used: a known
-/// limit, and it starts as a first use.
+/// What ConsensFlow writes in a home beside its ledger, each by its name in the home: a
+/// file that is there shows the home has been run in, whichever build wrote it.
+const WRITTEN: [&str; 10] = [
+    MARKER,
+    "consensflow.db-wal",
+    "consensflow.db-shm",
+    "daemon.log",
+    "daemon.log.1",
+    "daemon.log.lock",
+    "events.jsonl",
+    "events.jsonl.1",
+    "app/updates.json",
+    "app/app.log",
+];
+
+/// Whether `home` has been run in: it holds any file ConsensFlow writes in a home (the
+/// marker, the ledger's side files, the log or its lock, the trace, the app's own files), a
+/// project trace (any other `*.jsonl`), or a `consensflow.db` that is a link, dangling or
+/// not. Looked at as names, not followed. A home moved before its first start on the build
+/// that writes the marker is used all the same. Where the whole folder is replaced by
+/// another, empty one (a mount point whose disk is not there) nothing is left to show it:
+/// a known limit (39), and it starts as a first use.
 pub fn home_was_used(home: &Path) -> bool {
-    if home.join(MARKER).exists() {
+    let named = |name: &str| fs::symlink_metadata(home.join(name)).is_ok();
+    if WRITTEN.iter().any(|name| named(name)) || named(LEDGER) {
         return true;
     }
-    let ledger = home.join(LEDGER);
-    let beside = |suffix: &str| {
-        let mut name = ledger.clone().into_os_string();
-        name.push(suffix);
-        std::path::PathBuf::from(name)
-    };
-    if beside("-wal").exists() || beside("-shm").exists() {
-        return true;
-    }
-    let trace = home.join("events.jsonl");
-    [trace.clone(), aside(&trace)].iter().any(|file| {
-        match fs::File::open(file) {
-            Ok(file) => BufReader::new(file)
-                .split(b'\n')
-                .map_while(Result::ok)
-                .any(|line| {
-                    let line = String::from_utf8_lossy(&line);
-                    line.contains("\"kind\":\"") && !line.contains("\"kind\":\"daemon.")
-                }),
-            // A trace that is there and cannot be opened is a trace the board may be in.
-            Err(failed) => failed.kind() != std::io::ErrorKind::NotFound,
-        }
+    fs::read_dir(home).is_ok_and(|names| {
+        names.flatten().any(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        })
     })
 }
 

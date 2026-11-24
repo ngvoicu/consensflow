@@ -47,9 +47,15 @@ impl Halt {
     }
 }
 
-/// What an operation says when it was admitted before the break and finished after it.
-pub const BROKEN_WORDS: &str =
+/// What an operation that was refused before it did anything says: nothing was changed.
+pub const BROKEN_REFUSED: &str =
     "ConsensFlow can't save to its ledger any more and is stopping: nothing was changed";
+
+/// What the page is told beside an answer that was made before the break and is true: its
+/// change was made. The break is said after it.
+pub const BROKEN_WORDS: &str = "ConsensFlow can't save to its ledger any more and is stopping, so \
+     nothing more will be saved. What was asked was done before; check the board after it \
+     is open again";
 
 /// What an operation says when the daemon is ending and it was not begun in time.
 pub const STOPPING_WORDS: &str = "the daemon is stopping: nothing was changed";
@@ -58,7 +64,7 @@ impl Halt {
     /// The refusal an effect makes right before it acts, or none while the daemon runs.
     pub fn refusal(&self) -> Option<&'static str> {
         if self.broke() {
-            Some(BROKEN_WORDS)
+            Some(BROKEN_REFUSED)
         } else if self.stopping() {
             Some(STOPPING_WORDS)
         } else {

@@ -9,6 +9,8 @@ publish = false
 [features]
 # The daemon's end of the bridge, on one thread over tokio (`cf_bridge::local`).
 local = ["dep:tokio"]
+# What the app's own tests need: threads that refuse to start, for the paths that must go on without one.
+test-support = []
 
 [dependencies]
 cf-proto.workspace = true

@@ -181,3 +181,56 @@ fn a_junction_left_on_the_way_to_the_copies_is_refused_and_where_it_leads_is_lef
     assert!(sentinel.exists());
     assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
 }
+
+/// The copy is staged and put in place by one rename: a break that comes after the first
+/// file, or between the last file and the rename, leaves nothing at the destination, and the
+/// staging folder is gone.
+#[test]
+fn a_copy_that_is_refused_midway_or_at_the_last_check_leaves_nothing_at_its_name() {
+    let given = read(&[
+        (&["checkout", "SPEC.html"], "<p>spec</p>"),
+        (&["assets", "spec-styles.css"], "p {}"),
+        (&["assets", "more.css"], "b {}"),
+    ]);
+    for row in ["after the first file", "at the last check"] {
+        let home = tempfile::tempdir().unwrap();
+        let broke = std::cell::Cell::new(false);
+        let written = std::cell::Cell::new(0);
+        let refused = place_checked(
+            home.path(),
+            &given,
+            KEPT_FOR,
+            &|| {
+                written.set(written.get() + 1);
+                if row == "after the first file" && written.get() == 1 {
+                    broke.set(true);
+                }
+            },
+            &|| {
+                if row == "at the last check" {
+                    broke.set(true);
+                }
+                if broke.get() {
+                    Err("the ledger broke".to_owned())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(refused.unwrap_err(), "the ledger broke", "{row}");
+        let left: Vec<_> = fs::read_dir(root(home.path()))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(
+            left.is_empty(),
+            "{row}: nothing is left, not even a part: {left:?}"
+        );
+    }
+    // And with no refusal the whole copy is at its name, no staging folder beside it.
+    let home = tempfile::tempdir().unwrap();
+    let html = place_checked(home.path(), &given, KEPT_FOR, &|| {}, &|| Ok(())).unwrap();
+    assert!(html.ends_with("checkout/SPEC.html"));
+    assert_eq!(fs::read_to_string(&html).unwrap(), "<p>spec</p>");
+    assert_eq!(fs::read_dir(root(home.path())).unwrap().count(), 1);
+}
