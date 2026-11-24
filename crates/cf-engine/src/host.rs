@@ -79,6 +79,14 @@ pub trait EngineHost: PaneHost {
     /// read of the screen that changes nothing, which the Node traces have none of, as
     /// [`EngineHost::quiet`].
     fn screen<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<Value, HostError>>;
+    /// One look at `pane`: the host's `pane.snapshot` that asks for the screen's last lines, read
+    /// with the screen's lock held ([`cf_harness::Look`]); none, and why, where the host did not
+    /// answer, said not ok, named no `seen`, or said it read more than the screen shows. It is
+    /// the look the engine decides on a window's input box by, where the request is not one the
+    /// Node traces hold: those hold every call of the host the engine made, and a fake writes
+    /// none down. Where the traces hold a snapshot at the point of decision, the request is made
+    /// through [`PaneHost::request`] (`Dispatcher::look_recorded`) and read as a look all the same.
+    fn look<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>>;
     /// How many alerts of the system's notification centre are on the Mac's screen now (a
     /// macOS privacy dialog raised in the app's name is one): none said where the host does
     /// not say (a Windows host, an older one, a Mac with no window server). The engine's look

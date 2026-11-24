@@ -817,7 +817,6 @@ pub trait Window {
             };
             let state = crate::BoxState {
                 stale_paste: self.stale_paste(),
-                emptied: host.cleared(),
             };
             Ok(
                 match crate::licence_paste(look, self.harness(), state, &[3]) {
@@ -852,7 +851,6 @@ pub trait Window {
                     self.harness(),
                     crate::BoxState {
                         stale_paste: self.stale_paste(),
-                        emptied: host.cleared(),
                     },
                     &[3],
                 ),
@@ -979,14 +977,6 @@ pub trait PaneHost {
     /// A native transport reported that this window took its message.
     /// A queue admission without that report must not call this.
     fn delivery_reported(&self, _pane: &Pane) {}
-
-    /// Whether the engine emptied the window's input box just before this
-    /// hand-over, with the keys of its [`Input::Pasted`]: an adapter that would
-    /// empty it itself presses nothing more (a second Control-C in a row ends
-    /// Claude Code). A host that says nothing emptied nothing.
-    fn cleared(&self) -> bool {
-        false
-    }
 }
 
 /// The heading the engine gives the project's rules for its staff in a window's role

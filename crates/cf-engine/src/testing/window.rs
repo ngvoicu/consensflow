@@ -15,10 +15,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, CompactionWord, Decline, Dialog, DialogSign, Held, InputBox, Observed, Over, Pane,
+    Admission, CompactionWord, Decline, Dialog, DialogSign, Held, Observed, Over, Pane,
     PaneHost, Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
+use cf_harness::{Look, PasteLicence};
+use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
@@ -54,6 +56,8 @@ pub const DIALOG_OPEN: &str = "dialog open (a test's harness dialog)";
 pub const SELF_ENDING_DIALOG: &str = "Will this test dialog close by itself?";
 
 pub(super) struct FakeWindow {
+    /// The harness the fake answers for, as its kind says it.
+    harness: Harness,
     seam: String,
     launch: String,
     session: RefCell<String>,
@@ -65,6 +69,7 @@ pub(super) struct FakeWindow {
 
 impl FakeWindow {
     pub(super) fn new(
+        harness: Harness,
         seam: String,
         launch: String,
         session: String,
@@ -72,6 +77,7 @@ impl FakeWindow {
     ) -> Self {
         let trusts = fake.trusts.borrow().clone();
         Self {
+            harness,
             seam,
             launch,
             session: RefCell::new(session),
@@ -147,14 +153,10 @@ impl Window for FakeWindow {
         holds(screen, "synthetic added choices")
     }
 
-    /// A box is read empty where a line of the screen is its prompt mark alone, as
-    /// Claude Code and Muse Code draw an empty one.
-    fn box_read_empty(&self, snapshot: &Value) -> bool {
-        snapshot["bottom"].as_array().is_some_and(|lines| {
-            lines
-                .iter()
-                .any(|line| line.as_str().map(str::trim) == Some("❯"))
-        })
+    /// The harness the fake answers for: its box is read as that harness's reader reads it, on
+    /// the lines a test's host shows.
+    fn harness(&self) -> Harness {
+        self.harness
     }
 
     /// Its prompt is a line of the screen that holds [`TRUST_PROMPT`], the screen the engine
@@ -316,10 +318,11 @@ impl Window for FakeWindow {
         Box::pin(async move { words })
     }
 
-    fn ready<'a>(
+    fn ready_on<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
         pane: &'a Pane,
+        _look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         let ready = self.fake.ready.borrow().clone();
         let Some(ready) = ready else {
@@ -351,13 +354,21 @@ impl Window for FakeWindow {
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
-        self.fake.cleared.borrow_mut().push(host.cleared());
+        // Whether the paste goes with the key that empties the box first.
+        self.fake.clear_firsts.borrow_mut().push(matches!(
+            licence,
+            Some(PasteLicence::Go {
+                clear_first: Some(_),
+                ..
+            })
+        ));
         let args = json!([{
             "launch": self.bag(),
             "pane": { "id": pane.id, "generation": pane.generation },
@@ -419,6 +430,10 @@ impl Window for FakeWindow {
                 Ok(Admission::Busy { reason }) => {
                     json!({ "admitted": false, "busy": true, "reason": reason })
                 }
+                // No Node fake was ever turned back by a look either.
+                Ok(Admission::LookAgain { reason }) => {
+                    json!({ "admitted": false, "lookAgain": true, "reason": reason })
+                }
                 Ok(Admission::Uncertain { reason }) => {
                     json!({ "admitted": null, "reason": reason })
                 }
@@ -469,16 +484,6 @@ impl Window for FakeWindow {
             }
         });
         Box::pin(async {})
-    }
-
-    /// Not written down: the JavaScript fake was never asked.
-    fn input_box<'a>(
-        &'a self,
-        _host: &'a dyn PaneHost,
-        _pane: &'a Pane,
-    ) -> Work<'a, Option<InputBox>> {
-        let held = self.fake.input_box.get();
-        Box::pin(async move { held })
     }
 
     /// Not written down: the JavaScript fake was never asked.

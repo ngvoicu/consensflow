@@ -87,7 +87,8 @@
 use std::rc::Rc;
 
 use cf_base::{js, time};
-use cf_harness::contract::{Input, InputBox, Observed, Pane};
+use cf_harness::contract::{Input, Observed, Pane};
+use cf_harness::{after_wait, licence_enter, AfterWait, EnterFor, EnterLicence, Look};
 use cf_harness::records::{Item, Reading, Role, Settlement};
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
@@ -104,14 +105,6 @@ use crate::seams::EngineError;
 use crate::shown::Shown;
 use crate::trust::Trusting;
 
-/// An Enter, pressed once more for a paste its window did not send.
-const ENTER: u8 = 13;
-/// How long a paste may go unshown in the record before its window gets that Enter.
-const ENTER_AGAIN_MS: i64 = 10_000;
-/// How long what the window's screen shows must have held still first: one being typed
-/// into, or drawing, is left be; one that only prints its screen again as it is, is not
-/// (T-1083).
-pub(crate) const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long a read of the window may take and still say what the window does now:
 /// a pane host answers a snapshot at once, so one that took longer stalled, and what
 /// it says is as old as the stall.
@@ -120,6 +113,9 @@ const SLOW_READ_MS: i64 = 5_000;
 const NO_ANSWER: &str = "its pane host did not answer in time";
 /// How often at most the log says a message's window could not be read.
 const UNREAD_TOLD_MS: i64 = 60_000;
+/// An Enter, pressed once more for a paste its window did not send.
+/// How long a paste may go unshown in the record before its window gets that Enter.
+const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long after it was last found free (`Delivering::free_since`) a paste the
 /// record never showed is pasted again at the window's next rest, however its rest
 /// was cut by turns.
@@ -153,9 +149,6 @@ pub(crate) struct Watched {
     /// How long what the window's screen showed had held still, as the pane host said
     /// before it was to go again.
     screen_quiet_ms: Option<i64>,
-    /// Whether that look found the screen lacking bytes the window printed (`outputRead` over
-    /// `outputDrawn`): a box read off it is not read.
-    screen_behind: bool,
 }
 
 impl Dispatcher {
@@ -260,7 +253,7 @@ impl Dispatcher {
                 && waited > ENTER_AGAIN_MS
                 && self.pasted(record)
             {
-                return self.enter_again(record, delivering.message).await;
+                return self.enter_again(record, delivering.message, None, EnterFor::PasteNotSent).await;
             }
             // The chief's window is the human's own, and its wait is told of by itself (T-629).
             if at_work && !delivering.chief {
@@ -368,7 +361,8 @@ impl Dispatcher {
                 && !delivering.entered_again
                 && self.pasted(record)
             {
-                self.enter_again(record, delivering.message).await?;
+                self.enter_again(record, delivering.message, None, EnterFor::PasteNotSent)
+                    .await?;
             }
             return Ok(());
         }
@@ -450,22 +444,11 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = (window, pane) else {
             return Ok(false);
         };
-        let watched = record
-            .delivery
-            .borrow()
-            .watched
-            .filter(|watched| watched.message == message);
-        let printing = watched
-            .and_then(|watched| watched.screen_quiet_ms)
-            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);
-        let boxed = if printing {
-            None
-        } else {
-            returning(window.input_box(&*self.seams.host, &pane)).await
-        };
-        // A box that could not be read because the screen lacks bytes the window printed is
-        // no box that shows nothing: look again at the next ask, as for a window that prints.
-        let printing = printing || (boxed.is_none() && watched.is_some_and(|w| w.screen_behind));
+        // One look decides it all: no look, or a screen that changed within the last seconds, is
+        // a window that waits once more (its rest begins again, and nothing is pasted); a box
+        // that holds the paste gets an Enter, on that look; any other box says the paste went.
+        let looked = self.look_quietly(&pane).await;
+        let after = after_wait(looked.as_ref(), window.harness());
         let on_its_way = record
             .delivery
             .borrow()
@@ -475,12 +458,16 @@ impl Dispatcher {
         if self.forgotten(record) || !on_its_way {
             return Ok(true);
         }
-        let held = boxed == Some(InputBox::Holds);
-        if !(printing || held) {
-            return Ok(false);
-        }
-        if held {
-            self.enter_again(record, message).await?;
+        let held = matches!(after, AfterWait::EnterAgain(_));
+        match after {
+            AfterWait::PasteAgain => return Ok(false),
+            AfterWait::EnterAgain(_) => {
+                if let Ok(look) = looked.clone() {
+                    self.enter_again(record, message, Some(look), EnterFor::PasteStillThere)
+                        .await?;
+                }
+            }
+            AfterWait::LookAgain | AfterWait::Printing => {}
         }
         let now = self.now();
         if let Some(delivering) = record
@@ -498,6 +485,8 @@ impl Dispatcher {
             "m-{message} was to go again, its record never having shown it: its window {}; it waits once more, and is not pasted again",
             if held {
                 "holds it in its input box, and Enter was pressed once more"
+            } else if looked.is_err() {
+                "could not be looked at"
             } else {
                 "printed on its screen within the last seconds"
             }
@@ -519,7 +508,6 @@ impl Dispatcher {
                     last: now,
                     longest_pass: now - delivering.since,
                     screen_quiet_ms: None,
-                    screen_behind: false,
                 },
                 |watched| Watched {
                     last: now,
@@ -970,39 +958,34 @@ impl Dispatcher {
         self: &Rc<Self>,
         record: &Rc<Record>,
         message: i64,
+        taken: Option<Look>,
+        needs: EnterFor,
     ) -> Result<(), EngineError> {
-        let Some(pane) = record.window.borrow().pane.clone() else {
+        let (Some(pane), Some(window)) = ({
+            let part = record.window.borrow();
+            (part.pane.clone(), part.window.clone())
+        }) else {
             return Ok(());
         };
         self.entered_again(record, message, true);
         // A host that cannot say what the window does now says nothing of the paste.
-        let Some(snapshot) = self.snapshot_now(&pane, false).await else {
+        let look = match taken {
+            Some(look) => look,
+            None => match self.look_recorded(&pane).await {
+                Ok(look) => look,
+                Err(_) => {
+                    self.entered_again(record, message, false);
+                    self.unknown(record, NO_ANSWER);
+                    return Ok(());
+                }
+            },
+        };
+        // What the human has typed since would go with it: they send both. And the box must
+        // hold what the Enter is for, on this look, still for a while.
+        let EnterLicence::Go(at) = licence_enter(&look, window.harness(), needs) else {
             self.entered_again(record, message, false);
-            self.unknown(record, NO_ANSWER);
             return Ok(());
         };
-        let snapshot = Some(snapshot);
-        let quiet = snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))
-            .and_then(Value::as_f64);
-        // What the human has typed since would go with it: they send both.
-        let ready = snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)))
-            && !js::truthy(
-                snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.get("unsent")),
-            )
-            && quiet.is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
-            // The window's output is all in the screen the quiet was read from: an Enter into
-            // a window that has printed what is not yet drawn may go before its last bytes.
-            && snapshot.as_ref().is_some_and(output_is_drawn);
-        if !ready {
-            self.entered_again(record, message, false);
-            return Ok(());
-        }
         // Enter sends what waits in the input box: only as the ledger admits the
         // paste now, its project open and nothing of it withdrawn while the screen
         // was looked at (`deliveries`). Withheld, the paste stays in the box, and
@@ -1032,10 +1015,13 @@ impl Dispatcher {
             }
             Enter::Arrived => return Ok(()),
         }
-        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
-        // A key the host did not take is pressed again at the next look's
-        // Enter, if any: `.catch(() => {})` made a promise of its own to wait on.
-        let _ = returning(self.seams.host.request("pane.input", input)).await;
+        // A key the host did not take (it checks the look again where it writes, and refuses
+        // an Enter for a box that changed, output not drawn or a key typed since) is pressed
+        // again at the next look's Enter, if any.
+        if !self.enter(&pane, &at).await.ok {
+            self.entered_again(record, message, false);
+            return Ok(());
+        }
         self.trace_window(record, WindowEvent::EnterAgain { message })
     }
 
@@ -1084,15 +1070,6 @@ impl Dispatcher {
             "{window} could not be read ({why}): m-{message} waits, its rest begun again; \
              {reads} reads of it came to nothing in {secs} s"
         ));
-    }
-
-    /// Whether the window's screen shows every byte of output the pty gave, as the pane host
-    /// says now: a box read off it is then the window's box. A host that cannot say, or gives
-    /// no counts, has none pending (the box read stands, as before the counts).
-    pub(crate) async fn screen_current(&self, pane: &Pane) -> bool {
-        self.snapshot_now(pane, false)
-            .await
-            .is_none_or(|snapshot| output_is_drawn(&snapshot))
     }
 
     /// The pane host's word on the window now: none where it failed, or came too late
@@ -1146,7 +1123,6 @@ impl Dispatcher {
                 .get(SCREEN_QUIET_MS)
                 .and_then(Value::as_f64)
                 .map(|quiet| quiet as i64);
-            watched.screen_behind = !output_is_drawn(&snapshot);
         }
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");
@@ -1233,12 +1209,3 @@ fn item_ms(item: &Item) -> Option<i64> {
     }
 }
 
-/// Whether a pane host's `snapshot` says the screen shows every byte of output the pty gave
-/// (`outputDrawn` equal to `outputRead`); a host that gives no counts has none pending.
-pub(crate) fn output_is_drawn(snapshot: &Value) -> bool {
-    let count = |name: &str| snapshot.get(name).and_then(Value::as_u64);
-    match (count("outputRead"), count("outputDrawn")) {
-        (Some(read), Some(drawn)) => read == drawn,
-        _ => true,
-    }
-}

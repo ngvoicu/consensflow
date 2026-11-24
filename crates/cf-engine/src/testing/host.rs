@@ -72,6 +72,8 @@ pub struct FakeHost {
     /// The panes the engine looked at for a dialog of their harness
     /// ([`EngineHost::screen`]), in order.
     screen_looks: RefCell<Vec<Pane>>,
+    /// The panes the engine took a look at the input box of ([`EngineHost::look`]), in order.
+    looks: RefCell<Vec<Pane>>,
     /// How many alerts the system has on screen, as `pane.alerts` answers it
     /// ([`FakeHost::set_alerts`]): none said, unless the test says.
     alerts: Cell<Option<usize>>,
@@ -144,6 +146,36 @@ impl FakeHost {
             panic!("a snapshot is an object");
         };
         *self.snapshot.borrow_mut() = fields;
+    }
+
+    /// What the screen shows of the window's input box from now on, as a Claude Code window draws
+    /// it between its rules: nothing in it (`Empty`), words in it (`Holds`), or no box at all
+    /// (`None`). The reader of the harness the fake answers for reads it so
+    /// ([`cf_harness::Look::reads`]).
+    pub fn shows_box(&self, shown: Option<cf_harness::contract::InputBox>) {
+        use cf_harness::contract::InputBox;
+        let rule = "─".repeat(40);
+        let mut fields = self.snapshot.borrow_mut();
+        match shown {
+            None => {
+                fields.remove("bottom");
+                fields.remove("cursor");
+            }
+            Some(shown) => {
+                let (typed, plain) = match shown {
+                    InputBox::Empty => ("", 0),
+                    InputBox::Holds => (" a message the human typed", 26),
+                };
+                fields.insert(
+                    "bottom".to_owned(),
+                    json!([rule, format!("❯{typed}"), rule]),
+                );
+                fields.insert(
+                    "cursor".to_owned(),
+                    json!({ "line": 1, "col": 2, "shown": true, "plainAfter": plain }),
+                );
+            }
+        }
     }
 
     /// How many alerts the system has on screen from now on, as the host says it: none where it
@@ -248,6 +280,12 @@ impl FakeHost {
         self.quiet_looks.borrow().clone()
     }
 
+    /// How many looks at a window's input box the engine took through [`EngineHost::look`]: no
+    /// call of Node's host, so not among the requests.
+    pub fn look_count(&self) -> usize {
+        self.looks.borrow().len()
+    }
+
     /// The panes the engine looked at for a dialog of their harness, in order
     /// ([`EngineHost::screen`]): no call of Node's host, so not among the requests.
     pub fn screen_looks(&self) -> Vec<Pane> {
@@ -328,6 +366,8 @@ impl FakeHost {
             // a snapshot it asked none of reads none (T-946).
             if !drawn_asked {
                 answer.remove("bottom");
+            } else {
+                name_what_is_shown(&mut answer);
             }
         }
         Value::Object(answer)
@@ -403,6 +443,26 @@ pub fn window_of(id: &str, handle: &str) -> bool {
         && rest[digits..]
             .strip_prefix('-')
             .is_some_and(|participant| participant.starts_with(&format!("{handle}-")))
+}
+
+/// What a host that gives the screen's lines also gives with them: the count of the human's keys,
+/// and the name of what the lines show (`seen`), made of the lines and the cursor as the real
+/// host's is.
+fn name_what_is_shown(answer: &mut Map<String, Value>) {
+    use std::hash::{Hash, Hasher};
+    answer
+        .entry("bottom")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    answer.entry("typed").or_insert_with(|| json!(0));
+    if !answer.contains_key("seen") {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        answer["bottom"].to_string().hash(&mut hasher);
+        answer
+            .get("cursor")
+            .map(ToString::to_string)
+            .hash(&mut hasher);
+        answer.insert("seen".to_owned(), json!(format!("{:016x}", hasher.finish())));
+    }
 }
 
 /// A pane as the Node traces write it.
@@ -540,6 +600,22 @@ impl EngineHost for FakeHost {
         // The lines as drawn go only to a request that asks for them (`request`): this asks none.
         answer.remove("bottom");
         Box::pin(async move { Ok(Value::Object(answer)) })
+    }
+
+    /// One look at the screen the test set ([`FakeHost::set_snapshot`]), as a host that asks for
+    /// the lines answers it. Answered at once, in no turn of its own, and written down nowhere
+    /// but [`FakeHost::look_count`]: the traces have no such call.
+    fn look<'a>(
+        &'a self,
+        pane: &'a Pane,
+    ) -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>> {
+        self.looks.borrow_mut().push(pane.clone());
+        let mut answer = Map::new();
+        answer.insert("ok".to_owned(), Value::Bool(true));
+        answer.extend(self.snapshot.borrow().clone());
+        name_what_is_shown(&mut answer);
+        let look = cf_harness::Look::of(&Value::Object(answer));
+        Box::pin(async move { look })
     }
 
     /// What the test set the alerts on screen to ([`FakeHost::set_alerts`]), answered at once and

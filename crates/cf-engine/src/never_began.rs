@@ -48,19 +48,16 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use cf_base::{js, time};
+use cf_base::time;
+use cf_harness::{licence_enter, EnterFor, EnterLicence};
 use cf_harness::contract::{Input, Observed};
 use cf_harness::records::{Reading, Role};
 use cf_ledger::{ParticipantView, ProjectView};
-use cf_proto::panes::SCREEN_QUIET_MS;
 use cf_proto::trace::WindowEvent;
-use serde_json::{json, Value};
 
-use crate::arrival::{output_is_drawn, ENTER_AGAIN_QUIET_MS};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::Shown;
 
@@ -68,9 +65,6 @@ use crate::shown::Shown;
 /// nothing: a harness at work draws within it (Claude Code's, Codex's, Pi's, Devin's and
 /// Muse's spinners and timers every second or faster).
 pub(crate) const QUIET_MS: f64 = 10_000.0;
-
-/// An Enter.
-const ENTER: u8 = 13;
 
 /// A message standing alone in a record: its item, and the message by its header.
 type Alone = (Arc<str>, Option<i64>);
@@ -175,8 +169,20 @@ impl Dispatcher {
         let Some((entered, pressed)) = unbegun.entered else {
             // Spent before the host is asked: no other look presses it meanwhile.
             self.spent(record, &unbegun.item, now, Pressed::Unanswered);
-            let pressed = self.press_begun(record, &unbegun).await?;
-            self.spent(record, &unbegun.item, now, pressed);
+            match self.press_begun(record, &unbegun).await? {
+                Some(pressed) => self.spent(record, &unbegun.item, now, pressed),
+                // The once is not spent: no look came, or the host refused its Enter.
+                None => {
+                    if let Some(unbegun) = record
+                        .never_began
+                        .borrow_mut()
+                        .as_mut()
+                        .filter(|each| each.item == unbegun.item)
+                    {
+                        unbegun.entered = None;
+                    }
+                }
+            }
             return Ok(());
         };
         // What it shows goes with the note: a snapshot of its screen.
@@ -314,45 +320,37 @@ impl Dispatcher {
     }
 
     /// The once of a message standing alone: Enter, into a window that takes pastes, quiet
-    /// and holding none of the human's words unsent. A harness that takes its messages over
-    /// a channel of its own is pressed nothing, and its once is spent all the same.
+    /// and holding none of the human's words unsent, on one look at it. A harness that takes its
+    /// messages over a channel of its own is pressed nothing, and its once is spent all the
+    /// same. No look, or one the host refuses the Enter for (the box changed, output pending,
+    /// the human typed): none, and the once is not spent: the next pass looks again.
     async fn press_begun(
         &self,
         record: &Record,
         unbegun: &Unbegun,
-    ) -> Result<Pressed, EngineError> {
-        let pane = record.window.borrow().pane.clone();
+    ) -> Result<Option<Pressed>, EngineError> {
+        let (pane, window) = {
+            let part = record.window.borrow();
+            (part.pane.clone(), part.window.clone())
+        };
         let pasted = matches!(record.window.borrow().input, Input::Pasted { .. });
-        let Some(pane) = pane.filter(|_| pasted) else {
-            return Ok(Pressed::Channel);
+        let (Some(pane), Some(window)) = (pane.filter(|_| pasted), window) else {
+            return Ok(Some(Pressed::Channel));
         };
-        // What the human typed and has not sent would go with it: the host says so.
-        let Some(mut snapshot) = self.snapshot_now(&pane, false).await else {
-            return Ok(Pressed::Unanswered);
+        let Ok(look) = self.look_recorded(&pane).await else {
+            return Ok(None);
         };
-        // A read in flight at this one look is no printing window: look once more before the
-        // once-only Enter is spent as one.
-        if !output_is_drawn(&snapshot) {
-            snapshot = match self.snapshot_now(&pane, false).await {
-                Some(again) => again,
-                None => return Ok(Pressed::Unanswered),
-            };
+        // What the human typed and has not sent would go with it; and what the screen shows held
+        // still, not its output: a window that repaints the same at rest prints all the time
+        // (Muse Code after a stopped command, T-1083).
+        let at = match licence_enter(&look, window.harness(), EnterFor::TurnNeverBegan) {
+            EnterLicence::Go(at) => at,
+            EnterLicence::Wait(_) if look.unsent() => return Ok(Some(Pressed::Unsent)),
+            EnterLicence::Wait(_) => return Ok(Some(Pressed::Printing)),
+        };
+        if !self.enter(&pane, &at).await.ok {
+            return Ok(None);
         }
-        if js::truthy(snapshot.get("unsent")) {
-            return Ok(Pressed::Unsent);
-        }
-        // What the screen shows held still, not its output: a window that repaints the same
-        // at rest prints all the time (Muse Code after a stopped command, T-1083).
-        let quiet = snapshot
-            .get(SCREEN_QUIET_MS)
-            .and_then(Value::as_f64)
-            .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
-        if !quiet || !output_is_drawn(&snapshot) {
-            return Ok(Pressed::Printing);
-        }
-        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
-        // A key the host did not take is not pressed again: the next wait's end tells.
-        let _ = returning(self.seams.host.request("pane.input", input)).await;
         self.seams.log.warn(&format!(
             "the window {} began no turn on {}, which its record shows: Enter was pressed once more",
             pane.id,
@@ -363,7 +361,7 @@ impl Dispatcher {
         if let Some(message) = unbegun.message {
             self.trace_window(record, WindowEvent::EnterAgain { message })?;
         }
-        Ok(Pressed::Enter)
+        Ok(Some(Pressed::Enter))
     }
 }
 

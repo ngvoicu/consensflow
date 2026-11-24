@@ -191,8 +191,6 @@ pub struct BoxState {
     /// message an interrupt put back, a `/compact` the human's cancel left): the paste clears it
     /// first.
     pub stale_paste: bool,
-    /// The engine emptied the box just before this hand-over: nothing more is pressed.
-    pub emptied: bool,
 }
 
 /// What a look licenses for a window that takes pastes.
@@ -246,7 +244,7 @@ pub fn licence_paste(
     if !over_count && !stale && reads == BoxReading::Holds {
         return PasteLicence::Wait(Held::Unsent);
     }
-    let clear_first = (stale && !state.emptied && reads != BoxReading::Empty).then_some(clear);
+    let clear_first = (stale && reads != BoxReading::Empty).then_some(clear);
     PasteLicence::Go {
         at: look.at(),
         read_empty: over_count,

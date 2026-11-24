@@ -9,8 +9,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_base::js;
+use cf_harness::PasteLicence;
 use cf_harness::contract::{
-    Admission, Held, HostError, Input, Observed, Over, Pane, PaneHost, Readiness, Work,
+    Admission, Held, HostError, Observed, Over, Pane, PaneHost, Readiness, Work,
 };
 use cf_harness::records::{Reading, Role};
 use cf_ledger::model::MAX_BODY;
@@ -18,11 +19,10 @@ use cf_ledger::{
     is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
     MessageView, NewNote, ParticipantView, ProjectView, TaskView,
 };
-use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
+use cf_proto::panes::HumanInput;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::arrival::{output_is_drawn, ENTER_AGAIN_QUIET_MS};
 use crate::at_work::OnWork;
 use crate::delivery_text::{is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
@@ -34,7 +34,6 @@ use crate::runtime::returning;
 mod tests;
 use crate::seams::EngineError;
 use crate::shown::{after_words, words_key, Evidence, Paste, Shown};
-use crate::windows::pane_body_drawn;
 
 /// What ends the words of a failed message sent back to whoever sent them where they
 /// fill a note's whole room.
@@ -203,15 +202,14 @@ pub(crate) struct DeliveryPart {
     /// record had lost before it: one lost since is lost from that turn.
     pub(crate) lost_before: Option<(i64, usize)>,
     /// A paste whose Enter was withheld (`arrival`), which the window's input box
-    /// may hold: nothing is pasted into that window until the host has taken the
-    /// keys that empty it ([`Dispatcher::clear_box`]), unless the window's record
+    /// may hold: the next paste into that window empties it first, with the key that goes with
+    /// the paste ([`cf_harness::PasteLicence`]), unless the window's record
     /// shows the human sent it. A window opened since has a box of its own, which
     /// holds nothing of it.
     pub(crate) uncleared: Option<Uncleared>,
-    /// The pane whose input box the engine emptied, and nothing went in since:
-    /// each paste is told so until one goes in ([`PaneHost::cleared`]), and its
-    /// adapter presses nothing more to empty it.
-    pub(crate) emptied: Option<Pane>,
+    /// The look the attempt's licence is made from: the one the delivery took as it began, and
+    /// the fresh one the pacing took just before the paste ([`crate::box_keys`]).
+    pub(crate) looked: Option<cf_harness::Look>,
     /// The rest the window's looks have read since it began (`pacing`): none while a
     /// look reads it otherwise.
     pub(crate) rest: Option<crate::pacing::Rest>,
@@ -318,8 +316,6 @@ pub(crate) struct Admitting<'a> {
     carried: Vec<i64>,
     /// What it hands over is a paste handed over already, which an Enter sends.
     again: bool,
-    /// The engine emptied the window's input box just before the hand-over.
-    cleared: bool,
     /// A row of the paste its window has since, which says the window took it.
     received: Cell<Option<i64>>,
     /// It said no, or could not tell: what was to go in did not.
@@ -342,7 +338,6 @@ impl<'a> Admitting<'a> {
             message,
             carried,
             again: false,
-            cleared: false,
             received: Cell::new(None),
             refused: Cell::new(false),
             withdrawn: Cell::new(false),
@@ -356,12 +351,6 @@ impl<'a> Admitting<'a> {
     /// its window has since is no row withdrawn.
     pub(crate) fn again(mut self) -> Self {
         self.again = true;
-        self
-    }
-
-    /// The host for a hand-over the engine emptied the input box for just before.
-    pub(crate) fn cleared(mut self, cleared: bool) -> Self {
-        self.cleared = cleared;
         self
     }
 
@@ -489,10 +478,6 @@ impl PaneHost for Admitting<'_> {
             }
             answer
         })
-    }
-
-    fn cleared(&self) -> bool {
-        self.cleared
     }
 
     fn admits(&self) -> bool {
@@ -635,14 +620,10 @@ impl Dispatcher {
         record: &Rc<Record>,
         message: MessageView,
     ) -> Result<(), EngineError> {
-        let host: &dyn PaneHost = &*self.seams.host;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
-        let ready = window
-            .ready(host, &pane)
-            .await
-            .map_err(|error| EngineError::said("not-ready", error))?;
+        let ready = self.readiness_on_a_look(record, &window, &pane).await?;
         if let Some(input) = window.human_input() {
             record.delivery.borrow_mut().input = Some(input);
         }
@@ -679,10 +660,7 @@ impl Dispatcher {
             // A window that never will be ready is a launch that did not come up.
             Readiness::Unfit(why) => return self.give_up_unfit(record, &message, &why).await,
         };
-        // Held for what the human typed and has not sent: the board says so. A box
-        // the engine emptied holds the human's words now, which an interrupt of ours
-        // may put back there: it is no longer known empty (Calliope's review of
-        // 2026-10-21, round 12).
+        // Held for what the human typed and has not sent: the board says so.
         {
             let mut part = record.delivery.borrow_mut();
             part.unsent = held == Some(Held::Unsent);
@@ -690,9 +668,6 @@ impl Dispatcher {
                 Some(Held::ForHuman(words)) => Some(words.clone()),
                 _ => None,
             };
-        }
-        if held == Some(Held::Unsent) {
-            record.delivery.borrow_mut().emptied = None;
         }
         if let Some(held) = held {
             // Said once a reason, so a wait is in the trace, not a mystery.
@@ -750,10 +725,16 @@ impl Dispatcher {
                 self.changed();
                 return Ok(());
             }
-            // The key that empties it goes only into a window whose screen held still
-            // for a while and holds nothing the human typed since it was read ready:
-            // a second Control-C in a row ends Claude Code (the same review, round 11).
-            let quiet = self.may_press(&pane).await;
+            // The key that empties it goes, with the paste, only into a window whose screen held
+            // still for a while and holds nothing the human typed, on the look it was read
+            // ready by: a second Control-C in a row ends Claude Code (the same review, round 11).
+            let attempt = record.delivery.borrow().looked.clone();
+            let quiet = attempt.as_ref().is_some_and(|look| {
+                !look.unsent()
+                    && look
+                        .screen_quiet_ms()
+                        .is_some_and(|quiet| quiet >= cf_harness::SCREEN_QUIET_FOR_ENTER_MS)
+            });
             if self.forgotten(record)
                 || !self.in_open_project(message.project_id)?
                 || self
@@ -829,6 +810,16 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
+        // The paste goes as the licence of the latest look says: the one pacing took just
+        // before it, or the attempt's own. Nothing is begun, and nothing spent, on a wait.
+        let latest = record.delivery.borrow().looked.clone();
+        let licence = latest
+            .as_ref()
+            .map(|look| self.licence_of(record, &pane, &window, look));
+        if let Some(PasteLicence::Wait(held)) = &licence {
+            let reason = format!("the window is not ready for a paste: {}", held.sentence());
+            return self.held_once(record, message.id, &reason).await;
+        }
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         // Its `delivery.begun` says what the look that let it go read, where one did.
@@ -871,47 +862,15 @@ impl Dispatcher {
                 .paste_into(message.id, conversation.id)?;
         }
         let session = conversation.and_then(|conversation| conversation.native_session);
-        // The box is emptied once the delivery is begun, so that a paste follows
-        // the key; a key the host did not take spends the attempt, as a refused
-        // paste does, and the last fails the delivery (the same review).
-        let clearing = stale.as_ref().is_some_and(|stale| stale.pane == pane);
-        let cleared = if clearing {
-            self.clear_box(record, &pane).await
-        } else {
-            Cleared::Taken
-        };
-        // The key goes only into a box read off a screen that shows all the window printed: the
-        // box may be empty already, and the key does harm there. The attempt is given back and
-        // the message waits, as for a window at work.
-        if cleared == Cleared::Behind {
-            let why = "its screen does not yet show all that it printed";
-            self.seams
-                .ledger
-                .borrow_mut()
-                .retry_delivery(message.id, why, true)?;
-            self.rest_ends(record);
-            self.held_once(record, message.id, why).await?;
-            self.changed();
-            return Ok(());
-        }
-        if cleared == Cleared::Failed {
-            let delivering = self.delivering(record, message.id, carried);
-            return self.settle_failure(
-                delivering,
-                "its window's input box could not be emptied of a paste whose Enter was withheld",
-                true,
-            );
-        }
         // A turn begins with this message: what the window's tree runs now came before it,
         // and so did the rest the window was seen at, as every monitor of the turn will.
         self.mark_turn(record, &pane).await;
         record.held.borrow_mut().rests.pasted();
         // The adapter asks the ledger at its hand-over whether the project is still
         // open and nothing of the paste was withdrawn since it was begun.
-        let cleared = record.delivery.borrow().emptied.as_ref() == Some(&pane);
-        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);
+        let admitting = Admitting::handing(self, message.id, carried.clone());
         let awaiting_report = AwaitingBriefReport::new(record, &pane, message.id);
-        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
+        let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
             Err(error) => Admission::Refused {
@@ -928,9 +887,29 @@ impl Dispatcher {
         if let Some(cause) = admitting.report_failed.borrow_mut().take() {
             return Err(cause);
         }
-        // Something went into the box, or may have: it is no longer known empty.
-        if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
-            record.delivery.borrow_mut().emptied = None;
+        // The key that empties a box of a paste whose Enter was withheld went with this one's
+        // write, unless the host wrote nothing: what the box held is not there to be pasted over.
+        let wrote = !matches!(
+            outcome,
+            Admission::Refused { .. } | Admission::Busy { .. } | Admission::LookAgain { .. }
+        );
+        if wrote
+            && matches!(
+                &licence,
+                Some(PasteLicence::Go {
+                    clear_first: Some(_),
+                    ..
+                })
+            )
+        {
+            let mut part = record.delivery.borrow_mut();
+            if part
+                .uncleared
+                .as_ref()
+                .is_some_and(|stale| stale.pane == pane)
+            {
+                part.uncleared = None;
+            }
         }
         if self.forgotten(record) {
             return Ok(());
@@ -957,6 +936,20 @@ impl Dispatcher {
         delivering.session = session;
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);
+        }
+        // The look that licensed the paste was no longer true where the host wrote (the box
+        // changed, output was pending, or the human typed): nothing went in, no attempt is
+        // spent, and the message waits for the next look. A delivery does not fail for it.
+        if let Admission::LookAgain { reason } = &outcome {
+            let why = format!("the window changed as the message was handed over: {reason}");
+            {
+                let mut ledger = self.seams.ledger.borrow_mut();
+                ledger.retry_delivery(message.id, &why, true)?;
+            }
+            self.rest_ends(record);
+            self.held_once(record, message.id, &why).await?;
+            self.changed();
+            return Ok(());
         }
         // Refused for being at work (Pi's extension, D9): nothing went in, so the
         // attempt is given back, and the message waits for the window's next rest.
@@ -1033,14 +1026,10 @@ impl Dispatcher {
         let Some((first, text)) = self.owed_first(record) else {
             return Ok(());
         };
-        let host: &dyn PaneHost = &*self.seams.host;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
-        let ready = window
-            .ready(host, &pane)
-            .await
-            .map_err(|error| EngineError::said("not-ready", error))?;
+        let ready = self.readiness_on_a_look(record, &window, &pane).await?;
         record.delivery.borrow_mut().input = window.human_input();
         // Forgotten, closed, handed or given up while the window got ready: nothing.
         if self.forgotten(record)
@@ -1067,10 +1056,8 @@ impl Dispatcher {
                     };
                     // What the human typed is theirs to send: the launch's time is not
                     // spent while it waits for them, as it is not while the window asks
-                    // whether to trust its folder (`trust`), and the box holds their
-                    // words now, so it is no longer known empty (`deliver`).
+                    // whether to trust its folder (`trust`).
                     if unsent {
-                        part.emptied = None;
                         let now = self.now();
                         if let Some(delivering) = part
                             .delivering
@@ -1127,7 +1114,8 @@ impl Dispatcher {
         let session = conversation.and_then(|conversation| conversation.native_session);
         let admitting = Admitting::handing(self, first.message, first.carried.clone());
         let awaiting_report = AwaitingBriefReport::new(record, &pane, first.message);
-        let handed = returning(window.deliver(&admitting, &pane, &text)).await;
+        let licence = self.first_licence(record, &window, &pane);
+        let handed = returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await;
         let reported = record
             .delivery
             .borrow()
@@ -1576,92 +1564,6 @@ impl Dispatcher {
         let part = record.delivery.borrow();
         let held = part.held.as_ref()?;
         (self.now() - held.since_ms >= HELD_TOLD_MS).then_some(held.message)
-    }
-
-    /// Whether a key may be pressed into `pane` now: what its screen shows held still for
-    /// [`ENTER_AGAIN_QUIET_MS`] and it holds nothing the human typed.
-    async fn may_press(&self, pane: &Pane) -> bool {
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        let snapshot = returning(self.seams.host.request("pane.snapshot", body))
-            .await
-            .ok();
-        snapshot.is_some_and(|snapshot| {
-            snapshot.get("ok") == Some(&Value::Bool(true))
-                && !js::truthy(snapshot.get("unsent"))
-                && snapshot
-                    .get(SCREEN_QUIET_MS)
-                    .and_then(Value::as_f64)
-                    .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS)
-                && output_is_drawn(&snapshot)
-        })
-    }
-
-    /// Empties `pane`'s input box of a paste whose Enter was withheld
-    /// ([`DeliveryPart::uncleared`]), with the keys of its harness
-    /// ([`Input::Pasted`]): whether the host took them, which is when the box
-    /// counts as empty, and stays so until something goes in
-    /// ([`DeliveryPart::emptied`]). A box its harness reads empty on the screen
-    /// (the human emptied it) is pressed nothing and counts as empty: the key does
-    /// harm there, Control-C arming the quit of Claude Code and Muse Code, which a
-    /// paste between does not disarm in Muse (T-829's probe), and stopping a turn at
-    /// work.
-    pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> Cleared {
-        let Input::Pasted { clear } = record.window.borrow().input else {
-            return Cleared::Taken;
-        };
-        let read = self.box_read(record, pane).await;
-        if read == BoxRead::Behind {
-            return Cleared::Behind;
-        }
-        let taken = if read == BoxRead::Empty {
-            true
-        } else {
-            let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
-            let answer = returning(self.seams.host.request("pane.input", body)).await;
-            answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)))
-        };
-        if taken {
-            let mut part = record.delivery.borrow_mut();
-            if part
-                .uncleared
-                .as_ref()
-                .is_some_and(|stale| &stale.pane == pane)
-            {
-                part.uncleared = None;
-            }
-            part.emptied = Some(pane.clone());
-        }
-        if taken {
-            Cleared::Taken
-        } else {
-            Cleared::Failed
-        }
-    }
-
-    /// What the window of `record` in `pane` shows of its input box now, as its harness reads
-    /// it ([`cf_harness::contract::Window::box_read_empty`]): not empty where the screen cannot
-    /// be read, and behind where the host says the screen lacks bytes the window printed (a box
-    /// read off it is not the window's box).
-    async fn box_read(&self, record: &Record, pane: &Pane) -> BoxRead {
-        let Some(window) = record.window.borrow().window.clone() else {
-            return BoxRead::NotEmpty;
-        };
-        // The box is read from the screen's lines as drawn, which the host sends only when
-        // asked (`pane_body_drawn`): asked without them, every box read not empty, and the
-        // key went into empty ones too (T-946).
-        let snapshot = returning(
-            self.seams
-                .host
-                .request("pane.snapshot", pane_body_drawn(pane)),
-        )
-        .await
-        .ok()
-        .filter(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)));
-        match snapshot {
-            Some(snapshot) if !output_is_drawn(&snapshot) => BoxRead::Behind,
-            Some(snapshot) if window.box_read_empty(&snapshot) => BoxRead::Empty,
-            _ => BoxRead::NotEmpty,
-        }
     }
 
     /// A member's turn that failed while its task was not working (waiting on an
@@ -2467,24 +2369,4 @@ pub(crate) fn described(message: &MessageView) -> String {
         .task_number
         .map_or_else(String::new, |number| format!(" on T-{number}"));
     format!("{kind} from {from}{on}")
-}
-
-/// What a window's input box reads as, off the pane host's snapshot of its screen.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BoxRead {
-    Empty,
-    NotEmpty,
-    /// The screen lacks bytes the window printed: the box on it is not read.
-    Behind,
-}
-
-/// How the keys that empty a box of a paste whose Enter was withheld ended.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Cleared {
-    /// The box is empty, read so or by the keys the host took.
-    Taken,
-    /// The host took no key.
-    Failed,
-    /// The screen lacks bytes the window printed: no key was pressed, look again.
-    Behind,
 }

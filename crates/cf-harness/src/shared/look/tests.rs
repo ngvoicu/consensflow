@@ -146,10 +146,7 @@ fn a_paste_on_its_way_waits() {
 /// paste's own `clearFirst`, only where the look reads the box holding something.
 #[test]
 fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
-    let stale = BoxState {
-        stale_paste: true,
-        emptied: false,
-    };
+    let stale = BoxState { stale_paste: true };
     let holds = look(&snapshot("/compact", false, None));
     match licence_paste(&holds, Harness::Claude, stale, CLEAR) {
         PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, Some(CLEAR)),
@@ -158,14 +155,6 @@ fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
     let empty = look(&snapshot("", false, None));
     match licence_paste(&empty, Harness::Claude, stale, CLEAR) {
         PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, None, "an empty box"),
-        other => panic!("{other:?}"),
-    }
-    let emptied = BoxState {
-        stale_paste: true,
-        emptied: true,
-    };
-    match licence_paste(&holds, Harness::Claude, emptied, CLEAR) {
-        PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, None, "the engine did"),
         other => panic!("{other:?}"),
     }
     // A box the reader does not read holds the paste: the key would be blind.

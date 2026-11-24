@@ -190,6 +190,13 @@ impl EngineHost for BridgeHost {
         Box::pin(async move { sent.await.map_err(host_error) })
     }
 
+    fn look<'a>(
+        &'a self,
+        pane: &'a Pane,
+    ) -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>> {
+        Box::pin(cf_harness::look(self, pane))
+    }
+
     fn alerts(&self) -> Work<'_, Result<Option<usize>, HostError>> {
         let sent = self.bridge.request("pane.alerts", json!({}), None);
         Box::pin(async move {

@@ -17,7 +17,7 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::{Pane, PaneHost, Readiness};
+use cf_harness::contract::{Pane, Readiness};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 
@@ -348,14 +348,10 @@ impl Dispatcher {
         record: &Rc<Record>,
         message: MessageView,
     ) -> Result<(), EngineError> {
-        let host: &dyn PaneHost = &*self.seams.host;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
-        let ready = window
-            .ready(host, &pane)
-            .await
-            .map_err(|error| EngineError::said("not-ready", error))?;
+        let ready = self.readiness_on_a_look(record, &window, &pane).await?;
         if self.forgotten(record) {
             return Ok(());
         }

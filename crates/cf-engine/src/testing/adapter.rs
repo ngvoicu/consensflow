@@ -23,7 +23,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, NoDefault,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, LaunchId, NoDefault,
     Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
     Work,
 };
@@ -314,10 +314,10 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
-    /// Whether the host said, at each delivery in order, that the engine emptied
-    /// the window's input box just before it (`PaneHost::cleared`). Not written
-    /// down in the traces: Node's dispatcher emptied no box.
-    pub cleared: RefCell<Vec<bool>>,
+    /// Whether each delivery, in order, went with the key that empties the window's input box
+    /// of a paste of ours left in it first (`PasteLicence`'s `clear_first`). Not written down in
+    /// the traces: Node's dispatcher pressed that key on its own, before the paste.
+    pub clear_firsts: RefCell<Vec<bool>>,
     /// Looks at a record with no window open that the test holds, told the
     /// conversation as `[session]`: one let go reads the record as it is then.
     /// Node's dispatcher suite held none.
@@ -372,9 +372,6 @@ pub struct FakeAdapter {
     /// (`Window::idle_word`): every harness's but one with no such word, whose
     /// windows are read at rest by the pacing's fallback.
     pub idle_word: Cell<bool>,
-    /// What its windows' input box holds on their screen (`Window::input_box`): none,
-    /// as a window whose box no reader reads, unless a test says.
-    pub input_box: Cell<Option<InputBox>>,
     /// A window opened again on a conversation reads what the one before it ended in, as a
     /// harness's record keeps it: the failure of its last turn and the quota it said (a
     /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
@@ -459,7 +456,7 @@ impl FakeAdapter {
             place_fails: RefCell::new(None),
             specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
-            cleared: RefCell::new(Vec::new()),
+            clear_firsts: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             last_call_holds: Holds::default(),
@@ -472,7 +469,6 @@ impl FakeAdapter {
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
             idle_word: Cell::new(true),
-            input_box: Cell::new(None),
             rereads_failures: Cell::new(false),
             never_begins: Cell::new(None),
         })
@@ -1338,6 +1334,8 @@ impl Asked {
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
         let window: Rc<dyn Window> = Rc::new(FakeWindow::new(
+            cf_proto::agents::Harness::from_kind(&self.harness)
+                .unwrap_or(cf_proto::agents::Harness::Claude),
             seam,
             id.clone(),
             native.clone(),
