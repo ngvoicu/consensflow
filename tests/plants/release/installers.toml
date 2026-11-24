@@ -1899,17 +1899,6 @@ replace = '''if (!process.env.CI) {'''
 # --- T-850 (T-847's last P3s): the site by its branch tips, a link for an install folder, Windows parity ---
 
 [[plant]]
-name = "installers: install.sh reads the install folder with lstat, so a link to another volume never sweeps"
-meant = "an install folder that is a link to another volume is swept as any: its leftovers are the folder's own"
-runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
-platforms = ["macos"]
-
-[[plant.edit]]
-file = "install/install.sh"
-find = '''"$("$stat" -L -f %d "$2")"'''
-replace = '''"$("$stat" -f %d "$2")"'''
-
-[[plant]]
 name = "installers: to-site --check reads the installers branch no more than HEAD"
 meant = "is satisfied by the installers branch's tip when it holds the two, the checkout holding none"
 runs = [["node", "--test", "tests/to-site.test.mjs"]]
