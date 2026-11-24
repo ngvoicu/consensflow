@@ -63,3 +63,14 @@ impl Drop for SlotRuleOff {
         crate::staff::slots::overflow::set(self.0);
     }
 }
+
+/// Opens `file` as [`crate::open_ledger`] does, with the update to the slots (the last
+/// migration) left out: the ledger as a version without the slots opens it. The gate of
+/// `architecture/staff-slots.md` 9.5 compares what the update leaves with this.
+pub fn open_ledger_without_the_slots_update(
+    file: &std::path::Path,
+    options: crate::Options,
+) -> Result<crate::Ledger, crate::LedgerError> {
+    let migrations = &crate::MIGRATIONS[..crate::MIGRATIONS.len() - 1];
+    crate::ledger::open_ledger_with(file, options, migrations)
+}

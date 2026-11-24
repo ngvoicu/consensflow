@@ -105,6 +105,16 @@ thread_local! {
 /// for a cancelled one, which a cancel up to 3.0.5 left behind, is told to the
 /// chief once (`tasks::note_stranded_waits`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
+    open_ledger_with(file, options, &MIGRATIONS)
+}
+
+/// [`open_ledger`] with the migrations it takes the file through. Only the kit asks for
+/// fewer than [`MIGRATIONS`] (`testing::open_ledger_without_the_slots_update`).
+pub(crate) fn open_ledger_with(
+    file: &Path,
+    options: Options,
+    migrations: &[&str],
+) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
     // is refused at once instead. Node set both of these when it opened.
@@ -120,7 +130,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
             "PRAGMA synchronous = {}",
             synchronous(cfg!(feature = "test-support"))
         ))?;
-        migrate(&db, &MIGRATIONS)
+        migrate(&db, migrations)
     })();
     if let Err(cause) = ready {
         drop(db);

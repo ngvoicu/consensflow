@@ -102,7 +102,10 @@ pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
-pub use slots::{seat_in_slot, slot_rule_off, without_the_slot_rule, SlotRuleOff};
+pub use slots::{
+    open_ledger_without_the_slots_update, seat_in_slot, slot_rule_off, without_the_slot_rule,
+    SlotRuleOff,
+};
 pub use staff_rules::undo_migration_0026;
 
 /// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
