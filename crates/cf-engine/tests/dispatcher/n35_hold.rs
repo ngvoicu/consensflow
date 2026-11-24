@@ -1,8 +1,8 @@
 //! A turn that fails is tried again twice before its task fails (D3's N35). A try is a hold of
 //! the task and main's own Resume, with nothing pending of its own: where main would fail a
 //! working task for a failed end, the task is held for 30 seconds, then for 2 minutes, and the
-//! pass that finds the hold due resumes it. The count is read from the message last pasted into
-//! the window, never kept. Every case drives the stand-in window through real passes and the
+//! pass that finds the hold due resumes it. The count is a number stored on the task (the
+//! ledger raises it with the numbered Resume and resets it on an action, a result or 30 minutes). Every case drives the stand-in window through real passes and the
 //! ledger's own messages, with the tries on at the daemon's pace.
 use super::fixtures::{given, Tiers};
 use cf_engine::testing::{Context, Made};
@@ -1291,4 +1291,197 @@ fn the_hold_notice_offers_the_resume_the_ledger_accepts_and_a_failed_task_the_re
         .borrow_mut()
         .resume_task(t.project.id, 1, Some("chief"), "The work, rephrased.")
         .expect("the ledger accepts the resume the notice names");
+}
+
+/// The window failed twice and was tried twice: its second try is the turn at work.
+fn two_tries_used(c: &Context, window: &str) {
+    fail(c, window);
+    passes(c, 3);
+    c.advance(31_000);
+    until_resumed(c, "zeus", 1);
+    next_turn_opens(c, window);
+    passes(c, 2);
+    fail(c, window);
+    passes(c, 3);
+    c.advance(121_000);
+    until_resumed(c, "zeus", 2);
+    next_turn_opens(c, window);
+    passes(c, 2);
+}
+
+/// The turn at work fails again: whether the task is held for another try.
+fn fails_again_held(c: &Context, t: &Tiers<'_>, window: &str) -> Option<i64> {
+    fail(c, window);
+    passes(c, 3);
+    t.task(1).task.retry.map(|retry| retry.which)
+}
+
+fn refused_for_two_minutes(c: &Context, window: &str, busy: bool) {
+    c.advance(1_000);
+    let at = Some(super::fixtures::now(c));
+    let refusal = if busy {
+        Quota::Busy {
+            at,
+            because: "Selected model is at capacity. Please try a different model.".into(),
+        }
+    } else {
+        Quota::Exhausted {
+            at,
+            resets_at: Some(super::fixtures::after(c, 2 * 60_000)),
+        }
+    };
+    c.adapter.refuse(window, refusal);
+    passes(c, 3);
+}
+
+/// T-2189's finding 1: the member's quota or busy model returns by itself with its own Resume,
+/// which is no numbered try and no reset: the count stands across it.
+fn a_short_hold_after_two_tries_fails_the_next_failure(busy: bool) {
+    let c = retrying();
+    let (t, window) = working(&c);
+    two_tries_used(&c, &window);
+    refused_for_two_minutes(&c, &window, busy);
+    assert_eq!(t.task(1).task.state, "paused", "held to the reset");
+    assert!(t.task(1).task.retry.is_none(), "no retry waits");
+    c.advance(121_000);
+    until_resumed(&c, "zeus", 3);
+    c.adapter.with(&window, |agent| agent.quota = None);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), None);
+    assert_eq!(t.task(1).task.state, "failed", "the third failure in a row");
+    assert_eq!(
+        resumes(&c, "zeus"),
+        3,
+        "two tries and the quota's own Resume"
+    );
+}
+
+#[test]
+fn a_two_minute_quota_hold_after_two_tries_leaves_the_next_failure_to_fail_the_task() {
+    a_short_hold_after_two_tries_fails_the_next_failure(false);
+}
+
+#[test]
+fn a_one_minute_busy_model_hold_after_two_tries_leaves_the_next_failure_to_fail_the_task() {
+    a_short_hold_after_two_tries_fails_the_next_failure(true);
+}
+
+#[test]
+fn a_quota_hold_between_two_failures_changes_nobody_s_try() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    refused_for_two_minutes(&c, &window, false);
+    c.advance(121_000);
+    until_resumed(&c, "zeus", 2);
+    c.adapter.with(&window, |agent| agent.quota = None);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(
+        fails_again_held(&c, &t, &window),
+        Some(2),
+        "one try was used: the next failure gets the second"
+    );
+}
+
+#[test]
+fn a_clock_put_back_five_minutes_never_gives_a_third_try() {
+    // T-2189's finding 1, second part: the wall clock stepped back after the first Resume.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    c.step_wall(-5 * 60_000);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), Some(2));
+    c.advance(121_000);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), None);
+    assert_eq!(t.task(1).task.state, "failed");
+    assert_eq!(resumes(&c, "zeus"), 2, "never a third try");
+}
+
+#[test]
+fn a_failure_29_minutes_59_seconds_after_the_second_try_fails_and_30_minutes_after_begins_again() {
+    for (after, held) in [(29 * 60_000 + 59_999, None), (30 * 60_000, Some(1))] {
+        let c = retrying();
+        let (t, window) = working(&c);
+        two_tries_used(&c, &window);
+        // The second Resume was delivered just now: time passes since its delivery.
+        c.advance(after);
+        assert_eq!(
+            fails_again_held(&c, &t, &window),
+            held,
+            "{after} ms after the second try"
+        );
+    }
+}
+
+#[test]
+fn a_chief_s_tell_delivered_to_the_window_gives_it_two_tries_again() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    two_tries_used(&c, &window);
+    c.advance(1_000);
+    c.ledger
+        .borrow_mut()
+        .tell_queued(t.project.id, 1, "chief", "Use the west file.")
+        .unwrap();
+    for _ in 0..8 {
+        passes(&c, 1);
+        if given(&c, "zeus")
+            .iter()
+            .any(|text| text.contains("Use the west file."))
+        {
+            break;
+        }
+    }
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), Some(1));
+}
+
+#[test]
+fn a_restart_between_the_first_try_and_the_next_failure_keeps_the_count() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.edit_ledger(|_| {});
+    c.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = c.make();
+    restarted.settle_after_restart().unwrap();
+    restarted.resume_project(t.project.id).unwrap();
+    c.advance(31_000);
+    for _ in 0..8 {
+        restarted.pass().unwrap();
+        if resumes(&c, "zeus") > 0 {
+            break;
+        }
+    }
+    assert_eq!(resumes(&c, "zeus"), 1, "the first try, after the restart");
+    next_turn_opens(&c, &window);
+    for _ in 0..2 {
+        restarted.pass().unwrap();
+    }
+    fail(&c, &window);
+    for _ in 0..3 {
+        restarted.pass().unwrap();
+    }
+    assert_eq!(
+        t.task(1).task.retry.expect("held again").which,
+        2,
+        "the count stored before the restart is the one read after it"
+    );
 }

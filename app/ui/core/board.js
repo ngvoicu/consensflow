@@ -1697,6 +1697,17 @@ export class BoardView {
     )
   }
 
+  /** What a retry past its time waits for, as the drawer says it: from the board's state at `now`. */
+  #retryWhy(assigneeHandle, now) {
+    // The member whose task it is: a backup's task waits on the backup, folded or not.
+    const lanes = this.#board.lanes
+    const assignee = lanes.find((lane) => lane.participant.handle === assigneeHandle)?.participant
+    const owner =
+      lanes.find((lane) => lane.participant.handle === (assignee?.member ?? assignee?.handle))
+        ?.participant ?? null
+    return retryWaitsFor(this.#board.project.state !== 'open', owner, now)
+  }
+
   #tick() {
     const now = Date.now()
     for (const root of [this.#root, this.#stackCards]) {
@@ -1709,7 +1720,9 @@ export class BoardView {
         }
       }
       for (const held of root.querySelectorAll('.card-held[data-retry]')) {
-        const text = retryWords(JSON.parse(held.dataset.retry), false, now, held.dataset.why || null)
+        // What it waits for follows the clock too: its member's quota may return meanwhile.
+        const why = this.#retryWhy(held.dataset.assignee || null, now)
+        const text = retryWords(JSON.parse(held.dataset.retry), false, now, why)
         if (held.textContent !== text) held.textContent = text
       }
     }
@@ -1744,17 +1757,15 @@ export class BoardView {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
     }
     if (task.retry) {
-      // The member whose task it is: a backup's task waits on the backup, folded or not.
-      const lanes = this.#board.lanes
-      const assignee = lanes.find((lane) => lane.participant.handle === task.assignee)?.participant
-      const owner =
-        lanes.find((lane) => lane.participant.handle === (assignee?.member ?? assignee?.handle))
-          ?.participant ?? null
-      const why = retryWaitsFor(this.#board.project.state !== 'open', owner)
-      const held = element('span', 'card-held', retryWords(task.retry, false, Date.now(), why))
-      // The card left open past its time follows the clock (`#tick`).
+      const now = Date.now()
+      const held = element(
+        'span',
+        'card-held',
+        retryWords(task.retry, false, now, this.#retryWhy(task.assignee, now)),
+      )
+      // The card left open past its time follows the clock (`#tick`), its reason too.
       held.dataset.retry = JSON.stringify(task.retry)
-      held.dataset.why = why ?? ''
+      held.dataset.assignee = task.assignee ?? ''
       where.append(' · ', held)
     }
     if (task.resumeWait) {

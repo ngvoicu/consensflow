@@ -89,6 +89,8 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .filter(|column: &String| table != "project" || column != "own_hands")
+        // The count of a task's tries in a row (0045) is not in the ledger this one is made to be.
+        .filter(|column: &String| table != "task" || column != "turn_retries")
         .collect();
     let quoted = columns
         .iter()
@@ -268,7 +270,11 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
             (
                 name.clone(),
                 sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
-                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(
+                        ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries >= 0)",
+                        "",
+                    ),
             )
         })
         .collect();

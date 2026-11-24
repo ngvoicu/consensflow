@@ -19667,6 +19667,39 @@ test("a retry that becomes due while a closed project's board stays open says to
   );
 });
 
+test("a folded backup's retry card left open follows its member's quota reset, as the drawer does", async ({
+  page,
+}) => {
+  // T-2189: the reason was computed when the card was drawn and kept on every tick.
+  const base = Date.now();
+  const { data } = team({
+    out: { hera: new Date(base + 120_000).toISOString() },
+    working: ["hera"],
+  });
+  const lane = data.boards[1].lanes.find((l) => l.participant.member === "hera");
+  Object.assign(lane.tasks[0], {
+    state: "paused",
+    retry: { kind: "failed", which: 2, of: 2, dueAt: new Date(base + 60_000).toISOString() },
+  });
+  Object.assign(data.tasks["1:22"], lane.tasks[0]);
+  await page.clock.install({ time: base });
+  await open(page, data);
+  const card = page.locator('button.card[data-task="22"]');
+  await expect(card.locator(".card-held")).toContainText("Trying again at");
+  await page.clock.fastForward(65_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for its member to be back (2 of 2)",
+  );
+  await page.clock.fastForward(65_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for its window (2 of 2)",
+  );
+  await card.click();
+  await expect(
+    page.getByRole("complementary", { name: "Task T-22" }).locator(".drawer-meta"),
+  ).toContainText("waiting for its window");
+});
+
 /** The real page emulator and a raw xterm oracle, both at a fixed size. */
 async function utf8CutPage(page) {
   await page.route('**/utf8-cut-test', (route) =>

@@ -31,7 +31,10 @@ use crate::staff::{require_free, Giving};
 use crate::store::Store;
 use crate::views::TaskRow;
 
-use super::RetryFact;
+use super::{RetryFact, RetryHold, RetryPlan};
+
+/// How many numbered Resumes a failed turn gets in a row.
+const TRIES: i64 = 2;
 
 /// The chief (or the human) stops a worker's task without ending it: its
 /// agent is interrupted on the daemon's next look and its window stays for
@@ -527,20 +530,38 @@ pub(crate) fn hold_task(
     until: &str,
     because: &str,
 ) -> Result<TaskView, LedgerError> {
-    hold(store, project_id, number, until, because, None)
+    hold(store, project_id, number, until, because)
 }
 
 /// A hold of a working task whose turn failed, with the fact of the retry it is for, in one
-/// write (D3's N35): the same hold, and main's own Resume at its time is the retry.
+/// write (D3's N35): the same hold, and main's own Resume at its time is the retry. Which try
+/// it is comes from the count on the task, which this write reads at its own moment (a count
+/// 30 minutes past its last numbered Resume is zero first); where the two tries are used,
+/// nothing is written and the answer says so.
 pub(crate) fn hold_task_for_retry(
     store: &mut Store,
     project_id: i64,
     number: i64,
-    until: &str,
     because: &str,
     fact: &RetryFact<'_>,
-) -> Result<TaskView, LedgerError> {
-    hold(store, project_id, number, until, because, Some(fact))
+    plan: RetryPlan,
+) -> Result<RetryHold, LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let now = store.now_ms();
+        let used = super::turn_retry::standing(store, task.id, now, plan.renew_after_ms)?;
+        if used >= TRIES {
+            return Ok(RetryHold::Spent);
+        }
+        let wait = if used == 0 {
+            plan.unit_ms
+        } else {
+            plan.second_units * plan.unit_ms
+        };
+        hold(store, project_id, number, &time::iso(now + wait), because)?;
+        super::turn_retry::write(store, task.id, used + 1, fact)?;
+        Ok(RetryHold::Held { which: used + 1 })
+    })
 }
 
 fn hold(
@@ -549,7 +570,6 @@ fn hold(
     number: i64,
     until: &str,
     because: &str,
-    retry: Option<&RetryFact<'_>>,
 ) -> Result<TaskView, LedgerError> {
     model::require_text(because, "because", 1000)?;
     if time::parse(until).is_none() {
@@ -571,9 +591,6 @@ fn hold(
             "UPDATE task SET held_until = ? WHERE id = ?",
             params![until, task.id],
         )?;
-        if let Some(fact) = retry {
-            super::turn_retry::write(store, task.id, fact)?;
-        }
         task_by_id(store, task.id)
     })
 }
@@ -1320,9 +1337,12 @@ pub(crate) fn resume_task(
             "queued",
             json!({ "by": by, "message": message_id }),
         )?;
-        // main's own Resume of a hold made for a retry carries that retry (D3's N35).
+        // main's own Resume of a hold made for a retry carries that retry (D3's N35): the try
+        // is used in this write. A person's or the chief's Resume starts the tries again.
         if by.is_none() {
             super::turn_retry::link(store, &task, message_id)?;
+        } else {
+            super::turn_retry::reset(store, task.id)?;
         }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,

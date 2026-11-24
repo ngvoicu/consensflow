@@ -103,10 +103,11 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
-/// Remove the turn-retry table when a fixture reconstructs a ledger before 0045.
+/// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0045.
 pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
+        "ALTER TABLE task DROP COLUMN turn_retries;
+         DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
     )
 }
 
@@ -239,6 +240,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "backup_of"),
             ("participant", "vacation_since"),
             ("participant", "out_kind"),
+            ("task", "turn_retries"),
         ])
     {
         take_column_out(tables, table, column);
@@ -360,7 +362,11 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
-                    .replace(paused_with_project::COLUMN_LINES, "");
+                    .replace(paused_with_project::COLUMN_LINES, "")
+                    .replace(
+                        ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries >= 0)",
+                        "",
+                    );
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the

@@ -87,6 +87,6 @@ pub use tasks::{
     asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanTask, RESUME_WORDS,
     SAME_ERROR_WITHIN_MS,
 };
-pub use tasks::{resumed_in_vain, RetryFact, NEVER_BEGAN};
+pub use tasks::{resumed_in_vain, RetryFact, RetryHold, RetryPlan, NEVER_BEGAN};
 pub use waiting_questions::QuestionWait;
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

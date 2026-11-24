@@ -105,6 +105,18 @@ pub(crate) fn queue(
         ],
     )?;
     let id = store.db.last_insert_rowid();
+    // What a person or the chief gives a task's window about the task, or an answer to its
+    // question, starts its failed turns' tries again (D3's N35). The daemon's own words do not.
+    if let Some(task) = message.task_id {
+        let given = message.kind == "answer" || message.from.is_some_and(|from| from != message.to);
+        if given {
+            store.db.execute(
+                "UPDATE task SET turn_retries = 0
+                  WHERE id = ? AND assignee_id = ? AND turn_retries <> 0",
+                params![task, message.to],
+            )?;
+        }
+    }
     if landing == "queued" && matches!(message.kind, "answer" | "note") {
         adopt(store, id)?;
     }

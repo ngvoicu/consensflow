@@ -210,7 +210,7 @@ mod tests {
             "6dc804588d6b156b184773d4ed178827880749f4ad1e47380a2006407b796bc3",
             "1cf8ebe2c486a4327f449110753c1e4d3eea6d56cb99f77f214a1c90f0ec0fe6",
             "7eb6abb166c8dc0e37ed5f7fb978343abb2fab804aea2b53f142380bd89dc0a8",
-            "fa218ebf4579fcd43573cbbdcc15414043f1326d157f52a1466c183128d57eb8",
+            "cf40b8c80c0d9a81ce50efce62c924f4e19554b2aec25b697cc497838abca84d",
         ];
         // A migration added with no hash would pass by the zip below unpinned.
         assert_eq!(

@@ -4,24 +4,23 @@
 //! finds the hold due resumes it with main's own words. Nothing of a retry is pending anywhere
 //! else: no row with a due time, no message of its own kind, no timer, no deadline.
 //!
-//! **The count is read from what ConsensFlow knows for certain.** `n` is the try that the
-//! message last pasted into the window about the task carried (`Ledger::turn_retry_tries`): 0
-//! for any message but a retry's Resume. A try counts only once its paste is received. An
-//! answer, a tell, a person's Resume or a reopen pasted since makes `n` 0 again, a result ends
-//! the task, and 30 minutes after the last automatic Resume a failure gets a fresh pair. No
-//! harness's reading of a turn's end resets it (an interrupted turn and a look taken between
-//! the record and the wire both read as a success). The daemon alone can never try more than
-//! twice in a row.
+//! **The count is stored, never read from the order of messages.** The tries a task has used in
+//! a row are a number on the task (`task.turn_retries`), raised by the ledger in the write that
+//! queues a numbered Resume and put back to zero in the write of a person's or the chief's
+//! action on the task (a Resume or reopen, a tell, an answer), of its result, or of the first
+//! failure 30 minutes or more after the last numbered Resume was delivered. A quota's or a busy
+//! model's own Resume is neither: the count stands across it. Nothing is ordered by a wall-clock
+//! time, and no harness's reading of a turn's end resets it. The daemon alone can never try
+//! more than twice in a row; if the computer's clock jumps forward, the 30 minutes can end early.
 //!
 //! **Nothing reads why.** No code, no kind and no words of the failure decide: a missing model
 //! gets the same two tries.
 
 use std::rc::Rc;
 
-use cf_base::time;
 use cf_harness::contract::Observed;
 use cf_harness::records::{Quota, Reading, Settlement};
-use cf_ledger::{NewNote, ParticipantView, ProjectView, RetryFact};
+use cf_ledger::{NewNote, ParticipantView, ProjectView, RetryFact, RetryHold, RetryPlan};
 use cf_proto::ledger::TaskView;
 
 use crate::dispatcher::Dispatcher;
@@ -31,8 +30,6 @@ use crate::turn_end::Watching;
 
 /// How many units a failed turn's second try waits (30 seconds, 2 minutes: four to one).
 const SECOND_TRY_UNITS: i64 = 4;
-/// How many tries a turn gets.
-const TRIES: i64 = 2;
 /// How long after the last automatic Resume a failed turn gets a fresh pair of tries.
 const RENEWAL_MS: i64 = 30 * 60 * 1000;
 
@@ -85,56 +82,36 @@ impl Dispatcher {
         if unit == 0 || participant.role == "chief" {
             return Ok(Tried::Fails(said.to_owned()));
         }
-        // The try the last paste carried, read from the ledger: a tell, an answer, a person's
-        // Resume or a reopen pasted since makes it 0, and so does a result (the task is done).
-        // A harness's own reading of a turn's end decides nothing (T-2186): the one other
-        // thing that starts the count again is time, 30 minutes since the last automatic Resume.
-        let n = {
-            let ledger = self.seams.ledger.borrow();
-            match ledger.last_pasted(participant.id, task.id)? {
-                Some(message) => {
-                    let tries = ledger.turn_retry_tries(message.id)?;
-                    let since = message
-                        .delivered_at
-                        .as_deref()
-                        .and_then(time::parse)
-                        .map(|at| self.now() - at);
-                    if tries > 0 && since.is_some_and(|since| since >= RENEWAL_MS) {
-                        0
-                    } else {
-                        tries
-                    }
-                }
-                None => 0,
-            }
-        };
-        if n >= TRIES {
-            return Ok(Tried::Fails(format!("{said} (tried again twice)")));
-        }
-        let wait = if n == 0 {
-            unit
-        } else {
-            SECOND_TRY_UNITS * unit
-        };
-        let until = time::iso(self.now() + wait);
-        self.seams.ledger.borrow_mut().hold_task_for_retry(
+        // The tries used are a number on the task, kept by the ledger in the writes that queue
+        // a numbered Resume and in those that start the count again (a person's or the chief's
+        // action on the task, its result, or a failure 30 minutes after the last numbered
+        // Resume was delivered). The ledger decides in this one write; nothing here orders
+        // messages by their times or reads a harness's idea of how a turn ended.
+        let held = self.seams.ledger.borrow_mut().hold_task_for_retry(
             project.id,
             task.number,
-            &until,
             &format!("its turn failed: {said}"),
             &RetryFact {
                 session: participant.id,
                 kind: "failed",
-                which: n + 1,
                 said,
                 cause,
             },
+            RetryPlan {
+                unit_ms: unit,
+                second_units: SECOND_TRY_UNITS,
+                renew_after_ms: RENEWAL_MS,
+            },
         )?;
-        if n == 0 {
+        let which = match held {
+            RetryHold::Spent => return Ok(Tried::Fails(format!("{said} (tried again twice)"))),
+            RetryHold::Held { which } => which,
+        };
+        if which == 1 {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If that fails too, T-{n} fails. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, or a failure 30 minutes after its last automatic try. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
                 n = task.number,
                 first = spoken(unit),
                 second = spoken(SECOND_TRY_UNITS * unit),

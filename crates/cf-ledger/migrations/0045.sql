@@ -1,8 +1,10 @@
 -- The fact of a hold made for a retry (D3's N35): a turn that failed holds its task and main's
 -- own Resume tries it again. One row for each such hold, written with the hold and never
--- changed but for the message that carried its Resume, once. It has no state to end: the
--- tries a window has used are read from the message last pasted into it, and a row goes only
--- with its task or its session.
+-- changed but for the message that carried its Resume, once. The tries a task has used in a
+-- row are a number on the task, `turn_retries`: it goes up by one in the write that queues a
+-- numbered Resume and back to zero in the write of a person's or the chief's action on the
+-- task, of its result, or of the first failure 30 minutes after the last numbered Resume was
+-- delivered. Every task that exists reads zero.
 CREATE TABLE turn_retry (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
@@ -21,3 +23,4 @@ CREATE TABLE turn_retry (
 );
 CREATE INDEX turn_retry_by_task ON turn_retry (task_id, id);
 CREATE INDEX turn_retry_by_message ON turn_retry (message_id);
+ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries >= 0);
