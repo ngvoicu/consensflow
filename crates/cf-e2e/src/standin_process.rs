@@ -326,12 +326,8 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
 #[cfg(test)]
 fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
     let home = home.as_os_str().to_owned();
-    use crate::live::stores::{Kind, Whose};
     crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
         .into_iter()
-        // Muse's launcher is the one program a stand-in run may look for: the echo cases start it
-        // inside the kit's sandbox, and the door still refuses a write to it.
-        .filter(|root| !(root.store.whose == Whose::Muse && root.store.kind == Kind::Program))
         .map(|root| root.path)
         .collect()
 }
@@ -580,7 +576,27 @@ pub(crate) fn outside_inherited_harness_homes(path: &Path) -> bool {
     let forbidden = INHERITED_HARNESS_HOMES
         .get()
         .unwrap_or_else(|| panic!("stand-in inherited homes not recorded"));
+    // Muse's launcher is the one program a stand-in run may look for: the echo cases start it
+    // inside the kit's sandbox. The door still refuses every write to it (it stays a root).
+    let launchers = muse_launcher_roots();
+    if launchers.iter().any(|launcher| launcher == path) {
+        return true;
+    }
     safe_path_entry(path, forbidden)
+}
+
+/// Muse's launcher and its version file, below the account's home as this process inherited it.
+fn muse_launcher_roots() -> Vec<PathBuf> {
+    use crate::live::stores::{Kind, Whose};
+    let Some(Some(home)) = INHERITED_HOME.get() else {
+        return Vec::new();
+    };
+    let home = home.clone();
+    crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
+        .into_iter()
+        .filter(|root| root.store.whose == Whose::Muse && root.store.kind == Kind::Program)
+        .map(|root| root.path)
+        .collect()
 }
 
 /// Check an inherited PATH candidate before the harness search inspects it.
