@@ -1,6 +1,7 @@
 //! The host's side of a page that comes back: the boundary a subscription fixes, the credit it
 //! settles, the journals of ended windows.
 
+#[cfg(unix)]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
