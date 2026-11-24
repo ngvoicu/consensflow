@@ -538,6 +538,28 @@ fn t2160_a_cursor_only_echo_after_the_look() {
     case.end();
 }
 
+/// T-2160: a key typed and erased again since the look: the screen shows what it showed, the human
+/// holds no unsent text, and still the paste is refused: their key's echo may not be drawn yet.
+#[test]
+fn t2160_a_key_typed_and_erased_since_the_look() {
+    each_harness(|harness| {
+        let answer = kept();
+        let case = Case::new(harness, paste_after_a_look(&answer));
+        case.until_script("case.looked");
+        case.world.echo_as([Echo::Silent]);
+        case.world.type_keys(b"x");
+        case.world.type_keys(&[0x7f]);
+        case.run(&[case.script], |case| case.world.jobs.lock().unwrap().is_empty());
+        case.drawn();
+        case.finish();
+        let outcome = answer.lock().unwrap().take().expect("asked");
+        assert!(matches!(outcome, Err(ArbiterError::Unsent)), "{harness:?}: {outcome:?}");
+        assert!(case.held().is_empty(), "{harness:?}");
+        case.rules();
+        case.end();
+    });
+}
+
 /// T-2160: an echo drawn while the paste is admitted: the feed holds the screen's lock, and the
 /// host's check of the look waits for it; what it finds then is not the look's box.
 #[test]

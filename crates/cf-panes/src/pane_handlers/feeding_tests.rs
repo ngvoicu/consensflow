@@ -637,3 +637,15 @@ fn an_enter_of_a_look_is_refused_for_a_key_since_and_for_a_box_that_changed() {
     assert_eq!(why(refused), Some(Why::BoxChanged));
     assert_eq!(window.writer.written().len(), written, "nothing written");
 }
+
+/// The key that empties a box goes with the paste's one write, and a refusal writes neither: a
+/// box that changed since the look gets no key of the engine's.
+#[test]
+fn a_refused_paste_writes_no_clearing_key() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.print("\x1b[2;4H");
+    let refused = window.paste_clearing(at, false, Some(b"\x15"));
+    assert_eq!(why(refused), Some(Why::BoxChanged));
+    assert!(window.writer.written().is_empty(), "no key alone, and no paste");
+}
