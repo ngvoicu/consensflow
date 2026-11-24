@@ -25,7 +25,7 @@ mod time;
 mod window;
 
 pub use adapter::{
-    AfterPrepare, CameUp, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking,
+    AfterPrepare, CameUp, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, ReadyOnLook, Started, Taking,
 };
 pub use adapters::{FakeAdapters, FakeRecords};
 pub use background::FakeBackground;

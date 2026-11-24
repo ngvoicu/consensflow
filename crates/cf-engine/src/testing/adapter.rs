@@ -27,6 +27,7 @@ use cf_harness::contract::{
     Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
     Work,
 };
+use cf_harness::Look;
 use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
@@ -174,6 +175,11 @@ pub struct FakeAgent {
 /// What a test makes `ready` answer, where it gives the adapter one.
 pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 
+/// What a test makes `ready_on` say of a look it is given, where it gives the adapter one: a
+/// readiness of its own, or none, which leaves the answer to [`Ready`] (a real adapter reads the
+/// look it is asked about and no other).
+pub type ReadyOnLook = Rc<dyn Fn(&Look) -> Option<Readiness>>;
+
 /// What a test makes `started` answer, where it gives the adapter one: why
 /// the window could not take its first message, if it could not.
 pub type Started = Rc<dyn Fn() -> Result<(), String>>;
@@ -233,6 +239,8 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// A judgment of the test's own of each look `ready_on` is given.
+    pub ready_on_look: RefCell<Option<ReadyOnLook>>,
     /// What its windows' input boxes show (`unsent_words`): none, as an adapter
     /// with no reader of its harness's box.
     pub box_words: RefCell<Option<String>>,
@@ -427,6 +435,7 @@ impl FakeAdapter {
             default: RefCell::new(Ok(None)),
             items,
             ready: RefCell::new(None),
+            ready_on_look: RefCell::new(None),
             box_words: RefCell::new(None),
             human_input: RefCell::new(None),
             started: RefCell::new(None),

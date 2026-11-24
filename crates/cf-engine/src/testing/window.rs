@@ -322,8 +322,12 @@ impl Window for FakeWindow {
         &'a self,
         _host: &'a dyn PaneHost,
         pane: &'a Pane,
-        _look: Option<&'a Look>,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
+        let judged = self.fake.ready_on_look.borrow().clone();
+        if let Some(said) = look.zip(judged).and_then(|(look, judged)| judged(look)) {
+            return Box::pin(async move { Ok(said) });
+        }
         let ready = self.fake.ready.borrow().clone();
         let Some(ready) = ready else {
             return Box::pin(async { Ok(Readiness::Ready) });

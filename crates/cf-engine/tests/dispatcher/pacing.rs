@@ -1155,3 +1155,46 @@ fn a_hold_the_windows_readiness_made_says_what_its_harness_read_of_the_humans_in
     let inputs = held_inputs(&context, note.id);
     assert_eq!(inputs.last(), Some(&Some(read)), "{inputs:?}");
 }
+
+/// N17 (T-2198 finding 1): the look a paste carries is the one its window's own readiness
+/// approved. A window ready on the look that opened the gate, whose screen shows a picker by the
+/// time the message is to go (the Muse resume picker, which its adapter refuses), is asked about
+/// that screen again, and nothing is pasted into it.
+#[test]
+fn a_paced_paste_goes_only_on_a_look_its_window_approved() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let picker = json!({
+        "bottom": ["", "  that session is already open in another window - pick another session"],
+    });
+    let prompt = json!({ "screenQuietMs": 60_000 });
+    context.host.set_snapshot(prompt.clone());
+    let host = Rc::downgrade(&context.host);
+    let asked = Rc::new(std::cell::Cell::new(0));
+    let counted = Rc::clone(&asked);
+    *context.adapter.ready_on_look.borrow_mut() = Some(Rc::new(move |look| {
+        counted.set(counted.get() + 1);
+        let picked = look
+            .lines()
+            .iter()
+            .any(|line| line.contains("pick another session"));
+        if picked {
+            return Some(Readiness::Unfit("the session is open in another window".to_owned()));
+        }
+        // The screen changes to the picker after the readiness that opened the gate.
+        host.upgrade().unwrap().set_snapshot(picker.clone());
+        Some(Readiness::Ready)
+    }));
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..4 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "nothing goes into a screen its window refuses"
+    );
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    assert!(asked.get() >= 2, "the look the paste carries was asked about again");
+}

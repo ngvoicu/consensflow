@@ -77,22 +77,47 @@ impl Dispatcher {
         };
         let look = looked.as_ref().and_then(|looked| looked.as_ref().ok());
         record.delivery.borrow_mut().looked = look.cloned();
+        match (look, &looked) {
+            (Some(look), _) => self.readiness_of_look(record, window, pane, look).await,
+            (None, looked) => {
+                let ready = window
+                    .ready_on(host, pane, None)
+                    .await
+                    .map_err(|error| EngineError::said("not-ready", error))?;
+                match (ready, looked) {
+                    // What the host said of why there is no look is the wait's words.
+                    (Readiness::Held(Held::Because(why)), Some(Err(no_look))) if why == NO_LOOK => {
+                        Ok(Readiness::Held(Held::Because(no_look_wait(*no_look))))
+                    }
+                    (ready, _) => Ok(ready),
+                }
+            }
+        }
+    }
+
+    /// Whether `window` may take a paste on `look`: its adapter's readiness of that look, and then
+    /// what the look licenses of a paste ([`Dispatcher::licence_of`]). Every look a paste may
+    /// carry has passed both, the one the paste is licensed on included: a look taken after the
+    /// readiness was asked (the pacing's, as the message is to go) is asked again.
+    pub(crate) async fn readiness_of_look(
+        &self,
+        record: &Record,
+        window: &Rc<dyn Window>,
+        pane: &Pane,
+        look: &Look,
+    ) -> Result<Readiness, EngineError> {
+        let host: &dyn cf_harness::contract::PaneHost = &*self.seams.host;
         let ready = window
-            .ready_on(host, pane, look)
+            .ready_on(host, pane, Some(look))
             .await
             .map_err(|error| EngineError::said("not-ready", error))?;
-        match (ready, &looked) {
-            // What the host said of why there is no look is the wait's words.
-            (Readiness::Held(Held::Because(why)), Some(Err(no_look))) if why == NO_LOOK => {
-                Ok(Readiness::Held(Held::Because(no_look_wait(*no_look))))
-            }
-            (Readiness::Ready, Some(Ok(look))) => Ok(match self.licence_of(record, pane, window, look)
-            {
+        Ok(match ready {
+            Readiness::Ready => match self.licence_of(record, pane, window, look) {
                 PasteLicence::Wait(held) => Readiness::Held(held),
                 PasteLicence::Go { .. } => Readiness::Ready,
-            }),
-            (ready, _) => Ok(ready),
-        }
+            },
+            other => other,
+        })
     }
 
     /// The licence of the look the attempt kept, for the paste of a launch's first message;

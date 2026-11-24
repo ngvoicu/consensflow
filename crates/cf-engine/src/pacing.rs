@@ -36,8 +36,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::js;
-use cf_harness::contract::{Input, Observed};
-use cf_harness::PasteLicence;
+use cf_harness::contract::{Input, Observed, Readiness};
 use cf_harness::records::Reading;
 use cf_proto::ledger::MessageView;
 use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
@@ -480,12 +479,15 @@ impl Dispatcher {
             (Some(pane), true) => Some(self.look_recorded(pane).await),
             _ => None,
         };
+        // The adapter's readiness of that look, too: the look the paste carries is the one the
+        // window's own `ready_on` approved, not an earlier one it has passed since.
         let box_wait = match (&looked, &window, &pane) {
             (Some(Err(no_look)), _, _) => Some(no_look_wait(*no_look)),
             (Some(Ok(look)), Some(window), Some(pane)) => {
-                match self.licence_of(record, pane, window, look) {
-                    PasteLicence::Wait(held) => Some(held.sentence().to_owned()),
-                    PasteLicence::Go { .. } => None,
+                match self.readiness_of_look(record, window, pane, look).await? {
+                    Readiness::Ready => None,
+                    Readiness::Held(held) => Some(held.sentence().to_owned()),
+                    Readiness::Unfit(why) => Some(why),
                 }
             }
             _ => None,
