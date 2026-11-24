@@ -133,6 +133,13 @@ impl Bridge {
         self.inner.fence();
     }
 
+    /// From now on no request is made of the peer: it is answered at once as refused ("the
+    /// daemon is stopping") and nothing is written, so no window is told a line after the
+    /// daemon's ledger broke. Events and answers still go (the break itself is an event).
+    pub fn ask_no_more(&self) {
+        self.inner.ask_no_more();
+    }
+
     /// Waits for the bridge to end and says why it did first: its input
     /// ended, it was closed, or its transport failed. The end is latched: it
     /// is told at once to whoever asks after it came, and to as many as ask.

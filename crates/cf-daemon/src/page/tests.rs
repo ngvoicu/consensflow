@@ -90,6 +90,7 @@ fn rig_listing(
             grants_of,
         },
         models: Rc::new(crate::models::ModelLists::new(adapters, env_of_models)),
+        halt: crate::halt::Halt::new(),
     });
     Rig {
         home,

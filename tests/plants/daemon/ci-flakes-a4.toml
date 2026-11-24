@@ -184,8 +184,8 @@ runs = ["a4-start"]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''            self.api.drop_connections();
         }
-        self.tail(exit_code(why));'''
+        self.tail(self.code(why));'''
 replace = '''            self.api.drop_connections();
         }
         tokio::time::sleep(Duration::from_millis(1_400)).await;
-        self.tail(exit_code(why));'''
+        self.tail(self.code(why));'''

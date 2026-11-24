@@ -35,13 +35,6 @@ pub(crate) struct Store {
     broken: Option<String>,
     /// Told once, the moment the ledger breaks.
     on_broken: Option<BrokenHook>,
-    /// The connection that was left in its transaction when the ledger broke, kept
-    /// open so that its lock holds (no other daemon takes the file while this
-    /// process ends) and never read or written again: [`Store::db`] is an empty
-    /// ledger in memory from then on, so that every read and every write that does
-    /// not go through [`Store::write`] fails too, and none shows what was never
-    /// committed.
-    parked: Option<Connection>,
 }
 
 impl Store {
@@ -60,22 +53,14 @@ impl Store {
             logged: Vec::new(),
             broken: None,
             on_broken: None,
-            parked: None,
         }
     }
 
-    /// Lets go of the connection parked at a break: its transaction is rolled
-    /// back with it and the file's lock goes.
-    pub(crate) fn release_parked(&mut self) {
-        if let Some(parked) = self.parked.take() {
-            let _ = parked.close();
-        }
-    }
-
-    /// Whether a connection is parked in a transaction (a test's look).
+    /// Whether the connection is in a transaction that was never rolled back (a
+    /// test's look).
     #[cfg(test)]
-    pub(crate) fn parked_open(&self) -> bool {
-        self.parked.as_ref().is_some_and(|db| !db.is_autocommit())
+    pub(crate) fn left_open(&self) -> bool {
+        !self.db.is_autocommit()
     }
 
     /// Why the ledger is broken, if it is.
@@ -132,8 +117,8 @@ impl Store {
         }
     }
 
-    /// A broken ledger refuses whatever is asked of it.
-    fn refuse_if_broken(&self) -> Result<(), LedgerError> {
+    /// A broken ledger refuses whatever is asked of it, a read as a write.
+    pub(crate) fn refuse_if_broken(&self) -> Result<(), LedgerError> {
         match &self.broken {
             Some(cause) => Err(LedgerError::refused_with(
                 "ledger-broken",
@@ -159,15 +144,23 @@ impl Store {
         crate::rollback::said(first, rolled)
     }
 
-    /// The ledger can go on no more; whoever asked is told once.
+    /// The ledger can go on no more; whoever asked is told once. The one broken
+    /// state is set first, and the connection is shut by SQLite itself: its
+    /// authorizer denies every statement from now on, so that a read or a write by
+    /// any path that does not look at the flag fails too, and nothing of the open
+    /// transaction (never committed) can be read. Nothing here allocates or opens
+    /// anything that can fail, so the break cannot be half made. The connection is
+    /// kept, so that its lock holds while the process ends.
     fn break_with(&mut self, cause: &str) {
         if self.broken.is_some() {
             return;
         }
         self.broken = Some(cause.to_owned());
-        if let Ok(memory) = Connection::open_in_memory() {
-            self.parked = Some(std::mem::replace(&mut self.db, memory));
-        }
+        let _ = self
+            .db
+            .authorizer(Some(|_: rusqlite::hooks::AuthContext<'_>| {
+                rusqlite::hooks::Authorization::Deny
+            }));
         if let Some(hook) = self.on_broken.as_mut() {
             hook(cause);
         }
@@ -195,6 +188,7 @@ impl Store {
 
     /// A project's row, or a refusal naming the id.
     pub(crate) fn project_row(&self, id: i64) -> Result<ProjectRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row("SELECT * FROM project WHERE id = ?", [id], ProjectRow::read)
             .optional()?
@@ -205,6 +199,7 @@ impl Store {
 
     /// A participant's row, its member's handle with it, or a refusal naming the id.
     pub(crate) fn participant_row(&self, id: i64) -> Result<ParticipantRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row(
                 &format!("{PARTICIPANT_SELECT} WHERE p.id = ?"),
@@ -261,6 +256,7 @@ impl Store {
 
     /// A task of the project by its number, or a refusal naming it.
     pub(crate) fn task_row(&self, project_id: i64, number: i64) -> Result<TaskRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row(
                 "SELECT * FROM task WHERE project_id = ? AND number = ?",
@@ -279,6 +275,7 @@ impl Store {
 
     /// One message, or none.
     pub(crate) fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
+        self.refuse_if_broken()?;
         Ok(self
             .db
             .query_row(
@@ -648,10 +645,7 @@ mod tests {
             said.starts_with("no way; its rollback failed too: "),
             "{said}"
         );
-        assert!(
-            store.parked_open(),
-            "the refused rollback left it open, parked"
-        );
+        assert!(store.left_open(), "the refused rollback left it open");
         assert!(
             store.message(1).is_err(),
             "a read after the break shows nothing of what was not committed"
@@ -670,6 +664,32 @@ mod tests {
             serde_json::json!({})
         ))));
         assert_eq!(told.borrow().len(), 1, "told once, however often asked");
+    }
+
+    #[test]
+    fn a_read_that_looks_at_no_flag_is_refused_by_sqlite_itself_once_the_ledger_broke() {
+        let (mut store, _) = store();
+        crate::rollback::refuse_next_rollback();
+        let _ = store.write(|store| {
+            store.log(1, "dirty", serde_json::json!({}))?;
+            Err::<(), _>(LedgerError::refused("no", "no way"))
+        });
+        assert!(
+            store.left_open(),
+            "the uncommitted row is in the open transaction"
+        );
+        // Straight through the connection, as a path that forgot the flag would read.
+        assert!(store
+            .db
+            .query_row("SELECT COUNT(*) FROM event", [], |row| row.get::<_, i64>(0))
+            .is_err());
+        assert!(store
+            .db
+            .execute(
+                "INSERT INTO event (project_id, at, kind, data) VALUES (1, 'x', 'y', 'z')",
+                []
+            )
+            .is_err());
     }
 
     #[test]

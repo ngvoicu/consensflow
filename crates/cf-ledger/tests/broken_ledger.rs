@@ -181,3 +181,33 @@ fn a_note_is_not_withdrawn_after_the_break_and_nothing_of_the_dirty_transaction_
         .expect("the note");
     assert_eq!(state, "queued", "the committed note is as it was");
 }
+
+#[test]
+fn after_the_break_the_integrity_check_and_every_read_refuse_and_say_why() {
+    let home = tempfile::tempdir().expect("a home");
+    let file = home.path().join("consensflow.db");
+    let mut ledger = open_ledger(&file, Options::default()).expect("a ledger");
+    project(&mut ledger);
+    assert_eq!(ledger.integrity().expect("sound"), "ok");
+    refuse_next_rollback();
+    let _ = ledger.create_task(99, &task(99, "nowhere"));
+    assert!(ledger.broken().is_some());
+    // On a9a9a8ff8 the empty ledger that stood in the broken one's place said `ok`.
+    let said = ledger.integrity().expect_err("no health is reported");
+    assert_eq!(said.code(), Some("ledger-broken"), "{said}");
+    assert!(ledger.projects().is_err(), "no read shows the board");
+    assert!(ledger.project(1).is_err());
+}
+
+#[test]
+fn a_ledger_opened_without_leave_to_make_it_is_refused_and_makes_nothing() {
+    let home = tempfile::tempdir().expect("a home");
+    let file = home.path().join("consensflow.db");
+    let refused = cf_ledger::open_existing_ledger(&file, Options::default())
+        .err()
+        .expect("no ledger there");
+    assert!(refused.cannot_save(), "{refused}");
+    assert!(!file.exists(), "nothing was made");
+    drop(open_ledger(&file, Options::default()).expect("made when it may be"));
+    assert!(cf_ledger::open_existing_ledger(&file, Options::default()).is_ok());
+}

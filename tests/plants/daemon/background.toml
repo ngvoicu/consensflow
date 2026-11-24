@@ -1362,9 +1362,17 @@ file = "crates/cf-panes/src/headless.rs"
 find = '''
         std::thread::scope(|scope| {
             for pane in open {
-                scope.spawn(move || {
-                    let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
+                let key = PaneKey::new(pane.id.clone(), pane.generation);
+                // A thread that cannot be made does not leave the pane open: it is closed
+                // here, on this thread, after the others it did start.
+                let started = new_thread("consensflow-close").and_then(|thread| {
+                    thread.spawn_scoped(scope, move || {
+                        let _ = close(panes, &key);
+                    })
                 });
+                if started.is_err() {
+                    let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
+                }
             }
         });'''
 replace = '''

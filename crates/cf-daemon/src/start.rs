@@ -163,6 +163,16 @@ fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
     }
 }
 
+/// [`at_start`] for the open of the ledger: one that was there and is not any more, between
+/// the look at it and the open, is a ledger lost, said as one.
+fn at_start_of_used(file: &std::path::Path, create: bool, failed: LedgerError) -> StartError {
+    if !create && failed.cannot_save() {
+        StartError::CannotSave(crate::broken::lost_words(file))
+    } else {
+        at_start(file, failed)
+    }
+}
+
 /// A daemon that is running.
 pub struct Daemon {
     latch: Rc<Latch>,
@@ -215,18 +225,27 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
     let home = config_root(&env).ok_or(StartError::NoHome)?;
-    // A home that was used and has no ledger is not a first use: it is refused, in the
-    // words of a ledger that cannot be saved to, and never started as an empty board.
-    // (Read before this start writes a line of its own.)
+    // A home that has had a board (its marker, or what an earlier build left) and whose
+    // ledger is missing, empty, unreadable or a dangling link is not a first use: it is
+    // refused, in the words of a ledger that cannot be saved to with how to start anew on
+    // purpose, and is never started as an empty board. (Read before this start writes a
+    // line of its own.) A ledger that is there is opened with no leave to make it, so one
+    // that goes between this look and the open is refused too.
     let used = crate::broken::home_was_used(&home);
     make_folder(&home, 0o777, Mkdir::Sync)
         .map_err(|failed| StartError::System(failed.to_string()))?;
-    let ledger_file = home.join("consensflow.db");
-    if used
-        && matches!(std::fs::symlink_metadata(&ledger_file), Err(error) if error.kind() == io::ErrorKind::NotFound)
-    {
-        return Err(StartError::CannotSave(crate::broken::words(&ledger_file)));
+    let ledger_file = home.join(crate::broken::LEDGER);
+    let looked = crate::broken::ledger_file(&ledger_file);
+    if used && looked != crate::broken::Ledgerfile::Held {
+        return Err(StartError::CannotSave(crate::broken::lost_words(
+            &ledger_file,
+        )));
     }
+    let create = !used
+        && matches!(
+            looked,
+            crate::broken::Ledgerfile::Missing | crate::broken::Ledgerfile::Empty
+        );
     let trace = Rc::new(Trace::new(&home));
     trace
         .started()
@@ -238,7 +257,7 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         std::process::id(),
         home.display()
     ));
-    let started = run(env, options, home, trace, Rc::clone(&log), errors).await;
+    let started = run(env, options, home, create, trace, Rc::clone(&log), errors).await;
     if started.is_err() {
         log.info("exit 1");
     }
@@ -250,6 +269,7 @@ async fn run(
     env: Env,
     options: Options,
     home: PathBuf,
+    create: bool,
     trace: Rc<Trace>,
     log: Rc<Log>,
     errors: Rc<Errors>,
@@ -258,14 +278,23 @@ async fn run(
     // one is touched before it is held.
     let told = Rc::clone(&trace);
     let ledger_file = home.join("consensflow.db");
-    let ledger = open_ledger(
-        &ledger_file,
-        LedgerOptions {
-            trace: Box::new(move |event| told.event(event)),
-            ..LedgerOptions::default()
-        },
-    )
-    .map_err(|failed| at_start(&ledger_file, failed))?;
+    let ledger_options = LedgerOptions {
+        trace: Box::new(move |event| told.event(event)),
+        ..LedgerOptions::default()
+    };
+    let opened = if create {
+        open_ledger(&ledger_file, ledger_options)
+    } else {
+        cf_ledger::open_existing_ledger(&ledger_file, ledger_options)
+    };
+    let ledger = opened.map_err(|failed| at_start_of_used(&ledger_file, create, failed))?;
+    // The ledger is there: the home says it has a board from now on.
+    if let Err(failed) = crate::broken::mark(&home) {
+        log.warn(
+            "the home could not be marked as having a board",
+            Some(&failed.to_string()),
+        );
+    }
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
     let limits = Limits::of(&env);
@@ -304,6 +333,9 @@ async fn run(
     // The stop's latch, and the bridge as far as building it goes: it hears
     // and says nothing until it is polled, after the handle line.
     let latch = Latch::new();
+    // Every effect and the log read the one halt of the latch.
+    log.ends_with(latch.halt());
+    trace.ends_with(latch.halt());
     let console = Rc::new(Console::to(options.stderr, {
         let latch = Rc::clone(&latch);
         // The drain of `cf ui`: no reader, no point.
@@ -313,8 +345,10 @@ async fn run(
         .on_fatal({
             let (log, latch) = (Rc::clone(&log), Rc::clone(&latch));
             move |cause| {
-                log.error("the bridge failed", Some(&cause.to_string()));
+                // The latch first: the log is then written off the runtime, and a log that
+                // is held cannot keep the stop from running.
                 latch.trip("the bridge failed");
+                log.error("the bridge failed", Some(&cause.to_string()));
             }
         })
         .connect(options.input, options.output);
@@ -472,6 +506,7 @@ async fn run(
             let bridge = bridge.clone();
             Rc::new(move || bridge.fence())
         },
+        halt: latch.halt(),
     });
     arm(
         &latch,
@@ -533,6 +568,7 @@ async fn run(
             grants_of: crate::computer_use::grants_of(&env),
         },
         models: Rc::new(ModelLists::new(adapters, env.clone())),
+        halt: latch.halt(),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

@@ -86,6 +86,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             body.text("pane")
         ))
     })?;
+    page.halted()?;
     (page.computer_use.open)(pane).await.map_err(Said)?;
     one("opened", body.text("pane"))
 }

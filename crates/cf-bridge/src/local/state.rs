@@ -53,6 +53,9 @@ pub(super) struct Inner {
     /// Set when the daemon is ending: no frame the peer sends is admitted after
     /// it but the answers to what this end asked.
     fenced: Cell<bool>,
+    /// Set when the daemon's ledger cannot save: nothing more is asked of the peer (a
+    /// request is refused in words and never written), so no window is told a line.
+    asks_no_more: Cell<bool>,
     /// Why the bridge closed, which a request made after that is refused with.
     terminal: RefCell<Option<BridgeError>>,
     pending: RefCell<HashMap<String, Pending>>,
@@ -71,6 +74,14 @@ impl Inner {
         self.fenced.set(true);
     }
 
+    pub(super) fn ask_no_more(&self) {
+        self.asks_no_more.set(true);
+    }
+
+    pub(super) fn asks_no_more(&self) -> bool {
+        self.asks_no_more.get()
+    }
+
     pub(super) fn is_fenced(&self) -> bool {
         self.fenced.get()
     }
@@ -86,6 +97,7 @@ impl Inner {
             next_id: Cell::new(0),
             closed: Cell::new(false),
             fenced: Cell::new(false),
+            asks_no_more: Cell::new(false),
             terminal: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
             registry: Registry::default(),

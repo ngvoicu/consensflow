@@ -83,6 +83,7 @@ async fn rig(pass: crate::pass::Pass) -> Rig {
         ledger: Rc::new(RefCell::new(ledger)),
         exit: Rc::new(move |code| noted.borrow_mut().push(code)),
         fence: Rc::new(|| {}),
+        halt: crate::halt::Halt::new(),
     };
     Rig {
         home,

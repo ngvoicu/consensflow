@@ -280,8 +280,8 @@ runs = ["daemon-lib-start", "stop"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-                log.error("the bridge failed", Some(&cause.to_string()));
-                latch.trip("the bridge failed");'''
+                latch.trip("the bridge failed");
+                log.error("the bridge failed", Some(&cause.to_string()));'''
 replace = '                log.error("the bridge failed", Some(&cause.to_string()));'
 
 [[plant.edit]]

@@ -106,6 +106,8 @@ pub struct Specs {
     /// Called on the blocking thread as each look at a folder begins: nothing,
     /// but where a test holds a look to see the daemon go on without it.
     before: Arc<dyn Fn() + Send + Sync>,
+    /// Called as each look ends, on its thread, before the page hears of it (a test's).
+    after: Arc<dyn Fn() + Send + Sync>,
     /// How many looks run, each counted until its thread is done with it.
     jobs: Arc<AtomicUsize>,
     /// Whether each folder (by its path) held a file, and when that was read.
@@ -129,6 +131,7 @@ impl Specs {
             kept_for: copies::KEPT_FOR,
             open_within: OPEN_WITHIN,
             before: Arc::new(|| {}),
+            after: Arc::new(|| {}),
             jobs: Arc::default(),
             remembered: RefCell::default(),
             looking: RefCell::default(),
@@ -156,6 +159,13 @@ impl Specs {
         self
     }
 
+    /// With `after` called as each look at a folder ends.
+    #[cfg(test)]
+    pub(super) fn after_each_look(mut self, after: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.after = after;
+        self
+    }
+
     /// With `before` called as each look at a folder begins.
     #[cfg(test)]
     pub(super) fn before_each_look(mut self, before: Arc<dyn Fn() + Send + Sync>) -> Self {
@@ -172,12 +182,15 @@ impl Specs {
     ) -> impl std::future::Future<Output = Result<T, String>> + 'static {
         let admitted = Running::admitted(&self.jobs);
         let before = Arc::clone(&self.before);
+        let after = Arc::clone(&self.after);
         async move {
             let running = admitted?;
             tokio::task::spawn_blocking(move || {
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             })
             .await
             .map_err(|failed| format!("the specs folder could not be read: {failed}"))?
@@ -334,10 +347,15 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         .ok_or_else(|| Said("ConsensFlow has no home folder to copy the file into".to_owned()))?;
     let read = path.clone();
     let kept_for = page.specs.kept_for;
+    let halt = std::sync::Arc::clone(&page.halt);
     let copy = page
         .specs
         .look(move || {
             let found = in_folder(&directory, &name)?.for_browser(&read, &|| {})?;
+            // Right before the copy is made: a break or a stop since the read ends it.
+            if let Some(words) = halt.refusal() {
+                return Err(words.to_owned());
+            }
             copies::place(&home, &found, kept_for)
         })
         .await?;
@@ -347,6 +365,8 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
              waiting. Open it again"
         )));
     }
+    // Right before the file is opened, and the copy that was made is not left to open.
+    page.halted()?;
     (page.specs.open)(&page.env, copy).await.map_err(Said)?;
     one("opened", path)
 }

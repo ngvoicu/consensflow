@@ -53,6 +53,31 @@ pub fn cannot_save_words(ledger: &std::path::Path) -> String {
     )
 }
 
+/// What the person is told when a home that holds a board it was used for has no ledger
+/// (or an empty, unreadable or dangling one): the words of a ledger that cannot save, and
+/// how to start a new board on purpose.
+pub fn lost_ledger_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    let home = whole.parent().unwrap_or(&whole);
+    format!(
+        "{} This home has held a board before, and ConsensFlow does not open it empty. If you \
+         meant to start a new board, move {} away, or point ConsensFlow at a new folder \
+         (CONSENSFLOW_HOME), and open it again.",
+        cannot_save_words(ledger),
+        home.display()
+    )
+}
+
+/// The words for a ledger that ended a daemon with [`CANNOT_SAVE_EXIT`], where the one that
+/// ended did not say them: a ledger that is not there as a file with something in it is a
+/// home that lost its board ([`lost_ledger_words`]); any other cannot be saved to.
+pub fn unsaved_words(ledger: &std::path::Path) -> String {
+    match std::fs::metadata(ledger) {
+        Ok(found) if found.is_file() && found.len() > 0 => cannot_save_words(ledger),
+        _ => lost_ledger_words(ledger),
+    }
+}
+
 /// The variable as text when it is set to something, a byte that is no UTF-8
 /// as U+FFFD.
 fn named(env: &Env, name: &str) -> Option<String> {

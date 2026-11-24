@@ -219,8 +219,14 @@ replace = '''
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = "        if tokio::time::timeout(DEADLINE, waiting).await.is_err() {"
-replace = "        if tokio::time::timeout(DEADLINE * 2, waiting).await.is_err() {"
+find = '''        if tokio::time::timeout_at(deadline.into(), waiting)
+            .await
+            .is_err()
+        {'''
+replace = '''        if tokio::time::timeout_at((deadline + DEADLINE).into(), waiting)
+            .await
+            .is_err()
+        {'''
 
 [[plant]]
 name = "ci flakes: the connections are waited for a second time before they are dropped"
@@ -245,13 +251,13 @@ file = "crates/cf-daemon/src/stop.rs"
 find = '''
             self.api.drop_connections();
         }
-        self.tail(exit_code(why));
+        self.tail(self.code(why));
 '''
 replace = '''
             self.api.drop_connections();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        self.tail(exit_code(why));
+        self.tail(self.code(why));
 '''
 
 [[plant]]

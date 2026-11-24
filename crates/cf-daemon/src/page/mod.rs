@@ -80,6 +80,19 @@ pub struct Page {
     pub computer_use: ComputerUsePage,
     /// The models each harness lists, read at the first ask and at the human's Refresh.
     pub models: Rc<crate::models::ModelLists>,
+    /// Whether the daemon is ending or its ledger broke: asked right before an operation
+    /// writes a file, copies or opens one, and again before it says it worked.
+    pub halt: std::sync::Arc<crate::halt::Halt>,
+}
+
+impl Page {
+    /// The refusal an operation makes right before an effect, where the daemon is ending.
+    pub(in crate::page) fn halted(&self) -> Result<(), body::Said> {
+        match self.halt.refusal() {
+            Some(words) => Err(body::Said(words.to_owned())),
+            None => Ok(()),
+        }
+    }
 }
 
 /// What an operation serves: the fields of its answer, which follow `ok: true`,
@@ -121,6 +134,12 @@ async fn answer(
     body: Value,
 ) -> Result<Value, String> {
     let body = if body.is_null() { json!({}) } else { body };
+    // An operation that was not begun before the break begins nothing, and one that ends
+    // after it does not say it worked.
+    if let Some(words) = page.halt.refusal().filter(|_| page.halt.broke()) {
+        return Err(words.to_owned());
+    }
+    let halt = std::sync::Arc::clone(&page.halt);
     let kick = Rc::clone(&page.kick);
     // Begun where its frame is read, and contained from the first poll: what
     // the operation does before its first wait is done now, in the order the
@@ -132,6 +151,7 @@ async fn answer(
     )
     .await;
     match begun.await {
+        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),
         Ok(Ok(fields)) => {
             if operation.kicks() {
                 kick();

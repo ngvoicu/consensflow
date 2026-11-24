@@ -3,6 +3,7 @@
 //! is told to the page as `daemon-status`.
 
 use std::panic::{self, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::process::Child;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -50,10 +51,6 @@ const DAEMON_NOT_CONFIRMED: &str = "ConsensFlow's daemon stopped, and the end of
 const DAEMON_KEEPS_STOPPING: &str = "ConsensFlow's daemon keeps stopping: it was started again three times, and each time it stopped within a minute";
 /// How the daemon's process ends when the ledger cannot be saved to (`cf_base::home`).
 pub(crate) const LEDGER_EXIT: i32 = cf_base::home::CANNOT_SAVE_EXIT;
-/// How long the app waits for the end of a daemon whose bridge has closed, to read how it
-/// ended: it is ending, and a process that is not gone by then is read as one that has no
-/// status to give.
-const EXIT_READ: Duration = Duration::from_millis(1500);
 /// How long a daemon has to say it is ready (its handle line) before its
 /// start counts as failed. It opens its ledger first and migrates it, and
 /// each step of a migration rebuilds a table and checks every reference in
@@ -98,6 +95,9 @@ pub(crate) struct StartedDaemon {
     daemon: Child,
     bridge: Bridge,
     roster: RosterHandle,
+    /// The ledger the process was launched with, said when it was launched: the words of a
+    /// ledger that cannot save name this file, never one the app's own environment gives.
+    ledger: PathBuf,
 }
 
 impl StartedDaemon {
@@ -182,6 +182,9 @@ struct DaemonState {
     /// What a daemon said as it ended because its ledger cannot save, and which process
     /// said it: the words are the person's, and only the daemon in hand may give them.
     broken: Option<(u32, String)>,
+    /// The process in hand, and the ledger it was launched with: only its words count.
+    pid: Option<u32>,
+    ledger: Option<PathBuf>,
 }
 
 /// How a daemon that stopped is started again.
@@ -208,6 +211,8 @@ impl Daemon {
                 up_since: None,
                 restarts: 0,
                 broken: None,
+                pid: None,
+                ledger: None,
             }),
             settled: Condvar::new(),
             report,
@@ -237,7 +242,12 @@ impl Daemon {
                 .and_then(Value::as_u64)
                 .and_then(|pid| u32::try_from(pid).ok());
             if let (Some(from), Some(words)) = (from, body.get("words").and_then(Value::as_str)) {
-                daemon.lock().broken = Some((from, words.to_owned()));
+                // Only the process in hand is heard: a late frame of an older daemon changes
+                // nothing, whatever it says.
+                let mut state = daemon.lock();
+                if state.pid == Some(from) {
+                    state.broken = Some((from, words.to_owned()));
+                }
             }
         })
     }
@@ -356,18 +366,24 @@ impl Daemon {
         // held when its bridge closed, so its end is read here.
         let ended = started.bridge.is_closed();
         state.current = start;
-        state.daemon = Some(started.daemon);
+        state.pid = Some(started.daemon.id());
+        state.ledger = Some(started.ledger);
+        state.broken = None;
         state.bridge = Some(started.bridge);
         state.roster = Some(started.roster);
         state.up_since = Some(Instant::now());
         if ended {
-            let exit = state
-                .daemon
-                .as_mut()
-                .and_then(|child| exit_status_within(child, Duration::ZERO));
+            // The process is waited for, with the lock let go: its own status is read
+            // before anything is decided.
+            let mut child = started.daemon;
+            drop(state);
+            let exit = reaped(&mut child);
+            let mut state = self.lock();
+            state.daemon = Some(child);
             self.stopped(state, exit);
             return Ok(());
         }
+        state.daemon = Some(started.daemon);
         // A daemon started again says what became of the windows and the projects once, when
         // it is up: its start has paused the projects that were open by then.
         let status = if again {
@@ -399,9 +415,9 @@ impl Daemon {
         }
         let mut child = state.daemon.take();
         drop(state);
-        let exit = child
-            .as_mut()
-            .and_then(|child| exit_status_within(child, EXIT_READ));
+        // Its end is waited for, not guessed: the child is reaped, never killed first and
+        // never given a time, and what it ended with is read before anything is decided.
+        let exit = child.as_mut().and_then(reaped);
         let mut state = self.lock();
         if state.stopping || state.current != start {
             drop(state);
@@ -429,8 +445,9 @@ impl Daemon {
             .take()
             .filter(|(pid, _)| Some(*pid) == from)
             .map(|(_, words)| words);
+        let ledger = state.ledger.clone().unwrap_or_default();
         let broken = (exit == Some(LEDGER_EXIT) || said.is_some())
-            .then(|| said.unwrap_or_else(ledger_words));
+            .then(|| said.unwrap_or_else(|| cf_base::home::unsaved_words(&ledger)));
         let Some(restart) = state.restart.clone() else {
             let cause = broken.as_deref().unwrap_or(DAEMON_STOPPED);
             self.change(&mut state, DaemonStatus::down(cause, false));
@@ -572,6 +589,12 @@ impl Daemon {
             let Err(failure) = self.attempt(&restart.starter, true) else {
                 return;
             };
+            // A replacement the ledger refused (74) is not tried again and is not made an
+            // ordinary failure: the person is told the ledger's words as they are.
+            if failure.ledger {
+                self.fail(&failure);
+                return;
+            }
             let spent = {
                 let mut state = self.lock();
                 state.restarts += 1;
@@ -693,28 +716,10 @@ impl Daemon {
     }
 }
 
-/// How a process ended, as its code, waiting up to `wait` for it to be gone: none where it
-/// is not, or ended by a signal.
-fn exit_status_within(child: &mut Child, wait: Duration) -> Option<i32> {
-    let until = Instant::now() + wait;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.code(),
-            Ok(None) if Instant::now() < until => thread::sleep(Duration::from_millis(10)),
-            _ => return None,
-        }
-    }
-}
-
-/// The words of a ledger that cannot be saved to, as the app makes them where the daemon
-/// did not say them: by the ledger of the home this process is given, which the daemon it
-/// started takes too.
-pub(crate) fn ledger_words() -> String {
-    let home = cf_base::home::config_root(&cf_base::env::Env::from_process());
-    match home {
-        Some(home) => cf_base::home::cannot_save_words(&home.join("consensflow.db")),
-        None => cf_base::home::cannot_save_words(std::path::Path::new("consensflow.db")),
-    }
+/// How a process ended, as its code: waited for until it is gone, and reaped. None where it
+/// ended by a signal.
+fn reaped(child: &mut Child) -> Option<i32> {
+    child.wait().ok().and_then(|status| status.code())
 }
 
 #[cfg(test)]
@@ -1253,7 +1258,7 @@ mod tests {
         daemon.start(starter, panes, QUICK);
 
         let told = told_of(&heard, 3);
-        assert_eq!(told[2], DaemonStatus::ledger(&ledger_words()));
+        assert_eq!(told[2], DaemonStatus::ledger(&fallback_words()));
         assert!(heard.recv_timeout(Duration::from_millis(800)).is_err());
         assert_eq!(starts.load(Ordering::SeqCst), 1, "not started again");
     }
@@ -1333,6 +1338,31 @@ mod tests {
         }
     }
 
+    /// The words of the daemon in hand are not displaced by a late frame of an older one.
+    #[test]
+    fn a_late_frame_of_an_older_daemon_does_not_displace_the_words_of_the_one_in_hand() {
+        let panes = Arc::new(PaneTable::new());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let hears = daemon.hears_broken();
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &hears,
+            &[the_words_frame(SAID)],
+            Then::ExitAfter(1500, LEDGER_EXIT),
+        );
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+        assert_eq!(told_of(&heard, 1), [DaemonStatus::up()]);
+        thread::sleep(Duration::from_millis(500));
+        // Its own words were heard by now; another process's come late, by its number.
+        hears(json!({ "words": "an older daemon's", "pid": 1u32 }));
+        let told = told_of(&heard, 2);
+        assert_eq!(told[1], DaemonStatus::ledger(SAID), "{told:?}");
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
     /// The thread that closes the windows is not made: they are closed all the same, and the
     /// person is told the daemon's reason.
     #[test]
@@ -1381,6 +1411,240 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
+    /// What the app says where the daemon's own words were lost: for the ledger of the
+    /// process's launch (no home of the command's own: the app's).
+    fn fallback_words() -> String {
+        cf_base::home::unsaved_words(&crate::daemon_command::launch_ledger(&Command::new("x")))
+    }
+
+    /// A stand-in whose launch names `home`, as a login shell's home does.
+    fn a_ledger_stand_in_at(
+        starts: &Arc<AtomicUsize>,
+        hears: &Arc<dyn Fn(Value) + Send + Sync>,
+        frames: &[String],
+        then: Then,
+        home: &Path,
+    ) -> DaemonStarter {
+        let (counted, hears, frames, home) = (
+            Arc::clone(starts),
+            Arc::clone(hears),
+            frames.to_vec(),
+            home.to_path_buf(),
+        );
+        Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+            let hear = Arc::clone(&hears);
+            builder.on_event(LEDGER_BROKEN_EVENT, move |body| hear(body));
+            builder.on_close(closed);
+            let mut command = stand_in_command(&frames, then);
+            command.env("CONSENSFLOW_HOME", &home);
+            connect_daemon(command, builder, Duration::from_secs(30))
+        })
+    }
+
+    /// The stream ends before the process does, and the process ends for the ledger well after
+    /// the time the app used to give it: it is read from its own end, and not started again,
+    /// whether the end of the stream came before the daemon was in hand (a short wait) or after
+    /// (a long one).
+    #[test]
+    fn a_stream_that_ends_before_the_process_does_is_read_from_the_process_s_own_end() {
+        for wait in [700, 1900, 3200] {
+            let panes = Arc::new(PaneTable::new());
+            let starts = Arc::new(AtomicUsize::new(0));
+            let (report, heard) = listener();
+            let daemon = Daemon::new(report);
+            let starter = a_ledger_stand_in(
+                &panes,
+                &starts,
+                &daemon.hears_broken(),
+                &[],
+                Then::CloseThenExit(wait, LEDGER_EXIT),
+            );
+            daemon.start(starter, panes, QUICK);
+            // Told up first where the stream ended after the daemon was in hand, and not
+            // where it had ended already: what matters is the last, and that none is a start.
+            let mut told = Vec::new();
+            while told
+                .last()
+                .is_none_or(|status: &DaemonStatus| !status.ledger)
+            {
+                told.push(heard.recv_timeout(Duration::from_secs(25)).expect("told"));
+            }
+            assert_eq!(
+                told.last(),
+                Some(&DaemonStatus::ledger(&fallback_words())),
+                "{wait}"
+            );
+            assert!(
+                told.iter()
+                    .all(|status| *status != DaemonStatus::started_again()),
+                "{wait}: {told:?}"
+            );
+            assert!(heard.recv_timeout(Duration::from_millis(500)).is_err());
+            assert_eq!(
+                starts.load(Ordering::SeqCst),
+                1,
+                "{wait}: not started again"
+            );
+        }
+    }
+
+    /// A daemon that closes its stream before it is ready and ends for its ledger after: its
+    /// status is waited for, and it is killed by nothing.
+    #[test]
+    fn a_daemon_whose_stream_ends_before_it_is_ready_is_waited_for_not_killed() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.on_close(closed);
+            #[cfg(unix)]
+            let command = {
+                let mut command = crate::testing::command("/bin/sh");
+                command
+                    .arg("-c")
+                    .arg(format!("exec 1>&-; sleep 0.9; exit {LEDGER_EXIT}"));
+                command
+            };
+            #[cfg(windows)]
+            let command = {
+                let mut command = crate::testing::command("powershell.exe");
+                command
+                    .args(["-NoProfile", "-NonInteractive", "-Command"])
+                    .arg(format!(
+                        "[Console]::Out.Close(); Start-Sleep -Milliseconds 900; exit {LEDGER_EXIT}"
+                    ));
+                command
+            };
+            connect_daemon(command, builder, Duration::from_secs(30))
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        assert_eq!(
+            told_of(&heard, 1),
+            [DaemonStatus::ledger(&fallback_words())]
+        );
+        assert!(heard.recv_timeout(Duration::from_millis(1500)).is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "no retry");
+    }
+
+    /// Where the daemon's words were lost, the file named is the one its process was launched
+    /// with, whatever the app's own environment says.
+    #[test]
+    fn the_words_name_the_ledger_the_child_was_launched_with() {
+        let launched = tempfile::tempdir().expect("a folder");
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let starter = a_ledger_stand_in_at(
+            &starts,
+            &daemon.hears_broken(),
+            &[],
+            Then::ExitAfter(200, LEDGER_EXIT),
+            launched.path(),
+        );
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let told = told_of(&heard, 3);
+        let ledger = launched.path().join("consensflow.db");
+        assert!(told[2].ledger, "{:?}", told[2]);
+        let said = told[2].cause.clone().unwrap_or_default();
+        assert!(said.contains(&ledger.display().to_string()), "{said}");
+        assert_eq!(said, cf_base::home::unsaved_words(&ledger));
+        assert_ne!(said, fallback_words(), "not the app's own");
+    }
+
+    /// A daemon that stopped, and whose replacement the ledger refuses (74), keeps the ledger's
+    /// flag and its words, and is not started a third time.
+    #[test]
+    fn a_replacement_refused_for_the_ledger_keeps_the_ledgers_words_and_flag() {
+        let panes = Arc::new(PaneTable::new());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let first = a_ledger_stand_in(
+            &panes,
+            &Arc::new(AtomicUsize::new(0)),
+            &Daemon::new(Arc::new(|_: &DaemonStatus| {})).hears_broken(),
+            &[],
+            Then::StopAfter(300),
+        );
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+                return first(closed);
+            }
+            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            builder.on_close(closed);
+            connect_daemon(an_exit_with(LEDGER_EXIT), builder, Duration::from_secs(30))
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+        let told = told_of(&heard, 4);
+        assert_eq!(told[0], DaemonStatus::up());
+        assert_eq!(told[3], DaemonStatus::ledger(&fallback_words()), "{told:?}");
+        assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 2, "no third start");
+    }
+
+    /// No thread can be made, for the cleanup or for the closing of a window: the window is
+    /// closed on the thread that asks, and answers nothing after the stop is declared.
+    #[test]
+    fn with_no_thread_to_make_the_windows_are_closed_on_the_current_one() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        struct Allowed;
+        impl Drop for Allowed {
+            fn drop(&mut self) {
+                cf_panes::headless::refuse_threads(false);
+            }
+        }
+        let _allowed = Allowed;
+        let panes = Arc::new(PaneTable::new());
+        let (argv, folder) = a_program_that_runs_on();
+        for _ in 0..2 {
+            panes
+                .open(
+                    folder.path(),
+                    &argv,
+                    &HashMap::new(),
+                    PtySize {
+                        rows: 24,
+                        cols: 80,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    },
+                )
+                .expect("open a window");
+        }
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.fail_the_cleanup_thread();
+        cf_panes::headless::refuse_threads(true);
+        let starter = a_ledger_stand_in(
+            &panes,
+            &starts,
+            &daemon.hears_broken(),
+            &[the_words_frame(SAID)],
+            Then::ExitAfter(300, LEDGER_EXIT),
+        );
+        daemon.start(starter, Arc::clone(&panes), QUICK);
+        assert_eq!(
+            told_of(&heard, 3),
+            [
+                DaemonStatus::up(),
+                DaemonStatus::closing_windows(),
+                DaemonStatus::ledger(SAID),
+            ]
+        );
+        assert!(
+            panes.list().expect("a list").is_empty(),
+            "no window is left"
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
     /// A daemon that ends for its ledger before it is ready is not a start to try again.
     #[test]
     fn a_daemon_that_ends_for_its_ledger_before_it_is_ready_is_never_started_again() {
@@ -1396,7 +1660,10 @@ mod tests {
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
 
-        assert_eq!(told_of(&heard, 1), [DaemonStatus::ledger(&ledger_words())]);
+        assert_eq!(
+            told_of(&heard, 1),
+            [DaemonStatus::ledger(&fallback_words())]
+        );
         assert!(
             heard.recv_timeout(Duration::from_millis(1500)).is_err(),
             "no retry"
@@ -1431,6 +1698,9 @@ mod tests {
         StayUp,
         /// Ends after this many milliseconds with this status.
         ExitAfter(u64, i32),
+        /// Closes its output at once (the app reads the end of the stream), and ends only
+        /// after this many milliseconds with this status: the stream ends before the process.
+        CloseThenExit(u64, i32),
     }
 
     /// The command of a stand-in for `cf ui --json` on either system: a shell on a Mac, a
@@ -1451,6 +1721,12 @@ mod tests {
                 Then::StayUp => "while read -r line; do :; done".to_string(),
                 Then::ExitAfter(milliseconds, code) => {
                     format!("sleep {}; exit {code}", milliseconds as f64 / 1000.0)
+                }
+                Then::CloseThenExit(milliseconds, code) => {
+                    format!(
+                        "exec 1>&-; sleep {}; exit {code}",
+                        milliseconds as f64 / 1000.0
+                    )
                 }
             });
             let mut command = crate::testing::command("/bin/sh");
@@ -1478,6 +1754,9 @@ mod tests {
                 Then::ExitAfter(milliseconds, code) => {
                     format!("Start-Sleep -Milliseconds {milliseconds}; exit {code}")
                 }
+                Then::CloseThenExit(milliseconds, code) => format!(
+                    "[Console]::Out.Close(); Start-Sleep -Milliseconds {milliseconds}; exit {code}"
+                ),
             });
             let mut command = crate::testing::command("powershell.exe");
             command

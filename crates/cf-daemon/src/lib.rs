@@ -38,6 +38,7 @@ pub mod computer_use;
 pub mod console;
 pub mod errors;
 pub mod files;
+pub mod halt;
 pub mod host;
 pub mod machine;
 pub mod models;

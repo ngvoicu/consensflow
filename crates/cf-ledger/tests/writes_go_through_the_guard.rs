@@ -15,11 +15,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// What makes the transaction, or opens the file, or is the tests' own.
-const THE_GUARD_AND_ITS_OWN: [&str; 7] = [
+const THE_GUARD_AND_ITS_OWN: [&str; 9] = [
     "write",
     "write_batch",
     "migrate",
     "open_ledger",
+    "open_existing_ledger",
+    "open_ledger_as",
     "write_raw",
     "roll_back",
     "break_with",
@@ -79,9 +81,10 @@ fn every_write_of_the_ledger_goes_through_the_guarded_transaction() {
         {
             loose.push(format!("pub fn {}", function.name));
         }
-        if function.name == "open_ledger" && exposes(function, &exposed, false) {
+        if function.name == "open_ledger_as" && exposes(function, &exposed, false) {
             loose.push(
-                "open_ledger calls a function that writes outside a guarded transaction".to_owned(),
+                "open_ledger_as calls a function that writes outside a guarded transaction"
+                    .to_owned(),
             );
         }
     }

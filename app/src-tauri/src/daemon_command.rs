@@ -70,6 +70,30 @@ pub(crate) fn daemon_command(
     Ok(command)
 }
 
+/// The ledger the daemon this command starts will open: the home as the child's own
+/// environment names it (the app's, with what the command adds or takes away: a login
+/// shell's `HOME` or `CONSENSFLOW_HOME` included), made whole against the folder the child
+/// starts in. Recorded at launch, so that the words of a ledger that cannot save name the
+/// file the child had, never one the app's own environment would give.
+pub(crate) fn launch_ledger(command: &Command) -> PathBuf {
+    let mut env = Env::from_process();
+    for (name, value) in command.get_envs() {
+        let name = name.to_string_lossy().into_owned();
+        env = match value {
+            Some(value) => env.with_var(&name, &value.to_string_lossy()),
+            None => env.without_vars(|var| var == name),
+        };
+    }
+    let home = cf_base::home::config_root(&env).unwrap_or_default();
+    let home = match command.get_current_dir() {
+        Some(folder) => folder.join(home),
+        None => home,
+    };
+    std::path::absolute(&home)
+        .unwrap_or(home)
+        .join("consensflow.db")
+}
+
 /// The daemon `cf` makes: `cf ui --json --no-open`, with nothing of the app's
 /// own added to its environment.
 #[allow(clippy::disallowed_methods)] // The daemon is a std `Command` the app finishes (the human's login environment added to its own) and starts itself, to hold its pipes, and it inherits the app's stderr; cf_process::spawn gives a tokio child a whole environment and never inherits stderr.

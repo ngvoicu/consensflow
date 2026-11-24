@@ -494,3 +494,120 @@ fn copy_folder(from: &Path, to: &Path) {
 
 mod looks;
 mod opening;
+
+/// A file the viewer has no copy of in `home`.
+fn copies_in(home: &Path) -> Vec<PathBuf> {
+    fn walk(folder: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "html") {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(home, &mut found);
+    found
+}
+
+/// An `specs.open` that was admitted and read before the ledger broke does not copy and does
+/// not open after it, and does not say it worked.
+#[tokio::test]
+async fn an_open_that_finishes_after_the_break_neither_copies_nor_opens_and_says_so() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.before_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                copies_in(asked.home.path()).is_empty(),
+                "a copy was made after the break"
+            );
+            assert!(
+                asked.opened.borrow().is_empty(),
+                "a file was opened after the break"
+            );
+            assert!(
+                answer["error"].as_str().unwrap().contains("ledger"),
+                "{answer}"
+            );
+        })
+        .await;
+}
+
+/// The break comes after the copy and before the opener: nothing is opened.
+#[tokio::test]
+async fn an_open_whose_copy_was_made_is_not_opened_after_the_break() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.after_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                asked.opened.borrow().is_empty(),
+                "a file was opened after the break"
+            );
+        })
+        .await;
+}
+
+/// After the break the page's operations are refused before they begin, and one that was
+/// begun before it and succeeds after it does not say it worked.
+#[tokio::test]
+async fn after_the_break_no_page_answer_says_it_worked() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.after_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            // Read before the break, answered after it.
+            let read = asked.file("checkout/SPEC.html").await;
+            assert_eq!(read["ok"], false, "{read}");
+            // Asked after it.
+            let later = asked.present().await;
+            assert_eq!(later["ok"], false, "{later}");
+            // And a setting that writes a file is not written.
+            let settings = ask(&asked.app, "specs.set", json!({ "on": true })).await;
+            assert_eq!(settings["ok"], false, "{settings}");
+        })
+        .await;
+}

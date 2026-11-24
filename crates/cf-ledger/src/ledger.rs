@@ -105,7 +105,22 @@ thread_local! {
 /// for a cancelled one, which a cancel up to 3.0.5 left behind, is told to the
 /// chief once (`tasks::note_stranded_waits`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
-    let db = Connection::open(file)?;
+    open_ledger_as(file, options, true)
+}
+
+/// [`open_ledger`] for a ledger that is there: SQLite is given no leave to make the file,
+/// so one that went (moved, a link left dangling) between the look at it and this open is
+/// refused (`SQLITE_CANTOPEN`) and never made again empty beside the board it was.
+pub fn open_existing_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
+    open_ledger_as(file, options, false)
+}
+
+fn open_ledger_as(file: &Path, options: Options, create: bool) -> Result<Ledger, LedgerError> {
+    let mut flags = rusqlite::OpenFlags::default();
+    if !create {
+        flags.remove(rusqlite::OpenFlags::SQLITE_OPEN_CREATE);
+    }
+    let db = Connection::open_with_flags(file, flags)?;
     // SQLite's own default waits five seconds for a lock: a second instance
     // is refused at once instead. Node set both of these when it opened.
     db.busy_timeout(Duration::ZERO)?;
@@ -207,7 +222,6 @@ impl Ledger {
     /// folders of such tests stayed for good, with their `consensflow.db` (T-1333).
     pub fn let_go_of_its_file(&mut self) {
         if let Ok(memory) = Connection::open_in_memory() {
-            self.store.release_parked();
             self.store.db = memory;
             self.test_file_owners.clear();
         }
@@ -273,6 +287,7 @@ impl Ledger {
 
     /// SQLite's own consistency check of the whole file: `ok` when sound.
     pub fn integrity(&mut self) -> Result<String, LedgerError> {
+        self.store.refuse_if_broken()?;
         Ok(self
             .store
             .db
@@ -291,7 +306,6 @@ impl Ledger {
     /// still, and every operation after this fails as SQLite fails for a
     /// table that is not there: nothing may use it again.
     pub fn close_in_place(&mut self) -> Result<(), LedgerError> {
-        self.store.release_parked();
         let open = std::mem::replace(&mut self.store.db, Connection::open_in_memory()?);
         open.close().map_err(|(_, cause)| cause.into())
     }

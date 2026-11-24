@@ -7,6 +7,9 @@ p23a-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start:
 p23a-app = ["cargo", "xtask", "app", "test", "daemon::tests::"]
 p23a-writes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "writes_go_through_the_guard"]
 p23a-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a ledger that cannot be saved to"]
+p23a-log = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::log::tests"]
+p23a-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::trace::tests::once_the_ledger_broke"]
+p23a-viewer = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::viewer::"]
 p23a-bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::tests::input"]
 
 [[plant]]
@@ -104,8 +107,8 @@ runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
-find = "        latch.trip(WHY);"
-replace = "        let _ = (&latch, WHY);"
+find = "        latch.trip_broken();"
+replace = "        let _ = &latch;"
 
 [[plant]]
 name = "broken ledger: the app is not told"
@@ -143,7 +146,7 @@ runs = ["p23a-app"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon.rs"
 find = '''        let broken = (exit == Some(LEDGER_EXIT) || said.is_some())
-            .then(|| said.unwrap_or_else(ledger_words));'''
+            .then(|| said.unwrap_or_else(|| cf_base::home::unsaved_words(&ledger)));'''
 replace = '''        let broken: Option<String> = None;'''
 
 [[plant]]
@@ -217,8 +220,10 @@ runs = ["p23a-daemon"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
 find = '''        bridge.fence();
+        bridge.ask_no_more();
         // The app hears'''
-replace = '''        // The app hears'''
+replace = '''        bridge.ask_no_more();
+        // The app hears'''
 
 [[plant]]
 name = "broken ledger: the fence admits what it should refuse"
@@ -277,11 +282,8 @@ runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = '''    if used
-        && matches!('''
-replace = '''    if false
-        && used
-        && matches!('''
+find = '''    if used && looked != crate::broken::Ledgerfile::Held {'''
+replace = '''    if false && used && looked != crate::broken::Ledgerfile::Held {'''
 
 [[plant]]
 name = "broken ledger: a held log blocks the ordinary stop"
@@ -295,22 +297,13 @@ replace = '''            .info(&format!("stop: {why}; rss {size} MB"));'''
 
 [[plant]]
 name = "broken ledger: a held log blocks the stop of a broken ledger"
-meant = "a_log_another_process_holds_does_not_keep_the_daemon_from_stopping"
-runs = ["p23a-daemon"]
+meant = "a_line_written_while_the_daemon_ends_does_not_wait_for_a_held_log"
+runs = ["p23a-log"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/broken.rs"
-find = '''        latch.trip(WHY);
-        errors
-            .trace()'''
-replace = '''        errors
-            .trace()'''
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/broken.rs"
-find = '''            .error_within("the ledger cannot save any more", Some(cause), SETTLE);'''
-replace = '''            .error("the ledger cannot save any more", Some(cause));
-        latch.trip(WHY);'''
+file = "crates/cf-daemon/src/files/log.rs"
+find = '''        if self.halt.get().is_some_and(|halt| halt.stopping()) {'''
+replace = '''        if false {'''
 
 [[plant]]
 name = "broken ledger: a cleanup thread that is not made leaves the windows open"
@@ -331,3 +324,227 @@ runs = ["p23a-page"]
 file = "app/ui/core/app.js"
 find = "  if (ledger) {"
 replace = "  if (false) {"
+
+[[plant]]
+name = "broken ledger: a read is made with no look at the broken flag (the integrity check)"
+meant = "after_the_break_the_integrity_check_and_every_read_refuse_and_say_why"
+runs = ["p23a-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''        self.store.refuse_if_broken()?;
+        Ok(self'''
+replace = '''        Ok(self'''
+
+[[plant]]
+name = "broken ledger: the connection is not shut at the break"
+meant = "a_read_that_looks_at_no_flag_is_refused_by_sqlite_itself_once_the_ledger_broke"
+runs = ["p23a-store"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = '''        let _ = self
+            .db
+            .authorizer(Some(|_: rusqlite::hooks::AuthContext<'_>| {
+                rusqlite::hooks::Authorization::Deny
+            }));'''
+replace = ''''''
+
+[[plant]]
+name = "broken ledger: a spec is copied after the break"
+meant = "an_open_that_finishes_after_the_break_neither_copies_nor_opens_and_says_so"
+runs = ["p23a-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''            if let Some(words) = halt.refusal() {
+                return Err(words.to_owned());
+            }'''
+replace = '''            let _ = &halt;'''
+
+[[plant]]
+name = "broken ledger: a spec is opened after the break"
+meant = "an_open_whose_copy_was_made_is_not_opened_after_the_break"
+runs = ["p23a-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''    page.halted()?;
+    (page.specs.open)(&page.env, copy)'''
+replace = '''    (page.specs.open)(&page.env, copy)'''
+
+[[plant]]
+name = "broken ledger: a page answer says it worked after the break"
+meant = "after_the_break_no_page_answer_says_it_worked"
+runs = ["p23a-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = '''        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),'''
+replace = '''        Ok(Ok(_)) if false && halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),'''
+
+[[plant]]
+name = "broken ledger: an operation is begun after the break"
+meant = "after_the_break_no_page_answer_says_it_worked"
+runs = ["p23a-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/mod.rs"
+find = '''    if let Some(words) = page.halt.refusal().filter(|_| page.halt.broke()) {'''
+replace = '''    if let Some(words) = page.halt.refusal().filter(|_| false) {'''
+
+[[plant]]
+name = "broken ledger: an event is appended to the trace after the break"
+meant = "once_the_ledger_broke_no_event_is_appended_and_an_error_still_is"
+runs = ["p23a-trace"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = '''    pub fn event(&self, event: &Event) {
+        if self.broke() {
+            return;
+        }'''
+replace = '''    pub fn event(&self, event: &Event) {'''
+
+[[plant]]
+name = "broken ledger: a window is asked a line after the break"
+meant = "a_bridge_that_asks_no_more_refuses_its_own_requests_and_writes_nothing"
+runs = ["p23a-bridge"]
+
+[[plant.edit]]
+file = "crates/cf-bridge/src/local/request.rs"
+find = '''        if inner.asks_no_more() {'''
+replace = '''        if false && inner.asks_no_more() {'''
+
+[[plant]]
+name = "broken ledger: an ordinary stop under way ends with the status of a quit though the ledger broke"
+meant = "a_stop_already_under_way_ends_with_the_ledgers_status_when_the_ledger_breaks"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''        let code = if self.halt.broke() {'''
+replace = '''        let code = if false && self.halt.broke() {'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''    fn code(&self, why: &str) -> i32 {
+        if self.halt.broke() {'''
+replace = '''    fn code(&self, why: &str) -> i32 {
+        if false && self.halt.broke() {'''
+
+[[plant]]
+name = "broken ledger: a restart is decided on a time limit"
+meant = "a_stream_that_ends_before_the_process_does_is_read_from_the_process_s_own_end"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''        let exit = child.as_mut().and_then(reaped);'''
+replace = '''        let exit = child.as_mut().and_then(|child| {
+            thread::sleep(Duration::from_millis(1500));
+            child.try_wait().ok().flatten().and_then(|status| status.code())
+        });'''
+
+[[plant]]
+name = "broken ledger: a child that closed its stream is killed before its status is read"
+meant = "a_daemon_whose_stream_ends_before_it_is_ready_is_waited_for_not_killed"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon/connect.rs"
+find = '''        if !ended {
+            let _ = child.kill();
+        }'''
+replace = '''        let _ = ended;
+        let _ = child.kill();'''
+
+[[plant]]
+name = "broken ledger: the words name the ledger of the app's own environment"
+meant = "the_words_name_the_ledger_the_child_was_launched_with"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''        let ledger = state.ledger.clone().unwrap_or_default();'''
+replace = '''        let ledger = crate::daemon_command::launch_ledger(&std::process::Command::new("x"));'''
+
+[[plant]]
+name = "broken ledger: a replacement the ledger refused is told as an ordinary failure"
+meant = "a_replacement_refused_for_the_ledger_keeps_the_ledgers_words_and_flag"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''            if failure.ledger {
+                self.fail(&failure);
+                return;
+            }'''
+replace = ''''''
+
+[[plant]]
+name = "broken ledger: a late frame of an older daemon displaces the words in hand"
+meant = "a_late_frame_of_an_older_daemon_does_not_displace_the_words_of_the_one_in_hand"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''                if state.pid == Some(from) {'''
+replace = '''                if true {'''
+
+[[plant]]
+name = "broken ledger: a pane is closed by a spawned thread only"
+meant = "with_no_thread_to_make_the_windows_are_closed_on_the_current_one"
+runs = ["p23a-app"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = '''                if started.is_err() {'''
+replace = '''                if false && started.is_err() {'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = '''            Err(_) => reap_all(panes),'''
+replace = '''            Err(_) => return Reaped::TooLate,'''
+
+[[plant]]
+name = "broken ledger: a home that has a marker and lost its ledger is opened empty"
+meant = "a_used_home_whose_ledger_is_gone_empty_dangling_or_not_a_file_is_never_opened_empty"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = '''    if home.join(MARKER).exists() {
+        return true;
+    }'''
+replace = ''''''
+
+[[plant]]
+name = "broken ledger: the marker is never written"
+meant = "the_marker_is_written_at_first_use_and_at_the_first_open_of_an_older_home"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''    if let Err(failed) = crate::broken::mark(&home) {'''
+replace = '''    if let Err(failed) = Ok::<(), std::io::Error>(()) {'''
+
+[[plant]]
+name = "broken ledger: a trace that cannot be opened is taken for none"
+meant = "an_unreadable_or_garbled_trace_is_a_trace_the_board_may_be_in"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = '''            Err(failed) => failed.kind() != std::io::ErrorKind::NotFound,'''
+replace = '''            Err(_) => false,'''
+
+[[plant]]
+name = "broken ledger: a ledger that went before the open is made again"
+meant = "a_ledger_that_goes_between_the_look_and_the_open_is_refused_not_made_again"
+runs = ["p23a-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''    open_ledger_as(file, options, false)'''
+replace = '''    open_ledger_as(file, options, true)'''

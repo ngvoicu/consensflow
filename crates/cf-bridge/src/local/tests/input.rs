@@ -292,3 +292,24 @@ fn a_fenced_bridge_refuses_a_request_and_drops_an_event_and_still_settles_an_ans
         assert_eq!((served.get(), heard.get()), (0, 0), "nothing was admitted");
     });
 }
+
+#[test]
+fn a_bridge_that_asks_no_more_refuses_its_own_requests_and_writes_nothing() {
+    run(async {
+        let (bridge, wire) = lonely();
+        bridge.ask_no_more();
+        let answered = bridge
+            .request("pane.write", json!({ "line": "go on" }), None)
+            .await;
+        assert_eq!(answered.unwrap()["ok"], false);
+        quiet().await;
+        assert!(
+            wire.frames().is_empty(),
+            "no line reached the peer: {:?}",
+            wire.frames()
+        );
+        // An event still goes: the break itself is told.
+        assert!(bridge.event("ledger.broken", json!({})));
+        assert_eq!(wire.wait_for_frames(1).await[0]["op"], "ledger.broken");
+    });
+}

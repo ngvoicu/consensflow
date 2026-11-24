@@ -7,12 +7,14 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
 use cf_base::file::append_rotating;
 use cf_base::time::{iso, Clock, SystemClock};
+
+use crate::halt::Halt;
 
 /// How big the log may get before it is moved aside: 5 MB.
 pub const LIMIT: u64 = 5_000_000;
@@ -23,6 +25,9 @@ pub struct Log {
     file: PathBuf,
     limit: u64,
     clock: RefCell<Box<dyn Clock + Send>>,
+    /// Once the daemon is ending (a stop, a break) every line is written on a thread
+    /// off the runtime that is waited for [`SETTLE`](super::SETTLE) at most.
+    halt: OnceLock<Arc<Halt>>,
 }
 
 impl Log {
@@ -38,7 +43,15 @@ impl Log {
             file,
             limit,
             clock: RefCell::new(clock),
+            halt: OnceLock::new(),
         }
+    }
+
+    /// From the moment `halt` says the daemon is ending, a line is written only off the
+    /// runtime and waited for a moment: a log that another process holds must keep nothing
+    /// from stopping, whichever path writes it.
+    pub fn ends_with(&self, halt: Arc<Halt>) {
+        let _ = self.halt.set(halt);
     }
 
     /// Where the log is.
@@ -89,6 +102,9 @@ impl Log {
     }
 
     fn write(&self, level: &str, message: &str, cause: Option<&str>) {
+        if self.halt.get().is_some_and(|halt| halt.stopping()) {
+            return self.write_within(level, message, cause, super::SETTLE);
+        }
         // The home may be read-only or gone mid-run.
         let _ = append_rotating(&self.file, &self.text(level, message, cause), self.limit);
     }
@@ -149,6 +165,39 @@ mod tests {
             limit,
             Box::new(Ticks(1_791_194_400_000)),
         )
+    }
+
+    /// From the moment the daemon is ending, a line that another process holds the lock of
+    /// is waited for a moment and let go, whichever path writes it (a pass's error, the
+    /// bridge's fatal callback, a caught panic): none of them is written on the runtime.
+    #[test]
+    fn a_line_written_while_the_daemon_ends_does_not_wait_for_a_held_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = log_in(dir.path(), LIMIT);
+        let halt = crate::halt::Halt::new();
+        log.ends_with(std::sync::Arc::clone(&halt));
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(cf_base::file::lock_beside(log.file()))
+            .unwrap();
+        held.lock().unwrap();
+        let letting_go = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(4));
+            drop(held);
+        });
+        halt.break_ledger();
+        let began = std::time::Instant::now();
+        log.error("a pass failed", Some("after the hook"));
+        log.warn("the bridge failed", None);
+        log.info("caught");
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            began.elapsed()
+        );
+        letting_go.join().unwrap();
     }
 
     #[test]

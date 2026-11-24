@@ -649,13 +649,17 @@ file = "crates/cf-daemon/src/page/viewer.rs"
 find = '''            tokio::task::spawn_blocking(move || {
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             })
             .await'''
 replace = '''            std::future::ready(Ok::<_, tokio::task::JoinError>({
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             }))
             .await'''
 

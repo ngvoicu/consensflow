@@ -19,6 +19,9 @@ pub(crate) fn connect_daemon(
     builder: BridgeBuilder,
     within: Duration,
 ) -> Result<StartedDaemon, DaemonFailure> {
+    // The ledger this child will have, as its own environment names it: said now, at its
+    // launch, and kept with it.
+    let ledger = crate::daemon_command::launch_ledger(&command);
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -35,14 +38,19 @@ pub(crate) fn connect_daemon(
     let writer = child.stdin.take().ok_or_else(|| {
         DaemonFailure::transient("the daemon process gave no input pipe".to_string())
     })?;
-    let failed = |child: &mut Child, cause: String| {
-        let _ = child.kill();
+    // A daemon that is still running is ended (killed) before it is waited for; one that
+    // closed its stream is waited for as it is, killed by nothing, for its status is the
+    // answer: `ended` is that case.
+    let failed = |child: &mut Child, cause: String, ended: bool| {
+        if !ended {
+            let _ = child.kill();
+        }
         let ended = child.wait();
         // A daemon that ended for a ledger it cannot save to says so by its status: not a
         // start to try again, whatever else it failed to say.
         if ended.is_ok_and(|status| status.code() == Some(LEDGER_EXIT)) {
             return DaemonFailure {
-                cause: crate::daemon::ledger_words(),
+                cause: cf_base::home::unsaved_words(&ledger),
                 retry: false,
                 ledger: true,
             };
@@ -61,6 +69,7 @@ pub(crate) fn connect_daemon(
         return Err(failed(
             &mut child,
             format!("could not read the bundled ConsensFlow's handle: {error}"),
+            false,
         ));
     }
     let connected = match handle.recv_timeout(within) {
@@ -69,24 +78,28 @@ pub(crate) fn connect_daemon(
             return Err(failed(
                 &mut child,
                 "ConsensFlow's daemon stopped before it was ready".to_string(),
+                true,
             ));
         }
         Ok(Err(error)) => {
             return Err(failed(
                 &mut child,
                 format!("could not connect to the bundled ConsensFlow: {error}"),
+                false,
             ));
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             return Err(failed(
                 &mut child,
                 format!("ConsensFlow's daemon did not say it was ready within {within:?}"),
+                false,
             ));
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             return Err(failed(
                 &mut child,
                 "could not read the bundled ConsensFlow's handle".to_string(),
+                false,
             ));
         }
     };
@@ -95,8 +108,9 @@ pub(crate) fn connect_daemon(
             daemon: child,
             bridge: connected.bridge,
             roster,
+            ledger,
         }),
-        Err(cause) => Err(failed(&mut child, cause)),
+        Err(cause) => Err(failed(&mut child, cause, false)),
     }
 }
 

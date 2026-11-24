@@ -78,6 +78,9 @@ impl Bridge {
         if inner.is_closed() {
             return Sent::Settled(Err(inner.terminal()));
         }
+        if inner.asks_no_more() {
+            return Sent::Settled(Ok(refusal("the daemon is stopping")));
+        }
         let id = inner.next_id();
         let frame = Frame {
             v: PROTOCOL_VERSION,
