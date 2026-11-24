@@ -1235,6 +1235,11 @@ pub(crate) fn resume_task(
             .transpose()?;
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["paused"], "resume")?;
+        // A person's or the chief's Resume starts the failed turns' tries again, whichever way
+        // it goes on from here (D3's N35); a refusal below writes nothing.
+        if by.is_some() {
+            super::turn_retry::reset(store, task.id)?;
+        }
         // A refusal below writes nothing, this withdrawal with it.
         leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
         let assignee = task
@@ -1338,11 +1343,9 @@ pub(crate) fn resume_task(
             json!({ "by": by, "message": message_id }),
         )?;
         // main's own Resume of a hold made for a retry carries that retry (D3's N35): the try
-        // is used in this write. A person's or the chief's Resume starts the tries again.
+        // is used in this write.
         if by.is_none() {
             super::turn_retry::link(store, &task, message_id)?;
-        } else {
-            super::turn_retry::reset(store, task.id)?;
         }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,

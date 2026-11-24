@@ -470,6 +470,27 @@ fn a_persons_resume_with_words_begins_the_count_again() {
 }
 
 #[test]
+fn a_persons_resume_that_sends_the_task_back_to_the_board_begins_the_count_again() {
+    // The task has no window to go on in: the Resume sends it back to the board, and no
+    // message is queued to a window.
+    assert_eq!(
+        after(|ledger, project, _, _| {
+            ledger
+                .pause_task(project.id, 1, Some("chief"), None)
+                .expect("paused");
+            ledger
+                .sqlite()
+                .execute("UPDATE task SET assignee_id = NULL WHERE number = 1", [])
+                .expect("no window");
+            ledger
+                .resume_task(project.id, 1, Some("chief"), "go on")
+                .expect("resumed to the board");
+        }),
+        0
+    );
+}
+
+#[test]
 fn a_result_begins_the_count_again() {
     assert_eq!(
         after(|ledger, project, _, _| {

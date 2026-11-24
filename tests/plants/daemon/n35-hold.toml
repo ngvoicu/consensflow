@@ -7,9 +7,8 @@
 # Not planted, since each is equivalent to what the code does anyway:
 # - the chief held out of a retry (`participant.role == "chief"` in `failed_end`): the chief's turn never
 #   reaches the failed-turn path of `collect`, which only a staff window's look calls;
-# - the explicit reset in `resume_task` for a person's Resume: the Resume's own message is queued from
-#   that person to the window, and `queue` resets the count for it (the explicit reset serves the
-#   branch where the task goes back to the board and no message is queued to its old window).
+# - a reopen that does not reset the count through the task's move: a reopen queues a message from the
+#   person to the window, and `queue` resets the count for it, so no move needs to.
 #
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
 
@@ -90,18 +89,18 @@ runs = ["n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
-find = "        if to == \"done\" || matches!(task.state.as_str(), \"done\" | \"failed\") {"
+find = "        if to == \"done\" {"
 replace = "        if false {"
 
 [[plant]]
-name = "n35 hold: a reopen does not reset the count"
-meant = "a_reopen_begins_the_count_again"
+name = "n35 hold: a person's Resume back to the board keeps the count"
+meant = "a_persons_resume_that_sends_the_task_back_to_the_board_begins_the_count_again"
 runs = ["n35-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/store.rs"
-find = "        if to == \"done\" || matches!(task.state.as_str(), \"done\" | \"failed\") {"
-replace = "        if to == \"done\" {"
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if by.is_some() {\n            super::turn_retry::reset(store, task.id)?;\n        }"
+replace = "        if false {\n            super::turn_retry::reset(store, task.id)?;\n        }"
 
 [[plant]]
 name = "n35 hold: a person's Resume linked as a retry"
