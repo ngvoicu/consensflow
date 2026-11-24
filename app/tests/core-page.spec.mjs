@@ -19812,8 +19812,7 @@ test.describe('moving along the dock', () => {
       [pane, ++sequence, [...new TextEncoder().encode(text)]],
     )
   /** Eighty numbered lines, so a window has scrollback. */
-  const lines = (who) =>
-    Array.from({ length: 80 }, (_, n) => `${who} line ${n + 1}`).join('\r\n')
+  const lines = (who) => Array.from({ length: 80 }, (_, n) => `${who} line ${n + 1}`).join('\r\n')
   /**
    * The board beside a dock with the chief's window and the sessions `shown` (shown in that
    * order, the last with the keyboard), each printed some lines.
@@ -19829,20 +19828,23 @@ test.describe('moving along the dock', () => {
     await print(page, CHIEF, lines('chief'))
     await print(page, AMBER, lines('amber'))
     await print(page, BIRCH, lines('birch'))
-    await expect(page.locator('#stage .terminal-card[data-handle="chief"] .xterm-rows')).toContainText(
-      'chief line 80',
-    )
+    await expect(
+      page.locator('#stage .terminal-card[data-handle="chief"] .xterm-rows'),
+    ).toContainText('chief line 80')
   }
   const stage = (page) => page.locator('#stage')
   const scrolled = (page) => stage(page).evaluate((node) => Math.round(node.scrollLeft))
-  /** Where in the row the dock rests: polled until it holds still. */
+  /** Where in the row the dock rests: polled until nothing moves it and it holds still. */
   const resting = async (page) => {
     let last = -1
     await expect
       .poll(async () => {
-        const now = await scrolled(page)
-        const still = now === last
-        last = now
+        const [now, moving] = await stage(page).evaluate((node) => [
+          Math.round(node.scrollLeft),
+          node.dataset.moving === 'true',
+        ])
+        const still = !moving && now === last
+        last = moving ? -1 : now
         return still
       })
       .toBe(true)
@@ -19966,9 +19968,12 @@ test.describe('moving along the dock', () => {
   }) => {
     await dock(page)
     // The keyboard in the chief's window, its cursor at the start of a line, the session's
-    // window in view and the chief's last third beside it.
-    await card(page, 'chief').locator('.xterm-helper-textarea').focus()
+    // window in view and the chief's last third beside it. Focused as xterm focuses it, the
+    // field not scrolled to (a script's plain focus() would scroll there itself).
     await print(page, CHIEF, '\r\n> ')
+    await card(page, 'chief')
+      .locator('.xterm-helper-textarea')
+      .evaluate((field) => field.focus({ preventScroll: true }))
     await stage(page).evaluate((node) => {
       node.scrollLeft = node.scrollWidth
     })
@@ -20013,6 +20018,21 @@ test.describe('moving along the dock', () => {
     expect(await scrolled(page)).toBe(0)
   })
 
+  test('where motion is reduced the row goes at once, with no glide', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await dock(page, ['amber-pine', 'brisk-birch'])
+    await resting(page)
+    await page.keyboard.press('Control+Shift+Tab')
+    // Read in the same task as the key: a glide would be at its start.
+    const [left, moving] = await stage(page).evaluate((node) => [
+      Math.round(node.scrollLeft),
+      node.dataset.moving === 'true',
+    ])
+    expect(moving).toBe(false)
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+    expect(await resting(page)).toBe(left)
+  })
+
   test("the dock's map names its windows in the row's order, shows which are in view and which has the keyboard, and goes to the one chosen", async ({
     page,
   }) => {
@@ -20025,24 +20045,20 @@ test.describe('moving along the dock', () => {
     await resting(page)
     // The last shown is whole in view at the right end, with the keyboard; the one before it
     // partly; the chief's out of view, to the left.
-    await expect
-      .poll(states)
-      .toEqual([
-        ['none', 'false'],
-        ['part', 'false'],
-        ['whole', 'true'],
-      ])
+    await expect.poll(states).toEqual([
+      ['none', 'false'],
+      ['part', 'false'],
+      ['whole', 'true'],
+    ])
     await expect(chips.nth(0)).toHaveAttribute('title', /out of view, to the left/)
     await map.getByRole('button', { name: "Go to Chief of Staff's terminal" }).click()
     await expect.poll(() => keyboardIn(page)).toBe('chief')
     expect(await resting(page)).toBe(0)
-    await expect
-      .poll(states)
-      .toEqual([
-        ['whole', 'true'],
-        ['none', 'false'],
-        ['none', 'false'],
-      ])
+    await expect.poll(states).toEqual([
+      ['whole', 'true'],
+      ['none', 'false'],
+      ['none', 'false'],
+    ])
     await expect(chips.nth(2)).toHaveAttribute('title', /out of view, to the right/)
     // A swipe moves the view, not the keyboard: the map says both.
     await over(page, 'chief')
@@ -20055,7 +20071,9 @@ test.describe('moving along the dock', () => {
     ])
     // With the chief's window alone in the dock there is nowhere to go: no map.
     for (const name of ['amber-pine', 'brisk-birch']) {
-      await card(page, `zeus-${name}`).getByRole('button', { name: `Hide @zeus · ${name}'s terminal` }).click()
+      await card(page, `zeus-${name}`)
+        .getByRole('button', { name: `Hide @zeus · ${name}'s terminal` })
+        .click()
     }
     await expect.poll(() => docked(page)).toEqual(['chief'])
     await expect(map).toBeHidden()
