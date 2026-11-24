@@ -128,16 +128,17 @@ fn open_system(page: &str) -> Result<(), String> {
 
 /// Opens `page` with `opener`, given the page as its one argument.
 #[cfg_attr(any(test, windows), allow(dead_code))]
-#[allow(clippy::disallowed_methods)] // cf-process runs a program async, on an empty environment and under a time and size limit; the opener is waited for on the caller's thread, in this process's environment, and its exit status is not read.
+#[allow(clippy::disallowed_methods)] // cf-process runs a program async, on an empty environment and under a time and size limit; the opener is waited for on the caller's thread, in this process's environment, and its exit status is read: a failure is an error.
 pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
     cf_process::hold_only_the_streams(&mut command);
-    command
-        .arg(page)
-        .status()
-        .map(drop)
-        .map_err(|e| e.to_string())
+    let status = command.arg(page).status().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{} ended with {status}", opener.display()))
+    }
 }
 
 #[cfg(test)]
@@ -336,5 +337,36 @@ mod tests {
             std::fs::read_to_string(&said).expect("what it said"),
             format!("clear {page}\n")
         );
+    }
+
+    /// An opener that runs and fails is a failure (T-2118, the Settings button's): its status
+    /// was read by no one, so the page's error line stayed hidden.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_opener_that_exits_with_a_failure_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().expect("a folder");
+        let opener = folder.path().join("open");
+        std::fs::write(&opener, "#!/bin/sh\nexit 3\n").expect("the opener");
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable");
+        let opened = (0..50)
+            .map(|_| {
+                open_with(
+                    &opener,
+                    "x-apple.systempreferences:com.apple.preference.security",
+                )
+            })
+            .find(|opened| {
+                let busy = matches!(opened, Err(refused) if refused.contains("Text file busy"));
+                if busy {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                !busy
+            })
+            .expect("the opener started");
+        let error = opened.expect_err("a failed opener is opened nothing");
+        assert!(error.contains('3'), "the status is not said: {error}");
     }
 }

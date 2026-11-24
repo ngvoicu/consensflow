@@ -111,8 +111,8 @@ runs = ["screens-unit"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/screens/harnesses.rs"
-find = "self.admin.check(id.map(Harness::as_str), refresh)"
-replace = "self.admin.check(None, refresh)"
+find = "self.admin.observe(id.map(Harness::as_str), refresh)"
+replace = "self.admin.observe(None, refresh)"
 
 [[plant]]
 name = "screens: a harness that is none of the five is Claude"

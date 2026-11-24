@@ -681,3 +681,39 @@ fn the_size_is_given_to_a_window_resumed_as_to_one_launched() {
 fn muse_s_real_window_is_the_smallest_one_measured() {
     assert_eq!(super::REAL_WINDOW, 512_000);
 }
+
+/// A Muse launcher only, with no pin, that says `said` to `--version`: what its launch
+/// is prepared with, and the programs run to prepare it.
+#[cfg(unix)]
+fn launcher_saying(said: &str) -> (Result<Prepared, String>, Vec<String>) {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), None);
+    let fakes = Fakes::new(&env);
+    fakes
+        .processes
+        .run_answer("muse --version", Ok(said.to_owned()));
+    let adapter = MuseAdapter::new(&fakes.services(&env, Path::new("")));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    let prepared = finished(adapter.prepare(&launch(&id, None)));
+    let ran = fakes
+        .processes
+        .take_ran()
+        .iter()
+        .map(|(program, _)| crate::testing::named(program))
+        .collect();
+    (prepared, ran)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_muse_launcher_that_says_1_4_12_is_refused_and_one_that_says_1_4_24_runs_itself() {
+    let (refused, ran) = launcher_saying("Muse Code 1.4.12 (1.4.12-R6000.1)");
+    assert_eq!(
+        refused.err().unwrap(),
+        "Muse Code 1.4.13 or newer is required. Update Muse Code before opening a pane."
+    );
+    assert_eq!(ran, ["muse --version"]);
+    let (opened, ran) = launcher_saying("Muse Code 1.4.24 (1.4.24-R7500)");
+    assert!(opened.unwrap().argv[0].ends_with("muse"));
+    assert_eq!(ran, ["muse --version"]);
+}

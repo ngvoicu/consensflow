@@ -46,7 +46,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
 use cf_base::time::{Clock, SystemClock};
-use cf_harness::contract::{Records, Work};
+use cf_harness::contract::{ProcessStatus, Records, Work};
 use cf_harness::records::{Boundary, Options, Reading};
 use cf_harness::seams::Time;
 use cf_proto::agents::Harness;
@@ -219,6 +219,19 @@ impl DaemonRecords {
 }
 
 impl Records for DaemonRecords {
+    fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, ProcessStatus)>> {
+        self.spawn.arrival(self.records.claude_statuses(folder))
+    }
+
+    fn claude_holders<'a>(
+        &'a self,
+        folder: &'a str,
+        session: &'a str,
+    ) -> Work<'a, Option<Vec<u32>>> {
+        self.spawn
+            .arrival(self.records.claude_holders(folder, session))
+    }
+
     fn look<'a>(
         &'a self,
         harness: Harness,

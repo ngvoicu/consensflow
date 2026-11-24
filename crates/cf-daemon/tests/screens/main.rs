@@ -59,7 +59,6 @@ traces! {
     core_agents_server_005: "core-agents-server-005",
     core_agents_server_009: "core-agents-server-009",
     corners_screens_009: "corners-screens-009",
-    corners_screens_010: "corners-screens-010",
 }
 
 /// The traces of the screens the recorder made, by name.
@@ -71,7 +70,7 @@ fn recorded() -> BTreeSet<String> {
 fn every_trace_of_the_screens_there_is_has_a_test_and_no_test_is_for_none() {
     let tested: BTreeSet<String> = TRACES.iter().map(|name| (*name).to_owned()).collect();
     assert_eq!(recorded(), tested);
-    assert_eq!(TRACES.len(), 5);
+    assert_eq!(TRACES.len(), 4);
 }
 
 /// The world is read as the recorder reads it: a roster's `createdAt` and

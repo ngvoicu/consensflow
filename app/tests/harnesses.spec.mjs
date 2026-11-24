@@ -1,8 +1,112 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
+
+test('tested versions and installed release tell one consistent story', async ({ page }) => {
+  const html = readFileSync(
+    new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
+    'utf8',
+  )
+  const row = (id, installed, release, beyond) => ({
+    id,
+    installed,
+    path: installed ? `/test/${id}` : null,
+    checkedAt: 0,
+    version: installed ? { state: 'checked', value: '1.0.0' } : { state: 'not-installed' },
+    update: { state: installed ? 'current' : 'not-checked' },
+    tested: { newest: '2.0.0', oldest: null, release, beyond },
+  })
+  await page.route('http://a3.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({
+        json: {
+          harnesses: [
+            row('claude', true, '9999.0.2', true),
+            row('pi', true, '0.0.1', false),
+            row('codex', false, null, false),
+          ],
+        },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://a3.test/harnesses')
+  const rows = page.locator('.host')
+  await expect(rows).toHaveCount(3)
+  const claude = rows.filter({ has: page.getByText('Claude Code', { exact: true }) })
+  const claudeText = await claude.innerText()
+  expect.soft(claudeText).toContain('Version 9999.0.2, up to date')
+  expect.soft(claudeText).toContain('Tested up to 2.0.0.')
+  expect.soft(claudeText).toContain('This version is newer and has not been checked yet.')
+  const pi = rows.filter({ has: page.getByText('Pi', { exact: true }) })
+  const piText = await pi.innerText()
+  expect.soft(piText).toContain('Version 0.0.1, up to date')
+  expect.soft(piText).toContain('Tested up to 2.0.0.')
+  expect.soft(piText).not.toContain('This version is newer')
+  const codex = rows.filter({ has: page.getByText('Codex', { exact: true }) })
+  const codexText = await codex.innerText()
+  expect.soft(codexText).not.toContain('Tested up to')
+  expect.soft(codexText).not.toContain('This version is newer')
+})
+
+test('an older check response never replaces what a later look already showed', async ({
+  page,
+}) => {
+  const html = readFileSync(
+    new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
+    'utf8',
+  )
+  const row = (id, reason, stamp) => ({
+    id,
+    stamp,
+    installed: true,
+    path: `/test/${id}`,
+    checkedAt: 0,
+    version: { state: 'checked', value: '1.0.0' },
+    update: { state: 'current', value: '1.0.0', source: 'x', command: null },
+    tested: { newest: '2.0.0', oldest: null, release: null, beyond: false },
+    setup: { state: 'update-required', reason },
+  })
+  const held = []
+  await page.route('http://order.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      held.push({ route, body: JSON.parse(route.request().postData() || '{}') })
+      return
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  const answer = (at, rows) => held[at].route.fulfill({ json: { harnesses: rows } })
+  await page.goto('http://order.test/harnesses')
+  await expect.poll(() => held.length).toBe(1)
+  // Check all begins while the opening look is still out: it is the newer.
+  await page.locator('#check-all').click()
+  await expect.poll(() => held.length).toBe(2)
+  expect(held[1].body.refresh).toBe(true)
+  await answer(1, [row('codex', 'NEW codex', 2), row('devin', 'NEW devin', 2)])
+  await expect(page.getByText('NEW codex')).toBeVisible()
+  // The older response arrives last, and changes nothing.
+  await answer(0, [row('codex', 'OLD codex', 1), row('devin', 'OLD devin', 1)])
+  await page.waitForTimeout(150)
+  await expect(page.getByText('NEW codex')).toBeVisible()
+  await expect(page.getByText('NEW devin')).toBeVisible()
+  await expect(page.getByText('OLD codex')).toHaveCount(0)
+  await expect(page.getByText('OLD devin')).toHaveCount(0)
+  // A row's own look, begun after an all-harness look that has not ended, wins for that
+  // row and for it alone.
+  await page.locator('#check-all').click()
+  await expect.poll(() => held.length).toBe(3)
+  await page.getByRole('button', { name: 'Refresh' }).first().click()
+  await expect.poll(() => held.length).toBe(4)
+  expect(held[3].body.id).toBe('codex')
+  await answer(3, [row('codex', 'ROW codex', 4)])
+  await expect(page.getByText('ROW codex')).toBeVisible()
+  await answer(2, [row('codex', 'ALL codex', 3), row('devin', 'ALL devin', 3)])
+  await expect(page.getByText('ALL devin')).toBeVisible()
+  await expect(page.getByText('ROW codex')).toBeVisible()
+  await expect(page.getByText('ALL codex')).toHaveCount(0)
+})
 
 test('Harnesses loads the bundled Geist in standalone and framed views', async ({
   page,
@@ -110,7 +214,7 @@ for (const [harness, label] of [['pi', 'Pi']]) {
       await page.goto(`${server.url}/harnesses?token=${server.token}`)
       const pi = page
         .locator('.host')
-        .filter({ has: page.locator('strong', { hasText: new RegExp(`^${harness}$`) }) })
+        .filter({ has: page.locator('strong', { hasText: new RegExp(`^${label}$`) }) })
       await expect(pi).toContainText('Version 1.2.3')
       await expect(pi).toContainText(`${label} setup failed`)
       // In the page's red for the light scheme the test browser has (#B91C1C).
@@ -134,9 +238,9 @@ for (const [harness, label] of [['pi', 'Pi']]) {
       // the count said four).
       await expect(page.locator('.host')).toHaveCount(5)
       await expect(
-        page.locator('.host').filter({ has: page.locator('strong', { hasText: /^muse$/ }) }),
+        page.locator('.host').filter({ has: page.locator('strong', { hasText: /^Muse Code$/ }) }),
       ).toHaveCount(1)
-      await expect(page.locator('.host').filter({ hasText: 'claude' })).toContainText(
+      await expect(page.locator('.host').filter({ hasText: 'Claude Code' })).toContainText(
         'Not installed',
       )
       for (const label of ['Turn off', 'Reset everything']) {
@@ -174,104 +278,214 @@ test('Harnesses reports a failed initial check and allows retry', async ({ page 
   }
 })
 
-test('Harnesses says how each one was installed and updates it from a button', async ({ page }) => {
-  const t = tempEnv()
-  const server = await agentsServer(t.env)
-  const row = (version, update) => ({
-    id: 'codex',
-    path: '/opt/homebrew/Caskroom/codex/0.1/bin/codex',
-    installed: true,
-    checkedAt: Date.now(),
-    version: { state: 'checked', value: version },
-    distribution: 'Homebrew',
-    update,
-  })
-  const others = ['claude', 'pi', 'devin'].map((id) => ({
-    id,
-    path: null,
-    installed: false,
-    checkedAt: Date.now(),
-    version: { state: 'not-installed' },
-    update: { state: 'not-checked' },
-  }))
-  const available = {
-    state: 'available',
-    value: '0.2.0',
-    command: '/opt/homebrew/bin/brew upgrade --cask codex',
-  }
-  await page.route('**/api/harnesses/check', (route) =>
-    route.fulfill({ json: { harnesses: [row('0.1.0', available), ...others] } }),
+// T-2091: the page is read-only. It shows the version, the launch's own check and the command
+// that updates a harness the way it was installed, with Copy and Refresh; it installs nothing.
+const harnessesHtml = () =>
+  readFileSync(
+    new URL('../../crates/cf-daemon/src/screens/pages/harnesses.html', import.meta.url),
+    'utf8',
   )
-  let asked = null
-  await page.route('**/api/harnesses/update', async (route) => {
-    asked = route.request().postDataJSON()
-    await route.fulfill({
-      json: {
-        result: {
-          id: 'codex',
-          state: 'updated',
-          before: '0.1.0',
-          after: '0.2.0',
-          command: available.command,
-          output: '',
-          harness: row('0.2.0', { state: 'current', value: '0.2.0', command: available.command }),
-        },
-      },
+const rowOf = (id, fields) => ({
+  id,
+  stamp: 1,
+  installed: true,
+  path: `/test/${id}`,
+  checkedAt: 0,
+  version: { state: 'checked', value: '0.1.0' },
+  update: { state: 'current', value: '0.1.0', command: null },
+  distribution: 'Homebrew',
+  tested: { newest: '2.0.0', oldest: null, release: null, beyond: false },
+  ...fields,
+})
+
+// Each way a harness was installed, on each platform, as the daemon says its command: the page
+// shows it as sent and Copy puts the same text on the clipboard.
+const METHODS = [
+  ['Homebrew cask', '/opt/homebrew/bin/brew upgrade --cask codex'],
+  ['Homebrew formula', '/opt/homebrew/bin/brew upgrade codex'],
+  ['npm', '/usr/local/bin/npm install -g @openai/codex@latest'],
+  ["Codex's own installer", "'/Users/a b/.codex/bin/codex' update"],
+  ["Pi's own installer", '/Users/a/.pi/bin/pi update --self'],
+  ['npm on Windows', '& "C:\\Program Files\\nodejs\\npm.cmd" install -g @openai/codex@latest'],
+  ["Codex's own installer on Windows", '& "C:\\Users\\a b\\.codex\\bin\\codex.exe" update'],
+]
+for (const [method, command] of METHODS) {
+  test(`a harness installed with ${method} shows the exact command that updates it, with Copy`, async ({
+    page,
+  }) => {
+    const html = harnessesHtml()
+    await page.addInitScript(() => {
+      window.copied = []
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: async (text) => void window.copied.push(text) },
+        configurable: true,
+      })
     })
-  })
-  try {
-    await page.goto(`${server.url}/harnesses?token=${server.token}`)
+    await page.route('http://cmd.test/**', (route) => {
+      if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+        return route.fulfill({
+          json: {
+            harnesses: [
+              rowOf('codex', { update: { state: 'available', value: '0.2.0', command } }),
+            ],
+          },
+        })
+      }
+      return route.fulfill({ contentType: 'text/html', body: html })
+    })
+    await page.goto('http://cmd.test/harnesses')
     const codex = page.locator('.host').first()
     await expect(codex).toContainText('Version 0.1.0, 0.2.0 is out')
-    await expect(codex).toContainText('Installed with Homebrew')
-    await expect(codex).not.toContainText('Release from')
-    await codex.getByRole('button', { name: 'Update to 0.2.0' }).click()
-    await expect(codex).toContainText('Updated 0.1.0 → 0.2.0')
-    await expect(codex).toContainText('Version 0.2.0, up to date')
+    await expect(codex.locator('code')).toHaveText(command)
+    await codex.getByRole('button', { name: 'Copy' }).click()
+    await expect(codex.getByRole('button', { name: 'Copied' })).toBeVisible()
+    expect(await page.evaluate(() => window.copied)).toEqual([command])
     await expect(codex.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
-    expect(asked).toEqual({ id: 'codex' })
-    await expect(page.locator('.host').nth(3)).not.toContainText('next prompt')
-  } finally {
-    await server.close()
-    t.cleanup()
+  })
+}
+
+test('a harness below the version ConsensFlow needs shows its reason and its command', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  const reason = 'Codex 0.150.0 has no native queue, which ConsensFlow needs: update Codex.'
+  await page.route('http://need.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({
+        json: {
+          harnesses: [
+            rowOf('codex', {
+              version: { state: 'checked', value: '0.150.0' },
+              update: { state: 'current', value: '0.150.0', command: 'brew upgrade codex' },
+              setup: { state: 'update-required', reason },
+            }),
+          ],
+        },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://need.test/harnesses')
+  const codex = page.locator('.host').first()
+  await expect(codex).toContainText(`ConsensFlow cannot start it: ${reason}`)
+  await expect(codex.locator('code')).toHaveText('brew upgrade codex')
+})
+
+test('a harness ConsensFlow can start says so, and one it could not check says why', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  await page.route('http://start.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({
+        json: {
+          harnesses: [
+            rowOf('codex', { setup: { state: 'ready' } }),
+            rowOf('devin', { setup: { state: 'unchecked', reason: 'could not read its version' } }),
+            rowOf('pi', {}),
+          ],
+        },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://start.test/harnesses')
+  const rows = page.locator('.host')
+  await expect(rows.nth(0)).toContainText('ConsensFlow can start it.')
+  await expect(rows.nth(1)).toContainText(
+    'ConsensFlow could not check it: could not read its version',
+  )
+  await expect(rows.nth(2)).toContainText('ConsensFlow can start it.')
+  await expect(page.locator('code')).toHaveCount(0)
+})
+
+test('where the install method is not known the page names the harness own update instructions', async ({
+  page,
+}) => {
+  const html = harnessesHtml()
+  await page.route('http://unknown.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({
+        json: {
+          harnesses: [
+            rowOf('pi', {
+              distribution: null,
+              update: { state: 'available', value: '1.2.4', command: null },
+            }),
+            rowOf('devin', { distribution: null }),
+          ],
+        },
+      })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://unknown.test/harnesses')
+  const row = page.locator('.host').first()
+  // One sentence, and nothing before it of what ConsensFlow does not recognize (T-2112).
+  await expect(row).toContainText(
+    'Update it the way you installed it, as its own update instructions say.',
+  )
+  await expect(row).not.toContainText('does not recognize')
+  await expect(row.getByRole('button', { name: 'Copy' })).toHaveCount(0)
+  // With no update to make, the row says nothing of how it was installed.
+  const current = page.locator('.host').nth(1)
+  await expect(current).toContainText('Version 0.1.0, up to date')
+  await expect(current).not.toContainText('does not recognize')
+  await expect(current).not.toContainText('Update it the way you installed it')
+})
+
+// T-2112: a row is named by the product, its command beside it; a command that is its own
+// product's name (agy) is said once.
+test('each harness is named by its product, with its command beside it', async ({ page }) => {
+  const html = harnessesHtml()
+  const named = [
+    ['claude', 'Claude Code'],
+    ['codex', 'Codex'],
+    ['pi', 'Pi'],
+    ['devin', 'Devin'],
+    ['muse', 'Muse Code'],
+    ['agy', 'agy'],
+  ]
+  await page.route('http://names.test/**', (route) => {
+    if (new URL(route.request().url()).pathname === '/api/harnesses/check') {
+      return route.fulfill({ json: { harnesses: named.map(([id]) => rowOf(id, {})) } })
+    }
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://names.test/harnesses')
+  const rows = page.locator('.host')
+  await expect(rows).toHaveCount(named.length)
+  for (const [at, [id, product]] of named.entries()) {
+    await expect(rows.nth(at).locator('strong')).toHaveText(product)
+    if (id === product) {
+      await expect(rows.nth(at).locator('.head')).not.toContainText(`(${id})`)
+    } else {
+      await expect(rows.nth(at).getByText(`(${id})`, { exact: true })).toBeVisible()
+    }
   }
 })
 
-test('Harnesses tells the human to update a harness the way it was installed when no command is known', async ({
-  page,
-}) => {
-  const t = tempEnv()
-  const server = await agentsServer(t.env, { installed: [] })
-  // The check is answered here: what the real feeds say of a newer release is for no test to depend on.
-  const pi = {
-    id: 'pi',
-    path: '/usr/local/bin/pi',
-    installed: true,
-    checkedAt: Date.now(),
-    version: { state: 'checked', value: '1.2.3' },
-    distribution: null,
-    update: { state: 'available', value: '1.2.4', command: null },
-  }
-  const others = ['claude', 'codex', 'devin'].map((id) => ({
-    id,
-    path: null,
-    installed: false,
-    checkedAt: Date.now(),
-    version: { state: 'not-installed' },
-    update: { state: 'not-checked' },
-  }))
-  await page.route('**/api/harnesses/check', (route) =>
-    route.fulfill({ json: { harnesses: [pi, ...others] } }),
-  )
-  try {
-    await page.goto(`${server.url}/harnesses?token=${server.token}`)
-    const row = page.locator('.host').first()
-    await expect(row).toContainText('Version 1.2.3, 1.2.4 is out')
-    await expect(row).toContainText('Installed in a way ConsensFlow does not recognize')
-    await expect(row).toContainText('Update it the way you installed it.')
-    await expect(row.getByRole('button', { name: /^Update to/ })).toHaveCount(0)
-  } finally {
-    await server.close()
-    t.cleanup()
-  }
+test('Refresh asks for that harness again, and the page installs nothing', async ({ page }) => {
+  const html = harnessesHtml()
+  const asked = []
+  let installs = 0
+  await page.route('http://refresh.test/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/harnesses/check') {
+      asked.push(JSON.parse(route.request().postData() || '{}'))
+      return route.fulfill({
+        json: { harnesses: [rowOf('codex', { stamp: asked.length })] },
+      })
+    }
+    if (path.startsWith('/api/harnesses/') && path !== '/api/harnesses/check') installs += 1
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+  await page.goto('http://refresh.test/harnesses')
+  await expect(page.locator('.host')).toHaveCount(1)
+  await page.locator('.host').first().getByRole('button', { name: 'Refresh' }).click()
+  await expect.poll(() => asked.length).toBe(2)
+  expect(asked[1]).toEqual({ id: 'codex', refresh: true })
+  await page.waitForTimeout(2500)
+  expect(asked.length).toBe(2)
+  expect(installs).toBe(0)
 })

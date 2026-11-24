@@ -1,9 +1,7 @@
 //! What the admin says of a harness, as the page reads it: a row of what is
-//! known of one CLI, and what became of an update. Each is written with its
+//! known of one CLI. Each is written with its
 //! fields in the order Node's admin built them, absent where it left a key out,
 //! so that its JSON reads as Node's did.
-
-use std::rc::Rc;
 
 use cf_proto::agents::Harness;
 use serde::{Serialize, Serializer};
@@ -22,6 +20,7 @@ pub struct Row {
     pub checked_at: i64,
     pub version: Version,
     pub update: Update,
+    pub tested: Tested,
     /// Whether a window can be opened on the CLI: Devin's always.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup: Option<Setup>,
@@ -30,6 +29,39 @@ pub struct Row {
     /// The extension made for the CLI (Pi's alone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<Extension>,
+}
+
+/// The releases tested with ConsensFlow and the installed release, when proved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Tested {
+    pub newest: &'static str,
+    pub oldest: Option<String>,
+    pub release: Option<String>,
+    pub beyond: bool,
+}
+
+impl Tested {
+    pub(super) fn of(harness: Harness, release: Option<&str>) -> Self {
+        let (newest, oldest) = crate::launch::declared(harness);
+        Self::with_newest(harness, newest, oldest, release)
+    }
+
+    fn with_newest(
+        harness: Harness,
+        newest: &'static str,
+        oldest: Option<String>,
+        release: Option<&str>,
+    ) -> Self {
+        let beyond = release
+            .and_then(|release| crate::launch::newer(harness, Some(newest), release))
+            .unwrap_or(false);
+        Self {
+            newest,
+            oldest,
+            release: release.map(str::to_owned),
+            beyond,
+        }
+    }
 }
 
 /// What the CLI said to `--version`.
@@ -93,8 +125,12 @@ pub struct Release {
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Setup {
     Ready,
-    /// Devin is older than a window needs.
+    /// The launch's check read the CLI and refuses it: the launch's own sentence.
     UpdateRequired {
+        reason: String,
+    },
+    /// The launch's check could not read the CLI: the launch's own sentence.
+    Unchecked {
         reason: String,
     },
 }
@@ -160,53 +196,13 @@ impl Extension {
     }
 
     /// Pi's extension, as it was prepared.
-    pub(super) fn of_pi(prepared: pi::Extension) -> Self {
+    pub(crate) fn of_pi(prepared: pi::Extension) -> Self {
         match prepared {
             pi::Extension::NotInstalled => Self::not_installed(),
             pi::Extension::InstalledUnverified { path } => Self::unverified(path),
             pi::Extension::Error { reason } => Self::failed(reason),
         }
     }
-}
-
-/// How an update ended, in the words the page switches on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Ended {
-    /// The install method is not recognized: nothing was run.
-    Unsupported,
-    Updated,
-    Unchanged,
-    Failed,
-}
-
-/// What an update came to.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum Outcome {
-    /// Nothing was run: the install method is not recognized.
-    Unsupported {
-        id: Harness,
-        state: Ended,
-        reason: String,
-        harness: Rc<Row>,
-    },
-    /// The command ran, and the CLI was checked again.
-    Ran {
-        id: Harness,
-        state: Ended,
-        /// The version before and after, when one was read.
-        before: Option<String>,
-        after: Option<String>,
-        command: String,
-        /// The last of what the command wrote, to either stream.
-        output: String,
-        /// Why it failed.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-        /// The row as it is after the update.
-        harness: Rc<Row>,
-    },
 }
 
 #[cfg(test)]

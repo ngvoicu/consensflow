@@ -4,6 +4,7 @@
 
 mod adapter;
 mod channel;
+pub(crate) mod declared;
 mod install;
 mod last_used;
 pub(crate) mod models;

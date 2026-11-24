@@ -29,9 +29,6 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
     ("crates/cf-engine/src/seams.rs", "ComputerUse::codex", Kind::Adapter, 1),
 
     // The harnesses' crate, outside its registry: its readers, its admin, its detection and the files a launch leaves.
-    // Muse's (D2b, T-996): its version read and compared in `inspect`, 2 of these 3 (T-703, before this list).
-    ("crates/cf-harness/src/admin/inspect.rs", "inspect", Kind::Match, 3),
-    ("crates/cf-harness/src/admin/inspect.rs", "setup", Kind::Match, 1),
     ("crates/cf-harness/src/admin/source.rs", "feed", Kind::Match, 1),
     ("crates/cf-harness/src/admin/source.rs", "name", Kind::Match, 1),
     ("crates/cf-harness/src/admin/source.rs", "npm_package", Kind::Match, 1),
