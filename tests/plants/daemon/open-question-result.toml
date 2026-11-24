@@ -36,8 +36,8 @@ runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''    Ok(if open.iter().all(|question| *question < pasted.id) {'''
-replace = '''    Ok(if open.iter().all(|question| *question < pasted.id + 1_000_000) {'''
+find = '''        if after {'''
+replace = '''        if false && after {'''
 
 [[plant]]
 name = "open question result: a question is placed by its id against the answer's"
