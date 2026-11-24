@@ -70,7 +70,10 @@ pub mod database;
 pub mod identity;
 pub mod keychain;
 pub mod place;
+pub mod reads;
 pub mod renewal;
+pub(crate) mod shells;
+pub mod source;
 pub mod spawn;
 pub mod terminal;
 mod windows_registry;
@@ -82,7 +85,7 @@ pub use writes::symlink;
 #[cfg(windows)]
 pub use writes::{symlink_dir, symlink_file};
 pub use writes::{
-    append, copy, copy_cloning, copy_keeping_mode, copy_tree, create, create_new,
+    append, copy, copy_cloning, copy_keeping_mode, copy_keeping_mode_from, copy_tree, copy_tree_from, create, create_new,
     create_new_private, made_dir, made_file, make_dir, make_dir_private, remove, rename,
     say_its_process, set_modified, set_permissions, write, write_executable, write_whole,
 };
@@ -948,11 +951,21 @@ pub fn window_admitted(
     let env = spawn::pane_environment(host, body, windows)?;
     let kit = spawn::kit_vars(host);
     let env = sealed(env, &kit, windows)?;
-    let program = body["argv"]
-        .get(0)
-        .and_then(serde_json::Value::as_str)
+    let argv = body["argv"]
+        .as_array()
         .ok_or_else(|| "the window names no program".to_owned())?;
-    let program = program_in(Path::new(program), &env);
+    let words = argv
+        .iter()
+        .map(|word| {
+            word.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("a word of the window's command is no text: {word}"))
+        })
+        .collect::<Result<Vec<String>, String>>()?;
+    let (program, args) = words
+        .split_first()
+        .ok_or_else(|| "the window names no program".to_owned())?;
+    let program = program_started(Path::new(program), args, &env)?;
     match program {
         spawn::Program::Keychain => {
             Err("the window's program is the Keychain's utility, which only its door starts".into())
@@ -1091,6 +1104,80 @@ pub fn register_shim(shim: &Path, var: Option<&str>, program: &Path) {
     );
 }
 
+/// The value of the variable `wanted` in `env`, the name in any case on Windows.
+fn env_value(env: &[(std::ffi::OsString, std::ffi::OsString)], wanted: &str) -> Option<String> {
+    let windows = cfg!(windows);
+    env.iter()
+        .find(|(name, _)| {
+            if windows {
+                name.to_string_lossy().eq_ignore_ascii_case(wanted)
+            } else {
+                name == wanted
+            }
+        })
+        .map(|(_, value)| value.to_string_lossy().into_owned())
+}
+
+/// The file `program` is, as a start with the environment `env` finds it: its own path where it
+/// has a folder, a bare name's first place on the search path otherwise.
+fn found_on(
+    program: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Option<PathBuf> {
+    if program.components().count() > 1 || program.is_absolute() {
+        return Some(program.to_path_buf());
+    }
+    crate::process::first_on_path(
+        &program.to_string_lossy(),
+        &env_value(env, "PATH").unwrap_or_default(),
+        &env_value(env, "PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned()),
+    )
+}
+
+/// What a program started with `args` is: [`program_in`], and where the program is a shell told
+/// to run a command, the program that command starts (T-2219). A command the shell would read for
+/// itself (an operator, a substitution, a variable) cannot be judged, and is the error: the start
+/// is refused.
+pub fn program_started(
+    program: &Path,
+    args: &[String],
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<spawn::Program, String> {
+    started_within(program, args, env, 0)
+}
+
+fn started_within(
+    program: &Path,
+    args: &[String],
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    depth: usize,
+) -> Result<spawn::Program, String> {
+    let judged = program_within(program, env, 0);
+    if judged != spawn::Program::Plain {
+        return Ok(judged);
+    }
+    let file = found_on(program, env).unwrap_or_else(|| program.to_path_buf());
+    let real = canonical(&file);
+    let names = [Some(file.as_path()), real.as_deref()];
+    let shell = names
+        .into_iter()
+        .flatten()
+        .filter_map(|path| path.file_name())
+        .find_map(|name| shells::shell_named(&name.to_string_lossy()));
+    let Some(shell) = shell else {
+        return Ok(judged);
+    };
+    match shells::told(shell, args)? {
+        shells::Told::Nothing => Ok(judged),
+        shells::Told::Command(words) => {
+            if depth >= STARTERS_DEEP {
+                return Err("the shell's command starts shells inside shells too deep to judge".into());
+            }
+            started_within(Path::new(&words[0]), &words[1..], env, depth + 1)
+        }
+    }
+}
+
 /// What `program` is ([`spawn::program_of`]), found on the search path `env` gives it where it
 /// is a bare name, by the file it resolves to.
 pub fn program_in(
@@ -1110,27 +1197,8 @@ fn program_within(
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     depth: usize,
 ) -> spawn::Program {
-    let windows = cfg!(windows);
-    let get = |wanted: &str| {
-        env.iter()
-            .find(|(name, _)| {
-                if windows {
-                    name.to_string_lossy().eq_ignore_ascii_case(wanted)
-                } else {
-                    name == wanted
-                }
-            })
-            .map(|(_, value)| value.to_string_lossy().into_owned())
-    };
-    let found = if program.components().count() > 1 || program.is_absolute() {
-        Some(program.to_path_buf())
-    } else {
-        crate::process::first_on_path(
-            &program.to_string_lossy(),
-            &get("PATH").unwrap_or_default(),
-            &get("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned()),
-        )
-    };
+    let get = |wanted: &str| env_value(env, wanted);
+    let found = found_on(program, env);
     let real = found.as_deref().and_then(canonical);
     let judged = real.as_deref().or(found.as_deref()).unwrap_or(program);
     if depth < STARTERS_DEEP {

@@ -189,7 +189,7 @@ replace = '''    let items = read.or_else(|_| -> Result<Vec<Item>> { Ok(Vec::new
 
 [[plant]]
 name = "K3 round 3: the long-brief check accepts the bare command alone"
-meant = "a_long_message_is_found_in_a_window_by_the_cf_command_the_product_wrote"
+meant = "a_posix_recipient_reads_the_rest_by_the_posix_word_alone"
 runs = ["ki-test-first-message"]
 
 [[plant.edit]]
@@ -804,7 +804,7 @@ replace = '''            Err(_) => {}'''
 
 [[plant]]
 name = "K3 doors: Claude's parity case opens a window on a pane table of its own (T-2119 X1)"
-meant = "the_live_kit_ends_removes_and_writes_only_through_its_door"
+meant = "the_live_kit_starts_ends_removes_and_writes_only_through_its_doors"
 runs = ["ki-lib-door"]
 
 [[plant.edit]]

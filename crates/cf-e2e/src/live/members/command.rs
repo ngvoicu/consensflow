@@ -441,7 +441,7 @@ mod tests {
             crate::process::Run::new("cmd")
                 .args(["/c", &format!("ping -n 30 127.0.0.1 > nul & rem {mark}")])
         } else {
-            crate::process::Run::new("/bin/sh").args(["-c", &format!("sleep 30; : {mark}")])
+            crate::process::Run::fixture_script(format!("sleep 30; : {mark}"))
         };
         let mut outsider = outsider.spawn().unwrap();
         // The window's program (100), its agent (101, Devin's runs its commands), the
@@ -720,8 +720,7 @@ mod tests {
         let mark = "cf-live-members-cut-mark-4171";
         let command = LongCommand::new(mark);
         let shell = |line: String| {
-            Run::new("/bin/sh")
-                .args(["-c", &line])
+            Run::fixture_script(line)
                 .spawn()
                 .unwrap()
         };

@@ -426,8 +426,7 @@ impl Jobs {
     /// says it is a command of the agent's, a shell that runs it ([`in_a_shell`]).
     fn running(program: &Path, words: Vec<OsString>, how: &How) -> Result<Run, String> {
         if how.in_place && cfg!(unix) {
-            Ok(Run::new("/bin/sh")
-                .args(["-c", IN_PLACE])
+            Ok(Run::fixture_script(IN_PLACE)
                 .arg(program)
                 .args(words)
                 .own_group())
@@ -524,13 +523,11 @@ pub fn in_a_shell_as(program: &Path, words: Vec<OsString>, detach: Detach) -> Re
                     .arg(program)
                     .args(words))
             }
-            Detach::Here => Ok(Run::new("/bin/sh")
-                .args(["-c", &shell_script(true)])
+            Detach::Here => Ok(Run::fixture_script(shell_script(true))
                 .arg(program)
                 .args(words)
                 .own_group()),
-            Detach::No => Ok(Run::new("/bin/sh")
-                .args(["-c", &shell_script(false)])
+            Detach::No => Ok(Run::fixture_script(shell_script(false))
                 .arg(program)
                 .args(words)
                 .own_group()),

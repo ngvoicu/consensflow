@@ -5,6 +5,7 @@ use std::fs;
 use std::time::Duration;
 
 use super::*;
+use crate::files;
 
 #[test]
 fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {

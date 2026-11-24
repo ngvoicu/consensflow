@@ -13,7 +13,6 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -65,18 +64,17 @@ pub struct Listing {
 impl Listing {
     /// Reads each of `records` whole. A folder that is not there holds no names; one that cannot
     /// be listed, or an entry of it that cannot be read, is an error: nothing is run on it.
-    pub fn of(records: &[&Path]) -> Result<Listing> {
+    pub fn of<S: Into<super::source::Source> + Copy>(records: &[S]) -> Result<Listing> {
         let mut folders = Vec::new();
         for folder in records {
-            let names = match fs::read_dir(folder) {
-                Ok(entries) => entries
-                    .map(|entry| entry.map(|entry| entry.file_name()))
-                    .collect::<std::io::Result<BTreeSet<OsString>>>()
-                    .map_err(Error::file("list", folder))?,
+            let folder: super::source::Source = (*folder).into();
+            let path = PathBuf::from(folder.to_argument());
+            let names = match folder.names() {
+                Ok(names) => names.into_iter().collect::<BTreeSet<OsString>>(),
                 Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
-                Err(failed) => return Err(Error::file("list", folder)(failed)),
+                Err(failed) => return Err(Error::file("list", &path)(failed)),
             };
-            folders.push(((*folder).to_path_buf(), names));
+            folders.push((path, names));
         }
         Ok(Listing { folders })
     }
@@ -91,4 +89,23 @@ impl Listing {
                 .any(|held| held.to_string_lossy().to_lowercase() == wanted)
         })
     }
+}
+
+/// Whether `path` is a link: a symbolic link anywhere, a junction or other reparse point on
+/// Windows. Whatever it points at is never followed.
+pub fn is_link(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const REPARSE_POINT: u32 = 0x400;
+        return meta.file_attributes() & REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    false
 }

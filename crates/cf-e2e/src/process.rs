@@ -217,6 +217,8 @@ pub(crate) enum Kind {
     /// A door operation (cargo, the Keychain's utility): its environment is the operation's own,
     /// named where it is made, and the seal's homes are not asked of it.
     Operation(&'static str),
+    /// [`Run::fixture_script`]: an offline fixture's own script, run by the shell.
+    Script,
 }
 
 /// Whether the variable `name` says what the machine is, and nothing of whose account runs on
@@ -320,6 +322,19 @@ impl Run {
             run = run.var(name, value);
         }
         run.kind = Kind::Harness(harness);
+        run
+    }
+
+    /// An offline fixture's own script, run by `/bin/sh -c`: the one start through a shell whose
+    /// command the door does not read (the door refuses any other, where it cannot read the
+    /// command, T-2219). A script with a word that names a harness's program, cargo or the
+    /// Keychain's utility is refused here too. The audit holds this function to the files that
+    /// call it ([`crate::door::rule`]): a new caller fails it.
+    pub fn fixture_script(script: impl AsRef<str>) -> Self {
+        let mut run = Self::new("/bin/sh");
+        run.args.push(Arg::Plain(OsString::from("-c")));
+        run.args.push(Arg::Plain(OsString::from(script.as_ref())));
+        run.kind = Kind::Script;
         run
     }
 
@@ -515,18 +530,7 @@ impl Run {
         }
         // The profile's two halves are said by the door from the profile the program is given,
         // unless its case names them: the machine's own would say the caller's.
-        let halves_named = self.vars.iter().any(|(name, _)| {
-            crate::door::spawn::PROFILE_HALVES
-                .iter()
-                .any(|half| same_name(name, OsStr::new(half), true))
-        });
-        if !halves_named {
-            env.retain(|(held, _)| {
-                !crate::door::spawn::PROFILE_HALVES
-                    .iter()
-                    .any(|half| same_name(held, OsStr::new(half), true))
-            });
-        }
+        without_unnamed_profile_halves(&mut env, &self.vars);
         // A program of a say-only run says only, into the same file, whatever its environment;
         // every program is told the folders the run made so far, the only ones it writes below,
         // and the roots it never writes in. None of them is a caller's to give.
@@ -571,7 +575,39 @@ impl Run {
         if let Kind::Operation(_) = self.kind {
             return Ok(());
         }
-        let program = crate::door::program_in(Path::new(&self.program), env);
+        if let Kind::Script = self.kind {
+            let words: Vec<String> = self
+                .args
+                .iter()
+                .map(|arg| match arg {
+                    Arg::Plain(word) => word.to_string_lossy().into_owned(),
+                    #[cfg(windows)]
+                    Arg::Raw(word) => word.to_string_lossy().into_owned(),
+                })
+                .collect();
+            return match crate::door::shells::names_a_door_program(&words) {
+                Some(name) => Err(Error::LiveApp(format!(
+                    "a fixture's script names {name}, which has a door of its own"
+                ))),
+                None => Ok(()),
+            };
+        }
+        let args: Vec<String> = self
+            .args
+            .iter()
+            .map(|arg| match arg {
+                Arg::Plain(word) => word.to_string_lossy().into_owned(),
+                #[cfg(windows)]
+                Arg::Raw(word) => word.to_string_lossy().into_owned(),
+            })
+            .collect();
+        let program = crate::door::program_started(Path::new(&self.program), &args, env)
+            .map_err(|why| {
+                Error::LiveApp(format!(
+                    "{} is not started: {why}",
+                    self.program.to_string_lossy()
+                ))
+            })?;
         match (&self.kind, &program) {
             (Kind::Plain, crate::door::spawn::Program::Plain) => Ok(()),
             (Kind::Harness(_), crate::door::spawn::Program::Harness(_)) => {
@@ -795,6 +831,27 @@ fn inheritable(name: &OsStr, value: &OsStr, roots: &crate::door::Roots) -> bool 
         .chain(std::env::split_paths(value))
         .filter(|path| path.is_absolute())
         .any(|path| roots.holds(&path))
+}
+
+/// The profile's two halves (`HOMEDRIVE`, `HOMEPATH`) taken out of `env` unless the program's case
+/// (`named`) gives them: the door says them again from the profile the program is given, and the
+/// machine's own would say the caller's.
+fn without_unnamed_profile_halves(
+    env: &mut Vec<(OsString, OsString)>,
+    named: &[(OsString, OsString)],
+) {
+    let halves_named = named.iter().any(|(name, _)| {
+        crate::door::spawn::PROFILE_HALVES
+            .iter()
+            .any(|half| same_name(name, OsStr::new(half), true))
+    });
+    if !halves_named {
+        env.retain(|(held, _)| {
+            !crate::door::spawn::PROFILE_HALVES
+                .iter()
+                .any(|half| same_name(held, OsStr::new(half), true))
+        });
+    }
 }
 
 /// Whether two names of variables are one: in any case on Windows.

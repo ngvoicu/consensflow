@@ -734,16 +734,38 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
     foreign
 }
 
+/// A fixture writes only below a decoy folder ([`unowned_tempdir`]) that the door refuses: any other
+/// path is a mistake of the fixture, and is not written.
+#[cfg(test)]
+fn is_in_the_decoy(path: &Path) {
+    assert!(
+        path.ancestors().any(|part| part
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("foreign-fixture-"))),
+        "{} is below no decoy folder",
+        path.display()
+    );
+    assert!(
+        crate::door::writable(path, true).is_err(),
+        "{} is a place the door lets a run write",
+        path.display()
+    );
+}
+
 /// A file of a synthetic foreign folder ([`unowned_tempdir`]), made as the foreign party made it:
 /// the door refuses a write there, so the fixture is not written through it.
 #[cfg(test)]
 pub(crate) fn foreign_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+    let path = path.as_ref();
+    is_in_the_decoy(path);
     std::fs::write(path, contents).expect("write a file of a synthetic foreign folder");
 }
 
 /// A folder of a synthetic foreign folder, made as [`foreign_write`] makes a file.
 #[cfg(test)]
 pub(crate) fn foreign_dir(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    is_in_the_decoy(path);
     std::fs::create_dir(path).expect("make a folder of a synthetic foreign folder");
 }
 

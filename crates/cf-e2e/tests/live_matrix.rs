@@ -251,16 +251,11 @@ mod tests {
         }
     }
 
-    /// The shared folder CI uploads the evidence from, made where it is not there: it is the
-    /// build folder's, no folder of a run's, so the door does not make it.
-    fn make_shared_folder(kept: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(kept)
-    }
-
     /// Keeps what `from` holds in a new folder of this run's own below `kept` (the shared folder
     /// that CI uploads): where the folder is, and the names of what it held.
     fn keep_below(from: &Path, kept: &Path) -> std::io::Result<(PathBuf, Vec<String>)> {
-        make_shared_folder(kept)?;
+        // `made_in` makes the shared folder CI uploads from where it is not there, as an
+        // allocation the door judges.
         let mut folder = cf_e2e::door::made_in(kept, "case-")?;
         let names = copied_below(from, folder.path())?;
         Ok((folder.keep(), names))

@@ -91,6 +91,53 @@ impl Control {
         TestMachine::required_for(what).map(|_| Control(()))
     }
 
+    /// Claude Code, once, on the account's own home (`HOME`: where its Keychain lookup is made)
+    /// and a config folder this run made (`CLAUDE_CONFIG_DIR` among `vars`), against the case's own
+    /// servers: the one start of the kit that gives a program the account's home, behind the
+    /// control's token. The program must be Claude Code's (a file of the machine's harness
+    /// resolution, by name), `vars` may not name a home of the account's, and the update switches
+    /// every start has are added. Refused anywhere the control is.
+    pub fn start_claude(
+        &self,
+        program: &Path,
+        args: &[&str],
+        vars: Vec<(String, String)>,
+        cwd: &Path,
+        limit: Duration,
+    ) -> Result<Ran> {
+        let _ = self;
+        for (name, value) in &vars {
+            if crate::door::spawn::HOME_VARS
+                .iter()
+                .chain(&crate::door::spawn::PROFILE_HALVES)
+                .any(|home| home.eq_ignore_ascii_case(name) && *home != "CLAUDE_CONFIG_DIR")
+            {
+                return Err(Error::Daemon(format!(
+                    "the Keychain control gives {name} itself; a caller names none of the homes"
+                )));
+            }
+            if name == "CLAUDE_CONFIG_DIR" && !crate::door::is_made_or_below(Path::new(value)) {
+                return Err(Error::Daemon(format!(
+                    "the Keychain control runs Claude Code on a config folder this run made, and {value} is none"
+                )));
+            }
+        }
+        if !vars.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR") {
+            return Err(Error::Daemon(
+                "the Keychain control runs Claude Code on a config folder this run made, and none is named".to_owned(),
+            ));
+        }
+        let home = crate::live::machine::home()?;
+        Run::operation("keychain-control", program)
+            .args(args)
+            .vars(vars)
+            .var("HOME", home)
+            .vars(crate::live::launcher::updates_off_of(crate::live::Harness::Claude).iter().copied())
+            .cwd(cwd)
+            .limit(limit)
+            .run()
+    }
+
     /// Makes the item Claude Code would make for `folder`, a config folder this run made, holding
     /// a made-up value, and says it is this run's ([`OwnItem`]): the hosted test's way to put an
     /// item in the Keychain for the guard to find. Refused where `folder` is no folder this run
@@ -291,5 +338,63 @@ mod tests {
         let shape = item.shape(&control);
         assert_eq!(shape, vec!["mcpOAuth(2)".to_owned(), "token".to_owned()]);
         assert!(!format!("{shape:?}").contains("SECRET"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod control_tests {
+    use super::*;
+
+    /// The control's one start of Claude Code: on the account's own home and a config folder this
+    /// run made, with the update switches, and never with a home a caller names or a config folder
+    /// that is no folder of this run's. A stand-in program stands for Claude Code: nothing live.
+    #[test]
+    fn the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other() {
+        let control = Control(());
+        let run = crate::door::made("cf-control-start-").unwrap();
+        let program = run.path().join("claude");
+        let seen = run.path().join("seen");
+        crate::door::write_executable(
+            &program,
+            format!("#!/bin/sh\nenv > '{}'\n", seen.display()),
+        )
+        .unwrap();
+        let config = run.path().join("config");
+        crate::door::make_dir(&config).unwrap();
+        let named = |config: &Path| {
+            vec![
+                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+                (
+                    "CLAUDE_CONFIG_DIR".to_owned(),
+                    config.to_string_lossy().into_owned(),
+                ),
+            ]
+        };
+        control
+            .start_claude(&program, &[], named(&config), run.path(), Duration::from_secs(20))
+            .unwrap();
+        let env = std::fs::read_to_string(&seen).unwrap();
+        let home = crate::live::machine::home().unwrap();
+        assert!(env.lines().any(|line| line == format!("HOME={}", home.display())), "{env}");
+        assert!(
+            env.lines()
+                .any(|line| line == format!("CLAUDE_CONFIG_DIR={}", config.display())),
+            "{env}"
+        );
+        for (name, value) in crate::live::launcher::updates_off_of(crate::live::Harness::Claude) {
+            assert!(env.lines().any(|line| line == format!("{name}={value}")), "{name}: {env}");
+        }
+        // A home a caller names, a config folder nobody made, and none named: refused, nothing run.
+        let mut with_home = named(&config);
+        with_home.push(("HOME".to_owned(), "/somewhere".to_owned()));
+        let foreign = crate::standin_process::unowned_tempdir();
+        for vars in [with_home, named(foreign.path()), Vec::new()] {
+            let _ = std::fs::remove_file(&seen);
+            let refused = control
+                .start_claude(&program, &[], vars, run.path(), Duration::from_secs(20))
+                .unwrap_err();
+            assert!(refused.to_string().contains("Keychain control"), "{refused}");
+            assert!(!seen.exists(), "a refused start ran");
+        }
     }
 }

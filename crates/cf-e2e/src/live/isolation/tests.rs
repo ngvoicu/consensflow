@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use serde_json::json;
 
 use super::*;
+use std::fs;
 use crate::process::Run;
 
 /// What a login holds that must never be said or kept in a home that is not its owner's.
@@ -1637,7 +1638,7 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
             // Restoring bytes restores a content comparison, but a replaced login has
             // a different identity and must still be reported as changed.
             crate::door::write(&file, &before).unwrap();
-            if isolation.plan.login_watched.contains(&file) {
+            if isolation.plan.login_watched.contains(&Owned::from(&file)) {
                 assert!(isolation.finish().is_err(), "{which}: {shown} was replaced");
             } else {
                 assert!(isolation.finish().is_ok(), "{which}: {shown} is as it was");
@@ -2472,7 +2473,7 @@ fn t1744_review_guard_does_not_open_any_owner_login_file() {
         ] {
             let before = guard.look();
             let after = guard.look();
-            assert!(before.changes_to(&after, &root).is_empty());
+            assert!(before.changes_to(&after, &Owned::from(&root)).is_empty());
         }
         let matrix = crate::matrix::evidence::Owner::of_machine().unwrap();
         assert!(matrix.unchanged(&matrix.again()).ok);
@@ -2556,21 +2557,21 @@ fn every_store_a_plan_names_is_a_row_of_the_table() {
         Plan::devin_on_windows(&home.join("AppData/Roaming")),
     ];
     for plan in &plans {
-        let mut named: Vec<&Path> = Vec::new();
+        let mut named: Vec<PathBuf> = Vec::new();
         for seed in &plan.seeds {
             match seed {
                 Seed::Copy { from, .. }
                 | Seed::PiLogin { from, .. }
-                | Seed::PiProvider { from, .. } => named.push(from),
+                | Seed::PiProvider { from, .. } => named.push(PathBuf::from(from.to_argument())),
                 Seed::Fixed { .. } => {}
             }
         }
-        named.extend(plan.watched.iter().map(PathBuf::as_path));
-        named.extend(plan.login_watched.iter().map(PathBuf::as_path));
-        named.extend(plan.records.iter().map(PathBuf::as_path));
+        for held in plan.watched.iter().chain(&plan.login_watched).chain(&plan.records) {
+            named.push(PathBuf::from(held.to_argument()));
+        }
         for path in named {
             assert!(
-                crate::live::stores::in_a_row(path, &lookup).is_some(),
+                crate::live::stores::in_a_row(&path, &lookup).is_some(),
                 "{} is in no row of the table ({})",
                 path.display(),
                 plan.described

@@ -101,6 +101,163 @@ const PTY_STARTS: &[&str] = &[
 /// The calls that start a program, by their names alone, outside `std::process`: the system's own.
 const START_CALLS: &[&str] = &["fork", "posix_spawn", "posix_spawnp", "execv", "execve", "execvp"];
 
+/// The functions of `std::fs` that read: what a held file ([`READS_HELD`]) does through the door's
+/// readers ([`crate::door::reads`]) for a place of the run's, and through a
+/// [`crate::door::source::Source`] for the owner's.
+const FS_READS: &[&str] = &[
+    "read",
+    "read_to_string",
+    "read_dir",
+    "metadata",
+    "symlink_metadata",
+    "canonicalize",
+    "read_link",
+];
+
+/// The methods of a path that read the file system, with no argument.
+const PATH_READS: &[&str] = &[
+    "exists",
+    "try_exists",
+    "read_dir",
+    "read_link",
+    "canonicalize",
+    "symlink_metadata",
+    "metadata",
+];
+
+/// The files that touch the owner's stores, and read nothing of the file system but through the
+/// door's readers or a source: every other read of theirs is found. A path is a prefix of a file's,
+/// from the crate's own folder. The files left out are those of the offline suites and the stand-in
+/// programs, which read the folders they made; the unit tests of a held file are not read.
+const READS_HELD: &[&str] = &[
+    "src/live/isolation",
+    "src/live/login",
+    "src/live/launcher",
+    "src/live/layout.rs",
+    "src/live/guard.rs",
+    "src/live/machine.rs",
+    "src/live/renew.rs",
+    "src/live/keychain.rs",
+    "src/muse.rs",
+    "src/rig/install.rs",
+    "src/rig/homes.rs",
+    "src/matrix/evidence.rs",
+    "tests/live_harness_dialogs.rs",
+];
+
+/// The files that ask the account for a source of the owner's files ([`crate::door::source`]):
+/// each reads for one of its three purposes (the seed of a run's home, a marketplace or package it
+/// copies, the guard of the owner's setup), and the rig's placement of the person's project
+/// folders. No other file names the account.
+const OWNER_FILES: &[(&str, &str)] = &[
+    (
+        "src/live/machine.rs",
+        "where the machine's harness is found, its login looked for and the home its setup is read from",
+    ),
+    (
+        "src/live/isolation.rs",
+        "the seeds of a harness's home and the owner's files it watches",
+    ),
+    (
+        "src/live/launcher.rs",
+        "the owner's launchers it hashes around a run",
+    ),
+    (
+        "src/live/login.rs",
+        "the caller's config folder a Claude login is copied from",
+    ),
+    (
+        "src/matrix/evidence.rs",
+        "the owner's launcher links, Muse and Claude files the matrix compares before and after a run",
+    ),
+    (
+        "src/live/agents.rs",
+        "Pi's login, read once in memory to name the providers a run's Pi model is asked of",
+    ),
+    (
+        "src/muse.rs",
+        "Muse's login and catalog copied into a live rig's home, and the launcher's version line",
+    ),
+    (
+        "tests/live_harness_dialogs.rs",
+        "the marketplace of the owner's Claude Code the dialog case copies, and the owner's `.claude.json` it compares around the run",
+    ),
+    (
+        "tests/live_muse/tui.rs",
+        "the owner's Muse login a direct window case copies into its own home",
+    ),
+    (
+        "tests/live_muse_reads.rs",
+        "the owner's Muse login and catalog the reads case copies into a scratch folder",
+    ),
+    (
+        "tests/live_keychain.rs",
+        "the guard of the owner's launchers the Keychain control runs under",
+    ),
+    (
+        "tests/live_launcher.rs",
+        "the owner's home a launcher case says its folders below",
+    ),
+    (
+        "tests/live_finish/compacted.rs",
+        "the decoy owners the compacted case's layouts are checked against",
+    ),
+    (
+        "tests/rig/muse_window.rs",
+        "the decoy owner a Muse window case's Devin isolation copies from",
+    ),
+    (
+        "tests/rig/standin_homes.rs",
+        "the decoy home a launcher watch must refuse",
+    ),
+    (
+        "tests/rig/harness_homes.rs",
+        "the decoy owners the rig's harness homes are copied from",
+    ),
+];
+
+/// The calls of the account's secret stores that no path or variable names ([`crate::live::stores::SECRET_STORES`]):
+/// Windows' Credential Manager, the Mac's Keychain by its API. The kit's own code names none: the
+/// Keychain is read by `/usr/bin/security`, in the one door that starts it.
+const SECRET_STORE_CALLS: &[&str] = &[
+    "CredReadW",
+    "CredReadA",
+    "CredEnumerateW",
+    "CredEnumerateA",
+    "CredWriteW",
+    "CredWriteA",
+    "CredDeleteW",
+    "CredDeleteA",
+    "SecItemCopyMatching",
+    "SecItemAdd",
+    "SecItemUpdate",
+    "SecItemDelete",
+    "SecKeychainFindGenericPassword",
+    "SecKeychainFindInternetPassword",
+];
+
+/// The crates that read a secret store of the account's.
+const SECRET_STORE_CRATES: &[&str] = &["keyring", "security_framework", "secret_service", "libsecret"];
+
+/// The programs that read or write one, named in a string (the `security` utility is the
+/// Keychain's door's alone).
+const SECRET_STORE_PROGRAMS: &[&str] = &["cmdkey", "vaultcmd", "secret-tool"];
+
+/// Whether `text` names a program that reads or writes a secret store of the account's.
+fn names_a_secret_store_program(text: &str) -> bool {
+    text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ';' | '&' | '|' | '(' | ')'))
+        .filter(|word| !word.is_empty())
+        .any(|word| {
+            let name = word
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(word)
+                .to_ascii_lowercase();
+            let name = name.strip_suffix(".exe").unwrap_or(&name);
+            SECRET_STORE_PROGRAMS.contains(&name)
+        })
+}
+
 /// The ways to open a SQLite database, which can write: its journal, its WAL, its shared memory.
 /// A read goes through `door::database::read`, a write through `door::database::write`.
 const DATABASE_OPENS: &[&str] = &["open", "open_with_flags", "open_with_flags_and_vfs"];
@@ -116,7 +273,7 @@ const XTASK_RUNS: &[&str] = &["run", "capture", "spawn"];
 const LEAVES_OUT: &[(&str, &[Class], &str)] = &[
     (
         "src/door",
-        &[Class::End, Class::Write, Class::Start, Class::Env, Class::Database],
+        &[Class::End, Class::Write, Class::Start, Class::Env, Class::Database, Class::Account],
         "the door is what the rule holds the rest to",
     ),
     (
@@ -158,12 +315,6 @@ const LEAVES_OUT: &[(&str, &[Class], &str)] = &[
         "src/process/pid.rs",
         &[Class::End],
         "the process primitives the door's endings are made of",
-    ),
-    (
-        "src/cf.rs",
-        &[Class::Write],
-        "the builder of the programs a suite starts keeps a lock and a stamp in the folder the builds \
-         share, which no run of the live kit makes (`cargo xtask live` builds first, and a case builds nothing)",
     ),
 ];
 
@@ -232,12 +383,6 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "the decoy folder the door's refusals are shown on: made where the run owns nothing, by design, so that a write there is refused",
     ),
     (
-        "tests/live_matrix.rs",
-        "make_shared_folder",
-        Class::Write,
-        "the folder CI uploads a failed case's evidence from is the build folder's, shared by every run: no folder of a run's, so the door cannot make it; the evidence itself goes in a new folder of the run's own below it",
-    ),
-    (
         "src/standin_process.rs",
         "foreign_write",
         Class::Write,
@@ -279,6 +424,222 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         Class::Operation,
         "the renewal's operation is made where it asks for the test machine's token, the harness, and a folder this run made",
     ),
+    (
+        "src/cf.rs",
+        "made",
+        Class::Write,
+        "the stamp of a build, in the folder the builds share, below the checkout's build folder: no folder of a run's, so the door cannot make it",
+    ),
+    (
+        "src/cf.rs",
+        "taking_turns",
+        Class::Write,
+        "the lock the builds take turns on, in the same shared folder",
+    ),
+    (
+        "src/cf.rs",
+        "a_program_the_run_built_and_that_is_gone_is_built_again",
+        Class::Write,
+        "a unit test takes away a program it built in a folder of its own, in the crate's own builder",
+    ),
+    (
+        "src/door/keychain.rs",
+        "start_claude",
+        Class::Operation,
+        "the control's operation is made where it asks the account's home and the config folder this run made",
+    ),
+    (
+        "src/door/keychain.rs",
+        "the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other",
+        Class::Operation,
+        "the control's own test starts it with a stand-in program",
+    ),
+    (
+        "src/live/login.rs",
+        "read",
+        Class::Operation,
+        "the Keychain's read of Claude Code's login item, for the seed of a run's login copy: the one caller of `login_item`",
+    ),
+    (
+        "src/live/login.rs",
+        "keychain_services",
+        Class::Operation,
+        "the Keychain's item names, for the guard that compares them around a run: the one caller of `item_names`",
+    ),
+    (
+        "src/live/renew.rs",
+        "one_shot_within",
+        Class::Operation,
+        "the renewal's one start, behind the test machine's token: the one caller of `renewal::start`",
+    ),
+    (
+        "src/live/renew/tests.rs",
+        "the_renewals_door_runs_two_harnesses_in_a_folder_the_run_made",
+        Class::Operation,
+        "the test of the renewal's door asks it for its two harnesses",
+    ),
+    (
+        "src/process.rs",
+        "terminal",
+        Class::Operation,
+        "`Run::terminal`: the one caller of the pty door, after the seal and the admission every start asks",
+    ),
+    (
+        "tests/live_keychain.rs",
+        "run",
+        Class::Operation,
+        "the Keychain control's start of Claude Code on the account's home, behind the control's token",
+    ),
+    (
+        "src/bin/fake_agent/background.rs",
+        "running",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/bin/fake_agent/background.rs",
+        "in_a_shell_as",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/bin/fake_agent/reply.rs",
+        "shell",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/bin/fake_devin/command.rs",
+        "start",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/door/k3_tests.rs",
+        "a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/live/codex.rs",
+        "server",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/live/codex.rs",
+        "a_request_the_server_does_not_answer_is_a_timeout_that_names_it",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/live/members/command.rs",
+        "a_process_outside_the_window_that_holds_the_mark_runs_on_and_the_windows_own_command_is_ended",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/live/members/command.rs",
+        "what_a_cut_window_left_of_the_command_is_ended_by_the_processes_chosen_while_it_was_the_windows",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/live/members/left/tests.rs",
+        "a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_what_runs_elsewhere_is_not_found",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/process/tests.rs",
+        "a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/process/tests.rs",
+        "sh",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/rig/stranger.rs",
+        "a_look_at_how_a_stranger_ended_waits_for_no_pipe_a_process_it_left_holds",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_finish/leaving/tests.rs",
+        "a_process_that_runs_is_there_and_one_that_never_was_is_not",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_finish/leaving/tests.rs",
+        "a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_which_process_it_is",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_finish/leaving/tests.rs",
+        "a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_finish/stand_in.rs",
+        "the_close_of_a_case_finds_what_its_window_left_says_so_and_ends_nothing_and_leaves_another_runs_job",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_parity/codex_devin.rs",
+        "muse_s_case_gives_the_human_s_settings_a_server_and_a_hook_that_says_its_word",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_stops/hook.rs",
+        "a_hook_of_another_run_on_the_machine_is_not_the_hook_the_case_waits_for",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/live_stops/slow.rs",
+        "a_process_of_another_run_that_holds_the_hooks_old_word_is_not_the_hook_the_case_looks_for",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/rig/homes.rs",
+        "a_rig_that_starts_takes_no_home_and_the_sweep_lists_the_old_ones_and_says_which_a_process_works_in_or_names",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/rig/live_member.rs",
+        "the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_that_says_the_same",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/smoke/app.rs",
+        "app",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "tests/smoke/app.rs",
+        "a_report_that_does_not_come_is_a_timeout_that_says_what_did_and_where_to_look",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/scratch_home.rs",
+        "a_program_run_by_the_home_sees_its_variables_and_none_of_the_tests",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
 ];
 
 /// The functions of `std::fs` (and `std::os::*::fs`) that write, copy, rename, link, make or set
@@ -314,6 +675,17 @@ const WRITING_PROGRAMS: &[&str] = &[
     "cp", "mv", "install", "rsync", "tee", "dd", "ln", "touch", "mkdir", "truncate", "ditto",
     "robocopy", "xcopy", "copy", "move", "mklink",
 ];
+
+/// Whether the path `segments` is one that reads the file system other than through the door's readers.
+fn reads_raw(segments: &[String]) -> bool {
+    let last = segments.last().map(String::as_str).unwrap_or_default();
+    let before = segments.iter().rev().nth(1).map(String::as_str);
+    match before {
+        Some("fs") => FS_READS.contains(&last),
+        Some("File") => last == "open",
+        _ => false,
+    }
+}
 
 /// Whether the path `segments` is one that writes in the file system other than through the door.
 fn writes_raw(segments: &[String]) -> bool {
@@ -405,6 +777,15 @@ enum Class {
     Operation,
     /// A child started on the environment of a stand-in's window, outside the stand-in programs.
     Window,
+    /// A secret store of the account's that no path names (Windows' Credential Manager, the
+    /// Keychain by its API), named by the kit's code ([`SECRET_STORE_CALLS`]).
+    Account,
+    /// The account asked for a source of the owner's files, outside the files named for it
+    /// ([`OWNER_FILES`]).
+    Owner,
+    /// A read of the file system in a file that touches the owner's stores ([`READS_HELD`]), made
+    /// outside the door's readers and a source.
+    Read,
 }
 
 impl Class {
@@ -417,6 +798,9 @@ impl Class {
             Class::Database => "database",
             Class::Operation => "operation",
             Class::Window => "window",
+            Class::Read => "read",
+            Class::Owner => "owner",
+            Class::Account => "account",
         }
     }
 }
@@ -445,9 +829,16 @@ struct Reader {
     xtask: bool,
     /// The classes this file is not held to (what the door is made of: [`LEAVES_OUT`]).
     skip: &'static [Class],
+    /// Whether this is a file of [`READS_HELD`].
+    holds_reads: bool,
+    /// Whether this is a file of [`OWNER_FILES`], or of the door.
+    asks_account: bool,
     /// How deep in code only a test builds this is (a file such a test module is, too): a process
     /// a test ends by its own id is the test audit's, not this rule's.
     in_test: usize,
+    /// How deep in code a `cfg(test)` builds only: a `#[test]` function of a live suite is not
+    /// that, and an ending written in one is found (T-2220 finding 4).
+    in_cfg_test: usize,
     /// How deep in closures given to the door this is.
     in_door: usize,
     /// How deep in a comparison this is, where a string is read.
@@ -491,6 +882,23 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
             format!("{}(…) (a database opened outside the database door)", segments.join("::")),
         ));
     }
+    if matches!(
+        (before, last),
+        (Some("keychain"), "login_item" | "item_names")
+            | (Some("renewal"), "start")
+            | (Some("terminal"), "open")
+    ) {
+        return Some((
+            Class::Operation,
+            format!("{}(…) (a door's operation, made outside the files that make them)", segments.join("::")),
+        ));
+    }
+    if before == Some("Run") && last == "fixture_script" {
+        return Some((
+            Class::Operation,
+            "Run::fixture_script(…) (the one start through a shell whose command is not read, made outside the files that call it)".into(),
+        ));
+    }
     if before == Some("Run") && last == "operation" {
         return Some((
             Class::Operation,
@@ -509,6 +917,26 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
     None
 }
 
+/// Whether `receiver` is a file's metadata or its type, which says what a file is without reading
+/// the file system again: `meta.is_dir()`, `kind.is_symlink()`, `found.file_type().is_file()`.
+fn asks_a_file_type(receiver: &Expr) -> bool {
+    match receiver {
+        Expr::MethodCall(call) => matches!(
+            call.method.to_string().as_str(),
+            "file_type" | "unwrap" | "expect" | "clone"
+        ),
+        Expr::Path(path) => path.path.get_ident().is_some_and(|name| {
+            matches!(
+                name.to_string().as_str(),
+                "meta" | "kind" | "found" | "metadata" | "file_type" | "ty" | "kind_of"
+            )
+        }),
+        Expr::Reference(inner) => asks_a_file_type(&inner.expr),
+        Expr::Paren(inner) => asks_a_file_type(&inner.expr),
+        _ => false,
+    }
+}
+
 /// What a method called `name` with `args` arguments is, if it is an act the rule holds to a
 /// door. A getter of the same name with no arguments (`.env()`) sets nothing.
 fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
@@ -518,10 +946,22 @@ fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
             format!(".{name}(…) (a change made by a path or a handle)"),
         ));
     }
+    if args == 0 && PATH_READS.contains(&name) {
+        return Some((
+            Class::Read,
+            format!(".{name}() (a read of the file system outside the door's readers and a source)"),
+        ));
+    }
     if PTY_STARTS.contains(&name) || (name == "exec" && args == 0) {
         return Some((
             Class::Start,
             format!(".{name}(…) (a program started outside the spawn door)"),
+        ));
+    }
+    if name == "start_claude" && args == 5 {
+        return Some((
+            Class::Operation,
+            ".start_claude(…) (the Keychain control's start of Claude Code, made outside its case)".into(),
         ));
     }
     if name == "as_this_window" {
@@ -553,6 +993,12 @@ fn literal_class(text: &str) -> Option<(Class, String)> {
             format!("{text:?} (a database written to a file outside the database door)"),
         ));
     }
+    if names_a_secret_store_program(text) {
+        return Some((
+            Class::Account,
+            format!("{text:?} (a program that reads a secret store of the account's)"),
+        ));
+    }
     ends_in_words(text).then(|| (Class::End, format!("{text:?}")))
 }
 
@@ -560,7 +1006,15 @@ impl Reader {
     /// Notes a place that does `what`, of `class`. Inside a closure handed to the door only the
     /// door's own act, an ending, is its to allow: a write or a start there is found.
     fn flag(&mut self, class: Class, what: String) {
-        if (class == Class::End && (self.in_door > 0 || self.in_test > 0)) || self.skip.contains(&class) {
+        if (class == Class::End && (self.in_door > 0 || self.in_cfg_test > 0)) || self.skip.contains(&class) {
+            return;
+        }
+        // The unit tests of a file read and name what they made.
+        if class == Class::Owner && (self.asks_account || self.in_test > 0) {
+            return;
+        }
+        // The unit tests of a held file read the folders they made.
+        if class == Class::Read && (!self.holds_reads || self.in_test > 0) {
             return;
         }
         self.found.push(Found {
@@ -679,26 +1133,34 @@ impl<'ast> Visit<'ast> for Reader {
     fn visit_item_mod(&mut self, item: &'ast ItemMod) {
         let test = for_tests_only(&item.attrs);
         self.in_test += usize::from(test);
+        self.in_cfg_test += usize::from(test);
         visit::visit_item_mod(self, item);
         self.in_test -= usize::from(test);
+        self.in_cfg_test -= usize::from(test);
     }
 
     fn visit_item_fn(&mut self, item: &'ast ItemFn) {
-        let test = for_tests_only(&item.attrs) || is_test(&item.attrs);
+        let cfg = for_tests_only(&item.attrs);
+        let test = cfg || is_test(&item.attrs);
         self.in_test += usize::from(test);
+        self.in_cfg_test += usize::from(cfg);
         self.item.push(item.sig.ident.to_string());
         visit::visit_item_fn(self, item);
         self.item.pop();
         self.in_test -= usize::from(test);
+        self.in_cfg_test -= usize::from(cfg);
     }
 
     fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
-        let test = for_tests_only(&item.attrs) || is_test(&item.attrs);
+        let cfg = for_tests_only(&item.attrs);
+        let test = cfg || is_test(&item.attrs);
         self.in_test += usize::from(test);
+        self.in_cfg_test += usize::from(cfg);
         self.item.push(item.sig.ident.to_string());
         visit::visit_impl_item_fn(self, item);
         self.item.pop();
         self.in_test -= usize::from(test);
+        self.in_cfg_test -= usize::from(cfg);
     }
 
     fn visit_expr_call(&mut self, call: &'ast ExprCall) {
@@ -766,6 +1228,15 @@ impl<'ast> Visit<'ast> for Reader {
         if let Some((class, what)) = method_call(&method, call.args.len()) {
             self.flag(class, what);
         }
+        if call.args.is_empty()
+            && matches!(method.as_str(), "is_file" | "is_dir" | "is_symlink")
+            && !asks_a_file_type(&call.receiver)
+        {
+            self.flag(
+                Class::Read,
+                format!(".{method}() (a read of the file system outside the door's readers and a source)"),
+            );
+        }
         // The descent's hold of a process, which it ends: the descent's own.
         if method == "hold" && call.args.len() == 1 {
             self.flag(Class::End, ".hold(…) of a process to end".into());
@@ -815,6 +1286,40 @@ impl<'ast> Visit<'ast> for Reader {
                 ),
             );
         }
+        if named.len() >= 2
+            && named[named.len() - 1] == "this"
+            && named[named.len() - 2] == "Account"
+        {
+            self.flag(
+                Class::Owner,
+                "Account::this() (the owner's files asked for outside the files named for it)"
+                    .into(),
+            );
+        }
+        if named
+            .iter()
+            .any(|name| SECRET_STORE_CALLS.contains(&name.as_str()))
+            || named
+                .first()
+                .is_some_and(|first| SECRET_STORE_CRATES.contains(&first.as_str()))
+        {
+            self.flag(
+                Class::Account,
+                format!(
+                    "{} (a secret store of the account's, which no path names)",
+                    named.join("::")
+                ),
+            );
+        }
+        if reads_raw(&named) {
+            self.flag(
+                Class::Read,
+                format!(
+                    "{} (a read of the file system outside the door's readers and a source)",
+                    named.join("::")
+                ),
+            );
+        }
         visit::visit_path(self, path);
     }
 
@@ -843,6 +1348,42 @@ impl<'ast> Visit<'ast> for Reader {
                     Class::Start,
                     format!(
                         "use {} (a program xtask's live run names itself)",
+                        imported.join("::")
+                    ),
+                );
+            }
+            if imported.len() >= 2
+                && imported[imported.len() - 1] == "Account"
+                && imported[imported.len() - 2] == "source"
+            {
+                self.flag(
+                    Class::Owner,
+                    format!(
+                        "use {} (the owner's files asked for outside the files named for it)",
+                        imported.join("::")
+                    ),
+                );
+            }
+            if imported
+                .iter()
+                .any(|name| SECRET_STORE_CALLS.contains(&name.as_str()))
+                || imported
+                    .first()
+                    .is_some_and(|first| SECRET_STORE_CRATES.contains(&first.as_str()))
+            {
+                self.flag(
+                    Class::Account,
+                    format!(
+                        "use {} (a secret store of the account's, which no path names)",
+                        imported.join("::")
+                    ),
+                );
+            }
+            if reads_raw(&imported) {
+                self.flag(
+                    Class::Read,
+                    format!(
+                        "use {} (a read of the file system outside the door's readers and a source)",
                         imported.join("::")
                     ),
                 );
@@ -987,7 +1528,11 @@ fn read_as(
         xtask,
         skip,
         read_opens: std::collections::HashSet::new(),
+        holds_reads: READS_HELD.iter().any(|held| name.starts_with(held)),
+        asks_account: name.starts_with("src/door")
+            || OWNER_FILES.iter().any(|(file, _)| name == *file),
         in_test: usize::from(test_file),
+        in_cfg_test: usize::from(test_file),
         in_door: 0,
         reading: 0,
         found: Vec::new(),
@@ -1360,3 +1905,163 @@ fn xtasks_live_run_names_no_program_of_its_own_and_the_door_holds_what_it_is_mad
     assert!(left_out("tests/live_stops/stuck.rs").is_empty());
 }
 
+
+#[test]
+fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files() {
+    let held = |text: &str| read_as("src/live/isolation.rs", text, false, &[], false);
+    let elsewhere = |text: &str| read_as("src/live/members.rs", text, false, &[], false);
+    for text in [
+        "fn f() { let _ = std::fs::read(p); }",
+        "fn f() { let _ = fs::read_to_string(p); }",
+        "fn f() { for e in fs::read_dir(p).unwrap() {} }",
+        "fn f() { let _ = fs::metadata(p); }",
+        "fn f() { let _ = fs::symlink_metadata(p); }",
+        "fn f() { let _ = fs::canonicalize(p); }",
+        "fn f() { let _ = fs::read_link(p); }",
+        "fn f() { let _ = File::open(p); }",
+        "fn f() { let _ = std::fs::File::open(p); }",
+        "use std::fs::{read, File};",
+        "fn f() { if p.exists() {} }",
+        "fn f() { if p.is_file() {} }",
+        "fn f() { if p.is_dir() {} }",
+        "fn f() { let _ = p.read_dir(); }",
+        "fn f() { let _ = p.canonicalize(); }",
+        "fn f() { let _ = p.read_link(); }",
+        "fn f() { let _ = p.symlink_metadata(); }",
+        "fn f() { let _ = p.metadata(); }",
+        "fn f() { if p.is_symlink() {} }",
+    ] {
+        let found = held(text);
+        assert!(
+            found.iter().any(|found| found.class == Class::Read),
+            "{text} is not found as a read: {found:?}"
+        );
+        assert!(
+            !elsewhere(text).iter().any(|found| found.class == Class::Read),
+            "{text} is found in a file that is no held file's"
+        );
+    }
+    // What it does not find: the door's readers and a source, a test of a held file, a path that
+    // is built or compared, and a method of the same name with arguments.
+    for text in [
+        "fn f() { let _ = crate::door::reads::read(p); }",
+        "fn f() { let _ = door::reads::is_dir(p); }",
+        "fn f() { let _ = source.read(); }",
+        "fn f() { let _ = source.present(); }",
+        "fn f() { let _ = p.join(\"x\").display(); }",
+        "#[cfg(test)]\nmod tests { fn f() { let _ = std::fs::read(p); } }",
+        "fn f() { let _ = map.metadata(\"key\"); }",
+        "fn f() { if meta.is_dir() && kind.is_file() && m.file_type().is_symlink() {} }",
+        "fn f() { let _ = source.meta(); let _ = source.lstat(); let _ = source.real(); }",
+    ] {
+        let found: Vec<_> = held(text)
+            .into_iter()
+            .filter(|found| found.class == Class::Read)
+            .collect();
+        assert!(found.is_empty(), "{text} is found: {found:?}");
+    }
+    // The account is asked for only in the files named for it.
+    for (name, asks) in [
+        ("src/live/machine.rs", true),
+        ("src/live/isolation.rs", true),
+        ("src/door/source.rs", true),
+        ("src/live/members.rs", false),
+        ("tests/live_matrix.rs", false),
+    ] {
+        let found = read_as(
+            name,
+            "fn f() { let _ = Account::this().home(Purpose::Guard); }",
+            false,
+            &[],
+            false,
+        );
+        assert_eq!(
+            found.iter().any(|found| found.class == Class::Owner),
+            !asks,
+            "{name}: {found:?}"
+        );
+        let imported = read_as(
+            name,
+            "use crate::door::source::Account;",
+            false,
+            &[],
+            false,
+        );
+        assert_eq!(
+            imported.iter().any(|found| found.class == Class::Owner),
+            !asks,
+            "{name}: {imported:?}"
+        );
+    }
+    // A case's own `Account` (the members' tally of a case) is no account of the owner's.
+    let tally = read_as(
+        "src/live/members.rs",
+        "use crate::live::members::Account;\nfn f() { let _ = Account::new(); }",
+        false,
+        &[],
+        false,
+    );
+    assert!(tally.iter().all(|found| found.class != Class::Owner), "{tally:?}");
+}
+
+#[test]
+fn the_rule_finds_a_secret_store_no_path_names_and_each_listed_store_has_a_way_it_finds() {
+    let found = |text: &str| read("x.rs", text);
+    // What stores::SECRET_STORES lists, and a way each is reached that the rule finds.
+    let ways: &[(&str, &[&str])] = &[
+        (
+            "Keychain",
+            &[
+                "fn f() { unsafe { SecItemCopyMatching(q, r) }; }",
+                "use security_framework::passwords::get_generic_password;",
+            ],
+        ),
+        (
+            "Windows' Credential Manager",
+            &[
+                "fn f() { unsafe { CredReadW(t, 1, 0, &mut c) }; }",
+                "fn f() { unsafe { windows_sys::Win32::Security::Credentials::CredEnumerateW(a, 0, &mut n, &mut c) }; }",
+                r#"fn f() { let _ = Run::new("cmdkey").arg("/list"); }"#,
+                r#"fn f() { let _ = Run::new("C:\\Windows\\System32\\vaultcmd.exe"); }"#,
+                r#"fn f() { let _ = "powershell -Command cmdkey /list"; }"#,
+            ],
+        ),
+        (
+            "the Secret Service",
+            &[
+                "fn f() { let e = keyring::Entry::new(a, b); }",
+                r#"fn f() { let _ = Run::new("secret-tool").arg("lookup"); }"#,
+            ],
+        ),
+    ];
+    for (name, whole) in crate::live::stores::SECRET_STORES
+        .iter()
+        .map(|(_, name, _)| (*name, ()))
+        .map(|(name, ())| (name, ways.iter().find(|(held, _)| *held == name)))
+    {
+        let Some((_, texts)) = whole else {
+            panic!("{name} is a secret store of the table, and no way to it is shown found")
+        };
+        for text in *texts {
+            let flagged = found(text);
+            assert!(
+                flagged.iter().any(|found| found.class == Class::Account),
+                "{name}: {text} is not found: {flagged:?}"
+            );
+        }
+    }
+    // What it does not find: the Keychain's own door is a file of the door, a string that only
+    // says where a login is, and a name that has the program's letters in it.
+    for text in [
+        r#"fn f() { let _ = "the login is in Windows' Credential Manager"; }"#,
+        r#"fn f() { let _ = Run::new("mycmdkeys"); }"#,
+        "fn f() { let key = keyring_size; }",
+    ] {
+        assert!(
+            found(text).iter().all(|found| found.class != Class::Account),
+            "{text} is found"
+        );
+    }
+    let door = read_as("src/door/keychain.rs", "fn f() { SecItemAdd(a, b); }", false, left_out("src/door/keychain.rs"), false);
+    assert!(door.iter().all(|found| found.class != Class::Account), "{door:?}");
+}

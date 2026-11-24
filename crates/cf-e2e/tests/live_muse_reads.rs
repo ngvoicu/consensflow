@@ -40,6 +40,11 @@ use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// Compare every non-directory entry by metadata only, without following links.
 fn tree(root: &Path) -> Result<BTreeMap<PathBuf, cf_base::file::Stat>> {
     let mut found = BTreeMap::new();
@@ -138,7 +143,7 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         "muse-reads: copying ~/.config/muse/auth.json and ~/.local/share/muse/model-catalog, and nothing else, into {} (removed when the run ends)",
         scratch.path().display()
     );
-    copy_muse_into(&home, scratch.path(), &auth).map_err(|source| Error::File {
+    copy_muse_into(owned(&home), scratch.path(), &auth).map_err(|source| Error::File {
         action: "copy the login and the model catalog of",
         path: home.join(".config/muse"),
         source,

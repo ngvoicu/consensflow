@@ -1,0 +1,313 @@
+# The plants of K3's doors, part 3: the guards a critical review (T-2086, P4) found with no plant,
+# each held now by a test that fails when it goes: the judge's ground by act, a write through a last
+# link, a name below a file, `program_of` and the window's refusals of the Keychain's utility and
+# cargo, the seal's refusal of the door's own variables and of one profile half, `inheritable` and
+# the removal of the machine's profile halves.
+[run]
+kd3-lib-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::"]
+kd3-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests"]
+kd3-lib-renew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::renew"]
+
+[[plant]]
+name = "K3 part 3: a name a caller gives is made over what is there"
+meant = "the_judges_ground_is_by_the_act"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        Act::Name => fs::symlink_metadata(path).is_err(),'''
+replace = '''        Act::Name => true,'''
+
+[[plant]]
+name = "K3 part 3: a write or a rename goes anywhere"
+meant = "the_judges_ground_is_by_the_act"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        Act::Write | Act::Rename => {
+            made.is_below_made(place, any_case) || made.is_made_file(place, any_case)
+        }'''
+replace = '''        Act::Write | Act::Rename => true,'''
+
+[[plant]]
+name = "K3 part 3: a folder is made anywhere"
+meant = "the_judges_ground_is_by_the_act"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        Act::Folder => made.is_below_made(place, any_case) || made.is_made_folder(place, any_case),'''
+replace = '''        Act::Folder => true,'''
+
+[[plant]]
+name = "K3 part 3: a removal takes anything"
+meant = "the_judges_ground_is_by_the_act"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        Act::Remove => made.is_made_folder(place, any_case) || made.is_below_made(place, any_case),'''
+replace = '''        Act::Remove => true,'''
+
+[[plant]]
+name = "K3 part 3: a write goes through a last link"
+meant = "a_write_through_a_last_link_is_refused_and_a_removal_of_the_link_is_not"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''    if last_is_link && !matches!(act, Act::Remove | Act::Rename | Act::Allocate) {'''
+replace = '''    if false && last_is_link && !matches!(act, Act::Remove | Act::Rename | Act::Allocate) {'''
+
+[[plant]]
+name = "K3 part 3: a name below a file is a place"
+meant = "a_name_below_a_file_is_no_place"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''                if !absent.is_empty() && !there.is_dir() {'''
+replace = '''                if false && !absent.is_empty() && !there.is_dir() {'''
+
+[[plant]]
+name = "K3 part 3: a Muse binary is not known by its name"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''    if name.starts_with("muse-bin-") {'''
+replace = '''    if false && name.starts_with("muse-bin-") {'''
+
+[[plant]]
+name = "K3 part 3: Claude's versions folder is not known"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''    if versions_of_claude {'''
+replace = '''    if false && versions_of_claude {'''
+
+[[plant]]
+name = "K3 part 3: a file in a store is not a harness's program"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''    if in_store {
+        return Program::Harness(harness_word'''
+replace = '''    if false && in_store {
+        return Program::Harness(harness_word'''
+
+[[plant]]
+name = "K3 part 3: a file the run made is known by its name"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''    if made_by_run {
+        return Program::Plain;'''
+replace = '''    if false && made_by_run {
+        return Program::Plain;'''
+
+[[plant]]
+name = "K3 part 3: the Keychain's utility is not known by its name"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        if candidate == "security" {'''
+replace = '''        if false && candidate == "security" {'''
+
+[[plant]]
+name = "K3 part 3: cargo is not known by its name"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        if candidate == "cargo" {'''
+replace = '''        if false && candidate == "cargo" {'''
+
+[[plant]]
+name = "K3 part 3: gemini is not agy"
+meant = "a_program_is_known_by_each_way_the_door_knows_one"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        .map(|word| if *word == "gemini" { "agy" } else { *word })'''
+replace = '''        .map(|word| *word)'''
+
+[[plant]]
+name = "K3 part 3: a window of the Keychain's utility is opened"
+meant = "a_window_whose_program_is_the_keychains_utility_or_cargo_is_not_opened"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        spawn::Program::Keychain => {
+            Err("the window's program is the Keychain's utility, which only its door starts".into())
+        }'''
+replace = '''        spawn::Program::Keychain => Ok(()),'''
+
+[[plant]]
+name = "K3 part 3: a window of cargo is opened"
+meant = "a_window_whose_program_is_the_keychains_utility_or_cargo_is_not_opened"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        spawn::Program::Cargo => {
+            Err("the window's program is cargo, which only its door starts".into())
+        }'''
+replace = '''        spawn::Program::Cargo => Ok(()),'''
+
+[[plant]]
+name = "K3 part 3: the seal lets a caller give the run's folders"
+meant = "the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''    for owned in [
+        super::MADE_ROOTS,
+        super::account::PROTECTED_FILE,'''
+replace = '''    for owned in [
+        super::account::PROTECTED_FILE,'''
+
+[[plant]]
+name = "K3 part 3: the seal lets a caller give the roots file"
+meant = "the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        super::account::PROTECTED_FILE,
+        super::account::PROTECTED_DIGEST,
+    ] {
+        if get(owned)'''
+replace = '''        super::account::PROTECTED_DIGEST,
+    ] {
+        if get(owned)'''
+
+[[plant]]
+name = "K3 part 3: the seal lets a caller give the roots digest"
+meant = "the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        super::account::PROTECTED_DIGEST,
+    ] {
+        if get(owned)'''
+replace = '''    ] {
+        if get(owned)'''
+
+[[plant]]
+name = "K3 part 3: the seal lets one profile half stand alone"
+meant = "the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        let (Some(drive), Some(rest)) = (halves[0], halves[1]) else {
+            return Err("HOMEDRIVE and HOMEPATH are given one without the other".to_owned());
+        };'''
+replace = '''        let (drive, rest) = (halves[0].unwrap_or_default(), halves[1].unwrap_or_default());'''
+
+[[plant]]
+name = "K3 part 3: a variable that names a store is handed on to a stand-in's child"
+meant = "a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that_is_not_the_runs"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    let whole = std::iter::once(PathBuf::from(value));
+    !whole
+        .chain(std::env::split_paths(value))
+        .filter(|path| path.is_absolute())
+        .any(|path| roots.holds(&path))'''
+replace = '''    let _ = (roots, value);
+    true'''
+
+[[plant]]
+name = "K3 part 3: a profile half of a window is handed on to a stand-in's child"
+meant = "a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that_is_not_the_runs"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    if crate::door::spawn::PROFILE_HALVES.contains(&text.as_str()) {
+        // Said again by the door'''
+replace = '''    if false && crate::door::spawn::PROFILE_HALVES.contains(&text.as_str()) {
+        // Said again by the door'''
+
+[[plant]]
+name = "K3 part 3: the machine's profile halves are kept where the case names none"
+meant = "the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    if !halves_named {
+        env.retain('''
+replace = '''    if false && !halves_named {
+        env.retain('''
+
+[[plant]]
+name = "K3 part 3: any variable a case names keeps the machine's profile halves"
+meant = "the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''    let halves_named = named.iter().any(|(name, _)| {'''
+replace = '''    let halves_named = !named.is_empty() || named.iter().any(|(name, _)| {'''
+
+[[plant]]
+name = "K3 part 3: a machine run is given no home its case does not name a place for"
+meant = "a_machine_env_run_is_given_the_homes_its_case_names_and_no_other"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        env.extend(missing);'''
+replace = '''        let _ = missing;'''
+
+[[plant]]
+name = "K3 part 3: the Windows machine list lacks WINDIR"
+meant = "the_windows_machine_list_keeps_systemroot_and_the_system_variables"
+runs = ["kd3-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        "WINDIR",
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 part 3: the renewal is given no account variable"
+meant = "the_renewal_is_given_the_accounts_home_by_name_and_nothing_of_the_callers"
+runs = ["kd3-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/renewal.rs"
+find = '''        .vars(account.iter().cloned())
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 part 3: the audit does not find machine_env"
+meant = "the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_door"
+runs = ["kd3-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''"inheriting_env" | "inheriting_window_env" | "machine_env" | "env_clear" | "env_remove"'''
+replace = '''"inheriting_env" | "inheriting_window_env" | "env_clear" | "env_remove"'''

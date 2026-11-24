@@ -586,8 +586,7 @@ fn the_project_of_a_worker_that_leaves_a_command_is_a_folder_of_its_own() {
 #[cfg(unix)]
 #[test]
 fn a_process_that_runs_is_there_and_one_that_never_was_is_not() {
-    let mut shell = cf_e2e::process::Run::new("/bin/sh")
-        .args(["-c", "sleep 8; true"])
+    let mut shell = cf_e2e::process::Run::fixture_script("sleep 8; true")
         .spawn()
         .unwrap();
     let pid = u64::from(shell.id());
@@ -900,8 +899,7 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
         .unwrap()
         .expect("this process is there")
         .started;
-    let ran = cf_e2e::process::Run::new("/bin/sh")
-        .args(["-c", "sleep 25 > /dev/null 2>&1 &"])
+    let ran = cf_e2e::process::Run::fixture_script("sleep 25 > /dev/null 2>&1 &")
         .cwd(&folder)
         .run()
         .unwrap();
@@ -1092,8 +1090,7 @@ impl Drop for Reaper {
 fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict(
 ) {
     let elsewhere = cf_e2e::door::made("t-").unwrap();
-    let ran = cf_e2e::process::Run::new("/bin/sh")
-        .args(["-c", &format!("{} > /dev/null 2>&1 & echo $!", command())])
+    let ran = cf_e2e::process::Run::fixture_script(format!("{} > /dev/null 2>&1 & echo $!", command()))
         .cwd(elsewhere.path())
         .run()
         .unwrap();

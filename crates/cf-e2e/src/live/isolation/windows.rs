@@ -2,6 +2,7 @@
 // are path arithmetic over a profile laid out as Windows lays it, so a Mac holds them too. The
 // zeewin2 run of a live suite is what shows the harness reads them where the plans say.
 use super::*;
+use std::fs;
 
 /// What the owner's Devin files hold: never said anywhere, and never in the run's home but
 /// where a login is copied.
@@ -425,7 +426,11 @@ fn on_windows_muse_watches_the_owners_login_settings_trust_and_session_index() {
     let data =
         var("XDG_DATA_HOME").map_or_else(|| home.join(".local").join("share"), PathBuf::from);
     assert_eq!(
-        made.plan.watched,
+        made.plan
+            .watched
+            .iter()
+            .map(|held| PathBuf::from(held.to_argument()))
+            .collect::<Vec<_>>(),
         [
             config.join("muse").join("auth.json"),
             config.join("muse").join("settings.json"),

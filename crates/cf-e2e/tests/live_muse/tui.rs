@@ -14,6 +14,11 @@ use cf_e2e::live::{agents, machine, Log};
 use cf_e2e::process::Run;
 use serde_json::Value;
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 pub type Outcome = Result<(), String>;
 
 /// These probes run Muse on a Mac alone, saying so before anything is made or spent: they
@@ -196,7 +201,7 @@ pub fn write(file: &Path, text: &str) -> Outcome {
 
 fn copy_login(owner: &Path, root: &Path) -> Outcome {
     cf_e2e::live::guard::copy_muse_login(
-        &owner.join(".config/muse/auth.json"),
+        owned(owner.join(".config/muse/auth.json")),
         &root.join("config/muse/auth.json"),
     )
     .map_err(|error| format!("auth.json: {error}"))

@@ -49,6 +49,11 @@ use cf_e2e::process::{own_var, Run};
 use cf_e2e::rig::HarnessHome;
 use cf_e2e::{Error, Result};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// How long a Claude Code run is given: it ends in seconds when the model server answers 401.
 const LIMIT: Duration = Duration::from_secs(90);
 
@@ -335,10 +340,6 @@ fn run(
     let dead = "http://127.0.0.1:9";
     let mut vars: Vec<(String, String)> = vec![
         ("PATH".to_owned(), path),
-        (
-            "HOME".to_owned(),
-            live::machine::home()?.to_string_lossy().into_owned(),
-        ),
         ("USER".to_owned(), own_var("USER").unwrap_or_default()),
         (
             "TMPDIR".to_owned(),
@@ -360,12 +361,9 @@ fn run(
     ];
     // The updater is off here as in every run of the kit: the owner's launcher is the guard's.
     vars.extend(updates_off().map(|(name, value)| (name.to_owned(), value.to_owned())));
-    Run::harness("claude", claude)
-        .args(args)
-        .vars(vars)
-        .cwd(project)
-        .limit(LIMIT)
-        .run()?;
+    folders
+        .control
+        .start_claude(claude, args, vars, project, LIMIT)?;
     thread::sleep(Duration::from_millis(500));
     let now = Listing::take()?;
     let gained: BTreeSet<String> = before.gained(&now);
@@ -411,7 +409,7 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     let claude = fs::canonicalize(&command).map_err(io("read the link", &command))?;
     log.say(format!("claude is {} ({version})", claude.display()));
     Listing::take()?;
-    let guard = Guard::new(Harness::Claude, &command, &home);
+    let guard = Guard::new(Harness::Claude, &command, owned(&home));
     guard.vars()?;
     // One server is the model's (it answers 401 to all), the other is the MCP servers' that ask for OAuth.
     let model = Server::start()?;

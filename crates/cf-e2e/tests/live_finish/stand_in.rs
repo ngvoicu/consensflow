@@ -386,8 +386,7 @@ fn the_close_of_a_case_finds_what_its_window_left_says_so_and_ends_nothing_and_l
     // its shell printed, and ended by which process it is however the test ends: another tree
     // running this test has a `sleep 4713` of its own, which is none of this one's.
     let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
-    let ran = cf_e2e::process::Run::new("/bin/sh")
-        .args(["-c", "sleep 4713 > /dev/null 2>&1 & echo $!"])
+    let ran = cf_e2e::process::Run::fixture_script("sleep 4713 > /dev/null 2>&1 & echo $!")
         .cwd(elsewhere.path())
         .run()?;
     assert_eq!(ran.code, Some(0));

@@ -245,8 +245,7 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_wh
     let elsewhere = crate::door::made("t-").unwrap();
     // Another run's orphan: parent init's, in a folder of its own, begun after this window. Its
     // number is the one this test's shell printed; it is ended however the test ends.
-    let ran = Run::new("/bin/sh")
-        .args(["-c", "sleep 31 > /dev/null 2>&1 & echo $!"])
+    let ran = Run::fixture_script("sleep 31 > /dev/null 2>&1 & echo $!")
         .cwd(elsewhere.path())
         .run()
         .unwrap();
@@ -257,8 +256,7 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_wh
         read: None,
     };
     let mut reaper = Reaper(Vec::new());
-    let mut window = Run::new("/bin/sh")
-        .args(["-c", "tail -f /dev/null | grep --line-buffered tick & wait"])
+    let mut window = Run::fixture_script("tail -f /dev/null | grep --line-buffered tick & wait")
         .cwd(folder.path())
         .spawn()
         .unwrap();

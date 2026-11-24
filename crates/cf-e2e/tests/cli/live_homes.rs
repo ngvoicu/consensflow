@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 28] = [
+const BY_HAND: [(&str, &str, &str); 27] = [
     (
         "crates/cf-e2e/src/live/ask.rs",
         "HOME",
@@ -84,20 +84,20 @@ const BY_HAND: [(&str, &str, &str); 28] = [
     (
         "crates/cf-e2e/tests/live_parity/claude.rs",
         "CLAUDE_CONFIG_DIR",
-        "it copies the owner's whole Claude setup (skills, plugins, agents) into a throwaway on purpose, \
-         to compare a member's window with a bare Claude's; it writes nothing of the owner's",
+        "it reads the owner's Claude login alone (`STILL_ACTS`) and copies it, without its refresh token, into a \
+         config folder of the run's own, to compare a member's window with a bare Claude's; it writes nothing of the owner's",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "HOME",
-        "it reads the machine's Devin config where a launch reads it (`ask::devin_config` is given \
-         the machine's environment) and writes it, with a compaction threshold, into the kit's home \
+        "it reads the machine's Devin config through a source, into a folder of the run's, and asks \
+         `ask::devin_config` there (HOME is that folder), then writes it, with a compaction threshold, into the kit's home \
          (`with_home_file`): no window is given the variable",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "XDG_CONFIG_HOME",
-        "the same read of the machine's Devin config, as macOS and Linux name its folder",
+        "the same folder, as macOS and Linux name the config folder (the run's own, not the machine's)",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
@@ -113,8 +113,8 @@ const BY_HAND: [(&str, &str, &str); 28] = [
         "crates/cf-e2e/tests/live_muse/tui.rs",
         "HOME",
         "what `live_muse_background` and `live_muse_posture` share (T-790 moved it there): they run \
-         Muse alone, in no window of the kit's, on a Mac only: the owner's home for the keychain, \
-         which holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
+         Muse alone, in no window of the kit's, behind the test machine's marker: HOME is the run's own root \
+         there, below a folder this run made, and Muse's file sandbox keeps it from the owner's (T-705)",
     ),
     (
         "crates/cf-e2e/tests/live_muse/tui.rs",
@@ -179,17 +179,8 @@ const BY_HAND: [(&str, &str, &str); 28] = [
     ),
     (
         "crates/cf-e2e/tests/live_keychain.rs",
-        "HOME",
-        "it runs the machine's Claude Code by itself, in no rig and on no login of the owner's, to show what a \
-         throwaway CLAUDE_CONFIG_DIR leaves in the owner's login Keychain (T-1102): HOME is the owner's, as \
-         `security` needs it to find the Keychain, and CLAUDE_CONFIG_DIR a folder of the case's own, holding a \
-         made-up login. Nothing of the owner's is read there, and `live::launcher::Guard` holds the owner's \
-         launcher and Keychain around the whole case",
-    ),
-    (
-        "crates/cf-e2e/tests/live_keychain.rs",
         "CLAUDE_CONFIG_DIR",
-        "the same: the folder is the thing it shows the Keychain item of",
+        "the control's start of Claude Code (`Control::start_claude`) is given a folder of the case's own, holding a made-up login: the folder is the thing it shows the Keychain item of; the door gives HOME itself",
     ),
     (
         "crates/cf-e2e/tests/live_launcher.rs",
@@ -228,17 +219,17 @@ const DOORS_OWN: [(&str, &str, &str); 6] = [
     (
         "crates/cf-e2e/src/live/isolation/pi.rs",
         "\"PI_CODING_AGENT_DIR\".to_owned(),",
-        "the renewal of Pi's login runs on the run's own Pi folder, given through the renewal's door",
+        "the renewal of Pi's login runs on the OWNER's own Pi folder (`agent`), by name, through the renewal's door: safe only because the renewal needs a test machine's marker, which an owner's account never has",
     ),
     (
         "crates/cf-e2e/src/live/renew.rs",
         "(\"HOME\".to_owned(), text.clone())",
-        "the renewal's account variables: the folder the renewal runs in, which the run made",
+        "the renewal's account variables: the ACCOUNT's own home, by name, for the harness the renewal runs once: safe only behind the test machine's marker",
     ),
     (
         "crates/cf-e2e/src/live/renew.rs",
         "(\"USERPROFILE\".to_owned(), text)",
-        "the same folder, as Windows names it",
+        "the same account home, as Windows names it: safe only behind the test machine's marker",
     ),
     (
         "crates/cf-e2e/src/live/stores.rs",

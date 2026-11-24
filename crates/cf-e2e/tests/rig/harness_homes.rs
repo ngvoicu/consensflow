@@ -18,6 +18,11 @@ use serde_json::json;
 
 use crate::{Outcome, FAKE_AGENT};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// What the owner's setups hold that no run may touch.
 const SENTINEL: &str = "SENTINEL-the-owners-own";
 
@@ -107,16 +112,20 @@ impl Owner {
         vec![
             Installed::at(Harness::Pi, self.path("bin/pi"), home).with_isolation(Arc::new(
                 Isolation::pi(
-                    home,
-                    &self.path(".pi/agent"),
+                    owned(home),
+                    owned(self.path(".pi/agent")),
                     "openrouter/meta/muse-spark-1.3",
                     run,
                 ),
             )),
             Installed::at(Harness::Codex, self.path("bin/codex"), self.path(".codex"))
-                .with_isolation(Arc::new(Isolation::codex(home, &self.path(".codex")))),
+                .with_isolation(Arc::new(Isolation::codex(owned(home), owned(self.path(".codex"))))),
             Installed::at(Harness::Devin, self.path("bin/devin"), home).with_isolation(Arc::new(
-                Isolation::devin(home, &self.path(".config"), &self.path(".local/share")),
+                Isolation::devin(
+                    owned(home),
+                    owned(self.path(".config")),
+                    owned(self.path(".local/share")),
+                ),
             )),
         ]
     }
@@ -262,8 +271,8 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
     let home = owner.home.path();
     let pi = Installed::at(Harness::Pi, owner.path("bin/pi"), home).with_isolation(Arc::new(
         Isolation::pi(
-            home,
-            &owner.path(".pi/agent"),
+            owned(home),
+            owned(owner.path(".pi/agent")),
             "openai/gpt-6-luna",
             Duration::from_secs(3600),
         ),

@@ -202,7 +202,7 @@ The stores the kit protects:
 | Pi | `~/.pi`, the folders `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` name | the same, below `%USERPROFILE%` |
 | Devin | `devin` in `~/.config`, `~/.local/share`, `~/.local/state`, `~/.cache` | `%APPDATA%\devin`, `%LOCALAPPDATA%\devin` |
 | Muse Code | `muse` in the same four folders, `~/Library/Application Support/Muse`, its runtime folders | `muse` in `.config`, `.local\share`, `.local\state` and `.cache` below `%USERPROFILE%` |
-| agy | `~/.gemini` | `%USERPROFILE%\.gemini` |
+| agy | `~/.gemini`, its launcher `~/.local/bin/agy`, the skills folder `~/.agents`, and gcloud's folder (`~/.config/gcloud`, `CLOUDSDK_CONFIG`, `GOOGLE_APPLICATION_CREDENTIALS`) that its other login can use | the same below `%USERPROFILE%`, and `%APPDATA%\gcloud` |
 | your account | `~/Library/Keychains` | |
 
 ### Processes
@@ -298,8 +298,18 @@ The doors check what the kit hands a program. They cannot stop:
 - **The app's own code.** The daemon a case starts runs ConsensFlow's code.
   Its windows are sealed, but programs it starts for itself are not.
 - **Another process** that changes a path between the kit's check and its act.
-- **Stores not yet in the table**, such as Windows' Credential Manager and
-  Claude Code's installer folder.
+- **A secret store no path names.** Windows' Credential Manager (where agy keeps
+  its login on Windows), the Secret Service of a Linux desktop and a Mac's
+  Keychain are reached through your login session, not through a folder or a
+  variable. The kit's own code never names one except `door::keychain`, which
+  reads the Keychain through `security`: its audit finds a call to the
+  Credential Manager's or the Keychain's functions, the `keyring` crate,
+  `cmdkey`, `vaultcmd` and `secret-tool`. What a harness does there itself, the
+  kit cannot prevent.
+- **A program reached through a shell.** A window or a start whose program is a
+  shell (`sh -c`, `cmd /c`, `powershell -Command`) is judged by the program its
+  command starts. A command the shell would read for itself (an operator, a
+  substitution, a variable) cannot be judged, and is refused.
 - **A test run by hand.** `cargo xtask live` clears `CF_LIVE_MADE_ROOTS` and
   `CF_LIVE_PROTECTED_FILE`, which tell a run what it made and what it protects.
   A `cargo test` started directly with them set is not protected the same way.

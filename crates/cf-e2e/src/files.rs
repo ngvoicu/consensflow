@@ -37,12 +37,12 @@ pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> Result {
 
 /// The bytes of the file `path`.
 pub fn read(path: &Path) -> Result<Vec<u8>> {
-    fs::read(path).map_err(Error::file("read", path))
+    crate::door::reads::read(path).map_err(Error::file("read", path))
 }
 
 /// The text of the file `path`.
 pub fn read_string(path: &Path) -> Result<String> {
-    fs::read_to_string(path).map_err(Error::file("read", path))
+    crate::door::reads::read_to_string(path).map_err(Error::file("read", path))
 }
 
 /// The text of the file `path` up to its last line break: the lines of a file

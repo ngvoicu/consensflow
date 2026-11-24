@@ -794,3 +794,315 @@ fn the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges() {
     assert_eq!(ran.code, Some(0), "{ran}");
     drop(held);
 }
+
+// ---- T-2219: the guards T-2086 found unplanted, each held by a test of its own. ----
+
+/// The judge's ground is by the act (design section 3): a name a caller gives is made new and never
+/// over what is there; a write or a rename goes below a folder this run made; a folder is made
+/// there or is one this run made; a removal takes a folder this run made or what is below one; an
+/// allocation asks nothing more.
+#[test]
+fn the_judges_ground_is_by_the_act() {
+    let mine = made("k3-ground-").unwrap();
+    let theirs = crate::standin_process::unowned_tempdir();
+    let below_mine = mine.path().join("inner");
+    let below_theirs = theirs.path().join("inner");
+    crate::door::make_dir(&below_mine).unwrap();
+    crate::standin_process::foreign_dir(&below_theirs);
+    crate::standin_process::foreign_write(&theirs.path().join("there.txt"), "theirs");
+    crate::door::write(mine.path().join("here.txt"), "mine").unwrap();
+    // A name: new anywhere nothing is, never over what is there.
+    assert!(judge(&theirs.path().join("new.txt"), Act::Name).is_ok());
+    assert!(judge(&mine.path().join("new.txt"), Act::Name).is_ok());
+    assert!(judge(&theirs.path().join("there.txt"), Act::Name).is_err());
+    assert!(judge(&mine.path().join("here.txt"), Act::Name).is_err());
+    // A write and a rename: below a folder this run made, or a file it made, and nowhere else.
+    for act in [Act::Write, Act::Rename] {
+        assert!(judge(&mine.path().join("here.txt"), act).is_ok(), "{act:?}");
+        assert!(judge(&below_mine.join("new.txt"), act).is_ok(), "{act:?}");
+        assert!(judge(&theirs.path().join("there.txt"), act).is_err(), "{act:?}");
+        assert!(judge(&below_theirs.join("new.txt"), act).is_err(), "{act:?}");
+    }
+    // A folder: a folder this run made, or below one.
+    assert!(judge(mine.path(), Act::Folder).is_ok());
+    assert!(judge(&below_mine.join("deeper"), Act::Folder).is_ok());
+    assert!(judge(&below_theirs.join("deeper"), Act::Folder).is_err());
+    assert!(judge(theirs.path(), Act::Folder).is_err());
+    // A removal: a folder this run made, or what is below one.
+    assert!(judge(mine.path(), Act::Remove).is_ok());
+    assert!(judge(&below_mine, Act::Remove).is_ok());
+    assert!(judge(&mine.path().join("here.txt"), Act::Remove).is_ok());
+    assert!(judge(&below_theirs, Act::Remove).is_err());
+    assert!(judge(&theirs.path().join("there.txt"), Act::Remove).is_err());
+    // An allocation asks no more than that it is no store's.
+    assert!(judge(&theirs.path().join("allocated"), Act::Allocate).is_ok());
+}
+
+/// A write through a last link goes to what it leads to, so it is refused whatever it leads to; a
+/// removal and a rename take the link itself, and an allocation is judged by the place.
+#[cfg(unix)]
+#[test]
+fn a_write_through_a_last_link_is_refused_and_a_removal_of_the_link_is_not() {
+    let mine = made("k3-link-").unwrap();
+    let inside = mine.path().join("inside.txt");
+    crate::door::write(&inside, "mine").unwrap();
+    let link = mine.path().join("link");
+    std::os::unix::fs::symlink(&inside, &link).unwrap();
+    // The link leads to a file this run made, below a folder it made: still no write goes through it.
+    for act in [Act::Write, Act::Name, Act::Folder] {
+        let refused = judge(&link, act).unwrap_err();
+        assert!(refused.to_string().contains("is a link"), "{act:?}: {refused}");
+    }
+    assert!(judge(&link, Act::Remove).is_ok());
+    assert!(judge(&link, Act::Rename).is_ok());
+}
+
+/// A name below a file is no place, whatever the system calls its absence.
+#[test]
+fn a_name_below_a_file_is_no_place() {
+    let mine = made("k3-below-file-").unwrap();
+    let file = mine.path().join("a.txt");
+    crate::door::write(&file, "mine").unwrap();
+    for act in [Act::Write, Act::Name, Act::Folder, Act::Allocate, Act::Remove] {
+        // "is a file" where the system calls the path absent, "cannot be resolved" where it says
+        // "not a directory": no place either way.
+        let refused = judge(&file.join("child"), act).unwrap_err().to_string();
+        assert!(
+            refused.contains("is a file") || refused.contains("cannot be resolved"),
+            "{act:?}: {refused}"
+        );
+    }
+    assert!(super::place::resolve(&file.join("deeper").join("child")).is_err());
+}
+
+/// `program_of`, each way a program is known: by a Muse binary's name, by Claude's `versions`
+/// folder, by a store of the table, by the Keychain's utility, by cargo, by the harness's own name
+/// as the last net (`gemini` is agy's), with an extension or in another case, and not where the run
+/// made the file.
+#[test]
+fn a_program_is_known_by_each_way_the_door_knows_one() {
+    let plain = |program: &str, real: Option<&str>, in_store: bool, made_by_run: bool| {
+        spawn::program_of(Path::new(program), real.map(Path::new), in_store, made_by_run)
+    };
+    // Muse's `muse-bin-<version>`, whatever the program is called that leads to it.
+    assert_eq!(
+        plain("/usr/local/bin/m", Some("/opt/muse/muse-bin-2.0"), false, false),
+        Program::Harness("muse")
+    );
+    assert_eq!(
+        plain("/opt/muse/muse-bin-2.0", None, false, false),
+        Program::Harness("muse")
+    );
+    // Claude's versions folder is Claude's only where its parent is `claude`.
+    assert_eq!(
+        plain("/x/cc", Some("/h/.local/share/claude/versions/2.1.0"), false, false),
+        Program::Harness("claude")
+    );
+    assert_eq!(
+        plain("/x/cc", Some("/h/.local/share/other/versions/2.1.0"), false, false),
+        Program::Plain
+    );
+    assert_eq!(
+        plain("/x/cc", Some("/h/.local/share/claude/bin/cc"), false, false),
+        Program::Plain
+    );
+    // A file in a store of the table is the harness it is named for, or a harness not named.
+    assert_eq!(plain("/h/.pi/agent/bin/pi", None, true, false), Program::Harness("pi"));
+    assert_eq!(
+        plain("/h/.local/share/devin/cli/_versions/3000/devin", None, true, false),
+        Program::Harness("devin")
+    );
+    assert_eq!(
+        plain("/h/.pi/agent/bin/helper", None, true, false),
+        Program::Harness("a harness")
+    );
+    // A file the run made is plain, whatever its name.
+    for name in ["claude", "codex", "pi", "devin", "muse", "agy", "cargo", "security"] {
+        assert_eq!(
+            plain(&format!("/run/bin/{name}"), None, false, true),
+            Program::Plain,
+            "{name}"
+        );
+    }
+    // The last net: the name, by the program as given or by the file it resolves to, in any case
+    // and with its extension.
+    for (given, real, expected) in [
+        ("claude", None, Program::Harness("claude")),
+        ("/usr/bin/CODEX.EXE", None, Program::Harness("codex")),
+        ("x", Some("/opt/bin/Pi.cmd"), Program::Harness("pi")),
+        ("/usr/bin/gemini", None, Program::Harness("agy")),
+        ("/usr/bin/agy", None, Program::Harness("agy")),
+        ("/usr/bin/muse", None, Program::Harness("muse")),
+        ("/usr/bin/devin", None, Program::Harness("devin")),
+        ("/usr/local/bin/cargo", None, Program::Cargo),
+        ("cargo.exe", None, Program::Cargo),
+        ("/usr/bin/security", None, Program::Keychain),
+        ("security", None, Program::Keychain),
+        ("/opt/tools/security", None, Program::Keychain),
+        ("/usr/bin/git", None, Program::Plain),
+        ("/usr/bin/codexx", None, Program::Plain),
+    ] {
+        assert_eq!(plain(given, real, false, false), expected, "{given} {real:?}");
+    }
+}
+
+/// A window whose program is the Keychain's utility, or cargo, is refused each by itself: only
+/// their doors start them.
+#[test]
+fn a_window_whose_program_is_the_keychains_utility_or_cargo_is_not_opened() {
+    let root = made("k3-window-doors-").unwrap();
+    let host = window_host(&root.path().join("home"));
+    let keychain = json!({ "id": "p-1", "argv": ["/usr/bin/security", "find-generic-password"], "env": {} });
+    let refused = super::window_admitted(&host, &keychain).unwrap_err();
+    assert!(refused.contains("Keychain"), "{refused}");
+    let cargo = json!({ "id": "p-2", "argv": ["/opt/x/cargo", "build"], "env": {} });
+    let refused = super::window_admitted(&host, &cargo).unwrap_err();
+    assert!(refused.contains("cargo"), "{refused}");
+    let git = json!({ "id": "p-3", "argv": ["/usr/bin/git", "status"], "env": {} });
+    assert_eq!(super::window_admitted(&host, &git), Ok(()));
+}
+
+/// The seal refuses each of the door's own variables a caller gives or changes, and one profile
+/// half given without the other.
+#[test]
+fn the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone() {
+    let is_runs = |path: &Path| path.starts_with("/kit/run");
+    let in_protected = |path: &Path| path.starts_with("/owner");
+    let judges = Judges {
+        windows: false,
+        is_runs: &is_runs,
+        in_protected: &in_protected,
+        kit: &[],
+    };
+    let env = run_homes("/kit/run/home");
+    // Each of the door's own variables, given by a caller.
+    for name in [
+        super::MADE_ROOTS,
+        super::account::PROTECTED_FILE,
+        super::account::PROTECTED_DIGEST,
+    ] {
+        let mut given = env.clone();
+        given.push((name.into(), "/owner/roots".into()));
+        let refused = spawn::seal(given, &judges).unwrap_err();
+        assert!(refused.contains(name), "{name}: {refused}");
+    }
+    // One profile half without the other, either one.
+    for half in ["HOMEDRIVE", "HOMEPATH"] {
+        let mut one = run_homes("/kit/run/home");
+        one.push((
+            half.into(),
+            if half == "HOMEDRIVE" { "C:" } else { "/kit/run/home" }.into(),
+        ));
+        let refused = spawn::seal(one, &judges).unwrap_err();
+        assert!(refused.contains("one without the other"), "{half}: {refused}");
+    }
+}
+
+// ---- T-2219: a program reached through a shell is judged by what the shell is told to run. ----
+
+/// A window whose program is a shell is judged by the program its command starts: a harness's gets
+/// its switches, the Keychain's utility and cargo are refused whatever shell reaches them, shells
+/// inside shells are followed, and a command the shell would read for itself (an operator, a
+/// substitution, a variable) is refused, since the door cannot say what it starts.
+#[test]
+fn a_window_started_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run() {
+    let root = made("k3-shell-window-").unwrap();
+    let host = window_host(&root.path().join("home"));
+    let muse = root.path().join("opt").join("muse-bin-1.4.14");
+    let admitted = |argv: serde_json::Value, env: serde_json::Value| {
+        super::window_admitted(&host, &json!({ "id": "p", "argv": argv, "env": env }))
+    };
+    let command = format!("{} --version", muse.display());
+    // A harness through a shell wants its switches, as it does started alone.
+    let refused = admitted(json!(["/bin/sh", "-c", command]), json!({})).unwrap_err();
+    assert!(refused.contains("MUSE"), "{refused}");
+    assert_eq!(
+        admitted(json!(["/bin/sh", "-c", command]), switches_of("muse")),
+        Ok(())
+    );
+    for argv in [
+        json!(["bash", "-lc", format!("exec {}", muse.display())]),
+        json!(["/bin/zsh", "-c", format!("'{}' x", muse.display())]),
+        json!(["sh", "-c", format!("sh -c '{}'", muse.display())]),
+        json!(["cmd.exe", "/d", "/c", muse.display().to_string()]),
+        json!(["C:\\Windows\\System32\\cmd.exe", "/c", muse.display().to_string()]),
+        json!(["powershell.exe", "-NoProfile", "-Command", muse.display().to_string()]),
+        json!(["pwsh", "-c", muse.display().to_string()]),
+    ] {
+        let refused = admitted(argv.clone(), json!({})).unwrap_err();
+        assert!(refused.contains("MUSE"), "{argv}: {refused}");
+        assert_eq!(admitted(argv.clone(), switches_of("muse")), Ok(()), "{argv}");
+    }
+    // The Keychain's utility and cargo, through any shell.
+    for argv in [
+        json!(["/bin/sh", "-c", "/usr/bin/security dump-keychain"]),
+        json!(["sh", "-c", "sh -c 'security list-keychains'"]),
+        json!(["cmd", "/c", "security x"]),
+    ] {
+        let refused = admitted(argv.clone(), json!({})).unwrap_err();
+        assert!(refused.contains("Keychain"), "{argv}: {refused}");
+    }
+    for argv in [
+        json!(["/bin/sh", "-c", "cargo build"]),
+        json!(["bash", "-c", "exec /opt/x/cargo test"]),
+        json!(["powershell", "-Command", "cargo build"]),
+    ] {
+        let refused = admitted(argv.clone(), json!({})).unwrap_err();
+        assert!(refused.contains("cargo"), "{argv}: {refused}");
+    }
+    // A command that cannot be read is refused, and so is one that starts a shell it cannot read.
+    for argv in [
+        json!(["/bin/sh", "-c", "echo ready && cargo build"]),
+        json!(["/bin/sh", "-c", "$PROGRAM --version"]),
+        json!(["sh", "-c", "sh -c 'a; b'"]),
+        json!(["cmd", "/c", "echo a & cargo build"]),
+        json!(["powershell", "-Command", "& cargo build"]),
+        json!(["powershell", "-EncodedCommand", "AAAA"]),
+    ] {
+        let refused = admitted(argv.clone(), json!({})).unwrap_err();
+        assert!(
+            refused.contains("cannot be read") || refused.contains("encoded command"),
+            "{argv}: {refused}"
+        );
+    }
+    // A shell with no command, one running a script file, and a command that is plain: opened.
+    for argv in [
+        json!(["/bin/sh"]),
+        json!(["/bin/sh", "./start.sh", "-c", "claude"]),
+        json!(["/bin/sh", "-c", "echo hello"]),
+        json!(["cmd"]),
+        json!(["powershell", "-NoProfile", "-File", "x.ps1"]),
+    ] {
+        assert_eq!(admitted(argv.clone(), json!({})), Ok(()), "{argv}");
+    }
+}
+
+/// A start of a program the kit makes through a shell is judged the same way: a plain start of
+/// `sh -c "cargo …"` is a start of cargo, and one the door cannot read is not started.
+#[cfg(unix)]
+#[test]
+fn a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run() {
+    use crate::process::Run;
+    let refused = Run::new("/bin/sh").args(["-c", "cargo --version"]).run().unwrap_err();
+    assert!(refused.to_string().contains("cargo"), "{refused}");
+    let refused = Run::new("/bin/sh")
+        .args(["-c", "/usr/bin/security list-keychains"])
+        .run()
+        .unwrap_err();
+    assert!(refused.to_string().contains("Keychain"), "{refused}");
+    let refused = Run::new("/bin/sh")
+        .args(["-c", "echo ready; cargo --version"])
+        .run()
+        .unwrap_err();
+    assert!(refused.to_string().contains("cannot be read"), "{refused}");
+    // A script an offline fixture runs goes through its own start, and is refused there too where
+    // a word of it names a program with a door.
+    let ran = Run::fixture_script("echo ready; echo again").run().unwrap();
+    assert_eq!(ran.stdout.trim(), "ready\nagain");
+    for script in ["echo a; cargo build", "/usr/bin/security dump-keychain | cat", "x=1; Claude --version"] {
+        let refused = Run::fixture_script(script).run().unwrap_err();
+        assert!(refused.to_string().contains("door of its own"), "{script}: {refused}");
+    }
+    let ran = Run::new("/bin/sh").args(["-c", "echo ready"]).run().unwrap();
+    assert_eq!(ran.stdout.trim(), "ready");
+}

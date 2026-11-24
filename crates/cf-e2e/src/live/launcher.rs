@@ -37,7 +37,6 @@
 //! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -45,8 +44,8 @@ use std::sync::{Mutex, PoisonError};
 use sha2::{Digest, Sha256};
 
 use super::keychain;
-use super::login::digest;
 use super::machine::Harness;
+use crate::door::source::{Account, Purpose, Source as Owned};
 use crate::process::own_var;
 use crate::rig::HarnessHome;
 use crate::{Error, Result};
@@ -94,15 +93,15 @@ pub fn updates_off() -> impl Iterator<Item = (&'static str, &'static str)> {
 /// What to look at for one harness.
 #[derive(Debug, Clone)]
 pub struct Watch {
-    home: PathBuf,
+    home: Owned,
     harness: Harness,
     /// The launchers: each is looked at as a link and as the file it ends at.
-    launchers: Vec<PathBuf>,
+    launchers: Vec<Owned>,
     /// The folders where the harness installs its versions, whose entries are listed, those that
     /// begin with the word where there is one.
-    folders: Vec<(PathBuf, Option<&'static str>)>,
+    folders: Vec<(Owned, Option<&'static str>)>,
     /// The small files that name the version in use.
-    files: Vec<PathBuf>,
+    files: Vec<Owned>,
     /// How to list the names of Claude Code's Keychain items, for the harness that keeps its login
     /// there; none for the others, and for a watch that is only about the launchers.
     keychain: Option<fn() -> Option<BTreeSet<String>>>,
@@ -111,45 +110,49 @@ pub struct Watch {
 impl Watch {
     /// What to look at for `harness`, whose program the kit runs is `command`, on the machine of
     /// the person whose home is `home` (Codex's `home` is its own folder, which holds no launcher).
-    pub fn of(harness: Harness, command: &Path, home: &Path) -> Self {
+    pub fn of(harness: Harness, command: &Path, home: impl Into<Owned>) -> Self {
+        let home = &home.into();
         let program = if cfg!(windows) {
             format!("{}.exe", harness.name())
         } else {
             harness.name().to_owned()
         };
-        let mut launchers = vec![command.to_path_buf()];
+        let account = Account::this();
+        let command_source = account.program(command, Purpose::Guard);
+        let mut launchers = vec![command_source.clone()];
         if harness != Harness::Codex {
             // Where the harness's own installer puts it: the link it re-points.
-            let installed = home.join(".local").join("bin").join(program);
+            let installed = home.join(&format!(".local/bin/{program}"));
             if !launchers.contains(&installed) {
                 launchers.push(installed);
             }
         }
         let data = if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
-            home.join(".local").join("share")
+            home.join(".local/share")
         } else {
-            own_var("XDG_DATA_HOME")
-                .filter(|folder| !folder.is_empty())
-                .map_or_else(|| home.join(".local").join("share"), PathBuf::from)
+            account
+                .variable("XDG_DATA_HOME", Purpose::Guard)
+                .unwrap_or_else(|| home.join(".local/share"))
         };
         let mut folders = Vec::new();
         let mut files = Vec::new();
         match harness {
             Harness::Claude => {
-                folders.push((data.join("claude").join("versions"), None));
+                folders.push((data.join("claude/versions"), None));
             }
             Harness::Devin => {
-                folders.push((data.join("devin").join("cli").join("_versions"), None));
+                folders.push((data.join("devin/cli/_versions"), None));
             }
             Harness::Muse => {
                 // The launcher keeps its binaries and its version line beside itself.
                 let install = if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
-                    command.parent().map(Path::to_path_buf)
+                    command_source.parent()
                 } else {
-                    fs::canonicalize(command)
+                    command_source
+                        .real()
                         .ok()
-                        .and_then(|real| real.parent().map(Path::to_path_buf))
-                        .or_else(|| command.parent().map(Path::to_path_buf))
+                        .and_then(|real| real.parent())
+                        .or_else(|| command_source.parent())
                 };
                 if let Some(install) = install {
                     folders.push((install.clone(), Some("muse")));
@@ -159,7 +162,7 @@ impl Watch {
             Harness::Codex | Harness::Pi => {}
         }
         Self {
-            home: home.to_path_buf(),
+            home: home.clone(),
             harness,
             launchers,
             folders,
@@ -178,10 +181,10 @@ impl Watch {
 
     /// What it is now.
     pub fn look(&self) -> Seen {
-        crate::standin_process::require_home(
-            &self.home,
-            &format!("{} launcher home lookup", self.harness.name()),
-        );
+        self.home.require_home(&format!(
+            "{} launcher home lookup",
+            self.harness.name()
+        ));
         Seen {
             keychain: self.keychain.and_then(|names| names()),
             launchers: self
@@ -198,11 +201,8 @@ impl Watch {
                 .files
                 .iter()
                 .map(|file| {
-                    crate::standin_process::require_watch_path(file, "launcher version lookup");
-                    (
-                        file.clone(),
-                        fs::read(file).ok().map(|bytes| digest(&bytes)),
-                    )
+                    file.require_watch_path("launcher version lookup");
+                    (file.clone(), file.hash().ok())
                 })
                 .collect(),
         }
@@ -211,12 +211,13 @@ impl Watch {
 
 /// The names in `folder`, those that begin with `prefix` where there is one; none for a folder
 /// that is not there.
-fn entries(folder: &Path, prefix: Option<&str>) -> Option<BTreeSet<String>> {
-    crate::standin_process::require_watch_path(folder, "launcher versions lookup");
-    let read = fs::read_dir(folder).ok()?;
+fn entries(folder: &Owned, prefix: Option<&str>) -> Option<BTreeSet<String>> {
+    folder.require_watch_path("launcher versions lookup");
+    let names = folder.names().ok()?;
     Some(
-        read.flatten()
-            .filter_map(|entry| entry.file_name().into_string().ok())
+        names
+            .into_iter()
+            .filter_map(|name| name.into_string().ok())
             .filter(|name| prefix.is_none_or(|prefix| name.starts_with(prefix)))
             .collect(),
     )
@@ -231,8 +232,9 @@ struct Bytes {
 
 impl Bytes {
     /// The file `path`'s, read once through (the binary of a harness is hundreds of megabytes).
-    fn of(path: &Path) -> Option<Self> {
-        let mut file = fs::File::open(path).ok()?;
+    fn of(path: impl Into<Owned>) -> Option<Self> {
+        let path = path.into();
+        let mut file = path.open().ok()?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0_u8; 1 << 20];
         let mut size = 0_u64;
@@ -263,22 +265,22 @@ struct Launcher {
     /// The link the path reads, where it is one.
     link: Option<PathBuf>,
     /// Where it ends, every link followed; none for one that dangles.
-    ends_at: Option<PathBuf>,
+    ends_at: Option<Owned>,
     /// The bytes of the file it ends at.
     bytes: Option<Bytes>,
 }
 
 impl Launcher {
-    fn look(path: &Path) -> Self {
-        crate::standin_process::require_watch_path(path, "launcher lookup");
-        let present = fs::symlink_metadata(path).is_ok();
-        let ends_at = fs::canonicalize(path).ok();
+    fn look(path: &Owned) -> Self {
+        path.require_watch_path("launcher lookup");
+        let present = path.present();
+        let ends_at = path.real().ok();
         Self {
             present,
-            link: fs::read_link(path).ok(),
+            link: path.link_target().ok(),
             bytes: ends_at
-                .as_deref()
-                .filter(|real| real.is_file())
+                .as_ref()
+                .filter(|real| real.is_a_file())
                 .and_then(Bytes::of),
             ends_at,
         }
@@ -288,24 +290,24 @@ impl Launcher {
 /// The owner's launchers and install folders at a moment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seen {
-    launchers: BTreeMap<PathBuf, Launcher>,
-    folders: BTreeMap<PathBuf, Option<BTreeSet<String>>>,
-    files: BTreeMap<PathBuf, Option<String>>,
+    launchers: BTreeMap<Owned, Launcher>,
+    folders: BTreeMap<Owned, Option<BTreeSet<String>>>,
+    files: BTreeMap<Owned, Option<String>>,
     /// The names of Claude Code's Keychain items; none where they were not listed.
     keychain: Option<BTreeSet<String>>,
 }
 
 /// `path` as a run says it: below `~` where it is below the owner's `home`.
-fn shown(path: &Path, home: &Path) -> String {
+fn shown(path: &Owned, home: &Owned) -> String {
     // A path that was followed through a link is spelled as the system spells it (macOS's
     // temporary folders are `/private/var/…`), the home as it was given.
-    let real = fs::canonicalize(home).ok();
-    match path.strip_prefix(home).ok().or_else(|| {
-        real.as_deref()
-            .and_then(|real| path.strip_prefix(real).ok())
-    }) {
-        Some(below) => format!("~/{}", below.display()),
-        None => path.display().to_string(),
+    let real = home.real().ok();
+    match path
+        .below(home)
+        .or_else(|| real.as_ref().and_then(|real| path.below(real)))
+    {
+        Some(below) => format!("~/{below}"),
+        None => path.name(),
     }
 }
 
@@ -313,7 +315,7 @@ impl Seen {
     /// What the launchers are, in a line, for a run that left them as they were: where each is
     /// and the first twelve digits of the hash of the file it ends at (`none` for one that is
     /// not there).
-    pub fn summary(&self, home: &Path) -> String {
+    pub fn summary(&self, home: &Owned) -> String {
         let present = self
             .launchers
             .iter()
@@ -335,7 +337,7 @@ impl Seen {
 
     /// What differs between `self` (before the run) and `after`, in words, with the way back
     /// for a link that moved; nothing where nothing does. `home` is the owner's.
-    pub fn changes_to(&self, after: &Self, home: &Path) -> Vec<String> {
+    pub fn changes_to(&self, after: &Self, home: &Owned) -> Vec<String> {
         let mut found = Vec::new();
         for (path, was) in &self.launchers {
             let Some(now) = after.launchers.get(path) else {
@@ -380,14 +382,14 @@ impl Seen {
                 found.push(format!(
                     "{name} now ends at {} (it ended at {}): a link it goes through moved",
                     now.ends_at
-                        .as_deref()
+                        .as_ref()
                         .map_or("nothing (it dangles)".to_owned(), |end| shown(end, home)),
                     was.ends_at
-                        .as_deref()
+                        .as_ref()
                         .map_or("nothing".to_owned(), |end| shown(end, home)),
                 ));
             } else if was.ends_at == now.ends_at && was.bytes != now.bytes {
-                let end = now.ends_at.as_deref().unwrap_or(path);
+                let end = now.ends_at.as_ref().unwrap_or(path);
                 found.push(format!("{} is not as it was", shown(end, home)));
             }
         }
@@ -437,7 +439,7 @@ impl Seen {
 pub struct Guard {
     harness: Harness,
     /// The owner's home, which a run says its paths below as `~`.
-    home: PathBuf,
+    home: Owned,
     watch: Watch,
     before: Mutex<Option<Seen>>,
 }
@@ -445,11 +447,12 @@ pub struct Guard {
 impl Guard {
     /// The guard of `harness`, run as `command`, on the machine of the person whose home is
     /// `home`.
-    pub fn new(harness: Harness, command: &Path, home: &Path) -> Self {
+    pub fn new(harness: Harness, command: &Path, home: impl Into<Owned>) -> Self {
+        let home = &home.into();
         let watch = Watch::of(harness, command, home);
         Self {
             harness,
-            home: home.to_path_buf(),
+            home: home.clone(),
             watch: if harness == Harness::Claude && keychain::watching() {
                 watch.with_keychain(keychain::names)
             } else {

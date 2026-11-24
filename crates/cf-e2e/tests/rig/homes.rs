@@ -128,14 +128,10 @@ mod sweeping {
         // before a rig's turn came in a loaded suite (T-655's gate, twice). And no longer than
         // the case's process: `cargo test` ends no group of a test it gave up on, so a case
         // killed outright would leave a sleeper of its own time behind (Calliope on T-679).
-        let mut sleeper = Run::new("sh")
-            .args([
-                "-c",
-                &format!(
+        let mut sleeper = Run::fixture_script(format!(
                     "while kill -0 {} 2>/dev/null; do /bin/sleep 1; done",
                     std::process::id()
-                ),
-            ])
+                ))
             .cwd(worked_in.join("workspace"))
             .spawn()?;
         let mut namer = Run::new("sh")

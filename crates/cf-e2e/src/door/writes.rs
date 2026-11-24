@@ -94,6 +94,7 @@ fn executable(path: &Path, contents: &[u8]) -> io::Result<()> {
 /// this run made.
 pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
     allowed("copy to", to, false)?;
     let bytes = fs::read(from).map_err(Error::file("read", from))?;
     folder_of(to)?;
@@ -104,6 +105,19 @@ pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
 /// is written new is 0644: T-841).
 pub fn copy_keeping_mode(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
+    keep_mode(from, to)
+}
+
+/// [`copy_keeping_mode`] of a file of the account's, which is read as a [`super::source::Source`].
+pub fn copy_keeping_mode_from(
+    from: &super::source::Source,
+    to: impl AsRef<Path>,
+) -> Result {
+    keep_mode(from.path_for_door(), to.as_ref())
+}
+
+fn keep_mode(from: &Path, to: &Path) -> Result {
     allowed("copy to", to, false)?;
     folder_of(to)?;
     fs::copy(from, to)
@@ -117,6 +131,7 @@ pub fn copy_keeping_mode(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result
 #[allow(clippy::disallowed_methods)]
 pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
     allowed("copy to", to, false)?;
     folder_of(to)?;
     #[cfg(target_os = "macos")]
@@ -323,6 +338,25 @@ pub fn copy_tree(
     skip: &dyn Fn(&Path) -> bool,
 ) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
+    tree(from, to, skip)
+}
+
+/// [`copy_tree`] of a folder of the account's, read as a [`super::source::Source`]; `skip` is asked
+/// of each entry as a source of the same purpose.
+pub fn copy_tree_from(
+    from: &super::source::Source,
+    to: impl AsRef<Path>,
+    skip: &dyn Fn(&super::source::Source) -> bool,
+) -> Result {
+    tree(
+        from.path_for_door(),
+        to.as_ref(),
+        &|entry| skip(&from.of_walk(entry)),
+    )
+}
+
+fn tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result {
     if fs::symlink_metadata(from)
         .map_err(Error::file("read", from))?
         .file_type()
@@ -366,7 +400,7 @@ fn copy_tree_inside(
             make_dir_private(&target)?;
             copy_tree_inside(&source, &target, source_root, target_root, skip)?;
         } else if kind.is_file() {
-            copy_keeping_mode(&source, &target)?;
+            keep_mode(&source, &target)?;
         }
     }
     Ok(())

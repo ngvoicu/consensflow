@@ -43,6 +43,11 @@ use cf_e2e::live::{self, ask, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows: no window
 /// of this test runs it, but a rig has one.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -101,7 +106,7 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
         config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultNotice":true}"#,
     )?;
-    live::machine::seed_claude_trust(config.path(), home)?;
+    live::machine::seed_claude_trust(config.path(), owned(home))?;
     // The XDG folder a seat for Muse gives every window of a rig.
     let data =
         cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;

@@ -412,8 +412,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_process_of_another_run_that_holds_the_hooks_old_word_is_not_the_hook_the_case_looks_for() {
-        let mut decoy = cf_e2e::process::Run::new("/bin/sh")
-            .args(["-c", &format!("read line; : {HOOK_MARK}")])
+        let mut decoy = cf_e2e::process::Run::fixture_script(format!("read line; : {HOOK_MARK}"))
             .spawn()
             .unwrap();
         let pid = decoy.id();

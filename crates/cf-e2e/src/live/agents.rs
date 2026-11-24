@@ -450,19 +450,18 @@ fn pi_providers() -> Option<Vec<String>> {
         super::keychain::live_case(),
         "stand-in run attempted Pi provider lookup"
     );
-    let folder = crate::process::own_var("PI_CODING_AGENT_DIR")
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
+    let folder = crate::door::source::Account::this()
+        .variable("PI_CODING_AGENT_DIR", crate::door::source::Purpose::Seed)
         .or_else(|| {
-            super::machine::home()
+            super::machine::owner_home()
                 .ok()
-                .map(|home| home.join(".pi").join("agent"))
+                .map(|home| home.join(".pi/agent"))
         })?;
     #[cfg(test)]
     PI_PROVIDER_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     static NAMES: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
     NAMES
-        .get_or_init(|| super::isolation::pi_provider_names(&folder.join("auth.json")).ok())
+        .get_or_init(|| super::isolation::pi_provider_names(folder.join("auth.json")).ok())
         .clone()
 }
 

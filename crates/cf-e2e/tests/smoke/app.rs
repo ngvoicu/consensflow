@@ -273,7 +273,7 @@ mod tests {
     fn app(script: &str, patience: Duration) -> (cf_e2e::door::Made, App) {
         let root = cf_e2e::door::made("t-").unwrap();
         let state = root.path().join("state");
-        let run = Run::new("/bin/sh").args(["-c", script]);
+        let run = Run::fixture_script(script);
         let app = App::start(run, root.path(), &state, patience).unwrap();
         (root, app)
     }
@@ -415,7 +415,7 @@ mod tests {
             "read line\n".to_owned(),
         ]
         .concat();
-        let run = Run::new("/bin/sh").args(["-c", script.as_str()]);
+        let run = Run::fixture_script(script.as_str());
         let app = App::start(run, root.path(), &state, Duration::from_millis(400)).unwrap();
         let said = app.wait_for("project").unwrap_err().to_string();
         assert!(

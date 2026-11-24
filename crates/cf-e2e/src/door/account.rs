@@ -31,7 +31,7 @@ pub const PROTECTED_DIGEST: &str = "CF_LIVE_PROTECTED_DIGEST";
 
 /// The account as the run's first process found it, or as its parent handed it on.
 #[derive(Debug)]
-struct Account {
+struct Held {
     /// The protected roots, as spelled.
     roots: Vec<PathBuf>,
     /// Where they are written for a child, and the digest of what was written: none until the
@@ -42,7 +42,7 @@ struct Account {
     home: Option<PathBuf>,
 }
 
-static ACCOUNT: OnceLock<Account> = OnceLock::new();
+static ACCOUNT: OnceLock<Held> = OnceLock::new();
 
 /// The digest of `text`, in hex.
 fn digest(text: &str) -> String {
@@ -66,7 +66,7 @@ pub fn read_roots(text: &str, expected: &str) -> Result<Vec<PathBuf>, String> {
 
 /// The account of this process, from `lookup` (its environment as it was started): a child's
 /// from the file it was handed, the first process's from the table of stores.
-fn account_of(lookup: &dyn Fn(&str) -> Option<OsString>) -> Result<Account, String> {
+fn account_of(lookup: &dyn Fn(&str) -> Option<OsString>) -> Result<Held, String> {
     let handed = lookup(PROTECTED_FILE).filter(|value| !value.is_empty());
     if let Some(file) = handed {
         let expected = lookup(PROTECTED_DIGEST)
@@ -80,7 +80,7 @@ fn account_of(lookup: &dyn Fn(&str) -> Option<OsString>) -> Result<Account, Stri
             )
         })?;
         let roots = read_roots(&text, &expected)?;
-        return Ok(Account {
+        return Ok(Held {
             roots,
             file: OnceLock::from((file, expected)),
             home: None,
@@ -100,7 +100,7 @@ fn account_of(lookup: &dyn Fn(&str) -> Option<OsString>) -> Result<Account, Stri
         .into_iter()
         .find_map(|name| lookup(name).filter(|value| !value.is_empty()))
         .map(PathBuf::from);
-    Ok(Account {
+    Ok(Held {
         roots,
         file: OnceLock::new(),
         home,
@@ -116,7 +116,7 @@ pub fn begin() {
     });
 }
 
-fn account() -> &'static Account {
+fn account() -> &'static Held {
     begin();
     ACCOUNT.get().unwrap_or_else(|| unreachable!("begun above"))
 }
@@ -173,6 +173,32 @@ pub fn protected() -> Vec<PathBuf> {
             .cloned(),
     );
     roots
+}
+
+/// The account's home as this process's environment says it now: `HOME`, else `USERPROFILE`. A
+/// stand-in run's is its decoy account's: the kit reads the files of the account its process is
+/// in, and the protected roots are the real account's, which the first call to [`begin`] read.
+#[allow(clippy::disallowed_methods)] // One of the two readers of the account's own environment.
+pub(super) fn home_of_this_process() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+}
+
+/// The variable `name` as this process's environment says it now.
+#[allow(clippy::disallowed_methods)] // One of the readers of the account's own environment.
+pub(super) fn lookup_in_this_process(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+
+/// The folder the variable `name` of a store's row names in this process's environment, where
+/// set and not empty.
+#[allow(clippy::disallowed_methods)] // One of the two readers of the account's own environment.
+pub(super) fn variable_of_this_process(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The person's home, where the rig places project folders: the first process's own, never a

@@ -13,7 +13,6 @@
 //! beside it ([`StandIn`]), and Muse is its child.
 
 use std::ffi::OsString;
-use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -37,11 +36,15 @@ pub enum Run {
 /// it, `credential_backend: file`). The model catalog, where present, is copied so the
 /// run's `model/list` can identify the account's models. The person's files are never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
-    crate::standin_process::require_home(real_home, "Muse login lookup");
+    let real_home =
+        crate::door::source::Account::this().named(real_home, crate::door::source::Purpose::Seed);
+    real_home.require_home("Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
-    let auth = real_home.join(".config").join("muse").join("auth.json");
-    let text = files::read_string(&auth)?;
+    let auth = real_home.join(".config/muse/auth.json");
+    let text = auth
+        .read_to_string()
+        .map_err(|failed| Error::Daemon(format!("could not read {auth}: {failed}")))?;
     let sanitized = login_copy(&text)?;
     let copy = config.join("auth.json");
     // A resumed rig already has this copy. Make its replacement private from its first byte,
@@ -52,12 +55,8 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
         .map_err(Error::file("write", &staged))?;
     crate::door::rename(&staged, &copy)?;
     let catalog = real_home.join(".local/share/muse/model-catalog");
-    if catalog.is_dir() {
-        crate::door::copy_tree(
-            &catalog,
-            rig_home.join(".local/share/muse/model-catalog"),
-            &|_| false,
-        )?;
+    if catalog.is_a_folder() {
+        catalog.copy_tree_into(rig_home.join(".local/share/muse/model-catalog"), &|_| false)?;
     }
     Ok(())
 }
@@ -185,7 +184,11 @@ fn sandbox_profile(
     }
     let mut reads = exemptions.clone();
     for executable in readable {
-        let real = fs::canonicalize(executable).map_err(Error::file("resolve", executable))?;
+        let real = crate::door::source::Account::this()
+            .program(executable, crate::door::source::Purpose::Guard)
+            .real()
+            .map(|real| PathBuf::from(real.to_argument()))
+            .map_err(Error::file("resolve", executable))?;
         // The stores of every harness and of the account, as the table has them, and the two
         // folders whose every child is one (the XDG config and data folders below the home).
         let inside_folders = [".config", ".local/share"]
@@ -298,7 +301,9 @@ pub(crate) fn installed_on(
     let bin = real.parent().unwrap_or(Path::new("."));
     let exe = if cfg!(windows) { ".exe" } else { "" };
     let version_file = bin.join(".muse-version");
-    let version = fs::read_to_string(version_file)
+    let version = crate::door::source::Account::this()
+        .program(&version_file, crate::door::source::Purpose::Guard)
+        .read_to_string()
         .map(|line| line.trim().to_owned())
         .map_err(|_| {
             format!(
@@ -307,7 +312,10 @@ pub(crate) fn installed_on(
             )
         })?;
     let binary = bin.join(format!("muse-bin-{version}{exe}"));
-    if !binary.is_file() {
+    if !crate::door::source::Account::this()
+        .program(&binary, crate::door::source::Purpose::Guard)
+        .is_a_file()
+    {
         return Err(format!(
             "Muse Code's binary {} is not on this machine",
             binary.display()
@@ -340,7 +348,7 @@ impl StandIn {
         let me = std::env::current_exe().map_err(|error| error.to_string())?;
         let file = Self::file_of(&me);
         let text =
-            fs::read_to_string(&file).map_err(|error| format!("{}: {error}", file.display()))?;
+            crate::door::reads::read_to_string(&file).map_err(|error| format!("{}: {error}", file.display()))?;
         Self::from_json(&text).ok_or_else(|| format!("{} says no stand-in", file.display()))
     }
 
@@ -721,7 +729,7 @@ pub fn pids_beside(argv: &Path) -> PathBuf {
 
 /// Each window's process and its Muse's, as the rig's Muse wrote them, oldest first.
 pub fn pids(argv: &Path) -> Vec<(u32, u32)> {
-    fs::read_to_string(pids_beside(argv))
+    crate::door::reads::read_to_string(pids_beside(argv))
         .unwrap_or_default()
         .lines()
         .filter_map(|line| {
@@ -733,7 +741,7 @@ pub fn pids(argv: &Path) -> Vec<(u32, u32)> {
 
 /// Every command line the rig's Muse was given, in order, as its words.
 pub fn launches(argv: &Path) -> Vec<Vec<String>> {
-    fs::read_to_string(argv)
+    crate::door::reads::read_to_string(argv)
         .unwrap_or_default()
         .split('\u{1e}')
         .filter(|line| !line.is_empty())
@@ -755,7 +763,9 @@ pub fn sessions(home: &Path) -> Vec<(String, PathBuf)> {
             for day in dirs(&month) {
                 for session in dirs(&day) {
                     let log = session.join("session.jsonl");
-                    if fs::symlink_metadata(&log).is_ok_and(|meta| meta.file_type().is_file()) {
+                    if crate::door::reads::symlink_metadata(&log)
+                        .is_ok_and(|meta| meta.file_type().is_file())
+                    {
                         let id = session
                             .file_name()
                             .unwrap_or_default()
@@ -772,12 +782,10 @@ pub fn sessions(home: &Path) -> Vec<(String, PathBuf)> {
 }
 
 fn dirs(folder: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = fs::read_dir(folder)
+    let mut found: Vec<PathBuf> = crate::door::reads::read_dir(folder)
         .into_iter()
         .flatten()
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .map(|entry| entry.path())
+        .filter(|path| crate::door::reads::is_dir(path))
         .filter(|path| path.file_name().is_some_and(|name| name != "subagent"))
         .collect();
     found.sort();
@@ -786,7 +794,7 @@ fn dirs(folder: &Path) -> Vec<PathBuf> {
 
 /// A session log's records, its torn lines passed over.
 pub fn records(log: &Path) -> Vec<Value> {
-    fs::read_to_string(log)
+    crate::door::reads::read_to_string(log)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())

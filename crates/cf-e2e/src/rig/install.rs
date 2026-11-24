@@ -409,7 +409,7 @@ pub(super) fn give_muse_its_folders(
         }
         crate::door::make_dir(&moved)?;
         let link = moved.join("muse");
-        match std::fs::symlink_metadata(&link) {
+        match crate::door::reads::symlink_metadata(&link) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 let removed = crate::door::Door::of_run().remove_in_made(&link);
                 if !removed.is_gone() {

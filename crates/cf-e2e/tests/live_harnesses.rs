@@ -189,7 +189,7 @@ fn look(admin: &Admin, harnesses: &[Harness], log: &Log, path: &str) -> Result<V
             checks.push(Check::unavailable(harness.name(), "the look", why));
             continue;
         }
-        let guard = launcher::Guard::new(harness, found.command(), found.home());
+        let guard = launcher::Guard::new(harness, found.command(), found.owner());
         guard.vars()?;
         // Only the harness asked for is looked at: an unscoped refresh would run every
         // harness's CLI of the machine, which this run reports nothing of.

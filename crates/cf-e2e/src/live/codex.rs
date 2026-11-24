@@ -505,7 +505,7 @@ done
 
     #[cfg(unix)]
     fn server() -> AppServer {
-        AppServer::start(Run::new("/bin/sh").args(["-c", SERVER])).unwrap()
+        AppServer::start(Run::fixture_script(SERVER)).unwrap()
     }
 
     #[cfg(unix)]
@@ -555,7 +555,7 @@ done
     #[cfg(unix)]
     #[test]
     fn a_request_the_server_does_not_answer_is_a_timeout_that_names_it() {
-        let server = AppServer::start(Run::new("/bin/sh").args(["-c", "cat > /dev/null"])).unwrap();
+        let server = AppServer::start(Run::fixture_script("cat > /dev/null")).unwrap();
         let failed = server
             .request("thread/start", &json!({}), Duration::from_millis(200))
             .unwrap_err();

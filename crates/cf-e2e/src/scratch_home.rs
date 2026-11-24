@@ -205,14 +205,12 @@ mod tests {
     #[test]
     fn a_program_run_by_the_home_sees_its_variables_and_none_of_the_tests() {
         let home = ScratchHome::new().unwrap();
-        let ran = home
-            .command("/bin/sh")
-            .args([
-                "-c",
-                r#"printf '%s|%s|%s|%s' "$HOME" "$CONSENSFLOW_HOME" "$PATH" "${CARGO_MANIFEST_DIR-unset}""#,
-            ])
-            .run()
-            .unwrap();
+        let ran = Run::fixture_script(
+            r#"printf '%s|%s|%s|%s' "$HOME" "$CONSENSFLOW_HOME" "$PATH" "${CARGO_MANIFEST_DIR-unset}""#,
+        )
+        .vars(home.vars())
+        .run()
+        .unwrap();
         let root = home.root().display();
         assert_eq!(
             ran.stdout,

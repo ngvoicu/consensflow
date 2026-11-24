@@ -5,6 +5,11 @@ use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 // This decoy is a nonexistent sibling of the private test temp directory, never
 // any part of the machine owner's home. A lookup must refuse it before looking.
 fn refuses_foreign_home(harness: Harness) {
@@ -14,7 +19,7 @@ fn refuses_foreign_home(harness: Harness) {
         .unwrap_or_else(|| panic!("temporary folder has no parent"))
         .join(format!("cf-foreign-home-{}", std::process::id()));
     let error = match std::panic::catch_unwind(|| {
-        live::launcher::Watch::of(harness, &foreign.join("bin"), &foreign).look()
+        live::launcher::Watch::of(harness, &foreign.join("bin"), owned(&foreign)).look()
     }) {
         Err(error) => error,
         Ok(_) => panic!("the harness home lookup did not fail closed"),

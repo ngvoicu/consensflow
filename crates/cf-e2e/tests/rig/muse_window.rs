@@ -25,6 +25,11 @@ use serde_json::json;
 
 use crate::{config, secs, Outcome};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// How long an echo turn of these cases takes, unless a case says otherwise: long
 /// enough for the daemon to see it at work.
 const TURN_MS: u64 = 4_000;
@@ -141,7 +146,11 @@ fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> 
         "api_key = 'fixture'\n",
     )?;
     cf_e2e::door::make_dir(at(".local/share/muse/sessions"))?;
-    let devin = Isolation::devin(owner.path(), &at(".config"), &at(".local/share"));
+    let devin = Isolation::devin(
+        owned(owner.path()),
+        owned(at(".config")),
+        owned(at(".local/share")),
+    );
     let rig = Rig::start(config.isolated(Arc::new(devin)))?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(

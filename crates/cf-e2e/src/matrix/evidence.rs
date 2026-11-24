@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::door::source::{Account, Purpose};
 use crate::live::report::Check;
 use crate::{Error, Result};
 
@@ -62,14 +63,20 @@ impl Owner {
     fn look_with_logins(links: &[PathBuf], files: &[PathBuf], login_files: &[PathBuf]) -> Self {
         let mut seen = BTreeMap::new();
         for link in links {
-            let target = std::fs::read_link(link).map_or_else(
+            let target = Account::this()
+                .named(link, Purpose::Guard)
+                .link_target()
+                .map_or_else(
                 |_| "no link".to_owned(),
                 |to| format!("-> {}", to.display()),
             );
             seen.insert(link.clone(), OwnerFile::Text(target));
         }
         for file in files.iter().filter(|file| !login_files.contains(file)) {
-            let hash = std::fs::read(file).map_or_else(
+            let hash = Account::this()
+                .named(file, Purpose::Guard)
+                .read()
+                .map_or_else(
                 |_| "absent".to_owned(),
                 |bytes| {
                     let digest = Sha256::digest(bytes);
@@ -83,7 +90,7 @@ impl Owner {
             seen.insert(file.clone(), OwnerFile::Text(hash));
         }
         for file in login_files {
-            let observed = match cf_base::file::stat(file) {
+            let observed = match Account::this().named(file, Purpose::Guard).stat() {
                 Ok(stat) => OwnerFile::Login(Some(stat)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     OwnerFile::Login(None)
@@ -272,7 +279,7 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     let wal = PathBuf::from(format!("{}-wal", db.display()));
     let stamp = || {
         [db, wal.as_path()].map(|file| {
-            std::fs::metadata(file)
+            crate::door::reads::metadata(file)
                 .ok()
                 .map(|meta| (meta.len(), meta.modified().ok()))
         })
@@ -286,7 +293,7 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     for _ in 0..5 {
         let before = stamp();
         crate::door::copy_keeping_mode(db, &clone)?;
-        if wal.is_file() {
+        if crate::door::reads::is_file(&wal) {
             crate::door::copy_keeping_mode(&wal, clones.path().join("clone.db-wal"))?;
         }
         if stamp() == before {
@@ -326,7 +333,7 @@ pub fn holds_none(folder: &Path, secrets: &[String]) -> Check {
     let mut found = Vec::new();
     let mut read = 0;
     for file in crate::checkout::files_below(folder, &[]).unwrap_or_default() {
-        let Ok(bytes) = std::fs::read(&file) else {
+        let Ok(bytes) = crate::door::reads::read(&file) else {
             continue;
         };
         read += 1;

@@ -80,8 +80,8 @@ fn a_launcher_that_is_left_alone_is_no_change_and_the_summary_names_it_and_its_h
     let command = home.claude();
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
-    assert!(seen.changes_to(&watch.look(), home.0.path()).is_empty());
-    let summary = seen.summary(home.0.path());
+    assert!(seen.changes_to(&watch.look(), &crate::door::source::Source::from(home.0.path())).is_empty());
+    let summary = seen.summary(&crate::door::source::Source::from(home.0.path()));
     assert!(summary.starts_with("~/.local/bin/claude "), "{summary}");
     assert_eq!(
         summary.matches("~/.local/bin/claude ").count(),
@@ -302,7 +302,10 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
         Path::new("/opt/homebrew/bin/codex"),
         home.0.path(),
     );
-    assert_eq!(watch.launchers, [PathBuf::from("/opt/homebrew/bin/codex")]);
+    assert_eq!(
+        watch.launchers,
+        [crate::door::source::Source::from(PathBuf::from("/opt/homebrew/bin/codex"))]
+    );
     assert!(watch.folders.is_empty() && watch.files.is_empty());
     let pi = Watch::of(
         Harness::Pi,
@@ -315,6 +318,7 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
             PathBuf::from("/opt/homebrew/bin/pi"),
             home.path(".local/bin/pi")
         ]
+        .map(crate::door::source::Source::from)
     );
 }
 

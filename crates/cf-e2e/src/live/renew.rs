@@ -362,12 +362,13 @@ pub fn one_shot(
 /// What the harness is told of the account it renews for, by name: its home, in every variable a
 /// program finds one by. The test machine's own account, never the caller's environment passed
 /// on: the child has the machine's variables and these, and no other.
-pub fn account_vars(home: &Path) -> Vec<(String, String)> {
-    let text = home.to_string_lossy().into_owned();
+pub fn account_vars(home: impl Into<crate::door::source::Source>) -> Vec<(String, String)> {
+    let home = home.into();
+    let text = home.to_argument();
     let mut vars = vec![("HOME".to_owned(), text.clone())];
     if cfg!(windows) {
-        vars.push(("USERPROFILE".to_owned(), text));
-        if let Some((drive, path)) = crate::standin_process::drive_and_path(home) {
+        vars.push(("USERPROFILE".to_owned(), text.clone()));
+        if let Some((drive, path)) = crate::standin_process::drive_and_path(Path::new(&text)) {
             vars.push(("HOMEDRIVE".to_owned(), drive));
             vars.push(("HOMEPATH".to_owned(), path));
         }
@@ -385,7 +386,7 @@ pub fn one_shot_in(
     program: &Path,
     words: &[String],
     account: &[(String, String)],
-    records: &[&Path],
+    records: &[&crate::door::source::Source],
 ) -> Result<Option<String>> {
     one_shot_within(
         Some(machine),
@@ -408,7 +409,7 @@ fn one_shot_within(
     words: &[String],
     account: &[(String, String)],
     limit: Duration,
-    records: &[&Path],
+    records: &[&crate::door::source::Source],
 ) -> Result<Option<String>> {
     // It runs as the owner on the account's own login: only on an account that is a test
     // machine's own (T-2007 round 3), before anything is made or started.
@@ -468,20 +469,7 @@ fn one_shot_within(
 /// Whether `path` is a link: a symbolic link anywhere, a junction or other reparse point on
 /// Windows. Whatever it points at is never followed.
 fn is_link(path: &Path) -> bool {
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
-        return false;
-    };
-    if meta.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const REPARSE_POINT: u32 = 0x400;
-        return meta.file_attributes() & REPARSE_POINT != 0;
-    }
-    #[cfg(not(windows))]
-    false
+    crate::door::renewal::is_link(path)
 }
 
 /// Takes away of each folder in `records` the one entry the harness made there for the folder
@@ -492,8 +480,8 @@ fn is_link(path: &Path) -> bool {
 /// 9). Nothing else of the owner's is touched: an entry of theirs whose name ends the same is
 /// theirs. One that cannot be taken away is left (the kit's watch then names it). Why one was
 /// refused, where one was.
-fn forget(
-    records: &[&Path],
+fn forget<S: Into<crate::door::source::Source> + Copy>(
+    records: &[S],
     own: &Path,
     baseline: &crate::door::renewal::Listing,
     machine: Option<&TestMachine>,
@@ -501,7 +489,8 @@ fn forget(
     let door = crate::door::Door::of_run();
     let mut refused = Vec::new();
     for (at, folder) in records.iter().enumerate() {
-        let Some(record) = crate::door::Record::of(folder, own) else {
+        let folder: crate::door::source::Source = (*folder).into();
+        let Some(record) = crate::door::Record::of(Path::new(&folder.to_argument()), own) else {
             continue;
         };
         let path = record.path();

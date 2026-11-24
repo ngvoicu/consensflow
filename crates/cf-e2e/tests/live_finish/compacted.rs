@@ -36,6 +36,11 @@ use serde_json::{json, Value};
 use crate::check::{self, Finished};
 use crate::task::Task;
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// The context, in tokens, past which the worker's Devin compacts its session.
 pub const THRESHOLD: u64 = 1000;
 
@@ -73,13 +78,23 @@ fn config_in(machine: &Path) -> Result<Value> {
     // The folder the adapter reads Devin's config in, on each system: `XDG_CONFIG_HOME` on
     // macOS and Linux, Windows' data folder (`APPDATA`) there. Without the second, the case
     // read the Windows machine's own config (integration B round 2, T-800).
+    // The machine's config is read as an owner's file, through a source, into a folder of the
+    // run's own; the helper is asked there, on homes that are the run's (the seal refuses a
+    // question whose homes are the account's).
+    let scratch = cf_e2e::door::made("finish-devin-config-")
+        .map_err(|failed| Error::Daemon(failed.to_string()))?;
+    let file = cf_e2e::door::source::Account::this()
+        .named(machine, cf_e2e::door::source::Purpose::Seed)
+        .join("devin/config.json");
+    if file.is_a_file() {
+        cf_e2e::door::make_dir(scratch.path().join("devin"))?;
+        file.copy_into(scratch.path().join("devin/config.json"))?;
+    }
+    let folder = scratch.path().to_string_lossy().into_owned();
     let env = [
-        ("HOME".to_owned(), home()?.to_string_lossy().into_owned()),
-        (
-            "XDG_CONFIG_HOME".to_owned(),
-            machine.to_string_lossy().into_owned(),
-        ),
-        ("APPDATA".to_owned(), machine.to_string_lossy().into_owned()),
+        ("HOME".to_owned(), folder.clone()),
+        ("XDG_CONFIG_HOME".to_owned(), folder.clone()),
+        ("APPDATA".to_owned(), folder),
     ];
     let mut config = ask::devin_config(&env)?;
     let Some(fields) = config.as_object_mut() else {
@@ -265,15 +280,15 @@ mod tests {
         };
         check_layout(
             true,
-            Isolation::devin_on_windows(owner.path(), &owner.path().join("roaming")),
+            Isolation::devin_on_windows(owned(owner.path()), owned(owner.path().join("roaming"))),
         );
         #[cfg(unix)]
         check_layout(
             false,
             Isolation::devin(
-                owner.path(),
-                &owner.path().join("config"),
-                &owner.path().join("data"),
+                owned(owner.path()),
+                owned(owner.path().join("config")),
+                owned(owner.path().join("data")),
             ),
         );
         let data = root.path().join("data");

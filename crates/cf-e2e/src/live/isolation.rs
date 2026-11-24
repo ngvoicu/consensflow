@@ -86,7 +86,6 @@ mod tests;
 mod windows;
 
 use std::fmt;
-use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -95,10 +94,10 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::agents;
+use crate::door::source::{Account, Purpose, Source as Owned};
 use super::login::{private_folder, write_private_bytes};
 use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
-use crate::process::own_var;
 use crate::rig::HarnessHome;
 use crate::{Error, Result};
 use watch::{shown, Seen};
@@ -133,13 +132,13 @@ enum Seed {
     /// A file of the owner's, copied: a login if `login` (then it must be there, and a
     /// change in the copy is a refresh), a config otherwise (copied if there).
     Copy {
-        from: PathBuf,
+        from: Owned,
         to: PathBuf,
         login: bool,
     },
     /// The owner's `auth.json` of Pi, with the entries of `providers` that last `left`.
     PiLogin {
-        from: PathBuf,
+        from: Owned,
         to: PathBuf,
         providers: Option<Vec<String>>,
         left: Duration,
@@ -150,7 +149,7 @@ enum Seed {
     /// `settings.json` made to name the package — refused, before anything is made, where one
     /// it needs is missing or the proxy it is set for does not answer.
     PiProvider {
-        from: PathBuf,
+        from: Owned,
         to: PathBuf,
         provider: &'static pi::Provider,
     },
@@ -169,11 +168,11 @@ struct Plan {
     set: Vec<(&'static str, &'static str)>,
     seeds: Vec<Seed>,
     /// The owner's files compared before and after.
-    watched: Vec<PathBuf>,
+    watched: Vec<Owned>,
     /// Watched login-bearing files, compared by metadata and never read by the guard.
-    login_watched: Vec<PathBuf>,
+    login_watched: Vec<Owned>,
     /// The owner's folders of records, in which no entry may name a folder of the run.
-    records: Vec<PathBuf>,
+    records: Vec<Owned>,
     /// Where the login is copied from, as a run says it.
     described: String,
 }
@@ -182,20 +181,21 @@ impl Plan {
     /// Codex: `CODEX_HOME`, holding a copy of `auth.json` and nothing else of the owner's,
     /// which a check writes its own configuration into. A run on the owner's saves a trust
     /// table for its folder in their `config.toml` and its threads among theirs.
-    fn codex(owner: &Path) -> Self {
+    fn codex(owner: impl Into<Owned>) -> Self {
+        let owner = &owner.into();
         Self {
             folders: Vec::new(),
             vars: vec![("CODEX_HOME", "codex".into())],
             set: Vec::new(),
             seeds: vec![Seed::Copy {
-                from: owner.join("auth.json"),
+                from: owner.join("auth.json").for_why(Purpose::Seed),
                 to: "codex/auth.json".into(),
                 login: true,
             }],
             watched: vec![owner.join("auth.json"), owner.join("config.toml")],
             login_watched: vec![owner.join("auth.json")],
             records: Vec::new(),
-            described: owner.join("auth.json").display().to_string(),
+            described: owner.join("auth.json").name(),
         }
     }
 
@@ -204,19 +204,20 @@ impl Plan {
     /// agent folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's
     /// own files, its package and a `settings.json` that names it. Pi writes its sessions,
     /// its settings and its MCP logins there.
-    fn pi(owner: &Path, providers: Option<Vec<String>>, left: Duration) -> Self {
+    fn pi(owner: impl Into<Owned>, providers: Option<Vec<String>>, left: Duration) -> Self {
+        let owner = &owner.into();
         let mut seeds = vec![Seed::PiLogin {
-            from: owner.join("auth.json"),
+            from: owner.join("auth.json").for_why(Purpose::Seed),
             to: "pi/agent/auth.json".into(),
             providers: providers.clone(),
             left,
         }];
-        let mut watched: Vec<PathBuf> =
+        let mut watched: Vec<Owned> =
             ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
                 .map(|name| owner.join(name))
                 .into();
         // models.json may hold provider keys; the proxy config may hold its key too.
-        let mut login_watched: Vec<PathBuf> = ["auth.json", "models.json", "mcp-auth.json"]
+        let mut login_watched: Vec<Owned> = ["auth.json", "models.json", "mcp-auth.json"]
             .map(|name| owner.join(name))
             .into();
         for provider in providers
@@ -225,7 +226,7 @@ impl Plan {
             .filter_map(|name| pi::provider(name))
         {
             seeds.push(Seed::PiProvider {
-                from: owner.to_path_buf(),
+                from: owner.for_why(Purpose::Marketplace),
                 to: "pi/agent".into(),
                 provider,
             });
@@ -248,7 +249,7 @@ impl Plan {
             watched,
             login_watched,
             records: vec![owner.join("sessions")],
-            described: owner.join("auth.json").display().to_string(),
+            described: owner.join("auth.json").name(),
         }
     }
 
@@ -266,7 +267,8 @@ impl Plan {
     /// of the owner's. `HOME` stays the person's, and Git gets the generated global config.
     /// (Devin reads `~/.agents/skills` by the system's profile folder, not the variable, so the
     /// owner's skills are read there, never written.)
-    fn devin_on_windows(owner_roaming: &Path) -> Self {
+    fn devin_on_windows(owner_roaming: impl Into<Owned>) -> Self {
+        let owner_roaming = &owner_roaming.into();
         let profile = PathBuf::from("profile");
         let roaming = profile.join("AppData").join("Roaming");
         let local = profile.join("AppData").join("Local");
@@ -282,12 +284,12 @@ impl Plan {
             set: Vec::new(),
             seeds: vec![
                 Seed::Copy {
-                    from: owner.join("credentials.toml"),
+                    from: owner.join("credentials.toml").for_why(Purpose::Seed),
                     to: roaming.join("devin").join("credentials.toml"),
                     login: true,
                 },
                 Seed::Copy {
-                    from: owner.join("config.json"),
+                    from: owner.join("config.json").for_why(Purpose::Seed),
                     to: roaming.join("devin").join("config.json"),
                     login: false,
                 },
@@ -299,18 +301,19 @@ impl Plan {
             watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],
             login_watched: vec![owner.join("credentials.toml")],
             records: Vec::new(),
-            described: owner.join("credentials.toml").display().to_string(),
+            described: owner.join("credentials.toml").name(),
         }
     }
 
     /// Muse Code: nothing of the run's own, for the rig's launcher gives its windows their
     /// folders; the owner's login metadata, settings and trust, and the index of their
     /// sessions, which a session of the run's would be written into, are watched.
-    fn muse(config: &Path, data: &Path) -> Self {
+    fn muse(config: impl Into<Owned>, data: impl Into<Owned>) -> Self {
+        let (config, data) = (&config.into(), &data.into());
         let config = config.join("muse");
         Self {
             folders: Vec::new(),
@@ -321,11 +324,11 @@ impl Plan {
                 config.join("auth.json"),
                 config.join("settings.json"),
                 config.join("trust.json"),
-                data.join("muse").join("session-index.db"),
+                data.join("muse/session-index.db"),
             ],
             login_watched: vec![config.join("auth.json")],
             records: Vec::new(),
-            described: config.join("auth.json").display().to_string(),
+            described: config.join("auth.json").name(),
         }
     }
 
@@ -333,7 +336,8 @@ impl Plan {
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
     /// are copied. Git gets a run-owned config; no owner Git folder or credentials are carried.
     #[cfg(unix)]
-    fn devin(config: &Path, data: &Path) -> Self {
+    fn devin(config: impl Into<Owned>, data: impl Into<Owned>) -> Self {
+        let (config, data) = (&config.into(), &data.into());
         Self {
             folders: ["config", "data", "state", "cache"]
                 .map(PathBuf::from)
@@ -348,12 +352,12 @@ impl Plan {
             set: Vec::new(),
             seeds: vec![
                 Seed::Copy {
-                    from: data.join("devin").join("credentials.toml"),
+                    from: data.join("devin/credentials.toml").for_why(Purpose::Seed),
                     to: "data/devin/credentials.toml".into(),
                     login: true,
                 },
                 Seed::Copy {
-                    from: config.join("devin").join("config.json"),
+                    from: config.join("devin/config.json").for_why(Purpose::Seed),
                     to: "config/devin/config.json".into(),
                     login: false,
                 },
@@ -363,35 +367,22 @@ impl Plan {
                 },
             ],
             watched: vec![
-                data.join("devin").join("credentials.toml"),
-                config.join("devin").join("config.json"),
-                data.join("devin")
-                    .join("cli")
-                    .join("trusted_workspaces.json"),
+                data.join("devin/credentials.toml"),
+                config.join("devin/config.json"),
+                data.join("devin/cli/trusted_workspaces.json"),
             ],
-            login_watched: vec![data.join("devin").join("credentials.toml")],
+            login_watched: vec![data.join("devin/credentials.toml")],
             records: Vec::new(),
-            described: data
-                .join("devin")
-                .join("credentials.toml")
-                .display()
-                .to_string(),
+            described: data.join("devin/credentials.toml").name(),
         }
     }
 }
 
 /// The owner's folder `variable` names, or `below` in their `home` where it names none.
-fn xdg(home: &Path, variable: &str, below: &[&str]) -> PathBuf {
-    own_var(variable)
-        .filter(|value| !value.is_empty())
-        .map_or_else(
-            || {
-                below
-                    .iter()
-                    .fold(home.to_path_buf(), |path, part| path.join(part))
-            },
-            PathBuf::from,
-        )
+fn xdg(home: &Owned, variable: &str, below: &[&str]) -> Owned {
+    Account::this()
+        .variable(variable, Purpose::Guard)
+        .unwrap_or_else(|| home.join(&below.join("/")))
 }
 
 /// A file of the run's home that holds a login, as it was copied.
@@ -404,7 +395,7 @@ impl Copied {
     /// Whether the file is as it was copied: the same bytes, or the same JSON (a harness may
     /// write a login again, with nothing in it changed).
     fn unchanged(&self) -> bool {
-        let Ok(now) = fs::read(&self.file) else {
+        let Ok(now) = crate::door::reads::read(&self.file) else {
             return false;
         };
         if now == self.was {
@@ -437,7 +428,7 @@ struct Made {
 pub struct Isolation {
     harness: Harness,
     /// The owner's home, which a run says its paths below as `~`.
-    owner_home: PathBuf,
+    owner_home: Owned,
     plan: Plan,
     /// Where the home is made.
     parent: PathBuf,
@@ -460,9 +451,11 @@ impl Isolation {
     /// Pi's home holds the login of the provider of the model the run asked for.
     pub fn of_machine_lasting(
         harness: Harness,
-        home: &Path,
+        home: impl Into<Owned>,
         run: Duration,
     ) -> Result<Option<Self>> {
+        let home = home.into();
+        let home = &home;
         let pi = if harness == Harness::Pi {
             vec![agents::asked_for(Harness::Pi)?.of(Harness::Pi).name.clone()]
         } else {
@@ -476,19 +469,20 @@ impl Isolation {
     fn of_machine_on(
         test_machine: Option<TestMachine>,
         harness: Harness,
-        home: &Path,
+        home: impl Into<Owned>,
         run: Duration,
         pi: &[String],
     ) -> Result<Option<Self>> {
-        let machine = |name: &str| own_var(name).filter(|value| !value.is_empty());
+        let home = &home.into();
+        let machine = |name: &str| Account::this().variable(name, Purpose::Guard);
         // Codex's home is its own folder; the owner's home, which a run says its paths below as
         // `~`, is the user's.
-        let user = super::machine::home().unwrap_or_else(|_| home.to_path_buf());
+        let user = super::machine::owner_home().unwrap_or_else(|_| home.clone());
         Ok(match harness {
             Harness::Codex => Some(Self::codex(&user, home)),
             Harness::Pi => {
-                let agent = machine("PI_CODING_AGENT_DIR")
-                    .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
+                let agent =
+                    machine("PI_CODING_AGENT_DIR").unwrap_or_else(|| home.join(".pi/agent"));
                 let mut made = Self::pi_on(home, &agent, pi, run);
                 // A test machine renews a login that has run short by a turn of Pi on the run's
                 // first Pi model.
@@ -517,8 +511,7 @@ impl Isolation {
             // the profile.
             #[cfg(not(unix))]
             Harness::Devin => {
-                let roaming = machine("APPDATA")
-                    .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);
+                let roaming = machine("APPDATA").unwrap_or_else(|| home.join("AppData/Roaming"));
                 Some(Self::devin_on_windows(home, &roaming))
             }
             // Every harness says its home here, so that one added later is a decision and
@@ -533,25 +526,36 @@ impl Isolation {
     /// [`super::machine::rig`]), so this home holds nothing and sets nothing; it watches the
     /// owner's Muse files in `config` and `data` (the XDG folders of the owner whose home is
     /// `home`), and fails a run that changed them.
-    pub fn muse(home: &Path, config: &Path, data: &Path) -> Self {
+    pub fn muse(home: impl Into<Owned>, config: impl Into<Owned>, data: impl Into<Owned>) -> Self {
         Self::new(Harness::Muse, home, Plan::muse(config, data))
     }
 
     /// Codex's home, copying the login in `codex_home`, the owner's `CODEX_HOME` (in the home
     /// `home`).
-    pub fn codex(home: &Path, codex_home: &Path) -> Self {
+    pub fn codex(home: impl Into<Owned>, codex_home: impl Into<Owned>) -> Self {
         Self::new(Harness::Codex, home, Plan::codex(codex_home))
     }
 
     /// Pi's home, copying the login in `agent`, the owner's Pi folder (in the home `home`), that
     /// the Pi model `model` needs, if it lasts a run of `run` and [`MARGIN`].
-    pub fn pi(home: &Path, agent: &Path, model: &str, run: Duration) -> Self {
+    pub fn pi(
+        home: impl Into<Owned>,
+        agent: impl Into<Owned>,
+        model: &str,
+        run: Duration,
+    ) -> Self {
         Self::pi_on(home, agent, &[model.to_owned()], run)
     }
 
     /// [`Isolation::pi`], for a run whose Pi windows are on the models `models`: the logins
     /// of each one's provider, or every login that is fit where one of them names none.
-    pub fn pi_on(home: &Path, agent: &Path, models: &[String], run: Duration) -> Self {
+    pub fn pi_on(
+        home: impl Into<Owned>,
+        agent: impl Into<Owned>,
+        models: &[String],
+        run: Duration,
+    ) -> Self {
+        let (home, agent) = (home.into(), agent.into());
         let mut providers: Option<Vec<String>> = Some(Vec::new());
         for model in models {
             match (pi::provider_of(model), providers.as_mut()) {
@@ -566,20 +570,24 @@ impl Isolation {
     /// Devin's home, copying the login in the owner's data folder `data` and the config in `config`
     /// (the XDG folders of the owner whose home is `home`).
     #[cfg(unix)]
-    pub fn devin(home: &Path, config: &Path, data: &Path) -> Self {
+    pub fn devin(home: impl Into<Owned>, config: impl Into<Owned>, data: impl Into<Owned>) -> Self {
         Self::new(Harness::Devin, home, Plan::devin(config, data))
     }
 
     /// Devin's home on Windows, copying the login in the owner's Roaming folder `roaming` (the
     /// owner whose profile is `home`).
-    pub fn devin_on_windows(home: &Path, roaming: &Path) -> Self {
-        Self::new(Harness::Devin, home, Plan::devin_on_windows(roaming))
+    pub fn devin_on_windows(home: impl Into<Owned>, roaming: impl Into<Owned>) -> Self {
+        Self::new(
+            Harness::Devin,
+            home,
+            Plan::devin_on_windows(roaming),
+        )
     }
 
-    fn new(harness: Harness, owner_home: &Path, plan: Plan) -> Self {
+    fn new(harness: Harness, owner_home: impl Into<Owned>, plan: Plan) -> Self {
         Self {
             harness,
-            owner_home: owner_home.to_path_buf(),
+            owner_home: owner_home.into(),
             plan,
             parent: std::env::temp_dir(),
             renewal: None,
@@ -600,7 +608,7 @@ impl Isolation {
 
     /// The owner's home: the person's, whatever folder of it the harness reads its login from
     /// (Codex's is `~/.codex`).
-    pub fn owner_home(&self) -> &Path {
+    pub fn owner_home(&self) -> &Owned {
         &self.owner_home
     }
 
@@ -678,13 +686,10 @@ impl Isolation {
             Seed::Fixed { .. } => None,
         };
         if let Some(source) = source {
-            crate::standin_process::require_home(
-                source,
-                &format!("{} isolation lookup", self.harness.name()),
-            );
+            source.require_home(&format!("{} isolation lookup", self.harness.name()));
         }
         match seed {
-            Seed::Copy { from, to, login } => match fs::read(from) {
+            Seed::Copy { from, to, login } => match from.read() {
                 Ok(bytes) => {
                     let bytes = if *login {
                         let text = std::str::from_utf8(&bytes).map_err(|_| {
@@ -716,7 +721,7 @@ impl Isolation {
                 Err(failed) => Err(Error::Daemon(format!(
                     "{}'s login is not in {} ({failed}): {}",
                     self.harness.name(),
-                    from.display(),
+                    from,
                     self.harness.log_in()
                 ))),
             },
@@ -730,7 +735,7 @@ impl Isolation {
                 let text = pi_seed_text(from).map_err(|failed| {
                     Error::Daemon(format!(
                         "Pi's login is not in {} ({failed}): {}",
-                        from.display(),
+                        from,
                         self.harness.log_in()
                     ))
                 })?;
@@ -758,11 +763,11 @@ impl Isolation {
     /// `cliproxyapi.json` sets does not answer; never what a file holds.
     fn pi_provider(
         &self,
-        from: &Path,
+        from: &Owned,
         to: &Path,
         provider: &'static pi::Provider,
     ) -> Result<Vec<Placed>> {
-        if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        if from.is_a_link() {
             return Err(Error::Daemon("Pi's provider tree is a link".to_owned()));
         }
         let folder = shown(from, &self.owner_home);
@@ -774,16 +779,15 @@ impl Isolation {
         };
         let read_file = |name: &str| {
             let path = from.join(name);
-            let meta = fs::symlink_metadata(&path)?;
-            if meta.file_type().is_symlink()
-                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)
+            let meta = path.lstat()?;
+            if meta.file_type().is_symlink() || !path.real()?.is_inside(&from.real()?)
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "a provider file leaves its tree",
                 ));
             }
-            fs::read(path)
+            path.read()
         };
         let config = read_file(provider.config)
             .ok()
@@ -812,18 +816,23 @@ impl Isolation {
                 provider.package
             )));
         };
-        let package = from.join(&source.folder);
-        let inside = fs::symlink_metadata(&package)
+        let below = source.folder.to_string_lossy().replace('\\', "/");
+        let package = from.join(&below);
+        let inside = package
+            .lstat()
             .is_ok_and(|meta| !meta.file_type().is_symlink())
-            && fs::canonicalize(&package)
+            && package
+                .real()
                 .ok()
-                .zip(fs::canonicalize(from).ok())
-                .is_some_and(|(package, agent)| package.starts_with(agent));
+                .zip(from.real().ok())
+                .is_some_and(|(package, agent)| package.is_inside(&agent));
         let manifest_inside = inside
-            && fs::canonicalize(package.join("package.json"))
+            && package
+                .join("package.json")
+                .real()
                 .ok()
-                .zip(fs::canonicalize(&package).ok())
-                .is_some_and(|(manifest, package)| manifest.starts_with(package));
+                .zip(package.real().ok())
+                .is_some_and(|(manifest, package)| manifest.is_inside(&package));
         if !inside || !manifest_inside {
             return Err(missing(&format!(
                 "{}/package.json is missing, or the package or manifest links outside its tree",
@@ -861,7 +870,7 @@ impl Isolation {
             source.folder.display()
         ));
         placed.push(Placed::Tree {
-            from: from.join(&source.folder),
+            from: from.join(&below).for_why(Purpose::Marketplace),
             to: to.join(&source.folder),
         });
         placed.push(Placed::File {
@@ -880,7 +889,7 @@ impl Isolation {
     /// renewal's part in it said, where it is.
     fn pi_entries(
         &self,
-        from: &Path,
+        from: &Owned,
         providers: Option<&[String]>,
         text: &str,
         now: i64,
@@ -923,7 +932,7 @@ impl Isolation {
             file: shown.clone(),
             login: format!("Pi's `{provider}` login"),
             read: &|| {
-                fs::read_to_string(from).map_err(|failed| {
+                from.read_to_string().map_err(|failed| {
                     Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
                 })
             },
@@ -1029,7 +1038,7 @@ impl Isolation {
 
     fn look(&self) -> Seen {
         let codex_config = (self.harness == Harness::Codex)
-            .then(|| self.plan.watched.get(1).map(PathBuf::as_path))
+            .then(|| self.plan.watched.get(1))
             .flatten();
         Seen::look(
             &self.plan.watched,
@@ -1042,7 +1051,7 @@ impl Isolation {
 
 /// A Pi seed waiting for the run home which will use it. Only the sanitized copy is on disk.
 struct PiDiscovery {
-    from: PathBuf,
+    from: Owned,
     stat: cf_base::file::Stat,
     text: String,
     folder: crate::door::Made,
@@ -1052,7 +1061,7 @@ impl PiDiscovery {
     /// Names come from the sanitized run-owned copy, never from the owner's text.
     fn names(&self) -> Result<Vec<String>> {
         let file = self.folder.path().join("auth.json");
-        let bytes = fs::read(&file).map_err(Error::file("read", &file))?;
+        let bytes = crate::door::reads::read(&file).map_err(Error::file("read", &file))?;
         let entries: Value = serde_json::from_slice(&bytes)
             .map_err(|_| Error::Daemon("Pi's discovery copy is not JSON".to_owned()))?;
         let entries = entries
@@ -1063,7 +1072,10 @@ impl PiDiscovery {
 
     /// Reuse the by-design read to seed the real home. Refuse a source that moved in between.
     fn into_seed(self) -> Result<String> {
-        let now = cf_base::file::stat(&self.from).map_err(Error::file("stat", &self.from))?;
+        let now = self
+            .from
+            .stat()
+            .map_err(|failed| Error::Daemon(format!("could not stat {}: {failed}", self.from)))?;
         if now != self.stat {
             return Err(Error::Daemon(
                 "Pi's login changed between model selection and making the run's home; run again"
@@ -1094,11 +1106,18 @@ fn register_pi_discovery_cleanup() -> bool {
 
 /// Make the kit's Pi discovery copy while reading the login once for the run's seed.
 /// No on-disk copy contains refresh keys, even if this process is interrupted.
-fn pi_discovery_copy(from: &Path) -> Result<PiDiscovery> {
-    crate::standin_process::require_home(from, "Pi login copy");
-    let before = cf_base::file::stat(from).map_err(Error::file("stat", from))?;
-    let text = crate::files::read_string(from)?;
-    let after = cf_base::file::stat(from).map_err(Error::file("stat", from))?;
+fn pi_discovery_copy(from: impl Into<Owned>) -> Result<PiDiscovery> {
+    let from = &from.into();
+    from.require_home("Pi login copy");
+    let stat = |from: &Owned| {
+        from.stat()
+            .map_err(|failed| Error::Daemon(format!("could not stat {from}: {failed}")))
+    };
+    let before = stat(from)?;
+    let text = from
+        .read_to_string()
+        .map_err(|failed| Error::Daemon(format!("could not read {from}: {failed}")))?;
+    let after = stat(from)?;
     if before != after {
         return Err(Error::Daemon(
             "Pi's login changed while the run was making its copy; run again".to_owned(),
@@ -1113,7 +1132,7 @@ fn pi_discovery_copy(from: &Path) -> Result<PiDiscovery> {
     private_folder(folder.path())?;
     write_private_bytes(&folder.path().join("auth.json"), sanitized.as_bytes())?;
     Ok(PiDiscovery {
-        from: from.to_owned(),
+        from: from.clone(),
         stat: after,
         text,
         folder,
@@ -1121,8 +1140,8 @@ fn pi_discovery_copy(from: &Path) -> Result<PiDiscovery> {
 }
 
 /// Resolve a Pi model from a sanitized copy, retaining its seed for the run's own home.
-pub(super) fn pi_provider_names(from: &Path) -> Result<Vec<String>> {
-    let discovery = pi_discovery_copy(from)?;
+pub(super) fn pi_provider_names(from: impl Into<Owned>) -> Result<Vec<String>> {
+    let discovery = pi_discovery_copy(&from.into())?;
     let names = discovery.names()?;
     let cleanup = PI_DISCOVERY_CLEANUP.get_or_init(register_pi_discovery_cleanup);
     if !cleanup {
@@ -1134,7 +1153,8 @@ pub(super) fn pi_provider_names(from: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-fn pi_seed_text(from: &Path) -> Result<String> {
+fn pi_seed_text(from: impl Into<Owned>) -> Result<String> {
+    let from = &from.into();
     let discovery = {
         let mut held = PI_DISCOVERY.lock().unwrap_or_else(PoisonError::into_inner);
         if held
@@ -1148,15 +1168,16 @@ fn pi_seed_text(from: &Path) -> Result<String> {
     };
     match discovery {
         Some(copy) => copy.into_seed(),
-        None => crate::files::read_string(from),
+        None => from
+            .read_to_string()
+            .map_err(|failed| Error::Daemon(format!("could not read {from}: {failed}"))),
     }
 }
 
 /// The installed harness may make a relative HOME absolute before making its plan.
-fn same_pi_source(left: &Path, right: &Path) -> bool {
-    left == right
-        || matches!((std::path::absolute(left), std::path::absolute(right)),
-            (Ok(left), Ok(right)) if left == right)
+fn same_pi_source(left: impl Into<Owned>, right: impl Into<Owned>) -> bool {
+    let (left, right) = (left.into(), right.into());
+    left == right || left.is_the_same_spelling_as(&right)
 }
 
 /// What a seed puts in the home.
@@ -1168,7 +1189,7 @@ enum Placed {
     },
     /// The folder `from`, copied under `to` whole: the package a provider of Pi's is loaded
     /// from ([`pi::Provider`]), whose files the owner was hashed not to change.
-    Tree { from: PathBuf, to: PathBuf },
+    Tree { from: Owned, to: PathBuf },
 }
 
 impl Placed {
@@ -1198,8 +1219,8 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
 
 /// The folder `from` copied under `to`, its folders and files; the package's own perms are
 /// kept on the entries where the copy can have them (T-1373: an executable it bundles still runs).
-fn copy_tree(from: &Path, to: &Path) -> Result {
-    crate::door::copy_tree(from, to, &|_| false)
+fn copy_tree(from: &Owned, to: &Path) -> Result {
+    from.copy_tree_into(to, &|_| false)
 }
 
 impl fmt::Debug for Isolation {

@@ -4,6 +4,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
+use crate::files;
 use crate::process::Run;
 
 #[test]

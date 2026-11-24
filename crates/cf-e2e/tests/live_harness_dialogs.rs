@@ -38,10 +38,10 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::source::{Account as Owner, Purpose};
 use cf_e2e::live::members::{member, stand_in_chief, Account, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, text, Harness, Log};
-use cf_e2e::process::own_var;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -67,8 +67,9 @@ const BRIEF: &str = "Use your file-writing tool (not the shell) to create the fi
 /// Gives the run's Claude config folder `config` the marketplace the person's Claude Code
 /// knows, copied, and names it there as Claude Code names a marketplace it added.
 fn seed_marketplace(config: &Path) -> Result {
-    let home = own_var("HOME")
-        .map(std::path::PathBuf::from)
+    let home = Owner::this()
+        .home(Purpose::Marketplace)
+        .map(|home| std::path::PathBuf::from(home.to_argument()))
         .unwrap_or_default();
     seed_marketplace_from(&home, config)
 }
@@ -94,36 +95,22 @@ fn seed_marketplace_from(home: &Path, config: &Path) -> Result {
     )
 }
 
-/// Copies the folder `from` into `to`, its files and folders, links left out.
+/// Copies the folder `from` (the owner's) into `to`, its files and folders, links left out.
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
-        return Ok(());
-    }
-    cf_e2e::door::make_dir(to)?;
-    let entries = fs::read_dir(from)
-        .map_err(|failed| Error::Daemon(format!("{}: {failed}", from.display())))?;
-    for entry in entries.flatten() {
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        let target = to.join(entry.file_name());
-        if kind.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else if kind.is_file() {
-            cf_e2e::door::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
+    Owner::this()
+        .named(from, Purpose::Marketplace)
+        .copy_tree_into(to, &|entry| entry.is_a_link())
 }
 
 /// What Claude Code's statuses in the run's config folder say: each window's word, and what
 /// it waits on where it says it waits.
 fn statuses(config: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(config.join("sessions")) else {
+    let Ok(entries) = cf_e2e::door::reads::read_dir(config.join("sessions")) else {
         return Vec::new();
     };
     entries
-        .filter_map(|entry| fs::read_to_string(entry.ok()?.path()).ok())
+        .into_iter()
+        .filter_map(|entry| cf_e2e::door::reads::read_to_string(entry).ok())
         .filter_map(|text| serde_json::from_str::<Value>(&text).ok())
         .map(|status| match status["waitingFor"].as_str() {
             Some(why) => format!("{} ({why})", text(&status["status"])),
@@ -271,7 +258,7 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
         format!("open for {open_for:?}"),
     );
     case.check("the task came to its result", state == "done", state);
-    let run = lsp_keys(&config.join(".claude.json"));
+    let run = lsp_keys(cf_e2e::door::reads::read_to_string(config.join(".claude.json")).ok());
     case.check(
         "the run's own .claude.json holds nothing of the offer: no ignored count, no plugin never offered, offers not turned off",
         run.iter().all(|(_, value)| value.is_null() || *value == json!(0)),
@@ -280,8 +267,9 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
     let installed = config.join("plugins").join("installed_plugins.json");
     case.check(
         "no plugin was installed in the run's config",
-        !installed.exists()
-            || fs::read_to_string(&installed).is_ok_and(|text| !text.contains("lsp")),
+        !cf_e2e::door::reads::exists(&installed)
+            || cf_e2e::door::reads::read_to_string(&installed)
+                .is_ok_and(|text| !text.contains("lsp")),
         format!("{}", installed.display()),
     );
     Ok(case)
@@ -289,9 +277,8 @@ fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
 
 /// The keys Claude Code writes of its LSP offers in a `.claude.json`, with their values (null
 /// where it holds none), and of its plugin hints.
-fn lsp_keys(file: &Path) -> Vec<(&'static str, Value)> {
-    let config = fs::read_to_string(file)
-        .ok()
+fn lsp_keys(text: Option<String>) -> Vec<(&'static str, Value)> {
+    let config = text
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .unwrap_or(Value::Null);
     [
@@ -309,11 +296,17 @@ fn lsp_keys(file: &Path) -> Vec<(&'static str, Value)> {
 /// Claude Code sessions rewrite the rest of it all day, so the digest may move with them; the
 /// keys of the offers move only with an offer answered or left to close.
 fn owners_config() -> (String, Vec<(&'static str, Value)>) {
-    let file = own_var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
+    let file = Owner::this()
+        .named(
+            Owner::this()
+                .home(Purpose::Guard)
+                .map(|home| std::path::PathBuf::from(home.to_argument()))
+                .unwrap_or_default(),
+            Purpose::Guard,
+        )
         .join(".claude.json");
-    let digest = fs::read(&file)
+    let digest = file
+        .read()
         .map(|bytes| {
             Sha256::digest(&bytes)
                 .iter()
@@ -321,7 +314,7 @@ fn owners_config() -> (String, Vec<(&'static str, Value)>) {
                 .collect::<String>()
         })
         .unwrap_or_default();
-    (digest, lsp_keys(&file))
+    (digest, lsp_keys(file.read_to_string().ok()))
 }
 
 /// The run.

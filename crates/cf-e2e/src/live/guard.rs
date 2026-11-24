@@ -8,6 +8,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::door::source::Source as Owned;
+
 /// Devin's store as named by the rig, refused unless its real path is run-owned.
 pub fn devin_store_path(
     windows: bool,
@@ -100,23 +102,26 @@ impl Scratch {
 /// What a run copies of a harness's folders: a file as it is, with the mode it had (a login
 /// file is 0600, and `files::copy` writes fresh bytes at the process's default, 0644: T-841),
 /// in folders only the owner enters.
-pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
+pub fn copy_kept(from: impl Into<Owned>, to: &Path) -> io::Result<()> {
+    let from = from.into();
     if let Some(folder) = to.parent() {
         crate::door::make_dir_private(folder)?;
     }
     // `fs::copy` opens the target with the source's mode and copies its permission bits.
-    Ok(crate::door::copy_keeping_mode(from, to)?)
+    Ok(from.copy_keeping_mode_into(to)?)
 }
 
 /// The folder `from` copied to `to` the same way, the files under it too.
-pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
-    crate::door::copy_tree(from, to, &|_| false)
+pub fn copy_folder_kept(from: impl Into<Owned>, to: &Path) -> io::Result<()> {
+    let from = from.into();
+    from.copy_tree_into(to, &|_| false)
         .map_err(|error| io::Error::other(error.to_string()))
 }
 
 /// Copy a Muse login only after removing refresh-named keys, in a private file.
-pub fn copy_muse_login(from: &Path, to: &Path) -> io::Result<()> {
-    let text = std::fs::read_to_string(from)?;
+pub fn copy_muse_login(from: impl Into<Owned>, to: &Path) -> io::Result<()> {
+    let from = from.into();
+    let text = from.read_to_string()?;
     copy_muse_login_text(&text, to)
 }
 
@@ -138,7 +143,12 @@ fn copy_muse_login_text(text: &str, to: &Path) -> io::Result<()> {
 /// (its secret is in the keychain, which the copy does not carry) and the model catalog cache,
 /// and nothing else of the config (the settings and their backup, what it trusts) or of the data
 /// (its sessions): Muse lists the account's models from the cache and the login alone.
-pub fn copy_muse_into(home: &Path, scratch: &Path, auth: &str) -> io::Result<()> {
+pub fn copy_muse_into(
+    home: impl Into<Owned>,
+    scratch: &Path,
+    auth: &str,
+) -> io::Result<()> {
+    let home = home.into();
     copy_muse_login_text(auth, &scratch.join("config/muse/auth.json"))?;
     copy_folder_kept(
         &home.join(".local/share/muse/model-catalog"),

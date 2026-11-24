@@ -28,7 +28,6 @@ mod path;
 mod tests;
 mod wrapper;
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,10 +36,11 @@ use std::time::Duration;
 use super::isolation::{lasting, Isolation};
 use super::launcher::Guard;
 use super::login::Login;
+use crate::door::source::{Account, Purpose, Source as Owned};
 use super::PLANNED;
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
-use crate::{checkout, files, Error, Result};
+use crate::{checkout, Error, Result};
 
 pub(crate) use path::find_muse_install;
 pub use path::{command, working_command};
@@ -255,7 +255,7 @@ impl Installed {
     /// `folder` spells it ([`Isolation::made_in`]), for a run that takes `planned`.
     pub fn with_homes_in(mut self, folder: &Path, planned: Duration) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine_lasting(self.harness, &self.home, planned)?
+            self.isolation = Isolation::of_machine_lasting(self.harness, &self.owner(), planned)?
                 .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
@@ -345,9 +345,15 @@ impl Installed {
         &self.command
     }
 
-    /// The home its login is read from.
+    /// The home its login is read from, as a name: what is read of it is read as a source.
     pub fn home(&self) -> &Path {
         &self.home
+    }
+
+    /// The home its login is read from, as the owner's files are read: a source, for the
+    /// copies and the guards the run makes of it.
+    pub fn owner(&self) -> Owned {
+        Account::this().named(&self.home, Purpose::Guard)
     }
 
     /// The version it says it is, as its first line says it; `unknown` when it
@@ -366,10 +372,10 @@ impl Installed {
         // started for it, for a start outside its file sandbox reaches the owner's stores
         // (T-1997 finding 4).
         if self.harness == Harness::Muse {
-            return self
-                .command
+            return Account::this()
+                .program(&self.command, Purpose::Guard)
                 .parent()
-                .and_then(|folder| crate::files::read_string(&folder.join(".muse-version")).ok())
+                .and_then(|folder| folder.join(".muse-version").read_to_string().ok())
                 .map(|said| said.trim().to_owned())
                 .filter(|said| !said.is_empty())
                 .unwrap_or_else(|| "unknown".to_owned());
@@ -432,7 +438,7 @@ impl Installed {
     /// finding 1: `CF_KIT_PROJECT_HOME` was in every window's environment).
     fn project_home(&self) -> PathBuf {
         match &self.isolation {
-            Some(isolation) => isolation.owner_home().to_path_buf(),
+            Some(isolation) => PathBuf::from(isolation.owner_home().to_argument()),
             None => self.home.clone(),
         }
     }
@@ -519,21 +525,25 @@ pub fn live_root(home: &Path) -> PathBuf {
 /// It writes only in a folder this run made, and never through a link at the file: the owner's
 /// own config, a folder another run made and one a person made are refused, and so is a
 /// `.claude.json` that is a link.
-pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
-    seed_claude_trust_checked(config, home, true)
+pub fn seed_claude_trust(config: &Path, home: impl Into<Owned>) -> Result {
+    seed_claude_trust_checked(config, &home.into(), true)
 }
 
 /// Seed a login-only parity config without looking up the owner's Claude folder.
-pub(super) fn seed_claude_trust_login_only(config: &Path, home: &Path) -> Result {
-    seed_claude_trust_checked(config, home, false)
+pub(super) fn seed_claude_trust_login_only(config: &Path, home: impl Into<Owned>) -> Result {
+    seed_claude_trust_checked(config, &home.into(), false)
 }
 
-fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> Result {
-    let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+fn seed_claude_trust_checked(config: &Path, home: &Owned, check_owner: bool) -> Result {
+    let real = |path: &Path| {
+        crate::door::reads::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    };
     let config = real(config);
     if check_owner {
-        let owners = real(&home.join(".claude"));
-        if config == real(home) || config.starts_with(&owners) {
+        let owners = home.join(".claude");
+        let owners = owners.real().unwrap_or(owners);
+        let home_real = home.real().unwrap_or_else(|_| home.clone());
+        if home_real.is_path(&config) || owners.holds(&config) {
             return Err(Error::Daemon(format!(
                 "{} is the owner's own Claude config, which a run never writes",
                 config.display()
@@ -547,13 +557,13 @@ fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> R
         )));
     }
     let file = config.join(".claude.json");
-    if fs::symlink_metadata(&file).is_ok_and(|found| found.file_type().is_symlink()) {
+    if crate::door::reads::is_symlink(&file) {
         return Err(Error::Daemon(format!(
             "{} is a link, which a write would go through",
             file.display()
         )));
     }
-    let mut held: serde_json::Value = files::read_string(&file)
+    let mut held: serde_json::Value = crate::door::reads::read_to_string(&file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .filter(serde_json::Value::is_object)
@@ -561,7 +571,7 @@ fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> R
     if !held["projects"].is_object() {
         held["projects"] = serde_json::json!({});
     }
-    let root = claude_project_key(&live_root(home).to_string_lossy());
+    let root = claude_project_key(&live_root(Path::new(&home.to_argument())).to_string_lossy());
     held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
     crate::door::write(&file, held.to_string())
 }
@@ -633,7 +643,7 @@ fn rig_keeping_claude_in(
         }
         // The owner's launcher of every harness the rig seats is looked at when the rig starts
         // and when it ends, whatever home the harness runs on (T-1082).
-        let guard = Guard::new(install.harness, &install.command, &install.home);
+        let guard = Guard::new(install.harness, &install.command, &install.owner());
         let guard = if install
             .claude_config()
             .is_some_and(|config| config.keeps_its_findings())
@@ -826,7 +836,7 @@ fn with_homes(mut installed: Installed, planned: Duration, watch_owner: bool) ->
             installed = installed.with_claude_config(Arc::new(login));
         }
     }
-    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.home(), planned)? {
+    if let Some(isolation) = Isolation::of_machine_lasting(harness, &installed.owner(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)
@@ -969,7 +979,9 @@ fn login_places(
 
 /// Whether one of `places` is there: the machine has been set up for the harness.
 fn has_login(places: &[PathBuf]) -> bool {
-    places.iter().any(|place| place.exists())
+    places
+        .iter()
+        .any(|place| Account::this().named(place, Purpose::Guard).present())
 }
 
 /// A machine that has no login for `harness`: the places it keeps one in, the
@@ -1030,6 +1042,12 @@ fn home_of_unchecked(
         (_, _) => PathBuf::from(named(user_home)?),
     };
     Some(std::path::absolute(&home).unwrap_or(home))
+}
+
+/// The user's own home on this machine as the owner's files are read: a source (`HOME`, else
+/// `USERPROFILE`).
+pub fn owner_home() -> Result<Owned> {
+    Ok(Account::this().named(home()?, Purpose::Guard))
 }
 
 /// The user's own home on this machine: `HOME`, else `USERPROFILE`.
@@ -1124,7 +1142,10 @@ fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
 
 /// Whether `a` and `b` are one place, by their real paths.
 fn same_place(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
+    match (
+        crate::door::reads::canonicalize(a),
+        crate::door::reads::canonicalize(b),
+    ) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }

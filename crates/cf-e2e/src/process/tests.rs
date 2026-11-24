@@ -66,13 +66,10 @@ fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
     let stray = std::fs::File::open("/dev/null").unwrap();
     fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let asking = || {
-        Run::new("/bin/sh").args([
-            "-c".to_owned(),
-            format!(
+        Run::fixture_script(format!(
                 "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
                 stray.as_raw_fd()
-            ),
-        ])
+            ))
     };
     let ran = asking().run().unwrap();
     assert_eq!(ran.stdout, "clear\n");
@@ -265,7 +262,7 @@ mod shell {
     use super::*;
 
     fn sh(script: &str) -> Run {
-        Run::new("/bin/sh").args(["-c", script])
+        Run::fixture_script(script)
     }
 
     #[test]
@@ -979,4 +976,71 @@ fn the_windows_machine_list_keeps_systemroot_and_the_system_variables() {
     ] {
         assert!(is_machine_variable(name), "{name}");
     }
+}
+
+/// A window's variable is handed on to a stand-in's child unless it is a home that is no folder
+/// the run made, one that names a store of the account (by itself or in a list), or one of the
+/// profile's halves, which the door says again from the profile it gives.
+#[test]
+fn a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that_is_not_the_runs() {
+    let store = crate::door::made("cf-inherit-store-").unwrap();
+    let run = crate::door::made("cf-inherit-run-").unwrap();
+    let _held = crate::door::account::TestRoot::add(store.path());
+    let roots = crate::door::Roots::now();
+    let os = |text: &str| OsString::from(text);
+    let inside = store.path().join("x");
+    let list = std::env::join_paths([run.path(), &inside]).unwrap();
+    // The search path is the one variable that may name anything.
+    assert!(inheritable(&os("PATH"), list.as_os_str(), &roots));
+    assert!(inheritable(&os("path"), list.as_os_str(), &roots));
+    // Another variable, naming a store alone or in a list of folders: not handed on.
+    assert!(!inheritable(&os("TOOLS"), inside.as_os_str(), &roots));
+    assert!(!inheritable(&os("TOOLS"), list.as_os_str(), &roots));
+    assert!(!inheritable(&os("TOOLS"), store.path().as_os_str(), &roots));
+    // One that names a folder of the run, or no folder at all.
+    assert!(inheritable(&os("TOOLS"), run.path().as_os_str(), &roots));
+    assert!(inheritable(&os("LANG"), OsStr::new("en_US.UTF-8"), &roots));
+    // A home: only a folder the run made, outside every store.
+    assert!(inheritable(&os("HOME"), run.path().as_os_str(), &roots));
+    assert!(!inheritable(&os("HOME"), store.path().as_os_str(), &roots));
+    assert!(!inheritable(&os("HOME"), OsStr::new("relative/home"), &roots));
+    // The profile's halves are the door's to say again.
+    assert!(!inheritable(&os("HOMEDRIVE"), OsStr::new("C:"), &roots));
+    assert!(!inheritable(&os("homepath"), OsStr::new("/h"), &roots));
+}
+
+/// A program is given the profile's two halves only where its case names them: the machine's own
+/// say the caller's profile.
+#[test]
+fn the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them() {
+    let machine = || -> Vec<(OsString, OsString)> {
+        [("HOMEDRIVE", "C:"), ("HOMEPATH", "\\Users\\caller"), ("LANG", "C"), ("homepath", "x")]
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect()
+    };
+    let mut env = machine();
+    without_unnamed_profile_halves(&mut env, &[]);
+    let names: Vec<String> = env
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["LANG"]);
+    // A case that names one of them names the profile it wants: the machine's stay as they are.
+    let mut env = machine();
+    without_unnamed_profile_halves(
+        &mut env,
+        &[(OsString::from("HOMEDRIVE"), OsString::from("D:"))],
+    );
+    assert_eq!(env.len(), 4);
+    let mut env = machine();
+    without_unnamed_profile_halves(
+        &mut env,
+        &[(OsString::from("homepath"), OsString::from("/n"))],
+    );
+    assert_eq!(env.len(), 4);
+    // Another variable named by the case changes nothing of it.
+    let mut env = machine();
+    without_unnamed_profile_halves(&mut env, &[(OsString::from("LANG"), OsString::from("C"))]);
+    assert_eq!(env.len(), 1);
 }

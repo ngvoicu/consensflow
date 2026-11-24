@@ -585,8 +585,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        let ran = cf_e2e::process::Run::new("/bin/sh")
-            .args(["-c", &command])
+        let ran = cf_e2e::process::Run::fixture_script(command)
             .run()
             .unwrap();
         let said: serde_json::Value = serde_json::from_str(&ran.stdout).unwrap();

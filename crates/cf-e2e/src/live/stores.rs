@@ -188,13 +188,52 @@ pub const STORES: &[Store] = &[
     // a version no table can spell, and it is the launcher guard's to compare.
     row(Muse, Program, Place::Home(".local/bin/muse")),
     row(Muse, Program, Place::Home(".local/bin/.muse-version")),
-    // agy, as far as this branch knows it: its seat is on a branch of its own, which gives its
-    // list (Gemini's folder is the one place known here).
+    // agy (Google's Antigravity CLI), from its adapter (`cf-harness/src/agy`, T-1861 and T-1930) and
+    // the runs recorded there: everything it keeps is below `~/.gemini` (`antigravity-cli`: its
+    // settings, conversation database, installation id, logs, updater, built-in skills and cache;
+    // `config`: `config.json`, `hooks.json`, `mcp_config.json`, `projects`), which `HOME` alone moves
+    // (the recorded run changed nothing outside a throwaway home). `--app-data-dir` and
+    // `--gemini-dir` name the two folders by flags, which a window of the kit is never given.
     row(Agy, Login, Place::Home(".gemini")),
-    // Not in the table, because no path or variable names it: Windows' Credential Manager, where
-    // a harness keeps a login it does not keep in a file. Design section 7 says what that is.
+    // Its installer puts the launcher in `~/.local/bin`, as Claude Code's and Muse's do, and agy
+    // updates itself (`agy update`), so the program is a store the door never writes.
+    row(Agy, Program, Place::Home(".local/bin/agy")),
+    // The skills folder every harness that follows the agents convention reads (agy's adapter reads
+    // `~/.agents/skills`, and Devin's own skills are read there too): shared, read and never
+    // written by a run.
+    row(Agy, Settings, Place::Home(".agents")),
+    // Its other login: the application default credentials of gcloud, which `AGY_ADC_AUTH=true`
+    // asks it to use in place of its keyring entry (the recorded T-1861 run, from agy's help).
+    row(Agy, Login, under("XDG_CONFIG_HOME", ".config", "gcloud")),
+    row(Agy, Login, under("APPDATA", "AppData/Roaming", "gcloud")),
+    row(Agy, Login, Place::Var("CLOUDSDK_CONFIG")),
+    row(Agy, Login, Place::Var("GOOGLE_APPLICATION_CREDENTIALS")),
     // The account's Keychain.
     row(Account, Login, Place::Home("Library/Keychains")),
+];
+
+/// The stores no path or variable names, where a harness keeps a login it does not keep in a file,
+/// and why the kit cannot reach each (design section 7): the account's own secret stores, which a
+/// program reaches through its user's session and no environment decides. The kit's own code never
+/// reads or writes one but through a door that names it (the Keychain's `security` reads, in
+/// `door::keychain`); the audit ([`crate::door::rule`]) refuses every other way to name one, and a
+/// test holds that each is on its list.
+pub const SECRET_STORES: &[(Whose, &str, &str)] = &[
+    (
+        Whose::Account,
+        "Keychain",
+        "a Mac's login Keychain, which Claude Code and Muse keep a login in and `security` reads",
+    ),
+    (
+        Whose::Agy,
+        "Windows' Credential Manager",
+        "where agy keeps its Google login on Windows (its keyring entry), reached by the system's credential functions and its command-line utilities",
+    ),
+    (
+        Whose::Agy,
+        "the Secret Service",
+        "where agy keeps its Google login on a Linux desktop (libsecret), reached by a keyring library and its command-line utility",
+    ),
 ];
 
 /// The names of the account's homes, each a default below which a [`Place::Home`] row is.
@@ -439,11 +478,55 @@ mod tests {
             has(at(var, "muse"));
             has(at(var, "devin"));
         }
+        // agy: all of it below `~/.gemini`, its launcher, the skills folder agents share, and the
+        // application default credentials it may be asked to use (gcloud's folder, or what the
+        // two variables name).
+        for home in ["HOME", "USERPROFILE"] {
+            has(at(home, ".gemini"));
+            has(at(home, ".local/bin/agy"));
+            has(at(home, ".agents"));
+            has(at(home, ".config/gcloud"));
+            has(at(home, "AppData/Roaming/gcloud"));
+        }
+        has(at("XDG_CONFIG_HOME", "gcloud"));
+        has(at("APPDATA", "gcloud"));
         has(at("XDG_RUNTIME_DIR", "muse"));
         has(at("APPDATA", "devin"));
         has(at("LOCALAPPDATA", "devin"));
         has(at("CFFIXED_USER_HOME", "Library/Application Support/Muse"));
         has(PathBuf::from("/private/tmp/tbh-501-rt/muse"));
+    }
+
+    #[test]
+    fn the_variables_that_name_a_login_of_gcloud_are_roots_where_the_account_sets_them() {
+        let vars: HashMap<&'static str, PathBuf> = [
+            ("HOME", PathBuf::from(if cfg!(windows) { r"C:\h" } else { "/h" })),
+            ("CLOUDSDK_CONFIG", PathBuf::from(if cfg!(windows) { r"C:\g" } else { "/g" })),
+            (
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                PathBuf::from(if cfg!(windows) { r"C:\c\adc.json" } else { "/c/adc.json" }),
+            ),
+        ]
+        .into();
+        let roots = roots_for(&lookup_of(&vars), None);
+        for named in ["CLOUDSDK_CONFIG", "GOOGLE_APPLICATION_CREDENTIALS"] {
+            assert!(
+                roots.iter().any(|root| root.path == vars[named]
+                    && root.store.whose == Whose::Agy
+                    && root.store.kind == Login),
+                "{named} is no root of agy's login"
+            );
+        }
+    }
+
+    #[test]
+    fn the_stores_no_path_names_are_listed_each_with_the_reason_the_kit_cannot_reach_it() {
+        let names: Vec<&str> = SECRET_STORES.iter().map(|(_, name, _)| *name).collect();
+        assert_eq!(
+            names,
+            ["Keychain", "Windows' Credential Manager", "the Secret Service"]
+        );
+        assert!(SECRET_STORES.iter().all(|(_, _, why)| !why.is_empty()));
     }
 
     #[test]
