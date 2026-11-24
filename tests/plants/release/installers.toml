@@ -1190,10 +1190,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    # writer in this folder could change in between; none excludes it.
+find = '''    # between; none excludes it.
     check_app "$stage" "the copy of the app made in $dir"
 '''
-replace = '''    # writer in this folder could change in between; none excludes it.
+replace = '''    # between; none excludes it.
 '''
 
 [[plant]]
@@ -1266,10 +1266,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    dest="$dir/ConsensFlow.app"
+find = '''    fi
     remove_leftovers
 '''
-replace = '''    dest="$dir/ConsensFlow.app"
+replace = '''    fi
 '''
 
 [[plant]]
