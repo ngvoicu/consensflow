@@ -69,6 +69,7 @@ pub fn zshenv(folder: &Path) -> String {
 /// `.zshenv` has put the person's `ZDOTDIR` back first. A program that reads
 /// `$ZDOTDIR/<name>` itself, as a harness taking a snapshot of the person's shell may, finds
 /// the person's own file through it.
+#[cfg(unix)]
 fn forward(folder: &Path, name: &str) -> String {
     let ours = quoted(&folder.join("zsh").to_string_lossy());
     format!(
