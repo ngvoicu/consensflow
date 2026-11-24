@@ -269,3 +269,35 @@ fn a_pkill_alias_or_function_in_the_persons_zshrc_wins_in_an_interactive_zsh() {
     assert!(out.contains("mine-fn"), "{out}");
     assert!(!scene.reached("pkill") && !scene.reached("killall"));
 }
+
+#[test]
+fn a_program_that_reads_the_files_of_zdotdir_itself_gets_the_persons_own() {
+    // A harness that takes a snapshot of the person's shell may source `$ZDOTDIR/.zshrc` from
+    // a shell of its own, which never ran our `.zshenv` (`-f` reads none here).
+    let own = std::env::temp_dir().join(format!("cf-guard-sh-snap-own-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&own);
+    for zdotdir in [None, Some(own.as_path())] {
+        let scene = Scene::new(
+            if zdotdir.is_some() {
+                "snap-set"
+            } else {
+                "snap-none"
+            },
+            zdotdir,
+        );
+        let marks = scene.root.join("marks");
+        person_files(zdotdir.unwrap_or(&scene.home), &marks, &ALL, "");
+        let line = "source \"$ZDOTDIR/.zshrc\"; source \"$ZDOTDIR/.zprofile\"";
+        let (code, _, said) = scene.run("/bin/zsh", "-fc", line, true);
+        assert_eq!(code, Some(0), "{said}");
+        assert_eq!(marks_of(&marks), ".zshrc-read\n.zprofile-read\n", "{said}");
+        let (code, _, said) = scene.run("/bin/bash", "-c", "source \"$ZDOTDIR/.zshrc\"", true);
+        assert_eq!(code, Some(0), "{said}");
+        assert_eq!(
+            marks_of(&marks),
+            ".zshrc-read\n.zprofile-read\n.zshrc-read\n",
+            "{said}"
+        );
+        let _ = std::fs::remove_dir_all(&own);
+    }
+}

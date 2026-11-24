@@ -83,3 +83,13 @@ runs = ["guard-shells"]
 file = "crates/cf-daemon/src/member_guard.rs"
 find = '  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse'
 replace = '  :\nelse'
+
+[[plant]]
+name = "member-guard: bash 4.3's exported function is left out, so a login bash of Homebrew's finds the real pkill"
+meant = "member_guard::tests::the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_in_both_forms_bash_reads"
+runs = ["guard-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = '        vars.push((format!("BASH_FUNC_{file}%%"), body));'
+replace = '        drop(body);'

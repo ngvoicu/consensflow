@@ -65,16 +65,35 @@ pub fn zshenv(folder: &Path) -> String {
     text
 }
 
+/// The `.zshrc`, `.zprofile` and `.zlogin` of the same folder. zsh never reads them: its
+/// `.zshenv` has put the person's `ZDOTDIR` back first. A program that reads
+/// `$ZDOTDIR/<name>` itself, as a harness taking a snapshot of the person's shell may, finds
+/// the person's own file through it.
+fn forward(folder: &Path, name: &str) -> String {
+    let ours = quoted(&folder.join("zsh").to_string_lossy());
+    format!(
+        "# ConsensFlow's member guard: the person's own {name}.\n\
+         if [[ -n ${{CONSENSFLOW_ZDOTDIR_WAS+x}} ]]; then _consensflow_dir=$CONSENSFLOW_ZDOTDIR_WAS\n\
+         elif [[ ${{ZDOTDIR:-}} == {ours} ]]; then _consensflow_dir=$HOME\n\
+         else _consensflow_dir=${{ZDOTDIR:-$HOME}}; fi\n\
+         [[ -r $_consensflow_dir/{name} ]] && source \"$_consensflow_dir/{name}\"\n\
+         unset _consensflow_dir\n"
+    )
+}
+
 #[cfg(unix)]
 fn write_zshenv(folder: &Path) -> io::Result<()> {
     let dir = folder.join("zsh");
     std::fs::create_dir_all(&dir)?;
-    let file = dir.join(".zshenv");
-    let text = zshenv(folder);
-    if std::fs::read_to_string(&file).is_ok_and(|had| had == text) {
-        return Ok(());
+    let mut files = vec![(".zshenv", zshenv(folder))];
+    files.extend([".zshrc", ".zprofile", ".zlogin"].map(|name| (name, forward(folder, name))));
+    for (name, text) in files {
+        let file = dir.join(name);
+        if !std::fs::read_to_string(&file).is_ok_and(|had| had == text) {
+            std::fs::write(file, text)?;
+        }
     }
-    std::fs::write(file, text)
+    Ok(())
 }
 
 /// What a window's environment holds for the shells' function layer, on a Mac: `ZDOTDIR` the
