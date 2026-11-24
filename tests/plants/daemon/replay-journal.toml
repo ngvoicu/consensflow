@@ -146,14 +146,24 @@ find = """            if was != tracked.modes.alternate {
 replace = ""
 
 [[plant]]
-name = "journal: a region the screen may refuse replaces the one it keeps"
-meant = "a_region_the_screen_may_refuse_is_written_after_the_one_it_keeps"
+name = "journal: a region the screen refuses replaces the one it keeps"
+meant = "a_region_the_screen_refuses_never_costs_the_one_it_uses"
 runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal/tracker.rs"
-find = "                    if shown.len() == MAX_REGIONS {"
-replace = "                    if !shown.is_empty() {"
+find = "            .find(|region| region.top < usize::from(rows))"
+replace = "            .find(|_| true)"
+
+[[plant]]
+name = "journal: a region whose top is not above its bottom is taken"
+meant = "a_region_the_screen_refuses_never_costs_the_one_it_uses"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = "            if top < bottom && top < MAX_TOP {"
+replace = "            if top < MAX_TOP {"
 
 [[plant]]
 name = "journal: a resize flood starts the journal again inside a sequence"

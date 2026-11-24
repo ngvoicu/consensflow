@@ -75,9 +75,11 @@ async function runCase(c) {
         while (!p.replaying && p.inbox?.length && p === cur && !p.held && !p.gone) {
           const m = p.inbox.shift()
           if (m.offset + m.len <= p.next) { host.send('ack', win, { seq: m.seq }); continue } // wholly below what the page has
-          if (m.offset !== p.next) throw new Error(`live message at ${m.offset}, the page is at ${p.next}`)
-          const carried = await E(([n, h]) => G.writeHex(n, h), [p.name, m.hex])
-          p.next += m.len
+          if (m.offset > p.next) throw new Error(`live message at ${m.offset}, the page is at ${p.next}`)
+          // One that straddles the page's offset (the journal started again inside it, a mark a size made) is written from it.
+          const hex = m.hex.slice((p.next - m.offset) * 2)
+          const carried = await E(([n, h]) => G.writeHex(n, h), [p.name, hex])
+          p.next += hex.length >> 1
           p.carried = carried
           host.send('ack', win, { seq: m.seq })
         }

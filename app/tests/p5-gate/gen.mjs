@@ -168,6 +168,13 @@ export function namedCases() {
   add('margins E past cap: a one-number region at the last row', 40, 12, [e(C2 + '2;9r' + C2 + '12r'), filler, { reload: true }, e('X')], true)
   add('margins F: 257 width changes after them', 40, 12, [e(C2 + '2;9r'), e('abc'), ...widths, { reload: true }, e('X')], false)
   add('margins G past cap: both screens, a size between', 40, 12, [e(C2 + '3;7r' + C2 + '?1049h' + C2 + '2;9r'), { resize: [44, 12] }, e(C2 + '4;8r'), filler, { reload: true }, e('X')], true)
+  // T-2179's finding 3: a setting xterm refuses never costs the region the screen uses (the first, normal, the inactive normal, the alternate).
+  const refused = (n) => Array.from({ length: n }, (_, i) => C2 + (20 + i) + ';' + (30 + i) + 'r').join('')
+  for (const n of [16, 1000]) {
+    add('margins H past cap: ' + n + ' refused settings, the normal screen', 40, 12, [e(C2 + '2;9r' + refused(n)), filler, { reload: true }, e('X')], true)
+    add('margins I past cap: ' + n + ' refused settings, the inactive normal screen', 40, 12, [e(C2 + '2;9r' + refused(n) + C2 + '?1049h'), filler, { reload: true }, e('X')], true)
+    add('margins J past cap: ' + n + ' refused settings, the alternate screen', 40, 12, [e(C2 + '?1049h' + C2 + '2;9r' + refused(n)), filler, { reload: true }, e('X')], true)
+  }
   return cs
 }
 export function reviewCases(cases) {

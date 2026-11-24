@@ -10,11 +10,14 @@
 use super::modes::Modes;
 use super::parser::{Action, Parser};
 
-/// A scroll region the program set: the first and last row from 1 as it wrote them (`usize::MAX`
-/// for no last row: the screen's), and the offset at which the sequence ended. The host does not
-/// know the screen's rows, so it keeps the settings made since the screen's margins were last
-/// the whole screen, and the page's xterm refuses at its own rows what the old one refused. A
-/// size taken by the page resets the margins of both screens at its own offset.
+/// A scroll region the program set that xterm may have taken: the first and last row from 1 as
+/// it wrote them (`usize::MAX` for no last row: the screen's), and the offset at which the
+/// sequence ended. xterm takes a region only when its top is above its bottom, the bottom being
+/// the screen's last row where it is missing, zero or past it, and it keeps the region it had
+/// when it refuses one. The host does not know the screen's rows when it reads a setting (a size
+/// reaches it late), so a screen keeps the settings that some number of rows would take and no
+/// later setting supersedes: their tops rise from the oldest to the newest. The one the page's
+/// xterm keeps at a mark is the newest whose top is above the rows there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Region {
     pub(crate) at: u64,
@@ -22,8 +25,30 @@ pub(crate) struct Region {
     pub(crate) bottom: usize,
 }
 
-/// The most settings kept for a screen.
-const MAX_REGIONS: usize = 16;
+/// The rows at which a setting is not taken whatever the screen: a top this far down is
+/// refused by every screen the page can make (rows are a `u16`, and a window's sizes are
+/// bounded far below it), so it is not kept.
+pub(crate) const MAX_TOP: usize = 1024;
+
+impl Region {
+    /// The region xterm holds after these settings (of one screen, since its margins were last
+    /// the whole screen) on a screen of `rows` rows: the newest it takes.
+    pub(crate) fn kept_at(set: &[Region], rows: u16) -> Option<Region> {
+        set.iter()
+            .rev()
+            .find(|region| region.top < usize::from(rows))
+            .copied()
+    }
+
+    /// Take in a setting that xterm takes at some number of rows: the ones it supersedes
+    /// (those it takes wherever it takes them) are dropped.
+    fn push(set: &mut Vec<Region>, region: Region) {
+        while set.last().is_some_and(|last| last.top >= region.top) {
+            set.pop();
+        }
+        set.push(region);
+    }
+}
 
 /// What the tracker follows: xterm keeps margins for each screen, normal and alternate.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -123,28 +148,33 @@ fn csi(
             }
         }
         (None, None, b'r') => {
-            // A region whose top is not above its bottom is refused, and the margins stay, as
-            // xterm keeps them; one with no bottom or past the screen is the screen's, which
-            // only the screen's rows can tell (so it is kept as written).
+            // xterm's `setScrollRegion`: top is the first parameter or 1; the bottom is the
+            // screen's last row where it is missing, zero or past the screen; the region is
+            // taken only when the bottom is below the top. Whether a bottom is past the screen
+            // only the screen's rows tell, so a setting is kept as written (see `Region`).
             let (top, bottom) = match params {
                 [] => (1, usize::MAX),
                 [top] => (*top, usize::MAX),
                 [top, bottom, ..] => (*top, if *bottom == 0 { usize::MAX } else { *bottom }),
             };
             let top = top.max(1);
-            if top < bottom {
+            // One whose top is not above its bottom is refused at every screen. One whose top is
+            // as far down as `MAX_TOP` is refused at every screen a page makes.
+            if top < bottom && top < MAX_TOP {
                 let shown = tracked.shown();
                 if top == 1 && bottom == usize::MAX {
+                    // The whole screen: taken at every screen of two rows or more, and a screen
+                    // of one row refuses every setting.
                     shown.clear();
                 } else {
-                    if shown.len() == MAX_REGIONS {
-                        shown.remove(0);
-                    }
-                    shown.push(Region {
-                        at: offset,
-                        top,
-                        bottom,
-                    });
+                    Region::push(
+                        shown,
+                        Region {
+                            at: offset,
+                            top,
+                            bottom,
+                        },
+                    );
                 }
             }
         }

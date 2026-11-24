@@ -581,21 +581,84 @@ fn margins_are_kept_for_each_screen() {
     );
 }
 
-/// Blocker 3: a region xterm refuses keeps the one it had. The host does not know the rows, so
-/// the settings since the screen's margins were last the whole screen are written in order and
-/// the page's xterm refuses at its own rows what the old one did.
+/// A journal of the given size past its cap after `opening`, and the seed of its first piece.
+fn seed_at(size: Size, opening: &[u8]) -> String {
+    let journal = Journal::new(size);
+    take(&journal, opening);
+    let chunk = text(0, 64 * 1024);
+    while journal.end() < 12 * MIB as u64 {
+        take(&journal, &chunk);
+    }
+    let (_, pieces) = pulled(&journal);
+    String::from_utf8(pieces[0].seed.clone()).unwrap()
+}
+
+/// `count` settings that a 12-row screen refuses, one after another: tops from 20, each a row or
+/// ten below its bottom, so each is a region some taller screen would take.
+fn refusals(count: usize) -> Vec<u8> {
+    (0..count)
+        .flat_map(|i| format!("\x1b[{};{}r", 20 + i, 30 + i).into_bytes())
+        .collect()
+}
+
+/// T-2179 finding 3: xterm refuses a region whose top is not above its bottom, the bottom taken
+/// as the screen's last row where it is missing, zero or past it, and keeps the one it had. So
+/// the region a screen uses stays through any number of settings it refuses.
 #[test]
-fn a_region_the_screen_may_refuse_is_written_after_the_one_it_keeps() {
-    assert_eq!(seed_of(b"\x1b[2;9r\x1b[20;30r"), "\x1b[2;9r\x1b[20;30r");
-    assert_eq!(seed_of(b"\x1b[2;9r\x1b[12r"), "\x1b[2;9r\x1b[12r");
-    // A region that no screen takes is not kept; the whole screen forgets the ones before.
-    assert_eq!(seed_of(b"\x1b[2;9r\x1b[9;2r"), "\x1b[2;9r");
-    assert_eq!(seed_of(b"\x1b[2;9r\x1b[1;0r"), "");
-    // A few at most.
-    let many: Vec<u8> = (2..40)
-        .flat_map(|top| format!("\x1b[{top};50r").into_bytes())
-        .collect();
-    let seed = seed_of(&many);
-    assert_eq!(seed.matches('r').count(), 16);
-    assert!(seed.ends_with("\x1b[39;50r"));
+fn a_region_the_screen_refuses_never_costs_the_one_it_uses() {
+    let size = (12, 80);
+    for count in [1, 15, 16, 17, 100, 1000] {
+        let refused = refusals(count);
+        // The active normal screen.
+        let stream = [&b"\x1b[2;9r"[..], &refused].concat();
+        assert_eq!(seed_at(size, &stream), "\x1b[2;9r", "normal, {count}");
+        // The normal screen, inactive while the alternate shows.
+        let stream = [&b"\x1b[2;9r"[..], &refused, b"\x1b[?1049h"].concat();
+        assert_eq!(
+            seed_at(size, &stream),
+            "\x1b[2;9r\x1b[?47h",
+            "inactive, {count}"
+        );
+        // The alternate screen.
+        let stream = [&b"\x1b[?1049h\x1b[2;9r"[..], &refused].concat();
+        assert_eq!(
+            seed_at(size, &stream),
+            "\x1b[?47h\x1b[2;9r",
+            "alternate, {count}"
+        );
+    }
+    // Refused for no bottom, a bottom past the rows, and a top that is not above the bottom.
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[12r"), "\x1b[2;9r");
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[13;99r"), "\x1b[2;9r");
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[9;2r"), "\x1b[2;9r");
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[5;5r"), "\x1b[2;9r");
+    // Taken, though the bottom is past the rows or missing: the last row is the bottom.
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[3;99r"), "\x1b[3;99r");
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[4r"), "\x1b[4r");
+    // The whole screen is taken and forgets the region; so does a bottom of zero.
+    assert_eq!(seed_at(size, b"\x1b[2;9r\x1b[1;0r"), "");
+    // A taller screen takes what a short one refuses, at the rows the mark is replayed at.
+    let stream = [&b"\x1b[2;9r"[..], &refusals(3)].concat();
+    assert_eq!(seed_at((40, 80), &stream), "\x1b[22;32r");
+    // The last one taken wins, whatever came between.
+    let stream = [&b"\x1b[2;9r\x1b[3;8r"[..], &refusals(20), b"\x1b[3;7r"].concat();
+    assert_eq!(seed_at(size, &stream), "\x1b[3;7r");
+}
+
+/// A size taken late (at a byte the host has already read past) decides which settings were
+/// refused: the rows at the mark, not the rows when the host read them.
+#[test]
+fn the_rows_of_a_late_size_decide_which_settings_were_refused() {
+    let journal = Journal::new((12, 80));
+    take(&journal, b"\x1b[2;9r\x1b[20;30r");
+    // The size resets the margins and the later setting is taken at the new rows.
+    journal.resize(Some(journal.end()), (40, 80));
+    take(&journal, b"\x1b[20;30r\x1b[2;9r\x1b[50;60r");
+    let chunk = text(0, 64 * 1024);
+    while journal.end() < 12 * MIB as u64 {
+        take(&journal, &chunk);
+    }
+    let (_, pieces) = pulled(&journal);
+    assert_eq!(String::from_utf8_lossy(&pieces[0].seed), "\x1b[2;9r");
+    assert_eq!(pieces[0].size, (40, 80));
 }

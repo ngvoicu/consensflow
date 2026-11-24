@@ -7,5 +7,5 @@ Not a Playwright spec: run it by hand when the journal, the hub's boundary, `att
     cargo build -p cf-panes --example gate_bridge
     node app/tests/p5-gate/gate.mjs <webkit|chromium> <random cases> <first seed> [past-cap cases] [out.jsonl]
 
-`cases51.mjs` holds T-2096's 51 cases, `gen.mjs` the 25 named cases and the seeded generator (random cases from
+`cases51.mjs` holds T-2096's 51 cases, `gen.mjs` the 31 named cases and the seeded generator (random cases from
 the first seed up; past-cap cases from first seed + 100000).

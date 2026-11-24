@@ -170,8 +170,10 @@ impl Journal {
     }
 
     /// A message has been taken in whole (the reads joined into it, all appended): a mark is
-    /// taken at its end if one is due, and the journal is cut to its cap. Marks are only ever
-    /// at the end of a message, so a page that restarts at one drops whole live messages.
+    /// taken at its end if one is due, and the journal is cut to its cap. The marks the cap and
+    /// the rest points make are at message ends; one that a size makes (the 257th) is at the
+    /// journal's end, which can fall inside a message on its way to the page, so a page that
+    /// restarts at a mark writes the part of a live message that is past it.
     pub(crate) fn settle(&self) {
         self.locked().settle();
     }
@@ -317,10 +319,15 @@ impl Inner {
     /// it changes the rows or only the width).
     fn margins_at(&self, mark: &Mark) -> (Vec<Region>, Vec<Region>) {
         let sized = self.sized_at(mark.offset);
+        let rows = self.size_at(mark.offset).0;
         let kept = |set: &[Region]| {
-            set.iter()
+            let since = set
+                .iter()
                 .filter(|region| sized.is_none_or(|sized| region.at > sized))
                 .copied()
+                .collect::<Vec<_>>();
+            Region::kept_at(&since, rows)
+                .into_iter()
                 .collect::<Vec<_>>()
         };
         (kept(&mark.tracked.normal), kept(&mark.tracked.alt))
