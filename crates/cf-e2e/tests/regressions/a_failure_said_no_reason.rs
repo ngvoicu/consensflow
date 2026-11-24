@@ -102,7 +102,7 @@ fn a_codex_worker_whose_turn_its_safety_filter_refused_fails_its_task_saying_so(
     assert_eq!(
         note,
         format!(
-            "T-1 failed: @{session}'s harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness; it said: \"{said}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
+            "T-1 failed: @{session}'s harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): rephrase the work, or give security work to another harness; it said: \"{said}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\""
         )
     );
     Ok(())

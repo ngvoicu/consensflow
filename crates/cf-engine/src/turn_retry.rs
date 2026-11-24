@@ -4,11 +4,13 @@
 //! finds the hold due resumes it with main's own words. Nothing of a retry is pending anywhere
 //! else: no row with a due time, no message of its own kind, no timer, no deadline.
 //!
-//! **The count is read, never kept.** `n` is the try that the message last pasted into the
-//! window about the task carried (`Ledger::turn_retry_tries`): 0 for any message but a retry's
-//! Resume. A try counts only once its paste is received, and only a turn that fails again
-//! counts; an answer, a tell or a person's Resume pasted since makes `n` 0 again. The daemon
-//! alone can never try more than twice in a row.
+//! **The count is read from certain facts.** `n` is the try that the message last pasted into
+//! the window about the task carried (`Ledger::turn_retry_tries`): 0 for any message but a
+//! retry's Resume. A try counts only once its paste is received, and only a turn that fails
+//! again counts; an answer, a tell or a person's Resume pasted since makes `n` 0 again. It is
+//! 0 as well after a turn whose own end, as a look read it, was a success after that paste
+//! (`Record::ended_well_after`); nothing inside a turn that then fails (an answer item, a
+//! commentary) is such an end. The daemon alone can never try more than twice in a row.
 //!
 //! **Nothing reads why.** No code, no kind and no words of the failure decide: a missing model
 //! gets the same two tries.
@@ -42,15 +44,16 @@ pub(crate) fn turn_at_work(observed: &Observed) -> bool {
         )
 }
 
-/// Whether a turn ended well in the record after the paste at `start`: an assistant answer its
-/// harness marks complete and wrote itself. A failed end writes none (Claude Code's error
-/// record, Pi's error step and Codex's failed end are not complete answers).
-pub(crate) fn turn_went_through(items: &[cf_harness::records::Item], start: usize) -> bool {
-    items.get(start + 1..).is_some_and(|after| {
-        after.iter().any(|item| {
-            item.role == cf_harness::records::Role::Assistant && item.complete && !item.synthetic
-        })
-    })
+/// A wait in the words a note says it: whole minutes, else whole seconds, else milliseconds.
+fn spoken(ms: i64) -> String {
+    let (count, unit) = if ms % 60_000 == 0 {
+        (ms / 60_000, "minute")
+    } else if ms % 1_000 == 0 {
+        (ms / 1_000, "second")
+    } else {
+        (ms, "millisecond")
+    };
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 
 /// What a failed turn comes to for its task.
@@ -62,6 +65,42 @@ pub(crate) enum Tried {
 }
 
 impl Dispatcher {
+    /// A look read the turn after the last paste about the task settled and not failed: the
+    /// harness's own end of that turn is a success. Said of nothing else: an answer item inside
+    /// a turn that then fails is not an end (T-2161).
+    pub(crate) fn note_a_turn_ended_well(
+        &self,
+        record: &Record,
+        participant: &ParticipantView,
+        task: &TaskView,
+    ) -> Result<(), EngineError> {
+        let last = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, task.id)?
+            .map(|message| message.id);
+        record.ended_well_after.set(last);
+        Ok(())
+    }
+
+    /// Whether a turn ended well since the last paste about the task, so that a failure now is
+    /// the first try's whatever the paste carried.
+    pub(crate) fn ended_well_since_last_paste(
+        &self,
+        record: &Record,
+        task: &TaskView,
+        participant: &ParticipantView,
+    ) -> Result<bool, EngineError> {
+        let last = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, task.id)?
+            .map(|message| message.id);
+        Ok(last.is_some() && record.ended_well_after.get() == last)
+    }
+
     /// A failed turn where main would fail its working task: the task is held for a retry if
     /// it has a try left, in one look and one write against this moment (the clock read once),
     /// the first try told once to whoever gave the task; else it fails with the turn's reason
@@ -118,8 +157,10 @@ impl Dispatcher {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in 30 seconds, and once more 2 minutes after a second failure. If that fails too, T-{n} fails.",
-                n = task.number
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If that fails too, T-{n} fails. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                n = task.number,
+                first = spoken(unit),
+                second = spoken(SECOND_TRY_UNITS * unit),
             );
             let aside = format!("its turn failed: ConsensFlow tries it again ({said})");
             self.seams.ledger.borrow_mut().show(

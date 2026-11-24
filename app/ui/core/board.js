@@ -128,7 +128,7 @@ const ACTIVITY_LABEL = {
  * 14:02:31 (1 of 2)"; the drawer says "its turn failed: tries again at ..."); from that time
  * until its window has the words, that it waits for its window. `drawer` is the drawer's line.
  */
-const retryWords = (retry, drawer = false, now = Date.now()) => {
+const retryWords = (retry, drawer = false, now = Date.now(), why = null) => {
   const count = ` (${retry.which} of ${retry.of})`
   const due = retry.dueAt ? new Date(retry.dueAt).getTime() : null
   if (due !== null && due > now) {
@@ -140,9 +140,18 @@ const retryWords = (retry, drawer = false, now = Date.now()) => {
     })
     return drawer ? `its turn failed: tries again at ${at}${count}` : `Trying again at ${at}${count}`
   }
+  // From its time on, what it waits for is the real state: the window, or the project's
+  // resume, or its member's return from quota.
+  const waits = why ?? 'its window'
   return drawer
-    ? `its turn failed: trying again, waiting for its window${count}`
-    : `Trying again, waiting for its window${count}`
+    ? `its turn failed: trying again, waiting for ${waits}${count}`
+    : `Trying again, waiting for ${waits}${count}`
+}
+/** What a retry past its time waits for, from the board's own state: null where it is its window. */
+const retryWaitsFor = (closed, participant, now = Date.now()) => {
+  if (closed) return "the project's resume"
+  if (participant && outOfQuota(participant, now)) return 'its member to be back'
+  return null
 }
 /** How a message's kind reads. */
 const KIND_LABEL = {
@@ -1413,7 +1422,7 @@ export class BoardView {
         cell.append(this.#stackTile(held.length, state, label, participant))
       } else if (held.length > 0) {
         const list = element('ol', 'cards')
-        list.append(...held.map((task) => this.#card(task, lane.busy ?? null)))
+        list.append(...held.map((task) => this.#card(task, lane.busy ?? null, participant)))
         cell.append(list)
       }
       row.append(cell)
@@ -1684,7 +1693,7 @@ export class BoardView {
     this.#stackTitle.textContent = `${label} tasks of ${laneName(row.participant)}`
     redraw(
       this.#stackCards,
-      held.map((task) => this.#card(task, row.busy ?? null)),
+      held.map((task) => this.#card(task, row.busy ?? null, row.participant)),
     )
   }
 
@@ -1702,7 +1711,7 @@ export class BoardView {
     }
   }
 
-  #card(task, busy = null) {
+  #card(task, busy = null, participant = null) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -1730,7 +1739,16 @@ export class BoardView {
     if (task.held) {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
     }
-    if (task.retry) where.append(' · ', element('span', 'card-held', retryWords(task.retry)))
+    if (task.retry) {
+      const owner =
+        participant === null
+          ? null
+          : (this.#board.lanes.find(
+              (lane) => lane.participant.handle === (participant.member ?? participant.handle),
+            )?.participant ?? participant)
+      const why = retryWaitsFor(this.#board.project.state !== 'open', owner)
+      where.append(' · ', element('span', 'card-held', retryWords(task.retry, false, Date.now(), why)))
+    }
     if (task.resumeWait) {
       where.append(' · ', element('span', 'card-held', `resume waits: ${task.resumeWait.reason}`))
     }
@@ -1847,7 +1865,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.retry ? ` · ${retryWords(task.retry, true)}` : ''}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.retry ? ` · ${retryWords(task.retry, true, now, retryWaitsFor(closed, waitingMember?.participant, now))}` : ''}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]

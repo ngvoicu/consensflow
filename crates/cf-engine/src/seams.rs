@@ -243,11 +243,9 @@ pub struct Limits {
     /// still meets every other rule of the gate (the human's keys, the fallback, the fresh
     /// look and its box). False in every daemon.
     pub settle_from_first_look: bool,
-    /// The unit of the tries of a refused or failed turn, in milliseconds (`turn_retry`): a
-    /// refused turn's retry and a failed turn's first try are due after one, the second try
-    /// after four, and a retry's receipt and a refusal's open turn are waited for ten. None
-    /// at all (0) is no retry: a refused turn holds its member and a failed turn fails its
-    /// task at once, as before D3's R2 and N35.
+    /// The unit of the tries of a failed turn, in milliseconds (`turn_retry`): its first try
+    /// is due after one unit, its second after four. None at all (0) is no retry: a failed
+    /// turn fails its task at once, as before D3's N35.
     pub turn_retry_ms: i64,
 }
 

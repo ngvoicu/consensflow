@@ -1167,3 +1167,93 @@ fn a_second_try_after_an_earlier_quota_hold_says_no_old_quota_line() {
         second.aside
     );
 }
+
+/// A turn that failed, whatever its record holds of the answer it began: a complete assistant
+/// item is inside a turn whose own end is a failure (T-2161: Muse's commentary, Codex's final
+/// item, Devin's stored stop).
+fn fail_after_an_answer_item(c: &Context, window: &str, text: &str) {
+    let item = c.adapter.item(Role::Assistant, text);
+    c.adapter.with(window, |agent| {
+        agent.items.push(item);
+        agent.failed = true;
+        agent.settled = true;
+        agent.failure = Some("connection reset".to_owned());
+    });
+}
+
+#[test]
+fn an_answer_item_inside_a_turn_that_then_failed_is_never_a_turn_that_went_through() {
+    // T-2161 finding 2: three failed turns in a row, each holding a complete assistant item,
+    // got a third Resume. Only a turn's own end, as a success, counts.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail_after_an_answer_item(&c, &window, "Looking at the parser.");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.retry.expect("held").which, 1);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail_after_an_answer_item(&c, &window, "Looking again.");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.retry.expect("held").which, 2);
+    c.advance(121_000);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail_after_an_answer_item(&c, &window, "And once more.");
+    passes(&c, 3);
+    c.advance(3_600_000);
+    passes(&c, 8);
+    assert_eq!(t.task(1).task.state, "failed", "two tries, then it fails");
+    assert_eq!(resumes(&c, "zeus"), 2, "never a third automatic Resume");
+}
+
+#[test]
+fn a_turn_that_ended_well_after_the_last_resume_makes_the_next_failure_the_first_try() {
+    // The count resets on a successful turn end after the last automatic Resume, and on
+    // nothing else: the turn the Resume began ended well and left a job.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.adapter
+        .answer_leaving_a_job("zeus", "The build runs in the background.");
+    passes(&c, 3);
+    c.advance(3_600_000);
+    c.adapter.wake(
+        "zeus",
+        "<task-notification>the build ended</task-notification>",
+    );
+    fail(&c, &window);
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.retry.expect("held").which, 1);
+}
+
+#[test]
+fn the_hold_notice_offers_the_resume_the_ledger_accepts_and_a_failed_task_the_reopen() {
+    // T-2161 finding 7: the notice told the requester to reopen a task the ledger refuses to
+    // reopen while it is held.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    let notice = t
+        .notes("chief")
+        .into_iter()
+        .find(|note| note.contains("tries it again"))
+        .expect("the first try's note");
+    assert!(
+        notice.contains("cf task resume T-1 \"…\""),
+        "the held task's way on is a resume: {notice}"
+    );
+    assert!(!notice.contains("reopen"), "{notice}");
+    c.ledger
+        .borrow_mut()
+        .resume_task(t.project.id, 1, Some("chief"), "The work, rephrased.")
+        .expect("the ledger accepts the resume the notice names");
+}

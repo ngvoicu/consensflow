@@ -20,17 +20,17 @@ const KINDS: [(&str, &str, &str); 15] = [
     (
         "cyber_policy",
         "Codex's safety filter refused the turn as a cybersecurity risk",
-        "reopen it with the work rephrased, or give security work to another harness",
+        "rephrase the work, or give security work to another harness",
     ),
     (
         "bio_policy",
         "Codex's safety filter refused the turn as a biological risk",
-        "reopen it with the work rephrased, or give it to another harness",
+        "rephrase the work, or give it to another harness",
     ),
     (
         "misalignment_policy_violation",
         "Codex's safety filter refused the turn under its misalignment policy",
-        "reopen it with the work rephrased, or give it to another harness",
+        "rephrase the work, or give it to another harness",
     ),
     (
         "context_window_exceeded",
@@ -50,7 +50,7 @@ const KINDS: [(&str, &str, &str); 15] = [
     (
         "invalid_prompt",
         "the API rejected the prompt as invalid",
-        "reopen the turn with the request rephrased",
+        "rephrase the request",
     ),
     (
         "bad_request",
@@ -96,8 +96,8 @@ const KINDS: [(&str, &str, &str); 15] = [
 
 /// What a turn's `error` says its kind is, in plain words (the kind's name after them, then the
 /// way on where there is one), where it is a kind with a plain name: `Codex's safety filter
-/// refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work
-/// rephrased, or give security work to another harness`.
+/// refused the turn as a cybersecurity risk (cyber_policy): rephrase the work, or give
+/// security work to another harness`.
 pub(super) fn plain(error: Option<&Value>) -> Option<String> {
     let info = field(error, "codex_error_info")?;
     let name = match info {
@@ -111,4 +111,22 @@ pub(super) fn plain(error: Option<&Value>) -> Option<String> {
     } else {
         format!("{what} ({kind}): {on}")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KINDS;
+
+    #[test]
+    fn no_way_on_names_an_action_that_depends_on_the_task_s_state() {
+        // The way on is said in a note about a task that is held (its way on is a resume) or
+        // failed (a reopen): the engine adds the command; the kind's words never name one
+        // (T-2161 finding 7).
+        for (kind, _, on) in KINDS {
+            assert!(
+                !on.to_lowercase().contains("reopen") && !on.to_lowercase().contains("resume"),
+                "{kind}: {on}"
+            );
+        }
+    }
 }

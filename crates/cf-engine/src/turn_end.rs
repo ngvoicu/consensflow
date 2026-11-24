@@ -500,7 +500,8 @@ impl Dispatcher {
             if still && !self.forgotten(record) {
                 // Two tries, each a hold of the task and main's own Resume, before it fails
                 // (`turn_retry`).
-                let went_through = crate::turn_retry::turn_went_through(items, start);
+                let went_through =
+                    self.ended_well_since_last_paste(record, &thread.task, participant)?;
                 match self.failed_end(
                     project,
                     participant,
@@ -516,6 +517,9 @@ impl Dispatcher {
                 }
             }
             return Ok(Turn::Open);
+        }
+        if observed.settled {
+            self.note_a_turn_ended_well(record, participant, &thread.task)?;
         }
         let lost = lost_in_turn(record, observed, Some(start));
         if !observed.settled {

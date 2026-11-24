@@ -255,7 +255,7 @@ fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_befor
     let tiers = working(&context);
     context.adapter.with("zeus", |agent| {
         agent.failure_kind = Some(
-            "Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness"
+            "Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): rephrase the work, or give security work to another harness"
                 .to_owned(),
         );
     });
@@ -268,7 +268,7 @@ fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_befor
         told(&tiers),
         [failed(
             &tiers,
-            "@zeus's harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness; it said: \"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.\""
+            "@zeus's harness reported a failure: Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): rephrase the work, or give security work to another harness; it said: \"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.\""
         )]
     );
 }

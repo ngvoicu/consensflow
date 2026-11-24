@@ -7,7 +7,8 @@
 # - the chief held out of a retry (`participant.role == "chief"` in `failed_end`): the chief's turn never
 #   reaches the failed-turn path of `collect`, which only a staff window's look calls;
 # - a try counted before its paste is received (`last_pasted` taking a message still on its way): a
-#   Resume that is not yet received makes `collect` return at `resume_words_wait` before any failed end
+#   Resume that is not yet received leaves its task queued, not working: `collect`'s filter
+#   `thread.task.state == "working"` (and `resume_words_wait` beside it) returns before any failed end
 #   is read, so no look reaches the count with such a message last.
 #
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
@@ -16,6 +17,7 @@
 n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold"]
 n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
 n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
+n35-kinds = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "no_way_on_names"]
 n35-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "error_before_text"]
 
 [[plant]]
@@ -227,3 +229,43 @@ runs = ["n35-dispatcher"]
 file = "crates/cf-ledger/src/views.rs"
 find = "             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id\n                              AND r.paused_at = t.paused_at)\n"
 replace = ""
+
+[[plant]]
+name = "n35 hold: a failed turn counted as one that ended well"
+meant = "an_answer_item_inside_a_turn_that_then_failed_is_never_a_turn_that_went_through"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                let went_through =\n                    self.ended_well_since_last_paste(record, &thread.task, participant)?;"
+replace = "                self.note_a_turn_ended_well(record, participant, &thread.task)?;\n                let went_through =\n                    self.ended_well_since_last_paste(record, &thread.task, participant)?;"
+
+[[plant]]
+name = "n35 hold: no count reset after a turn that ended well"
+meant = "a_turn_that_ended_well_after_the_last_resume_makes_the_next_failure_the_first_try"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        record.ended_well_after.set(last);"
+replace = "        let _ = last;"
+
+[[plant]]
+name = "n35 hold: the hold notice tells the requester to reopen a held task"
+meant = "the_hold_notice_offers_the_resume_the_ledger_accepts_and_a_failed_task_the_reopen"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "resume it with the work rephrased: cf task resume T-{n} "
+replace = "reopen it with the work rephrased: cf task reopen T-{n} "
+
+[[plant]]
+name = "n35 hold: a harness's way on names a reopen again"
+meant = "no_way_on_names_an_action_that_depends_on_the_task_s_state"
+runs = ["n35-kinds"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/kinds.rs"
+find = "\"rephrase the request\""
+replace = "\"reopen the turn with the request rephrased\""

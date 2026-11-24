@@ -440,7 +440,7 @@ fn a_turn_codex_refused_for_a_safety_filter_names_the_kind_in_plain_words_and_ke
     assert_eq!(read.failure.as_deref(), Some(CYBER_WORDS));
     assert_eq!(
         read.failure_kind.as_deref(),
-        Some("Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): reopen it with the work rephrased, or give security work to another harness")
+        Some("Codex's safety filter refused the turn as a cybersecurity risk (cyber_policy): rephrase the work, or give security work to another harness")
     );
     // No refusal for a moment, and no quota: the engine does not hold the turn to try it again.
     assert_eq!(read.quota.as_deref().map(Quota::level), Some(Level::Ok));

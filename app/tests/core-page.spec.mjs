@@ -19587,3 +19587,21 @@ test("a task whose time has come, or whose Resume is on its way, says it waits f
     );
   }
 });
+
+test("a retry past its time waits for what is really missing: the project's resume, or its member's return", async ({
+  page,
+}) => {
+  const closed = retryingModel("paused", 1, -20_000);
+  closed.boards[1].project.state = "closed";
+  await open(page, closed);
+  await expect(
+    page.locator('button.card[data-task="12"] .card-held'),
+  ).toHaveText("Trying again, waiting for the project's resume (1 of 2)");
+  const out = retryingModel("paused", 1, -20_000);
+  const lane = out.boards[1].lanes.find((l) => l.participant.handle === "zeus");
+  lane.participant.outUntil = new Date(Date.now() + 3_600_000).toISOString();
+  await open(page, out);
+  await expect(
+    page.locator('button.card[data-task="12"] .card-held'),
+  ).toHaveText("Trying again, waiting for its member to be back (1 of 2)");
+});
