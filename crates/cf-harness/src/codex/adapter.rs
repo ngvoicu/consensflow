@@ -219,7 +219,19 @@ impl Adapter for CodexAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let services = &self.services;
-            let executable = executable(Harness::Codex, &services.env)?;
+            // The program is found and Specmint's copy written on the plan's own thread, as
+            // the role's files are below: each can wait, and the engine's thread must not
+            // (T-2203).
+            let executable =
+                crate::shared::off_thread::plan(&services.env, launch, |env, launch| {
+                    // A chief given specs reads its Specmint skill by the path its role
+                    // text names: where Codex has none of its own, ConsensFlow's is
+                    // written where it is kept for every launch, which Codex is told of
+                    // by that path alone.
+                    specmint::write_own(Harness::Codex, env, launch)?;
+                    executable(Harness::Codex, env)
+                })
+                .await??;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
             let texts = role::text(
@@ -230,11 +242,6 @@ impl Adapter for CodexAdapter {
                 launch.instructions,
             )
             .await?;
-            // A chief given specs reads its Specmint skill by the path its role
-            // text names: where Codex has none of its own, ConsensFlow's is
-            // written where it is kept for every launch, which Codex is told of
-            // by that path alone.
-            specmint::write_own(Harness::Codex, &services.env, launch)?;
             // An image agent's window is Codex on its own default model, whose
             // image tool draws: it names no model or effort of its own.
             let agent = match launch.agent {
@@ -265,8 +272,13 @@ impl Adapter for CodexAdapter {
             // The role goes by a file the window's broker reads, never its command line;
             // what the window's sub-agents start with in its place, by a file the
             // supervisor names to the app-server.
-            let role = role::write(&services.env, launch.id, &texts.role)?;
-            let children = role::write_children(&services.env, launch.id, &texts)?;
+            let (role, children) =
+                crate::shared::off_thread::plan(&services.env, launch, move |env, launch| {
+                    let role = role::write(env, launch.id, &texts.role)?;
+                    let children = role::write_children(env, launch.id, &texts)?;
+                    Ok::<_, String>((role, children))
+                })
+                .await??;
             let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));

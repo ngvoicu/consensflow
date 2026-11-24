@@ -287,3 +287,41 @@ fn a_launch_waiting_on_the_system_of_computer_use_stops_nothing_else() {
         "said once it answered"
     );
 }
+
+/// A launch whose asks of the system get no answer in their limit goes on, says so once in the
+/// log, naming its window and what was asked and nothing that could name a secret, and says
+/// nothing to the human (T-2203).
+#[test]
+fn a_launch_the_system_gave_no_answer_to_goes_on_and_says_so_in_the_log() {
+    let context = Context::new();
+    context
+        .computer_use
+        .on_in
+        .borrow_mut()
+        .insert(FOLDER.to_owned());
+    context.computer_use.permissions.set(granted(false, false));
+    context.computer_use.silent();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    launch_once(&tiers, "Write the parser");
+    let lines: Vec<String> = context
+        .log
+        .warnings
+        .borrow()
+        .iter()
+        .filter(|line| line.contains("computer-use note"))
+        .cloned()
+        .collect();
+    // One line for each launch (the chief's window and the worker's), each naming its own.
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    for line in &lines {
+        assert!(
+            line.starts_with("the launch of @")
+                && line.ends_with(
+                    " went on without the computer-use note: macOS's privacy service gave no answer in 5 s"
+                ),
+            "{line}"
+        );
+    }
+    assert_ne!(lines[0], lines[1]);
+    assert!(computer_use_notes(&context, tiers.project.id).is_empty());
+}

@@ -66,19 +66,24 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         machine.codex(),
     )
     .await;
-    let permissions = permissions.map_or(Value::Null, |granted| {
+    // A system that gave no answer says nothing here: the page shows what it shows of none.
+    let permissions = permissions.ok().flatten().map_or(Value::Null, |granted| {
         json!({
             "accessibility": granted.accessibility,
             "screenRecording": granted.screen_recording,
         })
     });
+    let (claude_on, claude_folder) = claude.map_or((false, directory.clone()), |claude| {
+        (claude.on, claude.folder)
+    });
+    let codex_set_up = codex.unwrap_or_default().set_up;
     merged(json!({
         "system": system(),
         "permissions": permissions,
         "grantsOf": page.computer_use.grants_of,
         "harnesses": {
-            "claude-code": { "on": claude.on, "folder": claude.folder },
-            "codex": { "setUp": codex.set_up },
+            "claude-code": { "on": claude_on, "folder": claude_folder },
+            "codex": { "setUp": codex_set_up },
         },
     }))
 }

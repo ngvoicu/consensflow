@@ -246,30 +246,45 @@ impl Adapter for ClaudeAdapter {
     }
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
-            let executable = executable(Harness::Claude, &self.env)?;
-            let settings = install::settings(
-                &self.env,
-                launch.id,
-                launch.role != "chief",
-                launch.compaction,
-                launch.advisor_off,
-                launch.suggestion_off,
-                &self.pane_cf,
-                Some(launch.directory),
-            )?;
-            let role = install::role(&self.env, launch)?;
-            // Only the directories made by this launch's role writer and Specmint
-            // writer can be approved in Claude's added-directory dialog.
-            let mut added: Vec<String> = role
-                .windows(2)
-                .filter(|pair| pair[0] == "--add-dir")
-                .map(|pair| pair[1].clone())
-                .collect();
-            let real: Vec<String> = added
-                .iter()
-                .filter_map(|folder| crate::shared::directory::real_path(folder).ok())
-                .collect();
-            added.extend(real);
+            // The program, the launch's files and what Claude Code will ask of the project's
+            // folder are found and written on the plan's own thread: each can wait, and the
+            // engine's thread must not (T-2203).
+            let pane_cf = self.pane_cf.clone();
+            let (executable, settings, role, added, trusts) =
+                crate::shared::off_thread::plan(&self.env, launch, move |env, launch| {
+                    let executable = executable(Harness::Claude, env)?;
+                    let settings = install::settings(
+                        env,
+                        launch.id,
+                        launch.role != "chief",
+                        launch.compaction,
+                        launch.advisor_off,
+                        launch.suggestion_off,
+                        &pane_cf,
+                        Some(launch.directory),
+                    )?;
+                    let role = install::role(env, launch)?;
+                    // Only the directories made by this launch's role writer and Specmint
+                    // writer can be approved in Claude's added-directory dialog.
+                    let mut added: Vec<String> = role
+                        .windows(2)
+                        .filter(|pair| pair[0] == "--add-dir")
+                        .map(|pair| pair[1].clone())
+                        .collect();
+                    let real: Vec<String> = added
+                        .iter()
+                        .filter_map(|folder| crate::shared::directory::real_path(folder).ok())
+                        .collect();
+                    added.extend(real);
+                    Ok::<_, String>((
+                        executable,
+                        settings,
+                        role,
+                        added,
+                        trust::trusts(launch.directory),
+                    ))
+                })
+                .await??;
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks
             // `resumable` first, but a transcript that is not there has
@@ -379,7 +394,7 @@ impl Adapter for ClaudeAdapter {
                         .and_then(|agent| agent.model)
                         .filter(|model| !model.is_empty())
                         .map(str::to_owned),
-                    trusts: trust::trusts(launch.directory),
+                    trusts,
                     added,
                     directory: launch.directory.to_owned(),
                     hook_ask_ms: self

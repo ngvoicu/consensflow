@@ -9,7 +9,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
-use cf_engine::seams::ComputerUse;
+use cf_engine::seams::{ComputerUse, Waited};
 use tokio::task::LocalSet;
 
 use super::MachineComputerUse;
@@ -61,7 +61,7 @@ fn a_permission_query_that_waits_leaves_the_thread_going_and_is_answered_when_it
         }),
     );
     let (asked, still) = beside_a_ticker(async move { call::permissions(&machine).await });
-    assert_eq!(asked, None);
+    assert_eq!(asked, Ok(None));
     assert!(
         still < MOST_STILL,
         "the thread stood still for {still:?} while the system was asked"
@@ -86,7 +86,7 @@ fn a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on() {
         (asked, began.elapsed())
     });
     drop(release);
-    assert_eq!(asked, None);
+    assert_eq!(asked, Err(Waited(Duration::from_millis(400))));
     assert!(took < Duration::from_secs(3), "given up after {took:?}");
     assert!(
         still < MOST_STILL,
@@ -120,7 +120,7 @@ fn a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going() {
     );
     let (asked, still) = beside_a_ticker(async move { call::claude(&machine, "/work/app").await });
     writer.join().unwrap();
-    assert!(!asked.on);
+    assert!(!asked.unwrap().on);
     assert!(
         still < MOST_STILL,
         "the thread stood still for {still:?} while the file was read"
@@ -130,16 +130,18 @@ fn a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going() {
 /// The calls as the engine makes them, in one place for the test to name.
 mod call {
     use super::*;
-    use cf_engine::seams::ScreenPermissions;
+    use cf_engine::seams::{ScreenPermissions, Waited};
 
-    pub(super) async fn permissions(machine: &MachineComputerUse) -> Option<ScreenPermissions> {
+    pub(super) async fn permissions(
+        machine: &MachineComputerUse,
+    ) -> Result<Option<ScreenPermissions>, Waited> {
         machine.permissions().await
     }
 
     pub(super) async fn claude(
         machine: &MachineComputerUse,
         directory: &str,
-    ) -> cf_harness::claude::computer_use::ComputerUse {
+    ) -> Result<cf_harness::claude::computer_use::ComputerUse, Waited> {
         machine.claude(directory).await
     }
 }

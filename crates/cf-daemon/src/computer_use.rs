@@ -13,7 +13,7 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_engine::seams::{ComputerUse, ScreenPermissions};
+use cf_engine::seams::{ComputerUse, ScreenPermissions, Waited};
 use cf_harness::claude::computer_use;
 use cf_harness::contract::Work;
 use cf_process::{hand_over, screen_grants, with_required, Handed, Run};
@@ -121,48 +121,46 @@ impl MachineComputerUse {
     }
 
     /// What `call` says, made on the worker's thread and waited for no longer than
-    /// [`Self::waiting`]; none where the worker is gone or did not answer in time.
+    /// [`Self::waiting`]: [`Waited`] where the worker is gone or did not answer in time.
     async fn ask<T: Send + 'static>(
         &self,
         call: impl FnOnce(&computer_use::Configuration) -> T + Send + 'static,
-    ) -> Option<T> {
+    ) -> Result<T, Waited> {
+        let silent = Waited(self.within);
         let (answer, answered) = oneshot::channel();
         let job: Job = Box::new(move |configuration| {
             let _ = answer.send(call(configuration));
         });
-        self.jobs.send(job).ok()?;
-        tokio::time::timeout(self.within, answered).await.ok()?.ok()
+        self.jobs.send(job).map_err(|_| silent)?;
+        tokio::time::timeout(self.within, answered)
+            .await
+            .map_err(|_| silent)?
+            .map_err(|_| silent)
     }
 }
 
 impl ComputerUse for MachineComputerUse {
-    fn permissions(&self) -> Work<'_, Option<ScreenPermissions>> {
+    fn permissions(&self) -> Work<'_, Result<Option<ScreenPermissions>, Waited>> {
         let grants = Arc::clone(&self.grants);
-        Box::pin(async move { self.ask(move |_| grants()).await.flatten() })
+        Box::pin(async move { Ok(self.ask(move |_| grants()).await?) })
     }
 
-    fn claude<'a>(&'a self, directory: &'a str) -> Work<'a, computer_use::ComputerUse> {
+    fn claude<'a>(
+        &'a self,
+        directory: &'a str,
+    ) -> Work<'a, Result<computer_use::ComputerUse, Waited>> {
         let (env, asked) = (self.env.clone(), directory.to_owned());
         Box::pin(async move {
-            match self
-                .ask(move |configuration| configuration.computer_use(&env, &asked))
+            self.ask(move |configuration| configuration.computer_use(&env, &asked))
                 .await
-            {
-                Some(known) => known,
-                None => computer_use::ComputerUse {
-                    folder: directory.to_owned(),
-                    on: false,
-                },
-            }
         })
     }
 
-    fn codex(&self) -> Work<'_, cf_harness::codex::computer_use::ComputerUse> {
+    fn codex(&self) -> Work<'_, Result<cf_harness::codex::computer_use::ComputerUse, Waited>> {
         let env = self.env.clone();
         Box::pin(async move {
             self.ask(move |_| cf_harness::codex::computer_use::computer_use(&env))
                 .await
-                .unwrap_or_default()
         })
     }
 }

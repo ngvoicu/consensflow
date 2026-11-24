@@ -195,31 +195,39 @@ pub(super) async fn integration(
     let Said::Read(version) = checked.said else {
         return Err(version::required());
     };
-    let mut configuration = config::native(&services.env)?;
-    let home = config_root(&services.env).ok_or_else(|| "missing home in env".to_owned())?;
-    let root = path::join(&[&home.to_string_lossy(), "integrations", "devin", launch]);
-    make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
-    if configuration.get("hooks").is_none_or(Value::is_null) {
-        configuration.insert("hooks".to_owned(), json!({}));
-    }
-    let Some(Value::Object(hooks)) = configuration.get_mut("hooks") else {
-        return Err("the hooks of the native Devin configuration cannot take a hook".to_owned());
-    };
-    for (event, entry) in added_hooks(&services.bundle.pane_cf, board_questions) {
-        extend(hooks, event, entry)?;
-    }
-    configuration.insert("auto_update".to_owned(), Value::Bool(false));
-    let file = path::join(&[&root, "config.json"]);
-    let text = js::stringify(&Value::Object(configuration));
-    write_new(Path::new(&file), text.as_bytes(), 0o600).map_err(|error| error.to_string())?;
-    let wire = path::join(&[&root, "wire.jsonl"]);
-    Ok(Integration {
-        args: vec!["--config".to_owned(), file],
-        env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
-        wire,
-        version,
-        root,
+    // The configuration is read and the launch's folder and file written on the plan's own
+    // thread: each can wait, and the engine's thread must not (T-2203).
+    let (pane_cf, launch) = (services.bundle.pane_cf.clone(), launch.to_owned());
+    crate::shared::off_thread::work(&services.env, move |env| {
+        let mut configuration = config::native(env)?;
+        let home = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;
+        let root = path::join(&[&home.to_string_lossy(), "integrations", "devin", &launch]);
+        make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
+        if configuration.get("hooks").is_none_or(Value::is_null) {
+            configuration.insert("hooks".to_owned(), json!({}));
+        }
+        let Some(Value::Object(hooks)) = configuration.get_mut("hooks") else {
+            return Err(
+                "the hooks of the native Devin configuration cannot take a hook".to_owned(),
+            );
+        };
+        for (event, entry) in added_hooks(&pane_cf, board_questions) {
+            extend(hooks, event, entry)?;
+        }
+        configuration.insert("auto_update".to_owned(), Value::Bool(false));
+        let file = path::join(&[&root, "config.json"]);
+        let text = js::stringify(&Value::Object(configuration));
+        write_new(Path::new(&file), text.as_bytes(), 0o600).map_err(|error| error.to_string())?;
+        let wire = path::join(&[&root, "wire.jsonl"]);
+        Ok(Integration {
+            args: vec!["--config".to_owned(), file],
+            env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
+            wire,
+            version,
+            root,
+        })
     })
+    .await?
 }
 
 /// Writes the first message where Devin reads it from, in the launch's own

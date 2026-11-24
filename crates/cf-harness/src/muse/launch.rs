@@ -287,14 +287,22 @@ pub(super) async fn integration(
     let env = asking.env;
     let Pinned { program, check } = pinned(asking, executable).await;
     check.verdict.map_err(|refused| refused.sentence)?;
-    let root = launch_folder("muse", env, launch)?;
-    make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
+    // The launch's folder is made and the user's hooks read on the plan's own thread: each can
+    // wait, and the engine's thread must not (T-2203).
+    let (pane_cf, role_file, launch) = (pane_cf.to_owned(), role_file.to_owned(), launch.clone());
+    let (root, hooks) = crate::shared::off_thread::work(env, move |env| {
+        let root = launch_folder("muse", env, &launch)?;
+        make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
+        let said = path::join(&[&root, SAID]);
+        let count = count.min(super::session_hook::MOST_PARTS);
+        let hooks = hooks(
+            env,
+            added_hooks(&pane_cf, &role_file, &said, env.on_windows(), count)?,
+        )?;
+        Ok::<_, String>((root, hooks))
+    })
+    .await??;
     let said = path::join(&[&root, SAID]);
-    let count = count.min(super::session_hook::MOST_PARTS);
-    let hooks = hooks(
-        env,
-        added_hooks(pane_cf, role_file, &said, env.on_windows(), count)?,
-    )?;
     let mut given = vec![(NO_UPDATE.0.to_owned(), NO_UPDATE.1.to_owned())];
     given.extend(super::paths::data_home_given(env).map(|real| ("XDG_DATA_HOME".to_owned(), real)));
     Ok(Integration {

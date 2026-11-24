@@ -97,43 +97,53 @@ pub struct FakeComputerUse {
     /// How often each was asked of, permissions first.
     pub asked: Cell<(u32, u32)>,
     gate: RefCell<Option<super::executor::Gate>>,
+    silent: Cell<bool>,
 }
 
 impl crate::seams::ComputerUse for FakeComputerUse {
     fn permissions(
         &self,
-    ) -> cf_harness::contract::Work<'_, Option<crate::seams::ScreenPermissions>> {
+    ) -> cf_harness::contract::Work<
+        '_,
+        Result<Option<crate::seams::ScreenPermissions>, crate::seams::Waited>,
+    > {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions + 1, claude));
         Box::pin(async move {
-            self.held().await;
-            self.permissions.get()
+            self.held().await?;
+            Ok(self.permissions.get())
         })
     }
 
     fn claude<'a>(
         &'a self,
         directory: &'a str,
-    ) -> cf_harness::contract::Work<'a, cf_harness::claude::computer_use::ComputerUse> {
+    ) -> cf_harness::contract::Work<
+        'a,
+        Result<cf_harness::claude::computer_use::ComputerUse, crate::seams::Waited>,
+    > {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions, claude + 1));
         Box::pin(async move {
-            self.held().await;
-            cf_harness::claude::computer_use::ComputerUse {
+            self.held().await?;
+            Ok(cf_harness::claude::computer_use::ComputerUse {
                 folder: directory.to_owned(),
                 on: self.on_in.borrow().contains(directory),
-            }
+            })
         })
     }
 
     fn codex(
         &self,
-    ) -> cf_harness::contract::Work<'_, cf_harness::codex::computer_use::ComputerUse> {
+    ) -> cf_harness::contract::Work<
+        '_,
+        Result<cf_harness::codex::computer_use::ComputerUse, crate::seams::Waited>,
+    > {
         Box::pin(async move {
-            self.held().await;
-            cf_harness::codex::computer_use::ComputerUse {
+            self.held().await?;
+            Ok(cf_harness::codex::computer_use::ComputerUse {
                 set_up: self.codex_set_up.get(),
-            }
+            })
         })
     }
 }
@@ -147,11 +157,20 @@ impl FakeComputerUse {
         gate
     }
 
-    async fn held(&self) {
+    /// The system gives no answer in the limit it was given: every ask says so.
+    pub fn silent(&self) {
+        self.silent.set(true);
+    }
+
+    async fn held(&self) -> Result<(), crate::seams::Waited> {
         let gate = self.gate.borrow().clone();
         if let Some(gate) = gate {
             gate.wait().await;
         }
+        if self.silent.get() {
+            return Err(crate::seams::Waited(std::time::Duration::from_secs(5)));
+        }
+        Ok(())
     }
 }
 
