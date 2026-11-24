@@ -27,8 +27,9 @@
 # ConsensFlow stops the install, with words that ask the person to quit it:
 # the installer asks no window to close and ends no process, because Windows
 # gives it no way to ask one particular running copy without a gap. Right before the installer starts, nothing may run from the
-# app's folder; Tauri's quiet installer itself closes a ConsensFlow that is
-# opened in that last moment. `cf` comes inside the app: nothing else is set
+# app's folder. If you open ConsensFlow in the moment between the installer's
+# last check and the setup's copy, the setup closes it (Tauri's quiet installer
+# itself closes a ConsensFlow that is opened in that last moment). `cf` comes inside the app: nothing else is set
 # up. ConsensFlow is made for x64 Windows and Apple silicon Macs only.
 #
 # Options, as variables set before the command (irm | iex takes no arguments):

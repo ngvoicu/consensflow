@@ -174,6 +174,13 @@ for (const [label, shell] of shells) {
         [MACHINE_ENTRIES, `$machineEntries = @('${machine.replace('HKCU', 'HKCU:')}')`],
         ...replacements,
       ])
+      // Stop-Process is a recorder in the test copy: the shipped script never calls it, and a
+      // plant that makes it end the open app's processes ends nothing and leaves its mark.
+      const stopped = path.join(dir, 'stopped')
+      writeFileSync(
+        script,
+        `function Stop-Process { [IO.File]::AppendAllText('${stopped}', "stop\`n") }\n${readFileSync(script, 'utf8')}`,
+      )
       if (boundStarts) {
         writeFileSync(script, `Write-Output '${POWERSHELL_READY}'\n${readFileSync(script, 'utf8')}`)
       }
@@ -186,6 +193,7 @@ for (const [label, shell] of shells) {
         script,
         tmp: path.join(dir, 'tmp'),
         local: path.join(dir, 'local'),
+        stopped,
         user,
         machine,
       }
@@ -680,6 +688,7 @@ for (const [label, shell] of shells) {
               /ConsensFlow is open\. Quit it, then run this installer again\. Running from .*ConsensFlow.*ConsensFlow\.exe/,
             )
             assert.doesNotMatch(ran.out, /asking it to close/)
+            assert.ok(!existsSync(at.stopped), 'nothing was told to stop it')
             assert.equal(running.exitCode, null, 'it still runs')
           } finally {
             running.kill()
@@ -698,6 +707,7 @@ for (const [label, shell] of shells) {
               ran,
               /ConsensFlow is open\. Quit it, then run this installer again\. Running from .*helper\.exe/,
             )
+            assert.ok(!existsSync(at.stopped), 'nothing was told to stop it')
             assert.equal(other.exitCode, null, 'it still runs')
           } finally {
             other.kill()

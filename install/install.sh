@@ -33,7 +33,9 @@
 # waited for through it; two copies, a refusal or one that stays open end the
 # install, and one opened again before the swap too, and none is ever stopped, and nothing is installed. The
 # installed app is deleted only once the new one is in place and says its
-# version. `cf` comes inside the app: nothing else is set up. ConsensFlow is
+# version. If you open ConsensFlow in the moment between the installer's last
+# check and its swap, the install replaces it while it starts. `cf` comes inside
+# the app: nothing else is set up. ConsensFlow is
 # made for Apple silicon Macs and Windows only.
 #
 # A run that is killed (SIGKILL, a power cut: no trap runs) leaves in the folder
@@ -138,7 +140,11 @@ newer_than() {
 runs_inside() {
     pid=$$
     while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
-        case "$(ps -o comm= -p "$pid" 2>/dev/null || true)" in
+        program=$(ps -o comm= -p "$pid" 2>/dev/null || true)
+        case "$program" in
+            /*) program=$(cd "${program%/*}" 2>/dev/null && pwd -P)/${program##*/} ;;
+        esac
+        case "$program" in
             "$1"/Contents/*) return 0 ;;
         esac
         pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
@@ -409,7 +415,8 @@ main() {
     spctl=/usr/sbin/spctl
     plistbuddy=/usr/libexec/PlistBuddy
     quit_wait=120
-    running_id=dev.ngvoicu.consensflow
+    # The bundle identifier of the app to quit; the tests give their own stand-in's.
+    running_id="${CONSENSFLOW_TEST_APP_ID:-dev.ngvoicu.consensflow}"
 
     official=https://github.com/ngvoicu/consensflow/releases
     releases="${CONSENSFLOW_RELEASES_URL:-$official}"
@@ -484,7 +491,14 @@ main() {
     fi
     mkdir -p "$dir" 2>/dev/null || refuse "could not make the folder $dir."
     [ -w "$dir" ] || refuse "$dir is not yours to write to. Run this as a user who can, or with CONSENSFLOW_INSTALL_DIR=$HOME/Applications; it never uses sudo itself."
+    # One destination for everything below: absolute, its folders' links resolved,
+    # so the count, the quit and the check of this shell's own ancestors all
+    # compare against the same path whatever the folder was spelled as.
+    dir=$(cd "$dir" 2>/dev/null && pwd -P) || refuse "could not read the folder $dir."
     dest="$dir/ConsensFlow.app"
+    if [ -L "$dest" ]; then
+        refuse "$dest is a link to $(readlink "$dest"). Replace the link with the app (or install into the folder it points to) and run this again."
+    fi
     remove_leftovers
     remove_stale_runs
 
@@ -560,14 +574,15 @@ main() {
     say "the app is ConsensFlow's, signed (team $team) and notarized"
 
     quit_open_app "$dest"
+    # The copy is checked whole again now, after the wait for the open app; and the
+    # app put in place is checked whole once more while the one it replaces can
+    # still be put back. Each narrows what a writer in this folder could change in
+    # between; none excludes it.
+    check_app "$stage" "the copy of the app made in $dir"
+    # The last look, after every check of the copy and right before the move.
     if [ "$(open_copies "$dest")" != 0 ]; then
         refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
     fi
-    # The copy is checked whole again now, after the wait for the open app, as near
-    # its move as a shell gets; and the app put in place is checked whole once
-    # more while the one it replaces can still be put back. Each narrows what a
-    # writer in this folder could change in between; none excludes it.
-    check_app "$stage" "the copy of the app made in $dir"
     if [ -e "$dest" ]; then
         previous="$dir/.ConsensFlow.app.previous.$$"
         mv "$dest" "$previous" || { previous=""; refuse "could not move the installed ConsensFlow aside in $dir."; }
