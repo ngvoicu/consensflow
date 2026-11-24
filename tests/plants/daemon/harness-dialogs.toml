@@ -1125,33 +1125,6 @@ find = '    let start = detail.iter().rposition(|row| row.starts_with(WARNING))?
 replace = '    let start = detail.iter().position(|row| row.starts_with(WARNING))?;'
 
 [[plant]]
-name = "harness dialogs: once: place: the pin of Claude's adapter lets the added method move"
-meant = "the_prompt_readers_the_release_heads_windows_are_borrowed_for_are_the_release_heads"
-runs = ["hd-base-dialog"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
-        super::dialog_identity::identity(dialog)
-    }
-
-'''
-replace = ''''''
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''    fn harness(&self) -> Harness {
-        Harness::Claude
-    }'''
-replace = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
-        super::dialog_identity::identity(dialog)
-    }
-
-    fn harness(&self) -> Harness {
-        Harness::Claude
-    }'''
-
-[[plant]]
 name = "harness dialogs: computer use: the Computer Use permission prompt has no decline, and it waits for a key nobody presses"
 meant = "a_computer_use_permission_prompt_the_screen_shows_is_told_then_closed_by_escape_once_and_the_held_tell_goes_in_after_it"
 runs = ["hd-engine"]

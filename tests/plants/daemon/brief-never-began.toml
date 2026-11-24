@@ -16,6 +16,7 @@
 # Every name holds `brief never began`, so `npm run plants:daemon -- "brief never began"` runs them all.
 
 [run]
+look-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::look::tests::an_enter_waits_for_a_screen_that_changed"]
 bnb-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "brief_never_began::"]
 bnb-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_follow_up_whose_window_never_began"]
 bnb-codex-role = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "codex_role_replay::"]
@@ -130,8 +131,8 @@ replace = "            || observed.failed\n            || !observed.settled"
 # the same at rest (Muse after a stopped command) reads as printing for good.
 [[plant]]
 name = "brief never began: the Enter waits for the window's screen to be still"
-meant = "a_brief_a_window_that_repaints_at_rest_never_began_is_pressed_enter_once"
-runs = ["bnb-engine"]
+meant = "an_enter_waits_for_a_screen_that_changed_in_the_last_three_seconds_and_for_the_humans_text"
+runs = ["look-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"

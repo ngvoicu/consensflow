@@ -660,7 +660,7 @@ fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
     let at = window.look();
     assert!(matches!(window.paste(at, false), Err(ArbiterError::Unsent)));
     assert_eq!(window.pasted(), 0);
-    window.type_key("\x7f");
+    window.type_key("Y");
     assert!(
         matches!(window.paste(at, true), Err(ArbiterError::Unsent)),
         "a key since the look is no reason"

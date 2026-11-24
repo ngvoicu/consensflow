@@ -21,6 +21,7 @@
 # Every name holds `quiet by screen`, so `cargo xtask plants daemon "quiet by screen"` runs them.
 
 [run]
+look-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::look::tests::an_enter_waits_for_a_screen_that_changed"]
 qs-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "screen::", "arbiter::", "pane_handlers::"]
 qs-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pacing::", "looks::", "still_there::", "stale_box::", "close_when_drawn::"]
 qs-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::", "contract::bridge::"]
@@ -168,8 +169,8 @@ replace = """
 
 [[plant]]
 name = "quiet by screen: the Enter again waits for the screen to be still"
-meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
-runs = ["qs-engine"]
+meant = "an_enter_waits_for_a_screen_that_changed_in_the_last_three_seconds_and_for_the_humans_text"
+runs = ["look-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
