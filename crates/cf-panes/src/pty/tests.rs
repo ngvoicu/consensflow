@@ -1996,29 +1996,45 @@ fn a_read_is_counted_while_the_activity_lock_is_held() {
 /// T-2198 note 5: a gate asked with the pane's writer held looks at the screen it was given with
 /// the writer, and asks the pane table for nothing: while a resize or the opening of another pane
 /// holds the table through a native call, the writer of this pane would be held behind it.
-/// Here the table is held, as they hold it, while the gate looks.
+/// Here another thread holds the table, as they do, from the moment the gate is asked until the
+/// gate has looked (or three seconds).
 #[cfg(unix)]
 #[test]
 fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
     let _serial = serial_pty_test();
     let table = Arc::new(PaneTable::new());
     let pane = open_shell(&table, "exec /bin/cat");
-    let (told, done) = std::sync::mpsc::channel();
-    let (asked, key) = (Arc::clone(&table), pane.key.clone());
-    thread::spawn(move || {
-        let written = asked.write_gated(&key, b"x", &mut |screening| {
-            let busy = asked.lock_panes().expect("the table");
-            let mut looked = false;
-            screening(&mut |seen| looked = seen.is_some());
+    let (asked_tx, asked) = std::sync::mpsc::channel();
+    let (held_tx, held) = std::sync::mpsc::channel();
+    let (looked_tx, looked) = std::sync::mpsc::channel();
+    let holder = {
+        let table = Arc::clone(&table);
+        thread::spawn(move || {
+            asked.recv_timeout(Duration::from_secs(10)).expect("the gate is asked");
+            let busy = table.lock_panes().expect("the table");
+            held_tx.send(()).unwrap();
+            let waited = looked.recv_timeout(Duration::from_secs(3)).is_err();
             drop(busy);
-            assert!(looked, "the screen was looked at");
-            super::Gate::Go
-        });
-        let _ = told.send(written.is_ok());
+            waited
+        })
+    };
+    let (writing, key) = (Arc::clone(&table), pane.key.clone());
+    let writer = thread::spawn(move || {
+        writing
+            .write_gated(&key, b"x", &mut |screening| {
+                asked_tx.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(10)).expect("the table is held");
+                let mut shown = false;
+                screening(&mut |seen| shown = seen.is_some());
+                looked_tx.send(()).unwrap();
+                assert!(shown, "the screen was looked at");
+                super::Gate::Go
+            })
+            .is_ok()
     });
-    assert_eq!(
-        done.recv_timeout(Duration::from_secs(10)),
-        Ok(true),
+    assert!(writer.join().unwrap(), "the write went");
+    assert!(
+        !holder.join().unwrap(),
         "the gate waited for the table while it held the writer"
     );
     table.kill(&pane.key).expect("kill the pane");
