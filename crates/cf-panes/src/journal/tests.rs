@@ -156,6 +156,7 @@ fn a_mark_is_forced_after_two_mebibytes_without_a_rest() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)]
 fn the_parser_rests_where_xterm_does_for_every_next_byte() {
     let states: &[&[u8]] = &[
         b"",

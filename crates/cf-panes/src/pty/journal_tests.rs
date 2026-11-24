@@ -12,11 +12,15 @@ use crate::journal::Journal;
 use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pane_handlers::forward_journaled;
 
+type Live = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;
+type Kept = Arc<Mutex<Vec<(Page, u64, Vec<u8>, bool)>>>;
+type Seen = Arc<Mutex<Vec<(u64, usize, u64)>>>;
+
 /// A page's sink: what it was given, whether it is still there.
 #[derive(Clone)]
 struct Page {
     alive: Arc<AtomicBool>,
-    got: Arc<Mutex<Vec<(u64, Vec<u8>)>>>,
+    got: Live,
 }
 
 impl Page {
@@ -166,7 +170,7 @@ fn each_of_many_subscriptions_against_a_running_consumer_has_the_stream_exactly_
     let hub = Arc::new(OutputHub::new());
     let mut window = Window::start(&hub);
     let mut all = Vec::new();
-    let pages: Arc<Mutex<Vec<(Page, u64, Vec<u8>, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+    let pages: Kept = Arc::new(Mutex::new(Vec::new()));
     let done = Arc::new(AtomicBool::new(false));
     let subscriber = {
         let (hub, journal, key) = (
@@ -375,7 +379,7 @@ fn a_page_that_does_not_acknowledge_is_waited_for_and_never_let_go() {
         )
         .unwrap();
     let journal = pane.journal.clone().unwrap();
-    let got: Arc<Mutex<Vec<(u64, usize, u64)>>> = Arc::new(Mutex::new(Vec::new()));
+    let got: Seen = Arc::new(Mutex::new(Vec::new()));
     let refused = Arc::new(AtomicBool::new(false));
     table.attach_page(&hub, {
         let (got, refused) = (Arc::clone(&got), Arc::clone(&refused));
