@@ -170,10 +170,11 @@ async fn a_paste_into_a_window_that_declared_its_read_is_answered_after_the_host
         .await;
 }
 
-/// Its time is the cap and five seconds more: a pane host that has not answered by then has not
+/// Its time is the cap and eight seconds more (the host's 3 s past the cap while output is
+/// pending, and five): a pane host that has not answered by then has not
 /// held the Enter for the window's read, and the daemon stops waiting.
 #[tokio::test(start_paused = true)]
-async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_the_hosts_cap() {
+async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_what_the_host_holds() {
     LocalSet::new()
         .run_until(async {
             let (host, _app) =
@@ -184,13 +185,13 @@ async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_th
                 .await
                 .unwrap();
             assert_eq!(answer, json!({ "ok": false, "error": "deadline" }));
-            assert_eq!(started.elapsed(), Duration::from_secs(38));
+            assert_eq!(started.elapsed(), Duration::from_secs(41));
         })
         .await;
 }
 
 /// A short brief to such a window has the bridge's thirty seconds, as every paste has had: the
-/// cap and five seconds are the floor's only where they are more.
+/// cap and its margin are the floor's only where they are more.
 #[tokio::test(start_paused = true)]
 async fn a_short_paste_into_a_window_that_declared_its_read_has_thirty_seconds_at_the_least() {
     LocalSet::new()
@@ -218,7 +219,7 @@ async fn a_short_paste_into_a_window_that_declared_its_read_has_thirty_seconds_a
 }
 
 /// A window whose harness declared nothing has the bridge's thirty seconds for a paste, however
-/// long: the pane host holds a delivery's Enter for 2 s at the most there.
+/// long: the pane host holds a delivery's Enter for 2 s there, and 3 s more while output is pending.
 #[tokio::test(start_paused = true)]
 async fn a_paste_into_a_window_that_declared_nothing_has_the_bridges_thirty_seconds() {
     LocalSet::new()

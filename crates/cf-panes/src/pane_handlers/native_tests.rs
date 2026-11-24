@@ -383,7 +383,7 @@ fn the_enter_looks_at_the_counts_again_with_the_writer_held() {
 }
 
 /// T-2139 3: the reader's `readEmpty` of the cursor prefix alone (the box empty, 6 bytes read)
-/// carries the read count it saw. The `X` came after in a read of its own, pending and then
+/// carries the shown-feed count it saw. The `X` came after in a read of its own, pending and then
 /// drawn: the paste with that answer is refused both times, and the child took only the `X`.
 #[test]
 fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
@@ -404,7 +404,7 @@ fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
     window.until(|snapshot| {
         snapshot["outputDrawn"].as_u64() == Some(before + 6) && is_current(snapshot)
     });
-    let answered_at = window.counts_only()["outputRead"].as_u64().unwrap();
+    let answered_at = window.counts_only()["outputShown"].as_u64().unwrap();
     let typed = window.counts_only()["typed"].as_u64().unwrap();
     // The answer was read here; the `X` comes in a read of its own, held before the screen.
     let (held, release) = hold_the_next_read(&window, FeedStage::Read);

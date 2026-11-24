@@ -78,6 +78,30 @@ fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again
     );
 }
 
+/// N17 (T-2150 note 2): a box that cannot be read off a screen that lacks bytes the window
+/// printed is not read empty: the message is not pasted again (main pressed Enter where it
+/// read the box as holding); the next look reads it once the screen is current.
+#[test]
+fn a_box_that_cannot_be_read_off_a_screen_that_lacks_output_is_not_taken_for_gone() {
+    let context = Context::new();
+    let note = a_note_that_never_shows(&context);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 0, "screenQuietMs": 60_000, "outputRead": 5, "outputDrawn": 4
+    }));
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(begun(&context, note), 1, "not pasted again");
+    context.host.set_snapshot(
+        json!({ "outputQuietMs": 40, "screenQuietMs": 60_000, "outputRead": 5, "outputDrawn": 5 }),
+    );
+    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(begun(&context, note), 2, "gone, once its screen is current");
+}
+
 #[test]
 fn a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_again() {
     let context = Context::new();

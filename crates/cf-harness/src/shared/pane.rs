@@ -18,7 +18,7 @@ fn named(pane: &Pane) -> Value {
 /// it did not finish wrote nothing (`admitted: false`) or may have written
 /// some; an answer that never came (the bridge ended) or did not say (its
 /// deadline passed: the bridge's thirty seconds, or, for a window whose harness declared how
-/// it reads a paste, the cap of that harness for this paste and five seconds more) may have
+/// it reads a paste, the cap of that harness for this paste and eight seconds more) may have
 /// been written: uncertain, never a refusal. A
 /// paste the host does not admit as it is asked for, after every wait of the
 /// adapter's before it, is refused unwritten ([`PaneHost::admits`]). With
@@ -38,8 +38,8 @@ pub(crate) async fn write_paste(
     request["body"] = json!(body);
     if let Some(answer) = read_empty {
         request["readEmpty"] = json!(answer.typed);
-        if let Some(read) = answer.read {
-            request["readAt"] = json!(read);
+        if let Some(shown) = answer.shown {
+            request["shownAt"] = json!(shown);
         }
     }
     match host.request("pane.write_paste", request).await {

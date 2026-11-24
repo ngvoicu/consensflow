@@ -874,9 +874,27 @@ impl Dispatcher {
         // The box is emptied once the delivery is begun, so that a paste follows
         // the key; a key the host did not take spends the attempt, as a refused
         // paste does, and the last fails the delivery (the same review).
-        if stale.as_ref().is_some_and(|stale| stale.pane == pane)
-            && !self.clear_box(record, &pane).await
-        {
+        let clearing = stale.as_ref().is_some_and(|stale| stale.pane == pane);
+        let cleared = if clearing {
+            self.clear_box(record, &pane).await
+        } else {
+            Cleared::Taken
+        };
+        // The key goes only into a box read off a screen that shows all the window printed: the
+        // box may be empty already, and the key does harm there. The attempt is given back and
+        // the message waits, as for a window at work.
+        if cleared == Cleared::Behind {
+            let why = "its screen does not yet show all that it printed";
+            self.seams
+                .ledger
+                .borrow_mut()
+                .retry_delivery(message.id, why, true)?;
+            self.rest_ends(record);
+            self.held_once(record, message.id, why).await?;
+            self.changed();
+            return Ok(());
+        }
+        if cleared == Cleared::Failed {
             let delivering = self.delivering(record, message.id, carried);
             return self.settle_failure(
                 delivering,
@@ -1587,11 +1605,15 @@ impl Dispatcher {
     /// harm there, Control-C arming the quit of Claude Code and Muse Code, which a
     /// paste between does not disarm in Muse (T-829's probe), and stopping a turn at
     /// work.
-    pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> bool {
+    pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> Cleared {
         let Input::Pasted { clear } = record.window.borrow().input else {
-            return true;
+            return Cleared::Taken;
         };
-        let taken = if self.box_read_empty(record, pane).await {
+        let read = self.box_read(record, pane).await;
+        if read == BoxRead::Behind {
+            return Cleared::Behind;
+        }
+        let taken = if read == BoxRead::Empty {
             true
         } else {
             let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
@@ -1609,28 +1631,37 @@ impl Dispatcher {
             }
             part.emptied = Some(pane.clone());
         }
-        taken
+        if taken {
+            Cleared::Taken
+        } else {
+            Cleared::Failed
+        }
     }
 
-    /// Whether the window of `record` in `pane` shows its input box empty now, as its
-    /// harness reads it ([`cf_harness::contract::Window::box_read_empty`]): no where the
-    /// screen cannot be read.
-    async fn box_read_empty(&self, record: &Record, pane: &Pane) -> bool {
+    /// What the window of `record` in `pane` shows of its input box now, as its harness reads
+    /// it ([`cf_harness::contract::Window::box_read_empty`]): not empty where the screen cannot
+    /// be read, and behind where the host says the screen lacks bytes the window printed (a box
+    /// read off it is not the window's box).
+    async fn box_read(&self, record: &Record, pane: &Pane) -> BoxRead {
         let Some(window) = record.window.borrow().window.clone() else {
-            return false;
+            return BoxRead::NotEmpty;
         };
         // The box is read from the screen's lines as drawn, which the host sends only when
         // asked (`pane_body_drawn`): asked without them, every box read not empty, and the
         // key went into empty ones too (T-946).
-        returning(
+        let snapshot = returning(
             self.seams
                 .host
                 .request("pane.snapshot", pane_body_drawn(pane)),
         )
         .await
-        .is_ok_and(|snapshot| {
-            snapshot.get("ok") == Some(&Value::Bool(true)) && window.box_read_empty(&snapshot)
-        })
+        .ok()
+        .filter(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)));
+        match snapshot {
+            Some(snapshot) if !output_is_drawn(&snapshot) => BoxRead::Behind,
+            Some(snapshot) if window.box_read_empty(&snapshot) => BoxRead::Empty,
+            _ => BoxRead::NotEmpty,
+        }
     }
 
     /// A member's turn that failed while its task was not working (waiting on an
@@ -2436,4 +2467,24 @@ pub(crate) fn described(message: &MessageView) -> String {
         .task_number
         .map_or_else(String::new, |number| format!(" on T-{number}"));
     format!("{kind} from {from}{on}")
+}
+
+/// What a window's input box reads as, off the pane host's snapshot of its screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxRead {
+    Empty,
+    NotEmpty,
+    /// The screen lacks bytes the window printed: the box on it is not read.
+    Behind,
+}
+
+/// How the keys that empty a box of a paste whose Enter was withheld ended.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cleared {
+    /// The box is empty, read so or by the keys the host took.
+    Taken,
+    /// The host took no key.
+    Failed,
+    /// The screen lacks bytes the window printed: no key was pressed, look again.
+    Behind,
 }

@@ -153,6 +153,8 @@ fn read(observed: &Observed) -> bool {
 }
 
 /// Why a message waits for a window whose harness's live word is that it is at work.
+/// Why a message waits while the window's screen lacks bytes the window printed.
+const SCREEN_BEHIND: &str = "its screen does not yet show all that it printed";
 const AT_WORK: &str = "its harness says it is at work";
 
 /// Why a message waits for a window whose record could not be read: nothing is typed
@@ -480,11 +482,19 @@ impl Dispatcher {
         // A box that holds words (ones the human's keys counted as sent, as Devin kept a
         // line typed with its Enter in one burst) would send a paste behind them, in one
         // message with them: it takes none.
-        let boxed = match (&window, pane) {
+        let boxed = match (&window, pane.clone()) {
             (Some(window), Some(pane)) if !emptied_first => {
                 returning(window.input_box(&*self.seams.host, &pane)).await
             }
             _ => None,
+        };
+        // A box that could not be read because the screen lacks bytes the window printed is not
+        // one that holds nothing: the paste waits and the box is read again.
+        let screen_behind = match (&window, &pane) {
+            (Some(_), Some(pane)) if boxed.is_none() && !emptied_first => {
+                !self.screen_current(pane).await
+            }
+            _ => false,
         };
         if self.forgotten(record) {
             return Ok(Pace::Gone);
@@ -501,6 +511,7 @@ impl Dispatcher {
             }
             Ok(_) if at_work => Some(AT_WORK.to_owned()),
             Ok(_) if boxed == Some(InputBox::Holds) => Some("its input box holds words".to_owned()),
+            Ok(_) if screen_behind => Some(SCREEN_BEHIND.to_owned()),
             Ok(_) => None,
         };
         let Some(why) = why else {

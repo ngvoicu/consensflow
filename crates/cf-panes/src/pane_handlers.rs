@@ -101,10 +101,10 @@ struct PasteRequest {
     /// window's adapter read its input box empty on the screen.
     #[serde(default, rename = "readEmpty")]
     read_empty: Option<u64>,
-    /// The bytes of the window's output the pane had read (`pane.snapshot`'s `outputRead`) when
-    /// it did: a paste goes in over the count only while no more has been read since.
-    #[serde(default, rename = "readAt")]
-    read_at: Option<u64>,
+    /// How many feeds had changed the window's screen (`pane.snapshot`'s `outputShown`) when it
+    /// did: a paste goes in over the count only while none has since and none is pending.
+    #[serde(default, rename = "shownAt")]
+    shown_at: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -257,8 +257,8 @@ fn register(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty, read_at)| {
-            let pending = paste_queue.paste(key, body.into_bytes(), read_empty, read_at)?;
+        let pasted = paste_request(body).and_then(|(key, body, read_empty, shown_at)| {
+            let pending = paste_queue.paste(key, body.into_bytes(), read_empty, shown_at)?;
             wait_for_input_blocking(pending)
         });
         Ok(match pasted {
@@ -513,6 +513,7 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "screenQuietMs":snapshot.screen_quiet_ms,
         "outputRead":snapshot.output_read,
         "outputDrawn":snapshot.output_drawn,
+        "outputShown":snapshot.output_shown,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -755,7 +756,7 @@ fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>, Option<u6
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body, request.read_empty, request.read_at))
+    Ok((key, request.body, request.read_empty, request.shown_at))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -1509,6 +1510,7 @@ mod tests {
             output_quiet_ms: None,
             output_read: 0,
             output_drawn: 0,
+            output_shown: 0,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![

@@ -10,8 +10,9 @@
 #   and a grace; it is looked at again with the pane's writer held, where it is written; at the cap
 #   it goes, as it did before the counts, and the paste is answered as made;
 # - a read is counted the moment the pty returns it, before the lock of the activity time;
-# - an answer of the input box's reader says the output read it was read at (`readAt`), and a paste
-#   goes in over a count only while no more has been read since;
+# - an answer of the input box's reader says how many feeds had changed the screen when it was
+#   read (`shownAt`), and a paste goes in over a count only while none has since and none is pending
+#   (a window that repaints the same at rest leaves the answer good, T-1083);
 # - the pair is sampled once, drawn first and read after it;
 # - every snapshot carries both counts; a counts-only one waits for no lock, one with the screen's
 #   lines takes the counts with the lock held;
@@ -25,6 +26,7 @@
 oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::", "pane_handlers::native_tests::"]
 oc-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "muse::window::"]
 oc-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "presses_no_enter_once_more_while"]
+oc-dispatch = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "lacks_output", "screen_that_fell_behind", "screen_lacks_bytes_the_window_printed", "read_in_flight_looks_once_more", "shows_less_than_it_printed"]
 oc-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_read_is_counted"]
 oc-paste = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::pane::tests::a_paste_over_a_read_empty_box"]
 oc-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::input_box::tests::a_box_on_a_screen_that_lacks"]
@@ -66,16 +68,6 @@ runs = ["oc-feed"]
 file = "crates/cf-panes/src/pty.rs"
 find = "            if ready() {\n                break writer;"
 replace = "            if true || ready() {\n                break writer;"
-
-[[plant]]
-name = "output clock: an answer's read count is ignored at admission"
-meant = "an_answer_read_before_output_that_came_since_does_not_admit_a_paste"
-runs = ["oc-feed"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = "                if read_at.is_some_and(|at| state.output.counts().both().0 > at) {"
-replace = "                if false && read_at.is_some_and(|at| state.output.counts().both().0 > at) {"
 
 [[plant]]
 name = "output clock: the pair is sampled read first"
@@ -188,10 +180,110 @@ replace = ""
 
 [[plant]]
 name = "output clock: a paste's request drops the output count of the answer"
-meant = "a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at"
+meant = "a_paste_over_a_read_empty_box_says_the_screen_changes_the_box_was_read_at"
 runs = ["oc-paste"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/pane.rs"
-find = "            request[\"readAt\"] = json!(read);"
-replace = "            let _ = read;"
+find = "            request[\"shownAt\"] = json!(shown);"
+replace = "            let _ = shown;"
+
+[[plant]]
+name = "output clock: the box that cannot be read off a screen that lacks output takes the paste"
+meant = "a_box_that_cannot_be_read_off_a_screen_that_lacks_output_takes_no_paste"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = "            (Some(_), Some(pane)) if boxed.is_none() && !emptied_first => {"
+replace = "            (Some(_), Some(pane)) if false && boxed.is_none() && !emptied_first => {"
+
+[[plant]]
+name = "output clock: a box that cannot be read off a screen that lacks output is taken for gone"
+meant = "a_box_that_cannot_be_read_off_a_screen_that_lacks_output_is_not_taken_for_gone"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let printing = printing || (boxed.is_none() && !self.screen_current(&pane).await);"
+replace = "        let printing = printing;"
+
+[[plant]]
+name = "output clock: the clearing key is pressed into a box read off a screen that fell behind"
+meant = "a_box_read_off_a_screen_that_fell_behind_is_not_cleared_blind"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            Some(snapshot) if !output_is_drawn(&snapshot) => BoxRead::Behind,"
+replace = "            Some(snapshot) if false && !output_is_drawn(&snapshot) => BoxRead::Behind,"
+
+[[plant]]
+name = "output clock: the clearing key is pressed while the screen lacks output"
+meant = "the_key_that_clears_a_box_waits_while_the_screen_lacks_bytes_the_window_printed"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                && output_is_drawn(&snapshot)\n        })"
+replace = "        })"
+
+[[plant]]
+name = "output clock: the once-only Enter is spent without a second look"
+meant = "a_brief_whose_look_found_a_read_in_flight_looks_once_more_before_its_enter_is_spent"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if !output_is_drawn(&snapshot) {\n            snapshot = match"
+replace = "        if false && !output_is_drawn(&snapshot) {\n            snapshot = match"
+
+[[plant]]
+name = "output clock: the once-only Enter goes while output is not drawn"
+meant = "a_brief_whose_window_shows_less_than_it_printed_is_pressed_no_enter"
+runs = ["oc-dispatch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if !quiet || !output_is_drawn(&snapshot) {"
+replace = "        if !quiet {"
+
+[[plant]]
+name = "output clock: a repaint at rest refuses an answer"
+meant = "an_answer_is_refused_for_output_that_changed_the_screen_and_not_for_a_repaint_at_rest"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = "        if changed {\n            self.counts.showed();"
+replace = "        self.counts.showed();\n        if changed {"
+
+[[plant]]
+name = "output clock: an answer's shown count is ignored at admission, a pending screen included"
+meant = "an_answer_read_before_output_that_came_since_does_not_admit_a_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                    counts.shown() != at || counts.pending()"
+replace = "                    counts.shown() != at && counts.pending()"
+
+[[plant]]
+name = "output clock: a pending read is not quiet"
+meant = "a_window_is_not_quiet_while_bytes_it_printed_are_not_in_its_screen"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = "        if self.counts.pending() {\n            return Some(0);\n        }"
+replace = ""
+
+[[plant]]
+name = "output clock: a give-up leaves the count pending for ever"
+meant = "the_counts_settle_where_they_stand_when_nobody_takes_the_output_in"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = "        self.drawn.fetch_max(read, Ordering::AcqRel);"
+replace = ""

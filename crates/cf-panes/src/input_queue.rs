@@ -47,7 +47,7 @@ pub enum InputWork {
     Paste {
         body: Vec<u8>,
         read_empty: Option<u64>,
-        read_at: Option<u64>,
+        shown_at: Option<u64>,
     },
     Claim,
 }
@@ -501,14 +501,14 @@ impl InputQueue {
         key: PaneKey,
         body: Vec<u8>,
         read_empty: Option<u64>,
-        read_at: Option<u64>,
+        shown_at: Option<u64>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(
             key,
             InputWork::Paste {
                 body,
                 read_empty,
-                read_at,
+                shown_at,
             },
         )
     }
@@ -676,8 +676,8 @@ fn input_worker(
             InputWork::Paste {
                 body,
                 read_empty,
-                read_at,
-            } => arbiter.write_paste(&panes, &key, &body, read_empty, read_at),
+                shown_at,
+            } => arbiter.write_paste(&panes, &key, &body, read_empty, shown_at),
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);

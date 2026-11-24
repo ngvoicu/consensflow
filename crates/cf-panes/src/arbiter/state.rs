@@ -85,6 +85,8 @@ impl PaneInputState {
     pub(super) fn snapshot(&self, now: Instant) -> ArbiterSnapshot {
         // One sampling of the pair, drawn first and read after it ([`OutputCount::both`]): two
         // samplings, one for each number, could tell 10/10 of a stream going 10/9, 11/9, 11/10.
+        // Shown first: a feed that ends after it moves the count past the answer's.
+        let output_shown = self.output.counts().shown();
         let (output_read, output_drawn) = self.output.counts().both();
         ArbiterSnapshot {
             generation: self.generation,
@@ -97,6 +99,7 @@ impl PaneInputState {
             screen_quiet_ms: self.output.screen_quiet_ms(now),
             output_read,
             output_drawn,
+            output_shown,
             paste_quiet_ms: self.pasted.map(|pasted| millis_since(now, pasted)),
             human_writes: self
                 .writes

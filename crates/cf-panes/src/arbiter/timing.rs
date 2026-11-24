@@ -61,6 +61,8 @@ pub struct OutputClock {
 pub struct OutputCount {
     read: AtomicU64,
     drawn: AtomicU64,
+    /// How many feeds changed what the screen shows.
+    shown: AtomicU64,
     /// The feed panicked: the screen is partly written and the window's generation is over.
     broken: AtomicBool,
 }
@@ -83,6 +85,15 @@ impl OutputCount {
     /// `bytes` came off the pty.
     pub(crate) fn took(&self, bytes: usize) {
         self.read.fetch_add(bytes as u64, Ordering::AcqRel);
+    }
+
+    /// A feed changed what the screen shows.
+    pub(crate) fn showed(&self) {
+        self.shown.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn shown(&self) -> u64 {
+        self.shown.load(Ordering::Acquire)
     }
 
     /// `bytes` are in the screen now.
@@ -152,6 +163,7 @@ impl OutputClock {
         let now = millis_since(self.clock.now(), self.started).saturating_add(1);
         self.printed.store(now, Ordering::Release);
         if changed {
+            self.counts.showed();
             self.shown.store(now, Ordering::Release);
         }
     }

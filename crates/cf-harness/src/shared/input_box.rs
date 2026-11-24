@@ -209,20 +209,21 @@ pub(crate) enum Unsent {
 }
 
 /// An input box read empty: when the host had taken `typed` writes of the human's keys, and
-/// where its snapshot says, `read` bytes of the window's output. A paste told so goes in over
-/// the count only while no more output has been read since (`readAt`): a box read before a
-/// later print, the echo of the key in a second read, may lack the key.
+/// where its snapshot says, after `shown` feeds of output that changed the screen. A paste told
+/// so goes in over the count only while no such feed came since and none is pending
+/// (`shownAt`): a box read before the echo of the key, in a read of its own, may lack the key.
+/// Output that changes nothing shown is no reason (T-1083).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReadEmpty {
     pub(crate) typed: u64,
-    pub(crate) read: Option<u64>,
+    pub(crate) shown: Option<u64>,
 }
 
 impl ReadEmpty {
     /// An answer of no output count (a host that gives none).
     #[cfg(test)]
     pub(crate) fn at_keys(typed: u64) -> Self {
-        Self { typed, read: None }
+        Self { typed, shown: None }
     }
 }
 
@@ -313,7 +314,7 @@ pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
         {
             Unsent::ReadEmpty(ReadEmpty {
                 typed,
-                read: snapshot.get("outputRead").and_then(Value::as_u64),
+                shown: snapshot.get("outputShown").and_then(Value::as_u64),
             })
         }
         _ => Unsent::Held,
@@ -406,11 +407,12 @@ mod tests {
         assert!(!read_empty(Harness::Claude, &snapshot));
         assert!(!screen_current(&snapshot));
         snapshot["outputDrawn"] = Value::from(262);
+        snapshot["outputShown"] = Value::from(4);
         assert_eq!(
             read_unsent(Harness::Claude, &snapshot),
             Unsent::ReadEmpty(ReadEmpty {
                 typed,
-                read: Some(262)
+                shown: Some(4)
             }),
             "the answer says the output it was read at"
         );

@@ -2705,8 +2705,8 @@ runs = ["muse-withheld"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let taken = if self.box_read_empty(record, pane).await {'''
-replace = '''        let taken = if false && self.box_read_empty(record, pane).await {'''
+find = '''        let taken = if read == BoxRead::Empty {'''
+replace = '''        let taken = if false && read == BoxRead::Empty {'''
 
 [[plant]]
 name = "muse: a box read empty is read so of a screen with no box"

@@ -367,3 +367,47 @@ fn a_snapshot_takes_both_counts_from_one_sampling() {
         "the pair of one sampling"
     );
 }
+
+/// T-2150 1: an answer is refused only for output that changed the screen, or that is not yet
+/// drawn. A window that repaints the same at rest (Muse Code after a stopped command prints
+/// every 50 ms: T-1083) leaves the answer good; the echo of the key, once drawn, or pending,
+/// does not.
+#[test]
+fn an_answer_is_refused_for_output_that_changed_the_screen_and_not_for_a_repaint_at_rest() {
+    let clock = Manual::new();
+    let arbiter = InputArbiter::with_clock(EnterTiming::fixed(0), clock.clone());
+    let key = PaneKey::new("rest", 1);
+    let printed = arbiter.register(&key).expect("register");
+    let screen = PaneScreen::new(24, 80);
+    let feed = |bytes: &[u8]| {
+        printed.counts().took(bytes.len());
+        screen.feed_noting(bytes, &printed)
+    };
+    assert!(feed(b"> "));
+    let writer = Recording::default();
+    arbiter.write_typed_via(&writer, &key, b"X").unwrap();
+    let answer = arbiter.snapshot(&key).unwrap();
+    let (typed, at) = (answer.typed, answer.output_shown);
+    for _ in 0..5 {
+        assert!(!feed(b"\x1b[0m"), "a colour reset changes nothing shown");
+    }
+    arbiter
+        .write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at))
+        .expect("a repaint at rest does not refuse the answer");
+    // Typed again, answered, and then the echo comes: pending, then drawn.
+    arbiter.write_typed_via(&writer, &key, b"Y").unwrap();
+    let answer = arbiter.snapshot(&key).unwrap();
+    let (typed, at) = (answer.typed, answer.output_shown);
+    printed.counts().took(1);
+    let refused = arbiter.write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at));
+    assert!(
+        matches!(refused, Err(ArbiterError::Unsent)),
+        "pending: {refused:?}"
+    );
+    assert!(screen.feed_noting(b"Y", &printed));
+    let refused = arbiter.write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at));
+    assert!(
+        matches!(refused, Err(ArbiterError::Unsent)),
+        "drawn: {refused:?}"
+    );
+}

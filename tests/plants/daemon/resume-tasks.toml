@@ -1905,11 +1905,9 @@ runs = ["engine-withheld-enter"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """
-            && !self.clear_box(record, &pane).await
-        {"""
+        if cleared == Cleared::Failed {"""
 replace = """
-            && !(self.clear_box(record, &pane).await || true)
-        {"""
+        if cleared == Cleared::Failed && false {"""
 
 [[plant]]
 name = "resume tasks: a box emptied stays to be emptied again"

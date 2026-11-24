@@ -460,6 +460,9 @@ impl Dispatcher {
         } else {
             returning(window.input_box(&*self.seams.host, &pane)).await
         };
+        // A box that could not be read because the screen lacks bytes the window printed is
+        // no box that shows nothing: look again at the next ask, as for a window that prints.
+        let printing = printing || (boxed.is_none() && !self.screen_current(&pane).await);
         let on_its_way = record
             .delivery
             .borrow()
@@ -1077,6 +1080,15 @@ impl Dispatcher {
             "{window} could not be read ({why}): m-{message} waits, its rest begun again; \
              {reads} reads of it came to nothing in {secs} s"
         ));
+    }
+
+    /// Whether the window's screen shows every byte of output the pty gave, as the pane host
+    /// says now: a box read off it is then the window's box. A host that cannot say, or gives
+    /// no counts, has none pending (the box read stands, as before the counts).
+    pub(crate) async fn screen_current(&self, pane: &Pane) -> bool {
+        self.snapshot_now(pane, false)
+            .await
+            .is_none_or(|snapshot| output_is_drawn(&snapshot))
     }
 
     /// The pane host's word on the window now: none where it failed, or came too late

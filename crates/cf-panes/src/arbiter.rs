@@ -119,6 +119,8 @@ pub struct ArbiterSnapshot {
     /// is the greater (`OutputCount`).
     pub output_read: u64,
     pub output_drawn: u64,
+    /// How many feeds changed what the screen shows.
+    pub output_shown: u64,
     /// How long what the pane's screen shows has not changed, once it has shown
     /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
     /// at work. A harness can print without end and change nothing shown (T-1083).
@@ -445,17 +447,19 @@ impl InputArbiter {
     /// A paste and its Enter, held while the human's keys left text unsent,
     /// unless `read_empty`: the window's adapter read its input box empty when
     /// the pane had taken that many writes of the human's keys, and none came
-    /// since; and, where it says `read_at`, when the pane had read that many bytes of output,
-    /// and no more came since (the box it read may lack what the window printed after it).
+    /// since; and, where it says `shown_at`, when the pane's screen had changed that many times
+    /// by output, and has not since nor lacks bytes (the box it read may lack what the window
+    /// printed after it). Output that changes nothing shown (a window that repaints at rest)
+    /// is no change (T-1083).
     pub(crate) fn write_paste(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
-        read_at: Option<u64>,
+        shown_at: Option<u64>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_read_at_via(table, pane, body, read_empty, read_at)
+        self.write_paste_shown_at_via(table, pane, body, read_empty, shown_at)
     }
 
     /// Admit a native-channel send (a harness's own server, inbox or socket)
@@ -478,18 +482,18 @@ impl InputArbiter {
         body: &[u8],
         read_empty: Option<u64>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_read_at_via(writer, pane, body, read_empty, None)
+        self.write_paste_shown_at_via(writer, pane, body, read_empty, None)
     }
 
     /// [`InputArbiter::write_paste_via`] for an answer that says the bytes of output it was
     /// read at.
-    pub(crate) fn write_paste_read_at_via<W: PaneInputWriter + ?Sized>(
+    pub(crate) fn write_paste_shown_at_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
-        read_at: Option<u64>,
+        shown_at: Option<u64>,
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
@@ -500,9 +504,13 @@ impl InputArbiter {
                 if read_empty != Some(state.typed) {
                     return Err(ArbiterError::Unsent);
                 }
-                // An answer read at fewer bytes than the window has printed since is of a box
-                // that may lack them (the echo of the key, in a later read): read it again.
-                if read_at.is_some_and(|at| state.output.counts().both().0 > at) {
+                // An answer read before output that changed the screen since, or while output
+                // is not yet drawn, is of a box that may lack the echo of the key: refused. Output
+                // that changes nothing shown (a window that repaints the same at rest) is no reason.
+                if shown_at.is_some_and(|at| {
+                    let counts = state.output.counts();
+                    counts.shown() != at || counts.pending()
+                }) {
                     return Err(ArbiterError::Unsent);
                 }
                 state.unsent = 0;

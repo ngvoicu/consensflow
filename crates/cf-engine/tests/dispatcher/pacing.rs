@@ -501,6 +501,32 @@ fn a_box_that_still_holds_words_takes_no_paste() {
     assert_eq!(pasted(&context, "chief"), [note.id]);
 }
 
+/// N17 (T-2150 note 2): a box that cannot be read because the screen lacks bytes the window
+/// printed is no box that holds nothing. On main the reader said "holds" and the paste
+/// waited; here it waits until the screen is current, then reads the box.
+#[test]
+fn a_box_that_cannot_be_read_off_a_screen_that_lacks_output_takes_no_paste() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context
+        .host
+        .set_snapshot(json!({ "outputRead": 5, "outputDrawn": 4 }));
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    context
+        .host
+        .set_snapshot(json!({ "outputRead": 5, "outputDrawn": 5 }));
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
 /// A refused paste is no paste (Calliope's P3 on T-919): a window whose harness refuses
 /// every attempt for being at work holds the message on one clock, from its first
 /// refusal, and the human is told of it once at ten minutes.

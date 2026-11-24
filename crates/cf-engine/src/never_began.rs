@@ -327,9 +327,17 @@ impl Dispatcher {
             return Ok(Pressed::Channel);
         };
         // What the human typed and has not sent would go with it: the host says so.
-        let Some(snapshot) = self.snapshot_now(&pane, false).await else {
+        let Some(mut snapshot) = self.snapshot_now(&pane, false).await else {
             return Ok(Pressed::Unanswered);
         };
+        // A read in flight at this one look is no printing window: look once more before the
+        // once-only Enter is spent as one.
+        if !output_is_drawn(&snapshot) {
+            snapshot = match self.snapshot_now(&pane, false).await {
+                Some(again) => again,
+                None => return Ok(Pressed::Unanswered),
+            };
+        }
         if js::truthy(snapshot.get("unsent")) {
             return Ok(Pressed::Unsent);
         }

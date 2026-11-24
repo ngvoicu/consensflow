@@ -42,15 +42,17 @@ use crate::seams::DaemonSpawn;
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The least a paste into a window has to be answered: the bridge's own default for a request.
-/// The pane host holds a delivery's Enter for 2 s at the most in a window whose harness
-/// declared nothing, and a paste is answered once its Enter is written.
+/// The pane host holds a delivery's Enter for 2 s, and for 3 s more while the window's output is
+/// not yet drawn, in a window whose harness declared nothing, and a paste is answered once its
+/// Enter is written.
 pub const PASTE_DEADLINE: Duration = Duration::from_secs(30);
 
-/// What a paste into a window whose harness declared how it reads one has beyond the most the
-/// pane host holds its Enter for (the declared cap for the paste's length, `SilentPaste::most_ms`):
-/// the time to write the Enter and for the answer to come back. A host that has not answered by
-/// then did not hold the Enter for the window's read, and the daemon stops waiting.
-pub const PASTE_MARGIN: Duration = Duration::from_secs(5);
+/// What a paste into a window whose harness declared how it reads one has beyond the cap the
+/// pane host holds its Enter to (the declared cap for the paste's length, `SilentPaste::most_ms`):
+/// the 3 s the host holds it past the cap while output is pending, and 5 s more for the Enter to
+/// be written and the answer to come back. A host that has not answered by then did not hold
+/// the Enter for the window's read, and the daemon stops waiting.
+pub const PASTE_MARGIN: Duration = Duration::from_secs(8);
 
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
@@ -100,7 +102,8 @@ impl BridgeHost {
 
     /// How long a request has to be answered, where that is more than the bridge's own default:
     /// a paste into a window whose harness declared how it reads one is held at the pane host
-    /// for that harness's cap for the paste's length, so it has the cap and [`PASTE_MARGIN`],
+    /// for that harness's cap for the paste's length (and 3 s more while output is pending), so it
+    /// has the cap and [`PASTE_MARGIN`],
     /// and [`PASTE_DEADLINE`] at the least. Any other request, or paste, has the bridge's.
     fn deadline_of(&self, op: &str, body: &Value) -> Option<Duration> {
         if op != "pane.write_paste" {

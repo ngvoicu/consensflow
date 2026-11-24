@@ -707,3 +707,88 @@ fn a_window_held_for_the_human_whose_message_leaves_the_head_says_its_words_no_m
     assert_ne!(activity.reason.as_deref(), Some(WORDS), "{activity:?}");
     assert_ne!(activity.state.as_str(), "waiting", "{activity:?}");
 }
+
+/// A paste whose Enter was withheld sits in zeus's box, and T-1 is resumed with new words: the
+/// next delivery empties the box first.
+fn a_box_to_clear(context: &Context) -> (i64, i64) {
+    let tiers = at_work(context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    note(context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    enter_again_with(context, "p1-zeus-amber-pine", || {
+        context.pause_task(project, 1);
+    });
+    context.resume_task(project, 1, "Carry on again");
+    let words = tiers.task(1).messages.last().cloned().expect("the words");
+    (project, words.id)
+}
+
+const QUIET: &str = r#"{ "screenQuietMs": 5000, "outputRead": 5, "outputDrawn": 5 }"#;
+const BEHIND: &str =
+    r#"{ "screenQuietMs": 5000, "outputQuietMs": 0, "outputRead": 5, "outputDrawn": 4 }"#;
+
+fn snapshot_of(text: &str) -> Value {
+    serde_json::from_str(text).unwrap()
+}
+
+/// N17 (T-2150 note 2, `Dispatcher::may_press`): the key that clears a box goes into a window
+/// whose screen is current and still: with output read and not yet drawn, nothing is pressed.
+#[test]
+fn the_key_that_clears_a_box_waits_while_the_screen_lacks_bytes_the_window_printed() {
+    let context = Context::new();
+    let (_, words) = a_box_to_clear(&context);
+    context.host.set_snapshot(snapshot_of(BEHIND));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key while the screen is behind");
+    context.host.set_snapshot(snapshot_of(QUIET));
+    context.pass().unwrap();
+    assert!(
+        clears(&context) >= 1,
+        "pressed once the screen shows it all"
+    );
+    assert!(context.message(words).attempts <= 1);
+}
+
+/// N17 (T-2150 note 2, `Dispatcher::clear_box`): the box is read off the screen as drawn, and a
+/// read that finds the screen behind (output came after the quiet was looked at) presses
+/// nothing, gives the attempt back and holds the words for the next look.
+#[test]
+fn a_box_read_off_a_screen_that_fell_behind_is_not_cleared_blind() {
+    let context = Context::new();
+    let (_, words) = a_box_to_clear(&context);
+    let (quiet, behind) = (snapshot_of(QUIET), snapshot_of(BEHIND));
+    let host = std::rc::Rc::downgrade(&context.host);
+    let on = std::rc::Rc::new(std::cell::Cell::new(true));
+    let gate = std::rc::Rc::clone(&on);
+    *context.host.on_request.borrow_mut() =
+        Some(std::rc::Rc::new(move |op: &str, body: &Value| {
+            if op == "pane.snapshot" {
+                if let Some(host) = host.upgrade() {
+                    let drawn = body.get("bottom").is_some() && gate.get();
+                    host.set_snapshot(if drawn { behind.clone() } else { quiet.clone() });
+                }
+            }
+        }));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key into a box that may be empty");
+    assert_eq!(context.message(words).attempts, 0, "no attempt is spent");
+    on.set(false);
+    context.pass().unwrap();
+    assert!(
+        clears(&context) >= 1,
+        "pressed once the screen shows it all"
+    );
+}

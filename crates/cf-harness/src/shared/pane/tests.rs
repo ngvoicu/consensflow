@@ -159,16 +159,16 @@ fn a_request_the_host_never_answered_is_a_transport_answer_in_the_hosts_word_els
 /// N17 (T-2139 finding 3): a paste told the box read empty says the output the host had read
 /// when it did, for the host to refuse it once more has been read since.
 #[test]
-fn a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at() {
+fn a_paste_over_a_read_empty_box_says_the_screen_changes_the_box_was_read_at() {
     let host = AnsweringHost::new(|_| Ok(json!({"ok": true, "admitted": true})));
     let answer = ReadEmpty {
         typed: 3,
-        read: Some(260),
+        shown: Some(4),
     };
     finished(Box::pin(write_paste(&host, &pane(), "hello", Some(answer))));
     let asked = host.asked.borrow();
     assert_eq!(asked[0].1["readEmpty"], 3);
-    assert_eq!(asked[0].1["readAt"], 260);
+    assert_eq!(asked[0].1["shownAt"], 4);
     drop(asked);
     let host = AnsweringHost::new(|_| Ok(json!({"ok": true, "admitted": true})));
     finished(Box::pin(write_paste(
@@ -177,5 +177,5 @@ fn a_paste_over_a_read_empty_box_says_the_output_the_box_was_read_at() {
         "hello",
         Some(ReadEmpty::at_keys(3)),
     )));
-    assert!(host.asked.borrow()[0].1.get("readAt").is_none());
+    assert!(host.asked.borrow()[0].1.get("shownAt").is_none());
 }
