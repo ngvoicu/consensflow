@@ -78,8 +78,10 @@ runs = ["bnb-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/never_began.rs"
-find = "            self.spent(record, &unbegun.item, now, pressed);"
-replace = "            let _ = pressed;"
+find = '''                Some(pressed) => self.spent(record, &unbegun.item, now, pressed),'''
+replace = '''                Some(pressed) => {
+                    let _ = pressed;
+                }'''
 
 [[plant]]
 name = "brief never began: the human's unsent words are sent with the Enter"
@@ -87,9 +89,11 @@ meant = "a_window_holding_words_the_human_did_not_send_is_pressed_nothing_and_it
 runs = ["bnb-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/never_began.rs"
-find = "        if js::truthy(snapshot.get(\"unsent\")) {"
-replace = "        if js::truthy(snapshot.get(\"unsentNever\")) {"
+file = "crates/cf-harness/src/shared/look.rs"
+find = '''    if look.unsent() {
+        return EnterLicence::Wait("the human has unsent text in the window");
+    }'''
+replace = ''''''
 
 [[plant]]
 name = "brief never began: a harness that takes its messages over a channel is pressed Enter"
@@ -98,8 +102,8 @@ runs = ["bnb-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/never_began.rs"
-find = "        let Some(pane) = pane.filter(|_| pasted) else {"
-replace = "        let Some(pane) = pane else {"
+find = """(pane.filter(|_| pasted), window)"""
+replace = """(pane, window)"""
 
 [[plant]]
 name = "brief never began: the pause note leaves out what the window's screen shows"
@@ -125,21 +129,14 @@ replace = "            || observed.failed\n            || !observed.settled"
 # clock, as every other Enter again does since T-1083; on the output's, a window that repaints
 # the same at rest (Muse after a stopped command) reads as printing for good.
 [[plant]]
-name = "brief never began: the Enter waits for the window's output to stop, not its screen"
+name = "brief never began: the Enter waits for the window's screen to be still"
 meant = "a_brief_a_window_that_repaints_at_rest_never_began_is_pressed_enter_once"
 runs = ["bnb-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/never_began.rs"
-find = '''            .get(SCREEN_QUIET_MS)
-            .and_then(Value::as_f64)
-            .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);'''
-replace = '''            .get("outputQuietMs")
-            .and_then(Value::as_f64)
-            .is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS && SCREEN_QUIET_MS != "");'''
-
-# T-1232's P3 (T-1190): a stalled Codex session whose role text changed is relaunched with the
-# role first, and the replay of its brief goes after the role's note as an ordinary paste.
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        .is_none_or(|quiet| quiet < SCREEN_QUIET_FOR_ENTER_MS)"""
+replace = """        .is_none_or(|quiet| quiet < 0)"""
 
 [[plant]]
 name = "brief never began: a Codex relaunch with a new role gives the stalled brief as its launch's own message"

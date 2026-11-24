@@ -361,8 +361,8 @@ runs = ["held-typed-claude"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''            self.input.replace(HumanInput::of(&snapshot));'''
-replace = '''            let _ = HumanInput::of(&snapshot);'''
+find = """            self.input.replace(look.human_input());"""
+replace = """            let _ = look.human_input();"""
 
 [[plant]]
 name = "held-typed trace: Devin's readiness keeps nothing of the human's input"

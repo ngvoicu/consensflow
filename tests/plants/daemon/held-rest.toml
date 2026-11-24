@@ -130,18 +130,6 @@ replace = "    let deadline = expires_at;"
 # --- a paste a window did not send (devin-chief-launch-message-left-unsubmitted) ---
 
 [[plant]]
-name = "held-rest: the Enter pressed again for a paste its window holds is sent with no key"
-meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
-runs = ["rest-engine-still-there"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = '        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });'
-replace = '        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [] });'
-
-# --- a window waiting on its own dialog (no-waiting-for-input-marker) ---
-
-[[plant]]
 name = "held-rest: a window whose own question dialog is open is not waiting"
 meant = "a_dialog_of_its_own_still_open_is_a_window_waiting_and_nothing_else_is"
 runs = ["rest-record-state"]

@@ -132,34 +132,18 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() {'''
-replace = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() || true {'''
-
-# The window as it is once the host answered the look at its screen: what the human did
-# meanwhile is what it is.
-
-[[plant]]
-name = "devin resume: the mode read before the look at the screen decides"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if wants_bypass(now.mode.as_deref()) {'''
-replace = '''            if wants_bypass(said.mode.as_deref()) {'''
-
-# Round 5 (Astra 4): a prompt already on the wire at readiness's first read, read since
-# the engine's look found the window at rest.
+find = """                    if pane::enter(host, pane, &at).await.ok {"""
+replace = """                    if pane::enter(host, pane, &at).await.ok || true {"""
 
 [[plant]]
 name = "devin resume: another conversation opened while the screen was looked at is not seen"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
+meant = "a_silent_window_nobody_typed_into_is_given_its_delivery_behind_bypass_and_a_key_that_comes_later_holds_it"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if let Some(held) = self.shows_another(&now) {'''
-replace = '''            if let Some(held) = None::<Held> {'''
+find = """            if let Some(held) = self.shows_another(&now) {"""
+replace = """            if let Some(held) = None::<Held> {"""
 
 [[plant]]
 name = "devin resume: a conversation the window is followed to inherits the time of the one before"
@@ -449,14 +433,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                    session.as_deref(),
-                    channel::Guard::Configured,
-                    BYPASS,'''
-replace = '''                    session.as_deref().filter(|_| false),
-                    channel::Guard::Configured,
-                    BYPASS,'''
-
-# The diagnostic launch without the owner's hooks (Sol 6): hook by hook, not entry by entry.
+find = '''                        session.as_deref(),
+                        channel::Guard::Configured,
+                        BYPASS,'''
+replace = '''                        session.as_deref().filter(|_| false),
+                        channel::Guard::Configured,
+                        BYPASS,'''
 
 [[plant]]
 name = "devin resume: an owner's hook that says the words of ConsensFlow's stays in a launch without the owner's"

@@ -1136,18 +1136,20 @@ find = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
     }
 
 '''
-replace = ""
+replace = ''''''
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Claude, snapshot)'''
+find = '''    fn harness(&self) -> Harness {
+        Harness::Claude
+    }'''
 replace = '''    fn dialog_identity(&self, dialog: &Dialog) -> Dialog {
         super::dialog_identity::identity(dialog)
     }
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Claude, snapshot)'''
+    fn harness(&self) -> Harness {
+        Harness::Claude
+    }'''
 
 [[plant]]
 name = "harness dialogs: computer use: the Computer Use permission prompt has no decline, and it waits for a key nobody presses"

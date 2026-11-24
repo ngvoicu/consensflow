@@ -80,13 +80,11 @@ runs = ["engine-unknown-looks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = '''
-            self.entered_again(record, message, false);
-            self.unknown(record, NO_ANSWER);
-            return Ok(());'''
-replace = '''
-            self.entered_again(record, message, false);
-            return Ok(());'''
+find = '''                    self.entered_again(record, message, false);
+                    self.unknown(record, NO_ANSWER);
+                    return Ok(());'''
+replace = '''                    self.entered_again(record, message, false);
+                    return Ok(());'''
 
 [[plant]]
 name = "load retype: a snapshot that comes long after it was asked says what the window does now"

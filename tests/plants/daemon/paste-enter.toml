@@ -261,8 +261,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                self.enter.for_delivery(state.silent_paste, &body),"
-replace = "                self.enter,"
+find = """            self.enter.for_delivery(state.silent_paste, body),"""
+replace = """            self.enter,"""
 
 [[plant]]
 name = "paste enter: a delivery into a window that declared nothing waits for a declaration"

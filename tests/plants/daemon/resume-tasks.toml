@@ -545,8 +545,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
-replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
+replace = """let outcome = match returning(window.deliver_on(host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]
 name = "resume tasks: a switch that waited for the chief's turn goes in a closed project"
@@ -591,8 +591,8 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
-replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
+replace = """let outcome = match returning(window.deliver_on(host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]
 name = "resume tasks: a hand-over the closed project turned away is a refusal, and costs its message an attempt"
@@ -1898,57 +1898,6 @@ replace = """
                 let _ = (pane, carried, since);"""
 
 [[plant]]
-name = "resume tasks: a paste goes into a box whose keys the host did not take"
-meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
-runs = ["engine-withheld-enter"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-        if cleared == Cleared::Failed {"""
-replace = """
-        if cleared == Cleared::Failed && false {"""
-
-[[plant]]
-name = "resume tasks: a box emptied stays to be emptied again"
-meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
-runs = ["engine-withheld-enter"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-            if part
-                .uncleared
-                .as_ref()
-                .is_some_and(|stale| &stale.pane == pane)
-            {
-                part.uncleared = None;
-            }"""
-replace = ""
-
-[[plant]]
-name = "resume tasks: the adapter is not told the engine just emptied the box"
-meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
-runs = ["engine-withheld-enter"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);"""
-replace = """
-        let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(false && cleared);"""
-
-[[plant]]
-name = "resume tasks: Claude empties a box the engine just emptied, a second Control-C"
-meant = "a_box_the_engine_just_emptied_is_not_emptied_again_by_claude"
-runs = ["harness-launch-claude-stops"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
-replace = "            if self.restored.get() || self.clear_first.take() {"
-
-[[plant]]
 name = "resume tasks: an Enter withheld for a closed project leaves the paste on its way in the box"
 meant = "a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume"
 runs = ["engine-closed-given-nothing"]
@@ -2079,8 +2028,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            let quiet = self.may_press(&pane).await;"
-replace = "            let quiet = self.may_press(&pane).await || true;"
+find = """            let quiet = attempt.as_ref().is_some_and(|look| {"""
+replace = """            let quiet = true || attempt.as_ref().is_some_and(|look| {"""
 
 [[plant]]
 name = "resume tasks: the key that empties the box goes into a window holding what the human typed"
@@ -2089,44 +2038,11 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = """
-                && !js::truthy(snapshot.get("unsent"))"""
-replace = ""
-
-[[plant]]
-name = "resume tasks: a box emptied counts as empty only for the paste right after the key"
-meant = "a_box_emptied_counts_as_empty_until_a_paste_goes_in"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-        if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
-            record.delivery.borrow_mut().emptied = None;
-        }"""
-replace = """
-        record.delivery.borrow_mut().emptied = None;"""
-
-[[plant]]
-name = "resume tasks: a key the host did not take spends no attempt"
-meant = "a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-            let delivering = self.delivering(record, message.id, carried);
-            return self.settle_failure(
-                delivering,
-                "its window's input box could not be emptied of a paste whose Enter was withheld",
-                true,
-            );"""
-replace = """
-            let _ = carried;
-            self.give_back(message.id, "its window's input box could not be emptied")?;
-            return Ok(());"""
-
-# --- round 13: Calliope's review of round 12 (2026-10-21) ---
+find = '''                !look.unsent()
+                    && look
+                        .screen_quiet_ms()'''
+replace = '''                look
+                        .screen_quiet_ms()'''
 
 [[plant]]
 name = "resume tasks: a window that never goes quiet for the key holds its queue for good"
@@ -2214,21 +2130,6 @@ find = "           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3
 replace = "           AND handed_at IS NOT NULL AND ?3 = ?3\","
 
 [[plant]]
-name = "resume tasks: a box the human typed into since it was emptied counts as empty"
-meant = "a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = """
-        if held == Some(Held::Unsent) {
-            record.delivery.borrow_mut().emptied = None;
-        }"""
-replace = ""
-
-# --- round 13's review (Calliope, 2026-10-21) ---
-
-[[plant]]
 name = "resume tasks: a paste given up that the human sent stays failed"
 meant = "a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered"
 runs = ["engine-stale-box"]
@@ -2249,30 +2150,6 @@ find = """
                         .is_some_and(|last| now - last > arrival_ms)"""
 replace = """
                         .is_some_and(|last| now - last > arrival_ms && false)"""
-
-[[plant]]
-name = "resume tasks: a box emptied before a Close counts as empty after the Resume"
-meant = "a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = "            self.record_of(participant.id).delivery.borrow_mut().emptied = None;"
-replace = "            let _ = participant;"
-
-# --- round 15: Calliope's review of the merge (T-81) ---
-
-[[plant]]
-name = "resume tasks: the chief's own exit leaves a box emptied counted empty"
-meant = "a_box_emptied_before_the_chiefs_window_ended_is_not_counted_empty_after_the_resume"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = "        for participant in participants {"
-replace = "        for participant in participants.iter().filter(|_| because.is_none()) {"
-
-# --- where the Resume's rules meet main's field 3.0.6 (the merge of T-392) ---
 
 [[plant]]
 name = "resume tasks: the Enter sends the brief of the chief's own step finished while the screen was looked at"

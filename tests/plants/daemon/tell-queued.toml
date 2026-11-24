@@ -380,16 +380,12 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+find = '''        let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {'''
 replace = '''
         if begun.message.kind == "result" {
-            let _ = returning(window.deliver(&admitting, &pane, &text)).await;
+            let _ = returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await;
         }
-        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {'''
-
-# The flake found in the gate (2026-10-15): the case read a worker's process file as
-# soon as it was there, which under load was before its process was in it. The plant
-# writes the file in two steps and puts the case's old read back: it fails as it did.
+        let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {'''
 
 [[plant]]
 name = "tell queued: a worker's process file read as soon as it is there, written in two steps"

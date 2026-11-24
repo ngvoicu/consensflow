@@ -167,24 +167,24 @@ replace = """
                 .get("outputQuietMs")"""
 
 [[plant]]
-name = "quiet by screen: the Enter again waits for a quiet output"
+name = "quiet by screen: the Enter again waits for the screen to be still"
 meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
 runs = ["qs-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "            .and_then(|snapshot| snapshot.get(SCREEN_QUIET_MS))"
-replace = """            .and_then(|snapshot| snapshot.get("outputQuietMs"))"""
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        .is_none_or(|quiet| quiet < SCREEN_QUIET_FOR_ENTER_MS)"""
+replace = """        .is_none_or(|quiet| quiet < 0)"""
 
 [[plant]]
-name = "quiet by screen: the key that empties a box waits for a quiet output"
+name = "quiet by screen: the key that empties a box waits for the screen to be still"
 meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
 runs = ["qs-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                    .get(SCREEN_QUIET_MS)"
-replace = """                    .get("outputQuietMs")"""
+find = """quiet >= cf_harness::SCREEN_QUIET_FOR_ENTER_MS"""
+replace = """quiet >= 0.0 as u64"""
 
 [[plant]]
 name = "quiet by screen: the daemon's host look of a closing window reads the output"
@@ -207,21 +207,12 @@ find = "            let activity = self.fallback_lane(record, activity).await;"
 replace = "            let activity = returning(self.fallback_lane(record, activity)).await;"
 
 [[plant]]
-name = "quiet by screen: Devin's /bypass waits for a quiet output"
-meant = "a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_wire_says_it_changed"
-runs = ["qs-harness"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            .get(SCREEN_QUIET_MS)"
-replace = """            .get("outputQuietMs")"""
-
-[[plant]]
 name = "quiet by screen: a box reader asks the screen whether the last key was answered"
 meant = "a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read"
 runs = ["qs-harness"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = """        let drawn = quiet("outputQuietMs").is_some_and(|printed| printed < typed);"""
-replace = """        let drawn = quiet("screenQuietMs").is_some_and(|printed| printed < typed);"""
+file = "crates/cf-harness/src/shared/look.rs"
+find = """self.output_quiet_ms.is_some_and(|printed| printed < typed)"""
+replace = """self.screen_quiet_ms.is_some_and(|printed| printed < typed)"""
+

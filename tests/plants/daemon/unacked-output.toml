@@ -321,9 +321,9 @@ runs = ["tiny-output"]
 [[plant.edit]]
 file = "crates/cf-panes/src/screen.rs"
 find = '''        printed.note(changed);
-        printed.counts().drew(bytes.len());'''
+        crate::sync::point("feed.noted");'''
 replace = '''        printed.note(changed && bytes.len() > 2);
-        printed.counts().drew(bytes.len());'''
+        crate::sync::point("feed.noted");'''
 
 [[plant]]
 name = "tiny read: a joined read's output is not stamped as it is taken in"

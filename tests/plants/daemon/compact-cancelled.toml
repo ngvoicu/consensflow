@@ -110,9 +110,10 @@ meant = "the_compact_claude_put_back_is_cleared_before_the_next_message_is_paste
 runs = ["compact-cancelled-adapter"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "                self.clear_first.set(true);\n"
-replace = ""
+file = "crates/cf-harness/src/shared/look.rs"
+find = '''    let clear_first = (stale && reads != BoxReading::Empty).then_some(clear);'''
+replace = '''    let clear_first = None::<&'static [u8]>;
+    let _ = (stale, clear);'''
 
 [[plant]]
 name = "compact-cancelled: the adapter never clears the box a cancel left, and the worker's result goes in behind the /compact"
@@ -121,9 +122,9 @@ runs = ["compact-cancelled-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
-replace = "            if self.restored.get() && !host.cleared() {"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    let stale = state.stale_paste && !over_count;"""
+replace = """    let stale = false && state.stale_paste && !over_count;"""
 
 [[plant]]
 name = "compact-cancelled: a box the screen shows empty after a cancel is cleared all the same, a Ctrl+C that may be the second in a row"
@@ -131,9 +132,9 @@ meant = "a_box_the_screen_shows_empty_after_the_cancel_is_pasted_into_with_no_ke
 runs = ["compact-cancelled-adapter"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            Some(InputBox::Empty) => Readiness::Ready,"
-replace = "            Some(InputBox::Empty) => {\n                self.clear_first.set(true);\n                Readiness::Ready\n            }"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    let clear_first = (stale && reads != BoxReading::Empty).then_some(clear);"""
+replace = """    let clear_first = stale.then_some(clear);"""
 
 [[plant]]
 name = "compact-cancelled: a box the screen does not show after a cancel is pasted into, behind what it may hold"
@@ -142,9 +143,11 @@ runs = ["compact-cancelled-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            None => Readiness::Held(Held::Unsent),"
-replace = "            None => Readiness::Ready,"
+file = "crates/cf-harness/src/shared/look.rs"
+find = '''    if stale && reads == BoxReading::Unread {
+        return PasteLicence::Wait(Held::Unsent);
+    }'''
+replace = ''''''
 
 [[plant]]
 name = "compact-cancelled: the adapter takes no word of the reading that the /compact is back in the box"
@@ -217,6 +220,9 @@ meant = "a_box_the_screen_does_not_show_after_the_cancel_holds_the_paste"
 runs = ["compact-cancelled-adapter"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            None => Readiness::Held(Held::Unsent),"
-replace = "            None => Readiness::Held(Held::Because(\"the box is not shown\".to_owned())),"
+file = "crates/cf-harness/src/shared/look.rs"
+find = '''    if stale && reads == BoxReading::Unread {
+        return PasteLicence::Wait(Held::Unsent);'''
+replace = '''    if stale && reads == BoxReading::Unread {
+        return PasteLicence::Wait(Held::Because("the box is not shown".to_owned()));'''
+

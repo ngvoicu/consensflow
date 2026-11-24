@@ -280,22 +280,11 @@ runs = ["pacing-panes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = '''
-        writer
-            .write(pane, bytes)
-            .map_err(|error| fail_input(&state, pane, error, false))
-    }
-
-    /// A paste and its Enter, held while the human's keys left text unsent,'''
-replace = '''
-        writer
-            .write(pane, bytes)
-            .map_err(|error| fail_input(&state, pane, error, false))?;
-        lock_state(&state)?.typed_at = Some(Instant::now());
-        Ok(())
-    }
-
-    /// A paste and its Enter, held while the human's keys left text unsent,'''
+find = '''        state.unsent = 0;
+        state.paste_in_flight = true;'''
+replace = '''        state.unsent = 0;
+        state.typed_at = Some(Instant::now());
+        state.paste_in_flight = true;'''
 
 [[plant]]
 name = "pacing gate: the fresh look takes a box that holds words for an empty one"
@@ -304,8 +293,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/pacing.rs"
-find = "            Ok(_) if boxed == Some(InputBox::Holds) => Some(\"its input box holds words\".to_owned()),"
-replace = "            Ok(_) if false => Some(\"its input box holds words\".to_owned()),"
+find = """                    PasteLicence::Wait(held) => Some(held.sentence().to_owned()),"""
+replace = """                    PasteLicence::Wait(_) => None,"""
 
 [[plant]]
 name = "re-paste: a box that still holds the paste is pasted over"
@@ -313,9 +302,9 @@ meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted
 runs = ["pacing-kit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "        let held = boxed == Some(InputBox::Holds);"
-replace = "        let held = boxed == Some(InputBox::Holds) && false;"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        BoxReading::Holds => AfterWait::EnterAgain(look.at()),"""
+replace = """        BoxReading::Holds => AfterWait::PasteAgain,"""
 
 [[plant]]
 name = "re-paste: a window that prints is pasted again"
@@ -323,9 +312,9 @@ meant = "a_window_whose_screen_printed_within_the_last_seconds_is_not_pasted_aga
 runs = ["pacing-kit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);"
-replace = "            .is_some_and(|quiet| (quiet as f64) < 0.0);"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        .is_some_and(|quiet| quiet < SCREEN_QUIET_FOR_ENTER_MS)"""
+replace = """        .is_some_and(|quiet| quiet < 0)"""
 
 [[plant]]
 name = "pacing gate: Claude's box its own hand-over empties first holds words for the fresh look"
@@ -333,19 +322,9 @@ meant = "a_claude_chief_whose_compact_the_human_cancelled_is_at_rest_and_is_hand
 runs = ["pacing-compact"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "        if self.restored.get() || self.clear_first.get() {"
-replace = "        if false {"
-
-[[plant]]
-name = "pacing review: box: a box the hand-over empties first is read for words by the fresh look"
-meant = "a_box_holding_a_paste_whose_enter_was_withheld_is_emptied_and_the_next_paste_goes"
-runs = ["pacing-kit"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/pacing.rs"
-find = "            (Some(window), Some(pane)) if !emptied_first => {"
-replace = "            (Some(window), Some(pane)) if emptied_first || true => {"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if !over_count && !stale && reads == BoxReading::Holds {"""
+replace = """    if !over_count && reads == BoxReading::Holds {"""
 
 [[plant]]
 name = "pacing review: held: a wait of the gate is told nowhere"
@@ -687,11 +666,9 @@ meant = "a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_i
 runs = ["pacing-box"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''                .request("pane.snapshot", pane_body_drawn(pane)),'''
-replace = '''                .request("pane.snapshot", json!({ "id": pane.id, "generation": pane.generation })),'''
-
-# --- Calliope's P3s on T-919: a window that answers Busy (Pi's extension, D9) ---
+file = "crates/cf-engine/src/box_keys.rs"
+find = """self.seams.host.request("pane.snapshot", pane_body_drawn(pane))"""
+replace = """self.seams.host.request("pane.snapshot", serde_json::json!({ "id": pane.id, "generation": pane.generation }))"""
 
 [[plant]]
 name = "pacing busy: a busy refusal starts the hold's clock again"
