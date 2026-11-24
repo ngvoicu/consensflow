@@ -59,7 +59,7 @@ find = """            launch.with(|launch| work(&env, launch))
             let _ = answer.send(made);
         }
     });
-    let sent = queue().lock().map(|jobs| jobs.send(job));"""
+    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));"""
 replace = """            launch.with(|launch| work(&env, launch))
         })) {
             let _ = answer.send(made);
@@ -80,7 +80,7 @@ find = """            launch.with(|launch| work(&env, launch))
             let _ = answer.send(made);
         }
     });
-    let sent = queue().lock().map(|jobs| jobs.send(job));"""
+    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));"""
 replace = """            launch.with(|launch| work(&env, launch))
         })) {
             let _ = answer.send(made);
