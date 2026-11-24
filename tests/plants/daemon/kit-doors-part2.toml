@@ -1,0 +1,120 @@
+# The plants of K3's doors, part 2: the audit that holds every start and write to the doors, the
+# keychain control's issue of its own items, a rename of a link, and the re-run under audit.
+[run]
+kd-lib-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::"]
+kd-lib-standin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standin_process"]
+
+[[plant]]
+name = "K3 part 2: the audit does not find a database opened where it can write"
+meant = "the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_door"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const DATABASE_OPENS: &[&str] = &["open", "open_with_flags", "open_with_flags_and_vfs"];'''
+replace = '''const DATABASE_OPENS: &[&str] = &[];'''
+
+[[plant]]
+name = "K3 part 2: the audit does not find a program on a pty of the kit's own started by spawn_command"
+meant = "the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_door"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''    "openpty",
+    "spawn_command",
+];'''
+replace = '''    "openpty",
+];'''
+
+[[plant]]
+name = "K3 part 2: the audit does not find xtask's generic runs"
+meant = "xtasks_live_run_names_no_program_of_its_own_and_the_door_holds_what_it_is_made_of"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const XTASK_RUNS: &[&str] = &["run", "capture", "spawn"];'''
+replace = '''const XTASK_RUNS: &[&str] = &[];'''
+
+[[plant]]
+name = "K3 part 2: a waiver of one class waives every class of its function"
+meant = "a_waiver_waives_one_operation_in_one_function_of_one_file_and_no_other_act"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''        *file == found.file && *item == found.item && *class == found.class'''
+replace = '''        *file == found.file && *item == found.item'''
+
+[[plant]]
+name = "K3 part 2: an item is issued where it was there before the run"
+meant = "an_item_is_issued_only_for_a_folder_this_run_made_and_gained_between_two_listings"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''        (after.0.contains(&name) && !self.0.contains(&name)).then(|| OwnItem {'''
+replace = '''        (after.0.contains(&name)).then(|| OwnItem {'''
+
+[[plant]]
+name = "K3 part 2: an item is issued for a folder this run did not make"
+meant = "an_item_is_issued_only_for_a_folder_this_run_made_and_gained_between_two_listings"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''        if !crate::door::is_made_or_below(folder) {
+            return None;
+        }
+        let name = item_of(folder);'''
+replace = '''        let name = item_of(folder);'''
+
+[[plant]]
+name = "K3 part 2: a Keychain listing that failed reads as an empty set"
+meant = "a_listing_that_failed_is_an_error_and_never_an_empty_set"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''        names().map(Listing).ok_or_else(|| {
+            Error::Daemon("the login Keychain cannot be listed here".to_owned())
+        })'''
+replace = '''        Ok(Listing(names().unwrap_or_default()))'''
+
+[[plant]]
+name = "K3 part 2: a rename of a link is judged through the link"
+meant = "a_rename_moves_a_link_itself_and_writes_nothing_through_it"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''    let ways = if matches!(act, Act::Remove | Act::Rename) && last_is_link {'''
+replace = '''    let ways = if matches!(act, Act::Remove) && last_is_link {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''    if last_is_link && !matches!(act, Act::Remove | Act::Rename | Act::Allocate) {'''
+replace = '''    if last_is_link && !matches!(act, Act::Remove | Act::Allocate) {'''
+
+[[plant]]
+name = "K3 part 2: a UNC profile gets no home halves of its own"
+meant = "the_two_halves_of_a_windows_profile_path_are_of_the_home"
+runs = ["kd-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    } else if text.starts_with(r"\\") {
+        Some((String::new(), text.to_owned()))
+    } else {'''
+replace = '''    } else {'''
+
+[[plant]]
+name = "K3 part 2: a test run again under audit is not given the stand-in's marks"
+meant = "a_test_run_again_under_audit_is_run_by_a_say_only_door_and_held_to_a_pass"
+runs = ["kd-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/again.rs"
+find = '''    for name in [super::MADE_ROOTS, "CF_E2E_STAND_IN"] {'''
+replace = '''    for name in [super::MADE_ROOTS] {'''

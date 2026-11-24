@@ -68,9 +68,15 @@ pub fn home_vars(home: &Path) -> Vec<(&'static str, PathBuf)> {
 }
 
 /// A Windows path as `HOMEDRIVE` and `HOMEPATH` say it: `C:` and `\Users\x`, with the verbatim
-/// prefix taken as the plain one. None for a path with no drive.
+/// prefix taken as the plain one. A profile on a UNC path (`\\server\share\x`, or `\\?\UNC\server\share\x`)
+/// has no drive: its `HOMEDRIVE` is empty and its `HOMEPATH` is the whole path, as Codex's own home
+/// is split (`live::codex`), so that neither names the caller's profile. None for a path that is
+/// neither.
 pub fn drive_and_path(home: &Path) -> Option<(String, String)> {
     let text = home.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return Some((String::new(), format!(r"\\{unc}")));
+    }
     let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
     let bytes = text.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
@@ -81,6 +87,8 @@ pub fn drive_and_path(home: &Path) -> Option<(String, String)> {
             format!("\\{rest}")
         };
         Some((text[..2].to_owned(), rest))
+    } else if text.starts_with(r"\\") {
+        Some((String::new(), text.to_owned()))
     } else {
         None
     }
@@ -318,8 +326,12 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
 #[cfg(test)]
 fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
     let home = home.as_os_str().to_owned();
+    use crate::live::stores::{Kind, Whose};
     crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
         .into_iter()
+        // Muse's launcher is the one program a stand-in run may look for: the echo cases start it
+        // inside the kit's sandbox, and the door still refuses a write to it.
+        .filter(|root| !(root.store.whose == Whose::Muse && root.store.kind == Kind::Program))
         .map(|root| root.path)
         .collect()
 }
@@ -735,6 +747,15 @@ mod tests {
             Some(("D:".to_owned(), r"\run\home".to_owned()))
         );
         assert_eq!(drive_and_path(Path::new("/run/home")), None);
+        // A profile on a UNC path has no drive: its path is the whole of it, in either spelling.
+        assert_eq!(
+            drive_and_path(Path::new(r"\\server\share\run\home")),
+            Some((String::new(), r"\\server\share\run\home".to_owned()))
+        );
+        assert_eq!(
+            drive_and_path(Path::new(r"\\?\UNC\server\share\run\home")),
+            Some((String::new(), r"\\server\share\run\home".to_owned()))
+        );
     }
 
     #[test]

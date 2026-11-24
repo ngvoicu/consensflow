@@ -522,6 +522,30 @@ fn a_link_in_a_folder_this_run_made_leads_no_write_out_of_it() {
     assert!(!theirs.path().join("new.txt").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_rename_moves_a_link_itself_and_writes_nothing_through_it() {
+    let (theirs, kept) = a_persons_folder();
+    let mine = made("own-").unwrap();
+    let link = mine.path().join("link");
+    std::os::unix::fs::symlink(&kept, &link).unwrap();
+    // The link is moved, and what it leads to is neither written nor moved.
+    let moved = mine.path().join("moved");
+    rename(&link, &moved).unwrap();
+    assert!(fs::symlink_metadata(&moved).unwrap().file_type().is_symlink());
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    // A link over a link replaces the link, not what it leads to.
+    let other = mine.path().join("other");
+    std::os::unix::fs::symlink(&kept, &other).unwrap();
+    rename(&moved, &other).unwrap();
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    // A name that is not the run's is still refused, as a link or not.
+    let elsewhere = theirs.path().join("elsewhere");
+    assert!(rename(&other, &elsewhere).is_err());
+    assert!(fs::symlink_metadata(&other).is_ok());
+}
+
 #[test]
 fn a_file_a_caller_names_is_made_new_and_refused_where_it_is_there_and_is_then_this_runs() {
     let (theirs, kept) = a_persons_folder();
