@@ -141,6 +141,9 @@ pub fn system_opener(env: Env) -> Opens {
 }
 
 #[cfg(test)]
+mod off_thread;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
