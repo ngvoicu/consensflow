@@ -61,7 +61,7 @@ pub(crate) struct ModelPane {
 
 impl PaneInputWriter for ModelPane {
     fn write(&self, _key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
-        match self.write_gated(_key, bytes, &mut || Gate::Go) {
+        match self.write_gated(_key, bytes, &mut |_| Gate::Go) {
             Ok(()) => Ok(()),
             Err(Gated::Pane(error)) => Err(error),
             Err(Gated::Refused(_)) => unreachable!("a gate that always goes refuses nothing"),
@@ -72,14 +72,15 @@ impl PaneInputWriter for ModelPane {
         &self,
         _key: &PaneKey,
         bytes: &[u8],
-        gate: &mut dyn FnMut() -> Gate,
+        gate: &mut dyn FnMut(crate::pty::Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
+        let screening = |under: &mut dyn FnMut(Option<Seen>)| self.with_seen(_key, under);
         let enter = bytes == b"\r";
         // Whether output was pending where the last check let the write go: read in the same
         // turn as the check, with no point between.
         let pending = std::cell::Cell::new(false);
         let mut checked = || {
-            let gated = gate();
+            let gated = gate(&screening);
             if enter && matches!(gated, Gate::Go) {
                 pending.set(sched::without_points(|| self.printed.counts().pending()));
             }

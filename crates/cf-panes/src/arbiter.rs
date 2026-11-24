@@ -525,9 +525,9 @@ impl InputArbiter {
         bytes.extend_from_slice(&bracketed(&body));
         // What the gate takes from the pane's state when it admits.
         let mut admitted = None;
-        let first = writer.write_gated(pane, &bytes, &mut || {
+        let first = writer.write_gated(pane, &bytes, &mut |screening| {
             let mut gate = Gate::Wait;
-            writer.with_seen(pane, &mut |seen| {
+            screening(&mut |seen| {
                 gate = self.paste_gate(&state, pane, &paste, seen, &body, &mut admitted);
             });
             gate
@@ -552,7 +552,7 @@ impl InputArbiter {
         // same cap.
         let at = self.clock.now();
         enter.wait(self.clock.as_ref(), &output, at);
-        let written = writer.write_gated(pane, b"\r", &mut || {
+        let written = writer.write_gated(pane, b"\r", &mut |_| {
             let overdue = millis_since(self.clock.now(), at) >= enter.pending_cap_ms();
             if overdue || !output.counts().pending() {
                 Gate::Go
@@ -677,9 +677,9 @@ impl InputArbiter {
         let state = self.pane_state(pane)?;
         let started = self.clock.now();
         writer
-            .write_gated(pane, b"\r", &mut || {
+            .write_gated(pane, b"\r", &mut |screening| {
                 let mut gate = Gate::Wait;
-                writer.with_seen(pane, &mut |seen| {
+                screening(&mut |seen| {
                     gate = self.enter_gate(&state, pane, &at, seen, started);
                 });
                 gate

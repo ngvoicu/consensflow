@@ -1992,3 +1992,34 @@ fn a_read_is_counted_while_the_activity_lock_is_held() {
     drop(held);
     table.kill(&streamed.key).expect("kill the pane");
 }
+
+/// T-2198 note 5: a gate asked with the pane's writer held looks at the screen it was given with
+/// the writer, and asks the pane table for nothing: while a resize or the opening of another pane
+/// holds the table through a native call, the writer of this pane would be held behind it.
+/// Here the table is held, as they hold it, while the gate looks.
+#[cfg(unix)]
+#[test]
+fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
+    let _serial = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let pane = open_shell(&table, "exec /bin/cat");
+    let (told, done) = std::sync::mpsc::channel();
+    let (asked, key) = (Arc::clone(&table), pane.key.clone());
+    thread::spawn(move || {
+        let written = asked.write_gated(&key, b"x", &mut |screening| {
+            let busy = asked.lock_panes().expect("the table");
+            let mut looked = false;
+            screening(&mut |seen| looked = seen.is_some());
+            drop(busy);
+            assert!(looked, "the screen was looked at");
+            super::Gate::Go
+        });
+        let _ = told.send(written.is_ok());
+    });
+    assert_eq!(
+        done.recv_timeout(Duration::from_secs(10)),
+        Ok(true),
+        "the gate waited for the table while it held the writer"
+    );
+    table.kill(&pane.key).expect("kill the pane");
+}

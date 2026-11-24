@@ -153,21 +153,29 @@ impl<'a> PaneEnvironment<'a> {
     }
 }
 
+/// What a gate is given to look at the pane's screen with, with the pane's writer held: it runs
+/// `under` with the screen's lock held, given what the screen shows of the input box then
+/// ([`Seen`]; none where the pane has no screen). The pane's table is not asked for it: the
+/// writer and the screen were taken in one lookup of it, before the writer was held.
+pub(crate) type Screening<'a> = &'a dyn Fn(&mut dyn FnMut(Option<Seen>));
+
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
 
-    /// [`PaneInputWriter::write`], with the pane's writer held and `gate` asked there. Go:
-    /// the bytes are written. Wait: the writer is let go for 2 ms and `gate` is asked again.
-    /// Refuse: nothing is written, and the refusal is the answer. Every write of a delivery's
-    /// that looks at the window is made so: the check and the write are of one hold.
+    /// [`PaneInputWriter::write`], with the pane's writer held and `gate` asked there, given
+    /// the means to look at the pane's screen. Go: the bytes are written. Wait: the writer is
+    /// let go for 2 ms and `gate` is asked again. Refuse: nothing is written, and the refusal is
+    /// the answer. Every write of a delivery's that looks at the window is made so: the check and
+    /// the write are of one hold.
     fn write_gated(
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        gate: &mut dyn FnMut() -> Gate,
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
+        let screening = |under: &mut dyn FnMut(Option<Seen>)| self.with_seen(key, under);
         loop {
-            match gate() {
+            match gate(&screening) {
                 Gate::Go => return self.write(key, bytes).map_err(Gated::Pane),
                 Gate::Wait => std::thread::sleep(GATE_REST),
                 Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
@@ -384,7 +392,7 @@ impl PaneTable {
     }
 
     pub(crate) fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
-        match self.write_gated(key, bytes, &mut || Gate::Go) {
+        match self.write_gated(key, bytes, &mut |_| Gate::Go) {
             Ok(()) => Ok(()),
             Err(Gated::Pane(error)) => Err(error),
             Err(Gated::Refused(_)) => unreachable!("a gate that always goes refuses nothing"),
@@ -397,9 +405,12 @@ impl PaneTable {
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        gate: &mut dyn FnMut() -> Gate,
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
-        let (writer, last_activity, active_writes) = {
+        // The writer and the screen in one lookup of the table: the gate asks the table for
+        // nothing while the writer is held (a resize, or the opening of another pane, holds the
+        // table through a native call).
+        let (writer, screen, last_activity, active_writes) = {
             let panes = self.lock_panes().map_err(Gated::Pane)?;
             let pane = panes
                 .get(key)
@@ -407,12 +418,16 @@ impl PaneTable {
             pane.active_writes.fetch_add(1, Ordering::AcqRel);
             (
                 Arc::clone(&pane.writer),
+                Arc::clone(&pane.screen),
                 Arc::clone(&pane.last_activity),
                 Arc::clone(&pane.active_writes),
             )
         };
         let _active_write = ActiveWrite(active_writes);
-        write_gated_in(&writer, bytes, gate, &std::thread::sleep)?;
+        let screening = |under: &mut dyn FnMut(Option<Seen>)| {
+            screen.with_seen(&mut |seen| under(Some(seen)));
+        };
+        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;
         *last_activity
             .lock()
             .map_err(|_| Gated::Pane(PaneError::LockPoisoned))? = Instant::now();
@@ -566,7 +581,7 @@ impl PaneInputWriter for PaneTable {
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        gate: &mut dyn FnMut() -> Gate,
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
         PaneTable::write_gated(self, key, bytes, gate)
     }
