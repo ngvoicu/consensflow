@@ -68,6 +68,11 @@ elif kind == "recovery":
     initial = b""
     (directory / "took-input").touch()
     gate("repaint"); os.write(1, b"\x1b[0m")
+elif kind == "credit":
+    gate("fill"); os.write(1, b"a" * 4096)
+    initial = take_until(b"X")
+    os.write(1, b"X")
+    (directory / "took-input").touch()
 else:
     initial = take_until(b"X")
     (directory / "took-input").touch()
@@ -92,6 +97,12 @@ struct Window {
 
 impl Window {
     fn new(kind: &str, arbiter: InputArbiter) -> Self {
+        Self::with_credit(kind, arbiter, 1 << 20)
+    }
+
+    /// A window whose reader is held once `credit` bytes of its output have not been
+    /// acknowledged by a page.
+    fn with_credit(kind: &str, arbiter: InputArbiter, credit: usize) -> Self {
         static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let directory = std::env::temp_dir().join(format!(
             "cf-n17-{kind}-{}-{}",
@@ -121,7 +132,7 @@ impl Window {
                     pixel_width: 0,
                     pixel_height: 0,
                 },
-                1 << 20,
+                credit,
             )
             .expect("open the child");
         let screen = Arc::clone(&streamed.screen);
@@ -579,5 +590,54 @@ fn a_panic_in_the_feed_ends_the_pane_and_admits_no_input() {
         assert!(Instant::now() < deadline, "the pane stayed in the table");
         thread::sleep(ms(5));
     }
+    window.end();
+}
+
+/// T-2198 finding 3: a window whose reader is held at the page's credit has output the host has
+/// not read, the echo of the person's key among it, however long ago they typed. The host says
+/// so in its look (`outputCaughtUp`), and refuses a paste that goes over their unsent count while
+/// it does; once the page acknowledges and the reader has read all there is, it says the look is
+/// current.
+#[test]
+fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
+    let window = Window::with_credit("credit", InputArbiter::new(timing(200)), 4096);
+    window.gate("fill");
+    window.until(|snapshot| {
+        snapshot["outputRead"].as_u64() >= Some(4096) && is_current(snapshot)
+    });
+    window
+        .inputs
+        .typed(window.key.clone(), b"X".to_vec())
+        .and_then(wait_for_input_blocking)
+        .unwrap();
+    window.took_input();
+    thread::sleep(ms(300));
+    let held = window.with_lines();
+    assert_eq!(held["unsent"], true);
+    assert!(is_current(&held), "the host has drawn all it read: {held}");
+    assert_eq!(
+        held["outputCaughtUp"], false,
+        "the echo of the person's key waits in the pty behind the page's credit: {held}"
+    );
+    // A look that read the box empty over their key, as the harness's reader does after five
+    // seconds: the host does not write the paste over a count it cannot vouch for.
+    let at = look_of(&held);
+    let refused = window
+        .inputs
+        .paste(window.key.clone(), b"DELIVERY".to_vec(), Some(at.clone()), Some(at.typed), None)
+        .and_then(wait_for_input_blocking);
+    assert!(refused.is_err(), "the paste went over the person's unsent key");
+    window.panes.ack_all();
+    let current = window.until(|snapshot| {
+        snapshot["bottom"].to_string().contains('X') && snapshot["outputCaughtUp"] == true
+    });
+    assert!(is_current(&current));
+    window
+        .inputs
+        .write(window.key.clone(), b"\r".to_vec())
+        .and_then(wait_for_input_blocking)
+        .unwrap();
+    window.wait_for(&window.directory.join("bytes"));
+    assert_eq!(window.bytes().unwrap(), b"X\r", "nothing was pasted");
     window.end();
 }

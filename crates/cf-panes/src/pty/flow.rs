@@ -267,12 +267,19 @@ pub(super) fn stream_output(
     const MAX_CHUNK_BYTES: usize = 8 * 1024;
     let mut buffer = [0; MAX_CHUNK_BYTES];
 
+    counts.reader_busy();
     while let Some(allowance) = flow.read_allowance() {
+        // Waiting for the pty, which has nothing more at this moment (the credit is there to
+        // read what it gives): the counts say the reader is caught up, and the read's own count
+        // ([`OutputCount::took`]) says it no longer is the moment bytes are in hand. Held at the
+        // credit above, or handing on what it read below, the reader is behind.
+        counts.reader_waits();
         let output_end::Got::Bytes(byte_count) =
             output.read(&mut buffer[..allowance.min(MAX_CHUNK_BYTES)])
         else {
             break;
         };
+        counts.reader_busy();
         // The bytes were counted as read as the pty returned them ([`ActivityReader`]): before
         // the activity lock, the flow, the queue and the lock of the screen.
         let Some(seq) = flow.record(byte_count) else {
@@ -295,6 +302,7 @@ pub(super) fn stream_output(
     let mut discarded = [0; MAX_CHUNK_BYTES];
     while let output_end::Got::Bytes(_) = output.read(&mut discarded) {}
     flow.close();
+    counts.reader_ended();
 }
 
 /// A descriptor of the pane's terminal of the output's own, which it asks whether there

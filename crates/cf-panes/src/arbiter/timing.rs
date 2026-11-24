@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -63,6 +63,26 @@ pub struct OutputCount {
     drawn: AtomicU64,
     /// The feed panicked: the screen is partly written and the window's generation is over.
     broken: AtomicBool,
+    /// What the thread that reads the pty is doing ([`Reader`]).
+    reader: AtomicU8,
+}
+
+/// What the thread that reads a window's pty is doing: whether the window may have printed
+/// what it has not read. The echo of the person's key is such output while the reader is held at
+/// the page's credit (the page has not acknowledged what it was sent), or while it is between
+/// two reads, so a look that reads it so is behind, whatever the two byte counts say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum Reader {
+    /// No thread reads this count: a pane with no output stream (a test's own, a table that
+    /// keeps none). It has no reader that could be behind.
+    Untracked = 0,
+    /// Holding bytes it has read, held at the credit, or not yet back in a read.
+    Busy = 1,
+    /// Waiting in a read of the pty, which has nothing more to give.
+    Waiting = 2,
+    /// The pty has ended for good: nothing more will be read.
+    Ended = 3,
 }
 
 #[cfg(test)]
@@ -83,6 +103,9 @@ impl OutputCount {
     /// `bytes` came off the pty.
     pub(crate) fn took(&self, bytes: usize) {
         crate::sync::point("took.before");
+        // Before the count: a reader that returned from its wait with bytes is no longer
+        // waiting, whatever its next step is.
+        self.reader_is(Reader::Busy);
         self.read.fetch_add(bytes as u64, Ordering::AcqRel);
         crate::sync::point("took.after");
     }
@@ -108,6 +131,36 @@ impl OutputCount {
             after();
         }
         pair
+    }
+
+    /// The thread that reads the pty is about to wait in a read, having given on all it read
+    /// and been given the credit to read more.
+    pub(crate) fn reader_waits(&self) {
+        self.reader_is(Reader::Waiting);
+    }
+
+    /// The thread that reads the pty has bytes in hand, or is held at the page's credit.
+    pub(crate) fn reader_busy(&self) {
+        self.reader_is(Reader::Busy);
+    }
+
+    /// The pty has ended for good.
+    pub(crate) fn reader_ended(&self) {
+        self.reader_is(Reader::Ended);
+    }
+
+    fn reader_is(&self, state: Reader) {
+        self.reader.store(state as u8, Ordering::Release);
+    }
+
+    /// Whether the window's reader has read all the pty has to give at this moment: it is
+    /// waiting in a read, or the pty has ended, or no thread reads it. A reader held at the page's
+    /// credit, or between two reads, has not: the window may have printed more (the echo of a
+    /// key of the person's), and what its screen shows may be behind it however long ago they
+    /// typed. A look taken with the screen's lock held and this loaded first is current to that
+    /// moment: bytes that arrive after it are after the look.
+    pub(crate) fn caught_up(&self) -> bool {
+        self.reader.load(Ordering::Acquire) != Reader::Busy as u8
     }
 
     /// Whether the screen lacks bytes the pty has given.

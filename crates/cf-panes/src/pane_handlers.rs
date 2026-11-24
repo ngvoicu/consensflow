@@ -556,6 +556,7 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "screenQuietMs":snapshot.screen_quiet_ms,
         "outputRead":snapshot.output_read,
         "outputDrawn":snapshot.output_drawn,
+        "outputCaughtUp":snapshot.output_caught_up,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -1751,6 +1752,7 @@ mod tests {
             output_quiet_ms: None,
             output_read: 0,
             output_drawn: 0,
+            output_caught_up: true,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![

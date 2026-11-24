@@ -2225,6 +2225,7 @@ fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
             output_quiet_ms: None,
             output_read: 0,
             output_drawn: 0,
+            output_caught_up: true,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: Vec::new(),

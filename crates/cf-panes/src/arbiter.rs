@@ -162,6 +162,10 @@ pub struct ArbiterSnapshot {
     /// is the greater (`OutputCount`).
     pub output_read: u64,
     pub output_drawn: u64,
+    /// Whether the thread that reads the pty has read all it has to give (`OutputCount`): not
+    /// while it is held at the page's credit or has bytes in hand. What the screen shows is then
+    /// behind the window, and an empty box says nothing of the person's last keys.
+    pub output_caught_up: bool,
     /// How long what the pane's screen shows has not changed, once it has shown
     /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
     /// at work. A harness can print without end and change nothing shown (T-1083).
@@ -630,7 +634,13 @@ impl InputArbiter {
                 if state.typed != at.typed {
                     return Gate::Refuse(ArbiterError::Unsent);
                 }
-                if state.unsent > 0 && paste.read_empty != Some(at.typed) {
+                // The look's reader read the box empty over the person's keys: that holds only
+                // where the window's reader has read all there is, or the echo of those keys
+                // may still be on its way (the page's credit holds the reader back).
+                if state.unsent > 0
+                    && (paste.read_empty != Some(at.typed)
+                        || !state.output.counts().caught_up())
+                {
                     return Gate::Refuse(ArbiterError::Unsent);
                 }
             }

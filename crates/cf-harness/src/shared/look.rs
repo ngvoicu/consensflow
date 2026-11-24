@@ -76,6 +76,10 @@ pub struct Look {
     output_quiet_ms: Option<u64>,
     screen_quiet_ms: Option<u64>,
     paste_in_flight: bool,
+    /// The host's word that the window's reader had read all the pty had to give when the look
+    /// was taken (`outputCaughtUp`): not while the page's credit holds it back. A host that does
+    /// not say has no reader to be behind.
+    caught_up: bool,
     lines: Vec<String>,
     cursor: Option<Cursor>,
     human: Option<HumanInput>,
@@ -110,6 +114,10 @@ impl Look {
                 .get("pasteInFlight")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            caught_up: snapshot
+                .get("outputCaughtUp")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
             lines: lines
                 .iter()
                 .filter_map(|line| line.as_str().map(str::to_owned))
@@ -149,8 +157,14 @@ impl Look {
     /// Whether `harness`'s reader reads the box empty where the host counts the human's keys as
     /// left unsent, and the window has answered their last key: the last key [`SETTLED_MS`] or
     /// more before and the window having printed since ([`UNDRAWN_MS`] or more before where it
-    /// has not). A paste told so goes in over the count, unless a key came since.
+    /// has not). A paste told so goes in over the count, unless a key came since. Only on a look
+    /// that is not behind: while the window's reader is held at the page's credit the echo of
+    /// those keys may be in the pty and not on the screen, however long ago they were typed, and
+    /// the person's unsent typing holds (limit 36).
     pub fn read_empty_over_count(&self, harness: Harness) -> bool {
+        if !self.caught_up {
+            return false;
+        }
         // Whether the window answered the last key at all, by its output and not by what its
         // screen shows: a key that changes nothing shown (Backspace in an empty box) is
         // answered all the same (T-1083).

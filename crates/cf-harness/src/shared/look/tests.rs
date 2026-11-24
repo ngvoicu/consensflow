@@ -254,3 +254,31 @@ fn after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets
         AfterWait::Printing
     );
 }
+
+/// T-2198 finding 3: the five-second override counts only with a look that is not behind. The
+/// host says whether the window's reader has caught up (`outputCaughtUp`): one held at the
+/// page's credit, or not yet back from a read, may leave the echo of the person's key unread, so
+/// the box that reads empty says nothing of their unsent character.
+#[test]
+fn the_override_of_the_humans_unsent_count_needs_a_look_that_is_not_behind() {
+    let mut old = snapshot("", true, Some(5_156));
+    old["outputQuietMs"] = json!(5_158);
+    let current = look(&old);
+    assert!(
+        matches!(
+            licence_paste(&current, Harness::Claude, BoxState::default(), CLEAR),
+            PasteLicence::Go { read_empty: true, .. }
+        ),
+        "a reader that has caught up: the box read empty, the keys long answered"
+    );
+    old["outputCaughtUp"] = json!(true);
+    assert!(look(&old).read_empty_over_count(Harness::Claude));
+    old["outputCaughtUp"] = json!(false);
+    let behind = look(&old);
+    assert!(!behind.read_empty_over_count(Harness::Claude));
+    assert_eq!(
+        licence_paste(&behind, Harness::Claude, BoxState::default(), CLEAR),
+        PasteLicence::Wait(Held::Unsent),
+        "the person's unsent typing holds while the reader is behind"
+    );
+}
