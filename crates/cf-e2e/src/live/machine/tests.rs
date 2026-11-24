@@ -810,7 +810,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
     // A synthetic folder outside the run's handed roots stays foreign to the
     // child, including when this test runs again under a say-only audit.
     let given = crate::standin_process::unowned_tempdir();
-    crate::door::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    crate::standin_process::foreign_write(given.path().join(".claude.json"), r#"{"projects":{}}"#);
     let child = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed",
@@ -826,7 +826,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         let home = crate::door::made("cf-test-").unwrap();
         let made = crate::door::made("consensflow-seed-test-").unwrap();
         let target = given.path().join("elsewhere.json");
-        crate::door::write(&target, "{}").unwrap();
+        crate::standin_process::foreign_write(&target, "{}");
         crate::door::symlink(&target, made.path().join(".claude.json")).unwrap();
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");

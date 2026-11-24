@@ -9,13 +9,12 @@ fn kit_disclosure_claude_record_helpers_refuse_links_outside_the_run() {
     use crate::door::symlink;
     let run = crate::door::made("cf-claude-records-").unwrap();
     let foreign = crate::standin_process::unowned_tempdir();
-    crate::door::write(
+    crate::standin_process::foreign_write(
         foreign.path().join("123.json"),
         r#"{"sessionId":"s","status":"idle"}"#,
-    )
-    .unwrap();
-    crate::door::make_dir(foreign.path().join("project")).unwrap();
-    crate::door::write(foreign.path().join("project/s.jsonl"), "{}\n").unwrap();
+    );
+    crate::standin_process::foreign_dir(foreign.path().join("project"));
+    crate::standin_process::foreign_write(foreign.path().join("project/s.jsonl"), "{}\n");
     symlink(foreign.path(), run.path().join("sessions")).unwrap();
     symlink(foreign.path(), run.path().join("projects")).unwrap();
     assert!(

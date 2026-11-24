@@ -312,8 +312,9 @@ pub fn judge_with(
     made: &dyn Registry,
 ) -> io::Result<PathBuf> {
     let last_is_link = fs::symlink_metadata(path).is_ok_and(|found| found.file_type().is_symlink());
-    // A removal takes a link itself: it is judged by its own name.
-    let ways = if act == Act::Remove && last_is_link {
+    // A removal takes a link itself, and so does a rename (it moves the link, or replaces it,
+    // and writes nothing through it): it is judged by its own name.
+    let ways = if matches!(act, Act::Remove | Act::Rename) && last_is_link {
         let parent = path.parent().unwrap_or(path);
         let name = path.file_name().map(OsString::from).unwrap_or_default();
         let mut ways = resolve(parent)?;
@@ -324,7 +325,7 @@ pub fn judge_with(
     } else {
         resolve(path)?
     };
-    if last_is_link && !matches!(act, Act::Remove | Act::Allocate) {
+    if last_is_link && !matches!(act, Act::Remove | Act::Rename | Act::Allocate) {
         return Err(refused(format!(
             "{} is a link, and a write goes through a link to what it leads to",
             path.display()

@@ -190,7 +190,7 @@ mod tests {
             let store = run.path().join("devin/cli/sessions.db");
             crate::door::make_dir(store.parent().unwrap()).unwrap();
             let foreign = owner.path().join("sessions.db");
-            crate::door::write(&foreign, "fabricated").unwrap();
+            crate::standin_process::foreign_write(&foreign, "fabricated");
             crate::door::symlink(&foreign, &store).unwrap();
             for (windows, key) in [(false, "XDG_DATA_HOME"), (true, "APPDATA")] {
                 let env = vec![(key.to_owned(), run.path().display().to_string())];
@@ -208,7 +208,7 @@ mod tests {
         crate::door::make_dir(store.parent().unwrap()).unwrap();
         crate::door::write(&store, "fabricated").unwrap();
         let target = foreign.path().join("foreign-wal");
-        crate::door::write(&target, "fabricated").unwrap();
+        crate::standin_process::foreign_write(&target, "fabricated");
         crate::door::symlink(&target, store.with_file_name("sessions.db-wal")).unwrap();
         let env = vec![("XDG_DATA_HOME".to_owned(), run.path().display().to_string())];
         assert!(

@@ -308,15 +308,10 @@ mod shell {
         let probe = r#"printf '%s|%s' "${CF_E2E_A-unset}" "${CARGO_MANIFEST_DIR-unset}""#;
         let alone = sh(probe).var("CF_E2E_A", "1").run().unwrap();
         assert_eq!(alone.stdout, "1|unset");
-        // Cargo sets the manifest's folder for the tests it runs.
-        let with_the_tests = sh(probe)
-            .var("CF_E2E_A", "1")
-            .run()
-            .unwrap();
-        assert_eq!(
-            with_the_tests.stdout,
-            format!("1|{}", env!("CARGO_MANIFEST_DIR"))
-        );
+        // Cargo sets the manifest's folder for the tests it runs, and no program is given it.
+        assert_ne!(std::env::var_os("CARGO_MANIFEST_DIR"), None);
+        let again = sh(probe).var("CF_E2E_A", "1").run().unwrap();
+        assert_eq!(again.stdout, "1|unset");
     }
 
     #[test]

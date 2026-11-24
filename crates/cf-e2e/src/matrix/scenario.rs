@@ -399,7 +399,7 @@ mod tests {
         // A file below a folder this run did not make is another's: the step fails and it stays.
         let other = crate::standin_process::unowned_tempdir();
         let theirs = other.path().join(".matrix-quota-spent");
-        crate::door::write(&theirs, "").unwrap();
+        crate::standin_process::foreign_write(&theirs, "");
         assert!(super::taken(&theirs).is_err());
         assert!(theirs.exists());
     }

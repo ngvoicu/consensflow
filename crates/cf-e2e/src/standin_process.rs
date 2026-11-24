@@ -706,6 +706,19 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
     foreign
 }
 
+/// A file of a synthetic foreign folder ([`unowned_tempdir`]), made as the foreign party made it:
+/// the door refuses a write there, so the fixture is not written through it.
+#[cfg(test)]
+pub(crate) fn foreign_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+    std::fs::write(path, contents).expect("write a file of a synthetic foreign folder");
+}
+
+/// A folder of a synthetic foreign folder, made as [`foreign_write`] makes a file.
+#[cfg(test)]
+pub(crate) fn foreign_dir(path: impl AsRef<Path>) {
+    std::fs::create_dir(path).expect("make a folder of a synthetic foreign folder");
+}
+
 #[cfg(test)]
 mod tests {
     use super::{drive_and_path, personal_harness_homes, safe_path_entry};

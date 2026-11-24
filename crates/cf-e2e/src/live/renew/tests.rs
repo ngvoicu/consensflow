@@ -662,8 +662,11 @@ fn a_record_that_stayed_is_the_renewals_error() {
 /// The renewal's door runs Claude Code's and Pi's logins alone, and only in a folder this run made.
 #[test]
 fn the_renewals_door_runs_two_harnesses_in_a_folder_the_run_made() {
-    let outside = std::env::temp_dir();
-    let program = Path::new("/bin/true");
+    // A folder this run did not make, and a program that is never started: both refusals come
+    // before the start.
+    let foreign = crate::standin_process::unowned_tempdir();
+    let outside = foreign.path().to_path_buf();
+    let program = Path::new("a-program-that-is-never-started");
     let refused = crate::door::renewal::start(
         &machine(),
         Harness::Codex,

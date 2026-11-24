@@ -268,7 +268,8 @@ mod tests {
         // Not there after.
         assert!(issued(folder.path(), &[], &[]).is_none());
         // A folder this run did not make, whatever the Keychain shows.
-        let other = std::env::temp_dir().join("a-folder-nobody-made");
+        let foreign = crate::standin_process::unowned_tempdir();
+        let other = foreign.path().join("a-folder-nobody-made");
         let other_name = item_of(&other);
         assert!(issued(&other, &[], &[&other_name]).is_none());
     }

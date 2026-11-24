@@ -50,8 +50,15 @@ pub fn again_under_audit(test: &str) -> Result {
         "find the test program",
         std::path::Path::new("."),
     ))?;
-    let ran = Run::new(program)
-        .args(["--exact", test, "--test-threads=1"])
+    let mut run = Run::new(program).args(["--exact", test, "--test-threads=1"]);
+    // The stand-in's own marks, which the program started finds at its start: the folders this
+    // process made (its audit file's folder is below one), and that it is a stand-in.
+    for name in [super::MADE_ROOTS, "CF_E2E_STAND_IN"] {
+        if let Some(value) = std::env::var_os(name) {
+            run = run.var(name, value);
+        }
+    }
+    let ran = run
         .var(AUDIT, "1")
         .var(AUDIT_FILE, &audit)
         .without(AUDIT_MADE)

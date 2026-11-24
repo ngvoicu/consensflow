@@ -42,7 +42,7 @@ fn t1700_login_only_trust_does_not_resolve_owner_claude() {
     // A run-owned folder cannot write through a linked config file either.
     let guarded = crate::door::made_in(run_parent.path(), "guarded-").unwrap();
     let outside = stranger.path().join("outside.json");
-    crate::door::write(&outside, "{}\n").unwrap();
+    crate::standin_process::foreign_write(&outside, "{}\n");
     crate::door::symlink(&outside, guarded.path().join(".claude.json")).unwrap();
     assert!(login.seed_trust(guarded.path()).is_err());
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "{}\n");

@@ -232,6 +232,18 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "the decoy folder the door's refusals are shown on: made where the run owns nothing, by design, so that a write there is refused",
     ),
     (
+        "src/standin_process.rs",
+        "foreign_write",
+        Class::Write,
+        "a file of the decoy folder, made as the foreign party made it: the door would refuse it, which is what the tests then show",
+    ),
+    (
+        "src/standin_process.rs",
+        "foreign_dir",
+        Class::Write,
+        "a folder of the decoy folder, made as the foreign party made it",
+    ),
+    (
         "tools/xtask/src/live/tests.rs",
         "the_live_tests_there_are_the_files_of_the_tests_folder_that_begin_with_live",
         Class::Write,
