@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 29] = [
+const BY_HAND: [(&str, &str, &str); 28] = [
     (
         "crates/cf-e2e/src/live/ask.rs",
         "HOME",
@@ -103,13 +103,6 @@ const BY_HAND: [(&str, &str, &str); 29] = [
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "APPDATA",
         "the same read of the machine's Devin config, as Windows names its folder",
-    ),
-    (
-        "crates/cf-e2e/tests/live_compaction_routes.rs",
-        "XDG_CONFIG_HOME",
-        "its Muse turns run alone, in no window of the kit's, on a throwaway copy of `auth.json` and \
-         the model catalog (`guard::copy_muse_into`, as `live muse-reads` does): the login is the \
-         keychain's, and the owner's `~/.config/muse` is digested before and after",
     ),
     (
         "crates/cf-e2e/tests/live_compaction_routes.rs",
@@ -227,6 +220,54 @@ const BY_HAND: [(&str, &str, &str); 29] = [
     ),
 ];
 
+/// The exact constructions of the doors' own that name a variable of [`HOMES`]: a store the table
+/// lists to protect, the account's variables the renewal is given, the folder of a Pi renewal. Each is
+/// the text of one construction, never a file: any other naming in the same file is still a home made
+/// by hand.
+const DOORS_OWN: [(&str, &str, &str); 6] = [
+    (
+        "crates/cf-e2e/src/live/isolation/pi.rs",
+        "\"PI_CODING_AGENT_DIR\".to_owned(),",
+        "the renewal of Pi's login runs on the run's own Pi folder, given through the renewal's door",
+    ),
+    (
+        "crates/cf-e2e/src/live/renew.rs",
+        "(\"HOME\".to_owned(), text.clone())",
+        "the renewal's account variables: the folder the renewal runs in, which the run made",
+    ),
+    (
+        "crates/cf-e2e/src/live/renew.rs",
+        "(\"USERPROFILE\".to_owned(), text)",
+        "the same folder, as Windows names it",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"XDG_CONFIG_HOME\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"XDG_DATA_HOME\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"APPDATA\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+];
+
+/// `own` with the doors' own constructions of `file` taken out ([`DOORS_OWN`]).
+fn without_the_doors_own(file: &str, own: &str) -> String {
+    let mut left = own.to_owned();
+    for (source, construction, _) in DOORS_OWN {
+        if source == file {
+            left = left.replace(construction, "");
+        }
+    }
+    left
+}
+
 /// The sources that call `on_own_home`, each with the reason.
 const OWN_HOME: [(&str, &str); 1] = [(
     "crates/cf-e2e/tests/live_pi_parity.rs",
@@ -340,7 +381,7 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
         if KIT.contains(&file.as_str()) {
             continue;
         }
-        let own = text(file);
+        let own = without_the_doors_own(file, &text(file));
         let named = HOMES
             .iter()
             .filter(|name| sets(&own, name))
@@ -366,7 +407,13 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
          (`live::isolation`, `live::login`) is given every window already, and its checks do \
          not see this one: {by_hand:?}"
     );
-    // What the table excuses is still there to excuse.
+    // What the tables excuse is still there to excuse.
+    for (file, construction, _) in DOORS_OWN {
+        assert!(
+            text(file).contains(construction),
+            "{file} no longer holds {construction}: take it out of DOORS_OWN"
+        );
+    }
     for (file, name, _) in BY_HAND {
         assert!(
             sources.iter().any(|source| source == file)

@@ -232,7 +232,8 @@ fn made(
     if !made {
         build(cargo, root, package, bin, more)?;
         if let Some(run) = run {
-            files::write(&built_for, run).map_err(|cause| cause.to_string())?;
+            // The stamp of the build, in the folder the builds share: no folder of a run's.
+            std::fs::write(&built_for, run).map_err(|cause| cause.to_string())?;
         }
     }
     drop(lock);
@@ -242,7 +243,7 @@ fn made(
 /// The lock the builds in the folder `folder` (the one for `BUILDS`) take turns on, taken once
 /// no build is under way and held until the file it answers is dropped.
 fn taking_turns(folder: &Path) -> std::result::Result<File, String> {
-    files::make_dir(folder).map_err(|cause| cause.to_string())?;
+    std::fs::create_dir_all(folder).map_err(|cause| cause.to_string())?;
     let lock = folder.join("build.lock");
     File::options()
         .read(true)
