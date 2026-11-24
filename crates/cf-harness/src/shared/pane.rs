@@ -7,42 +7,68 @@ use cf_proto::panes::BOTTOM_LINES;
 
 use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
-use crate::shared::input_box::ReadEmpty;
+use crate::shared::look::{At, Look, NoLook, PasteLicence};
 
 /// The pane's id and generation, as a request names it.
 fn named(pane: &Pane) -> Value {
     json!({ "id": pane.id, "generation": pane.generation })
 }
 
-/// Pastes `body` into the pane (`writePaste`). The host says whether a paste
-/// it did not finish wrote nothing (`admitted: false`) or may have written
-/// some; an answer that never came (the bridge ended) or did not say (its
-/// deadline passed: the bridge's thirty seconds, or, for a window whose harness declared how
-/// it reads a paste, the cap of that harness for this paste and eight seconds more) may have
-/// been written: uncertain, never a refusal. A
-/// paste the host does not admit as it is asked for, after every wait of the
-/// adapter's before it, is refused unwritten ([`PaneHost::admits`]). With
-/// `read_empty`, the input box read empty at that count of the human's keys
-/// ([`super::input_box::Unsent::ReadEmpty`]), and the paste goes in over the
-/// count unless a key came since.
+/// Pastes `body` into the pane (`writePaste`), as the look that licensed it says: its `at` (the
+/// look's `seen` and its count of the human's keys, which the host checks again where it writes),
+/// the count again as `readEmpty` where the look's reader read the box empty over the human's
+/// unsent keys, and the key that empties the box (`clearFirst`), written with the body. Only a
+/// licence of a look makes a paste: a wait writes nothing. The host says whether a paste it did
+/// not finish wrote nothing (`admitted: false`) or may have written some; an answer that never
+/// came (the bridge ended) or did not say (its deadline passed: the bridge's thirty seconds,
+/// or, for a window whose harness declared how it reads a paste, the cap of that harness for
+/// this paste and eight seconds more) may have been written: uncertain, never a refusal. A
+/// paste the host does not admit as it is asked for, after every wait of the adapter's before
+/// it, is refused unwritten ([`PaneHost::admits`]).
 pub(crate) async fn write_paste(
     host: &dyn PaneHost,
     pane: &Pane,
     body: &str,
-    read_empty: Option<ReadEmpty>,
+    licence: &PasteLicence,
 ) -> Sent {
+    let PasteLicence::Go {
+        at,
+        read_empty,
+        clear_first,
+    } = licence
+    else {
+        return not_admitted();
+    };
     if !host.admits() {
         return not_admitted();
     }
     let mut request = named(pane);
     request["body"] = json!(body);
-    if let Some(answer) = read_empty {
-        request["readEmpty"] = json!(answer.typed);
-        if let Some(shown) = answer.shown {
-            request["shownAt"] = json!(shown);
-        }
+    request["at"] = json!(at.seen);
+    request["typed"] = json!(at.typed);
+    if *read_empty {
+        request["readEmpty"] = json!(at.typed);
     }
-    match host.request("pane.write_paste", request).await {
+    if let Some(keys) = clear_first {
+        // The key is one control byte; the body of a request is text.
+        request["clearFirst"] = json!(String::from_utf8_lossy(keys));
+    }
+    answer(host, "pane.write_paste", request).await
+}
+
+/// Presses an Enter into the pane that is not a paste's first, on the look that licensed it
+/// (`pane.enter`): the host checks the look again with the pane's writer held, and writes it
+/// only if the screen still shows the box the look read, nothing is pending and the human has
+/// typed nothing since.
+pub async fn enter(host: &dyn PaneHost, pane: &Pane, at: &At) -> Sent {
+    let mut request = named(pane);
+    request["at"] = json!(at.seen);
+    request["typed"] = json!(at.typed);
+    answer(host, "pane.enter", request).await
+}
+
+async fn answer(host: &dyn PaneHost, operation: &str, request: Value) -> Sent {
+    match host.request(operation, request).await {
         Ok(answer) => Sent::from_reply(&answer),
         Err(HostError { error, message }) => Sent {
             ok: false,
@@ -53,39 +79,16 @@ pub(crate) async fn write_paste(
     }
 }
 
-/// Presses `keys` into the pane as the daemon presses its own (`pane.input`),
-/// which the host does not count as the human's: what they leave in the input
-/// box holds no paste back. The host's word for why it did not, or the
-/// bridge's when it never answered.
-pub(crate) async fn write_keys(
-    host: &dyn PaneHost,
-    pane: &Pane,
-    keys: &[u8],
-) -> Result<(), String> {
-    let mut request = named(pane);
-    request["bytes"] = json!(keys);
-    match host.request("pane.input", request).await {
-        Ok(answer) => {
-            let sent = Sent::from_reply(&answer);
-            if sent.ok {
-                return Ok(());
-            }
-            Err(sent
-                .cause
-                .or(sent.error)
-                .unwrap_or_else(|| "the window refused the keys".to_owned()))
-        }
-        Err(HostError { message, .. }) => Err(message),
-    }
+/// One observation of the window now ([`Look`]): the host's snapshot with the screen's last
+/// lines. None where the host gave no look, and why.
+pub async fn look(host: &dyn PaneHost, pane: &Pane) -> Result<Look, NoLook> {
+    let snapshot = snapshot_drawn(host, pane)
+        .await
+        .map_err(|_| NoLook::NoAnswer)?;
+    Look::of(&snapshot)
 }
 
-/// What the pane host says of a window now (`pane.snapshot`).
-pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
-    host.request("pane.snapshot", named(pane)).await
-}
-
-/// [`snapshot`], with the screen's last lines as drawn (`bottom`), where an
-/// adapter reads its harness's input box.
+/// A `pane.snapshot` with the screen's last lines as drawn (`bottom`), where a look is read.
 pub(crate) async fn snapshot_drawn(host: &dyn PaneHost, pane: &Pane) -> Result<Value, HostError> {
     let mut request = named(pane);
     request["bottom"] = json!(BOTTOM_LINES);

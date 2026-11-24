@@ -26,6 +26,18 @@ fn pane() -> Pane {
     }
 }
 
+/// The licence of a look of a box with nothing in it.
+fn go() -> PasteLicence {
+    PasteLicence::Go {
+        at: crate::shared::look::At {
+            seen: "00000000000000aa".to_owned(),
+            typed: 0,
+        },
+        read_empty: false,
+        clear_first: None,
+    }
+}
+
 /// A host that takes every paste.
 fn taking() -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
     AnsweringHost::new(|_| Ok(json!({ "ok": true })))
@@ -39,7 +51,7 @@ fn send_into(host: &dyn PaneHost, wire: &Path, session: Option<&str>, text: &str
         session,
         Guard::Configured,
         text,
-        None,
+        &go(),
     )))
 }
 
@@ -65,7 +77,7 @@ fn a_log_that_configured_none_takes_a_paste_only_where_the_adapter_says_the_wind
             Some("mild-coin"),
             guard,
             "/bypass hi",
-            None,
+            &go(),
         )))
     };
     fs::write(
@@ -112,7 +124,7 @@ fn a_message_is_pasted_into_the_conversation_the_log_says_the_window_shows() {
         host.asked.borrow().last().unwrap(),
         &(
             "pane.write_paste".to_owned(),
-            json!({ "id": "s1-zeus", "generation": 2, "body": "hi" })
+            json!({ "id": "s1-zeus", "generation": 2, "body": "hi", "at": "00000000000000aa", "typed": 0 })
         )
     );
 }

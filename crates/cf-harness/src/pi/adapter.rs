@@ -29,6 +29,7 @@ use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
+use crate::shared::look::{Look, PasteLicence};
 use crate::contract::{
     Adapter, Admission, CompactionWord, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
     Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
@@ -311,10 +312,15 @@ impl Window for PiWindow {
 
     /// A message waits until the extension has said which conversation the
     /// window shows, and it is the window's own.
-    fn ready<'a>(
+    fn harness(&self) -> Harness {
+        Harness::Pi
+    }
+
+    fn ready_on<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
         _pane: &'a Pane,
+        _look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             Ok(match self.channel.shown_session()? {
@@ -325,11 +331,12 @@ impl Window for PiWindow {
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        _licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             let session = self.session.borrow().clone();

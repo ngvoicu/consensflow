@@ -90,15 +90,8 @@ pub(crate) fn shown(harness: Harness, screen: &[String], cursor: Option<Cursor>)
     }
 }
 
-/// Whether `snapshot` (the pane host's of a `harness` window) shows its input box
-/// empty, as the harness's reader reads it ([`read`]): no where it shows no box.
-pub(crate) fn read_empty(harness: Harness, snapshot: &Value) -> bool {
-    bottom(snapshot).is_some_and(|screen| {
-        read(harness, &screen, Cursor::of(snapshot.get("cursor"))) == Some(InputBox::Empty)
-    })
-}
-
-/// [`shown`], of a `harness` window's screen as drawn now.
+/// [`shown`], of a `harness` window's screen as drawn now, for the human told of a delivery held
+/// for what they typed. It decides nothing.
 pub(crate) async fn words_on_screen(
     host: &dyn PaneHost,
     pane: &Pane,
@@ -195,75 +188,8 @@ pub(crate) const SETTLED_MS: u64 = 1_000;
 /// picker, which takes no filter, were drawn in neither.
 pub(crate) const UNDRAWN_MS: u64 = 5_000;
 
-/// What the human left unsent in a window, where the pane host's count says they
-/// left something.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Unsent {
-    /// The box may hold it: the delivery waits ([`crate::contract::Held::Unsent`]).
-    Held,
-    /// The box read empty when the host had taken this many writes of the human's
-    /// keys, the last of them [`SETTLED_MS`] or more before and the window having
-    /// printed since ([`UNDRAWN_MS`] or more before where it has not): a paste told so
-    /// goes in (`readEmpty`), unless a key came since.
-    ReadEmpty(ReadEmpty),
-}
-
-/// An input box read empty: when the host had taken `typed` writes of the human's keys, and
-/// where its snapshot says, after `shown` feeds of output that changed the screen. A paste told
-/// so goes in over the count only while no such feed came since and none is pending
-/// (`shownAt`): a box read before the echo of the key, in a read of its own, may lack the key.
-/// Output that changes nothing shown is no reason (T-1083).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ReadEmpty {
-    pub(crate) typed: u64,
-    pub(crate) shown: Option<u64>,
-}
-
-impl ReadEmpty {
-    /// An answer of no output count (a host that gives none).
-    #[cfg(test)]
-    pub(crate) fn at_keys(typed: u64) -> Self {
-        Self { typed, shown: None }
-    }
-}
-
-/// What the input box of a `harness` window holds on its screen now, whatever the
-/// pane host counted of the human's keys: its last lines as drawn, read by the
-/// harness's reader ([`read`]). None where the host gives no lines or the reader
-/// reads no box in them.
-pub(crate) async fn on_screen(
-    host: &dyn PaneHost,
-    pane: &Pane,
-    harness: Harness,
-) -> Option<InputBox> {
-    let snapshot = super::pane::snapshot_drawn(host, pane).await.ok()?;
-    read(
-        harness,
-        &bottom(&snapshot)?,
-        Cursor::of(snapshot.get("cursor")),
-    )
-}
-
-/// Whether the screen of `snapshot` shows every byte of output the host has read of the
-/// window (`outputDrawn` equal to `outputRead`), where it says: the input box on it is current.
-pub(crate) fn screen_current(snapshot: &Value) -> bool {
-    let count = |name: &str| snapshot.get(name).and_then(Value::as_u64);
-    match (count("outputRead"), count("outputDrawn")) {
-        (Some(read), Some(drawn)) => read == drawn,
-        _ => true,
-    }
-}
-
 /// The screen's last lines as drawn that a snapshot holds (`bottom`).
-///
-/// None where the screen is not current: the host says more output was read than the screen
-/// shows (`outputRead` over `outputDrawn`), so the box on it may lack what the window has
-/// already printed (a split echo, a read waiting for its feed). A host that gives no counts
-/// has nothing pending to tell.
 fn bottom(snapshot: &Value) -> Option<Vec<String>> {
-    if !screen_current(snapshot) {
-        return None;
-    }
     snapshot
         .get("bottom")
         .and_then(Value::as_array)
@@ -275,55 +201,18 @@ fn bottom(snapshot: &Value) -> Option<Vec<String>> {
         })
 }
 
-/// What a `harness` window holds unsent, the count up in the snapshot `counted`:
-/// its screen's last lines as drawn, read by the harness's reader ([`read`]). A box
-/// it does not read, a key too recent, or a host that gives no lines is the count's
-/// word; and so is a host whose snapshot says no `typed`, which would refuse a paste
-/// that says `readEmpty` (its request takes no field it does not know).
-pub(crate) async fn unsent(
-    host: &dyn PaneHost,
-    pane: &Pane,
-    harness: Harness,
-    counted: &Value,
-) -> Unsent {
-    if counted.get("typed").and_then(Value::as_u64).is_none() {
-        return Unsent::Held;
-    }
-    let Ok(snapshot) = super::pane::snapshot_drawn(host, pane).await else {
-        return Unsent::Held;
-    };
-    read_unsent(harness, &snapshot)
-}
-
-/// [`unsent`], of the snapshot `snapshot` (with its `bottom`).
-pub(crate) fn read_unsent(harness: Harness, snapshot: &Value) -> Unsent {
-    let quiet = |name: &str| snapshot.get(name).and_then(Value::as_u64);
-    let settled = quiet("typedQuietMs").is_some_and(|typed| {
-        // Whether the window answered the last key at all, by its output and not by what
-        // its screen shows: a key that changes nothing shown (Backspace in an empty box)
-        // is answered all the same, and would hold the read the whole UNDRAWN_MS (T-1083).
-        let drawn = quiet("outputQuietMs").is_some_and(|printed| printed < typed);
-        typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)
-    });
-    let typed = snapshot.get("typed").and_then(Value::as_u64);
-    let lines = bottom(snapshot);
-    let cursor = Cursor::of(snapshot.get("cursor"));
-    match (settled, typed, lines) {
-        (true, Some(typed), Some(lines))
-            if read(harness, &lines, cursor) == Some(InputBox::Empty) =>
-        {
-            Unsent::ReadEmpty(ReadEmpty {
-                typed,
-                shown: snapshot.get("outputShown").and_then(Value::as_u64),
-            })
-        }
-        _ => Unsent::Held,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::look::{BoxReading, Look, NoLook};
+
+    /// A recorded snapshot as a host that names what it shows would answer it.
+    fn recorded(path: &std::path::Path) -> Value {
+        let mut snapshot: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        snapshot["seen"] = Value::from("0123456789abcdef");
+        snapshot
+    }
 
     /// Screens recorded live (`cargo xtask live held-typed`), each the pane host's snapshot an
     /// adapter decided on: a box Claude Code drew empty, or with only its own words in it (its
@@ -343,14 +232,10 @@ mod tests {
                 Some("devin") => Harness::Devin,
                 _ => continue,
             };
-            let snapshot: Value =
-                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            let typed = snapshot["typed"].as_u64().unwrap();
-            assert_eq!(
-                read_unsent(harness, &snapshot),
-                Unsent::ReadEmpty(ReadEmpty::at_keys(typed)),
-                "{name}"
-            );
+            let snapshot = recorded(&path);
+            let look = Look::of(&snapshot).expect("a look");
+            assert_eq!(look.reads(harness), BoxReading::Empty, "{name}");
+            assert!(look.read_empty_over_count(harness), "{name}");
             let lines = bottom(&snapshot).unwrap();
             assert_eq!(
                 shown(harness, &lines, Cursor::of(snapshot.get("cursor"))).as_deref(),
@@ -369,53 +254,38 @@ mod tests {
     fn a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read() {
         let screens = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/screens/claude-2.1.312-keys-cleared-at-rest.json");
-        let mut snapshot: Value =
-            serde_json::from_str(&std::fs::read_to_string(screens).unwrap()).unwrap();
-        let typed = snapshot["typed"].as_u64().unwrap();
+        let mut snapshot = recorded(&screens);
         // The last key 2 s ago, printed after at once, the screen as it was 60 s ago.
         snapshot["typedQuietMs"] = Value::from(2_000);
         snapshot["outputQuietMs"] = Value::from(1_990);
         snapshot["screenQuietMs"] = Value::from(60_000);
-        assert_eq!(
-            read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(ReadEmpty::at_keys(typed))
-        );
+        assert!(Look::of(&snapshot)
+            .unwrap()
+            .read_empty_over_count(Harness::Claude));
     }
 
-    /// A box is current only when the screen shows every byte the host has read (N17,
+    /// A look is current only when the screen shows every byte the host has read (N17,
     /// T-2132): a window that printed the cursor move of a key's echo in one read and the key
-    /// in the next, the second not yet drawn, shows an empty box that is not its box. The
-    /// reader says held, never empty, while the counts differ; with them equal, or where the
-    /// host gives none, the box is read as before.
+    /// in the next, the second not yet drawn, shows an empty box that is not its box. Where the
+    /// counts differ there is no look; with them equal the box is read as before. A snapshot
+    /// with no `seen` is no look either.
     #[test]
-    fn a_box_on_a_screen_that_lacks_bytes_the_host_has_read_is_not_read_empty() {
+    fn a_snapshot_whose_screen_lacks_bytes_the_host_has_read_is_no_look() {
         let screens = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/screens/claude-2.1.312-keys-cleared-at-rest.json");
-        let mut snapshot: Value =
-            serde_json::from_str(&std::fs::read_to_string(screens).unwrap()).unwrap();
-        let typed = snapshot["typed"].as_u64().unwrap();
+        let mut snapshot = recorded(&screens);
         snapshot["typedQuietMs"] = Value::from(1_200);
         snapshot["outputQuietMs"] = Value::from(0);
         snapshot["screenQuietMs"] = Value::from(1_500);
-        assert_eq!(
-            read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(ReadEmpty::at_keys(typed))
-        );
+        assert!(Look::of(&snapshot)
+            .unwrap()
+            .read_empty_over_count(Harness::Claude));
         snapshot["outputRead"] = Value::from(262);
         snapshot["outputDrawn"] = Value::from(261);
-        assert_eq!(read_unsent(Harness::Claude, &snapshot), Unsent::Held);
-        assert!(!read_empty(Harness::Claude, &snapshot));
-        assert!(!screen_current(&snapshot));
+        assert_eq!(Look::of(&snapshot).unwrap_err(), NoLook::Behind);
         snapshot["outputDrawn"] = Value::from(262);
-        snapshot["outputShown"] = Value::from(4);
-        assert_eq!(
-            read_unsent(Harness::Claude, &snapshot),
-            Unsent::ReadEmpty(ReadEmpty {
-                typed,
-                shown: Some(4)
-            }),
-            "the answer says the output it was read at"
-        );
-        assert!(read_empty(Harness::Claude, &snapshot));
+        assert!(Look::of(&snapshot).is_ok());
+        snapshot.as_object_mut().unwrap().remove("seen");
+        assert_eq!(Look::of(&snapshot).unwrap_err(), NoLook::Old);
     }
 }

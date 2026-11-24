@@ -17,7 +17,9 @@ use cf_base::env::Env;
 use serde_json::{json, Value};
 
 use super::text;
-use crate::contract::{HostError, Pane, PaneHost, Readiness, Work};
+use cf_proto::agents::Harness;
+
+use crate::contract::{HostError, Held, Pane, PaneHost, Readiness, Work};
 use crate::seams::{Services, SystemTime};
 use crate::testing::Fakes;
 
@@ -110,7 +112,11 @@ pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
         let started = Instant::now();
         let mut answers: Vec<String> = Vec::new();
         loop {
-            let readiness = window.ready(&Relay, &pane).await?;
+            let looked = crate::look(&Relay, &pane).await;
+            let readiness = match &looked {
+                Ok(look) => window.ready_on(&Relay, &pane, Some(look)).await?,
+                Err(no_look) => Readiness::Held(Held::Because(no_look.words().to_owned())),
+            };
             let now = said(&readiness);
             if answers.last() != Some(&now) {
                 answers.push(now);
@@ -118,12 +124,21 @@ pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
             let over = !matches!(readiness, Readiness::Held(_)) || started.elapsed() >= within;
             if over {
                 let deliver = question.get("deliver").and_then(Value::as_str);
-                let delivered = match deliver.filter(|_| readiness == Readiness::Ready) {
-                    Some(text) => Some(matches!(
-                        window.deliver(&Relay, &pane, text).await?,
-                        crate::contract::Admission::Admitted { .. }
-                    )),
-                    None => None,
+                let delivered = match (deliver.filter(|_| readiness == Readiness::Ready), &looked)
+                {
+                    (Some(text), Ok(look)) => {
+                        let licence = crate::licence_paste(
+                            look,
+                            Harness::Devin,
+                            crate::BoxState::default(),
+                            &[],
+                        );
+                        Some(matches!(
+                            window.deliver_on(&Relay, &pane, text, Some(&licence)).await?,
+                            crate::contract::Admission::Admitted { .. }
+                        ))
+                    }
+                    _ => None,
                 };
                 return Ok(json!({
                     "answers": answers,

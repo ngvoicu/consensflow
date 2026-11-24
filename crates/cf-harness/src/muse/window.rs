@@ -34,11 +34,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use cf_proto::panes::HumanInput;
-use serde_json::Value;
 
 use super::paths::{begun_ms, cleared_into, opened_by, Heads};
 use super::screen;
@@ -49,7 +47,7 @@ use crate::contract::{
 use crate::records::{Options, Reading};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, Cursor, InputBox, ReadEmpty, Unsent};
+use crate::shared::look::{Look, PasteLicence, NO_LOOK};
 use crate::shared::pane;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to};
 
@@ -61,7 +59,6 @@ const HOLD: &str = "Muse has not said yet which session its window shows";
 
 /// What a window whose prompt is not drawn yet is held for.
 /// Held while the screen lacks output the host has read.
-const PRINTING: &str = "Muse's screen does not yet show all that it printed";
 
 const STARTING: &str = "Muse has not shown its prompt yet";
 
@@ -94,9 +91,6 @@ pub(super) struct MuseWindow {
     heads: Heads,
     /// The latest look read its turn taken back: the message is in its input box.
     restored: Cell<bool>,
-    /// The human's keys left something unsent by the pane host's count, and the latest
-    /// readiness read the input box empty on the screen, at this count of their keys.
-    read_empty: Cell<Option<ReadEmpty>>,
     /// What the pane host said of the human's input at the latest readiness, where it read
     /// a snapshot of the pane ([`Window::human_input`]).
     input: RefCell<Option<HumanInput>>,
@@ -120,7 +114,6 @@ impl MuseWindow {
             pid: Cell::default(),
             heads: Heads::default(),
             restored: Cell::new(false),
-            read_empty: Cell::default(),
             input: RefCell::new(None),
         }
     }
@@ -154,23 +147,6 @@ impl MuseWindow {
             &self.env,
             &self.heads,
         ))
-    }
-
-    /// The window's last lines as the pane host draws them, and where its cursor is:
-    /// none where the host says nothing.
-    async fn screen(host: &dyn PaneHost, pane: &Pane) -> Option<(Vec<String>, Option<Cursor>)> {
-        let snapshot = pane::snapshot_drawn(host, pane).await.ok()?;
-        // A screen that lacks bytes the host has read says nothing of the box (N17).
-        if !input_box::screen_current(&snapshot) {
-            return None;
-        }
-        let lines = snapshot
-            .get("bottom")?
-            .as_array()?
-            .iter()
-            .filter_map(|line| line.as_str().map(str::to_owned))
-            .collect();
-        Some((lines, Cursor::of(snapshot.get("cursor"))))
     }
 
     /// `text` as the window is given it: Windows' console drops a paste's non-ASCII
@@ -242,14 +218,20 @@ impl Window for MuseWindow {
         screen::shows_prompt(screen)
     }
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Muse, snapshot)
+    fn harness(&self) -> Harness {
+        Harness::Muse
     }
 
-    fn ready<'a>(
+    /// A message a turn taken back put in the box: the paste empties it first.
+    fn stale_paste(&self) -> bool {
+        self.restored.get()
+    }
+
+    fn ready_on<'a>(
         &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
@@ -259,34 +241,18 @@ impl Window for MuseWindow {
             if self.shown().is_some_and(|shown| shown != known) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
-            let snapshot = pane::snapshot_drawn(host, pane)
-                .await
-                .map_err(|failed| failed.message)?;
-            self.input.replace(HumanInput::of(&snapshot));
-            if snapshot.get("ok") != Some(&Value::Bool(true))
-                || js::truthy(snapshot.get("pasteInFlight"))
-            {
+            let Some(look) = look else {
+                return Ok(Readiness::Held(Held::Because(NO_LOOK.to_owned())));
+            };
+            self.input.replace(look.human_input());
+            if look.paste_in_flight() {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
-            // The screen lacks bytes the host has read: what it shows of the box is not the
-            // box (a split echo, a read waiting for its feed). Held, never read empty.
-            if !input_box::screen_current(&snapshot) {
-                return Ok(Readiness::Held(Held::Because(PRINTING.to_owned())));
-            }
-            let lines: Vec<String> = snapshot
-                .get("bottom")
-                .and_then(Value::as_array)
-                .map(|lines| {
-                    lines
-                        .iter()
-                        .filter_map(|line| line.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let lines = look.lines();
             // A host that draws no lines says nothing of them: the window is taken as
             // drawn, as the engine takes it.
             if !lines.is_empty() {
-                if let Some(said) = screen::held_elsewhere(&lines) {
+                if let Some(said) = screen::held_elsewhere(lines) {
                     return Ok(Readiness::Unfit(format!(
                         "Muse did not resume the session: {said}"
                     )));
@@ -294,18 +260,11 @@ impl Window for MuseWindow {
                 // A taken-back message in a box the screen does not show whole is the
                 // human's to empty, in words the board shows, until the box shows whole
                 // (T-931 P2-1): it is neither cleared blind nor pasted behind.
-                if self.restored.get() && screen::box_cut(&lines) {
+                if self.restored.get() && screen::box_cut(lines) {
                     return Ok(Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned())));
                 }
-                if !screen::shows_prompt(&lines) {
+                if !screen::shows_prompt(lines) {
                     return Ok(Readiness::Held(Held::Because(STARTING.to_owned())));
-                }
-            }
-            self.read_empty.set(None);
-            if js::truthy(snapshot.get("unsent")) {
-                match input_box::read_unsent(Harness::Muse, &snapshot) {
-                    Unsent::ReadEmpty(answer) => self.read_empty.set(Some(answer)),
-                    Unsent::Held => return Ok(Readiness::Held(Held::Unsent)),
                 }
             }
             Ok(Readiness::Ready)
@@ -323,26 +282,12 @@ impl Window for MuseWindow {
         false
     }
 
-    /// The box as the next paste meets it, through Muse's own reader ([`screen::read`]): a
-    /// turn taken back left its message there, which the hand-over empties first
-    /// ([`MuseWindow::deliver`]), so it holds nothing the paste would go in behind; a box
-    /// the screen does not show whole holds the window before this is asked ([`Held::ForHuman`]).
-    fn input_box<'a>(
-        &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
-    ) -> Work<'a, Option<InputBox>> {
-        if self.restored.get() {
-            return Box::pin(async { Some(InputBox::Empty) });
-        }
-        Box::pin(input_box::on_screen(host, pane, Harness::Muse))
-    }
-
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             let known = self.session.borrow().clone();
@@ -352,34 +297,13 @@ impl Window for MuseWindow {
                 });
             }
             // A turn taken back put its message in the box, which this one would go in
-            // after, to be sent as one: the box is emptied first, unless the engine just
-            // did, and only where the screen shows it holding something (Control-C into
-            // an empty box at work stops the turn). A box the screen does not show whole
-            // (a brief taller than the host's last lines: Muse keeps the box's tail in
-            // view and scrolls its first line out, T-829's probe) is neither cleared
-            // blind nor pasted behind.
-            if self.restored.get() && !host.cleared() {
-                let holds = Self::screen(host, pane)
-                    .await
-                    .and_then(|(lines, cursor)| screen::read(&lines, cursor));
-                match holds {
-                    Some(InputBox::Holds) => {
-                        if let Err(cause) = pane::write_keys(host, pane, &CLEAR_INPUT).await {
-                            let reason =
-                                format!("the window's input box could not be cleared: {cause}");
-                            return Ok(Admission::Refused { reason });
-                        }
-                    }
-                    Some(InputBox::Empty) => {}
-                    None => {
-                        return Ok(Admission::Refused {
-                            reason: OUT_OF_VIEW.to_owned(),
-                        })
-                    }
-                }
-            }
-            let read_empty = self.read_empty.take();
-            let sent = pane::write_paste(host, pane, &self.body(text), read_empty).await;
+            // after, to be sent as one: the key that empties the box goes with the paste, as
+            // its licence says (only where the screen shows the box holding something:
+            // Control-C into an empty box at work stops the turn). A box the screen does not
+            // show whole (a brief taller than the host's last lines: Muse keeps the box's tail
+            // in view and scrolls its first line out, T-829's probe) holds the paste before.
+            let licence = licence.ok_or("a window that takes pastes was given no licence")?;
+            let sent = pane::write_paste(host, pane, &self.body(text), licence).await;
             let admitted = admission(&sent, "Muse refused the paste", false);
             if matches!(admitted, Admission::Admitted { .. }) {
                 self.restored.set(false);

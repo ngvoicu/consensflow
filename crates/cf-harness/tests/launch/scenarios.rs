@@ -437,6 +437,9 @@ fn admission(admission: &Admission) -> Value {
         Admission::Admitted { queued: true } => json!({ "admitted": true, "queued": true }),
         Admission::Refused { reason } => json!({ "admitted": false, "reason": reason }),
         Admission::Busy { reason } => json!({ "admitted": false, "busy": true, "reason": reason }),
+        Admission::LookAgain { reason } => {
+            json!({ "admitted": false, "lookAgain": true, "reason": reason })
+        }
         Admission::Uncertain { reason } => json!({ "admitted": null, "reason": reason }),
     }
 }
@@ -573,7 +576,20 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
         });
     } else if let Some(text) = text(&step["deliver"]) {
         played.driver.begin(id, async move {
-            let outcome = window.deliver(&*host, &pane, &text).await;
+            // The goldens were recorded before looks: a paste goes in on a licence that stands
+            // for the look the scripted host's silence implies (and carries no more than the
+            // paste did then: the request below drops what a look added).
+            let licence = cf_harness::PasteLicence::Go {
+                at: cf_harness::At {
+                    seen: "0000000000000000".to_owned(),
+                    typed: 0,
+                },
+                read_empty: false,
+                clear_first: None,
+            };
+            let outcome = window
+                .deliver_on(&*host, &pane, &text, Some(&licence))
+                .await;
             (settled(outcome, |outcome| admission(&outcome)), None)
         });
     } else if step.get("started").is_some() {
@@ -1018,7 +1034,17 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         .host
         .take_asked()
         .into_iter()
-        .map(|(op, body)| json!({ "op": op, "body": body }))
+        .map(|(op, mut body)| {
+            if let Some(body) = body.as_object_mut().filter(|_| op == "pane.write_paste") {
+                body.remove("at");
+                body.remove("typed");
+            }
+            // A look asks for the screen's last lines: the recording asked for none.
+            if let Some(body) = body.as_object_mut().filter(|_| op == "pane.snapshot") {
+                body.remove("bottom");
+            }
+            json!({ "op": op, "body": body })
+        })
         .collect();
     fields.insert("requests".to_owned(), json!(asked));
     let fetches: Vec<Value> = played

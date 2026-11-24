@@ -20,6 +20,7 @@ use cf_proto::panes::{HumanInput, Servers, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
+use crate::shared::look::{Look, PasteLicence};
 use crate::records::{
     Boundary, Item, LastCall, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
     Timeline,
@@ -647,15 +648,6 @@ pub trait Window {
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
     }
-    /// Whether `snapshot` (the pane host's of the window: its last lines and its cursor)
-    /// shows the window's input box empty, as its harness's own reader reads it: the box
-    /// holds nothing a key would have to empty, and the key that empties one does harm in
-    /// an empty box (Control-C there arms the quit of Claude Code and Muse Code, which a
-    /// second one ends, and stops a turn at work). False where the harness reads no box,
-    /// or reads it holding anything.
-    fn box_read_empty(&self, _snapshot: &Value) -> bool {
-        false
-    }
     /// The servers its harness's dialog of new servers on `screen` (the window's last
     /// lines) would use, as its lines name them; none where they show none.
     fn trust_servers(&self, _screen: &[String]) -> Vec<String> {
@@ -738,11 +730,22 @@ pub trait Window {
     fn safe_decline(&self, _dialog: &Dialog) -> Option<Decline> {
         None
     }
-    /// Whether a delivery may go in now, or why that could not be told.
-    fn ready<'a>(
+    /// The harness this window is of: the reader of its input box.
+    fn harness(&self) -> Harness;
+    /// Whether the window's input box may hold a message of ours that did not go: one an
+    /// interrupt of ours put back, or a `/compact` the human's cancel left, which the next
+    /// paste empties first. What no screen says ([`BoxState`]).
+    fn stale_paste(&self) -> bool {
+        false
+    }
+    /// Whether a delivery may go in now, or why that could not be told, on `look` where the
+    /// window takes pastes ([`Input::Pasted`]): the one observation it reads, which the engine
+    /// took. A window whose harness takes its messages through a channel is given none.
+    fn ready_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>>;
     /// What the window's input box shows, for the human told of a delivery held for
     /// words typed there and not sent ([`Held::Unsent`]): its words, empty where it
@@ -773,12 +776,93 @@ pub trait Window {
     /// failed before the hand-over, which the engine says the delivery
     /// failed for. A failure after the hand-over is uncertain, never an
     /// error.
+    /// A paste goes in as the licence of a look says, which the host checks again where it
+    /// writes; a window with a channel is given none.
+    fn deliver_on<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+        text: &'a str,
+        licence: Option<&'a PasteLicence>,
+    ) -> Work<'a, Result<Admission, String>>;
+
+    /// A test's readiness: [`Window::ready_on`] of a look taken here from the host's snapshot
+    /// as it stands (a host a test scripts that names no `seen`, no `typed` or no lines is
+    /// given them), where the window takes pastes. The engine never calls it.
+    #[cfg(any(test, feature = "test-support"))]
+    fn ready<'a>(
+        &'a self,
+        host: &'a dyn PaneHost,
+        pane: &'a Pane,
+    ) -> Work<'a, Result<Readiness, String>> {
+        Box::pin(async move {
+            // What needs no look is said without taking one.
+            let first = self.ready_on(host, pane, None).await?;
+            let needs_a_look = matches!(
+                &first,
+                Readiness::Held(Held::Because(why)) if why == crate::shared::look::NO_LOOK
+            );
+            if !needs_a_look {
+                return Ok(first);
+            }
+            let look = crate::testing::look_of_scripted(host, pane).await;
+            let ready = self.ready_on(host, pane, look.as_ref().ok()).await?;
+            // The engine asks the look's licence after the readiness: a test's readiness is both.
+            let pasted = matches!(
+                self.harness(),
+                Harness::Claude | Harness::Devin | Harness::Muse
+            );
+            let (Readiness::Ready, Ok(look), true) = (&ready, &look, pasted) else {
+                return Ok(ready);
+            };
+            let state = crate::BoxState {
+                stale_paste: self.stale_paste(),
+                emptied: host.cleared(),
+            };
+            Ok(
+                match crate::licence_paste(look, self.harness(), state, &[3]) {
+                    crate::PasteLicence::Wait(held) => Readiness::Held(held),
+                    crate::PasteLicence::Go { .. } => ready,
+                },
+            )
+        })
+    }
+
+    /// A test's hand-over: [`Window::deliver_on`] with the licence of a look taken here
+    /// ([`Window::ready`]). The engine never calls it.
+    #[cfg(any(test, feature = "test-support"))]
     fn deliver<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
-    ) -> Work<'a, Result<Admission, String>>;
+    ) -> Work<'a, Result<Admission, String>> {
+        Box::pin(async move {
+            // A window whose harness takes its messages through a channel has no look.
+            if !matches!(
+                self.harness(),
+                Harness::Claude | Harness::Devin | Harness::Muse
+            ) {
+                return self.deliver_on(host, pane, text, None).await;
+            }
+            let look = crate::testing::look_of_scripted(host, pane).await;
+            let licence = match &look {
+                Ok(look) => crate::licence_paste(
+                    look,
+                    self.harness(),
+                    crate::BoxState {
+                        stale_paste: self.stale_paste(),
+                        emptied: host.cleared(),
+                    },
+                    &[3],
+                ),
+                Err(no_look) => {
+                    crate::PasteLicence::Wait(Held::Because(no_look.words().to_owned()))
+                }
+            };
+            self.deliver_on(host, pane, text, Some(&licence)).await
+        })
+    }
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
     /// Whether the harness says, after the hand-over, that it put the message last
@@ -840,17 +924,6 @@ pub trait Window {
     /// harness that keeps no such word (the default).
     fn kept_commands(&self) -> Work<'_, Option<Vec<String>>> {
         Box::pin(async { Some(Vec::new()) })
-    }
-    /// What the window's input box holds on its screen now, where its harness takes a
-    /// message pasted into that box (Claude Code, Devin): a paste whose Enter did not take
-    /// still sits there (3.0.7 chief-meeting, CMT-24). None where the screen shows no box
-    /// its reader knows, or the harness takes its messages through a channel of its own.
-    fn input_box<'a>(
-        &'a self,
-        _host: &'a dyn PaneHost,
-        _pane: &'a Pane,
-    ) -> Work<'a, Option<InputBox>> {
-        Box::pin(async { None })
     }
 }
 
@@ -1013,6 +1086,12 @@ pub enum Admission {
     /// waits for the window's next rest, with no attempt spent (Pi's extension
     /// sends nothing while Pi is busy; 3.0.7 chief-meeting, D9).
     Busy {
+        reason: String,
+    },
+    /// Refused because the look that licensed the paste is no longer true of the window: its
+    /// box changed, output is pending, or the human typed since. Nothing went in; the
+    /// message waits for the next look, with no attempt spent.
+    LookAgain {
         reason: String,
     },
     Uncertain {

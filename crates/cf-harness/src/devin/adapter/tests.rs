@@ -50,7 +50,6 @@ fn devin_window(
         at_enter,
         history: History::default(),
         looked: Cell::default(),
-        read_empty: Cell::default(),
         input: RefCell::default(),
         left_open: RefCell::new(None),
         unannounced_since: Cell::default(),

@@ -181,8 +181,8 @@ fn a_window_says_what_its_last_look_read_of_the_humans_input() {
         Ok(match op {
             "pane.snapshot" => json!({
                 "ok": true, "pasteInFlight": false, "unsent": false, "typed": 3,
-                "typedQuietMs": 900,
-                "humanWrites": [{ "agoMs": 900, "length": 25, "classes": ["string"] }],
+                "typedQuietMs": 1_900,
+                "humanWrites": [{ "agoMs": 1_900, "length": 25, "classes": ["string"] }],
             }),
             _ => json!({ "ok": true }),
         })
@@ -196,10 +196,10 @@ fn a_window_says_what_its_last_look_read_of_the_humans_input() {
         window.human_input(),
         Some(cf_proto::panes::HumanInput {
             typed: Some(3),
-            typed_quiet_ms: Some(900),
+            typed_quiet_ms: Some(1_900),
             unsent: Some(false),
             writes: vec![cf_proto::panes::HumanWrite {
-                ago_ms: 900,
+                ago_ms: 1_900,
                 length: 25,
                 classes: vec!["string"],
             }],

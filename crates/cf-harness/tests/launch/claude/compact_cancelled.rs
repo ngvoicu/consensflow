@@ -78,7 +78,8 @@ fn host(
         Ok(match op {
             "pane.snapshot" => {
                 let mut snapshot = json!({ "ok": true, "pasteInFlight": false, "unsent": unsent,
-                    "typed": u64::from(unsent), "typedQuietMs": 60_000, "outputQuietMs": 30_000 });
+                    "seen": "00000000000000aa", "typed": u64::from(unsent), "typedQuietMs": 60_000,
+                    "outputQuietMs": 30_000 });
                 if let Some(bottom) = &bottom {
                     snapshot["bottom"] = bottom.clone();
                 }
@@ -89,17 +90,22 @@ fn host(
     })
 }
 
-/// What was asked of the host but its snapshots: its operation, and the keys or the text.
+/// What was asked of the host but its snapshots: its operation, and the keys or the text. A paste
+/// that empties the box first is the key and then the paste, as it is written: one write.
 fn asked(host: &AnsweringHost<impl Fn(&str) -> Result<Value, HostError>>) -> Vec<(String, Value)> {
-    host.asked
-        .borrow()
-        .iter()
-        .filter(|(op, _)| op != "pane.snapshot")
-        .map(|(op, body)| {
-            let what = body.get("bytes").or_else(|| body.get("body")).cloned();
-            (op.clone(), what.unwrap_or(Value::Null))
-        })
-        .collect()
+    let mut asked = Vec::new();
+    for (op, body) in host.asked.borrow().iter() {
+        if op == "pane.snapshot" {
+            continue;
+        }
+        if let Some(keys) = body.get("clearFirst").and_then(Value::as_str) {
+            let keys: Vec<u8> = keys.bytes().collect();
+            asked.push(("pane.input".to_owned(), json!(keys)));
+        }
+        let what = body.get("bytes").or_else(|| body.get("body")).cloned();
+        asked.push((op.clone(), what.unwrap_or(Value::Null)));
+    }
+    asked
 }
 
 fn pane() -> Pane {

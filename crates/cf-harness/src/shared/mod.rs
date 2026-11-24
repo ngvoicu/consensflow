@@ -9,6 +9,7 @@ pub(crate) mod folders;
 pub(crate) mod input_box;
 pub(crate) mod launch_files;
 pub(crate) mod left_open;
+pub mod look;
 pub(crate) mod net;
 pub(crate) mod one_shot;
 pub(crate) mod pane;

@@ -63,23 +63,22 @@
 //!   switches none off. ConsensFlow's own hooks come from `--settings`, not
 //!   from MCP.
 
-use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, Servers};
 use cf_proto::specs::Variant;
-use serde_json::Value;
 
 use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
+use crate::shared::input_box;
+use crate::shared::look::{Look, PasteLicence, NO_LOOK};
 use crate::contract::{
     Adapter, Admission, Decline, Dialog, DialogSign, FirstMessage, Held, Input, Launch, LaunchId,
     NoDefault, Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records,
@@ -90,7 +89,6 @@ use crate::records::{Boundary, Options, Reading, Settlement};
 use crate::seams::processes::Processes;
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, InputBox, ReadEmpty, Unsent};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
@@ -361,8 +359,6 @@ impl Adapter for ClaudeAdapter {
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
                     put_back: Cell::new(false),
-                    clear_first: Cell::new(false),
-                    read_empty: Cell::new(None),
                     input: RefCell::new(None),
                     left_open: RefCell::new(left_open),
                     over_since: RefCell::new(None),
@@ -479,13 +475,6 @@ struct ClaudeWindow {
     /// The latest look read the window at rest after a command Claude put back in
     /// its input box (a compaction cancelled with Escape, `Lines::put_back`).
     put_back: Cell<bool>,
-    /// The latest readiness read that command still in the box on the screen, with
-    /// no key of the human's since: the delivery's paste clears it first.
-    clear_first: Cell<bool>,
-    /// The human's keys left something unsent by the pane host's count, and the
-    /// latest readiness read the input box empty on the screen, at this count of
-    /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
-    read_empty: Cell<Option<ReadEmpty>>,
     /// What the pane host said of the human's input at the latest readiness, where it
     /// read a snapshot of the pane ([`Window::human_input`]).
     input: RefCell<Option<HumanInput>>,
@@ -612,23 +601,6 @@ impl ClaudeWindow {
             .is_some_and(|pressed| pressed.stopped(record, self.time.wall_ms()))
     }
 
-    /// Whether a paste may go in after a compaction the human cancelled, the
-    /// human's keys having left nothing unsent: the box on the screen empty, or
-    /// holding what Claude put back, which the paste clears first (one Ctrl+C,
-    /// only where the box shows text: at an empty box a second one in a row ends
-    /// Claude). A box the screen does not show holds the paste as the human's own
-    /// words do, for the `/compact` they typed may be there unsent, and the board
-    /// tells them so (`holding`).
-    async fn put_back_cleared(&self, host: &dyn PaneHost, pane: &Pane) -> Readiness {
-        match input_box::on_screen(host, pane, Harness::Claude).await {
-            Some(InputBox::Empty) => Readiness::Ready,
-            Some(InputBox::Holds) => {
-                self.clear_first.set(true);
-                Readiness::Ready
-            }
-            None => Readiness::Held(Held::Unsent),
-        }
-    }
 }
 
 impl Window for ClaudeWindow {
@@ -751,10 +723,6 @@ impl Window for ClaudeWindow {
         }
     }
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Claude, snapshot)
-    }
-
     fn names_trust_choices(&self, screen: &[String]) -> bool {
         super::trust::names_choices(screen)
     }
@@ -788,103 +756,58 @@ impl Window for ClaudeWindow {
         self.input.borrow().clone()
     }
 
-    /// A paste waits for the window to be readable, on its conversation,
-    /// with no paste going in, and for what the human typed and did not send,
-    /// unless the input box reads empty on the screen ([`input_box::unsent`]).
-    /// After a compaction the human cancelled, Claude has the `/compact` back in
-    /// its box, which the human's keys never typed: the box on the screen says
-    /// whether it is still there, to be cleared first, and a box that cannot be
-    /// read holds the paste, which would go in behind it (`put_back`).
-    fn ready<'a>(
+    /// A paste waits for the window to be readable, on its conversation: what the human typed
+    /// and did not send, a box that holds a stale message, and every other word of the box
+    /// are the look's licence ([`crate::licence_paste`]), asked of the same look.
+    fn ready_on<'a>(
         &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
+        _host: &'a dyn PaneHost,
+        _pane: &'a Pane,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
             if self.status().is_some_and(|live| self.elsewhere(&live)) {
                 return Ok(Readiness::Held(Held::ShowsAnother));
             }
-            let snapshot = pane::snapshot(host, pane)
-                .await
-                .map_err(|failed| failed.message)?;
-            self.input.replace(HumanInput::of(&snapshot));
-            if snapshot.get("ok") != Some(&Value::Bool(true)) {
-                // The host's own word for why, as a template writes it.
-                let said = snapshot
-                    .get("error")
-                    .filter(|error| !error.is_null())
-                    .map_or(Cow::Borrowed("no answer"), |error| js::text(Some(error)));
-                let reason = format!("the window cannot be read: {said}");
-                return Ok(Readiness::Held(Held::Because(reason)));
-            }
-            if js::truthy(snapshot.get("pasteInFlight")) {
-                let reason = "a paste is on its way to the window".to_owned();
-                return Ok(Readiness::Held(Held::Because(reason)));
-            }
-            self.read_empty.set(None);
-            self.clear_first.set(false);
-            if !js::truthy(snapshot.get("unsent")) {
-                return Ok(if self.put_back.get() {
-                    self.put_back_cleared(host, pane).await
-                } else {
-                    Readiness::Ready
-                });
-            }
-            // The count is the human's keys, a guess: the box on the screen says.
-            Ok(
-                match input_box::unsent(host, pane, Harness::Claude, &snapshot).await {
-                    Unsent::ReadEmpty(answer) => {
-                        self.read_empty.set(Some(answer));
-                        Readiness::Ready
-                    }
-                    Unsent::Held => Readiness::Held(Held::Unsent),
-                },
-            )
+            let Some(look) = look else {
+                return Ok(Readiness::Held(Held::Because(NO_LOOK.to_owned())));
+            };
+            self.input.replace(look.human_input());
+            Ok(Readiness::Ready)
         })
     }
 
-    fn deliver<'a>(
+    fn harness(&self) -> Harness {
+        Harness::Claude
+    }
+
+    /// A message an interrupt of ours put back in the box, or a `/compact` the human's cancel
+    /// left: the paste empties it first.
+    fn stale_paste(&self) -> bool {
+        self.restored.get() || self.put_back.get()
+    }
+
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
-            // A window read at rest by an interrupt of ours has the message it
-            // was given in its input box again, and one the human's cancel left
-            // has the `/compact`: this one would be pasted after it, to go as one.
-            // The box is cleared first, unless the engine just cleared it.
-            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {
-                if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
-                    let reason = format!("the window's input box could not be cleared: {cause}");
-                    return Ok(Admission::Refused { reason });
-                }
-            }
-            let read_empty = self.read_empty.take();
-            let sent = pane::write_paste(host, pane, &window_text(text), read_empty).await;
+            let licence = licence.ok_or("a window that takes pastes was given no licence")?;
+            // The key that empties the box first goes with the paste, as its licence says.
+            let sent = pane::write_paste(host, pane, &window_text(text), licence).await;
             let admitted = admission(&sent, "the window refused the paste", false);
             if matches!(admitted, Admission::Admitted { .. }) {
                 // The turn the paste begins is its own: no press was for it.
                 *self.pressed.borrow_mut() = None;
                 self.restored.set(false);
+                self.put_back.set(false);
             }
             Ok(admitted)
         })
-    }
-
-    /// The box as the next paste meets it: one its own hand-over empties first (the
-    /// message an interrupt of ours put back, a `/compact` the human's cancel left, which
-    /// [`ClaudeWindow::ready`] found there) holds nothing the paste would go in behind.
-    fn input_box<'a>(
-        &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
-    ) -> Work<'a, Option<InputBox>> {
-        if self.restored.get() || self.clear_first.get() {
-            return Box::pin(async { Some(InputBox::Empty) });
-        }
-        Box::pin(input_box::on_screen(host, pane, Harness::Claude))
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

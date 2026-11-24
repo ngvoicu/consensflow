@@ -6,7 +6,7 @@ use std::path::Path;
 use super::wire::naming;
 use crate::contract::{Pane, PaneHost};
 use crate::shared::admission::Sent;
-use crate::shared::input_box::ReadEmpty;
+use crate::shared::look::PasteLicence;
 use crate::shared::pane::write_paste;
 
 /// A refusal before the paste is made: nothing was written.
@@ -33,8 +33,7 @@ pub(super) enum Guard {
 /// Pastes `text` into `pane` when Devin's wire log says the window shows
 /// `session`, the conversation it is known to be on, as `guard` asks it to say so. A window
 /// that is known to be on none (no session, or an empty one) shows no conversation a message
-/// is for. `read_empty` is the count of the human's keys its input box read
-/// empty at, if it did ([`write_paste`]).
+/// is for. `licence` is the look's ([`write_paste`]).
 pub(super) async fn send(
     host: &dyn PaneHost,
     pane: &Pane,
@@ -42,7 +41,7 @@ pub(super) async fn send(
     session: Option<&str>,
     guard: Guard,
     text: &str,
-    read_empty: Option<ReadEmpty>,
+    licence: &PasteLicence,
 ) -> Sent {
     let Ok(naming) = naming(wire) else {
         return refused("Devin conversation is unavailable");
@@ -52,7 +51,7 @@ pub(super) async fn send(
             || (guard == Guard::Unannounced && naming.unannounced() == Some(session))
     };
     match session.filter(|session| !session.is_empty()) {
-        Some(session) if shows(session) => write_paste(host, pane, text, read_empty).await,
+        Some(session) if shows(session) => write_paste(host, pane, text, licence).await,
         _ => refused("Devin is displaying another conversation"),
     }
 }

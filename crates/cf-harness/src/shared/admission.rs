@@ -51,6 +51,11 @@ pub(crate) fn admission(sent: &Sent, refusal: &str, queued: bool) -> Admission {
         .or_else(|| sent.error.clone())
         .unwrap_or_else(|| refusal.to_owned());
     if sent.refused {
+        // The look that licensed the paste is no longer true of the window (the box changed,
+        // output is pending, or the human typed): nothing went in, and the next look decides.
+        if matches!(sent.error.as_deref(), Some("look-again" | "unsent-text")) {
+            return Admission::LookAgain { reason };
+        }
         Admission::Refused { reason }
     } else {
         Admission::Uncertain { reason }

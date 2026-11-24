@@ -14,8 +14,9 @@ use cf_harness::contract::{
 use cf_harness::records::{ModelMoved, Quota, Record, Settlement};
 use cf_harness::seams::Time;
 use cf_harness::testing::{
-    finished, AnsweringHost, Driver, ScriptedHost, EPOCH_MS, FIRST_MESSAGE_MS,
+    finished, Answer, AnsweringHost, Driver, ScriptedHost, EPOCH_MS, FIRST_MESSAGE_MS,
 };
+use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::fixtures::*;
@@ -131,16 +132,17 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
             reason: "Devin is displaying another conversation".to_owned()
         }
     );
-    assert!(host.asked.borrow().is_empty(), "nothing reached the pane");
+    assert!(
+        host.asked
+            .borrow()
+            .iter()
+            .all(|(op, _)| op == "pane.snapshot"),
+        "nothing reached the pane"
+    );
     home.selects("mild-coin");
     assert_eq!(deliver("hi"), Admission::Admitted { queued: false });
-    assert_eq!(
-        host.asked.borrow().last().unwrap(),
-        &(
-            "pane.write_paste".to_owned(),
-            json!({ "id": "s1-zeus", "generation": 2, "body": "hi" })
-        )
-    );
+    let pasted = host.asked.borrow().last().unwrap().clone();
+    assert_eq!((pasted.0.as_str(), &pasted.1["body"]), ("pane.write_paste", &json!("hi")));
     // Node's case began with half a surrogate pair, which it dropped: a Rust
     // text holds none.
     deliver("half  of it, \u{1b}[31mred\u{1b}[0m and 50%\r60%");
@@ -203,13 +205,13 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
         finished(window.deliver(&host, &pane(), "hi")),
         Ok(Admission::Admitted { queued: false })
     );
+    let pasted = host.asked.borrow().last().unwrap().clone();
+    assert_eq!(pasted.0, "pane.write_paste");
     assert_eq!(
-        host.asked.borrow().last().unwrap(),
-        &(
-            "pane.write_paste".to_owned(),
-            json!({ "id": "s1-zeus", "generation": 2, "body": "hi", "readEmpty": 9 })
-        )
+        (&pasted.1["body"], &pasted.1["readEmpty"], &pasted.1["typed"]),
+        (&json!("hi"), &json!(9), &json!(9))
     );
+    assert!(pasted.1["at"].is_string());
     quiet.set(200);
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
     quiet.set(2_000);
@@ -231,9 +233,6 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
 #[test]
 fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
     const RULE: &str = "────────────────────────────────────────";
-    let home = Home::new();
-    let adapter = home.adapter();
-    let window = window(&adapter, &Request::resumed("mild-coin"));
     let drawn = |typed: &str, plain_after: u64| {
         json!({
             "ok": true,
@@ -241,10 +240,21 @@ fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
             "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain_after },
         })
     };
-    assert!(window.box_read_empty(&drawn("❭ Ask Devin anything about your code", 0)));
-    assert!(!window.box_read_empty(&drawn("❭ probe words", 10)));
-    assert!(!window.box_read_empty(&json!({ "ok": true, "bottom": ["SWE-2 Medium"] })));
+    assert!(reads_empty(Harness::Devin, &drawn("❭ Ask Devin anything about your code", 0)));
+    assert!(!reads_empty(Harness::Devin, &drawn("❭ probe words", 10)));
+    assert!(!reads_empty(Harness::Devin, &json!({ "ok": true, "bottom": ["SWE-2 Medium"] })));
 }
+
+/// Whether the look `snapshot` is (given the `seen` and `typed` a real host's carries) reads the
+/// box of `harness` empty.
+fn reads_empty(harness: cf_proto::agents::Harness, snapshot: &Value) -> bool {
+    let mut snapshot = snapshot.clone();
+    snapshot["seen"] = json!("00000000000000aa");
+    snapshot["typed"] = json!(0);
+    cf_harness::Look::of(&snapshot)
+        .is_ok_and(|look| look.reads(harness) == cf_harness::BoxReading::Empty)
+}
+
 
 /// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still
 /// admits it as it is asked for, after the window's own reads.
@@ -255,13 +265,20 @@ fn a_paste_the_host_no_longer_admits_is_refused_and_never_reaches_the_pane() {
     home.selects("mild-coin");
     let host = ScriptedHost::default();
     host.refuse_hand_overs();
+    host.answer(
+        "pane.snapshot",
+        [Answer::Now(Ok(json!({ "ok": true, "typed": 0 })))],
+    );
     assert_eq!(
         finished(window.deliver(&host, &pane(), "hi")),
         Ok(Admission::Refused {
             reason: NOT_ADMITTED.to_owned()
         })
     );
-    assert!(host.take_asked().is_empty(), "nothing reached the pane");
+    assert!(
+        host.take_asked().iter().all(|(op, _)| op == "pane.snapshot"),
+        "nothing reached the pane"
+    );
     assert_eq!(host.admissions(), 1);
 }
 

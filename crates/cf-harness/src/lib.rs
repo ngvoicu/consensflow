@@ -42,6 +42,12 @@ pub mod seams;
 mod shared;
 
 pub use devin::forget_kept;
+pub use shared::admission::Sent;
+pub use shared::pane::{enter, look};
+pub use shared::look::{
+    after_wait, licence_enter, licence_paste, AfterWait, At, BoxReading, BoxState, EnterFor,
+    EnterLicence, Look, NoLook, PasteLicence, SCREEN_QUIET_FOR_ENTER_MS,
+};
 pub use shared::launch_files::{forget_launch, sweep_launches, NotRemoved};
 pub use shared::specmint::bundled_specmint;
 

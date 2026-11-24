@@ -94,27 +94,51 @@ impl Stopped {
     }
 }
 
+/// What the pane host says of a Claude Code window whose box holds `typed` after its mark: the
+/// look a paste is licensed by.
+fn looked(typed: &str) -> Value {
+    let rule = "─".repeat(40);
+    json!({
+        "ok": true, "pasteInFlight": false, "unsent": false, "typed": 0, "seen": "00000000000000aa",
+        "bottom": ["⏺ READY", "", rule, format!("❯ {typed}"), rule],
+        "cursor": { "line": 3, "col": 2, "shown": true, "plainAfter": typed.chars().count() },
+    })
+}
+
 /// A host that takes keys and pastes, and says what it was asked.
 fn taking() -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
-    AnsweringHost::new(|op| {
+    taking_over("")
+}
+
+/// [`taking`], the window's box holding `typed`: what Claude put back there.
+fn taking_over(typed: &'static str) -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
+    AnsweringHost::new(move |op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "pasteInFlight": false, "unsent": false }),
+            "pane.snapshot" => looked(typed),
             _ => json!({ "ok": true }),
         })
     })
 }
 
-/// What was asked of the host: its operation, and the keys or the text.
+/// The text Claude put back in the box.
+const PUT_BACK: &str = "Resumed: Go on";
+
+/// What was asked of the host: its operation, and the keys or the text. A paste that empties the
+/// box first is the key and then the paste, as it is written: one write, the key in front.
 fn asked(host: &AnsweringHost<impl Fn(&str) -> Result<Value, HostError>>) -> Vec<(String, Value)> {
-    host.asked
-        .borrow()
-        .iter()
-        .filter(|(op, _)| op != "pane.snapshot")
-        .map(|(op, body)| {
-            let what = body.get("bytes").or_else(|| body.get("body")).cloned();
-            (op.clone(), what.unwrap_or(Value::Null))
-        })
-        .collect()
+    let mut asked = Vec::new();
+    for (op, body) in host.asked.borrow().iter() {
+        if op == "pane.snapshot" {
+            continue;
+        }
+        if let Some(keys) = body.get("clearFirst").and_then(Value::as_str) {
+            let keys: Vec<u8> = keys.bytes().collect();
+            asked.push(("pane.input".to_owned(), json!(keys)));
+        }
+        let what = body.get("bytes").or_else(|| body.get("body")).cloned();
+        asked.push((op.clone(), what.unwrap_or(Value::Null)));
+    }
+    asked
 }
 
 fn pane() -> Pane {
@@ -308,7 +332,7 @@ fn the_text_claude_put_back_in_its_input_box_is_cleared_before_the_next_message_
     stopped.at(5_000);
     assert!(stopped.settled());
 
-    let host = taking();
+    let host = taking_over(PUT_BACK);
     let sent = finished(stopped.window.deliver(&host, &pane(), "Resumed: Go on"));
     assert_eq!(sent, Ok(Admission::Admitted { queued: false }));
     assert_eq!(
@@ -365,7 +389,7 @@ fn a_box_the_engine_just_emptied_is_not_emptied_again_by_claude() {
     stopped.at(5_000);
     assert!(stopped.settled());
 
-    let host = ClearedFirst(taking());
+    let host = ClearedFirst(taking_over(PUT_BACK));
     let sent = finished(stopped.window.deliver(&host, &pane(), "Resumed: Go on"));
     assert_eq!(sent, Ok(Admission::Admitted { queued: false }));
     assert_eq!(
@@ -389,15 +413,15 @@ fn a_paste_the_host_stops_admitting_while_the_input_box_is_cleared_is_never_writ
     assert!(stopped.settled());
 
     let host = Rc::new(ScriptedHost::default());
-    host.answer("pane.input", [Answer::Held]);
+    host.answer("pane.snapshot", [Answer::Held]);
     let mut driver = Driver::default();
     let (window, handing) = (Rc::clone(&stopped.window), Rc::clone(&host));
     driver.begin(0, async move {
         window.deliver(&*handing, &pane(), "Resumed: Go on").await
     });
-    assert!(driver.run().is_empty(), "Ctrl+C waits for the host");
+    assert!(driver.run().is_empty(), "the look waits for the host");
     host.refuse_hand_overs();
-    assert!(host.release("pane.input", Ok(json!({ "ok": true }))));
+    assert!(host.release("pane.snapshot", Ok(looked(PUT_BACK))));
     assert_eq!(
         driver.run(),
         [(
@@ -408,7 +432,7 @@ fn a_paste_the_host_stops_admitting_while_the_input_box_is_cleared_is_never_writ
         )]
     );
     let ops: Vec<String> = host.take_asked().into_iter().map(|(op, _)| op).collect();
-    assert_eq!(ops, ["pane.input"], "nothing pasted");
+    assert_eq!(ops, ["pane.snapshot"], "nothing pressed, nothing pasted");
 }
 
 #[test]
@@ -435,9 +459,13 @@ fn an_input_box_that_could_not_be_cleared_is_not_pasted_into_and_is_cleared_agai
     stopped.at(5_000);
     assert!(stopped.settled());
 
+    // The host takes none of it: the key that empties the box goes with the paste or not at all.
     let refusing = AnsweringHost::new(|op| {
         Ok(match op {
-            "pane.input" => json!({ "ok": false, "error": "stale", "cause": "stale pane" }),
+            "pane.snapshot" => looked(PUT_BACK),
+            "pane.write_paste" => json!({
+                "ok": false, "admitted": false, "error": "stale-pane", "cause": "stale pane",
+            }),
             _ => json!({ "ok": true }),
         })
     });
@@ -445,18 +473,21 @@ fn an_input_box_that_could_not_be_cleared_is_not_pasted_into_and_is_cleared_agai
     assert_eq!(
         refused,
         Ok(Admission::Refused {
-            reason: "the window's input box could not be cleared: stale pane".to_owned()
+            reason: "stale pane".to_owned()
         })
     );
     assert_eq!(
         asked(&refusing),
-        [("pane.input".to_owned(), json!([3]))],
-        "nothing was pasted after the old text"
+        [
+            ("pane.input".to_owned(), json!([3])),
+            ("pane.write_paste".to_owned(), json!("Resumed: Go on")),
+        ],
+        "the key never went alone: the host wrote nothing"
     );
 
     // The next look still reads it so, and the next paste clears first.
     assert!(stopped.settled());
-    let host = taking();
+    let host = taking_over(PUT_BACK);
     finished(stopped.window.deliver(&host, &pane(), "Resumed: Go on")).unwrap();
     assert_eq!(
         asked(&host).first(),
@@ -476,6 +507,7 @@ fn a_paste_the_window_may_have_taken_in_part_is_cleared_before_the_next_try() {
 
     let breaking = AnsweringHost::new(|op| {
         Ok(match op {
+            "pane.snapshot" => looked(PUT_BACK),
             "pane.write_paste" => json!({ "ok": false, "admitted": null, "error": "uncertain" }),
             _ => json!({ "ok": true }),
         })
@@ -483,7 +515,7 @@ fn a_paste_the_window_may_have_taken_in_part_is_cleared_before_the_next_try() {
     let uncertain = finished(stopped.window.deliver(&breaking, &pane(), "Resumed: Go on")).unwrap();
     assert!(matches!(uncertain, Admission::Uncertain { .. }));
 
-    let host = taking();
+    let host = taking_over(PUT_BACK);
     finished(stopped.window.deliver(&host, &pane(), "Resumed: Go on")).unwrap();
     assert_eq!(
         asked(&host).first(),

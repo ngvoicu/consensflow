@@ -32,19 +32,54 @@ fn changed(session: &str, mode: &str) -> String {
     format!("{record}\n")
 }
 
+const RULE: &str = "────────────────────────────────────────";
+
+/// What the host says of a Devin window whose screen has held still for `quiet` milliseconds,
+/// its box holding `/bypass` where `holds` says so: the look a delivery reads (the box's words,
+/// the cursor after them, and the `seen` that names both).
+fn looked(quiet: f64, holds: bool) -> Value {
+    let (words, plain) = if holds {
+        ("❭ /bypass", 7)
+    } else {
+        ("❭ Ask Devin anything about your code", 0)
+    };
+    json!({
+        "ok": true, "outputQuietMs": 0, "screenQuietMs": quiet as u64, "typed": 0,
+        "seen": format!("{:016x}", u64::from(holds)),
+        "bottom": [format!("{RULE} (normal) ─"), words, RULE, "SWE-2 Medium"],
+        "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain },
+    })
+}
+
 /// A pane host whose window's screen has held still for `quiet` milliseconds while its
 /// output never does (what it prints changes nothing shown: `/bypass` waits on the screen,
-/// T-1083), and takes every paste unless `refuse` says it writes nothing.
+/// T-1083), and takes every paste unless `refuse` says it writes nothing. A paste it takes sits
+/// in the box until an Enter is taken.
 fn host(
     quiet: Rc<Cell<f64>>,
     refuse: Rc<Cell<bool>>,
 ) -> AnsweringHost<impl Fn(&str) -> Result<Value, crate::contract::HostError>> {
+    host_holding(quiet, refuse, Rc::new(Cell::new(false)))
+}
+
+/// [`host`], its box holding what `holds` says.
+fn host_holding(
+    quiet: Rc<Cell<f64>>,
+    refuse: Rc<Cell<bool>>,
+    holds: Rc<Cell<bool>>,
+) -> AnsweringHost<impl Fn(&str) -> Result<Value, crate::contract::HostError>> {
     AnsweringHost::new(move |op| {
         Ok(match op {
-            "pane.snapshot" => {
-                json!({ "ok": true, "outputQuietMs": 0, "screenQuietMs": quiet.get() })
-            }
+            "pane.snapshot" => looked(quiet.get(), holds.get()),
             "pane.write_paste" if refuse.get() => json!({ "ok": false, "admitted": false }),
+            "pane.write_paste" => {
+                holds.set(true);
+                json!({ "ok": true })
+            }
+            "pane.enter" => {
+                holds.set(false);
+                json!({ "ok": true })
+            }
             _ => json!({ "ok": true }),
         })
     })
@@ -100,7 +135,8 @@ fn a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, &wire, Some("mild-coin"));
     let (quiet, refuse) = (Rc::new(Cell::new(200.0)), Rc::new(Cell::new(false)));
-    let host = host(Rc::clone(&quiet), refuse);
+    let holds = Rc::new(Cell::new(false));
+    let host = host_holding(Rc::clone(&quiet), refuse, Rc::clone(&holds));
     // Its screen is still drawing: it waits, and nothing is pasted yet.
     assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
     assert!(pastes(&host.asked).is_empty());
@@ -113,6 +149,8 @@ fn a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_
     assert_eq!(pastes(&host.asked), ["/bypass"], "not again so soon");
     // The wire says the mode changed: ready, and nothing more is pasted.
     append(&wire, &changed("mild-coin", "bypass"));
+    // The window took the command, which its box no longer holds.
+    holds.set(false);
     assert_eq!(finished(window.ready(&host, &pane())), Ok(Readiness::Ready));
     assert_eq!(pastes(&host.asked), ["/bypass"]);
 }
@@ -131,8 +169,11 @@ fn a_window_says_what_its_last_look_read_of_the_humans_input() {
     assert_eq!(finished(window.ready(&host, &pane())), Ok(Readiness::Ready));
     assert_eq!(
         window.human_input(),
-        Some(cf_proto::panes::HumanInput::default()),
-        "a snapshot that says nothing of the human"
+        Some(cf_proto::panes::HumanInput {
+            typed: Some(0),
+            ..cf_proto::panes::HumanInput::default()
+        }),
+        "a snapshot that says nothing of the human but its count"
     );
 }
 
@@ -141,7 +182,7 @@ fn enters(asked: &RefCell<Vec<(String, Value)>>) -> usize {
     asked
         .borrow()
         .iter()
-        .filter(|(op, body)| op == "pane.input" && body["bytes"] == json!([13]))
+        .filter(|(op, _)| op == "pane.enter")
         .count()
 }
 
@@ -153,7 +194,7 @@ fn while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_past
     fs::write(&wire, configured("mild-coin", "normal")).unwrap();
     let fakes = Fakes::new(&Env::default());
     let window = window(&fakes, &wire, Some("mild-coin"));
-    let (quiet, refuse) = (Rc::new(Cell::new(2_000.0)), Rc::new(Cell::new(true)));
+    let (quiet, refuse) = (Rc::new(Cell::new(3_000.0)), Rc::new(Cell::new(true)));
     let host = host(quiet, Rc::clone(&refuse));
     // The host wrote nothing: the next look tries again at once.
     assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
@@ -192,10 +233,15 @@ fn an_enter_the_host_did_not_take_is_pressed_again_at_the_next_look() {
     let window = window(&fakes, &wire, Some("mild-coin"));
     let taken = Rc::new(Cell::new(false));
     let keys = Rc::clone(&taken);
+    let box_holds = Cell::new(false);
     let host = AnsweringHost::new(move |op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": 2_000 }),
-            "pane.input" if !keys.get() => json!({ "ok": false, "error": "stale" }),
+            "pane.snapshot" => looked(3_000.0, box_holds.get()),
+            "pane.write_paste" => {
+                box_holds.set(true);
+                json!({ "ok": true })
+            }
+            "pane.enter" if !keys.get() => json!({ "ok": false, "error": "stale" }),
             _ => json!({ "ok": true }),
         })
     });
@@ -226,7 +272,7 @@ fn host_while(
     AnsweringHost::new(move |op| {
         if op == "pane.snapshot" {
             append(&wire, &meanwhile);
-            return Ok(json!({ "ok": true, "screenQuietMs": 2_000 }));
+            return Ok(looked(2_000.0, false));
         }
         Ok(json!({ "ok": true }))
     })
@@ -274,10 +320,12 @@ fn a_conversation_the_window_is_followed_to_has_its_own_time_to_leave_the_normal
     append(&wire, &configured("fresh-leaf", "normal"));
     window.follow("fresh-leaf");
     assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
+    // The first paste is still in the box (no Enter was pressed for it), and nothing is pasted
+    // over it: the paste of the new conversation waits for the Enter's while.
     assert_eq!(
         pastes(&host.asked),
-        ["/bypass", "/bypass"],
-        "the new one is given its own paste at once"
+        ["/bypass"],
+        "no second paste over the box that holds the first"
     );
     fakes.time.settle_at(late + BYPASS_WITHIN_MS - 1);
     assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
@@ -337,7 +385,11 @@ fn a_window_that_never_draws_is_asked_as_it_draws_and_its_time_runs_all_the_same
     // The host says it has printed nothing.
     let host = AnsweringHost::new(|op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": null }),
+            "pane.snapshot" => {
+                let mut snapshot = looked(0.0, false);
+                snapshot["screenQuietMs"] = Value::Null;
+                snapshot
+            }
             _ => json!({ "ok": true }),
         })
     });
@@ -377,7 +429,12 @@ fn what_the_human_typed_and_has_not_sent_holds_the_window_before_the_mode_is_see
     let window = window(&fakes, &wire, Some("mild-coin"));
     let host = AnsweringHost::new(|op| {
         Ok(match op {
-            "pane.snapshot" => json!({ "ok": true, "screenQuietMs": 2_000, "unsent": true }),
+            "pane.snapshot" => {
+                let mut snapshot = looked(2_000.0, true);
+                snapshot["unsent"] = json!(true);
+                snapshot["typedQuietMs"] = json!(30_000);
+                snapshot
+            }
             _ => json!({ "ok": true }),
         })
     });

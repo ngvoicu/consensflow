@@ -52,11 +52,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
-use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
+use cf_proto::panes::{HumanInput, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -76,7 +75,10 @@ use crate::detect::executable;
 use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, ReadEmpty, Unsent};
+use crate::shared::input_box;
+use crate::shared::look::{
+    licence_enter, licence_paste, BoxState, EnterFor, EnterLicence, Look, PasteLicence, NO_LOOK,
+};
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
@@ -220,9 +222,6 @@ struct Switch {
     pasted: Option<i64>,
     entered: Option<i64>,
 }
-
-/// The key that sends what the input box holds.
-const ENTER: u8 = 13;
 
 /// How often the wire log is asked which conversation Devin opened, and the
 /// most it is waited on before it is given up on: a minute, or less where the
@@ -507,10 +506,6 @@ struct DevinWindow {
     /// How many history rows its conversation had at the engine's last look at the
     /// window (`observe`), which found it at rest or not.
     looked: Cell<Option<u64>>,
-    /// The human's keys left something unsent by the pane host's count, and the
-    /// latest readiness read the input box empty on the screen, at this count of
-    /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
-    read_empty: Cell<Option<ReadEmpty>>,
     /// What the pane host said of the human's input at the latest readiness, where it
     /// read a snapshot of the pane ([`Window::human_input`]).
     input: RefCell<Option<HumanInput>>,
@@ -566,7 +561,6 @@ impl DevinWindow {
             at_enter,
             history: History::default(),
             looked: Cell::default(),
-            read_empty: Cell::default(),
             input: RefCell::default(),
             left_open: RefCell::new(left_open),
             unannounced_since: Cell::default(),
@@ -624,7 +618,7 @@ impl DevinWindow {
         &self,
         host: &dyn PaneHost,
         pane: &Pane,
-        snapshot: &Value,
+        look: &Look,
     ) -> Readiness {
         let now = self.time.wall_ms();
         let mut switch = self.switch.get();
@@ -633,33 +627,42 @@ impl DevinWindow {
             self.switch.set(switch);
             return Readiness::Unfit(stayed_in_normal());
         }
-        let drawn = snapshot
-            .get(SCREEN_QUIET_MS)
-            .is_none_or(|quiet| quiet.as_f64().is_some_and(|ms| ms >= DRAWN_QUIET_MS));
+        // A window the host says has shown nothing yet has not drawn.
+        let drawn = look
+            .screen_quiet_ms()
+            .is_some_and(|ms| ms as f64 >= DRAWN_QUIET_MS);
         let due = switch
             .entered
             .or(switch.pasted)
             .is_none_or(|last| now - last >= BYPASS_AGAIN_MS);
         if drawn && due {
             if switch.pasted.is_some() && switch.entered.is_none() {
-                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() {
-                    switch.entered = Some(now);
+                // The Enter is the look's: the host checks it again where it writes.
+                if let EnterLicence::Go(at) =
+                    licence_enter(look, Harness::Devin, EnterFor::DevinBypass)
+                {
+                    if pane::enter(host, pane, &at).await.ok {
+                        switch.entered = Some(now);
+                    }
                 }
             } else {
-                let session = self.session.borrow().clone();
-                let sent = channel::send(
-                    host,
-                    pane,
-                    self.wire.path(),
-                    session.as_deref(),
-                    channel::Guard::Configured,
-                    BYPASS,
-                    self.read_empty.get(),
-                )
-                .await;
-                if !sent.refused {
-                    switch.pasted = Some(now);
-                    switch.entered = None;
+                let licence = licence_paste(look, Harness::Devin, BoxState::default(), &[]);
+                if matches!(licence, PasteLicence::Go { .. }) {
+                    let session = self.session.borrow().clone();
+                    let sent = channel::send(
+                        host,
+                        pane,
+                        self.wire.path(),
+                        session.as_deref(),
+                        channel::Guard::Configured,
+                        BYPASS,
+                        &licence,
+                    )
+                    .await;
+                    if !sent.refused {
+                        switch.pasted = Some(now);
+                        switch.entered = None;
+                    }
                 }
             }
         }
@@ -727,8 +730,8 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Devin, snapshot)
+    fn harness(&self) -> Harness {
+        Harness::Devin
     }
 
     /// The window is on `session` from now on: a switch to full permission begun for
@@ -774,10 +777,11 @@ impl Window for DevinWindow {
         self.input.borrow().clone()
     }
 
-    fn ready<'a>(
+    fn ready_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
@@ -785,10 +789,10 @@ impl Window for DevinWindow {
             if let Some(held) = self.shows_another(&said) {
                 return Ok(Readiness::Held(held));
             }
-            let snapshot = pane::snapshot(host, pane)
-                .await
-                .map_err(|failed| failed.message)?;
-            let input = HumanInput::of(&snapshot);
+            let Some(look) = look else {
+                return Ok(Readiness::Held(Held::Because(NO_LOOK.to_owned())));
+            };
+            let input = look.human_input();
             // The host's count is of this window's launch, and outlives a daemon's restart.
             if input
                 .as_ref()
@@ -798,18 +802,13 @@ impl Window for DevinWindow {
                 self.typed_into.set(true);
             }
             self.input.replace(input);
-            if snapshot.get("ok") != Some(&Value::Bool(true))
-                || js::truthy(snapshot.get("pasteInFlight"))
-            {
+            if look.paste_in_flight() {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
-            self.read_empty.set(None);
-            // The count is the human's keys, a guess: the box on the screen says.
-            if js::truthy(snapshot.get("unsent")) {
-                match input_box::unsent(host, pane, Harness::Devin, &snapshot).await {
-                    Unsent::ReadEmpty(answer) => self.read_empty.set(Some(answer)),
-                    Unsent::Held => return Ok(Readiness::Held(Held::Unsent)),
-                }
+            // The count is the human's keys, a guess: the box on the screen says. Nothing is
+            // switched in a window the human has typed in.
+            if look.unsent() && !look.read_empty_over_count(Harness::Devin) {
+                return Ok(Readiness::Held(Held::Unsent));
             }
             // The window as it is once the host answered: the human may have chosen
             // a mode, opened another conversation or begun a turn meanwhile, and
@@ -830,18 +829,19 @@ impl Window for DevinWindow {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
             if wants_bypass(now.mode.as_deref()) {
-                return Ok(self.switch_to_bypass(host, pane, &snapshot).await);
+                return Ok(self.switch_to_bypass(host, pane, look).await);
             }
             self.switch.set(Switch::default());
             Ok(Readiness::Ready)
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             // Windows' console drops a paste's non-ASCII marks on their way to Devin.
@@ -869,7 +869,7 @@ impl Window for DevinWindow {
             // it (`took`): Devin keeps the command in the row (run 2).
             self.history.expect(&body, self.time.wall_ms());
             let session = self.session.borrow().clone();
-            let read_empty = self.read_empty.take();
+            let licence = licence.ok_or("a window that takes pastes was given no licence")?;
             let sent = channel::send(
                 host,
                 pane,
@@ -877,7 +877,7 @@ impl Window for DevinWindow {
                 session.as_deref(),
                 guard,
                 &body,
-                read_empty,
+                licence,
             )
             .await;
             Ok(admission(&sent, "Devin refused the paste", false))
@@ -897,14 +897,6 @@ impl Window for DevinWindow {
     /// contract's own false: `took` reaches the engine first, and holds the paste for good.
     fn took(&self) -> bool {
         self.history().is_some_and(|seen| seen.took)
-    }
-
-    fn input_box<'a>(
-        &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
-    ) -> Work<'a, Option<input_box::InputBox>> {
-        Box::pin(input_box::on_screen(host, pane, Harness::Devin))
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

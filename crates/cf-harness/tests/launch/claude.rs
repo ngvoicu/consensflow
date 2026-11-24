@@ -25,6 +25,7 @@ use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Fakes, OtherProcess, FIRST_MESSAGE_MS,
 };
 use cf_proto::specs::Variant;
+use cf_proto::agents::Harness;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -713,7 +714,12 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
     let plan = prepare(&adapter, &request).unwrap();
     assert!(plan.argv.iter().all(|word| word != taken && word != text));
     let answer: RefCell<Result<Value, HostError>> = RefCell::new(Ok(json!({ "ok": true })));
-    let host = AnsweringHost::new(|_| answer.borrow().clone());
+    let host = AnsweringHost::new(|op| {
+        if op == "pane.snapshot" {
+            return Ok(json!({ "ok": true, "typed": 0, "seen": "00000000000000aa", "bottom": [] }));
+        }
+        answer.borrow().clone()
+    });
     let pane = Pane {
         id: "s1-zeus".to_owned(),
         generation: 7,
@@ -777,13 +783,10 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
         finished(window.deliver(&host, &pane, "hello")),
         Ok(Admission::Admitted { queued: false })
     );
-    assert_eq!(
-        host.asked.borrow().last().unwrap(),
-        &(
-            "pane.write_paste".to_owned(),
-            json!({ "id": "s1-zeus", "generation": 7, "body": "hello" })
-        )
-    );
+    let pasted = host.asked.borrow().last().unwrap().clone();
+    assert_eq!(pasted.0, "pane.write_paste");
+    assert_eq!(pasted.1["body"], "hello");
+    assert!(pasted.1.get("readEmpty").is_none() && pasted.1.get("clearFirst").is_none());
     paste_in_flight.set(true);
     assert_eq!(
         finished(window.ready(&host, &pane)),
@@ -813,19 +816,25 @@ fn pastes_a_message_into_the_window_waiting_for_a_paste_on_its_way_and_for_what_
 #[test]
 fn the_engine_is_told_the_box_is_empty_only_where_claude_draws_it_empty() {
     const RULE: &str = "────────────────────────────────────────";
-    let home = Home::new();
-    let window = window(
-        &home.adapter(),
-        &Request::resumed("e2c56db5-dffb-48d2-b060-d0f5a71096e0"),
-    );
     let drawn = |typed: &str| {
         json!({ "ok": true, "bottom": ["⏺ 4", "", RULE, typed, RULE,
             "  ⏵⏵ bypass permissions on (shift+tab to cycle)"] })
     };
-    assert!(window.box_read_empty(&drawn("❯ ")));
-    assert!(!window.box_read_empty(&drawn("❯ half a sentence")));
-    assert!(!window.box_read_empty(&json!({ "ok": true, "bottom": ["⏺ 4"] })));
+    assert!(reads_empty(Harness::Claude, &drawn("❯ ")));
+    assert!(!reads_empty(Harness::Claude, &drawn("❯ half a sentence")));
+    assert!(!reads_empty(Harness::Claude, &json!({ "ok": true, "bottom": ["⏺ 4"] })));
 }
+
+/// Whether the look `snapshot` is (given the `seen` and `typed` a real host's carries) reads the
+/// box of `harness` empty.
+fn reads_empty(harness: cf_proto::agents::Harness, snapshot: &Value) -> bool {
+    let mut snapshot = snapshot.clone();
+    snapshot["seen"] = json!("00000000000000aa");
+    snapshot["typed"] = json!(0);
+    cf_harness::Look::of(&snapshot)
+        .is_ok_and(|look| look.reads(harness) == cf_harness::BoxReading::Empty)
+}
+
 
 #[test]
 fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog() {
@@ -871,13 +880,14 @@ fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dial
         finished(window.deliver(&host, &pane, "hello")),
         Ok(Admission::Admitted { queued: false })
     );
+    let pasted = host.asked.borrow().last().unwrap().clone();
+    assert_eq!(pasted.0, "pane.write_paste");
     assert_eq!(
-        host.asked.borrow().last().unwrap(),
-        &(
-            "pane.write_paste".to_owned(),
-            json!({ "id": "s1-zeus", "generation": 7, "body": "hello", "readEmpty": 4 })
-        )
+        (&pasted.1["body"], &pasted.1["readEmpty"], &pasted.1["typed"]),
+        (&json!("hello"), &json!(4), &json!(4)),
+        "told the box read empty at the count, over the look it was read on"
     );
+    assert!(pasted.1["at"].is_string());
     // A key a moment ago may not be drawn yet; nor one the window has printed nothing
     // since (T-330), unless it is 5 s past: a key that changes nothing draws nothing.
     quiet.set(200);
@@ -921,14 +931,17 @@ fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dial
         Ok(Readiness::Held(Held::Unsent))
     );
     assert_eq!(older.asked.borrow().len(), 1);
-    // A paste after a look that held says nothing of a read.
-    assert_eq!(
+    // A paste is licensed by a look, and a look that holds licenses none: nothing is written.
+    let before = host.asked.borrow().len();
+    assert!(matches!(
         finished(window.deliver(&host, &pane, "hello")),
-        Ok(Admission::Admitted { queued: false })
-    );
-    assert_eq!(
-        host.asked.borrow().last().unwrap().1,
-        json!({ "id": "s1-zeus", "generation": 7, "body": "hello" })
+        Ok(Admission::Refused { .. })
+    ));
+    assert!(
+        host.asked.borrow()[before..]
+            .iter()
+            .all(|(op, _)| op == "pane.snapshot"),
+        "no paste went out"
     );
 }
 

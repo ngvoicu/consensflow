@@ -1026,3 +1026,44 @@ mod tests {
         );
     }
 }
+
+/// A look at `pane` taken from what a test's scripted `host` answers to `pane.snapshot`: where
+/// the answer names no `seen`, `typed` or `bottom`, they are given (a `seen` made of the lines and
+/// the cursor, as the real host's is), so that an answer a test wrote before looks existed reads
+/// as the look it stands for. A host that does not answer, or says not ok, gives none.
+pub async fn look_of_scripted(
+    host: &dyn PaneHost,
+    pane: &Pane,
+) -> Result<crate::Look, crate::NoLook> {
+    use std::hash::{Hash, Hasher};
+    let request = serde_json::json!({
+        "id": pane.id, "generation": pane.generation, "bottom": cf_proto::panes::BOTTOM_LINES,
+    });
+    let mut snapshot = host
+        .request("pane.snapshot", request)
+        .await
+        .map_err(|_| crate::NoLook::NoAnswer)?;
+    if let Some(answer) = snapshot.as_object_mut() {
+        answer
+            .entry("bottom")
+            .or_insert_with(|| serde_json::json!([]));
+        answer.entry("typed").or_insert_with(|| serde_json::json!(0));
+        // A host that says nothing of its screen's quiet is read as one long still.
+        answer
+            .entry("screenQuietMs")
+            .or_insert_with(|| serde_json::json!(60_000));
+        if !answer.contains_key("seen") {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            answer["bottom"].to_string().hash(&mut hasher);
+            answer
+                .get("cursor")
+                .map(ToString::to_string)
+                .hash(&mut hasher);
+            answer.insert(
+                "seen".to_owned(),
+                serde_json::json!(format!("{:016x}", hasher.finish())),
+            );
+        }
+    }
+    crate::Look::of(&snapshot)
+}

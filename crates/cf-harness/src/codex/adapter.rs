@@ -44,6 +44,7 @@ use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
+use crate::shared::look::{Look, PasteLicence};
 use crate::contract::{
     Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
     Over, Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
@@ -514,10 +515,15 @@ impl Window for CodexWindow {
 
     /// A message waits until the broker can take one and the window shows its
     /// own thread.
-    fn ready<'a>(
+    fn harness(&self) -> Harness {
+        Harness::Codex
+    }
+
+    fn ready_on<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
         _pane: &'a Pane,
+        _look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             Ok(match self.shown().await {
@@ -533,11 +539,12 @@ impl Window for CodexWindow {
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        _licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();
