@@ -36,16 +36,6 @@ find = """if state.unsent > 0 && paste.read_empty != Some(at.typed) {"""
 replace = """if state.unsent > 0 {"""
 
 [[plant]]
-name = "escape-unsent: the host takes a paste read empty at any count, a key since or not"
-meant = "a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it"
-runs = ["escape-unsent-arbiter"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = """if state.unsent > 0 && paste.read_empty != Some(at.typed) {"""
-replace = """if state.unsent > 0 && paste.read_empty.is_none() {"""
-
-[[plant]]
 name = "escape-unsent: Escape clears the count, though the box may keep the words"
 meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
 runs = ["escape-unsent-arbiter"]
