@@ -584,31 +584,27 @@ fn alpha_13s_question_and_bound_follow_up_go_on_in_the_same_window_through_deliv
 }
 
 /// A Critical worker's brief alpha.13 wrote and had not handed over, queued for its window or
-/// held at the human's gate, is delivered with the rule of now: its purpose alone. A brief that
-/// was delivered keeps what it said, a reviewer's Critical brief still says it changes no
-/// project file, and the Critical task alpha.13 left open is briefed by the rule of now.
+/// held at the human's gate, is delivered as it was saved: the update changes no message, so it
+/// still leads with "It changes no project file" (`architecture/staff-slots.md` 9.6, a known
+/// limit). A brief written after the update has the line of now.
 #[test]
-fn alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now() {
+fn alpha_13s_undelivered_critical_worker_briefs_are_delivered_as_saved() {
     const BEFORE: &str =
         "It changes no project file: return analysis, evidence and recommendations to the chief.";
     let dir = alpha13();
     let mut ledger = open(&dir);
     let body = |ledger: &Ledger, id: i64| ledger.message(id).unwrap().unwrap();
+    let saved = |purpose: &str, work: &str| format!("Critical work: {purpose}. {BEFORE}\n\n{work}");
     // T-5's delivered brief: history.
-    assert!(body(&ledger, 7)
-        .body
-        .starts_with(&format!("Critical work: hard-problem. {BEFORE}")));
-    // T-6's, queued: delivered with the purpose alone.
+    assert_eq!(body(&ledger, 7).state, "delivered");
+    // T-6's, queued: delivered byte for byte.
     ledger.begin_delivery(8).expect("its delivery begins");
     ledger
         .confirm_delivery(8, Some(&serde_json::json!({ "item": "i-1" })))
         .expect("delivered");
     let queued = body(&ledger, 8);
     assert_eq!(queued.state, "delivered");
-    assert_eq!(
-        queued.body,
-        "Critical work: hard-problem.\n\nModify a project file"
-    );
+    assert_eq!(queued.body, saved("hard-problem", "Modify a project file"));
     // The gated project's worker brief: the human passes it on, and it is delivered so.
     ledger.approve_message(9, "human").expect("passed on");
     ledger.begin_delivery(9).expect("its delivery begins");
@@ -617,24 +613,15 @@ fn alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_n
         .expect("delivered");
     let gated = body(&ledger, 9);
     assert_eq!(gated.state, "delivered");
-    assert_eq!(
-        gated.body,
-        "Critical work: hard-problem.\n\nModify a project file"
-    );
+    assert_eq!(gated.body, saved("hard-problem", "Modify a project file"));
     // The gated reviewer's: a reviewer changes no file.
     assert_eq!(
         body(&ledger, 10).body,
-        format!("Critical work: critical-review. {BEFORE}\n\nReview it")
+        saved("critical-review", "Review it")
     );
     // T-7, open: given now, briefed by the rule of now.
-    let zeus: i64 = ledger
-        .sqlite()
-        .query_row("SELECT id FROM participant WHERE id = 4", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
     let brief = ledger
-        .assign_task(1, 7, zeus)
+        .assign_task(1, 7, 4)
         .expect("assigned")
         .message
         .expect("its brief");

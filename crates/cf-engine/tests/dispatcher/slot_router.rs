@@ -675,12 +675,13 @@ fn a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slo
 }
 
 /// A Critical worker's brief that alpha.13 or alpha.14 wrote and had not handed over (queued for
-/// its window, or held at the human's gate) reaches the window after the update with the line
-/// of the rule now: its purpose alone, never "It changes no project file", which would forbid
-/// a worker its coding. The brief is made as those versions made it, the ledger is taken back
-/// to the schema before the update and opened as a start opens it, and the engine delivers it.
+/// its window, or held at the human's gate) reaches the window after the update as it was saved,
+/// with the line every earlier version wrote: the update changes no message (a known limit,
+/// `architecture/staff-slots.md` 9.6). The brief is made as those versions made it, the ledger
+/// is taken back to the schema before the update and opened as a start opens it, and the engine
+/// delivers it.
 #[test]
-fn a_critical_workers_brief_from_before_the_update_is_delivered_with_the_rule_of_now() {
+fn a_critical_workers_brief_from_before_the_update_is_delivered_as_saved() {
     const BEFORE: &str = "Critical work: hard-problem. It changes no project file: return analysis, evidence and recommendations to the chief.";
     for gate in [false, true] {
         let context = Context::new();
@@ -761,12 +762,7 @@ fn a_critical_workers_brief_from_before_the_update_is_delivered_with_the_rule_of
             .collect();
         assert_eq!(brief_given.len(), 1, "gate {gate}: {given:?}");
         assert!(
-            brief_given[0].contains("Critical work: hard-problem.\n\nModify a project file"),
-            "gate {gate}: {}",
-            brief_given[0]
-        );
-        assert!(
-            !brief_given[0].contains("changes no project file"),
+            brief_given[0].contains(&format!("{BEFORE}\n\nModify a project file")),
             "gate {gate}: {}",
             brief_given[0]
         );

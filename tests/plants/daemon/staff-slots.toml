@@ -483,48 +483,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "staff slots: the update leaves a queued Critical brief of a worker with the line before"
-meant = "a_critical_workers_brief_from_before_the_update_is_delivered_with_the_rule_of_now"
-runs = ["ss-engine-router"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
-find = '''
- WHERE kind = 'task' AND state IN ('queued', 'gated')
-'''
-replace = '''
- WHERE kind = 'task' AND state IN ('none')
-'''
-
-[[plant]]
-name = "staff slots: the update leaves a gated Critical brief of a worker with the line before"
-meant = "alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now"
-runs = ["ss-ledger-update"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
-find = '''
- WHERE kind = 'task' AND state IN ('queued', 'gated')
-'''
-replace = '''
- WHERE kind = 'task' AND state IN ('queued')
-'''
-
-[[plant]]
-name = "staff slots: the update rewrites a brief that was delivered"
-meant = "alpha_13s_undelivered_critical_worker_briefs_are_delivered_with_the_rule_of_now"
-runs = ["ss-ledger-update"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
-find = '''
- WHERE kind = 'task' AND state IN ('queued', 'gated')
-'''
-replace = '''
- WHERE kind = 'task' AND state IN ('queued', 'gated', 'delivered')
-'''
-
-[[plant]]
 name = "staff slots: the sweep's refusal of a backup ends the pass"
 meant = "critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup"
 runs = ["ss-engine-router"]

@@ -16,8 +16,8 @@ use serde_json::{json, Value};
 use super::giving::upstream;
 use super::own_steps::is_own_step;
 use super::{
-    delivery_body, release_inside, release_ready, require_on_board, require_task_state, task_by_id,
-    task_row_by_id,
+    brief_before_slots, delivery_body, release_inside, release_ready, require_on_board,
+    require_task_state, task_by_id, task_row_by_id,
 };
 use crate::model::{self, title_of, LedgerError, MAX_BODY, PURPOSES};
 use crate::roles;
@@ -435,10 +435,12 @@ fn rewrite_pending_briefs(
     renewed: &TaskRow,
 ) -> Result<(), LedgerError> {
     let old = delivery_body(task);
+    let before_slots = brief_before_slots(task);
     let words = delivery_body(renewed);
     // Only the rows that say the brief: a row that is it (the brief as it was
     // queued), or starts with it and a blank line (a resume that carries it); a
-    // row of the resume's words alone, or any other, is left as it is.
+    // row of the resume's words alone, or any other, is left as it is. A brief an
+    // earlier version saved says its critical line as that version did.
     let rows: Vec<(i64, String)> = store
         .db
         .prepare(
@@ -448,13 +450,18 @@ fn rewrite_pending_briefs(
         .query_map([task.id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     for (id, row) in rows {
-        let renewed = if row == old {
-            Some(words.clone())
-        } else {
-            row.strip_prefix(old.as_str())
-                .and_then(|rest| rest.strip_prefix("\n\n"))
-                .map(|rest| format!("{words}\n\n{rest}"))
-        };
+        let renewed = [Some(&old), before_slots.as_ref()]
+            .into_iter()
+            .flatten()
+            .find_map(|old| {
+                if row == *old {
+                    Some(words.clone())
+                } else {
+                    row.strip_prefix(old.as_str())
+                        .and_then(|rest| rest.strip_prefix("\n\n"))
+                        .map(|rest| format!("{words}\n\n{rest}"))
+                }
+            });
         if let Some(renewed) = renewed {
             store.db.execute(
                 "UPDATE message SET body = ? WHERE id = ?",

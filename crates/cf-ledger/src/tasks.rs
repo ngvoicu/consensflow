@@ -84,6 +84,23 @@ fn delivery_body(task: &TaskRow) -> String {
     }
 }
 
+/// `task`'s brief as every version before the slots wrote it, where that is not
+/// `delivery_body(task)`: critical work (a purpose) of the architect or of a role that changes
+/// files, which those versions led with "It changes no project file". `None` for every other
+/// task, where both forms are one. Main knows a task's own brief among its saved messages by
+/// its text, so the move (`transfer`) and the edit (`rewrite_pending_briefs`) ask this too.
+pub(crate) fn brief_before_slots(task: &TaskRow) -> Option<String> {
+    let purpose = task.purpose.as_ref()?;
+    let role = task.pool.as_deref().and_then(roles::find)?;
+    if role.id != roles::ARCHITECT.id && !role.changes_files {
+        return None;
+    }
+    Some(format!(
+        "Critical work: {purpose}. {CRITICAL_RULE}\n\n{}",
+        task.body
+    ))
+}
+
 /// The words that send a window on, as the task message that carries them
 /// reads: with the task's brief before them when no task message for the
 /// window was received or is on its way, so that the body never builds a
