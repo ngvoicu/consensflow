@@ -162,7 +162,7 @@ impl ComputerUse for MachineComputerUse {
         Box::pin(async move {
             self.ask(move |_| cf_harness::codex::computer_use::computer_use(&env))
                 .await
-                .unwrap_or(cf_harness::codex::computer_use::ComputerUse { set_up: false })
+                .unwrap_or_default()
         })
     }
 }
