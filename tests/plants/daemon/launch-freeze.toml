@@ -2,9 +2,14 @@
 # never hold the daemon's thread, and the daemon waits for them no longer than a limit (T-2203:
 # the owner's board stood still for 14 minutes while a launch waited). The calls are made on the
 # worker of `MachineComputerUse` (crates/cf-daemon/src/computer_use.rs, `ask`), whose answer is
-# waited for with a timeout.
+# waited for with a timeout. Round 2: the launch's plan finds the program, reads the project's
+# folders and writes the launch's files on the plan's worker (crates/cf-harness/src/shared/
+# off_thread.rs), waited for as long as it takes, and a launch the system gave no answer to says
+# so in the log (crates/cf-engine/src/computer_use.rs, `went_on_without_the_note`).
 
 [run]
+lf-plan = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread"]
+lf-log = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_the_system_gave_no_answer", "--", "--test-threads=2"]
 lf-query = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_waits"]
 lf-config = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_read_of_claude_codes"]
 lf-never = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_never_ends"]
@@ -41,3 +46,57 @@ runs = ["lf-never"]
 file = "crates/cf-daemon/src/computer_use.rs"
 find = """        self.within = within;"""
 replace = """        let _ = within;"""
+
+[[plant]]
+name = 'launch-freeze: the plan makes its files on the engine thread again'
+meant = "a_plan_whose_file_is_slow_to_write_leaves_the_thread_going_and_the_write_is_whole"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """            launch.with(|launch| work(&env, launch))
+        })) {
+            let _ = answer.send(made);
+        }
+    });
+    let sent = queue().lock().map(|jobs| jobs.send(job));"""
+replace = """            launch.with(|launch| work(&env, launch))
+        })) {
+            let _ = answer.send(made);
+        }
+    });
+    job();
+    let sent: Result<Result<(), ()>, ()> = Ok(Ok(()));"""
+
+[[plant]]
+name = 'launch-freeze: the folders of the project are read on the engine thread again'
+meant = "a_plan_that_waits_on_a_folder_of_the_project_leaves_the_thread_going"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """            launch.with(|launch| work(&env, launch))
+        })) {
+            let _ = answer.send(made);
+        }
+    });
+    let sent = queue().lock().map(|jobs| jobs.send(job));"""
+replace = """            launch.with(|launch| work(&env, launch))
+        })) {
+            let _ = answer.send(made);
+        }
+    });
+    job();
+    let sent: Result<Result<(), ()>, ()> = Ok(Ok(()));"""
+
+[[plant]]
+name = 'launch-freeze: a launch the system gave no answer to says nothing in the log'
+meant = "a_launch_the_system_gave_no_answer_to_goes_on_and_says_so_in_the_log"
+runs = ["lf-log"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/computer_use.rs"
+find = """        self.seams.log.warn(&format!(
+            "the launch of @{} went on without"""
+replace = """        self.seams.log.info(&format!(
+            "the launch of @{} went on without"""
