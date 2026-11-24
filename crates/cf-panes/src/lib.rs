@@ -19,6 +19,9 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod alerts;
+#[cfg(test)]
+mod model;
+mod sync;
 pub mod arbiter;
 mod background;
 #[cfg(any(windows, test))]

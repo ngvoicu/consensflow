@@ -108,7 +108,7 @@ use crate::trust::Trusting;
 /// How long a read of the window may take and still say what the window does now:
 /// a pane host answers a snapshot at once, so one that took longer stalled, and what
 /// it says is as old as the stall.
-const SLOW_READ_MS: i64 = 5_000;
+pub(crate) const SLOW_READ_MS: i64 = 5_000;
 /// Why a snapshot came to nothing.
 const NO_ANSWER: &str = "its pane host did not answer in time";
 /// How often at most the log says a message's window could not be read.

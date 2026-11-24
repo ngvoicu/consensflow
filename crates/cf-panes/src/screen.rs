@@ -260,13 +260,18 @@ impl PaneScreen {
     pub(crate) fn feed_noting(&self, bytes: &[u8], printed: &OutputClock) -> bool {
         #[cfg(test)]
         self.hook.at(FeedStage::Read);
+        crate::sync::point("feed.start");
         let mut screen = self.locked();
         #[cfg(test)]
         self.hook.at(FeedStage::Locked);
+        crate::sync::point("feed.locked");
         let changed = screen.feed(bytes);
+        crate::sync::point("feed.fed");
         // The clock first: between the two the window still reads as having output pending.
         printed.note(changed);
+        crate::sync::point("feed.noted");
         printed.counts().drew(bytes.len());
+        crate::sync::point("feed.drew");
         changed
     }
 
@@ -278,17 +283,22 @@ impl PaneScreen {
         read: impl FnOnce(&Screen) -> R,
         clocks: impl FnOnce() -> C,
     ) -> (R, C) {
+        crate::sync::point("look.start");
         let screen = self.locked();
         let drawn = read(&screen);
         #[cfg(test)]
         self.hook.at(FeedStage::Snapshot);
-        (drawn, clocks())
+        crate::sync::point("look.rows");
+        let clocked = clocks();
+        crate::sync::point("look.counts");
+        (drawn, clocked)
     }
 
     /// Runs `under` with the screen's lock held, given what the screen shows of the input
     /// box at that moment ([`Seen`]).
     pub(crate) fn with_seen(&self, under: &mut dyn FnMut(Seen)) {
         let screen = self.locked();
+        crate::sync::point("seen.locked");
         under(screen.seen());
     }
 
@@ -310,6 +320,6 @@ impl PaneScreen {
     /// A panic in a thread that held the lock leaves a screen that was only
     /// partly written to, which reads as well as it can.
     fn locked(&self) -> std::sync::MutexGuard<'_, Screen> {
-        self.screen.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::sync::lock(&self.screen).unwrap_or_else(PoisonError::into_inner)
     }
 }

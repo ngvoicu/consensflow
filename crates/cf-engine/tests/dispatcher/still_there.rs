@@ -54,7 +54,7 @@ fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again
     context
         .host
         .set_snapshot(json!({ "outputQuietMs": 40, "screenQuietMs": 60_000 }));
-    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.host.shows_box(Some(InputBox::Holds));
     let before = enters(&context);
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
@@ -67,7 +67,7 @@ fn a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again
     context.pass().unwrap();
     assert_eq!(enters(&context), before + 1);
     // Its box empty and its screen quiet, a whole wait later: it is gone, and goes again.
-    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.host.shows_box(Some(InputBox::Empty));
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -95,7 +95,7 @@ fn a_box_that_cannot_be_read_off_a_screen_that_lacks_output_is_not_taken_for_gon
     context.host.set_snapshot(
         json!({ "outputQuietMs": 40, "screenQuietMs": 60_000, "outputRead": 5, "outputDrawn": 5 }),
     );
-    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.host.shows_box(Some(InputBox::Empty));
     context.advance(PAST_ARRIVAL);
     context.pass().unwrap();
     context.pass().unwrap();

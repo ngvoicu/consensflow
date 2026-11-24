@@ -16,6 +16,7 @@ use cf_harness::contract::{Held, Input, Pane, Readiness, Window};
 use cf_harness::{licence_paste, BoxState, Look, NoLook, PasteLicence, Sent, NO_LOOK};
 use serde_json::Value;
 
+use crate::arrival::SLOW_READ_MS;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::returning;
@@ -110,9 +111,12 @@ impl Dispatcher {
     /// the lines): where the old engine asked the host for a snapshot at the point of decision,
     /// that request is the look.
     pub(crate) async fn look_recorded(&self, pane: &Pane) -> Result<Look, NoLook> {
+        let asked = self.now();
         let answer: Result<Value, _> =
             returning(self.seams.host.request("pane.snapshot", pane_body_drawn(pane))).await;
         match answer {
+            // An answer that came after a stall says what the window did, not what it does.
+            Ok(_) if self.now() - asked > SLOW_READ_MS => Err(NoLook::NoAnswer),
             Ok(answer) => Look::of(&answer),
             Err(_) => Err(NoLook::NoAnswer),
         }
@@ -121,7 +125,13 @@ impl Dispatcher {
     /// A look at `pane` through the engine's own seam ([`crate::host::EngineHost::look`]), which
     /// the Node traces hold no call of: where the old engine asked the host nothing.
     pub(crate) async fn look_quietly(&self, pane: &Pane) -> Result<Look, NoLook> {
-        returning(self.seams.host.look(pane)).await
+        let asked = self.now();
+        let looked = returning(self.seams.host.look(pane)).await;
+        // A look that came after a stall says what the window did, not what it does.
+        match looked {
+            Ok(_) if self.now() - asked > SLOW_READ_MS => Err(NoLook::NoAnswer),
+            looked => looked,
+        }
     }
 
     /// An Enter that sends what waits in `pane`'s input box, on the look that licensed it: the

@@ -486,7 +486,7 @@ fn a_window_whose_harness_says_it_is_at_work_is_given_nothing_whatever_its_recor
 fn a_box_that_still_holds_words_takes_no_paste() {
     let context = paced();
     let project = chief_at_rest(&context);
-    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.host.shows_box(Some(InputBox::Holds));
     let note = context.note(project, "zeus", "chief", "One");
     for _ in 0..3 {
         context.advance(SETTLE);
@@ -494,7 +494,7 @@ fn a_box_that_still_holds_words_takes_no_paste() {
     }
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
-    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.host.shows_box(Some(InputBox::Empty));
     context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
@@ -685,7 +685,7 @@ fn a_box_holding_a_paste_whose_enter_was_withheld_is_emptied_and_the_next_paste_
     });
     assert_eq!(crate::deliveries::enters(&context), 0, "no key that sends");
     // The box holds the paste whose Enter was withheld.
-    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.host.shows_box(Some(InputBox::Holds));
     context.resume_task(project, 1, "Carry on");
     let next = tiers.task(1).messages.last().cloned().expect("the words");
     for _ in 0..4 {

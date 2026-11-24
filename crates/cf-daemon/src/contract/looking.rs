@@ -134,8 +134,12 @@ impl Window for LookingWindow {
         self.window.follow(session);
     }
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        self.window.box_read_empty(snapshot)
+    fn harness(&self) -> cf_proto::agents::Harness {
+        self.window.harness()
+    }
+
+    fn stale_paste(&self) -> bool {
+        self.window.stale_paste()
     }
 
     fn greeted(&self, session: &str) -> bool {
@@ -146,21 +150,23 @@ impl Window for LookingWindow {
         self.window.started()
     }
 
-    fn ready<'a>(
+    fn ready_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
+        look: Option<&'a cf_harness::Look>,
     ) -> Work<'a, Result<Readiness, String>> {
-        self.window.ready(host, pane)
+        self.window.ready_on(host, pane, look)
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a cf_harness::PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
-        self.window.deliver(host, pane, text)
+        self.window.deliver_on(host, pane, text, licence)
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

@@ -201,7 +201,10 @@ pub(crate) fn write_gated_in(
 ) -> Result<(), Gated> {
     let mut held = loop {
         let held = lock_writer(writer)?;
-        match gate() {
+        crate::sync::point("writer.locked");
+        let gated = gate();
+        crate::sync::point("gate.asked");
+        match gated {
             Gate::Go => break held,
             Gate::Wait => {
                 drop(held);
@@ -212,15 +215,14 @@ pub(crate) fn write_gated_in(
     };
     held.write_all(bytes).map_err(|error| Gated::Pane(error.into()))?;
     held.flush().map_err(|error| Gated::Pane(error.into()))?;
+    crate::sync::point("writer.written");
     Ok(())
 }
 
 fn lock_writer(
     writer: &Mutex<Box<dyn Write + Send>>,
 ) -> Result<MutexGuard<'_, Box<dyn Write + Send>>, Gated> {
-    writer
-        .lock()
-        .map_err(|_| Gated::Pane(PaneError::LockPoisoned))
+    crate::sync::lock(writer).map_err(|_| Gated::Pane(PaneError::LockPoisoned))
 }
 
 struct Pane {

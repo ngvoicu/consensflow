@@ -128,6 +128,9 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
         context.host.refuse_kills.set(false);
         context.advance(11_000);
         context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+        context
+            .host
+            .shows_box(Some(cf_harness::contract::InputBox::Holds));
         context.pass().unwrap();
         assert_eq!(enters(&context), 0, "no key that sends");
         assert_eq!(context.message(told).state, "queued", "given back");
@@ -140,6 +143,10 @@ fn words_told_whose_enter_was_withheld_by_a_close_wait_and_the_answer_is_the_res
             context
                 .adapter
                 .with("zeus", |agent| agent.items.push(given));
+            // What it held is sent: the box on its screen is empty.
+            context
+                .host
+                .shows_box(Some(cf_harness::contract::InputBox::Empty));
             context.pass().unwrap();
         } else if sent_by_hand {
             human_sends(&context, "zeus", &pasted(&context, &pane, told));

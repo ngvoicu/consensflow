@@ -140,9 +140,7 @@ impl Read for ActivityReader {
         let byte_count = self.inner.read(buffer)?;
         if byte_count > 0 {
             self.counts.took(byte_count);
-            *self
-                .last_activity
-                .lock()
+            *crate::sync::lock(&self.last_activity)
                 .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
         }
         Ok(byte_count)

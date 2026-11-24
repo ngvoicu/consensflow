@@ -983,6 +983,10 @@ fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until
     context.host.refuse_kills.set(false);
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    // The paste is in the window's box, where its Enter was not pressed.
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "no key that sends, while closed");
 
@@ -994,12 +998,7 @@ fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until
 
     context.resume_project(project.id).unwrap();
     context.pass().unwrap();
-    let cleared = context
-        .host
-        .inputs()
-        .iter()
-        .filter(|body| body["bytes"] == json!([3]))
-        .count();
+    let cleared = crate::withheld_enter::clears(&context);
     assert_eq!(
         (enters(&context), cleared),
         (0, 1),

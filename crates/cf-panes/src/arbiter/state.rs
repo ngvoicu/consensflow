@@ -114,7 +114,7 @@ impl PaneInputState {
 pub(super) fn lock_state(
     state: &Mutex<PaneInputState>,
 ) -> Result<MutexGuard<'_, PaneInputState>, ArbiterError> {
-    state.lock().map_err(|_| ArbiterError::LockPoisoned)
+    crate::sync::lock(state).map_err(|_| ArbiterError::LockPoisoned)
 }
 
 pub(super) fn validate_generation(

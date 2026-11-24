@@ -74,6 +74,10 @@ pub struct FakeHost {
     screen_looks: RefCell<Vec<Pane>>,
     /// The panes the engine took a look at the input box of ([`EngineHost::look`]), in order.
     looks: RefCell<Vec<Pane>>,
+    /// The box the test says the window's screen shows ([`FakeHost::shows_box`]).
+    shown_box: RefCell<Option<cf_harness::contract::InputBox>>,
+    /// The host answers no look: a snapshot it did not give in time.
+    pub looks_fail: Cell<bool>,
     /// How many alerts the system has on screen, as `pane.alerts` answers it
     /// ([`FakeHost::set_alerts`]): none said, unless the test says.
     alerts: Cell<Option<usize>>,
@@ -150,32 +154,33 @@ impl FakeHost {
 
     /// What the screen shows of the window's input box from now on, as a Claude Code window draws
     /// it between its rules: nothing in it (`Empty`), words in it (`Holds`), or no box at all
-    /// (`None`). The reader of the harness the fake answers for reads it so
-    /// ([`cf_harness::Look::reads`]).
+    /// (`None`). It outlasts [`FakeHost::set_snapshot`], which sets what else the host says of the
+    /// window; a snapshot that gives lines of its own gives them over this. The reader of the
+    /// harness the fake answers for reads it so ([`cf_harness::Look::reads`]).
     pub fn shows_box(&self, shown: Option<cf_harness::contract::InputBox>) {
+        *self.shown_box.borrow_mut() = shown;
+    }
+
+    /// The box the test says the screen shows, as lines and a cursor, where the snapshot the test
+    /// set gives none of its own.
+    fn put_the_box(&self, answer: &mut Map<String, Value>) {
         use cf_harness::contract::InputBox;
-        let rule = "─".repeat(40);
-        let mut fields = self.snapshot.borrow_mut();
-        match shown {
-            None => {
-                fields.remove("bottom");
-                fields.remove("cursor");
-            }
-            Some(shown) => {
-                let (typed, plain) = match shown {
-                    InputBox::Empty => ("", 0),
-                    InputBox::Holds => (" a message the human typed", 26),
-                };
-                fields.insert(
-                    "bottom".to_owned(),
-                    json!([rule, format!("❯{typed}"), rule]),
-                );
-                fields.insert(
-                    "cursor".to_owned(),
-                    json!({ "line": 1, "col": 2, "shown": true, "plainAfter": plain }),
-                );
-            }
+        let Some(shown) = *self.shown_box.borrow() else {
+            return;
+        };
+        if answer.contains_key("bottom") {
+            return;
         }
+        let rule = "─".repeat(40);
+        let (typed, plain) = match shown {
+            InputBox::Empty => ("", 0),
+            InputBox::Holds => (" a message the human typed", 26),
+        };
+        answer.insert("bottom".to_owned(), json!([rule, format!("❯{typed}"), rule]));
+        answer.insert(
+            "cursor".to_owned(),
+            json!({ "line": 1, "col": 2, "shown": true, "plainAfter": plain }),
+        );
     }
 
     /// How many alerts the system has on screen from now on, as the host says it: none where it
@@ -253,13 +258,19 @@ impl FakeHost {
             .count()
     }
 
-    /// What was typed into panes, in order: the body of each `pane.input`.
+    /// What was typed into panes, in order: the body of each `pane.input`, and each `pane.enter`
+    /// (an Enter of a delivery, which the engine presses on a look) as the key it is.
     pub fn inputs(&self) -> Vec<Value> {
         self.requests
             .borrow()
             .iter()
-            .filter(|(op, _)| op == "pane.input")
-            .map(|(_, body)| body.clone())
+            .filter_map(|(op, body)| match op.as_str() {
+                "pane.input" => Some(body.clone()),
+                "pane.enter" => Some(json!({
+                    "id": body["id"], "generation": body["generation"], "bytes": [13],
+                })),
+                _ => None,
+            })
             .collect()
     }
 
@@ -367,6 +378,7 @@ impl FakeHost {
             if !drawn_asked {
                 answer.remove("bottom");
             } else {
+                self.put_the_box(&mut answer);
                 name_what_is_shown(&mut answer);
             }
         }
@@ -610,9 +622,13 @@ impl EngineHost for FakeHost {
         pane: &'a Pane,
     ) -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>> {
         self.looks.borrow_mut().push(pane.clone());
+        if self.looks_fail.get() {
+            return Box::pin(async { Err(cf_harness::NoLook::NoAnswer) });
+        }
         let mut answer = Map::new();
         answer.insert("ok".to_owned(), Value::Bool(true));
         answer.extend(self.snapshot.borrow().clone());
+        self.put_the_box(&mut answer);
         name_what_is_shown(&mut answer);
         let look = cf_harness::Look::of(&Value::Object(answer));
         Box::pin(async move { look })

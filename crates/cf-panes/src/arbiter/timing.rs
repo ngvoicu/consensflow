@@ -82,7 +82,9 @@ thread_local! {
 impl OutputCount {
     /// `bytes` came off the pty.
     pub(crate) fn took(&self, bytes: usize) {
+        crate::sync::point("took.before");
         self.read.fetch_add(bytes as u64, Ordering::AcqRel);
+        crate::sync::point("took.after");
     }
 
     /// `bytes` are in the screen now.
@@ -95,6 +97,7 @@ impl OutputCount {
     /// the reverse.
     pub(crate) fn both(&self) -> (u64, u64) {
         let drawn = self.drawn.load(Ordering::Acquire);
+        crate::sync::point("both.drawn");
         #[cfg(test)]
         if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
             between();

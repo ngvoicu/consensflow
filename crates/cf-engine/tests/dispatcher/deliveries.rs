@@ -18,7 +18,7 @@ use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher"];
 
-/// The Enters pressed into windows (`pane.input` with the byte 13).
+/// The Enters pressed into windows (`pane.enter`, or a `pane.input` with the byte 13).
 pub(crate) fn enters(context: &Context) -> usize {
     context
         .host
@@ -162,7 +162,7 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
         delivery_text(&note, &[], &CfWord::bare()),
     );
     *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, body: &Value| {
-        let enter = op == "pane.input" && body["bytes"][0] == 13;
+        let enter = op == "pane.enter" || (op == "pane.input" && body["bytes"][0] == 13);
         if let (true, Some(adapter)) = (enter, adapter.upgrade()) {
             let item = adapter.item(Role::User, &header);
             adapter.with("chief", |agent| agent.items.push(item));

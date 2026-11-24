@@ -45,6 +45,10 @@ fn said(context: &Context, pane: &str, body: &str) -> usize {
 /// The human presses Enter in the window of `handle` on what its box holds, `text`:
 /// its record shows it given, and the window answers and comes to rest.
 pub(crate) fn human_sends(context: &Context, handle: &str, text: &str) {
+    // What it held is sent: the box on its screen is empty.
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Empty));
     let given = context.adapter.item(Role::User, text);
     let answer = context.adapter.item(Role::Assistant, "ok");
     context.adapter.with(handle, |agent| {
@@ -58,6 +62,9 @@ pub(crate) fn human_sends(context: &Context, handle: &str, text: &str) {
 /// shows the paste behind the placeholders of its pictures, and the harness's own item
 /// for their sources after it.
 pub(crate) fn human_sends_pictures(context: &Context, handle: &str, text: &str) {
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Empty));
     let mut given = context.adapter.recorded_as_sent(handle, text);
     let answer = context.adapter.item(Role::Assistant, "ok");
     context.adapter.with(handle, |agent| {
@@ -213,6 +220,9 @@ fn a_note_the_human_sent_from_the_box_while_closed_is_taken_for_arrived_at_the_r
     context.host.refuse_kills.set(false);
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -403,18 +413,18 @@ fn a_box_emptied_counts_as_empty_until_a_paste_goes_in() {
         })
     }));
     let again = resumed_again(&context, &tiers);
-    let before = context.adapter.cleared.borrow().len();
+    let before = context.adapter.clear_firsts.borrow().len();
     for _ in 0..3 {
         context.pass().unwrap();
     }
     assert_eq!(refusals.get(), 0, "the first paste was refused");
     assert_eq!(context.message(again.id).state, "delivered");
-    assert_eq!(clears(&context), 1, "one key");
     assert_eq!(
-        context.adapter.cleared.borrow()[before..],
+        context.adapter.clear_firsts.borrow()[before..],
         [true, true],
-        "the refused paste and the one after it were each told the box is empty"
+        "the key goes with the paste: a refused paste wrote none, so the one after it carries it too"
     );
+    assert_eq!(clears(&context), 2, "the refused paste's and the one that went");
 }
 
 /// The same review (P3-5): a pane that would not take the key that empties its
@@ -427,12 +437,18 @@ fn a_box_emptied_counts_as_empty_until_a_paste_goes_in() {
 fn a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does() {
     let context = Context::new();
     let (tiers, _, _) = carrier_withheld(&context);
-    context.host.refuse_keys.set(true);
+    // The key goes in the paste's own write: a host that takes none of it refuses the paste.
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(|_| {
+        Box::pin(async {
+            Ok(Admission::Refused {
+                reason: "the pane host wrote nothing: stale pane".to_owned(),
+            })
+        })
+    }));
     let again = resumed_again(&context, &tiers);
     for _ in 0..6 {
         context.pass().unwrap();
     }
-    assert_eq!(times_handed(&context, SEAM, again.id), 0, "nothing pasted");
     let again = context.message(again.id);
     assert_eq!(again.state, "failed");
     assert_eq!(again.attempts, 3);
@@ -440,7 +456,7 @@ fn a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does()
         again
             .reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("input box could not be emptied")),
+            .is_some_and(|reason| reason.contains("the pane host wrote nothing")),
         "{:?}",
         again.reason
     );
@@ -539,6 +555,9 @@ fn an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_it() {
     context.host.refuse_kills.set(false);
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -698,15 +717,15 @@ fn a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty() {
     *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
     context.pass().unwrap();
     *context.adapter.ready.borrow_mut() = None;
-    let before = context.adapter.cleared.borrow().len();
+    let before = context.adapter.clear_firsts.borrow().len();
     for _ in 0..2 {
         context.pass().unwrap();
     }
     assert_eq!(context.message(again.id).state, "delivered");
     assert_eq!(
-        context.adapter.cleared.borrow()[before..],
-        [false],
-        "the paste after the human typed is not told the box is empty"
+        context.adapter.clear_firsts.borrow()[before..],
+        [true],
+        "the refused paste wrote no key: the one after the human's typing carries it"
     );
 }
 
@@ -730,6 +749,9 @@ fn a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered
     context.host.refuse_kills.set(false);
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     context.pass().unwrap();
     assert_eq!(
         context.message(note.id).state,
@@ -873,14 +895,14 @@ fn emptied_then_refused(context: &Context) -> (i64, MessageView) {
 /// box is empty.
 fn resumed_told_not_empty(context: &Context, project: i64, again: &MessageView) {
     context.resume_project(project).unwrap();
-    let before = context.adapter.cleared.borrow().len();
+    let before = context.adapter.clear_firsts.borrow().len();
     for _ in 0..3 {
         context.pass().unwrap();
     }
     assert_eq!(context.message(again.id).state, "delivered");
     assert_eq!(
-        context.adapter.cleared.borrow()[before..],
-        [false],
-        "the paste after the Resume is not told the box is empty"
+        context.adapter.clear_firsts.borrow()[before..],
+        [true],
+        "the refused paste wrote no key: the one after the Resume carries it"
     );
 }

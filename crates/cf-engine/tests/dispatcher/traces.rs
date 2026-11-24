@@ -717,7 +717,7 @@ fn project(event: &Value) -> Option<Value> {
     let args = &event["args"];
     match seam {
         "event" => Some(json!({ "event": event["event"] })),
-        "host" => Some(json!({ "host": method, "args": args, "answer": event["answer"] })),
+        "host" => Some(host_call(method, args, &event["answer"])),
         "credentials" => match method {
             Some("issue") => Some(json!({
                 "issue": event["answer"],
@@ -736,6 +736,41 @@ fn project(event: &Value) -> Option<Value> {
         adapter if adapter.starts_with("adapter:") => Some(adapter_call(adapter, method, &args[0])),
         _ => None,
     }
+}
+
+/// A call of the pane host as both sides write it. N17 (T-2164): a delivery's decisions on the
+/// input box are made on a look, the `pane.snapshot` that asks for the screen's last lines and
+/// answers them with the name of what they show (`seen`) and the count of the human's keys; and
+/// an Enter that is not a paste's first is `pane.enter`, checked again at the host with the look
+/// it was licensed by. The Node traces hold neither, so the projection reads the first as the
+/// snapshot it is, and the second as the `pane.input` of the Enter it replaces.
+fn host_call(method: Option<&str>, args: &Value, answer: &Value) -> Value {
+    let (mut args, mut answer) = (args.clone(), answer.clone());
+    match args[0].as_str() {
+        Some("pane.snapshot") => {
+            if let Some(body) = args[1].as_object_mut() {
+                body.shift_remove("bottom");
+            }
+            if let Some(answer) = answer.as_object_mut() {
+                for looked in ["bottom", "typed", "seen"] {
+                    answer.shift_remove(looked);
+                }
+            }
+        }
+        Some("pane.enter") => {
+            let body = json!({ "id": args[1]["id"], "generation": args[1]["generation"], "bytes": [13] });
+            args = json!(["pane.input", body]);
+        }
+        Some("pane.write_paste") => {
+            if let Some(body) = args[1].as_object_mut() {
+                for looked in ["at", "typed", "clearFirst"] {
+                    body.shift_remove(looked);
+                }
+            }
+        }
+        _ => {}
+    }
+    json!({ "host": method, "args": args, "answer": answer })
 }
 
 /// What a participant of an answer runs on, held apart on both sides: Node's member named
