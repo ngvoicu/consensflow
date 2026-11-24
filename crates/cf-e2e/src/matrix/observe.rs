@@ -61,7 +61,7 @@ impl Snapshot {
             tasks,
             chief_inbox: members.inbox(Some("chief"))?,
             lanes,
-            events: members.events(),
+            events: members.events_settled(),
         })
     }
 

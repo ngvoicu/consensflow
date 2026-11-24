@@ -33,7 +33,7 @@ members = [
 exclude = ["tools/probes"]
 
 [workspace.package]
-version = "3.0.7-alpha.15"
+version = "3.0.7-alpha.16"
 edition = "2021"
 rust-version = "1.95"
 

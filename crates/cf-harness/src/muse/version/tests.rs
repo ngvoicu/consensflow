@@ -77,3 +77,94 @@ fn the_installed_version_is_the_line_beside_the_launcher_where_it_really_is() {
         assert_eq!(installed(&link).as_deref(), Some("1.4.13-R6996.1"));
     }
 }
+
+#[test]
+fn a_launcher_s_answer_is_the_one_line_wholly_muse_s_own_and_nothing_else() {
+    let read = |said: &str| native(said).map(Version::semver);
+    let own = |version: &str| format!("Muse Code {version} ({version}-R6996.1)");
+    assert_eq!(read(&own("1.4.13")).as_deref(), Some("1.4.13"));
+    assert_eq!(
+        read(&format!("{}\n", own("1.4.13"))).as_deref(),
+        Some("1.4.13")
+    );
+    // A wrapper's line is passed over, before Muse's or after it.
+    let wrapper = |version: &str| format!("workspace launcher {version} ({version})");
+    for (said, expected) in [
+        (
+            format!("{}\n{}", own("1.4.12"), wrapper("1.4.24")),
+            "1.4.12",
+        ),
+        (
+            format!("{}\n{}", own("1.4.24"), wrapper("1.4.12")),
+            "1.4.24",
+        ),
+        (
+            format!("{}\r\n{}\r\n", wrapper("1.4.24"), own("1.4.12")),
+            "1.4.12",
+        ),
+        (
+            format!("{}\r\n{}\r\n", own("1.4.24"), wrapper("1.4.12")),
+            "1.4.24",
+        ),
+    ] {
+        assert_eq!(read(&said).as_deref(), Some(expected), "{said:?}");
+    }
+    for not in [
+        wrapper("1.4.24"),
+        format!("{}\n{}", own("1.4.23"), own("1.4.23")),
+        "Muse Code 1.4.23-beta (1.4.23-R1)".to_owned(),
+        "Muse Code 1.4.23 (1.4.24-R1)".to_owned(),
+        "Muse Code 1.4.23 (1.4.23)".to_owned(),
+        "Muse Code 1.4.23".to_owned(),
+        "prefix Muse Code 1.4.23 (1.4.23-R1)".to_owned(),
+        "Muse Code 1.4.23 (1.4.23-R1) suffix".to_owned(),
+        String::new(),
+    ] {
+        assert_eq!(read(&not), None, "{not:?}");
+    }
+}
+
+#[test]
+fn the_pin_is_one_bounded_line_of_a_regular_file() {
+    let folder = tempfile::tempdir().unwrap();
+    let launcher = folder.path().join("muse");
+    fs::write(&launcher, "#!/bin/bash\n").unwrap();
+    let pin = folder.path().join(".muse-version");
+    for not in [
+        "1.4.13\n1.4.14\n".to_owned(),
+        "1.4.13 1.4.14".to_owned(),
+        format!("1.4.13-R6996.1{}", " ".repeat(300)),
+    ] {
+        fs::write(&pin, &not).unwrap();
+        assert_eq!(installed(&launcher), None, "{not:?}");
+    }
+    fs::write(&pin, [0xff, 0xfe]).unwrap();
+    assert_eq!(installed(&launcher), None, "not text");
+    fs::remove_file(&pin).unwrap();
+    fs::create_dir(&pin).unwrap();
+    assert_eq!(installed(&launcher), None, "a folder");
+}
+
+#[cfg(unix)]
+#[test]
+// A pipe is made by the system's own `mkfifo`: nothing here is a window's program.
+#[allow(clippy::disallowed_methods)]
+fn a_pipe_in_the_pin_s_place_is_never_opened() {
+    let folder = tempfile::tempdir().unwrap();
+    let launcher = folder.path().join("muse");
+    fs::write(&launcher, "#!/bin/bash\n").unwrap();
+    let pipe = folder.path().join(".muse-version");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap()
+        .success());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(installed(&launcher));
+    });
+    let answer = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the read returned: it did not wait on the pipe");
+    assert_eq!(answer, None);
+}

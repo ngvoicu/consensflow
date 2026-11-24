@@ -102,3 +102,48 @@ fn a_person_gets_the_address_with_the_token_in_its_query_and_how_to_stop() {
         ]
     );
 }
+
+/// The thread `ui` hands the daemon to: its own, named, with the stack of
+/// [`DAEMON_STACK_BYTES`] and not the main thread's (1 MiB on Windows, where a debug build's
+/// launch of a chief's window overflowed it once a launch asked its harness its version first,
+/// T-1360).
+#[test]
+fn the_daemon_runs_on_a_thread_of_its_own_and_not_on_the_main_one() {
+    let served =
+        |_: &Env, _: &[OsString]| i32::from(std::thread::current().name() == Some(DAEMON_THREAD));
+    assert_eq!(ui_with(&Env::default(), &[], served), 1);
+}
+
+/// What the stack must hold: more than a test thread has (2 MiB) and than the main thread of
+/// Windows has (1 MiB), by a margin, so that a launch that nests deeper is not the next to
+/// overflow it.
+#[test]
+fn the_daemons_stack_is_more_than_the_main_threads_of_windows_and_of_a_test() {
+    let stack = std::hint::black_box(DAEMON_STACK_BYTES);
+    assert!(stack >= 8 * 1024 * 1024, "{stack} bytes");
+    // And a thread of it holds a depth of calls that a thread of 2 MiB cannot: 6 MiB of frames.
+    fn deeper(frames: usize) -> usize {
+        let mut frame = [0u8; 64 * 1024];
+        std::hint::black_box(&mut frame);
+        if frames == 0 {
+            usize::from(frame[0])
+        } else {
+            deeper(frames - 1) + usize::from(frame[1])
+        }
+    }
+    assert_eq!(on_a_stack_of_its_own(|| deeper(96)).unwrap(), 0);
+}
+
+/// A panic of the daemon is the panic of the thread that waited for it: the process ends as it
+/// did when the daemon ran on its main thread.
+#[test]
+fn a_panic_of_the_daemon_is_carried_to_the_thread_that_waits_for_it() {
+    let carried = std::panic::catch_unwind(|| {
+        let _ = on_a_stack_of_its_own(|| -> i32 { panic!("the daemon's panic") });
+    })
+    .unwrap_err();
+    assert_eq!(
+        carried.downcast_ref::<&str>().copied(),
+        Some("the daemon's panic")
+    );
+}

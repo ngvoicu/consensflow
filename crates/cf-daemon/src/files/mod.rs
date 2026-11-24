@@ -6,4 +6,9 @@ mod log;
 mod trace;
 
 pub use log::Log;
-pub use trace::Trace;
+#[cfg(test)]
+pub(crate) use trace::Durable;
+pub use trace::{Trace, QUEUE, SETTLE};
+
+#[cfg(test)]
+pub(crate) use trace::{settle_in, settled_trace};

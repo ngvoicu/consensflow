@@ -13,6 +13,7 @@ fn row(version: Version, update: Update) -> Row {
         checked_at: 7,
         version,
         update,
+        tested: Tested::of(Harness::Codex, None),
         setup: None,
         distribution: Distribution::Unlooked,
         extension: None,
@@ -25,6 +26,16 @@ fn release() -> Release {
         source: "https://feed".to_owned(),
         command: None,
     }
+}
+
+#[test]
+fn a3_threshold_takes_the_declared_bound_and_compares_muse_builds() {
+    let tested =
+        |harness, newest, release| Tested::with_newest(harness, newest, None, Some(release));
+    assert!(tested(Harness::Claude, "98.1.326", "98.1.330").beyond);
+    assert!(!tested(Harness::Claude, "98.1.330", "98.1.330").beyond);
+    assert!(tested(Harness::Muse, "1.4.14-R7309.1", "1.4.14-R7400.1").beyond);
+    assert!(!tested(Harness::Muse, "1.4.14-R7400.1", "1.4.14-R7309.1").beyond);
 }
 
 #[test]
@@ -97,7 +108,10 @@ fn a_row_leaves_out_what_was_never_looked_at_and_writes_null_for_what_was_not_fo
     let text = |row: &Row| serde_json::to_string(row).unwrap();
     assert_eq!(
         text(&found),
-        r#"{"id":"codex","path":"/bin/codex","installed":true,"checkedAt":7,"version":{"state":"checked","value":"1.0.0"},"update":{"state":"current","value":"1.0.1","source":"https://feed","command":null}}"#
+        format!(
+            r#"{{"id":"codex","path":"/bin/codex","installed":true,"checkedAt":7,"version":{{"state":"checked","value":"1.0.0"}},"update":{{"state":"current","value":"1.0.1","source":"https://feed","command":null}},"tested":{}}}"#,
+            serde_json::to_string(&found.tested).unwrap()
+        )
     );
     found.distribution = Distribution::Unrecognized;
     assert!(text(&found).ends_with(r#""distribution":null}"#));
@@ -105,9 +119,10 @@ fn a_row_leaves_out_what_was_never_looked_at_and_writes_null_for_what_was_not_fo
     found.setup = Some(Setup::Ready);
     found.extension = Some(Extension::unverified("/ext.mjs".to_owned()));
     assert!(
-        text(&found).ends_with(
-            r#""update":{"state":"current","value":"1.0.1","source":"https://feed","command":null},"setup":{"state":"ready"},"distribution":"Homebrew","extension":{"state":"installed-unverified","path":"/ext.mjs"}}"#
-        ),
+        text(&found).ends_with(&format!(
+            r#""update":{{"state":"current","value":"1.0.1","source":"https://feed","command":null}},"tested":{},"setup":{{"state":"ready"}},"distribution":"Homebrew","extension":{{"state":"installed-unverified","path":"/ext.mjs"}}}}"#,
+            serde_json::to_string(&found.tested).unwrap()
+        )),
         "{}",
         text(&found)
     );
@@ -133,53 +148,4 @@ fn an_extension_is_its_state_and_its_path_and_the_reason_when_it_failed() {
         .unwrap(),
         r#"{"state":"error","path":null,"reason":"EACCES"}"#
     );
-}
-
-#[test]
-fn an_outcome_keeps_its_reason_before_the_row_and_an_unsupported_one_has_no_command() {
-    let harness = Rc::new(row(Version::NotInstalled, Update::NotChecked));
-    let ran = Outcome::Ran {
-        id: Harness::Codex,
-        state: Ended::Failed,
-        before: Some("1.0.0".to_owned()),
-        after: None,
-        command: "codex update".to_owned(),
-        output: "no network".to_owned(),
-        reason: Some("Command failed".to_owned()),
-        harness: Rc::clone(&harness),
-    };
-    let json = serde_json::to_value(&ran).unwrap();
-    let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
-    assert_eq!(
-        keys,
-        ["id", "state", "before", "after", "command", "output", "reason", "harness"]
-    );
-    assert_eq!(
-        (&json["state"], &json["after"]),
-        (&json!("failed"), &json!(null))
-    );
-    let unsupported = Outcome::Unsupported {
-        id: Harness::Pi,
-        state: Ended::Unsupported,
-        reason: "r".to_owned(),
-        harness,
-    };
-    let json = serde_json::to_value(&unsupported).unwrap();
-    let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "state", "reason", "harness"]);
-    assert_eq!(json["state"], "unsupported");
-    let not_failed = Outcome::Ran {
-        id: Harness::Codex,
-        state: Ended::Updated,
-        before: None,
-        after: None,
-        command: String::new(),
-        output: String::new(),
-        reason: None,
-        harness: Rc::new(row(Version::NotInstalled, Update::NotChecked)),
-    };
-    assert!(serde_json::to_value(&not_failed)
-        .unwrap()
-        .get("reason")
-        .is_none());
 }

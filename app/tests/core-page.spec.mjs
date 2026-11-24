@@ -10705,7 +10705,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     const screen = harnesses.frameLocator('iframe')
     await expect(screen.locator('.host')).toHaveCount(5)
     await expect(
-      screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^pi$/ }) }),
+      screen.locator('.host').filter({ has: screen.locator('strong', { hasText: /^Pi$/ }) }),
     ).toContainText('Version 1.2.3')
     const before = daemon.runs('pi')
     await screen.getByRole('button', { name: 'Check all harnesses' }).click()
@@ -19514,4 +19514,281 @@ test('T1859 a team with one no-end hold gives the other part reset time in eithe
       `Neither can take a task until ${await resetWords(page, reset)}`,
     )
   }
+})
+
+/** The real page emulator and a raw xterm oracle, both at a fixed size. */
+async function utf8CutPage(page) {
+  await page.route('**/utf8-cut-test', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/vendor/xterm.css"><div id="actual"></div><div id="reference"></div>',
+    }),
+  )
+  await page.goto(`${ui.origin}/utf8-cut-test`)
+  await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const make = (id) => {
+      const emulator = new XtermEmulator(document.getElementById(id))
+      emulator.resizeObserver.disconnect()
+      clearTimeout(emulator.settling)
+      emulator.terminal.resize(40, 8)
+      return emulator
+    }
+    const actual = make('actual')
+    const reference = make('reference')
+    const rawWrite = (terminal, bytes) =>
+      new Promise((done) => terminal.write(Uint8Array.from(bytes), done))
+    const state = (terminal) => {
+      const buffer = (b) => ({
+        cursor: [b.cursorX, b.cursorY, b.baseY, b.viewportY],
+        lines: Array.from({ length: b.length }, (_, y) => {
+          const line = b.getLine(y)
+          return {
+            wrapped: line.isWrapped,
+            cells: Array.from({ length: terminal.cols }, (_, x) => {
+              const cell = line.getCell(x)
+              return [cell.getChars(), cell.getWidth(), cell.fg, cell.bg]
+            }),
+          }
+        }),
+      })
+      const core = terminal._core
+      const input = core._inputHandler
+      return JSON.stringify({
+        normal: buffer(terminal.buffer.normal),
+        alternate: buffer(terminal.buffer.alternate),
+        active: terminal.buffer.active.type,
+        modes: terminal.modes,
+        title: input._windowTitle,
+        parser: input._parser.currentState,
+        interim: [...input._utf8Decoder.interim],
+        pen: [input._curAttrData.fg, input._curAttrData.bg],
+      })
+    }
+    const reset = (emulator) => emulator.terminal.reset()
+    window.cutTest = {
+      actual,
+      reference,
+      text: () => actual.terminal.buffer.active.getLine(0).translateToString(true),
+      async whole(bytes) {
+        reset(reference)
+        await rawWrite(reference.terminal, bytes)
+        return state(reference.terminal)
+      },
+      async pieces(pieces) {
+        reset(actual)
+        for (const piece of pieces) await actual.write(Uint8Array.from(piece))
+        return state(actual.terminal)
+      },
+    }
+  })
+}
+
+test('UTF-8 cut characters survive each internal byte boundary', async ({ page }) => {
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    const cases = ['é', '—', '─', '“', '…', '•', '🙂']
+    const failures = []
+    let cuts = 0
+    for (const character of cases) {
+      const bytes = [...new TextEncoder().encode(`A${character}B`)]
+      const expected = await window.cutTest.whole(bytes)
+      for (let cut = 2; cut < bytes.length - 1; cut += 1) {
+        cuts += 1
+        const actual = await window.cutTest.pieces([bytes.slice(0, cut), bytes.slice(cut)])
+        if (actual !== expected || window.cutTest.text() !== `A${character}B`) {
+          failures.push({ character, cut: cut - 1, text: window.cutTest.text() })
+        }
+      }
+    }
+    return { cuts, failures }
+  })
+  expect(result.cuts).toBe(14)
+  expect(result.failures).toEqual([])
+})
+
+test('UTF-8 cut after the em dash second byte survives three output messages', async ({ page }) => {
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    const { TerminalLink } = await import('/terminal-link.js')
+    const emulator = window.cutTest.actual
+    const acknowledgements = []
+    let done
+    const acknowledged = new Promise((resolve) => {
+      done = resolve
+    })
+    const link = new TerminalLink({
+      pageId: 'cut-test',
+      registry: {},
+      report: (cause) => {
+        throw cause
+      },
+      invoke: async (command, args) => {
+        acknowledgements.push([command, args.seq])
+        if (args.seq === 3) done()
+        return { ok: true }
+      },
+    })
+    for (const [seq, bytes] of [
+      [1, [0x41, 0xe2, 0x80]],
+      [2, [0x94]],
+      [3, [0x42]],
+    ]) {
+      link.output({ id: 1, generation: 1, seq, bytes }, () => emulator)
+    }
+    await acknowledged
+    return { text: window.cutTest.text(), acknowledgements }
+  })
+  expect(result.text).toBe('A—B')
+  expect(result.acknowledgements.at(-1)).toEqual(['pane_ack', 3])
+})
+
+test('UTF-8 cut mixed output matches the uncut xterm at every byte', async ({ page }) => {
+  test.setTimeout(90_000)
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    const esc = '\x1b'
+    const cs = '\x1b['
+    const bytes = [
+      ...new TextEncoder().encode(
+        'plain ─│❯ é ü 界 🙂 ' +
+          cs +
+          '1;31mred—dash' +
+          cs +
+          '0m\r\n' +
+          esc +
+          ']0;title—x\x07' +
+          cs +
+          '?2004h' +
+          cs +
+          '5;3H' +
+          'x́y' +
+          esc +
+          'P1$r—\x1b\\' +
+          cs +
+          '38;2;1;2;3m▶' +
+          cs +
+          'm' +
+          '\u009b1mC1' +
+          cs +
+          '3b' +
+          '\t—\r\n' +
+          '🙂'.repeat(3) +
+          cs +
+          '2;5r' +
+          cs +
+          'r' +
+          'end—',
+      ),
+    ]
+    const expected = await window.cutTest.whole(bytes)
+    const failures = []
+    for (let cut = 1; cut < bytes.length; cut += 1) {
+      if ((await window.cutTest.pieces([bytes.slice(0, cut), bytes.slice(cut)])) !== expected)
+        failures.push(cut)
+    }
+    const singleBytes = (await window.cutTest.pieces(bytes.map((byte) => [byte]))) === expected
+    const chunksOfSeven =
+      (await window.cutTest.pieces(
+        Array.from({ length: Math.ceil(bytes.length / 7) }, (_, n) =>
+          bytes.slice(n * 7, n * 7 + 7),
+        ),
+      )) === expected
+    return { cuts: bytes.length - 1, failures, singleBytes, chunksOfSeven }
+  })
+  expect(result.cuts).toBe(157)
+  expect(result.failures).toEqual([])
+  expect(result.singleBytes).toBe(true)
+  expect(result.chunksOfSeven).toBe(true)
+})
+
+test('UTF-8 cut malformed output matches an uncut xterm', async ({ page }) => {
+  test.setTimeout(90_000)
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    // Stray continuations, overlongs, surrogates, invalid leads and interrupted prefixes;
+    // Z resolves a pending prefix without supplying a valid continuation.
+    const cases = [
+      [0x41, 0xff, 0x42, 0xc3, 0x43, 0x80, 0x5a],
+      [0x41, 0xe2, 0x80, 0x42, 0x5a],
+      [0x41, 0xe2, 0x80, 0xe2, 0x80, 0x94, 0x5a],
+      [0x41, 0xc0, 0x80, 0xc1, 0xbf, 0x5a],
+      [0x41, 0xe0, 0x80, 0x80, 0xed, 0xa0, 0x80, 0x5a],
+      [0x41, 0xf0, 0x80, 0x80, 0x80, 0xf4, 0x90, 0x80, 0x80, 0x5a],
+      [0x41, 0xf5, 0x80, 0x80, 0x80, 0xf8, 0x80, 0x5a],
+      [0x41, 0xf0, 0x80, 0x80, 0x42, 0x5a],
+      [0x41, 0xe2, 0x80, 0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x5a],
+    ]
+    const failures = []
+    let cuts = 0
+    for (const [index, bytes] of cases.entries()) {
+      const expected = await window.cutTest.whole(bytes)
+      for (let cut = 1; cut < bytes.length; cut += 1) {
+        cuts += 1
+        if ((await window.cutTest.pieces([bytes.slice(0, cut), bytes.slice(cut)])) !== expected)
+          failures.push([index, cut])
+      }
+      if ((await window.cutTest.pieces(bytes.map((byte) => [byte]))) !== expected)
+        failures.push([index, 'single-byte'])
+    }
+    return { cases: cases.length, cuts, failures }
+  })
+  expect(result.cases).toBe(9)
+  expect(result.cuts).toBe(57)
+  expect(result.failures).toEqual([])
+})
+
+test('UTF-8 cut waits through silence and preserves write acknowledgement order', async ({
+  page,
+}) => {
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    const emulator = window.cutTest.actual
+    const order = []
+    const first = emulator.write(Uint8Array.of(0x41)).then(() => order.push('A'))
+    const partial = Uint8Array.of(0xe2, 0x80)
+    const second = emulator.write(partial).then(() => order.push('partial'))
+    partial.fill(0xff) // The sender may reuse its buffer after the write.
+    await second
+    const before = window.cutTest.text()
+    await new Promise((done) => setTimeout(done, 100))
+    const quiet = window.cutTest.text()
+    await emulator.write(new Uint8Array())
+    await emulator.write(Uint8Array.of(0x94, 0x42))
+    await first
+    return { before, quiet, after: window.cutTest.text(), order }
+  })
+  expect(result).toEqual({ before: 'A', quiet: 'A', after: 'A—B', order: ['A', 'partial'] })
+})
+
+test('UTF-8 cut random malformed streams match an uncut xterm', async ({ page }) => {
+  test.setTimeout(90_000)
+  await utf8CutPage(page)
+  const result = await page.evaluate(async () => {
+    let seed = 12345
+    const random = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0)
+    const choices = [
+      0x41, 0x42, 0x80, 0x81, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xe2, 0xed, 0xef, 0xf0, 0xf4,
+      0xf5, 0xf7, 0xf8, 0xff,
+    ]
+    const failures = []
+    for (let run = 0; run < 400; run += 1) {
+      const bytes = Array.from(
+        { length: 2 + (random() % 24) },
+        () => choices[random() % choices.length],
+      )
+      bytes.push(0x5a)
+      const expected = await window.cutTest.whole(bytes)
+      const pieces = []
+      for (let at = 0; at < bytes.length; ) {
+        const length = 1 + (random() % 5)
+        pieces.push(bytes.slice(at, at + length))
+        at += length
+      }
+      if ((await window.cutTest.pieces(pieces)) !== expected) failures.push({ run, bytes, pieces })
+    }
+    return { runs: 400, failures }
+  })
+  expect(result.runs).toBe(400)
+  expect(result.failures).toEqual([])
 })

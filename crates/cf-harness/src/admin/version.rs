@@ -21,7 +21,7 @@ static VERSION: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// The version `text` names, or none (`versionOf`).
-pub(super) fn version_of(text: &str) -> Option<&str> {
+pub(crate) fn version_of(text: &str) -> Option<&str> {
     VERSION
         .captures(text)
         .and_then(|found| found.get(1))
@@ -31,7 +31,7 @@ pub(super) fn version_of(text: &str) -> Option<&str> {
 /// Whether `remote` is a later release than `local`, both read as three
 /// whole numbers, a number at a time; none when either is not three whole
 /// numbers, so no release is called newer or current on a guess (`newer`).
-pub(super) fn newer(local: Option<&str>, remote: &str) -> Option<bool> {
+pub(crate) fn newer(local: Option<&str>, remote: &str) -> Option<bool> {
     let (local, remote) = (numbers(local?)?, numbers(remote)?);
     for (before, after) in local.into_iter().zip(remote) {
         if before != after {

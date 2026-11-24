@@ -240,7 +240,7 @@ async fn a_handler_that_panics_is_a_500_internal_and_the_front_goes_on() {
             let log = std::fs::read_to_string(rig.home.path().join("daemon.log")).unwrap();
             assert!(log.contains("error a request failed"), "{log}");
             assert!(log.contains("panic: a bug in a handler"), "{log}");
-            let trace = std::fs::read_to_string(rig.home.path().join("events.jsonl")).unwrap();
+            let trace = crate::files::settled_trace(rig.home.path()).unwrap();
             assert!(
                 trace.contains(r#""reason":"a request failed: a bug in a handler""#),
                 "{trace}"

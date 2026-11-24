@@ -239,10 +239,13 @@ pub struct Probes {
     asked: RefCell<HashMap<Key, Asked>>,
 }
 
-/// Which executable a probe asked, as it is on disk, and what.
+/// Which executable a probe asked, as it is on disk, and what. The name it was invoked by is
+/// part of it: a launcher that several commands share (a version manager's) answers each
+/// command with its own program, so one command's answer is never another's.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
     file: PathBuf,
+    invoked: Option<OsString>,
     identity: Identity,
     size: u64,
     modified: u64,
@@ -270,14 +273,113 @@ pub async fn probe(
         .entry(key.clone())
         .or_insert_with(|| ask(processes, executable, args, env))
         .clone();
-    let answer = asked.clone().await;
+    let mut waiting = Waiting {
+        probes,
+        key,
+        awaited: asked.clone(),
+        asked,
+        answered: false,
+    };
+    let answer = (&mut waiting.awaited).await;
+    waiting.answered = true;
     if answer.is_err() {
-        let mut kept = probes.asked.borrow_mut();
-        if kept.get(&key).is_some_and(|stored| stored.ptr_eq(&asked)) {
-            kept.remove(&key);
-        }
+        waiting.retire();
     }
     answer.map_err(Unanswered::Failed)
+}
+
+/// A caller of [`probe`] waiting for the run it asked or joined. A run that did not answer is
+/// let go of; so is one whose last caller stopped waiting (a look cut at its time): left in
+/// the map, its unfinished run would be what the next question joined and waited for. Only
+/// that exact run is let go of: what was asked since, of the same file or not, is kept.
+struct Waiting<'a> {
+    probes: &'a Probes,
+    key: Key,
+    /// The run as it was put in the map: what is compared with the map's, since a handle that
+    /// has been waited on to its end no longer names its run.
+    asked: Asked,
+    /// The handle this caller waits on.
+    awaited: Asked,
+    answered: bool,
+}
+
+impl Waiting<'_> {
+    /// Takes this run out of the map, where it is still the one held under its key.
+    fn retire(&self) {
+        let mut kept = self.probes.asked.borrow_mut();
+        if kept
+            .get(&self.key)
+            .is_some_and(|stored| stored.ptr_eq(&self.asked))
+        {
+            kept.remove(&self.key);
+        }
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        // The map's and this caller's two handles are the run's holders when no other waits.
+        let alone = self
+            .asked
+            .strong_count()
+            .is_some_and(|holders| holders <= 3);
+        if !self.answered && alone {
+            self.retire();
+        }
+    }
+}
+
+impl Probes {
+    /// Lets go of every answer kept for `executable`, as it is on disk and as it is invoked,
+    /// and of the runs still in flight for it: the next question is asked again. For a
+    /// Refresh, which wants what the CLI says now. The same file invoked by another name has
+    /// kept answers of its own, which stay. An executable that cannot be resolved has nothing
+    /// kept.
+    pub fn forget(&self, executable: &Path) {
+        let Ok(file) = std::fs::canonicalize(executable) else {
+            return;
+        };
+        let invoked = invoked(executable);
+        self.asked
+            .borrow_mut()
+            .retain(|key, _| !(key.file == file && key.invoked == invoked));
+    }
+}
+
+/// What a check asks a CLI through: the probes kept so far, the programs they run
+/// with, and the environment.
+pub struct Asking<'a> {
+    pub probes: &'a Probes,
+    pub processes: &'a Rc<dyn Processes>,
+    pub env: &'a Env,
+}
+
+impl super::Services {
+    /// What a check of a CLI asks through.
+    pub fn asking(&self) -> Asking<'_> {
+        Asking {
+            probes: &self.probes,
+            processes: &self.processes,
+            env: &self.env,
+        }
+    }
+}
+
+/// What the CLI answers to `args`, asked afresh: the run is neither shared nor kept, and
+/// no other question's kept answer is given for it. For a question whose answer is of
+/// this launch alone (a launcher that is a script may run another program the next
+/// time with its own file unchanged), and that must not be stored under the path and
+/// arguments another executable name for the same file is asked by.
+pub async fn probe_afresh(
+    processes: &Rc<dyn Processes>,
+    executable: &Path,
+    args: &[&str],
+    env: &Env,
+) -> Result<Probed, Unanswered> {
+    key(executable, args).map_err(Unanswered::Unread)?;
+    ask(processes, executable, args, env)
+        .await
+        .map_err(Unanswered::Failed)
 }
 
 /// The executable as it is on disk: its real path, which file it is, its
@@ -292,6 +394,7 @@ fn key(executable: &Path, args: &[&str]) -> Result<Key, String> {
     let found =
         stat(&file).map_err(|failed| FileError::call(failed, "stat", Some(&file)).to_string())?;
     Ok(Key {
+        invoked: invoked(executable),
         changed: changed(&file),
         identity: found.identity,
         size: found.size,
@@ -299,6 +402,12 @@ fn key(executable: &Path, args: &[&str]) -> Result<Key, String> {
         args: args.iter().map(|&arg| arg.to_owned()).collect(),
         file,
     })
+}
+
+/// The name `executable` is invoked by: its last part as it was given, before any link in it
+/// is followed.
+fn invoked(executable: &Path) -> Option<OsString> {
+    executable.file_name().map(OsString::from)
 }
 
 /// When the file was last changed, in seconds and nanoseconds.

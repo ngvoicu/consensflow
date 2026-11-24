@@ -969,3 +969,37 @@ fn a_path_windows_resolved_is_written_without_its_verbatim_prefix() {
     assert_eq!(plain("/usr/bin/claude"), "/usr/bin/claude");
     assert_eq!(plain(r"C:\x"), r"C:\x");
 }
+
+fn argv(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| (*part).to_owned()).collect()
+}
+
+#[test]
+fn a_command_a_person_copies_quotes_what_the_shell_would_split() {
+    // Plain words stay as they are.
+    assert_eq!(
+        command_line(&argv(&["npm", "install", "-g", "@openai/codex@latest"])),
+        "npm install -g @openai/codex@latest"
+    );
+    if cfg!(windows) {
+        // PowerShell runs a quoted program with `&`.
+        assert_eq!(
+            command_line(&argv(&[
+                r"C:\Program Files\nodejs\npm.cmd",
+                "install",
+                "-g",
+                "x"
+            ])),
+            r#"& "C:\Program Files\nodejs\npm.cmd" install -g x"#
+        );
+    } else {
+        assert_eq!(
+            command_line(&argv(&["/Users/a b/bin/codex", "update"])),
+            "'/Users/a b/bin/codex' update"
+        );
+        assert_eq!(
+            command_line(&argv(&["/o'neil/codex", "update"])),
+            r"'/o'\''neil/codex' update"
+        );
+    }
+}
