@@ -254,7 +254,7 @@ replace = '''        refuse "$inside"'''
 
 [[plant]]
 name = "installers: install.sh asks a marked shell's destination to quit once it counts none"
-meant = "a copy opened after the marked install's count of none is never asked to quit: the last look refuses"
+meant = "a copy opened after the marked install counted none is never asked to quit: the last look refuses"
 runs = [["node", "--test", "--test-name-pattern", "opened after the marked install", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 
