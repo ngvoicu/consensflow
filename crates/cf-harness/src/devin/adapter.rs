@@ -77,7 +77,7 @@ use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box;
 use crate::shared::look::{
-    licence_enter, licence_paste, BoxState, EnterFor, EnterLicence, Look, PasteLicence, NO_LOOK,
+    licence_enter, licence_paste, BoxReading, BoxState, EnterFor, EnterLicence, Look, PasteLicence, NO_LOOK,
 };
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
@@ -636,16 +636,26 @@ impl DevinWindow {
             .or(switch.pasted)
             .is_none_or(|last| now - last >= BYPASS_AGAIN_MS);
         if drawn && due {
+            let mut paste = true;
             if switch.pasted.is_some() && switch.entered.is_none() {
+                paste = false;
                 // The Enter is the look's: the host checks it again where it writes.
-                if let EnterLicence::Go(at) =
-                    licence_enter(look, Harness::Devin, EnterFor::DevinBypass)
-                {
-                    if pane::enter(host, pane, &at).await.ok {
-                        switch.entered = Some(now);
+                match licence_enter(look, Harness::Devin, EnterFor::DevinBypass) {
+                    EnterLicence::Go(at) => {
+                        if pane::enter(host, pane, &at).await.ok {
+                            switch.entered = Some(now);
+                        }
+                    }
+                    // The command is no longer in the box the Enter was for: the window shows
+                    // it empty and quiet, in the mode it was in (a swallowed Enter, the person
+                    // cleared the command). No Enter will be allowed there, so the command goes
+                    // in again, within the launch's budget.
+                    EnterLicence::Wait(_) => {
+                        paste = !look.unsent() && look.reads(Harness::Devin) == BoxReading::Empty;
                     }
                 }
-            } else {
+            }
+            if paste {
                 let licence = licence_paste(look, Harness::Devin, BoxState::default(), &[]);
                 if matches!(licence, PasteLicence::Go { .. }) {
                     let session = self.session.borrow().clone();

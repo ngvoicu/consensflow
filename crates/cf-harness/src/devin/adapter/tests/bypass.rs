@@ -447,3 +447,51 @@ fn what_the_human_typed_and_has_not_sent_holds_the_window_before_the_mode_is_see
         "nothing goes behind its words"
     );
 }
+
+/// T-2198 finding 4: the first `/bypass` was pasted, its Enter was swallowed, and the person
+/// cleared the command from the box: the window is still in its normal mode, its box is empty and
+/// quiet, and the Enter is never to go (nothing waits in the box for it). The command is
+/// pasted again at the next look, within the launch's budget, where the window would otherwise
+/// be given up as unfit with its one paste spent.
+#[test]
+fn a_box_known_empty_that_lost_its_bypass_while_the_mode_is_normal_gets_the_command_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, configured("mild-coin", "normal")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window(&fakes, &wire, Some("mild-coin"));
+    let holds = Rc::new(Cell::new(false));
+    let typed = Rc::new(Cell::new(0u64));
+    let (keys, visible) = (Rc::clone(&typed), Rc::clone(&holds));
+    let host = AnsweringHost::new(move |op| {
+        Ok(match op {
+            "pane.snapshot" => {
+                let mut snapshot = looked(5_000.0, visible.get());
+                snapshot["typed"] = json!(keys.get());
+                snapshot["unsent"] = json!(false);
+                if keys.get() > 0 {
+                    snapshot["typedQuietMs"] = json!(9_000);
+                }
+                snapshot
+            }
+            "pane.write_paste" => {
+                visible.set(true);
+                json!({ "ok": true })
+            }
+            _ => json!({ "ok": true }),
+        })
+    });
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
+    assert_eq!(pastes(&host.asked), ["/bypass"]);
+    // The person cleared the command: the box is empty, the mode is still normal.
+    holds.set(false);
+    typed.set(1);
+    fakes.time.settle_at(EPOCH_MS + BYPASS_AGAIN_MS);
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(switching()));
+    assert_eq!(enters(&host.asked), 0, "no Enter into an empty box");
+    assert_eq!(
+        pastes(&host.asked),
+        ["/bypass", "/bypass"],
+        "the command goes again, once"
+    );
+}
