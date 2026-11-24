@@ -27,8 +27,11 @@
 # not yours to write to (never through sudo), and an installed ConsensFlow is
 # upgraded where it is. An installed ConsensFlow newer than the release is
 # never replaced by it, unless --version names that release. An open
-# ConsensFlow is asked to quit, as Quit in its menu would, and the install waits
-# for it; one that stays open is never stopped, and nothing is installed. The
+# ConsensFlow is asked to quit, as Quit in its menu would: it is found once among
+# the running applications (by its bundle identifier and the bundle this install
+# replaces, never by a process number), asked through that same object, and
+# waited for through it; two copies, a refusal or one that stays open end the
+# install, and one opened again before the swap too, and none is ever stopped, and nothing is installed. The
 # installed app is deleted only once the new one is in place and says its
 # version. `cf` comes inside the app: nothing else is set up. ConsensFlow is
 # made for Apple silicon Macs and Windows only.
@@ -96,11 +99,6 @@ fetch() {
     fi
 }
 
-# The processes running from the app at $1, one pid a line.
-processes_of() {
-    ps -axo pid=,comm= | awk -v inside="$1/Contents/" 'index($0, inside) { print $1 }'
-}
-
 # version order: begin
 # Whether the version $1 comes after $2, by SemVer's precedence: the numbers
 # first, then a release after any of its pre-releases, then the pre-release's
@@ -135,38 +133,79 @@ newer_than() {
 }
 # version order: end
 
-# The pids of this shell and the processes it runs under.
-ancestry() {
+# Whether this shell runs inside the app at $1: one of the programs it runs
+# under is a program of that bundle. Only this shell's own ancestors are read.
+runs_inside() {
     pid=$$
     while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
-        echo "$pid"
+        case "$(ps -o comm= -p "$pid" 2>/dev/null || true)" in
+            "$1"/Contents/*) return 0 ;;
+        esac
         pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
     done
+    return 1
+}
+
+# The one JavaScript (osascript -l JavaScript) that looks at the running apps. It
+# takes the mode (quit or count), the bundle identifier, the folder of the app
+# and the seconds to wait, and answers with one word and what follows it: `none`,
+# `many` (and how many), `ended`, `refused` or `open` (quit mode); the count
+# (count mode). The apps it names are the ones of that identifier whose bundle is
+# that folder, found once among the running applications as the system lists
+# them. In quit mode the one it found is asked to quit through that same object
+# and watched through it until it has ended: no process number is read or used,
+# so a number another program has taken since can never reach it.
+# shellcheck disable=SC2016 # JavaScript for osascript: nothing in it is for the shell
+quit_script='
+ObjC.import("AppKit");
+ObjC.import("Foundation");
+function run(argv) {
+    const mode = argv[0], id = argv[1], wait = Number(argv[3]);
+    const home = (p) => $(p).stringByResolvingSymlinksInPath.js;
+    const folder = home(argv[2]);
+    const list = $.NSWorkspace.sharedWorkspace.runningApplications;
+    const found = [];
+    for (let i = 0; i < list.count; i++) {
+        const app = list.objectAtIndex(i);
+        if (app.bundleIdentifier.isNil() || app.bundleURL.isNil()) continue;
+        if (app.bundleIdentifier.js === id && home(app.bundleURL.path.js) === folder) found.push(app);
+    }
+    if (mode === "count") return String(found.length);
+    if (found.length === 0) return "none";
+    if (found.length > 1) return "many " + found.length;
+    const app = found[0];
+    if (!app.terminate) return "refused";
+    const until = Date.now() + wait * 1000;
+    while (!app.terminated) {
+        if (Date.now() > until) return "open";
+        $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
+    }
+    return "ended";
+}'
+
+# How many ConsensFlows run from the app at $1.
+open_copies() {
+    osascript -l JavaScript -e "$quit_script" count "$running_id" "$1" 0 2>/dev/null || echo unknown
 }
 
 # Asks the ConsensFlow that runs from $1 to quit, the way Quit in its menu
-# does, and waits for every process of it to end. It is never stopped: one that
-# stays open ends the install.
+# does, and waits for that one instance to end. It is never stopped: one that
+# stays open, or refuses, ends the install.
 quit_open_app() {
-    running=$(processes_of "$1")
-    [ -n "$running" ] || return 0
-    for pid in $(ancestry); do
-        if printf '%s\n' "$running" | grep -qx "$pid"; then
-            refuse "this shell runs inside the ConsensFlow at $1, and quitting it to upgrade would end the install too. Run this from Terminal or another terminal app."
-        fi
-    done
-    say "ConsensFlow is open: asking it to quit, as Quit in its menu would..."
-    for pid in $running; do
-        osascript -l JavaScript -e "ObjC.import('AppKit'); const app = \$.NSRunningApplication.runningApplicationWithProcessIdentifier($pid); if (!app.isNil()) app.terminate;" >/dev/null 2>&1 || true
-    done
-    waited=0
-    while [ -n "$(processes_of "$1")" ]; do
-        if [ "$waited" -ge "$quit_wait" ]; then
-            refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
+    if runs_inside "$1"; then
+        refuse "this shell runs inside the ConsensFlow at $1, and quitting it to upgrade would end the install too. Run this from Terminal or another terminal app."
+    fi
+    answer=$(osascript -l JavaScript -e "$quit_script" quit "$running_id" "$1" "$quit_wait" 2>/dev/null) ||
+        refuse "could not ask the open ConsensFlow at $1 to quit. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."
+    case "$answer" in
+        none) return 0 ;;
+        many*) refuse "${answer#many } copies of ConsensFlow are running from $1, and the installer will not guess which to quit. Quit them (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        ended) say "ConsensFlow was open: it was asked to quit, as Quit in its menu would, and has quit." ;;
+        refused) refuse "ConsensFlow at $1 did not accept the request to quit. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        open) refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        *) refuse "could not tell whether ConsensFlow at $1 is open. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+    esac
+    return 0
 }
 
 # Whether $1 is a pid as a process here has one: one to five digits, no leading
@@ -370,6 +409,7 @@ main() {
     spctl=/usr/sbin/spctl
     plistbuddy=/usr/libexec/PlistBuddy
     quit_wait=120
+    running_id=dev.ngvoicu.consensflow
 
     official=https://github.com/ngvoicu/consensflow/releases
     releases="${CONSENSFLOW_RELEASES_URL:-$official}"
@@ -520,7 +560,7 @@ main() {
     say "the app is ConsensFlow's, signed (team $team) and notarized"
 
     quit_open_app "$dest"
-    if [ -n "$(processes_of "$dest")" ]; then
+    if [ "$(open_copies "$dest")" != 0 ]; then
         refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
     fi
     # The copy is checked whole again now, after the wait for the open app, as near

@@ -178,6 +178,7 @@ function freshCase(
     [REQUIREMENT, AD_HOC],
     [SPCTL, `spctl=${path.join(work, 'spctl')}`],
     ['quit_wait=120', 'quit_wait=4'],
+    ['running_id=dev.ngvoicu.consensflow', `running_id=${APPLET_ID}`],
   ],
 ) {
   const dir = mkdtempSync(path.join(work, 'case-'))
@@ -246,13 +247,27 @@ function assertInstalled(at, ran, version) {
   run('codesign', ['--verify', '--deep', '--strict', path.join(at.apps, 'ConsensFlow.app')])
 }
 
-/** A stay-open AppleScript applet as `dir`/ConsensFlow.app, which quits when asked unless `refuses`. */
-function applet(dir, refuses) {
-  const source = refuses
-    ? 'on idle\nreturn 1\nend idle\non quit\nend quit'
-    : 'on idle\nreturn 1\nend idle'
-  const app = path.join(dir, 'ConsensFlow.app')
+/** The bundle identifier of the test applets: never the release's. */
+const APPLET_ID = 'dev.ngvoicu.consensflow-test-applet'
+
+/**
+ * A stay-open AppleScript applet as `dir`/`name`.app, which quits when asked unless `refuses`
+ * (and writes `record` when it is asked to, where one is given), under `id`.
+ */
+function applet(dir, refuses, { name = 'ConsensFlow', id = APPLET_ID, record } = {}) {
+  const asked = record ? `do shell script "echo asked >> ${record}"\n` : ''
+  const source =
+    refuses || record
+      ? `on idle\nreturn 1\nend idle\non quit\n${asked}${refuses ? '' : 'continue quit\n'}end quit`
+      : 'on idle\nreturn 1\nend idle'
+  const app = path.join(dir, `${name}.app`)
   run('osacompile', ['-s', '-o', app, '-e', source])
+  run('/usr/libexec/PlistBuddy', [
+    '-c',
+    `Add :CFBundleIdentifier string ${id}`,
+    path.join(app, 'Contents/Info.plist'),
+  ])
+  run('codesign', ['--force', '--sign', '-', app])
   return app
 }
 
@@ -845,7 +860,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
         assert.equal(ran.status, 1, ran.out)
         assert.match(ran.out, /the copy of the app made in .* is not signed/)
-        assert.doesNotMatch(ran.out, /asking it to quit/)
+        assert.doesNotMatch(ran.out, /was asked to quit/)
         assert.ok(processesOf(app).length > 0, 'it still runs, never asked')
       } finally {
         for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
@@ -854,10 +869,11 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
 
     test('an app opened again between the quit and the swap is refused, and the installed one kept', async () => {
       const at = freshCase()
-      const installed = fakeApp(at.apps, '3.0.7-alpha.1')
-      const count = path.join(at.dir, 'ps-count')
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      // The look just before the swap (count) finds one running; the quit's own look finds none.
       const PATH = standIns(at, {
-        ps: `if [ "$1" = "-axo" ]; then\nn=$(cat "${count}" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${count}"\n/bin/ps "$@"\n[ "$n" -ge 2 ] && echo "99999 ${installed}/Contents/MacOS/app"\nexit 0\nfi\nexec /bin/ps "$@"`,
+        osascript:
+          'case " $* " in *" count "*) echo 1; exit 0 ;; esac\nexec /usr/bin/osascript "$@"',
       })
       assertKept(
         at,
@@ -910,7 +926,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       try {
         const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
         assert.equal(ran.status, 1, ran.out)
-        assert.match(ran.out, /asking it to quit/)
+        assert.match(ran.out, /was asked to quit/)
         assert.match(ran.out, /the code signature of the copy of the app made in .* does not hold/)
         assert.match(ran.out, /nothing was installed/)
         assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'no copy is left beside it')
@@ -1567,7 +1583,6 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       await waitFor(() => processesOf(app).length > 0, 'the applet starting')
       const ran = await install(at, ['--version', '3.0.7'])
       assertInstalled(at, ran, '3.0.7')
-      assert.match(ran.out, /ConsensFlow is open: asking it to quit/)
     })
 
     test('that stays open is never stopped, and nothing is installed', async () => {
@@ -1586,6 +1601,75 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       } finally {
         for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
       }
+    })
+
+    test('is found by its identifier and its bundle, never by a number: another app that holds an old number is not asked to quit', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'asked')
+      const other = applet(at.dir, true, {
+        name: 'Other',
+        id: 'dev.example.other-test-applet',
+        record,
+      })
+      run('open', ['-g', '-j', other])
+      await waitFor(() => processesOf(other).length > 0, 'the other app starting')
+      try {
+        // What the old way read: a list that gave this app's number to a ConsensFlow's path.
+        const PATH = standIns(at, {
+          ps: `if [ "$1" = "-axo" ]; then\nn=$(cat "${path.join(at.dir, 'ps-count')}" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${path.join(at.dir, 'ps-count')}"\n[ "$n" -le 1 ] && echo "${processesOf(other)[0]} ${at.apps}/ConsensFlow.app/Contents/MacOS/app"\nexit 0\nfi\nexec /bin/ps "$@"`,
+        })
+        const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+        assertInstalled(at, ran, '3.0.7')
+        assert.ok(!existsSync(record), 'the other app was never asked to quit')
+        assert.ok(processesOf(other).length > 0, 'it still runs')
+      } finally {
+        for (const pid of processesOf(other)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('an app of the same identifier at another path is not asked to quit', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'asked')
+      const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
+      const app = applet(elsewhere, true, { record })
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the app starting')
+      try {
+        assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
+        assert.ok(!existsSync(record), 'it was never asked to quit')
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('two copies running from the app are refused, named, and neither is asked to quit', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'asked')
+      const app = applet(at.apps, false, { record })
+      run('open', ['-g', '-j', app])
+      run('open', ['-n', '-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 1, 'both copies starting')
+      try {
+        const ran = await install(at, ['--version', '3.0.7'])
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /2 copies of ConsensFlow are running from .*ConsensFlow\.app/)
+        assert.match(ran.out, /nothing was installed/)
+        assert.ok(!existsSync(record), 'neither was asked')
+        assert.equal(processesOf(app).length, 2)
+        assert.notEqual(installedVersion(at), '3.0.7')
+        assert.deepEqual(readdirSync(at.tmp), [])
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('where the look at the running apps fails, nothing is installed and the words say to quit it', async () => {
+      const at = freshCase()
+      const PATH = standIns(at, {
+        osascript: 'case " $* " in *" quit "*) exit 1 ;; esac\nexec /usr/bin/osascript "$@"',
+      })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assertRefused(at, ran, /could not ask the open ConsensFlow at .* to quit\. Quit it/)
     })
 
     test('that the install runs inside is not asked to quit: the install is refused', async () => {

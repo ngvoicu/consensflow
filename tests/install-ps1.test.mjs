@@ -172,7 +172,6 @@ for (const [label, shell] of shells) {
       const script = testCopy(INSTALL_PS1, path.join(dir, 'install.ps1'), key.keyLine, [
         [UNINSTALL_ENTRY, `'${user.replace('HKCU', 'HKCU:')}'`],
         [MACHINE_ENTRIES, `$machineEntries = @('${machine.replace('HKCU', 'HKCU:')}')`],
-        ['$quitWait = 120', '$quitWait = 3'],
         ...replacements,
       ])
       if (boundStarts) {
@@ -668,7 +667,7 @@ for (const [label, shell] of shells) {
           return copy
         }
 
-        test('that stays open is never stopped, and nothing is installed', async () => {
+        test('is never closed or stopped: the install stops, asks the person to quit it, and installs nothing', async () => {
           const at = freshCase()
           const running = spawn(program(at, 'ConsensFlow.exe'), ['-n', '60', '127.0.0.1'], {
             stdio: 'ignore',
@@ -678,12 +677,30 @@ for (const [label, shell] of shells) {
             assertRefused(
               at,
               ran,
-              /ConsensFlow in .* is still open after 3s\. Close it and run this again\./,
+              /ConsensFlow is open\. Quit it, then run this installer again\. Running from .*ConsensFlow.*ConsensFlow\.exe/,
             )
-            assert.match(ran.out, /asking it to close/)
+            assert.doesNotMatch(ran.out, /asking it to close/)
             assert.equal(running.exitCode, null, 'it still runs')
           } finally {
             running.kill()
+          }
+        })
+
+        test('another program of the folder is named, and is not asked to close either', async () => {
+          const at = freshCase()
+          const other = spawn(program(at, 'helper.exe'), ['-n', '60', '127.0.0.1'], {
+            stdio: 'ignore',
+          })
+          try {
+            const ran = await install(at, ['--version', '3.0.7'])
+            assertRefused(
+              at,
+              ran,
+              /ConsensFlow is open\. Quit it, then run this installer again\. Running from .*helper\.exe/,
+            )
+            assert.equal(other.exitCode, null, 'it still runs')
+          } finally {
+            other.kill()
           }
         })
 
@@ -692,8 +709,8 @@ for (const [label, shell] of shells) {
           const ping = program(at, 'ConsensFlow.exe')
           const opened = freshCase([
             [
-              'Close-CfOpen $dir\n',
-              "Close-CfOpen $dir; [IO.File]::WriteAllText($env:CF_TEST_REOPEN_READY, 'ready'); $watch = [Diagnostics.Stopwatch]::StartNew(); while (-not (Test-Path -LiteralPath $env:CF_TEST_REOPEN_GO)) { if ($watch.Elapsed.TotalSeconds -gt 60) { throw 'test gate timed out' }; Start-Sleep -Milliseconds 50 }\n",
+              'Stop-IfCfOpen $dir\n',
+              "Stop-IfCfOpen $dir; [IO.File]::WriteAllText($env:CF_TEST_REOPEN_READY, 'ready'); $watch = [Diagnostics.Stopwatch]::StartNew(); while (-not (Test-Path -LiteralPath $env:CF_TEST_REOPEN_GO)) { if ($watch.Elapsed.TotalSeconds -gt 60) { throw 'test gate timed out' }; Start-Sleep -Milliseconds 50 }\n",
             ],
           ])
           opened.local = at.local

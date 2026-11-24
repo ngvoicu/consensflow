@@ -225,8 +225,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''            refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."'''
-replace = '''            kill -KILL $(processes_of "$1") 2>/dev/null || true'''
+find = '''        open) refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;'''
+replace = '''        open) return 0 ;;'''
 
 [[plant]]
 name = "installers: install.sh asks the ConsensFlow it runs inside to quit"
@@ -236,8 +236,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''        if printf '%s\n' "$running" | grep -qx "$pid"; then'''
-replace = '''        if false; then'''
+find = '''    if runs_inside "$1"; then'''
+replace = '''    if false; then'''
 
 [[plant]]
 name = "installers: install.sh leaves its folder behind"
@@ -412,8 +412,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = '''                Stop-CfInstall "ConsensFlow in $dir is still open after $($quitWait)s. Close it and run this again."'''
-replace = '''                Get-CfOpen $dir | Stop-Process -Force'''
+find = '''        Stop-CfInstall "ConsensFlow is open. Quit it, then run this installer again. Running from ${dir}: $names"'''
+replace = '''        Get-CfOpen $dir | Stop-Process -Force'''
 
 [[plant]]
 name = "installers: install.ps1 asks the ConsensFlow it runs inside to close"
@@ -843,7 +843,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ -n "$(processes_of "$dest")" ]; then'''
+find = '''    if [ "$(open_copies "$dest")" != 0 ]; then'''
 replace = '''    if false; then'''
 
 [[plant]]
