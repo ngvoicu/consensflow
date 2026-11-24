@@ -18,6 +18,8 @@ n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "di
 n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
 n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
 n35-kinds = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "no_way_on_names"]
+n35-card-backup = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a due retry of a backup"]
+n35-card-closed = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "becomes due while a closed"]
 n35-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "error_before_text"]
 
 [[plant]]
@@ -211,16 +213,6 @@ find = "        if self.is_out(&owner) {\n            return Ok(());\n        }\
 replace = "        if participant.role != \"chief\" {"
 
 [[plant]]
-name = "n35 hold: a failed end after a good turn counted from the old try"
-meant = "a_turn_the_harness_woke_after_turns_that_went_through_is_the_first_try_not_the_next"
-runs = ["n35-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_retry.rs"
-find = "        let n = if went_through {"
-replace = "        let n = if false && went_through {"
-
-[[plant]]
 name = "n35 hold: a second try's line is the old quota hold's"
 meant = "a_second_try_after_an_earlier_quota_hold_says_no_old_quota_line"
 runs = ["n35-dispatcher"]
@@ -229,26 +221,6 @@ runs = ["n35-dispatcher"]
 file = "crates/cf-ledger/src/views.rs"
 find = "             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id\n                              AND r.paused_at = t.paused_at)\n"
 replace = ""
-
-[[plant]]
-name = "n35 hold: a failed turn counted as one that ended well"
-meant = "an_answer_item_inside_a_turn_that_then_failed_is_never_a_turn_that_went_through"
-runs = ["n35-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end.rs"
-find = "                let went_through =\n                    self.ended_well_since_last_paste(record, &thread.task, participant)?;"
-replace = "                self.note_a_turn_ended_well(record, participant, &thread.task)?;\n                let went_through =\n                    self.ended_well_since_last_paste(record, &thread.task, participant)?;"
-
-[[plant]]
-name = "n35 hold: no count reset after a turn that ended well"
-meant = "a_turn_that_ended_well_after_the_last_resume_makes_the_next_failure_the_first_try"
-runs = ["n35-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_retry.rs"
-find = "        record.ended_well_after.set(last);"
-replace = "        let _ = last;"
 
 [[plant]]
 name = "n35 hold: the hold notice tells the requester to reopen a held task"
@@ -269,3 +241,53 @@ runs = ["n35-kinds"]
 file = "crates/cf-harness/src/codex/record/kinds.rs"
 find = "\"rephrase the request\""
 replace = "\"reopen the turn with the request rephrased\""
+
+[[plant]]
+name = "n35 hold: the count reset by anything but a person, a result or the clock"
+meant = "a_look_that_reads_a_turn_settled_and_not_failed_between_two_failures_resets_nothing"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                    let tries = ledger.turn_retry_tries(message.id)?;"
+replace = "                    let tries = ledger.turn_retry_tries(message.id)? * 0;"
+
+[[plant]]
+name = "n35 hold: the 30 minutes never run out"
+meant = "a_failure_30_minutes_after_the_last_automatic_resume_gets_a_fresh_pair"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                        .map(|at| self.now() - at);"
+replace = "                        .map(|at| at - self.now());"
+
+[[plant]]
+name = "n35 hold: the 30 minutes counted from nothing (every failure a fresh pair)"
+meant = "a_failure_30_minutes_after_the_last_automatic_resume_gets_a_fresh_pair"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "since.is_some_and(|since| since >= RENEWAL_MS)"
+replace = "since.is_some_and(|since| since >= 0)"
+
+[[plant]]
+name = "n35 hold: the folded card reads the primary's quota, not the task's member"
+meant = "a due retry of a backup's task says what its own member waits for, folded or not, when hera is out"
+runs = ["n35-card-backup"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      const assignee = lanes.find((lane) => lane.participant.handle === task.assignee)?.participant"
+replace = "      const assignee = this.#board.lanes.find((lane) => lane.participant.backupOf == null && lane.participant.role === 'worker')?.participant"
+
+[[plant]]
+name = "n35 hold: a closed project's card keeps the time that passed"
+meant = "a retry that becomes due while a closed project's board stays open says to resume the project"
+runs = ["n35-card-closed"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      for (const held of root.querySelectorAll('.card-held[data-retry]')) {"
+replace = "      for (const held of []) {"

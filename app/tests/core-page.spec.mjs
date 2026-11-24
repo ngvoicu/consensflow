@@ -19605,3 +19605,64 @@ test("a retry past its time waits for what is really missing: the project's resu
     page.locator('button.card[data-task="12"] .card-held'),
   ).toHaveText("Trying again, waiting for its member to be back (1 of 2)");
 });
+
+for (const outMember of ["diana", "hera"]) {
+  test(`a due retry of a backup's task says what its own member waits for, folded or not, when ${outMember} is out`, async ({
+    page,
+  }) => {
+    const { data } = team({
+      out: { [outMember]: new Date(Date.now() + 3_600_000).toISOString() },
+      working: ["hera"],
+    });
+    const lane = data.boards[1].lanes.find((l) => l.participant.member === "hera");
+    Object.assign(lane.tasks[0], {
+      state: "paused",
+      retry: {
+        kind: "failed",
+        which: 1,
+        of: 2,
+        dueAt: new Date(Date.now() - 20_000).toISOString(),
+      },
+    });
+    Object.assign(data.tasks["1:22"], lane.tasks[0]);
+    await open(page, data);
+    const card = page.locator('button.card[data-task="22"]');
+    const waits = outMember === "hera" ? "its member to be back" : "its window";
+    await expect(card.locator(".card-held")).toContainText(`waiting for ${waits}`);
+    await page
+      .locator('tr[data-handle="diana"]')
+      .getByRole("button", { name: "Show @diana's 1 session" })
+      .click();
+    await expect(card.locator(".card-held")).toContainText(`waiting for ${waits}`);
+  });
+}
+
+test("a retry that becomes due while a closed project's board stays open says to resume the project", async ({
+  page,
+}) => {
+  const now = Date.now();
+  const data = model();
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === "zeus");
+  data.boards[1].project.state = "closed";
+  data.projects.find((p) => p.id === 1).state = "closed";
+  const work = task(22, "Retry a job", "paused", "chief", "zeus", 2, {
+    pool: "worker",
+    tier: "standard",
+    retry: {
+      kind: "failed",
+      which: 1,
+      of: 2,
+      dueAt: new Date(now + 120_000).toISOString(),
+    },
+  });
+  lane.tasks.push(work);
+  data.tasks["1:22"] = { ...work, messages: [] };
+  await page.clock.install({ time: now });
+  await open(page, data);
+  const card = page.locator('button.card[data-task="22"]');
+  await expect(card.locator(".card-held")).toContainText("Trying again at");
+  await page.clock.fastForward(125_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for the project's resume (1 of 2)",
+  );
+});

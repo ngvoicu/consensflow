@@ -8,7 +8,7 @@
 //! to its part as it is ported. Who holds the participant now is its [`Hold`].
 //! A part is borrowed for one reading or one change, never across a wait.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::chief_switch::PendingSwitch;
@@ -35,11 +35,6 @@ pub(crate) struct Record {
     /// What its task is held for while its turn's work runs in the background
     /// (`turn_end`).
     pub(crate) held: RefCell<HeldPart>,
-    /// The message last pasted into the window about its working task when a look read the
-    /// turn after it ending as a success: the harness's own record of that turn's end. A failed
-    /// turn's count restarts from it (`turn_retry`). Memory only: where it is lost (a restart),
-    /// the count carried by the last paste stands, and a task fails sooner, never later.
-    pub(crate) ended_well_after: Cell<Option<i64>>,
     /// The latest message of its working task, where its record shows nothing after it
     /// (`never_began`).
     pub(crate) never_began: RefCell<Option<Unbegun>>,
@@ -65,7 +60,6 @@ impl Record {
             copied: RefCell::new(None),
             pending_switch: RefCell::new(None),
             held: RefCell::new(HeldPart::default()),
-            ended_well_after: Cell::new(None),
             never_began: RefCell::new(None),
             relaunching: RefCell::new(None),
             dialog: RefCell::new(DialogWatch::default()),

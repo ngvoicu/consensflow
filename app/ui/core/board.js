@@ -1422,7 +1422,7 @@ export class BoardView {
         cell.append(this.#stackTile(held.length, state, label, participant))
       } else if (held.length > 0) {
         const list = element('ol', 'cards')
-        list.append(...held.map((task) => this.#card(task, lane.busy ?? null, participant)))
+        list.append(...held.map((task) => this.#card(task, lane.busy ?? null)))
         cell.append(list)
       }
       row.append(cell)
@@ -1693,7 +1693,7 @@ export class BoardView {
     this.#stackTitle.textContent = `${label} tasks of ${laneName(row.participant)}`
     redraw(
       this.#stackCards,
-      held.map((task) => this.#card(task, row.busy ?? null, row.participant)),
+      held.map((task) => this.#card(task, row.busy ?? null)),
     )
   }
 
@@ -1708,10 +1708,14 @@ export class BoardView {
           card.setAttribute('aria-description', `${STATE_LABEL[card.dataset.state]} for ${text}`)
         }
       }
+      for (const held of root.querySelectorAll('.card-held[data-retry]')) {
+        const text = retryWords(JSON.parse(held.dataset.retry), false, now, held.dataset.why || null)
+        if (held.textContent !== text) held.textContent = text
+      }
     }
   }
 
-  #card(task, busy = null, participant = null) {
+  #card(task, busy = null) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -1740,14 +1744,18 @@ export class BoardView {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
     }
     if (task.retry) {
+      // The member whose task it is: a backup's task waits on the backup, folded or not.
+      const lanes = this.#board.lanes
+      const assignee = lanes.find((lane) => lane.participant.handle === task.assignee)?.participant
       const owner =
-        participant === null
-          ? null
-          : (this.#board.lanes.find(
-              (lane) => lane.participant.handle === (participant.member ?? participant.handle),
-            )?.participant ?? participant)
+        lanes.find((lane) => lane.participant.handle === (assignee?.member ?? assignee?.handle))
+          ?.participant ?? null
       const why = retryWaitsFor(this.#board.project.state !== 'open', owner)
-      where.append(' · ', element('span', 'card-held', retryWords(task.retry, false, Date.now(), why)))
+      const held = element('span', 'card-held', retryWords(task.retry, false, Date.now(), why))
+      // The card left open past its time follows the clock (`#tick`).
+      held.dataset.retry = JSON.stringify(task.retry)
+      held.dataset.why = why ?? ''
+      where.append(' · ', held)
     }
     if (task.resumeWait) {
       where.append(' · ', element('span', 'card-held', `resume waits: ${task.resumeWait.reason}`))

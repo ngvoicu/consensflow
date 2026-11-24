@@ -1209,29 +1209,64 @@ fn an_answer_item_inside_a_turn_that_then_failed_is_never_a_turn_that_went_throu
     assert_eq!(resumes(&c, "zeus"), 2, "never a third automatic Resume");
 }
 
+/// Two failed turns, each tried: the window is at its second Resume and its turn has begun.
+fn at_the_second_try(c: &Context, window: &str) {
+    fail(c, window);
+    passes(c, 3);
+    c.advance(31_000);
+    until_resumed(c, "zeus", 1);
+    next_turn_opens(c, window);
+    passes(c, 2);
+    fail(c, window);
+    passes(c, 3);
+    c.advance(121_000);
+    until_resumed(c, "zeus", 2);
+    next_turn_opens(c, window);
+    passes(c, 2);
+}
+
 #[test]
-fn a_turn_that_ended_well_after_the_last_resume_makes_the_next_failure_the_first_try() {
-    // The count resets on a successful turn end after the last automatic Resume, and on
-    // nothing else: the turn the Resume began ended well and left a job.
+fn a_look_that_reads_a_turn_settled_and_not_failed_between_two_failures_resets_nothing() {
+    // T-2186: a look between the record's read and the wire's read, or an interrupted turn,
+    // reads as a success in every harness. The count rests on nothing a harness reads.
     let c = retrying();
     let (t, window) = working(&c);
-    fail(&c, &window);
-    passes(&c, 3);
-    c.advance(31_000);
-    until_resumed(&c, "zeus", 1);
-    next_turn_opens(&c, &window);
+    at_the_second_try(&c, &window);
+    c.adapter.with(&window, |agent| {
+        agent.failed = false;
+        agent.settled = true;
+    });
     passes(&c, 2);
-    c.adapter
-        .answer_leaving_a_job("zeus", "The build runs in the background.");
-    passes(&c, 3);
-    c.advance(3_600_000);
-    c.adapter.wake(
-        "zeus",
-        "<task-notification>the build ended</task-notification>",
-    );
     fail(&c, &window);
     passes(&c, 3);
-    assert_eq!(t.task(1).task.retry.expect("held").which, 1);
+    c.advance(600_000);
+    passes(&c, 8);
+    assert_eq!(t.task(1).task.state, "failed", "two tries, then it fails");
+    assert_eq!(resumes(&c, "zeus"), 2, "never a third automatic Resume");
+}
+
+#[test]
+fn a_failure_30_minutes_after_the_last_automatic_resume_gets_a_fresh_pair() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    at_the_second_try(&c, &window);
+    c.advance(29 * 60_000);
+    fail(&c, &window);
+    passes(&c, 3);
+    assert_eq!(
+        t.task(1).task.state,
+        "failed",
+        "29 minutes after the last Resume it is the third failure"
+    );
+    let c = retrying();
+    let (t, window) = working(&c);
+    at_the_second_try(&c, &window);
+    c.advance(31 * 60_000);
+    fail(&c, &window);
+    passes(&c, 3);
+    let held = t.task(1).task;
+    assert_eq!(held.state, "paused", "31 minutes after: a fresh pair");
+    assert_eq!(held.retry.expect("held").which, 1);
 }
 
 #[test]
