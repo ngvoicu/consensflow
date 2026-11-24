@@ -220,7 +220,6 @@ fn holds_no_harness(folder: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
     use super::*;
 

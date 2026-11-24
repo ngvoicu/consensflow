@@ -247,7 +247,6 @@ fn words(content: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::Connection;
     use serde_json::json;
 
     use super::*;

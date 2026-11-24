@@ -42,7 +42,7 @@ use cf_e2e::live::window::{Member, Open, Window};
 use cf_e2e::live::{self, agents, ask, calls, secs, Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
 /// The stand-in for Claude, which a rig has, and the stand-in `cf` its windows run.

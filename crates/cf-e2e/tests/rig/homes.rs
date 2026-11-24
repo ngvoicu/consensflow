@@ -80,7 +80,6 @@ fn a_rig_is_given_its_home_in_the_folder_its_case_names() -> Outcome {
 
 #[cfg(unix)]
 mod sweeping {
-    use std::fs::File;
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 

@@ -3,7 +3,6 @@
 
 use std::thread;
 
-use rusqlite::Connection;
 use serde_json::Value;
 
 use super::*;

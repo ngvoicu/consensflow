@@ -311,7 +311,6 @@ pub fn say_copies(parent: &Path) -> usize {
 #[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
     use super::*;
 

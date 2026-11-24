@@ -19,7 +19,6 @@
 use std::path::Path;
 
 use cf_e2e::rig::{chief_body, Project, Rig};
-use rusqlite::Connection;
 use serde_json::{json, Value};
 
 use crate::idle_compaction_read_as_a_cut_turn::{

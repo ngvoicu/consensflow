@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs;
 use std::time::Duration;
 
 use super::*;

@@ -27,7 +27,6 @@ use std::path::Path;
 use cf_e2e::files;
 use cf_e2e::live::trace::Trace;
 use cf_e2e::rig::{Config, Project, Rig};
-use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
 #[cfg(unix)]

@@ -30,7 +30,7 @@ use cf_e2e::live::members::{self, Plan};
 use cf_e2e::live::{Harness, Log, Who};
 use cf_e2e::process::own_var;
 use cf_e2e::{Error, Result};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::check::{self, Finished};

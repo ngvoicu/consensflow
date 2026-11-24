@@ -33,12 +33,10 @@
 //! to the fix: the human types a turn of the stand-in's that takes a while, and the
 //! window reads at work for as long as it runs, and at rest after.
 
-use std::fs;
 use std::path::Path;
 
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::{Error, Result};
-use rusqlite::Connection;
 use serde_json::{json, Value};
 
 use crate::devin_notes_twice::store_of;
