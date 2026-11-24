@@ -121,19 +121,6 @@ find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env
 replace = '''        (Harness::Codex, Some(config)) if real_claude => isolated_env('''
 
 [[plant]]
-name = "K3: the admin daemon is given the owner's HOME over the kit's"
-meant = "the_admin_daemon_is_given_the_kits_home_and_never_the_owners"
-runs = ["ki-test-harnesses"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_harnesses.rs"
-find = '''const MACHINE: [&str; 11] = [
-    "PATH",'''
-replace = '''const MACHINE: [&str; 12] = [
-    "PATH",
-    "HOME",'''
-
-[[plant]]
 name = "K3: a version read is given the machine's home"
 meant = "a_version_read_is_given_the_kits_folders_and_never_the_machines_homes"
 runs = ["ki-lib-machine"]
@@ -207,8 +194,14 @@ runs = ["ki-test-first-message"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_first_message.rs"
-find = '''        .any(|cf| text.contains(&given_as(body, id, cf)))'''
-replace = '''        .any(|_| text.contains(&given_as(body, id, "cf")))'''
+find = '''    text.contains(&given_as(body, id, cf))
+}
+
+/// What one task of a worker showed.'''
+replace = '''    text.contains(&given_as(body, id, cf)) || text.contains(&given_as(body, id, "cf"))
+}
+
+/// What one task of a worker showed.'''
 
 [[plant]]
 name = "K3 round 3: the long-brief check cuts a body the product sends whole"
@@ -223,16 +216,6 @@ replace = '''    if message.encode_utf16().count() <= OPENING {
         return message.to_owned();'''
 
 [[plant]]
-name = "K3 round 3: a named home on Windows is given the caller's drive and path back"
-meant = "a_named_home_on_windows_is_not_given_the_callers_drive_and_path_back"
-runs = ["ki-lib-process"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/process.rs"
-find = '''    let home_named = names("HOME") || names("USERPROFILE");'''
-replace = '''    let home_named = false;'''
-
-[[plant]]
 name = "K3 round 3: the machine's variables hold HOME"
 meant = "a_machine_environment_holds_the_machine_and_nothing_of_the_account"
 runs = ["ki-lib-process"]
@@ -243,18 +226,6 @@ find = '''        "LANG",
         "TERM",'''
 replace = '''        "HOME",
         "TERM",'''
-
-[[plant]]
-name = "K3 round 3: a machine-env run inherits the caller's environment"
-meant = "a_machine_env_run_is_given_the_homes_its_case_names_and_no_other"
-runs = ["ki-lib-process"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/process.rs"
-find = '''            machine_vars(std::env::vars_os())
-        } else if !self.inherit {'''
-replace = '''            std::env::vars_os().collect()
-        } else if !self.inherit {'''
 
 [[plant]]
 name = "K3 round 3: a window is given the person's home as its own"
@@ -319,32 +290,6 @@ runs = ["ki-lib-members"]
 file = "crates/cf-e2e/src/stand_in_lists.rs"
 find = '''pub const MODELS: [&str; 4] = ["fake", "fake-2", "fake-chief", "worker"];'''
 replace = '''pub const MODELS: [&str; 4] = ["fake", "fake-3", "fake-chief", "worker"];'''
-
-[[plant]]
-name = "K3 round 3: the roster preflight lacks WINDIR"
-meant = "the_roster_preflight_is_given_the_windows_system_variables_a_program_starts_by"
-runs = ["ki-lib-agents"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/agents.rs"
-find = '''    "WINDIR",
-    "ComSpec",
-];'''
-replace = '''    "ComSpec",
-    "ComSpec",
-];'''
-
-[[plant]]
-name = "K3 round 3: the renewal inherits the caller's environment"
-meant = "the_renewal_is_given_the_accounts_home_by_name_and_nothing_of_the_callers"
-runs = ["ki-lib-renew"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/renew.rs"
-find = '''        .machine_env()
-        .vars(account.iter().cloned())'''
-replace = '''        .inheriting_env()
-        .vars(account.iter().cloned())'''
 
 [[plant]]
 name = "K3 round 3: a record that was there before is taken away"
@@ -578,8 +523,12 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''    let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));'''
-replace = '''    let any_case = false;'''
+find = '''        )));
+    }
+    let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));'''
+replace = '''        )));
+    }
+    let any_case = false;'''
 
 [[plant]]
 name = "K3 doors: the judge follows a `..` among absent names"
@@ -795,8 +744,8 @@ runs = ["ki-lib-renew"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/renew.rs"
-find = '''    TestMachine::required_by("the renewal of a login", machine.cloned())?;'''
-replace = '''    let _ = machine;'''
+find = '''    let machine = TestMachine::required_by("the renewal of a login", machine.cloned())?;'''
+replace = '''    let machine = machine.cloned().expect("a test machine");'''
 
 [[plant]]
 name = "K3 doors: a harness window is opened without its update switches (T-2086 C1)"
@@ -875,16 +824,6 @@ find = '''const PTY_STARTS: &[&str] = &[
     "PaneTable",'''
 replace = '''const PTY_STARTS: &[&str] = &[
     "NoSuchName",'''
-
-[[plant]]
-name = "K3 doors: Muse's direct TUI is let past the rule (T-2119 X1)"
-meant = "the_live_kit_ends_removes_and_writes_only_through_its_door"
-runs = ["ki-lib-door"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/rule.rs"
-find = '''const PTY_WAIVERS: &[&str] = &["tests/live_muse/tui.rs"];'''
-replace = '''const PTY_WAIVERS: &[&str] = &[];'''
 
 [[plant]]
 name = "K3 doors: the direct Muse window opens its pty on an account that is no test machine's (T-2119 X1)"

@@ -93,15 +93,12 @@ meant = "a_file_written_whole_is_not_there_until_it_is_written"
 runs = ["rig-lib-files"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/files.rs"
-find = '''
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    write(&writing, text)?;
+    rename(&writing, file)
 '''
-replace = '''
-    fs::write(file, text)
+replace = '''    let _ = &writing;
+    write(file, text)
 '''
 
 [[plant]]
@@ -267,11 +264,9 @@ runs = ["rig-lib-powershell"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = """
-        .inheriting_env()
         .limit(crate::process::POWERSHELL_LIMIT)
 }"""
 replace = """
-        .inheriting_env()
 }"""
 
 [[plant]]
@@ -282,11 +277,9 @@ runs = ["rig-lib-powershell"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/pid.rs"
 find = """
-        .finding_programs()
         .limit(super::POWERSHELL_LIMIT)
 }"""
 replace = """
-        .finding_programs()
 }"""
 
 # The rig's leftover check on Windows (T-1226; CI runs 41787972093 and 41792519144): a number

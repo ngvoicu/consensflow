@@ -243,8 +243,8 @@ runs = ["harness-devin-rows"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/record.rs"
-find = "            Arc::new(if reason == MISSING_SESSION {"
-replace = "            Arc::new(if reason == MISSING_SESSION && false {"
+find = "            Arc::new(if reason == MISSING_SESSION || reason == MISSING_STORE {"
+replace = "            Arc::new(if reason == MISSING_STORE {"
 
 # The rig's.
 

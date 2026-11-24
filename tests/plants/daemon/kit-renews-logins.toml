@@ -229,11 +229,13 @@ meant = "a_harness_that_goes_on_past_its_limit_is_ended_and_the_renewal_has_fail
 runs = ["renew-lib"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/renew.rs"
+file = "crates/cf-e2e/src/door/renewal.rs"
 find = '''        .limit(limit)
-        .run()?;'''
+        .run()
+}'''
 replace = '''        .unlimited()
-        .run()?;'''
+        .run()
+}'''
 
 [[plant]]
 name = "kit renews logins: the harness is started in a folder that is no folder of a run"
