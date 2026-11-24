@@ -100,7 +100,7 @@ impl OutputHub {
     /// The hub exists so `register_pane_handlers` need not know which of the
     /// two it is feeding — that is what lets the window and the helper share
     /// one set of handlers instead of two that drift.
-    pub fn register_sink(&self, sink: OutputSink) {
+    pub(crate) fn register_sink(&self, sink: OutputSink) {
         self.attach(sink);
     }
 

@@ -26,7 +26,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tracker::{MarginSet, Tracked, Tracker};
+use tracker::{Region, Tracked, Tracker};
 
 /// One segment of the journal's bytes.
 const SEGMENT_BYTES: usize = 1 << 20;
@@ -106,9 +106,9 @@ struct Inner {
     resizes: Vec<Resize>,
     /// The size at `start`.
     base_size: Size,
-    /// The offset of the last size before `start` that changed the rows, if any: the margins
-    /// the program set before it are the page's xterm's no longer.
-    base_rows_changed_at: Option<u64>,
+    /// The offset of the last size before `start`, if any: every size resets the margins of both
+    /// screens in xterm, so what the program set before it is the page's xterm's no longer.
+    base_sized_at: Option<u64>,
     /// The boundary of the page now subscribed: a size is not journaled before it.
     floor: u64,
 }
@@ -139,7 +139,7 @@ impl Journal {
                 tracker: Tracker::default(),
                 resizes: Vec::new(),
                 base_size: size,
-                base_rows_changed_at: None,
+                base_sized_at: None,
                 floor: 0,
             }),
         }
@@ -180,7 +180,7 @@ impl Journal {
     /// parsed): `None` where the size is not the current page's, which takes the journal's
     /// end. One before the last size taken, before the page's boundary or past the journal's
     /// end takes the end too; one before the journal's start takes the start. A size is
-    /// kept whole: none is folded into another, and the margins a change of rows resets are
+    /// kept whole: none is folded into another, and the margins a size resets are
     /// worked out from them in byte order with the program's own settings. The same size as
     /// the last is not kept.
     pub(crate) fn resize(&self, at: Option<u64>, size: Size) {
@@ -302,27 +302,28 @@ impl Inner {
             .map_or(self.base_size, |r| (r.rows, r.cols))
     }
 
-    /// The offset of the last size at or before `offset` that changed the rows.
-    fn rows_changed_at(&self, offset: u64) -> Option<u64> {
-        let mut rows = self.base_size.0;
-        let mut changed = self.base_rows_changed_at;
-        for resize in self.resizes.iter().take_while(|r| r.at <= offset) {
-            if resize.rows != rows {
-                changed = Some(resize.at);
-                rows = resize.rows;
-            }
-        }
-        changed
+    /// The offset of the last size at or before `offset`.
+    fn sized_at(&self, offset: u64) -> Option<u64> {
+        self.resizes
+            .iter()
+            .take_while(|r| r.at <= offset)
+            .last()
+            .map(|r| r.at)
+            .or(self.base_sized_at)
     }
 
-    /// The margins a fresh emulator needs at the mark: the program's last setting, unless a
-    /// size that changed the rows came after it, which resets them in xterm.
-    fn margins_at(&self, mark: &Mark) -> MarginSet {
-        let set = mark.tracked.margins;
-        match self.rows_changed_at(mark.offset) {
-            Some(changed) if set.at <= changed => MarginSet::default(),
-            _ => set,
-        }
+    /// The margins a fresh emulator needs at the mark, for each screen: what the program set
+    /// since the last size at or before it, which resets them in xterm (both screens, whether
+    /// it changes the rows or only the width).
+    fn margins_at(&self, mark: &Mark) -> (Vec<Region>, Vec<Region>) {
+        let sized = self.sized_at(mark.offset);
+        let kept = |set: &[Region]| {
+            set.iter()
+                .filter(|region| sized.is_none_or(|sized| region.at > sized))
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        (kept(&mark.tracked.normal), kept(&mark.tracked.alt))
     }
 
     /// Start the journal at `offset`, a mark: the sizes before it are the size at it, and the
@@ -332,9 +333,10 @@ impl Inner {
             return;
         }
         if let Some(mark) = self.marks.iter().find(|mark| mark.offset == offset) {
-            let margins = self.margins_at(mark);
+            let (normal, alt) = self.margins_at(mark);
             if let Some(mark) = self.marks.iter_mut().find(|mark| mark.offset == offset) {
-                mark.tracked.margins = margins;
+                mark.tracked.normal = normal;
+                mark.tracked.alt = alt;
             }
         }
         while self.marks.front().is_some_and(|mark| mark.offset < offset) {
@@ -342,14 +344,8 @@ impl Inner {
         }
         let folded = self.resizes.iter().take_while(|r| r.at <= offset).count();
         if folded > 0 {
-            let mut rows = self.base_size.0;
-            for resize in &self.resizes[..folded] {
-                if resize.rows != rows {
-                    self.base_rows_changed_at = Some(resize.at);
-                    rows = resize.rows;
-                }
-            }
             let last = self.resizes[folded - 1];
+            self.base_sized_at = Some(last.at);
             self.base_size = (last.rows, last.cols);
         }
         self.resizes.drain(..folded);
@@ -421,7 +417,10 @@ impl Inner {
             self.marks
                 .iter()
                 .find(|mark| mark.offset == self.start)
-                .map(|mark| seed::build(&mark.tracked, self.margins_at(mark).value))
+                .map(|mark| {
+                    let (normal, alt) = self.margins_at(mark);
+                    seed::build(&mark.tracked, &normal, &alt)
+                })
                 .unwrap_or_default()
         } else {
             Vec::new()

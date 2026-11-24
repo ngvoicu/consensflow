@@ -111,8 +111,10 @@ export function pastCapCase(seed) {
   const ops = []
   const prefix = []
   for (let i = 0, n = g.int(2, 30); i < n; i++) prefix.push(...utf8(g.atom()))
+  let sized = [cols, rows]
   for (const emit of cuts(g, prefix, g.int(1, 6))) {
-    if (g.r() < 0.3) ops.push({ resize: size(g) })
+    // a size after a region: of both kinds, a width alone as often as any (T-2171: xterm resets the margins on each)
+    if (g.r() < 0.5) { sized = g.r() < 0.5 ? [g.int(4, 100), sized[1]] : size(g); ops.push({ resize: sized }) }
     ops.push({ emit })
   }
   const line = utf8(g.pick(g.words) + ' ' + g.pick(g.words) + g.pick(['\r\n', '\n\r']))
@@ -123,7 +125,7 @@ export function pastCapCase(seed) {
     if (g.r() < 0.5) {
       for (let i = 0, n = g.int(1, 8); i < n; i++) ops.push({ emit: utf8(g.atom()) })
     }
-    if (g.r() < 0.4) ops.push({ resize: size(g) })
+    if (g.r() < 0.4) { sized = g.r() < 0.5 ? [g.int(4, 100), sized[1]] : size(g); ops.push({ resize: sized }) }
   }
   ops.push({ reload: true })
   if (g.r() < 0.6) { ops.push({ emit: utf8('tail text\r\n') }, { reload: true }) }
@@ -155,6 +157,17 @@ export function namedCases() {
   add('past cap: modes and margins then a paste', 40, 12, [e(C + '2;9r' + C + '?2004h' + C + '?1h' + C + '?1006h' + C + '?1002h'), { repeat: utf8('filler line of text\r\n'), count: 520000 }, { reload: true }, e('X')], true)
   add('past cap: margins then a resize then margins', 40, 12, [e(C + '2;9r'), { resize: [40, 10] }, e(C + '3;5r'), { repeat: utf8('filler line of text\r\n'), count: 520000 }, { reload: true }, e('X')], true)
   add('past cap: a resize after the margins', 40, 12, [e(C + '2;9r'), { resize: [40, 10] }, { repeat: utf8('filler line of text\r\n'), count: 520000 }, { reload: true }, e('X')], true)
+  // T-2171's margin cases: past the cap, past 256 sizes, against the shipped xterm's own rules.
+  const C2 = '\x1b['
+  const filler = { repeat: utf8('filler line of text\r\n'), count: 520000 }
+  const widths = Array.from({ length: 257 }, (_, i) => ({ resize: [41 + (i % 2), 12] }))
+  add('margins A past cap: a width-only size after them', 40, 12, [e(C2 + '2;9r'), { resize: [50, 12] }, filler, { reload: true }, e('X')], true)
+  add('margins B past cap: the alternate screen after them', 40, 12, [e(C2 + '2;9r' + C2 + '?1049h'), filler, { reload: true }, e('X')], true)
+  add('margins C past cap: set in the alternate screen, then left', 40, 12, [e(C2 + '?1049h' + C2 + '2;9r' + C2 + '?1049l'), filler, { reload: true }, e('X')], true)
+  add('margins D past cap: a region below the screen after them', 40, 12, [e(C2 + '2;9r' + C2 + '20;30r'), filler, { reload: true }, e('X')], true)
+  add('margins E past cap: a one-number region at the last row', 40, 12, [e(C2 + '2;9r' + C2 + '12r'), filler, { reload: true }, e('X')], true)
+  add('margins F: 257 width changes after them', 40, 12, [e(C2 + '2;9r'), e('abc'), ...widths, { reload: true }, e('X')], false)
+  add('margins G past cap: both screens, a size between', 40, 12, [e(C2 + '3;7r' + C2 + '?1049h' + C2 + '2;9r'), { resize: [44, 12] }, e(C2 + '4;8r'), filler, { reload: true }, e('X')], true)
   return cs
 }
 export function reviewCases(cases) {

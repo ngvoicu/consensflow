@@ -128,7 +128,9 @@ impl PaneTable {
         for (key, journal) in &journals {
             journal.begin_page(boundaries.get(key).copied().unwrap_or(0));
         }
-        hub.retain_handed(|key| journals.iter().any(|(held, _)| held == key));
+        // Looked up as each key is judged, under the hub's lock: a window that opened since the
+        // snapshot above has its entry kept.
+        hub.retain_handed(|key| self.journal_of(key).is_some());
         self.ack_all();
         boundaries
     }

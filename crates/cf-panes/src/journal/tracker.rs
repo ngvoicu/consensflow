@@ -10,21 +10,37 @@
 use super::modes::Modes;
 use super::parser::{Action, Parser};
 
-/// The scroll margins as the program last set them, first and last row from 1, and the
-/// offset at which that sequence ended. A size taken by the page resets the margins at its
-/// own offset, so what the margins are at a point depends on which of the two came last
-/// ([`super::Journal`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct MarginSet {
+/// A scroll region the program set: the first and last row from 1 as it wrote them (`usize::MAX`
+/// for no last row: the screen's), and the offset at which the sequence ended. The host does not
+/// know the screen's rows, so it keeps the settings made since the screen's margins were last
+/// the whole screen, and the page's xterm refuses at its own rows what the old one refused. A
+/// size taken by the page resets the margins of both screens at its own offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Region {
     pub(crate) at: u64,
-    pub(crate) value: Option<(usize, usize)>,
+    pub(crate) top: usize,
+    pub(crate) bottom: usize,
 }
 
-/// What the tracker follows.
+/// The most settings kept for a screen.
+const MAX_REGIONS: usize = 16;
+
+/// What the tracker follows: xterm keeps margins for each screen, normal and alternate.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Tracked {
     pub(crate) modes: Modes,
-    pub(crate) margins: MarginSet,
+    pub(crate) normal: Vec<Region>,
+    pub(crate) alt: Vec<Region>,
+}
+
+impl Tracked {
+    fn shown(&mut self) -> &mut Vec<Region> {
+        if self.modes.alternate {
+            &mut self.alt
+        } else {
+            &mut self.normal
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -62,10 +78,7 @@ fn perform(tracked: &mut Tracked, offset: u64, action: &Action) {
         Action::Escape {
             intermediate: None,
             last: b'c',
-        } => {
-            *tracked = Tracked::default();
-            tracked.margins.at = offset;
-        }
+        } => *tracked = Tracked::default(),
         Action::Escape {
             intermediate: None,
             last: b'=',
@@ -94,8 +107,14 @@ fn csi(
 ) {
     match (marker, intermediate, last) {
         (Some(b'?'), None, b'h' | b'l') => {
+            let was = tracked.modes.alternate;
             for &mode in params {
                 tracked.modes.private(mode, last == b'h');
+            }
+            if was != tracked.modes.alternate {
+                // The alternate screen starts with the whole screen and drops its margins as
+                // it is left.
+                tracked.alt.clear();
             }
         }
         (None, None, b'h' | b'l') => {
@@ -104,26 +123,34 @@ fn csi(
             }
         }
         (None, None, b'r') => {
-            // A region that is not one (the top at or below the bottom) is refused, and the
-            // margins stay, as xterm keeps them.
-            let region = match params {
-                [] => Some(None),
-                [top] => Some(Some((*top, usize::MAX))),
-                [top, bottom, ..] => {
-                    let bottom = if *bottom == 0 { usize::MAX } else { *bottom };
-                    (top.max(&1) < &bottom).then_some(Some((*top, bottom)))
-                }
+            // A region whose top is not above its bottom is refused, and the margins stay, as
+            // xterm keeps them; one with no bottom or past the screen is the screen's, which
+            // only the screen's rows can tell (so it is kept as written).
+            let (top, bottom) = match params {
+                [] => (1, usize::MAX),
+                [top] => (*top, usize::MAX),
+                [top, bottom, ..] => (*top, if *bottom == 0 { usize::MAX } else { *bottom }),
             };
-            if let Some(value) = region {
-                tracked.margins = MarginSet { at: offset, value };
+            let top = top.max(1);
+            if top < bottom {
+                let shown = tracked.shown();
+                if top == 1 && bottom == usize::MAX {
+                    shown.clear();
+                } else {
+                    if shown.len() == MAX_REGIONS {
+                        shown.remove(0);
+                    }
+                    shown.push(Region {
+                        at: offset,
+                        top,
+                        bottom,
+                    });
+                }
             }
         }
         (None, Some(b'!'), b'p') => {
             tracked.modes.soft_reset();
-            tracked.margins = MarginSet {
-                at: offset,
-                value: None,
-            };
+            tracked.shown().clear();
         }
         _ => {}
     }

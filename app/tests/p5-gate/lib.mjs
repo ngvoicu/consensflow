@@ -133,13 +133,15 @@ export async function open(browserName) {
         carried: G.carried[name].join(','), text,
       }
     }
-    /** What the host tracks reliably, and so what a page that restarted at a mark must have right: the size, the modes, the margins of the buffer that shows, the cursor shown, which buffer shows, the mouse, and what a paste sends. */
+    /** What the host tracks reliably, and so what a page that restarted at a mark must have right: the size, the modes, the margins of both screens, the cursor shown, which buffer shows, the mouse, and what a paste sends. */
     G.reliable = (name) => {
       const t = G.terms[name].t
       const core = t._core, bs = core._bufferService, cs = core.coreService, ms = core.coreMouseService
       const b = bs.buffer
       return {
         size: [t.cols, t.rows], active: t.buffer.active.type, margins: [b.scrollTop, b.scrollBottom],
+        marginsNormal: [bs.buffers.normal.scrollTop, bs.buffers.normal.scrollBottom],
+        marginsAlt: [bs.buffers.alt.scrollTop, bs.buffers.alt.scrollBottom],
         modes: JSON.stringify(t.modes), dec: JSON.stringify(cs.decPrivateModes), core: JSON.stringify(cs.modes),
         hidden: cs.isCursorHidden, mouse: [ms._activeProtocol, ms._activeEncoding].join('/'),
         carried: G.carried[name].join(','),

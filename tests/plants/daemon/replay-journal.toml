@@ -82,8 +82,8 @@ runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal.rs"
-find = "            Some(changed) if set.at <= changed => MarginSet::default(),"
-replace = "            Some(_) => MarginSet::default(),"
+find = "                .filter(|region| sized.is_none_or(|sized| region.at > sized))"
+replace = "                .filter(|region| sized.is_none())"
 
 [[plant]]
 name = "journal: a size at the byte the margins ended does not reset them"
@@ -92,8 +92,63 @@ runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal.rs"
-find = "            Some(changed) if set.at <= changed => MarginSet::default(),"
-replace = "            Some(changed) if set.at < changed => MarginSet::default(),"
+find = "                .filter(|region| sized.is_none_or(|sized| region.at > sized))"
+replace = "                .filter(|region| sized.is_none_or(|sized| region.at >= sized))"
+
+[[plant]]
+name = "journal: a size that changes only the width leaves the margins"
+meant = "a_size_that_changes_only_the_width_resets_the_margins"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        self.resizes
+            .iter()
+            .take_while(|r| r.at <= offset)
+            .last()
+            .map(|r| r.at)
+            .or(self.base_sized_at)"""
+replace = """        self.resizes
+            .iter()
+            .take_while(|r| r.at <= offset)
+            .filter(|r| r.rows != self.base_size.0)
+            .last()
+            .map(|r| r.at)
+            .or(self.base_sized_at)"""
+
+[[plant]]
+name = "journal: one set of margins for both screens"
+meant = "margins_are_kept_for_each_screen"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = "        if self.modes.alternate {\n            &mut self.alt"
+replace = "        if false {\n            &mut self.alt"
+
+[[plant]]
+name = "journal: the alternate screen keeps its margins as it is left"
+meant = "margins_are_kept_for_each_screen"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = """            if was != tracked.modes.alternate {
+                // The alternate screen starts with the whole screen and drops its margins as
+                // it is left.
+                tracked.alt.clear();
+            }"""
+replace = ""
+
+[[plant]]
+name = "journal: a region the screen may refuse replaces the one it keeps"
+meant = "a_region_the_screen_may_refuse_is_written_after_the_one_it_keeps"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = "                    if shown.len() == MAX_REGIONS {"
+replace = "                    if !shown.is_empty() {"
 
 [[plant]]
 name = "journal: a resize flood starts the journal again inside a sequence"

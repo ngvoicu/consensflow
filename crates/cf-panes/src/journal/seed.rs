@@ -1,25 +1,31 @@
 //! The bytes that give a fresh emulator what the host tracks reliably of a window at a mark:
-//! the modes and the scroll margins. No text and no cursor: the host does not draw the screen.
+//! the modes and the scroll margins of each screen. No text and no cursor: the host does not
+//! draw the screen.
 //!
-//! The order is the design's: the alternate screen if it shows; the margins; the modes that
-//! are not a fresh xterm's; the cursor shown or hidden. Wrap and origin are written when they
-//! are not xterm's own.
+//! The order is the design's: the normal screen's margins; the alternate screen, if it shows,
+//! and its margins; the modes that are not a fresh xterm's; the cursor shown or hidden. Wrap and
+//! origin are written when they are not xterm's own.
 
 use std::fmt::Write;
 
-use super::tracker::Tracked;
+use super::tracker::{Region, Tracked};
 
-pub(super) fn build(tracked: &Tracked, margins: Option<(usize, usize)>) -> Vec<u8> {
+fn regions(out: &mut String, set: &[Region]) {
+    for region in set {
+        if region.bottom == usize::MAX {
+            let _ = write!(out, "\x1b[{}r", region.top);
+        } else {
+            let _ = write!(out, "\x1b[{};{}r", region.top, region.bottom);
+        }
+    }
+}
+
+pub(super) fn build(tracked: &Tracked, normal: &[Region], alt: &[Region]) -> Vec<u8> {
     let mut out = String::new();
+    regions(&mut out, normal);
     if tracked.modes.alternate {
         out.push_str("\x1b[?47h");
-    }
-    if let Some((top, bottom)) = margins {
-        if bottom == usize::MAX {
-            let _ = write!(out, "\x1b[{}r", top.max(1));
-        } else {
-            let _ = write!(out, "\x1b[{};{bottom}r", top.max(1));
-        }
+        regions(&mut out, alt);
     }
     tracked.modes.write_to(&mut out);
     if tracked.modes.origin {

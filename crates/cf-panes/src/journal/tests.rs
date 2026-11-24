@@ -531,3 +531,66 @@ fn a_reset_piece_gives_every_size_since_the_start_and_a_continuation_those_after
         "the one at byte 2 is the page's own: it has it"
     );
 }
+
+/// T-2171, blocker 1: xterm resets its margins on every size it takes, a width alone included.
+#[test]
+fn a_size_that_changes_only_the_width_resets_the_margins() {
+    let journal = Journal::new((12, 40));
+    take(&journal, b"\x1b[2;9r");
+    journal.resize(Some(journal.end()), (12, 50));
+    let chunk = text(0, 64 * 1024);
+    while journal.end() < 12 * MIB as u64 {
+        take(&journal, &chunk);
+    }
+    let (_, pieces) = pulled(&journal);
+    assert_eq!(String::from_utf8_lossy(&pieces[0].seed), "");
+    // And 257 width changes, with no cap passed: the journal starts again at the 257th.
+    let journal = Journal::new((12, 40));
+    take(&journal, b"\x1b[2;9rabc");
+    for i in 0..257 {
+        journal.resize(Some(journal.end()), (12, 41 + (i % 2) as u16));
+    }
+    let (_, pieces) = pulled(&journal);
+    assert!(pieces[0].truncated);
+    assert_eq!(String::from_utf8_lossy(&pieces[0].seed), "");
+}
+
+/// Blocker 2: margins are kept for each screen, as xterm keeps them.
+#[test]
+fn margins_are_kept_for_each_screen() {
+    // Set on the normal screen, then the alternate screen shows: its own are the whole screen.
+    assert_eq!(seed_of(b"\x1b[2;9r\x1b[?1049h"), "\x1b[2;9r\x1b[?47h");
+    // Set on the alternate screen and left: dropped, the normal screen's are the whole screen.
+    assert_eq!(seed_of(b"\x1b[?1049h\x1b[2;9r\x1b[?1049l"), "");
+    // Set on the alternate screen while it shows.
+    assert_eq!(seed_of(b"\x1b[?1049h\x1b[2;9r"), "\x1b[?47h\x1b[2;9r");
+    // Both, the normal screen's written before the switch and the alternate's after it.
+    assert_eq!(
+        seed_of(b"\x1b[3;7r\x1b[?1049h\x1b[2;9r"),
+        "\x1b[3;7r\x1b[?47h\x1b[2;9r"
+    );
+    // A soft reset resets the screen that shows only.
+    assert_eq!(
+        seed_of(b"\x1b[3;7r\x1b[?1049h\x1b[2;9r\x1b[!p"),
+        "\x1b[3;7r\x1b[?47h"
+    );
+}
+
+/// Blocker 3: a region xterm refuses keeps the one it had. The host does not know the rows, so
+/// the settings since the screen's margins were last the whole screen are written in order and
+/// the page's xterm refuses at its own rows what the old one did.
+#[test]
+fn a_region_the_screen_may_refuse_is_written_after_the_one_it_keeps() {
+    assert_eq!(seed_of(b"\x1b[2;9r\x1b[20;30r"), "\x1b[2;9r\x1b[20;30r");
+    assert_eq!(seed_of(b"\x1b[2;9r\x1b[12r"), "\x1b[2;9r\x1b[12r");
+    // A region that no screen takes is not kept; the whole screen forgets the ones before.
+    assert_eq!(seed_of(b"\x1b[2;9r\x1b[9;2r"), "\x1b[2;9r");
+    assert_eq!(seed_of(b"\x1b[2;9r\x1b[1;0r"), "");
+    // A few at most.
+    let many: Vec<u8> = (2..40)
+        .flat_map(|top| format!("\x1b[{top};50r").into_bytes())
+        .collect();
+    let seed = seed_of(&many);
+    assert_eq!(seed.matches('r').count(), 16);
+    assert!(seed.ends_with("\x1b[39;50r"));
+}
