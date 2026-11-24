@@ -38,6 +38,9 @@ pub(crate) struct Store {
     trace: Box<dyn FnMut(&Event)>,
     /// Events of the open transaction, discarded if it does not commit.
     logged: Vec<Event>,
+    /// An operation's write is open: what it logs waits for its commit, even where SQLite
+    /// has ended the transaction under it (a full disk rolls it back).
+    open: bool,
 }
 
 impl Store {
@@ -57,6 +60,7 @@ impl Store {
             names,
             trace,
             logged: Vec::new(),
+            open: false,
         }
     }
 
@@ -73,10 +77,15 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        if self.open {
+            self.lost()?;
+            return work(self);
+        }
         if !self.db.is_autocommit() {
             return work(self);
         }
         self.db.execute_batch("BEGIN IMMEDIATE")?;
+        self.open = true;
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
             Ok(Ok(value)) => match self
                 .settle_ends_unread()
@@ -84,6 +93,7 @@ impl Store {
                 .and_then(|()| self.db.execute_batch("COMMIT"))
             {
                 Ok(()) => {
+                    self.open = false;
                     for event in std::mem::take(&mut self.logged) {
                         (self.trace)(&event);
                     }
@@ -117,10 +127,20 @@ impl Store {
 
     /// Rolls back the transaction and drops everything it logged.
     fn roll_back(&mut self) {
+        self.open = false;
         self.ending = false;
         self.end_failed = None;
         let _ = self.db.execute_batch("ROLLBACK");
         self.logged.clear();
+    }
+
+    /// The operation stops where SQLite ended its transaction (a settlement that failed
+    /// and rolled it back): the saved error is the operation's.
+    fn lost(&mut self) -> Result<(), LedgerError> {
+        match self.end_failed.take() {
+            Some(cause) => Err(cause.into()),
+            None => Ok(()),
+        }
     }
 
     /// A batch is one visible operation and needs a transaction of its own.
@@ -128,7 +148,7 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
-        if !self.db.is_autocommit() {
+        if self.open || !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",
                 "a batch needs its own transaction",
@@ -345,6 +365,7 @@ impl Store {
         data: Value,
     ) -> Result<(), LedgerError> {
         let at = self.at();
+        self.lost()?;
         let data = cf_base::json::js_order(data);
         self.db.execute(
             "INSERT INTO event (project_id, at, kind, data) VALUES (?, ?, ?, ?)",
@@ -356,10 +377,10 @@ impl Store {
             kind: kind.to_string(),
             data,
         };
-        if self.db.is_autocommit() {
-            (self.trace)(&event);
-        } else {
+        if self.open || !self.db.is_autocommit() {
             self.logged.push(event);
+        } else {
+            (self.trace)(&event);
         }
         Ok(())
     }

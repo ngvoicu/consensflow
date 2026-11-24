@@ -1,6 +1,7 @@
 # P19-A: the ledger tells its trace only after commit, in log order.
 [run]
 p19a-store = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "store::tests"]
+p19a-batch = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "failed_batch_tells"]
 p19a-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::trace"]
 
 [[plant]]
@@ -10,8 +11,8 @@ runs = ["p19a-trace"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
-find = "        if self.db.is_autocommit() {"
-replace = "        if true {"
+find = "        if self.open || !self.db.is_autocommit() {\n            self.logged.push(event);"
+replace = "        if false {\n            self.logged.push(event);"
 
 [[plant]]
 name = "ledger trace: tell what rolled back"
@@ -37,6 +38,7 @@ find = '''
                 .and_then(|()| self.db.execute_batch("COMMIT"))
             {
                 Ok(()) => {
+                    self.open = false;
                     for event in std::mem::take(&mut self.logged) {
                         (self.trace)(&event);
                     }
@@ -50,7 +52,10 @@ replace = '''
                     self.db.execute_batch("COMMIT")
                 })
             {
-                Ok(()) => Ok(value),'''
+                Ok(()) => {
+                    self.open = false;
+                    Ok(value)
+                }'''
 
 [[plant]]
 name = "ledger trace: tell committed events in reverse"
@@ -93,8 +98,8 @@ runs = ["p19a-store"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
-find = "        if self.db.is_autocommit() {"
-replace = "        if false {"
+find = "        if self.open || !self.db.is_autocommit() {\n            self.logged.push(event);"
+replace = "        if true {\n            self.logged.push(event);"
 
 [[plant]]
 name = "ledger trace: allow a batch inside an operation"
@@ -104,10 +109,25 @@ runs = ["p19a-store"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/store.rs"
 find = '''
-        if !self.db.is_autocommit() {
+        if self.open || !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",'''
 replace = '''
-        if false && !self.db.is_autocommit() {
+        if false && (self.open || !self.db.is_autocommit()) {
             return Err(LedgerError::refused(
                 "nested-batch",'''
+
+[[plant]]
+name = "ledger trace: tell before the outer write succeeds"
+meant = "a_batch_cancel_whose_end_date_write_rolls_the_transaction_back_tells_the_trace_nothing"
+runs = ["p19a-batch"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if self.open || !self.db.is_autocommit() {\n            self.logged.push(event);"
+replace = "        if !self.db.is_autocommit() {\n            self.logged.push(event);"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        self.lost()?;\n        let data = cf_base::json::js_order(data);"
+replace = "        let data = cf_base::json::js_order(data);"
