@@ -116,6 +116,11 @@ replace = """        self.resizes
             .map(|r| r.at)
             .or(self.base_sized_at)"""
 
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "            self.base_sized_at = Some(last.at);"
+replace = "            self.base_sized_at = self.resizes[..folded].iter().rfind(|r| r.rows != self.base_size.0).map(|r| r.at).or(self.base_sized_at);"
+
 [[plant]]
 name = "journal: one set of margins for both screens"
 meant = "margins_are_kept_for_each_screen"

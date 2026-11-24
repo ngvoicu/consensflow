@@ -562,6 +562,11 @@ fn margins_are_kept_for_each_screen() {
     assert_eq!(seed_of(b"\x1b[2;9r\x1b[?1049h"), "\x1b[2;9r\x1b[?47h");
     // Set on the alternate screen and left: dropped, the normal screen's are the whole screen.
     assert_eq!(seed_of(b"\x1b[?1049h\x1b[2;9r\x1b[?1049l"), "");
+    // Left and entered again: it starts as the whole screen.
+    assert_eq!(
+        seed_of(b"\x1b[?1049h\x1b[2;9r\x1b[?1049l\x1b[?1049h"),
+        "\x1b[?47h"
+    );
     // Set on the alternate screen while it shows.
     assert_eq!(seed_of(b"\x1b[?1049h\x1b[2;9r"), "\x1b[?47h\x1b[2;9r");
     // Both, the normal screen's written before the switch and the alternate's after it.
