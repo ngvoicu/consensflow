@@ -73,7 +73,7 @@ runs = ["host"]
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = "            offset += message.bytes.len() as u64;"
-replace = "            offset += message.bytes.len() as u64 + u64::from(message.bytes.len() > 20);"
+replace = "            offset += message.bytes.len() as u64 + u64::from(message.bytes.len() > 3);"
 
 [[plant]]
 name = "journal: a mark ignores the margins the program set after a size"
