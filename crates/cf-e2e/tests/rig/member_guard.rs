@@ -7,7 +7,7 @@
 //! Windows's.
 //!
 //! No case here runs a command by its name (the kit refuses to): it finds the program the window's
-//! PATH names first and shows it is the bundle's `cf`, which the other cases run under those names.
+//! PATH names first and shows it is the `cf` of the bundle that comes next on it, which the other cases run under those names.
 
 #[cfg(unix)]
 use std::path::PathBuf;
@@ -78,9 +78,13 @@ fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and
             );
             // The stand-in is the bundle's `cf`, which refuses (`cf/tests/member_guard.rs`). The
             // kit never starts a program by these names, so it is not run here.
+            let bundle = std::env::split_paths(frame["env"]["PATH"].as_str().unwrap_or_default())
+                .nth(1)
+                .ok_or("no second folder on the PATH")?
+                .join("cf");
             assert_eq!(
                 std::fs::canonicalize(&found)?,
-                std::fs::canonicalize(cf_e2e::cf::binary()?)?,
+                std::fs::canonicalize(&bundle)?,
                 "{}: {name}",
                 frame["id"]
             );
