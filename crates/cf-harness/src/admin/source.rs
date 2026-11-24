@@ -59,6 +59,32 @@ pub struct Source {
     pub update: Option<Vec<String>>,
 }
 
+/// The command as a person pastes it into a terminal: the words that the shell would split or
+/// read are quoted (single quotes; on Windows double quotes, run with `&` as PowerShell has it).
+pub(super) fn command_line(argv: &[String]) -> String {
+    let quoted = |word: &String| -> String {
+        let plain = !word.is_empty()
+            && word.chars().all(|c| {
+                c.is_alphanumeric() || "-_./:@=+,%".contains(c) || (cfg!(windows) && c == '\\')
+            });
+        if plain {
+            word.clone()
+        } else if cfg!(windows) {
+            format!("\"{}\"", word.replace('"', "\\\""))
+        } else {
+            format!("'{}'", word.replace('\'', "'\\''"))
+        }
+    };
+    let words: Vec<String> = argv.iter().map(quoted).collect();
+    let first_quoted = argv.first().is_some_and(|word| quoted(word) != *word);
+    let line = words.join(" ");
+    if cfg!(windows) && first_quoted {
+        format!("& {line}")
+    } else {
+        line
+    }
+}
+
 /// The name a harness goes by on the page.
 pub(super) fn name(harness: Harness) -> &'static str {
     match harness {

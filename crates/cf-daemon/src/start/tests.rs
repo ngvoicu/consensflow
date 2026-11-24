@@ -23,9 +23,11 @@ use tokio::task::LocalSet;
 use super::*;
 use crate::testing::Said;
 
+mod held;
 mod input;
 mod restart;
 mod screens;
+mod trace;
 
 const UI_TOKEN_DIGITS: usize = 48;
 

@@ -1,0 +1,15 @@
+# A host message can end inside a UTF-8 character. If the page gives the
+# unfinished suffix to xterm 6 at once, a cut after E2 80 loses an em dash.
+[run]
+utf8-cut-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=1", "-g", "UTF-8 cut after the em dash second byte"]
+
+[[plant]]
+name = "UTF-8 cut: unfinished bytes are written at once"
+meant = "UTF-8 cut after the em dash second byte survives three output messages"
+runs = ["utf8-cut-page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = '''        this.utf8Pending = payload.slice(start - 1)
+        payload = payload.subarray(0, start - 1)'''
+replace = '''        payload = payload // Plant: write the unfinished bytes immediately'''

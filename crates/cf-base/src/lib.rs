@@ -8,7 +8,8 @@
 //! may start (none of the live app's identity), and how much of a role `cf`
 //! printed its window reads whole.
 
-#![forbid(unsafe_code)]
+// One call, `file::durable`'s write-through move on Windows, allows it by name.
+#![deny(unsafe_code)]
 
 pub mod args;
 pub mod bundle;

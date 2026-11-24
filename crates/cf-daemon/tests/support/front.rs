@@ -24,7 +24,10 @@ use cf_daemon::api::Api;
 use cf_daemon::screens::Screens;
 use cf_daemon::seams::DaemonSpawn;
 use cf_harness::admin::HarnessAdmin;
-use cf_harness::testing::{ManualTime, ScriptedCapture, ScriptedLatest, EPOCH_MS};
+use cf_harness::seams::Probes;
+use cf_harness::testing::{
+    ManualTime, ScriptedCapture, ScriptedLatest, ScriptedProcesses, EPOCH_MS,
+};
 use cf_ledger::Ledger;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -92,6 +95,8 @@ pub fn screens(token: &str, env: Env) -> Rc<Screens> {
             Rc::new(ManualTime::new(EPOCH_MS)),
             Rc::new(ScriptedLatest::default()),
             Rc::new(ScriptedCapture::default()),
+            Rc::new(Probes::default()),
+            Rc::new(ScriptedProcesses::default()),
         ),
     })
 }

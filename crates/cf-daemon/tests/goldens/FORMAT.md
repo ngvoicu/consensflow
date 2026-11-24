@@ -37,7 +37,7 @@ the folder) were written from the recording, and the recording is fixed.
 | the page operations' | `core-page-001` to `028` | `page` | the page operations |
 | the page operations' corners | `corners-page-001` to `008` | `page` | the page operations |
 | the agents screens' | `core-agents-server-001` to `009` | `screens` | the screens |
-| the screens' corners | `corners-screens-001` to `010` | `screens` | the screens |
+| the screens' corners | `corners-screens-001` to `009` | `screens` | the screens |
 | the event file's | `core-trace-001` to `002` | `trace` | none: `files.json` holds the line formats |
 | the daemon log's | `core-log-001` | `log` | none: `files.json` holds the line formats |
 
@@ -717,7 +717,7 @@ All players: parse the trace and put each name where the player uses it (above);
 
 ### The agents' API (`api`, and the exchanges of `cf`)
 
-The API is the daemon's own dispatch (`api::handle`), served with the screens mounted in front of it as the daemon mounts them: inert, over a home of their own, with a UI token no trace carries. Node's traces of the API were recorded with none (`ui` is null), so a path that is the screens' (`/`, `/harnesses`, `/api/agents`, `/api/agents/<name>`, `/api/preferences`, `/api/harnesses/check`, `/api/harnesses/update`) is answered by them, whoever asks, with their bare 401 `{"error":"unauthorized"}`, where the API's routes alone answered it as an unknown route. One exchange of the traces is such: the fifth of `corners-api-001`, a `GET /` with a window's token (Node: 404 `unknown-route`). The player holds it to the screens' answer, as the daemon gives it, and says so in a list that a test holds to the traces (`DEPARTURES` of `tests/api/player.rs`, as the screens' player lists its own); every other answer is held to the bytes Node recorded.
+The API is the daemon's own dispatch (`api::handle`), served with the screens mounted in front of it as the daemon mounts them: inert, over a home of their own, with a UI token no trace carries. Node's traces of the API were recorded with none (`ui` is null), so a path that is the screens' (`/`, `/harnesses`, `/api/agents`, `/api/agents/<name>`, `/api/preferences`, `/api/harnesses/check`) is answered by them, whoever asks, with their bare 401 `{"error":"unauthorized"}`, where the API's routes alone answered it as an unknown route. One exchange of the traces is such: the fifth of `corners-api-001`, a `GET /` with a window's token (Node: 404 `unknown-route`). The player holds it to the screens' answer, as the daemon gives it, and says so in a list that a test holds to the traces (`DEPARTURES` of `tests/api/player.rs`, as the screens' player lists its own); every other answer is held to the bytes Node recorded.
 
 1. `ledger`: replay as 3.1's replay does (`clock` and `names` into the queues, the call, the answer or refusal, the events, the readings taken).
 2. `issue`: issue a token for the window on the API's credentials; keep `T1` → token. `revoke`: give it back.
@@ -869,6 +869,5 @@ corners-screens-009
 | the screens' token, the order of their checks, the body | `corners-screens-001` to `004` |
 | the roster the screens write | `corners-screens-005`, `006`, `core-agents-server-006`, `007` |
 | the roster that cannot be read | `corners-screens-007` |
-| a harness that is not installed, asked to update | `corners-screens-010` |
 | the pages | `core-agents-server-003`, `005`, `pages/` |
 | the line formats and their rotation | `core-trace-002`, `core-log-001` |

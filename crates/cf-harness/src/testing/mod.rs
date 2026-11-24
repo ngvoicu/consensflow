@@ -69,8 +69,8 @@ pub fn claude_computer_use_decline(
 }
 
 pub use admin::{
-    Asked, BodyEnding, Delivery, Response, Said, ScriptedCapture, ScriptedLatest, ScriptedNetwork,
-    Told,
+    Asked, BodyEnding, CaptureAsProcesses, Delivery, Response, Said, ScriptedCapture,
+    ScriptedLatest, ScriptedNetwork, Told,
 };
 pub use children::{called, name, named, ChildScript, Ends, ScriptedProcesses};
 pub use paste::paste_answers;
@@ -341,8 +341,12 @@ pub struct LocalRecords {
     env: Env,
     time: Rc<dyn Time>,
     cache: RefCell<Cache>,
+    /// The scanner of Claude's statuses, as the worker's is (it keeps nothing between looks).
+    scanner: RefCell<crate::claude::Scanner>,
     hold: Cell<bool>,
     held: RefCell<VecDeque<HeldLook>>,
+    /// The answers of the holders' scan wait here once taken, as a worker's pending reply does.
+    holders_held: RefCell<Option<Rc<Latch>>>,
 }
 
 /// A look held: the work it belongs to, and the latch that releases it.
@@ -360,8 +364,23 @@ impl LocalRecords {
             env,
             time,
             cache: RefCell::new(cache),
+            scanner: RefCell::default(),
             hold: Cell::new(false),
             held: RefCell::new(VecDeque::new()),
+            holders_held: RefCell::new(None),
+        }
+    }
+
+    /// The holders' scans to come take their answer at once and hand it over only when
+    /// [`LocalRecords::release_holders`] says: a worker's reply that is on its way.
+    pub fn hold_holders(&self) {
+        *self.holders_held.borrow_mut() = Some(Rc::new(Latch::default()));
+    }
+
+    /// Hands over the answers held, and holds no more.
+    pub fn release_holders(&self) {
+        if let Some(latch) = self.holders_held.borrow_mut().take() {
+            latch.open();
         }
     }
 
@@ -390,6 +409,28 @@ impl LocalRecords {
 }
 
 impl Records for LocalRecords {
+    fn claude_statuses<'a>(
+        &'a self,
+        folder: &'a str,
+    ) -> Work<'a, Vec<(u32, crate::contract::ProcessStatus)>> {
+        Box::pin(async move { self.scanner.borrow_mut().statuses(folder) })
+    }
+
+    fn claude_holders<'a>(
+        &'a self,
+        folder: &'a str,
+        session: &'a str,
+    ) -> Work<'a, Option<Vec<u32>>> {
+        let held = self.holders_held.borrow().clone();
+        Box::pin(async move {
+            let answer = self.scanner.borrow_mut().holders(folder, session);
+            if let Some(latch) = held {
+                Flagged(latch).await;
+            }
+            answer
+        })
+    }
+
     fn look<'a>(
         &'a self,
         harness: Harness,

@@ -93,6 +93,11 @@ impl Errors {
         Self { log, trace }
     }
 
+    /// The trace a failure is written in.
+    pub fn trace(&self) -> &Trace {
+        &self.trace
+    }
+
     /// The log a failure is written in, which says the rest of what is worth
     /// knowing too.
     pub fn log(&self) -> &Log {

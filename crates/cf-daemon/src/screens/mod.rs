@@ -48,8 +48,6 @@ pub enum Screen {
     Page,
     /// `/api/harnesses/check`.
     HarnessCheck,
-    /// `/api/harnesses/update`.
-    HarnessUpdate,
 }
 
 /// The screen a path is, whatever the method; none for any other path.
@@ -57,7 +55,6 @@ pub fn recognize(path: &str) -> Option<Screen> {
     match path {
         "/harnesses" => Some(Screen::Page),
         "/api/harnesses/check" => Some(Screen::HarnessCheck),
-        "/api/harnesses/update" => Some(Screen::HarnessUpdate),
         _ => None,
     }
 }
@@ -115,7 +112,6 @@ impl Screens {
             body::read(request).await?
         };
         match (&request.method, screen) {
-            (&Method::POST, Screen::HarnessUpdate) => self.update_harness(&body).await,
             (&Method::POST, Screen::HarnessCheck) => self.check_harnesses(&body).await,
             _ => Ok(Answer::json(404, json!({ "error": "not found" }))),
         }

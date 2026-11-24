@@ -112,9 +112,7 @@ async fn what_was_open_stays_suspended_and_opens_no_window_until_the_human_resum
             assert_eq!(board["board"]["project"]["state"], "suspended");
             // The start suspended the project and marked it for nothing: no event
             // says it is to come back, and none says it was resumed.
-            let trace =
-                std::fs::read_to_string(root.path().join("consensflow").join("events.jsonl"))
-                    .unwrap();
+            let trace = crate::files::settled_trace(&root.path().join("consensflow")).unwrap();
             let suspended = r#""kind":"project.state","data":{"from":"open","to":"suspended"}"#;
             assert!(trace.contains(suspended), "{trace}");
             assert!(
@@ -621,9 +619,7 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             );
             // The ledger's own events are in the trace as they happen: the
             // start suspended the project, and the human's resume opened it.
-            let trace =
-                std::fs::read_to_string(root.path().join("consensflow").join("events.jsonl"))
-                    .unwrap();
+            let trace = crate::files::settled_trace(&root.path().join("consensflow")).unwrap();
             let suspended = r#""kind":"project.state","data":{"from":"open","to":"suspended"}"#;
             let opened_again = r#""kind":"project.state","data":{"from":"suspended","to":"open"}"#;
             let at = |needle: &str| trace.lines().position(|line| line.contains(needle));
@@ -646,6 +642,8 @@ async fn wait_for(root: &Path, condition: impl Fn() -> bool) {
             let read = |name: &str| {
                 std::fs::read_to_string(root.join("consensflow").join(name)).unwrap_or_default()
             };
+            // A line the daemon said is the trace's writer's to write first.
+            crate::files::settle_in(&root.join("consensflow"));
             panic!(
                 "timed out waiting; the daemon's log:\n{}\nits trace:\n{}",
                 read("daemon.log"),
