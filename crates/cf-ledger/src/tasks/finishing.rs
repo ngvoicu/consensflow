@@ -35,7 +35,7 @@ use super::{
     task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
+    drop_queued_but_told, open_questions, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
     queued_paused_answers, recover_after_lost_answer, release_carried, say_again, tell_sent_back,
     warnings_on_their_way, warnings_queued, withdraw_at_work, withdraw_open_questions,
     withdraw_paused_answers, Afterwards, Dropped,
@@ -214,7 +214,26 @@ fn record_counted(
         if finished_by_word {
             withdraw_open_questions(store, &task, "was finished")?;
         }
-        if finished_by_word {
+        // The window's own result, with questions of its task still open: it went on past
+        // them, so nobody waits for them now. They close, and the result names each.
+        let mut body = body.to_owned();
+        let mut closed = finished_by_word;
+        if let (false, "waiting", Some(window)) =
+            (finished_by_word, task.state.as_str(), task.assignee_id)
+        {
+            let left = open_questions(store, task.id, window)?;
+            if !left.is_empty() {
+                closed = true;
+                withdraw_open_questions(store, &task, "was finished")?;
+                for question in left {
+                    body.push_str(&format!(
+                        "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. Say what it needed with `cf tell T-{number} \"…\"`.)"
+                    ));
+                }
+            }
+        }
+        let body = body.as_str();
+        if closed {
             crate::waiting_questions::end_for_task(store, task.id, task.assignee_id)?;
         }
         let message_id = queue(

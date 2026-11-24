@@ -232,10 +232,20 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
     )?.exists(params![task, window])? {
         return Ok(true);
     }
+    Ok(!open_questions(store, task, window)?.is_empty())
+}
+
+/// The ids of the questions `window` asked on `task` that have no answer on their way or
+/// received (see [`outstanding`]), oldest first.
+pub(crate) fn open_questions(
+    store: &Store,
+    task: i64,
+    window: i64,
+) -> Result<Vec<i64>, LedgerError> {
     Ok(store
         .db
         .prepare(&format!(
-            "SELECT 1 FROM message q
+            "SELECT q.id FROM message q
              WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
                AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
                  OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
@@ -245,9 +255,33 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer'))
-             LIMIT 1", crate::holding::task_for_question_sql("q"),
+             ORDER BY q.id", crate::holding::task_for_question_sql("q"),
         ))?
-        .exists(params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION])?)
+        .query_map(
+            params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The questions `window` left open on `task` when a message was pasted into it after all of
+/// them were asked: the turn that message began asked none of them, so its end is the task's
+/// result and not another wait for these. None where no message was pasted since, or where one
+/// of the open questions was asked after the latest paste (the turn asked it and ended on it).
+pub(crate) fn left_open_before_the_turn(
+    store: &Store,
+    task: i64,
+    window: i64,
+) -> Result<Vec<i64>, LedgerError> {
+    let open = open_questions(store, task, window)?;
+    let Some(pasted) = super::delivery::last_pasted(store, window, task)? else {
+        return Ok(Vec::new());
+    };
+    Ok(if open.iter().all(|question| *question < pasted.id) {
+        open
+    } else {
+        Vec::new()
+    })
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:

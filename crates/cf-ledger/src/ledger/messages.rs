@@ -898,6 +898,17 @@ impl Ledger {
         messages::begin_delivery(&mut self.store, message_id, Some(look))
     }
 
+    /// The questions a participant's window left open on a task when the latest message
+    /// pasted into it came after all of them: its turn since asked none, so its end is the
+    /// task's result (see `left_open_before_the_turn`). Empty otherwise.
+    pub fn left_open_before_the_turn(
+        &self,
+        participant_id: i64,
+        task_id: i64,
+    ) -> Result<Vec<i64>, LedgerError> {
+        messages::left_open_before_the_turn(&self.store, task_id, participant_id)
+    }
+
     /// The newest message pasted into a participant's window about a task and proved.
     pub fn last_pasted(
         &self,

@@ -461,7 +461,28 @@ impl Dispatcher {
             }
             _ => false,
         };
-        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {
+        // A task waiting on a question its window then went past: a message came into the
+        // window after every open question was asked, and its turn ended settled with no
+        // question of its own. That end is the result, whichever question is still open.
+        let went_past = match &task {
+            Some(thread)
+                if thread.task.state == "waiting"
+                    && observed.settled
+                    && !observed.failed
+                    && !observed.shared =>
+            {
+                !self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .left_open_before_the_turn(participant.id, thread.task.id)?
+                    .is_empty()
+            }
+            _ => false,
+        };
+        let Some(thread) = task.filter(|thread| {
+            (thread.task.state == "working" || went_past) && !waiting
+        }) else {
             record.held.borrow_mut().drop_hold();
             if observed.failed {
                 self.tell_failed_turn(project, participant, record, observed)

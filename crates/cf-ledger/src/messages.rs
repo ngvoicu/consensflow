@@ -83,8 +83,9 @@ pub(crate) use pauses::{
 pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
 pub use receipt::Read;
 pub(crate) use receipt::{
-    claim_answer, door_born_closed, receive_read, receive_read_part, reconcile,
+    open_questions,    claim_answer, door_born_closed, receive_read, receive_read_part, reconcile,
     reconcile_answered_on_open, release_all_claims, release_claims, settle_claim,
+    left_open_before_the_turn,
 };
 pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
@@ -408,18 +409,25 @@ pub(crate) fn answer(
         } else {
             None
         };
-        let finished = finished_task.is_some_and(|task| {
+        let finished = finished_task.as_ref().is_some_and(|task| {
             question.reason.as_deref() == Some(&format!("T-{} was finished", task.number))
         });
         if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {
             return Err(LedgerError::refused_with(
                 "question-withdrawn",
                 format!(
-                    "m-{question_id} was withdrawn{}: nobody waits for this answer",
+                    "m-{question_id} was withdrawn{}: nobody waits for this answer{}",
                     question
                         .reason
                         .as_deref()
-                        .map_or_else(String::new, |reason| format!(" ({reason})"))
+                        .map_or_else(String::new, |reason| format!(" ({reason})")),
+                    match (&finished_task, finished) {
+                        (Some(task), true) => format!(
+                            ". Say it with `cf tell T-{} \"…\"` if it still matters",
+                            task.number
+                        ),
+                        _ => String::new(),
+                    }
                 ),
                 409,
             ));
@@ -505,7 +513,8 @@ fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerErr
         "Its former window has ended. Start a new task with what you meant to answer.".to_owned()
     } else {
         match task.state.as_str() {
-        "done" | "failed" => "Start a new task with what you meant to answer.".to_owned(),
+        "done" => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
+        "failed" => "Start a new task with what you meant to answer.".to_owned(),
         "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
         _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
     }
