@@ -224,11 +224,9 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        let _active_write = ActiveWrite(active_writes);
-        write_gated_in('''
-replace = '''        let _active_write = ActiveWrite(active_writes);
-        let _table = self.lock_panes().map_err(Gated::Pane)?;
-        write_gated_in('''
+find = '''        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
+replace = '''        let _table = self.lock_panes().map_err(Gated::Pane)?;
+        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
 
 [[plant]]
 name = "load timing: an ack frees nothing of the pane's flow"

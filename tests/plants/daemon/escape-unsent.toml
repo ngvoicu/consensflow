@@ -32,7 +32,10 @@ runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = """if state.unsent > 0 && paste.read_empty != Some(at.typed) {"""
+find = """if state.unsent > 0
+                    && (paste.read_empty != Some(at.typed)
+                        || !state.output.counts().caught_up())
+                {"""
 replace = """if state.unsent > 0 {"""
 
 [[plant]]

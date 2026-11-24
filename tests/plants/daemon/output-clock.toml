@@ -222,8 +222,8 @@ file = "crates/cf-panes/src/arbiter.rs"
 find = """                if state.typed != at.typed {
                     return Gate::Refuse(ArbiterError::Unsent);
                 }
-                if state.unsent > 0 && paste.read_empty != Some(at.typed) {"""
-replace = """                if state.unsent > 0 && paste.read_empty != Some(at.typed) {"""
+"""
+replace = """"""
 
 [[plant]]
 name = "output clock: a look is taken of a screen that lacks bytes the host has read"
