@@ -267,7 +267,11 @@ pub(crate) fn open_questions(
 /// The questions `window` left open on `task` when a message was pasted into it after all of
 /// them were asked: the turn that message began asked none of them, so its end is the task's
 /// result and not another wait for these. None where no message was pasted since, or where one
-/// of the open questions was asked after the latest paste (the turn asked it and ended on it).
+/// of the open questions was asked after the latest paste began (the turn asked it and ended
+/// on it). "After" is the ledger's own order: the question's `message.sent` event against the
+/// paste's last `delivery.begun`, never the messages' ids (an answer written while the window
+/// was at work has a lower id than a question the same turn then asked, and is pasted after
+/// it). A question or a paste with no such event is placed by its message id.
 pub(crate) fn left_open_before_the_turn(
     store: &Store,
     task: i64,
@@ -277,11 +281,25 @@ pub(crate) fn left_open_before_the_turn(
     let Some(pasted) = super::delivery::last_pasted(store, window, task)? else {
         return Ok(Vec::new());
     };
-    Ok(if open.iter().all(|question| *question < pasted.id) {
-        open
-    } else {
-        Vec::new()
-    })
+    let place = |kind: &str, message: i64| -> Result<Option<i64>, LedgerError> {
+        Ok(store.db.query_row(
+            "SELECT max(id) FROM event
+              WHERE project_id = ?1 AND kind = ?2 AND json_extract(data, '$.message') = ?3",
+            params![pasted.project_id, kind, message],
+            |row| row.get::<_, Option<i64>>(0),
+        )?)
+    };
+    let paste = place("delivery.begun", pasted.id)?;
+    for question in &open {
+        let after = match (place("message.sent", *question)?, paste) {
+            (Some(asked), Some(paste)) => asked > paste,
+            _ => *question > pasted.id,
+        };
+        if after {
+            return Ok(Vec::new());
+        }
+    }
+    Ok(open)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:

@@ -38,3 +38,13 @@ runs = ["oqr-dispatcher"]
 file = "crates/cf-ledger/src/messages/receipt.rs"
 find = '''    Ok(if open.iter().all(|question| *question < pasted.id) {'''
 replace = '''    Ok(if open.iter().all(|question| *question < pasted.id + 1_000_000) {'''
+
+[[plant]]
+name = "open question result: a question is placed by its id against the answer's"
+meant = "a_result_after_an_answer_written_before_the_next_question_is_still_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''            (Some(asked), Some(paste)) => asked > paste,'''
+replace = '''            (Some(_), Some(_)) => *question > pasted.id,'''

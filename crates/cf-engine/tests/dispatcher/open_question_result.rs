@@ -13,6 +13,7 @@ use cf_engine::testing::Context;
 
 use crate::background::{results, working};
 use crate::fixtures::Tiers;
+use crate::turn_end::pending;
 
 const DONE: &str = "Both are done: committed as fe76a3c";
 
@@ -153,4 +154,74 @@ fn a_question_closed_by_the_result_is_never_reminded() {
         .filter(|message| message.body.contains("has waited"))
         .count();
     assert_eq!(reminders, 0);
+}
+
+/// A quick chief: the answer to the first question is written while the window is at work, the
+/// window asks a second question in that same turn and ends it, and only then is the answer
+/// pasted. The turn the paste begins asked nothing, so its end is the result, though the
+/// second question's id is higher than the answer's.
+#[test]
+fn a_result_after_an_answer_written_before_the_next_question_is_still_the_result() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let project = tiers.project.id;
+    let worker = tiers.assignee(1);
+    context.adapter.busy("zeus");
+    let first = context.ask(project, &worker, "chief", 1, "Which grammar?");
+    context.pass().unwrap();
+    context.answer(project, first.id, "PEG");
+    context.pass().unwrap();
+    let second = context.ask(project, &worker, "chief", 1, "Which format?");
+    context.pass().unwrap();
+    // The turn that asked both ends; the answer is pasted at rest and begins the next turn.
+    context.adapter.answer("zeus", "I asked which format");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting", "the second is open");
+
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    let results = results(&context, &tiers);
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(
+        results[0].contains(&format!(
+            "m-{} was left unanswered and is closed",
+            second.id
+        )),
+        "{results:?}"
+    );
+}
+
+/// A waiting task whose result is held for background jobs: when the jobs end and the held
+/// result is taken, it is delivered and the open question is closed and named.
+#[test]
+fn a_result_held_for_background_jobs_closes_the_open_question_when_it_is_taken() {
+    let context = Context::new();
+    let (tiers, first, second) = asked_two(&context);
+    context.answer(tiers.project.id, second, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    context
+        .adapter
+        .answer_leaving("zeus", "The suite runs in the background", pending(1, 0));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(results(&context, &tiers), Vec::<String>::new(), "held");
+
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    let results = results(&context, &tiers);
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(results[0].contains(DONE), "{results:?}");
+    assert!(
+        results[0].contains(&format!("m-{first} was left unanswered and is closed")),
+        "{results:?}"
+    );
 }
