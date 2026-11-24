@@ -174,20 +174,34 @@ function publish(version, options = {}, artifacts = { [dmgName(version)]: dmgs[v
 // The script checks the DMG's SHA-256 against the signed SHA256SUMS before it attaches it, which
 // that check adds nothing to, so each test copy attaches without it (T-1161). The script itself
 // keeps it, and install/real-install.mjs runs the script as it is.
-const NO_VERIFY = ['hdiutil attach -nobrowse', 'hdiutil attach -noverify -nobrowse']
+const NO_VERIFY = ['"$hdiutil" attach -nobrowse', '"$hdiutil" attach -noverify -nobrowse']
 
 /** A fresh case: its own folders, and a test copy made with `replacements`, attaching unverified. */
+// The script names each system tool by its path (a block between two marker lines). A case's copy
+// names them bare instead, so a stand-in first on PATH is the one that runs, except where the case
+// asks for the full paths (`fullPaths`: the script as it ships).
+const SYSTEM_TOOLS = [
+  ...readFileSync(INSTALL_SH, 'utf8')
+    .split('# system tools: begin\n')[1]
+    .split('# system tools: end')[0]
+    .matchAll(/\b(\w+)=(\/\S+)/g),
+]
+  .filter(([, name]) => name !== 'spctl' && name !== 'plistbuddy')
+  .map(([whole, name]) => [whole, `${name}=${name}`])
+
 function freshCase(
   replacements = [
     [REQUIREMENT, AD_HOC],
     [SPCTL, `spctl=${path.join(work, 'spctl')}`],
     ['quit_wait=120', 'quit_wait=4'],
   ],
+  { fullPaths = false } = {},
 ) {
   // The installer works on the folder's resolved name, as /var is /private/var here.
   const dir = realpathSync(mkdtempSync(path.join(work, 'case-')))
   const script = testCopy(INSTALL_SH, path.join(dir, 'install.sh'), key.keyLine, [
     ...replacements,
+    ...(fullPaths ? [] : SYSTEM_TOOLS),
     NO_VERIFY,
   ])
   mkdirSync(path.join(dir, 'tmp'))
@@ -341,7 +355,8 @@ test('install.sh orders versions as SemVer does', {
   const from = lines.indexOf('# version order: begin')
   const to = lines.indexOf('# version order: end')
   assert.ok(from >= 0 && to > from, 'install.sh marks its order of versions')
-  const order = lines.slice(from + 1, to).join('\n')
+  // The part is cut out of main, where the system tools are named: awk is the one it calls.
+  const order = `awk=/usr/bin/awk\n${lines.slice(from + 1, to).join('\n')}`
   for (const [a, b, newer] of VERSION_ORDER) {
     const ran = spawnSync('/bin/sh', ['-c', `${order}\nnewer_than "$1" "$2"`, 'sh', a, b])
     assert.equal(ran.status === 0, newer, `${a} after ${b}`)
@@ -351,7 +366,7 @@ test('install.sh orders versions as SemVer does', {
 test('the official download follows a redirect to https only', () => {
   const fetch = readFileSync(INSTALL_SH, 'utf8')
     .split('\n')
-    .filter((line) => line.includes('curl '))
+    .filter((line) => line.includes('"$curl" '))
   assert.ok(
     fetch.some((line) => line.includes("--proto '=https' --proto-redir '=https' --tlsv1.2")),
     fetch.join('\n'),
@@ -1708,40 +1723,6 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       assert.match(ran.out, /was asked to quit/)
     })
 
-    test('a shell inside the app is refused through a linked install folder too', async () => {
-      const at = freshCase()
-      const link = path.join(at.dir, 'linked')
-      symlinkSync(at.apps, link)
-      const app = fakeApp(at.apps, '3.0.7-alpha.1')
-      const launcher = path.join(app, 'Contents/MacOS/launcher')
-      writeFileSync(path.join(work, 'launcher.c'), LAUNCHER)
-      run('cc', ['-o', launcher, path.join(work, 'launcher.c')])
-      const ran = await install(at, ['--version', '3.0.7'], {
-        launcher,
-        env: { CONSENSFLOW_INSTALL_DIR: link },
-      })
-      assert.equal(ran.status, 1, ran.out)
-      assert.match(ran.out, /this shell runs inside the ConsensFlow at .*Run this from Terminal/)
-      assert.equal(installedVersion(at), '3.0.7-alpha.1')
-    })
-
-    test('a shell inside the app is refused when the install folder is spelled in another capitalization', async (t) => {
-      const at = freshCase()
-      const other = path.join(path.dirname(at.apps), path.basename(at.apps).toLowerCase())
-      if (!existsSync(other)) return t.skip('this volume tells capitals apart')
-      const app = fakeApp(at.apps, '3.0.7-alpha.1')
-      const launcher = path.join(app, 'Contents/MacOS/launcher')
-      writeFileSync(path.join(work, 'launcher.c'), LAUNCHER)
-      run('cc', ['-o', launcher, path.join(work, 'launcher.c')])
-      const ran = await install(at, ['--version', '3.0.7'], {
-        launcher,
-        env: { CONSENSFLOW_INSTALL_DIR: other },
-      })
-      assert.equal(ran.status, 1, ran.out)
-      assert.match(ran.out, /this shell runs inside the ConsensFlow at .*Run this from Terminal/)
-      assert.equal(installedVersion(at), '3.0.7-alpha.1')
-    })
-
     test('the open app is found when the install folder is spelled in another capitalization', async (t) => {
       const at = freshCase()
       const other = path.join(path.dirname(at.apps), path.basename(at.apps).toLowerCase())
@@ -1798,17 +1779,122 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       )
     })
 
-    test('that the install runs inside is not asked to quit: the install is refused', async () => {
+    // A window of ConsensFlow's pane host has CF_PANE_PROCESS_OWNER in its environment: that, and
+    // nothing about the shell's ancestors, tells the install runs inside the app it would quit.
+    const MARKER = { CF_PANE_PROCESS_OWNER: 'pane-host-1' }
+    const asked = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '')
+    const recorder = (at, log) =>
+      standIns(at, {
+        osascript: `echo "$*" | /usr/bin/cut -c1-40 >> "${log}"\nexec /usr/bin/osascript "$@"`,
+      })
+
+    test('a shell with the pane host marker is refused before any quit, and without it the same install goes on', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const log = path.join(at.dir, 'osascript')
+      const PATH = recorder(at, log)
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(
+        ran.out,
+        /This shell runs inside ConsensFlow, and quitting ConsensFlow would end the install too\. Run this from Terminal or another terminal app\./,
+      )
+      assert.match(ran.out, /nothing was installed/)
+      assert.ok(!/ quit /.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
+      assert.equal(installedVersion(at), '3.0.7-alpha.1')
+      assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'])
+      assert.deepEqual(readdirSync(at.tmp), [])
+      assertInstalled(at, await install(at, ['--version', '3.0.7'], { env: { PATH } }), '3.0.7')
+    })
+
+    test('the marker is read whatever runs the shell: a launcher reached through a link into the bundle', async () => {
       const at = freshCase()
       const app = fakeApp(at.apps, '3.0.7-alpha.1')
       const launcher = path.join(app, 'Contents/MacOS/launcher')
       writeFileSync(path.join(work, 'launcher.c'), LAUNCHER)
       run('cc', ['-o', launcher, path.join(work, 'launcher.c')])
-      const ran = await install(at, ['--version', '3.0.7'], { launcher })
+      const entry = path.join(at.dir, 'entry')
+      symlinkSync(path.join(app, 'Contents/MacOS'), entry)
+      const log = path.join(at.dir, 'osascript')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        launcher: path.join(entry, 'launcher'),
+        env: { PATH: recorder(at, log), ...MARKER },
+      })
       assert.equal(ran.status, 1, ran.out)
-      assert.match(ran.out, /this shell runs inside the ConsensFlow at .*Run this from Terminal/)
+      assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
+      assert.ok(!/ quit /.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
       assert.equal(installedVersion(at), '3.0.7-alpha.1')
-      assert.deepEqual(readdirSync(at.tmp), [])
+    })
+
+    test('GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through', async () => {
+      const gnu = 'case "$1" in -f) echo "stat: cannot read file system information for \'$2\'" >&2; exit 1 ;; esac\nexec /usr/bin/stat "$@"'
+      const at = freshCase(undefined, { fullPaths: true })
+      const app = fakeApp(at.apps, '3.0.7-alpha.1')
+      const log = path.join(at.dir, 'osascript')
+      const PATH = standIns(at, {
+        stat: gnu,
+        osascript: `echo "$*" | /usr/bin/cut -c1-40 >> "${log}"\nexec /usr/bin/osascript "$@"`,
+      })
+      const refused = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      assert.equal(refused.status, 1, refused.out)
+      assert.match(refused.out, /This shell runs inside ConsensFlow/)
+      assert.ok(!/ quit /.test(asked(log)), asked(log))
+      assert.equal(installedVersion(at), '3.0.7-alpha.1')
+      assert.ok(existsSync(app))
+      // And a copy an earlier run left is told a folder by the system's stat, not the GNU one.
+      const dead = Number(run('/bin/sh', ['-c', 'echo $$']).trim())
+      const left = path.join(at.apps, `.ConsensFlow.app.installing.${dead}`)
+      mkdirSync(left)
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /removed .*\.ConsensFlow\.app\.installing\.\d+/)
+      assert.ok(!existsSync(left))
+    })
+
+    test('every system tool is called by its path: stand-ins that fail for each of them first on PATH change nothing', async () => {
+      const at = freshCase(undefined, { fullPaths: true })
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const broken = Object.fromEntries(
+        SYSTEM_TOOLS.map(([, tool]) => [tool.split('=')[0], 'echo "$0 was run" >&2; exit 99']),
+      )
+      const PATH = standIns(at, broken)
+      assertInstalled(at, await install(at, ['--version', '3.0.7'], { env: { PATH } }), '3.0.7')
+    })
+
+    test('a host that quits under the install, with no marker to tell, ends it before the swap and leaves the installed app as it was', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const pidFile = path.join(at.dir, 'ended-pid')
+      // The quit lookup is where the install waits for ConsensFlow to quit; its host going down
+      // ends the shell that runs the install: the stand-in ends that shell, found by its script.
+      const quit = [
+        'case " $* " in *" quit "*)',
+        'p=$PPID',
+        'while [ -n "$p" ] && [ "$p" -gt 1 ]; do',
+        '  c=$(/bin/ps -o command= -p "$p")',
+        `  case "$c" in *"${at.script}"*) echo "$p" > "${pidFile}"; kill -KILL "$p"; exit 0 ;; esac`,
+        '  p=$(/bin/ps -o ppid= -p "$p" | /usr/bin/tr -d " ")',
+        'done ;;',
+        'esac',
+        'exec /usr/bin/osascript "$@"',
+      ].join('\n')
+      const PATH = standIns(at, { osascript: quit })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      try {
+        assert.notEqual(ran.status, 0, ran.out)
+        assert.ok(existsSync(pidFile), 'the stand-in ended the install shell')
+        assert.equal(installedVersion(at), '3.0.7-alpha.1', 'the installed app is as it was')
+        assert.ok(
+          !readdirSync(at.apps).some((name) => name.startsWith('.ConsensFlow.app.previous.')),
+          `nothing was moved aside: ${readdirSync(at.apps)}`,
+        )
+        assert.doesNotMatch(ran.out, /is installed in/)
+      } finally {
+        for (const mounted of attached(at))
+          spawnSync('hdiutil', ['detach', '-quiet', '-force', mounted])
+        for (const name of readdirSync(at.tmp))
+          rmSync(path.join(at.tmp, name), { recursive: true, force: true })
+      }
     })
   })
 
