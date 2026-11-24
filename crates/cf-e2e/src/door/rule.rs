@@ -232,6 +232,12 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "the decoy folder the door's refusals are shown on: made where the run owns nothing, by design, so that a write there is refused",
     ),
     (
+        "tests/live_matrix.rs",
+        "make_shared_folder",
+        Class::Write,
+        "the folder CI uploads a failed case's evidence from is the build folder's, shared by every run: no folder of a run's, so the door cannot make it; the evidence itself goes in a new folder of the run's own below it",
+    ),
+    (
         "src/standin_process.rs",
         "foreign_write",
         Class::Write,

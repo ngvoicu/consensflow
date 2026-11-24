@@ -237,8 +237,8 @@ mod tests {
         fn drop(&mut self) {
             if std::thread::panicking() {
                 let kept = self.0.clone();
-                match copied_below(self.1.path(), &kept) {
-                    Ok(names) => eprintln!(
+                match keep_below(self.1.path(), &kept) {
+                    Ok((kept, names)) => eprintln!(
                         "--- the failed case's evidence is kept in {}: {}",
                         kept.display(),
                         names.join(", ")
@@ -249,6 +249,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The shared folder CI uploads the evidence from, made where it is not there: it is the
+    /// build folder's, no folder of a run's, so the door does not make it.
+    fn make_shared_folder(kept: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(kept)
+    }
+
+    /// Keeps what `from` holds in a new folder of this run's own below `kept` (the shared folder
+    /// that CI uploads): where the folder is, and the names of what it held.
+    fn keep_below(from: &Path, kept: &Path) -> std::io::Result<(PathBuf, Vec<String>)> {
+        make_shared_folder(kept)?;
+        let mut folder = cf_e2e::door::made_in(kept, "case-")?;
+        let names = copied_below(from, folder.path())?;
+        Ok((folder.keep(), names))
     }
 
     /// Copies what `from` holds into `to`, folders and all: the names of what it held.
@@ -300,7 +315,14 @@ mod tests {
         })
         .join();
         assert!(failed.is_err());
-        let screen = std::fs::read_to_string(kept.path().join("windows").join("p1-worker.txt"));
+        // The evidence is in a folder of its own below the shared one.
+        let case = std::fs::read_dir(kept.path())
+            .unwrap()
+            .next()
+            .expect("the failed case kept a folder")
+            .unwrap()
+            .path();
+        let screen = std::fs::read_to_string(case.join("windows").join("p1-worker.txt"));
         assert_eq!(screen.unwrap(), "the worker's last screen\n");
     }
 
