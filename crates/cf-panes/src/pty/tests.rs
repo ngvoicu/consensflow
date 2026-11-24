@@ -2032,10 +2032,12 @@ fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
             })
             .is_ok()
     });
-    assert!(writer.join().unwrap(), "the write went");
+    let written = writer.join().unwrap();
+    let waited = holder.join().unwrap();
+    table.kill(&pane.key).expect("kill the pane");
+    assert!(written, "the write went");
     assert!(
-        !holder.join().unwrap(),
+        !waited,
         "the gate waited for the table while it held the writer"
     );
-    table.kill(&pane.key).expect("kill the pane");
 }
