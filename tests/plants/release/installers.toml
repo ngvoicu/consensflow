@@ -236,8 +236,19 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ -d "$1" ] && [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then'''
+find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ] && [ "$(open_copies "$1")" != 0 ]; then'''
 replace = '''    if false; then'''
+
+[[plant]]
+name = "installers: install.sh refuses a marked shell where nothing would be quit"
+meant = "a marked window in one running copy upgrades a closed copy in another folder, and no quit is asked"
+runs = [["node", "--test", "--test-name-pattern", "marked window in one running copy", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ] && [ "$(open_copies "$1")" != 0 ]; then'''
+replace = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then'''
 
 [[plant]]
 name = "installers: install.sh calls a system tool by its name"
