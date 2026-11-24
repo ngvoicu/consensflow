@@ -206,7 +206,7 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "        require_not_given(store, &task)?;\n"
+find = "        require_not_given(store, &task, routes_only)?;\n"
 replace = ""
 
 [[plant]]
@@ -288,7 +288,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "        require_not_given(store, &task)?;\n"
+find = "        require_not_given(store, &task, routes_only)?;\n"
 replace = ""
 
 [[plant]]
@@ -318,7 +318,7 @@ runs = ["cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task before any window\n                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n"
+find = "  cf task edit T-3 \"…\" [--tier <tier> [--purpose <purpose>]] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task before any window\n                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes;\n                                    --tier critical --purpose … sends critical work to its slot (a tier and purpose\n                                    alone are taken for a task back on the board after a Reassign)\n"
 replace = ""
 
 [[plant]]
@@ -328,7 +328,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
+find = "    {{cf}} task edit T-3 \"…\" [--tier <tier> [--purpose <purpose>]] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]

@@ -55,67 +55,16 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
 
 /// `member.add`: Add member (T-1143). A member on a model its harness lists, at an effort
 /// it lists for it, in the tier the human chose, a worker unless the page says otherwise,
-/// named by the model ([`cf_ledger::handles`]). A member on that harness, model and effort
-/// already takes the roles as roles more, in the tier chosen now. An image designer, which
-/// draws with Codex's image tool and holds no other role, is that only to a designer: a
-/// worker on the same model is a member beside it, whichever came first.
+/// named by the model ([`cf_ledger::handles`]). Add never merges: the same model at a second
+/// tier is a second member, with its own name, windows, slots and backup (a member that
+/// left comes back as itself, which the ledger does). Giving a role to a member already on
+/// the staff is `member.roles`. An image designer, which draws with Codex's image tool and
+/// holds no other role, is that only to a designer.
 pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let member = picked_member(page, body, true).await?;
-    let on_it = active_primary(page, project, |member_now| {
-        member_now.harness.as_deref() == Some(member.harness.as_str())
-            && member_now.model == member.model
-            && member_now.effort == member.effort
-            && member_now.designer == member.designer
-    })?;
     let mut ledger = page.ledger.borrow_mut();
-    let Some(existing) = on_it else {
-        return one("member", ledger.add_member(project, &member)?);
-    };
-    let mut held = existing.roles.clone();
-    held.extend(
-        member
-            .roles
-            .iter()
-            .filter(|role| !existing.roles.contains(role))
-            .cloned(),
-    );
-    // A role with tiers gained by a member given none comes with the tier chosen now.
-    let tier = (!cf_ledger::roles::takes_no_tier(&member.roles)).then_some(member.tier.as_str());
-    ledger.set_roles(project, &existing.handle, &held, tier)?;
-    // Roles with no tier leave the member in the tier it has, for its work with one.
-    let mut edit = edit_of(&member);
-    if cf_ledger::roles::takes_no_tier(&member.roles) {
-        edit.tier = existing.tier.clone().unwrap_or(edit.tier);
-    }
-    one(
-        "member",
-        ledger.edit_member(project, &existing.handle, &edit)?,
-    )
-}
-
-/// A matching primary: a backup on the same model is its own staff row.
-fn active_primary(
-    page: &Page,
-    project: i64,
-    which: impl Fn(&ParticipantView) -> bool,
-) -> Result<Option<ParticipantView>, Said> {
-    let ledger = page.ledger.borrow();
-    let Some(view) = ledger.project(project)? else {
-        return Err(Said(format!("no project {project}")));
-    };
-    for member in view.participants {
-        if member.role != "chief"
-            && member.role != "human"
-            && member.member_id.is_none()
-            && member.left_at.is_none()
-            && which(&member)
-            && !ledger.is_backup(project, &member.handle)?
-        {
-            return Ok(Some(member));
-        }
-    }
-    Ok(None)
+    one("member", ledger.add_member(project, &member)?)
 }
 
 /// Pick a backup from the same model catalog as a member, without its owner's roles or tier.
@@ -237,17 +186,6 @@ fn kept_choice(body: Body<'_>, found: &ParticipantView) -> Result<Picked, Said> 
         model_name: found.model_name.clone(),
         tier: tier_for(&found.roles, body)?,
     })
-}
-
-/// What `member` runs on, as Edit member changes it.
-fn edit_of(member: &NewMember) -> MemberEdit {
-    MemberEdit {
-        harness: member.harness.clone(),
-        model: member.model.clone(),
-        effort: member.effort.clone(),
-        model_name: member.model_name.clone(),
-        tier: member.tier.clone(),
-    }
 }
 
 /// A member of `project`'s staff now, not a session of one, that `which` picks.
@@ -514,20 +452,14 @@ pub(super) async fn resolve(
     })
 }
 
-/// `member.roles`: the roles are checked before the member is looked for. A role with tiers
-/// gained by a member whose roles had none comes with the `tier` the human chose (FD-04).
+/// `member.roles`: the roles are checked before the member is looked for. A role the member
+/// gains is held at the tier it has: it takes no tier, and only Edit changes one.
 pub(super) async fn roles(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let roles = parse_roles(body.get("roles"))?;
-    let tier = match body.get("tier") {
-        None | Some(Value::Null) => None,
-        given => Some(tier_of(given)?),
-    };
-    let member = page.ledger.borrow_mut().set_roles(
-        body.whole("project")?,
-        &body.text("agent"),
-        &roles,
-        tier.map(WorkTier::as_str),
-    )?;
+    let member =
+        page.ledger
+            .borrow_mut()
+            .set_roles(body.whole("project")?, &body.text("agent"), &roles)?;
     one("member", member)
 }
 

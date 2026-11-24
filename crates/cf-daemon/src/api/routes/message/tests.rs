@@ -13,6 +13,9 @@ use crate::testing::scene;
 
 #[tokio::test]
 async fn the_recipient_and_the_sender_read_the_whole_message_and_no_one_else_does() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     let scene = scene();
     let target = format!("/api/inbox/{}", scene.question.id);
     for token in [&scene.chief, &scene.zeus] {

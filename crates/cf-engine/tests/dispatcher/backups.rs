@@ -134,6 +134,9 @@ fn with_two_members_out_the_backup_of_the_one_whose_reset_is_latest_takes_the_ta
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     let first = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
     let second = backed(&context, tiers.project.id, "diana", "claude-code", "rhea");
+    // The staff stands as a ledger of the version before had it (two standard owners of one
+    // slot, each with a backup), and the update has run over it.
+    context.reopen_as_before_the_update();
     out(&context, &tiers, "zeus", &soon(&context, 2));
     out(&context, &tiers, "diana", &soon(&context, 5));
     tiers.open();
@@ -144,6 +147,7 @@ fn with_two_members_out_the_backup_of_the_one_whose_reset_is_latest_takes_the_ta
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     let first_again = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
     backed(&context, tiers.project.id, "diana", "claude-code", "rhea");
+    context.reopen_as_before_the_update();
     out(&context, &tiers, "zeus", &soon(&context, 6));
     out(&context, &tiers, "diana", &soon(&context, 5));
     tiers.open();

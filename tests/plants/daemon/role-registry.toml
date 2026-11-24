@@ -40,8 +40,8 @@ runs = ["rr-ledger-sixth"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
-find = '''    find(pool).is_some_and(|role| !role.tiered)'''
-replace = '''    find(pool).is_some_and(|role| role.tiered)'''
+find = '''    find(pool).is_some_and(|role| !role.tiered())'''
+replace = '''    find(pool).is_some_and(|role| role.tiered())'''
 
 [[plant]]
 name = "role registry: the image designer's row has tiers"
@@ -50,9 +50,11 @@ runs = ["rr-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
-find = '''    tiered: false,
+find = '''    tiers: &[],
+    home: "standard",
     image_agent: true,'''
-replace = '''    tiered: true,
+replace = '''    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: true,'''
 
 [[plant]]
@@ -197,18 +199,6 @@ runs = ["rr-daemon-members"]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''        tier: tier_for(&found.roles, body)?,'''
 replace = '''        tier: tier_of(body.get("tier"))?,'''
-
-[[plant]]
-name = "role registry: a scout's role added to a worker drops its tier"
-meant = "a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier"
-runs = ["rr-daemon-members"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''    if cf_ledger::roles::takes_no_tier(&member.roles) {
-        edit.tier = existing.tier'''
-replace = '''    if false {
-        edit.tier = existing.tier'''
 
 [[plant]]
 name = "role registry: board.get answers no roles"

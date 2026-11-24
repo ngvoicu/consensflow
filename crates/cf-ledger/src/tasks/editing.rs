@@ -21,7 +21,7 @@ use super::{
 };
 use crate::model::{self, title_of, LedgerError, MAX_BODY, PURPOSES};
 use crate::roles;
-use crate::staff::{has_members_of_tier, holders_of_tier, nearest_tier};
+use crate::staff::{holders_of_tier, may_take_slot, place, Placed};
 use crate::store::Store;
 use crate::views::TaskRow;
 
@@ -76,17 +76,54 @@ pub(crate) fn edit_task_with(
         .as_deref()
         .map(|tier| model::parse_tier(Some(&Value::from(tier))))
         .transpose()?;
+    if edit.purpose.is_some() && wanted != Some("critical") {
+        return Err(LedgerError::refused(
+            "purpose-without-critical",
+            "a purpose comes with --tier critical",
+        ));
+    }
+    // An edit that only routes (a tier, with its purpose) changes no brief and no need.
+    let routes_only = body.is_none() && !links && edit.tier.is_some();
     store.write(|store| {
         store.participant_by_handle(project_id, by)?;
         let task = store.task_row(project_id, number)?;
         require_on_board(&task, "edit")?;
-        require_not_given(store, &task)?;
+        require_not_given(store, &task, routes_only)?;
         // The tier is checked before anything is written: a refusal changes nothing.
         let moving = match wanted {
-            Some(wanted) => Some(tier_for(store, project_id, &task, wanted)?),
+            Some(wanted) => Some(tier_for(
+                store,
+                project_id,
+                &task,
+                wanted,
+                edit.purpose.as_deref(),
+            )?),
             None => None,
         };
         let at = store.at();
+        // A purpose given with Critical: the critical line of a brief that is queued or held
+        // at the gate says it now, wherever the task keeps its tier.
+        let task = match edit
+            .purpose
+            .as_deref()
+            .filter(|purpose| task.purpose.as_deref() != Some(purpose))
+        {
+            Some(purpose) => {
+                store.db.execute(
+                    "UPDATE task SET purpose = ?, updated_at = ? WHERE id = ?",
+                    params![purpose, at, task.id],
+                )?;
+                store.log(
+                    project_id,
+                    "task.purposed",
+                    json!({ "task": number, "by": by, "from": task.purpose, "to": purpose }),
+                )?;
+                let renewed = task_row_by_id(store, task.id)?;
+                rewrite_pending_briefs(store, &task, &renewed)?;
+                renewed
+            }
+            None => task,
+        };
         if let Some(body) = body {
             replace_brief(store, project_id, &task, by, body, &at)?;
         }
@@ -318,14 +355,16 @@ fn circle(waiter: i64, waited: i64) -> LedgerError {
     )
 }
 
-/// The tier a task asked for `wanted` goes to, as `(wanted, nearest)`: it is a task
-/// given by tier, for a role with tiers, and critical work has its purpose, and the staff
-/// holds the role.
+/// The tier a task asked for `wanted` goes to, as `(wanted, placed)`: it is a task given by
+/// tier, for a role that has a slot at `wanted`, and critical work has its purpose (the one
+/// given with the edit, or the task's own). Placed as a task added now is: its slot, else the
+/// nearest held one outside Critical; with none it waits, at the tier asked, and is not refused.
 fn tier_for(
     store: &Store,
     project_id: i64,
     task: &TaskRow,
     wanted: &'static str,
+    purpose: Option<&str>,
 ) -> Result<(String, String), LedgerError> {
     let number = task.number;
     let pool = match task.pool.as_deref() {
@@ -348,32 +387,20 @@ fn tier_for(
             ))
         }
     };
-    if wanted == "critical"
-        && !task
-            .purpose
-            .as_deref()
-            .is_some_and(|purpose| PURPOSES.contains(&purpose))
-    {
+    let purpose = purpose.or(task.purpose.as_deref());
+    if wanted == "critical" && !may_take_slot(pool, wanted, purpose) {
         return Err(LedgerError::refused(
             "purpose-required",
             format!(
-                "critical work names its purpose ({}), and T-{number} has none: cancel it and add it again",
+                "critical work names its purpose ({}), and T-{number} has none: give one with --purpose",
                 PURPOSES.join(", ")
             ),
         ));
     }
-    let tier =
-        nearest_tier(store, project_id, pool, Some(wanted))?.unwrap_or_else(|| wanted.to_owned());
-    if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
-        return Err(LedgerError::refused_with(
-            "no-member-of-tier",
-            format!(
-                "no {} is on the staff: ask the human for one, in your terminal",
-                roles::name_of(pool)
-            ),
-            409,
-        ));
-    }
+    let tier = match place(store, project_id, pool, Some(wanted), purpose)? {
+        Placed::Fell(tier) => tier,
+        Placed::Stays(_) | Placed::Waits { .. } => wanted.to_owned(),
+    };
     Ok((wanted.to_owned(), tier))
 }
 
@@ -391,8 +418,24 @@ fn replace_brief(
         "UPDATE task SET body = ?, title = ?, updated_at = ? WHERE id = ?",
         params![body, title_of(body), at, task.id],
     )?;
+    rewrite_pending_briefs(store, task, &task_row_by_id(store, task.id)?)?;
+    store.log(
+        project_id,
+        "task.edited",
+        json!({ "task": number, "by": by, "from": task.body }),
+    )?;
+    Ok(())
+}
+
+/// The task messages of `task` that say its brief and are still waiting (queued, or held at
+/// the human's gate) say it as `renewed` has it: the brief and the critical line before it.
+fn rewrite_pending_briefs(
+    store: &mut Store,
+    task: &TaskRow,
+    renewed: &TaskRow,
+) -> Result<(), LedgerError> {
     let old = delivery_body(task);
-    let words = delivery_body(&task_row_by_id(store, task.id)?);
+    let words = delivery_body(renewed);
     // Only the rows that say the brief: a row that is it (the brief as it was
     // queued), or starts with it and a blank line (a resume that carries it); a
     // row of the resume's words alone, or any other, is left as it is.
@@ -419,11 +462,6 @@ fn replace_brief(
             )?;
         }
     }
-    store.log(
-        project_id,
-        "task.edited",
-        json!({ "task": number, "by": by, "from": task.body }),
-    )?;
     Ok(())
 }
 
@@ -517,7 +555,7 @@ pub(crate) fn tell_open(
 /// Whether the task's brief may still be replaced: it waits for a window (open,
 /// queued, or paused before any had it), and no task message of it began to
 /// reach one. The refusal says what to do instead, by where the task is.
-fn require_not_given(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
+fn require_not_given(store: &Store, task: &TaskRow, routes_only: bool) -> Result<(), LedgerError> {
     let number = task.number;
     let tell = format!("tell its window: cf tell T-{number} \"…\"");
     match task.state.as_str() {
@@ -535,13 +573,20 @@ fn require_not_given(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
             ))
         }
     }
-    let begun = store
-        .db
-        .prepare(
-            "SELECT 1 FROM message WHERE task_id = ? AND kind = 'task'
+    // An edit that only routes a task given by tier that no window holds (on the board, open
+    // or paused) is taken after a Reassign, though an earlier window had its brief: it writes
+    // its tier and purpose, and the next window's brief has them.
+    let on_the_board = task.pool.is_some()
+        && task.assignee_id.is_none()
+        && matches!(task.state.as_str(), "open" | "paused");
+    let begun = !(routes_only && on_the_board)
+        && store
+            .db
+            .prepare(
+                "SELECT 1 FROM message WHERE task_id = ? AND kind = 'task'
                AND state IN ('delivering', 'delivered', 'read')",
-        )?
-        .exists([task.id])?;
+            )?
+            .exists([task.id])?;
     if begun {
         // A queued task's window, coming up, keeps what it is told for after its
         // brief (`tell_queued`, B3): it is told now. One taken back to the board is

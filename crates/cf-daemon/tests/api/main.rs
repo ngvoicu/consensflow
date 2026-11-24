@@ -106,11 +106,16 @@ const LANE_RUNS_ON: &str = "a lane of the board says the model and effort its pa
 /// or accepted, and that asks afresh, is asking as the session, and the board takes it.
 const ASKED_AFTER_THE_END: &str = "a question `cf ask` stamps after its window's task was cancelled or accepted is the session's own and is taken, where Node refused it as the ended task's";
 
+/// `cf task add` given no tier prints the usage whose lines name each role's tiers: every role
+/// takes Critical, complex, standard or light, and the roles Node gave no tier have one now.
+const USAGE_NAMES_EACH_ROLES_TIERS: &str = "`cf task add` with no tier prints a usage that names each role's tiers (a worker is critical, complex, standard or light; the frontend designer, the architect, the researcher and the integrator take a tier too), where Node's said the roles with no tier took none";
+
 const DEPARTED: &[Departed] = &[
     ("cf-board-005", ASKED_AFTER_THE_END),
     ("cf-board-014", LANE_RUNS_ON),
     ("cf-board-016", LANE_RUNS_ON),
     ("cf-board-018", STAFF_ON_ITS_OWN_MODEL),
+    ("cf-board-019", USAGE_NAMES_EACH_ROLES_TIERS),
     ("cf-board-021", LANE_RUNS_ON),
     ("cf-board-027", STAFF_ON_ITS_OWN_MODEL),
     ("core-api-003", RESULT_ACCEPTED),
@@ -227,6 +232,8 @@ fn every_trace_of_the_api_is_answered_as_node_answered_it() {
 
 #[test]
 fn every_run_of_cf_against_the_api_prints_what_it_printed_against_node() {
+    // Node's recordings never had the slot rule: they seat members it now refuses.
+    let _off = cf_ledger::testing::slot_rule_off();
     play_all(&["cf-board"], 29);
 }
 
