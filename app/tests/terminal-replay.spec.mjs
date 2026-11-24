@@ -303,10 +303,16 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
       const win = P5.window(`stuck${reload}`, { cols: 80, rows: 24, invoke: host.invoke, pageId: `stuck${reload}` })
       host.subscribe((m) => win.link.output(m, () => win.emulator))
       win.start()
-      await win.replayed
+      // A replay left stuck never ends: the case is bounded, so it fails on its words.
+      const ended = await Promise.race([win.replayed.then(() => true), P5.sleep(5000).then(() => false)])
+      if (!ended) {
+        out.push({ ended, text: [''], truncated: win.truncated, muted: true, acked: false })
+        break
+      }
       host.print([...new TextEncoder().encode(`live${reload}`)])
       await win.quiet()
       out.push({
+        ended,
         text: P5.state(win.emulator).text,
         truncated: win.truncated,
         muted: win.emulator.terminal.options.disableStdin,
@@ -317,6 +323,7 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
     return out
   })
   for (const [at, one] of result.entries()) {
+    expect(one.ended).toBe(true)
     expect(one.text.join('')).toContain(`live${at}`)
     expect(one.truncated).toBe(true)
     expect(one.muted).toBe(false)

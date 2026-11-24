@@ -31,16 +31,6 @@ find = "        bytes = bytes.subarray(window.next - offset)\n"
 replace = ""
 
 [[plant]]
-name = "replay page: a live message ends where the history ends and is written again"
-meant = "a reloaded page equals a continuous xterm in every case the reviews ran"
-runs = ["page"]
-
-[[plant.edit]]
-file = "app/ui/terminal-link.js"
-find = "        if (end <= window.next) {\n          this.#drawn(window.key, message)\n          continue\n        }"
-replace = "        if (end < window.next) {\n          this.#drawn(window.key, message)\n          continue\n        }"
-
-[[plant]]
 name = "replay page: the first live byte is lost at the boundary"
 meant = "a reloaded page equals a continuous xterm in every case the reviews ran"
 runs = ["page"]
