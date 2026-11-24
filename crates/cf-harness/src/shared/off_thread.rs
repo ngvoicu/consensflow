@@ -8,6 +8,7 @@
 //! that stops it half-way, and a plan whose future is dropped finishes what it had begun.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 
@@ -18,6 +19,40 @@ use tokio::sync::oneshot;
 use crate::contract::{Agent, Launch, LaunchId, Skill, Specs};
 
 type Job = Box<dyn FnOnce() + Send>;
+
+/// The plans the worker has been given and has not finished.
+static BUSY: AtomicUsize = AtomicUsize::new(0);
+
+/// The plans the worker has finished, ever.
+static DONE: AtomicUsize = AtomicUsize::new(0);
+
+/// How many plans the worker has finished: a test that polls by hand sees one end between two
+/// polls by this moving.
+pub(crate) fn finished_count() -> usize {
+    DONE.load(Ordering::SeqCst)
+}
+
+/// Waits until the worker has finished what it was given, and says whether there was any:
+/// a test that polls a plan by hand has nothing else to be woken by.
+pub(crate) fn wait_idle() -> bool {
+    let began = std::time::Instant::now();
+    let mut waited = false;
+    while BUSY.load(Ordering::SeqCst) > 0 && began.elapsed() < std::time::Duration::from_secs(20) {
+        waited = true;
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    waited
+}
+
+/// Counts a job as given, and as finished once it has been run.
+fn counted(job: Job) -> Job {
+    BUSY.fetch_add(1, Ordering::SeqCst);
+    Box::new(move || {
+        job();
+        DONE.fetch_add(1, Ordering::SeqCst);
+        BUSY.fetch_sub(1, Ordering::SeqCst);
+    })
+}
 
 /// The worker's queue: one thread for every plan, which makes them one at a time as the engine
 /// began them.
@@ -142,7 +177,7 @@ pub(crate) async fn plan<T: Send + 'static>(
             let _ = answer.send(made);
         }
     });
-    let sent = queue().lock().map(|jobs| jobs.send(job));
+    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));
     if !matches!(sent, Ok(Ok(()))) {
         return Err("the launch's files could not be made: their worker is gone".to_owned());
     }
@@ -164,7 +199,7 @@ pub(crate) async fn work<T: Send + 'static>(
             let _ = answer.send(made);
         }
     });
-    let sent = queue().lock().map(|jobs| jobs.send(job));
+    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));
     if !matches!(sent, Ok(Ok(()))) {
         return Err("the launch's files could not be made: their worker is gone".to_owned());
     }

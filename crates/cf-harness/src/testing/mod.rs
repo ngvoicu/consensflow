@@ -701,14 +701,35 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
     }
 }
 
-/// `work`, done: it must not wait on anything, and a test that gave it
-/// something to wait on uses a [`Driver`].
+/// `work`, done: it must not wait on anything a test did not give it, and a test that gave it
+/// something to wait on uses a [`Driver`]. What a launch's plan makes on its worker thread
+/// (`shared::off_thread`) is waited for, as the engine's thread waits for it: the thread parks
+/// until the worker wakes it, and a work that is pending with nothing to wake it fails after
+/// [`FINISHED_WITHIN`].
 pub fn finished<T>(mut work: Work<'_, T>) -> T {
-    match work.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("work that waited on nothing it was given"),
+    struct Unparks(std::thread::Thread);
+    impl std::task::Wake for Unparks {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = Waker::from(std::sync::Arc::new(Unparks(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    let began = std::time::Instant::now();
+    loop {
+        if let Poll::Ready(value) = work.as_mut().poll(&mut context) {
+            return value;
+        }
+        assert!(
+            began.elapsed() < FINISHED_WITHIN,
+            "work that waited on nothing it was given"
+        );
+        std::thread::park_timeout(std::time::Duration::from_millis(50));
     }
 }
+
+/// How long [`finished`] waits for work that waits on a thread of its own.
+const FINISHED_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a prepared window is launched with (its arguments, the variables it
 /// adds and the ones it drops), with `root`, the throwaway home it was made
@@ -765,6 +786,7 @@ impl<T> Driver<T> {
             let mut moved = false;
             let mut index = 0;
             while index < self.begun.len() {
+                let ended = crate::shared::off_thread::finished_count();
                 POLLING.with(|polling| polling.set(Some(self.begun[index].0)));
                 let polled = self.begun[index].1.as_mut().poll(&mut context);
                 POLLING.with(|polling| polling.set(None));
@@ -773,6 +795,10 @@ impl<T> Driver<T> {
                     settled.push((id, value));
                     moved = true;
                 } else {
+                    // What waits on the plan's worker thread is waited for here: nothing
+                    // else wakes work polled by hand.
+                    moved |= crate::shared::off_thread::wait_idle()
+                        || crate::shared::off_thread::finished_count() != ended;
                     index += 1;
                 }
             }

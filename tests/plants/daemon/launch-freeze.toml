@@ -21,8 +21,8 @@ runs = ["lf-query"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
-find = """        Box::pin(async move { self.ask(move |_| grants()).await.flatten() })"""
-replace = """        Box::pin(async move { grants() })"""
+find = """        Box::pin(async move { Ok(self.ask(move |_| grants()).await?) })"""
+replace = """        Box::pin(async move { Ok(grants()) })"""
 
 [[plant]]
 name = 'launch-freeze: Claude Code configuration is read on the daemon thread again'
@@ -31,11 +31,11 @@ runs = ["lf-config"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
-find = """            match self
-                .ask(move |configuration| configuration.computer_use(&env, &asked))
+find = """            self.ask(move |configuration| configuration.computer_use(&env, &asked))
                 .await
-            {"""
-replace = """            match Some(computer_use::Configuration::default().computer_use(&env, &asked)) {"""
+        })"""
+replace = """            Ok(computer_use::Configuration::default().computer_use(&env, &asked))
+        })"""
 
 [[plant]]
 name = 'launch-freeze: the wait for the system has no limit of its own'
