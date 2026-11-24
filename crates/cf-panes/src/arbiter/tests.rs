@@ -2597,7 +2597,7 @@ mod windows {
         };
         let pasted = Instant::now();
         arbiter
-            .write_paste(&table, &key, brief, None, None)
+            .write_paste_plain(&table, &key, brief, None)
             .expect("the delivery");
         let entered = pasted.elapsed();
         // A paste its window did not send, having read it, is pressed Enter on again, as the
@@ -2725,7 +2725,7 @@ mod windows {
         read_until(&table, &key, &output, "READY");
 
         arbiter
-            .write_paste(&table, &key, b"pasted words", None, None)
+            .write_paste_plain(&table, &key, b"pasted words", None)
             .expect("paste into the pane");
         let text = read_until(&table, &key, &output, "#");
         assert!(text.contains("GOT=[pasted words]"), "{text:?}");

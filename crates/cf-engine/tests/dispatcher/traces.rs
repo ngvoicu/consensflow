@@ -266,13 +266,18 @@ const HANDOFF_AND_NO_CAUSE: &str = "before it closes the chief's window, whose h
 /// The same, where the note falls among other effects.
 const NOTE_TURNS_AND_NO_CAUSE: &str = "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace; and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
 
-const ANSWER_ON_ITS_WAY: &str = "an answer queued for its window moves the task from waiting to working at once, where Node waits for receipt; the answer is delivered as before";
+const ANSWER_ON_ITS_WAY: &str = "an answer queued for its window moves the task from waiting to working at once, where Node waits for receipt; the answer is delivered as before; and a delivery takes one look at the window's screen (`pane.snapshot` with `bottom`) before its paste and is licensed by it (N17), so the effects of other work fall before or after the delivery's begun line, where Node's trace has them the other way";
 
 /// The exit of a window whose task works looks at its harness's record before it settles, to keep
 /// the final answer the harness wrote just before the window went.
 const EXIT_LOOKS: &str = "a window that exits with its task working is looked at once more (`observe` of its harness's record) before the exit settles, so a final answer written just before it is the task's result, where Node's exit paused the task at once";
 
+const LOOKS_BEFORE_HAND_OVER: &str = "a delivery takes one look at the window's screen (`pane.snapshot` with `bottom`) before its paste and is licensed by it (N17): the hand-over takes the turns the host's answer takes, so the effects of other work fall before or after the delivery's begun line, where Node's trace has them the other way";
+
 const DEPARTED: &[(&str, &str)] = &[
+    ("closes a window the human never opened as its task ends, though its agent is at work, and one they hid only after its turn", LOOKS_BEFORE_HAND_OVER),
+    ("a note written 3 turns after a pass whose delivery the harness refuses", LOOKS_BEFORE_HAND_OVER),
+    ("a note written 4 turns after a pass whose delivery the harness refuses", LOOKS_BEFORE_HAND_OVER),
     ("pauses the task and tells the requester when the worker window closes mid-task, and resumes it on its conversation", EXIT_LOOKS),
     ("keeps a task with its window when the window would not stop, and reassigns it once it does", EXIT_LOOKS),
     ("stops the window of a task the human reassigns before the task leaves it, even one the human opened", EXIT_LOOKS),

@@ -549,7 +549,10 @@ fn t2160_a_key_typed_and_erased_since_the_look() {
         case.world.echo_as([Echo::Silent]);
         case.world.type_keys(b"x");
         case.world.type_keys(&[0x7f]);
-        case.run(&[case.script], |case| case.world.jobs.lock().unwrap().is_empty());
+        // Both keys are written and counted, and the erase's echo is drawn.
+        case.run(&[case.script], |case| {
+            case.world.arbiter.snapshot(&case.world.key).is_ok_and(|now| now.typed >= 2)
+        });
         case.drawn();
         case.finish();
         let outcome = answer.lock().unwrap().take().expect("asked");
