@@ -249,6 +249,11 @@ impl Read for ActivityReader {
             self.counts.took(byte_count);
             *crate::sync::lock(&self.last_activity)
                 .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
+            // Returned from its wait with bytes: no longer waiting for any, whatever its next
+            // step is ([`OutputCount::caught_up`]). Counted first: from the count on, the pair
+            // says the read is pending; the moment between the pty's answer and the count is as
+            // short as a look can be taken in.
+            self.counts.reader_busy();
         }
         Ok(byte_count)
     }

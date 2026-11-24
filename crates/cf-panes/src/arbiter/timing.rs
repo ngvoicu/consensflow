@@ -103,9 +103,6 @@ impl OutputCount {
     /// `bytes` came off the pty.
     pub(crate) fn took(&self, bytes: usize) {
         crate::sync::point("took.before");
-        // Before the count: a reader that returned from its wait with bytes is no longer
-        // waiting, whatever its next step is.
-        self.reader_is(Reader::Busy);
         self.read.fetch_add(bytes as u64, Ordering::AcqRel);
         crate::sync::point("took.after");
     }

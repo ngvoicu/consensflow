@@ -255,6 +255,8 @@ impl World {
         };
         let mut buffer = [0; 8192];
         loop {
+            // As the pane's reader waits for the pty (`pty::flow::stream_output`).
+            self.printed.counts().reader_waits();
             let Ok(length) = reader.read(&mut buffer) else {
                 break;
             };
