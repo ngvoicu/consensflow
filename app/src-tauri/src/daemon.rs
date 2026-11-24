@@ -1654,6 +1654,46 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
+    /// The app's first start, through the supervisor, on a fresh home as `run()` leaves it: the
+    /// `app/` folder and the open `app/app.log` (the daemon's stderr is behind it), which the
+    /// daemon must take for a first use, never a used home with no ledger. The daemon's own
+    /// decision is asked of its code (`cf_daemon::broken`); the stand-in is the child.
+    #[test]
+    fn the_first_start_on_a_home_as_the_app_leaves_it_is_a_first_use_and_comes_up() {
+        let home = tempfile::tempdir().expect("a home");
+        let log = crate::prepare_error_log(home.path(), 1024).expect("the app's folder and log");
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .expect("the log opened as redirect_stderr opens it");
+        assert!(log.starts_with(home.path().join("app")));
+        assert!(
+            !cf_daemon::broken::home_was_used(home.path()),
+            "what the app wrote is no witness of a used home"
+        );
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        let starter = a_ledger_stand_in_at(
+            &starts,
+            &daemon.hears_broken(),
+            &[],
+            Then::StayUp,
+            home.path(),
+        );
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        assert_eq!(told_of(&heard, 1), [DaemonStatus::up()]);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        let (child, bridge) = daemon.stop().expect("the app stops");
+        if let Some(bridge) = bridge {
+            bridge.close_input();
+        }
+        if let Some(mut child) = child {
+            stop_daemon(&mut child);
+        }
+    }
+
     /// A start refused for a ledger that is no ledger carries the same new-board words as the
     /// daemon's own command line, and is never tried again.
     #[test]

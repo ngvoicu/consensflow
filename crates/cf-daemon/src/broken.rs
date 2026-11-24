@@ -104,7 +104,7 @@ pub fn mark(home: &Path) -> std::io::Result<()> {
 
 /// What ConsensFlow writes in a home beside its ledger, each by its name in the home: a
 /// file that is there shows the home has been run in, whichever build wrote it.
-const WRITTEN: [&str; 10] = [
+const WRITTEN: [&str; 8] = [
     MARKER,
     "consensflow.db-wal",
     "consensflow.db-shm",
@@ -113,14 +113,14 @@ const WRITTEN: [&str; 10] = [
     "daemon.log.lock",
     "events.jsonl",
     "events.jsonl.1",
-    "app/updates.json",
-    "app/app.log",
 ];
 
-/// Whether `home` has been run in: it holds any file ConsensFlow writes in a home (the
-/// marker, the ledger's side files, the log or its lock, the trace, the app's own files), a
-/// project trace (any other `*.jsonl`), or a `consensflow.db` that is a link, dangling or
-/// not. Looked at as names, not followed. A home moved before its first start on the build
+/// Whether `home` has been run in: it holds any file the daemon writes in a home (the
+/// marker, the ledger's side files, the log or its lock, the trace), a project trace (any
+/// other `*.jsonl`), or a `consensflow.db` that is a link, dangling or not. **The app's own
+/// files are no witness:** the app makes `app/`, opens `app/app.log` and may keep
+/// `app/updates.json` before the daemon's first start, and a home with only these is a first
+/// use. Looked at as names, not followed. A home moved before its first start on the build
 /// that writes the marker is used all the same. Where the whole folder is replaced by
 /// another, empty one (a mount point whose disk is not there) nothing is left to show it:
 /// a known limit (39), and it starts as a first use.

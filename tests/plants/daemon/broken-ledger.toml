@@ -609,3 +609,21 @@ runs = ["p23a-app"]
 file = "crates/cf-base/src/home.rs"
 find = '''    if is_a_ledger(ledger) {'''
 replace = '''    if true {'''
+
+[[plant]]
+name = "broken ledger: the app's own log is counted as a witness of a used home"
+meant = "a_home_that_holds_what_the_app_writes_before_the_daemon_is_a_first_use"
+runs = ["p23a-daemon", "p23a-app"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = '''    "events.jsonl.1",
+];'''
+replace = '''    "events.jsonl.1",
+    "app/app.log",
+];'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/broken.rs"
+find = "const WRITTEN: [&str; 8] = ["
+replace = "const WRITTEN: [&str; 9] = ["

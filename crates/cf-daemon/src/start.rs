@@ -252,13 +252,36 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         .map_err(|failed| StartError::System(failed.to_string()))?;
     let log = Rc::new(Log::new(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
-    log.info(&format!(
-        "start pid {} rust {VERSION} home {}",
-        std::process::id(),
-        home.display()
-    ));
-    let started = run(env, options, home, create, trace, Rc::clone(&log), errors).await;
+    // The start's first line waits for the ledger: on a home that is not used, the ledger is
+    // made before `daemon.log` or any other witness is, so a start that is cut off leaves
+    // nothing that counts, or a ledger (and only a ledger that is empty can then be
+    // refused: the instant between SQLite making the file and its first page).
+    let announced = Rc::new(std::cell::Cell::new(false));
+    let announce: Rc<dyn Fn()> = {
+        let (log, announced, home) = (Rc::clone(&log), Rc::clone(&announced), home.clone());
+        Rc::new(move || {
+            if !announced.replace(true) {
+                log.info(&format!(
+                    "start pid {} rust {VERSION} home {}",
+                    std::process::id(),
+                    home.display()
+                ));
+            }
+        })
+    };
+    let started = run(
+        env,
+        options,
+        home,
+        create,
+        trace,
+        Rc::clone(&log),
+        errors,
+        Rc::clone(&announce),
+    )
+    .await;
     if started.is_err() {
+        announce();
         log.info("exit 1");
     }
     started
@@ -273,6 +296,7 @@ async fn run(
     trace: Rc<Trace>,
     log: Rc<Log>,
     errors: Rc<Errors>,
+    announce: Rc<dyn Fn()>,
 ) -> Result<Daemon, StartError> {
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
@@ -288,7 +312,9 @@ async fn run(
         cf_ledger::open_existing_ledger(&ledger_file, ledger_options)
     };
     let ledger = opened.map_err(|failed| at_start_of_used(&ledger_file, create, failed))?;
-    // The ledger is there: the home says it has a board from now on.
+    // The ledger is there: the first line of the log may be written now, and the home says
+    // it has a board from now on.
+    announce();
     // A marker that cannot be written stops the start: a home that would not be known to
     // have a board is one that could open empty at the next start.
     if let Err(failed) = crate::broken::mark(&home) {

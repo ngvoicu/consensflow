@@ -292,14 +292,6 @@ async fn any_file_of_ours_makes_a_home_used_and_a_used_home_with_no_ledger_is_re
                 ("a project's trace", |home| {
                     std::fs::write(home.join("p1.jsonl"), "{}\n").unwrap()
                 }),
-                ("app/updates.json", |home| {
-                    std::fs::create_dir_all(home.join("app")).unwrap();
-                    std::fs::write(home.join("app/updates.json"), "{}").unwrap();
-                }),
-                ("app/app.log", |home| {
-                    std::fs::create_dir_all(home.join("app")).unwrap();
-                    std::fs::write(home.join("app/app.log"), "x\n").unwrap();
-                }),
                 ("a wal", |home| {
                     std::fs::write(home.join("consensflow.db-wal"), "").unwrap()
                 }),
@@ -334,6 +326,40 @@ async fn any_file_of_ours_makes_a_home_used_and_a_used_home_with_no_ledger_is_re
                 );
                 assert!(!home.join("away").exists(), "{row}");
             }
+        })
+        .await;
+}
+
+/// What the app and the CLI write in a home before the daemon's first start (read from the
+/// app's `run()`: `app/`, `app/app.log` with the daemon's stderr behind it; its updater:
+/// `app/updates.json`, `app/updates/`; the terminal command is written outside the home;
+/// `cf ui` writes nothing before `start`; the page's `agents.json` comes after a daemon) is no
+/// witness: the home is a first use, a new ledger is made, and the start succeeds.
+#[tokio::test]
+async fn a_home_that_holds_what_the_app_writes_before_the_daemon_is_a_first_use() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("consensflow");
+            std::fs::create_dir_all(home.join("app/updates")).unwrap();
+            std::fs::write(home.join("app/app.log"), "consensflow: the app started\n").unwrap();
+            std::fs::write(home.join("app/app.log.1"), "an older one\n").unwrap();
+            std::fs::write(home.join("app/updates.json"), "{\"channel\":\"stable\"}").unwrap();
+            std::fs::write(home.join("agents.json"), "{}").unwrap();
+            assert!(
+                !crate::broken::home_was_used(&home),
+                "none of them is a witness"
+            );
+            started_over(root.path()).await.expect("a first use starts");
+            assert!(home.join("consensflow.db").exists(), "its ledger was made");
+            assert!(home.join(crate::broken::MARKER).exists());
+            // And from then on the home is used: the next start with no ledger is refused.
+            std::fs::remove_file(home.join("consensflow.db")).unwrap();
+            let refused = started_over(root.path()).await.err();
+            assert!(
+                matches!(refused, Some(StartError::CannotSave(_))),
+                "{refused:?}"
+            );
         })
         .await;
 }
