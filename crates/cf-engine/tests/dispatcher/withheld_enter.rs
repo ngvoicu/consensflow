@@ -751,6 +751,19 @@ fn the_key_that_clears_a_box_waits_while_the_screen_lacks_bytes_the_window_print
         context.pass().unwrap();
     }
     assert_eq!(clears(&context), 0, "no key while the screen is behind");
+    let begun = |context: &Context| {
+        context
+            .recorder
+            .events()
+            .into_iter()
+            .filter(|event| {
+                event["seam"] == "event"
+                    && event["event"]["kind"] == "delivery.begun"
+                    && event["event"]["data"]["message"] == json!(words)
+            })
+            .count()
+    };
+    assert_eq!(begun(&context), 0, "not begun: the look before it held it");
     context.host.set_snapshot(snapshot_of(QUIET));
     context.pass().unwrap();
     assert!(
