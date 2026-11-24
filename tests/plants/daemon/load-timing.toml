@@ -227,7 +227,7 @@ file = "crates/cf-panes/src/pty.rs"
 find = '''        let _active_write = ActiveWrite(active_writes);
         write_gated_in('''
 replace = '''        let _active_write = ActiveWrite(active_writes);
-        let _table = self.lock_panes()?;
+        let _table = self.lock_panes().map_err(Gated::Pane)?;
         write_gated_in('''
 
 [[plant]]

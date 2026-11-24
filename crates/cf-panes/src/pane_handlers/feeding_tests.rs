@@ -649,3 +649,27 @@ fn a_refused_paste_writes_no_clearing_key() {
     assert_eq!(why(refused), Some(Why::BoxChanged));
     assert!(window.writer.written().is_empty(), "no key alone, and no paste");
 }
+
+/// A paste the look's reader read empty over the person's unsent count goes in and clears the
+/// count; one that does not say so is refused for the unsent text; one with a key of theirs since
+/// the look is refused all the same.
+#[test]
+fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
+    let window = Boxed::new();
+    window.type_key("X");
+    let at = window.look();
+    assert!(matches!(window.paste(at, false), Err(ArbiterError::Unsent)));
+    assert_eq!(window.pasted(), 0);
+    window.type_key("\x7f");
+    assert!(
+        matches!(window.paste(at, true), Err(ArbiterError::Unsent)),
+        "a key since the look is no reason"
+    );
+    assert_eq!(window.pasted(), 0);
+    let at = window.look();
+    window.paste(at, true).expect("read empty over the count, at the last key");
+    assert_eq!(window.pasted(), 1);
+    let at = window.look();
+    window.paste(at, false).expect("the count was cleared by that paste");
+    assert_eq!(window.pasted(), 2);
+}

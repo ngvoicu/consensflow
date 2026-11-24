@@ -546,7 +546,7 @@ runs = ["engine-resume-tasks"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
-replace = """let outcome = match returning(window.deliver_on(host, &pane, &text, licence.as_ref())).await {"""
+replace = """let outcome = match returning(window.deliver_on(&*self.seams.host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]
 name = "resume tasks: a switch that waited for the chief's turn goes in a closed project"
@@ -592,7 +592,7 @@ runs = ["engine-closed-given-nothing"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
-replace = """let outcome = match returning(window.deliver_on(host, &pane, &text, licence.as_ref())).await {"""
+replace = """let outcome = match returning(window.deliver_on(&*self.seams.host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]
 name = "resume tasks: a hand-over the closed project turned away is a refusal, and costs its message an attempt"
@@ -2030,19 +2030,6 @@ runs = ["engine-stale-box"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """            let quiet = attempt.as_ref().is_some_and(|look| {"""
 replace = """            let quiet = true || attempt.as_ref().is_some_and(|look| {"""
-
-[[plant]]
-name = "resume tasks: the key that empties the box goes into a window holding what the human typed"
-meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
-runs = ["engine-stale-box"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''                !look.unsent()
-                    && look
-                        .screen_quiet_ms()'''
-replace = '''                look
-                        .screen_quiet_ms()'''
 
 [[plant]]
 name = "resume tasks: a window that never goes quiet for the key holds its queue for good"

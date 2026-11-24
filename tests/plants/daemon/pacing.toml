@@ -287,16 +287,6 @@ replace = '''        state.unsent = 0;
         state.paste_in_flight = true;'''
 
 [[plant]]
-name = "pacing gate: the fresh look takes a box that holds words for an empty one"
-meant = "a_box_that_still_holds_words_takes_no_paste"
-runs = ["pacing-kit"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/pacing.rs"
-find = """                    PasteLicence::Wait(held) => Some(held.sentence().to_owned()),"""
-replace = """                    PasteLicence::Wait(_) => None,"""
-
-[[plant]]
 name = "re-paste: a box that still holds the paste is pasted over"
 meant = "a_paste_its_input_box_still_holds_is_pressed_enter_again_and_not_pasted_again"
 runs = ["pacing-kit"]

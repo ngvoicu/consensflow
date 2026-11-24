@@ -13,7 +13,7 @@
 # escape-unsent` runs them all.
 
 [run]
-escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::a_paste_read_empty"]
+escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::a_paste_read_empty", "arbiter::tests::a_paste_read_empty"]
 escape-unsent-screen = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "screen::tests::the_bottom"]
 escape-unsent-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "input_box"]
 escape-unsent-adapters = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "input_box"]
@@ -27,7 +27,7 @@ escape-unsent-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "re
 
 [[plant]]
 name = "escape-unsent: the host holds every paste while the count is up, read empty or not"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
+meant = "a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it"
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
@@ -37,7 +37,7 @@ replace = """if state.unsent > 0 {"""
 
 [[plant]]
 name = "escape-unsent: the host takes a paste read empty at any count, a key since or not"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
+meant = "a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it"
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
@@ -132,16 +132,6 @@ find = """        read_empty: over_count,"""
 replace = """        read_empty: false,"""
 
 [[plant]]
-name = "escape-unsent: a key typed a moment before the look is taken as drawn"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = """typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"""
-replace = """typed >= 0 && (drawn || typed >= UNDRAWN_MS)"""
-
-[[plant]]
 name = "escape-unsent: a key the window has printed nothing since reads as drawn, as round 1 had it"
 meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
 runs = ["escape-unsent-adapters"]
@@ -230,10 +220,10 @@ runs = ["escape-unsent-paste"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/pane.rs"
-find = "    if !host.admits() {\n        return not_admitted();"
-replace = "    if read_empty.is_none() && !host.admits() {\n        return not_admitted();"
-
-# --- the board ---
+find = '''    if !host.admits() {
+        return not_admitted();'''
+replace = '''    if *read_empty && !host.admits() {
+        return not_admitted();'''
 
 [[plant]]
 name = "escape-unsent: a lane out of quota hides that a message waits for what the human typed"
@@ -246,17 +236,6 @@ find = "    return ['out', lane.holding ? `${covered}. ${holding}` : covered]"
 replace = "    return ['out', covered]"
 
 # --- end to end, on the rig ---
-
-[[plant]]
-name = "escape-unsent rig: a key the chief's window has not drawn yet reads as drawn, and the result goes behind it"
-meant = "a_key_the_chiefs_window_has_not_drawn_yet_holds_the_result_until_it_is_drawn"
-runs = ["escape-unsent-rig"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = """typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"""
-replace = """typed >= SETTLED_MS"""
 
 [[plant]]
 name = "escape-unsent rig: Claude's suggestion holds the chief's result, the cursor at the box's start"

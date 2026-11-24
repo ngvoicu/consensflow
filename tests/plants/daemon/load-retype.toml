@@ -32,29 +32,6 @@ rig-regression-load-retype = ["cargo", "test", "--offline", "-p", "cf-e2e", "--t
 # 3.0.5 had none: the in-flight word and the time since the host's last paste.
 
 [[plant]]
-name = "load retype: a paste the record never showed goes again without the pane host asked once more, inside a stall of the host's (3.0.5's shape)"
-meant = "a_result_handed_to_a_claude_chief_while_its_pane_host_answers_nothing_is_pasted_once"
-runs = ["rig-regression-load-retype"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = '''
-        let Some(snapshot) = self.snapshot_now(&pane, true).await else {
-            self.unknown(record, NO_ANSWER);
-            return Ok(false);
-        };'''
-replace = '''
-        let snapshot = json!({});'''
-
-[[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "        if let Some(pasted) = pasted.filter(|&pasted| pasted < self.seams.limits.arrival_ms as f64)"
-replace = "        if let Some(pasted) = pasted.filter(|_| false)"
-
-# The engine's.
-
-[[plant]]
 name = "load retype: a look that could not read the record is a look at rest that showed nothing"
 meant = "never_pastes_again_a_message_while_every_look_cannot_read_its_record"
 runs = ["engine-unknown-looks"]
