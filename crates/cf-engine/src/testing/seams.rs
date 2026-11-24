@@ -96,31 +96,61 @@ pub struct FakeComputerUse {
     pub codex_set_up: Cell<bool>,
     /// How often each was asked of, permissions first.
     pub asked: Cell<(u32, u32)>,
-    /// How long each ask holds the thread it is made on (a system that waits).
-    pub blocks: Cell<std::time::Duration>,
+    gate: RefCell<Option<super::executor::Gate>>,
 }
 
 impl crate::seams::ComputerUse for FakeComputerUse {
-    fn permissions(&self) -> Option<crate::seams::ScreenPermissions> {
+    fn permissions(
+        &self,
+    ) -> cf_harness::contract::Work<'_, Option<crate::seams::ScreenPermissions>> {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions + 1, claude));
-        std::thread::sleep(self.blocks.get());
-        self.permissions.get()
+        Box::pin(async move {
+            self.held().await;
+            self.permissions.get()
+        })
     }
 
-    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse {
+    fn claude<'a>(
+        &'a self,
+        directory: &'a str,
+    ) -> cf_harness::contract::Work<'a, cf_harness::claude::computer_use::ComputerUse> {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions, claude + 1));
-        std::thread::sleep(self.blocks.get());
-        cf_harness::claude::computer_use::ComputerUse {
-            folder: directory.to_owned(),
-            on: self.on_in.borrow().contains(directory),
-        }
+        Box::pin(async move {
+            self.held().await;
+            cf_harness::claude::computer_use::ComputerUse {
+                folder: directory.to_owned(),
+                on: self.on_in.borrow().contains(directory),
+            }
+        })
     }
 
-    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse {
-        cf_harness::codex::computer_use::ComputerUse {
-            set_up: self.codex_set_up.get(),
+    fn codex(
+        &self,
+    ) -> cf_harness::contract::Work<'_, cf_harness::codex::computer_use::ComputerUse> {
+        Box::pin(async move {
+            self.held().await;
+            cf_harness::codex::computer_use::ComputerUse {
+                set_up: self.codex_set_up.get(),
+            }
+        })
+    }
+}
+
+impl FakeComputerUse {
+    /// Holds each ask of the system until the gate this answers opens, as a system
+    /// that waits does: the ask is pending, and no thread is held.
+    pub fn hold(&self) -> super::executor::Gate {
+        let gate = super::executor::Gate::default();
+        *self.gate.borrow_mut() = Some(gate.clone());
+        gate
+    }
+
+    async fn held(&self) {
+        let gate = self.gate.borrow().clone();
+        if let Some(gate) = gate {
+            gate.wait().await;
         }
     }
 }

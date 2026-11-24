@@ -247,11 +247,13 @@ fn the_note_says_how_to_mend_an_entry_macos_holds_for_another_copy_of_the_app() 
 }
 
 /// While the system is asked of computer use for a launch, and it waits (a privacy query
-/// that is not answered, a configuration file on a slow disk), the engine's thread is not
-/// held: the launch's turn ends at once and the system's answer is waited for off it
-/// (T-2203: the owner's board stood still for 14 minutes while a launch waited).
+/// that is not answered, a configuration file on a slow disk), nothing waits on the engine's
+/// thread: the launch's step is pending, passes run, the board takes what it is given, and
+/// the note is said once the system answers (T-2203: the owner's board stood still for 14
+/// minutes while a launch waited). The red of it, on main, was the stand-in holding the
+/// thread: the first pass took the 1.4 s the two asks held it.
 #[test]
-fn a_launch_asking_the_system_of_computer_use_holds_no_thread() {
+fn a_launch_waiting_on_the_system_of_computer_use_stops_nothing_else() {
     let context = Context::new();
     context
         .computer_use
@@ -259,18 +261,29 @@ fn a_launch_asking_the_system_of_computer_use_holds_no_thread() {
         .borrow_mut()
         .insert(FOLDER.to_owned());
     context.computer_use.permissions.set(granted(false, false));
-    context
-        .computer_use
-        .blocks
-        .set(std::time::Duration::from_millis(700));
+    let system = context.computer_use.hold();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open_body("Write the parser");
-    let began = std::time::Instant::now();
+    // The pass goes on after its wait for the step, which waits on the system.
     context.pass().unwrap();
-    context.pass().unwrap();
-    let held = began.elapsed();
     assert!(
-        held < std::time::Duration::from_millis(300),
-        "the engine's thread was held {held:?} by the asks of the system"
+        context.computer_use.asked.get().0 >= 1,
+        "the system was asked"
+    );
+    // The board takes what it is given, and passes go on, while it waits.
+    tiers.open_body("Write the lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(
+        computer_use_notes(&context, tiers.project.id).is_empty(),
+        "nothing is said before the system answers"
+    );
+    system.open();
+    context.settle();
+    context.pass().unwrap();
+    assert_eq!(
+        computer_use_notes(&context, tiers.project.id).len(),
+        1,
+        "said once it answered"
     );
 }

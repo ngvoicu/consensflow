@@ -1,0 +1,41 @@
+# A launch's asks of the system (a macOS permission query, a read of Claude Code's configuration)
+# never hold the daemon's thread, and the daemon waits for them no longer than a limit (T-2203:
+# the owner's board stood still for 14 minutes while a launch waited). The calls are made on the
+# worker of `MachineComputerUse` (crates/cf-daemon/src/computer_use.rs, `ask`), whose answer is
+# waited for with a timeout.
+
+[run]
+lf-off-thread = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread"]
+
+[[plant]]
+name = 'launch-freeze: the permission query is made on the daemon thread again'
+meant = "a_permission_query_that_waits_leaves_the_thread_going_and_is_answered_when_it_ends"
+runs = ["lf-off-thread"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = """        Box::pin(async move { self.ask(move |_| grants()).await.flatten() })"""
+replace = """        Box::pin(async move { grants() })"""
+
+[[plant]]
+name = 'launch-freeze: Claude Code configuration is read on the daemon thread again'
+meant = "a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going"
+runs = ["lf-off-thread"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = """            match self
+                .ask(move |configuration| configuration.computer_use(&env, &asked))
+                .await
+            {"""
+replace = """            match Some(computer_use::Configuration::default().computer_use(&env, &asked)) {"""
+
+[[plant]]
+name = 'launch-freeze: the wait for the system has no limit of its own'
+meant = "a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on"
+runs = ["lf-off-thread"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/computer_use.rs"
+find = """        self.within = within;"""
+replace = """        let _ = within;"""

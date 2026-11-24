@@ -58,14 +58,20 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         }
     };
     let machine = &page.computer_use.machine;
-    let permissions = machine.permissions().map_or(Value::Null, |granted| {
+    // Each is a wait on the system's own answer: together, so that a system that does not
+    // answer holds the page for the one limit, not three (T-2203).
+    let (permissions, claude, codex) = futures_util::future::join3(
+        machine.permissions(),
+        machine.claude(&directory),
+        machine.codex(),
+    )
+    .await;
+    let permissions = permissions.map_or(Value::Null, |granted| {
         json!({
             "accessibility": granted.accessibility,
             "screenRecording": granted.screen_recording,
         })
     });
-    let claude = machine.claude(&directory);
-    let codex = machine.codex();
     merged(json!({
         "system": system(),
         "permissions": permissions,

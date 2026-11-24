@@ -1199,7 +1199,7 @@ impl Dispatcher {
         // A Claude window where Claude Code's computer use is on, while ConsensFlow lacks
         // a permission it needs: the human is told once (`computer_use`). What fails to be
         // written down is the log's, not the launch's.
-        if let Err(cause) = self.tell_computer_use_once(project, participant) {
+        if let Err(cause) = self.tell_computer_use_once(project, participant).await {
             self.write_down(&cause);
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`

@@ -200,14 +200,20 @@ impl ScreenPermissions {
 /// configuration, never written).
 pub trait ComputerUse {
     /// ConsensFlow's permissions; none on a system where no harness's computer
-    /// use runs (Claude Code has none outside macOS).
-    fn permissions(&self) -> Option<ScreenPermissions>;
+    /// use runs (Claude Code has none outside macOS), or where the system did
+    /// not answer in time. Asked of the system, which can wait for good: a call
+    /// that never holds the engine's thread (T-2203).
+    fn permissions(&self) -> Work<'_, Option<ScreenPermissions>>;
     /// Whether Claude Code's computer use is on for a window opened in
-    /// `directory`, and the folder it is kept under.
-    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse;
+    /// `directory`, and the folder it is kept under: off where its configuration
+    /// could not be read in time.
+    fn claude<'a>(
+        &'a self,
+        directory: &'a str,
+    ) -> Work<'a, cf_harness::claude::computer_use::ComputerUse>;
     /// Whether Codex's computer use is set up on the machine (the ChatGPT app's
     /// plugin, for every folder; its grants are its own app's).
-    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse;
+    fn codex(&self) -> Work<'_, cf_harness::codex::computer_use::ComputerUse>;
 }
 
 /// The adapter for a harness's windows, by the word the ledger names the

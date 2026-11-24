@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
@@ -54,13 +55,39 @@ fn beside_a_ticker<T>(scene: impl std::future::Future<Output = T>) -> (T, Durati
 fn a_permission_query_that_waits_leaves_the_thread_going_and_is_answered_when_it_ends() {
     let machine = MachineComputerUse::granting(
         Env::from_vars([("HOME", "/nonexistent")]),
-        Rc::new(|| {
+        Arc::new(|| {
             std::thread::sleep(Duration::from_millis(1200));
             None
         }),
     );
     let (asked, still) = beside_a_ticker(async move { call::permissions(&machine).await });
     assert_eq!(asked, None);
+    assert!(
+        still < MOST_STILL,
+        "the thread stood still for {still:?} while the system was asked"
+    );
+}
+
+#[test]
+fn a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on() {
+    let (release, held) = mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
+    let machine = MachineComputerUse::granting(
+        Env::from_vars([("HOME", "/nonexistent")]),
+        Arc::new(move || {
+            let _ = held.lock().unwrap().recv();
+            None
+        }),
+    )
+    .waiting(Duration::from_millis(400));
+    let ((asked, took), still) = beside_a_ticker(async move {
+        let began = Instant::now();
+        let asked = call::permissions(&machine).await;
+        (asked, began.elapsed())
+    });
+    drop(release);
+    assert_eq!(asked, None);
+    assert!(took < Duration::from_secs(3), "given up after {took:?}");
     assert!(
         still < MOST_STILL,
         "the thread stood still for {still:?} while the system was asked"
@@ -89,7 +116,7 @@ fn a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going() {
     };
     let machine = MachineComputerUse::granting(
         Env::from_vars([("CLAUDE_CONFIG_DIR", home.path().to_str().unwrap())]),
-        Rc::new(|| None),
+        Arc::new(|| None),
     );
     let (asked, still) = beside_a_ticker(async move { call::claude(&machine, "/work/app").await });
     writer.join().unwrap();
@@ -106,13 +133,13 @@ mod call {
     use cf_engine::seams::ScreenPermissions;
 
     pub(super) async fn permissions(machine: &MachineComputerUse) -> Option<ScreenPermissions> {
-        machine.permissions()
+        machine.permissions().await
     }
 
     pub(super) async fn claude(
         machine: &MachineComputerUse,
         directory: &str,
     ) -> cf_harness::claude::computer_use::ComputerUse {
-        machine.claude(directory)
+        machine.claude(directory).await
     }
 }

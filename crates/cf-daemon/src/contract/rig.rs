@@ -251,7 +251,7 @@ impl Rig {
             // A machine with no computer use: no launch here is told of it.
             computer_use: Rc::new(crate::computer_use::MachineComputerUse::granting(
                 env.clone(),
-                Rc::new(|| None),
+                std::sync::Arc::new(|| None),
             )),
             limits: Limits::default(),
         };

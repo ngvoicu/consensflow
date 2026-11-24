@@ -59,7 +59,7 @@ pub fn note_for(missing: ScreenPermissions) -> String {
 impl Dispatcher {
     /// Tells the human once when a Claude window of `participant` starts where
     /// Claude Code's computer use is on and ConsensFlow lacks a permission it needs.
-    pub(crate) fn tell_computer_use_once(
+    pub(crate) async fn tell_computer_use_once(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
@@ -67,7 +67,7 @@ impl Dispatcher {
         if participant.harness.as_deref() != Some(CLAUDE) {
             return Ok(());
         }
-        let Some(granted) = self.seams.computer_use.permissions() else {
+        let Some(granted) = self.seams.computer_use.permissions().await else {
             return Ok(());
         };
         if granted.all() {
@@ -79,7 +79,7 @@ impl Dispatcher {
             self.computer_use.mended.borrow_mut().insert(project.id);
             return Ok(());
         }
-        if !self.seams.computer_use.claude(&project.directory).on {
+        if !self.seams.computer_use.claude(&project.directory).await.on {
             return Ok(());
         }
         let missing = ScreenPermissions {
