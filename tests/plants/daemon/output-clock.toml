@@ -205,7 +205,7 @@ runs = ["oc-dispatch"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let printing = printing || (boxed.is_none() && !self.screen_current(&pane).await);"
+find = "        let printing = printing || (boxed.is_none() && watched.is_some_and(|w| w.screen_behind));"
 replace = "        let printing = printing;"
 
 [[plant]]

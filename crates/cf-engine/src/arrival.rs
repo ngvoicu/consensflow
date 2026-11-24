@@ -153,6 +153,9 @@ pub(crate) struct Watched {
     /// How long what the window's screen showed had held still, as the pane host said
     /// before it was to go again.
     screen_quiet_ms: Option<i64>,
+    /// Whether that look found the screen lacking bytes the window printed (`outputRead` over
+    /// `outputDrawn`): a box read off it is not read.
+    screen_behind: bool,
 }
 
 impl Dispatcher {
@@ -462,7 +465,7 @@ impl Dispatcher {
         };
         // A box that could not be read because the screen lacks bytes the window printed is
         // no box that shows nothing: look again at the next ask, as for a window that prints.
-        let printing = printing || (boxed.is_none() && !self.screen_current(&pane).await);
+        let printing = printing || (boxed.is_none() && watched.is_some_and(|w| w.screen_behind));
         let on_its_way = record
             .delivery
             .borrow()
@@ -516,6 +519,7 @@ impl Dispatcher {
                     last: now,
                     longest_pass: now - delivering.since,
                     screen_quiet_ms: None,
+                    screen_behind: false,
                 },
                 |watched| Watched {
                     last: now,
@@ -1142,6 +1146,7 @@ impl Dispatcher {
                 .get(SCREEN_QUIET_MS)
                 .and_then(Value::as_f64)
                 .map(|quiet| quiet as i64);
+            watched.screen_behind = !output_is_drawn(&snapshot);
         }
         if js::truthy(snapshot.get("pasteInFlight")) {
             self.unknown(record, "its pane host is writing a paste into it still");
