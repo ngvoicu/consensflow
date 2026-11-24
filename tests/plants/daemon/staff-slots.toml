@@ -9,6 +9,8 @@
 ss-ledger-slots = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "slots"]
 ss-ledger-roles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "roles::"]
 ss-ledger-update = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "update_to_slots"]
+ss-ledger-messages = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "update_keeps_messages"]
+ss-ledger-briefs = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "brief_before_slots"]
 ss-engine-tier = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "tier_fallback::"]
 ss-engine-router = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slot_router::"]
 ss-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
@@ -503,3 +505,64 @@ replace = '''
                         continue;
                     }
 '''
+
+[[plant]]
+name = "staff slots: a role list that is no JSON stops the update"
+meant = "a_role_list_that_is_no_json_opens_and_is_logged_once"
+runs = ["ss-ledger-messages"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+     AND CASE WHEN json_valid(p.roles)
+              THEN json_array_length(p.roles) > 0
+'''
+replace = '''
+     AND CASE WHEN 1
+              THEN json_array_length(p.roles) > 0
+'''
+
+[[plant]]
+name = "staff slots: a move says a brief of before the slots twice"
+meant = "a_reassign_before_the_saved_brief_arrived_gives_the_next_window_the_work_once"
+runs = ["ss-ledger-briefs"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+        !(row.kind == "task" && (row.body == brief || before_slots.as_deref() == Some(&row.body)))
+'''
+replace = '''
+        !(row.kind == "task" && (row.body == brief || before_slots.is_none() && false))
+'''
+
+[[plant]]
+name = "staff slots: an edit misses a brief of before the slots"
+meant = "an_edit_of_the_queued_saved_brief_is_what_the_window_is_given"
+runs = ["ss-ledger-briefs"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        let renewed = [Some(&old), before_slots.as_ref()]
+'''
+replace = '''
+        let renewed = [Some(&old), before_slots.as_ref().filter(|_| false)]
+'''
+
+[[plant]]
+name = "staff slots: the update rewrites a queued Critical brief"
+meant = "every_older_ledger_opens_twice_and_the_update_changes_no_message"
+runs = ["ss-ledger-messages"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+DROP TABLE settled;
+'''
+replace = '''
+DROP TABLE settled;
+UPDATE message SET body = replace(body, ' It changes no project file: return analysis, evidence and recommendations to the chief.', '')
+ WHERE kind = 'task' AND state = 'queued' AND body LIKE 'Critical work:%';
+'''
+
