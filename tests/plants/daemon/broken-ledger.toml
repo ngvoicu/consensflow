@@ -119,7 +119,7 @@ runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
-find = '''        bridge.event(
+find = '''        bridge.final_event(
             EVENT,
             json!({ "words": words(&file), "pid": std::process::id() }),
         );'''
@@ -201,10 +201,10 @@ runs = ["p23a-daemon"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
 find = '''        bridge.fence();
-        bridge.ask_no_more();
-        // The app hears'''
-replace = '''        bridge.ask_no_more();
-        // The app hears'''
+        // From here no ordinary event or request goes: the daemon's last word is the only one.
+        bridge.ask_no_more();'''
+replace = '''        // From here no ordinary event or request goes: the daemon's last word is the only one.
+        bridge.ask_no_more();'''
 
 [[plant]]
 name = "broken ledger: the fence admits what it should refuse"
@@ -356,8 +356,8 @@ runs = ["p23a-viewer"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/mod.rs"
-find = '''        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),'''
-replace = '''        Ok(Ok(_)) if false && halt.broke() => Err(crate::halt::BROKEN_WORDS.to_owned()),'''
+find = '''        Ok(Ok(_)) if halt.broke() => Err(crate::halt::BROKEN_REFUSED.to_owned()),'''
+replace = '''        Ok(Ok(_)) if false && halt.broke() => Err(crate::halt::BROKEN_REFUSED.to_owned()),'''
 
 [[plant]]
 name = "broken ledger: an event is appended to the trace after the break"
@@ -492,10 +492,8 @@ runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
-find = '''    if home.join(MARKER).exists() {
-        return true;
-    }'''
-replace = ''''''
+find = '''    if WRITTEN.iter().any(|name| named(name)) || named(LEDGER) {'''
+replace = '''    if named(LEDGER) {'''
 
 [[plant]]
 name = "broken ledger: the marker is never written"

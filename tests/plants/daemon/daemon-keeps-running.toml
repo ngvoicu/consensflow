@@ -56,7 +56,7 @@ runs = ["bridge-queue"]
 [[plant.edit]]
 file = "crates/cf-bridge/src/requests.rs"
 find = '''
-            thread::spawn(move || {
+            apart(move || {
                 bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
             });'''
 replace = '''

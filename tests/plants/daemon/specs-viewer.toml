@@ -532,10 +532,14 @@ runs = ["viewer-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer.rs"
-find = '''            copies::place(&home, &found, kept_for)
+find = '''            copies::place_checked(&home, &found, kept_for, &*during, &|| {
+                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))
+            })
 '''
-replace = '''            copies::place(&home, &found, kept_for)
-                .map(|_| directory.join(&name).join(&read))
+replace = '''            copies::place_checked(&home, &found, kept_for, &*during, &|| {
+                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))
+            })
+            .map(|_| directory.join(&name).join(&read))
 '''
 
 [[plant]]
@@ -568,7 +572,7 @@ runs = ["viewer-folder"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer/copies.rs"
-find = "        match root.new_child(&name) {"
+find = "        match root.new_child(&format!(\"{name}.part\")) {"
 replace = "        match root.new_child(if name.is_empty() { &name } else { \"copy\" }) {"
 
 [[plant.edit]]
