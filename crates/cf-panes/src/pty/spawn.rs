@@ -24,6 +24,7 @@ use super::{Pane, PaneEnvironment, PaneError, PaneKey, PaneTable, StreamedPane};
 use crate::arbiter::OutputCount;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
+use crate::journal::Journal;
 use crate::screen::PaneScreen;
 
 /// Rejects names that `std::process::Command` cannot represent. Keeping this
@@ -263,6 +264,7 @@ impl PaneTable {
                 #[cfg(target_os = "macos")]
                 clock,
                 output_flow: None,
+                journal: None,
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
                 last_activity,
@@ -326,6 +328,10 @@ impl PaneTable {
 
         let reader = self.open_at_with_drop_env(key.clone(), cwd, argv, environment, size, owns)?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
+        let journal = self
+            .journals
+            .load(std::sync::atomic::Ordering::Acquire)
+            .then(|| Arc::new(Journal::new((size.rows, size.cols))));
         #[cfg(target_os = "macos")]
         let tree;
         let (pid, screen, ended, terminal, counts) = {
@@ -334,6 +340,7 @@ impl PaneTable {
                 .get_mut(&key)
                 .ok_or_else(|| PaneError::NotFound(key.clone()))?;
             pane.output_flow = Some(Arc::clone(&flow));
+            pane.journal.clone_from(&journal);
             #[cfg(target_os = "macos")]
             {
                 tree = pane.process_tree.clone();
@@ -380,6 +387,7 @@ impl PaneTable {
             output,
             screen,
             counts,
+            journal,
             ended,
             owed: self.exits.owe(),
             #[cfg(target_os = "macos")]

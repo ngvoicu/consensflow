@@ -98,12 +98,12 @@ fn a_window_is_not_quiet_while_bytes_it_printed_are_not_in_its_screen() {
     let printed = arbiter.register(&key).expect("register");
     let screen = PaneScreen::new(24, 80);
     printed.counts().took(5);
-    screen.feed_noting(b"ab", &printed);
+    screen.feed_noting(b"ab", &printed, |_| {});
     clock.advance(Duration::from_secs(60));
     let snapshot = arbiter.snapshot(&key).unwrap();
     assert_eq!(snapshot.output_quiet_ms, Some(0), "3 of 5 bytes not drawn");
     assert_eq!((snapshot.output_read, snapshot.output_drawn), (5, 2));
-    screen.feed_noting(b"cde", &printed);
+    screen.feed_noting(b"cde", &printed, |_| {});
     clock.advance(Duration::from_millis(40));
     let snapshot = arbiter.snapshot(&key).unwrap();
     assert_eq!(
@@ -129,7 +129,7 @@ fn the_enter_wait_holds_at_its_cap_while_bytes_are_pending_and_then_sends_one_en
     let arbiter = InputArbiter::with_clock(wait, clock.clone());
     let key = PaneKey::new("cap", 1);
     let printed = arbiter.register(&key).expect("register");
-    PaneScreen::new(24, 80).feed_noting(b"echo", &printed);
+    PaneScreen::new(24, 80).feed_noting(b"echo", &printed, |_| {});
     printed.counts().took(8);
     let writer = Recording::default();
     let before = clock.now();
@@ -165,7 +165,7 @@ fn the_wait_ends_when_the_screen_has_caught_up_and_is_quiet() {
     let printed = arbiter.register(&key).expect("register");
     let screen = PaneScreen::new(24, 80);
     printed.counts().took(1);
-    screen.feed_noting(b"e", &printed);
+    screen.feed_noting(b"e", &printed, |_| {});
     let paste_at = clock.now();
     clock.advance(Duration::from_millis(1));
     wait.wait_released_on(&*clock, &printed, paste_at);
@@ -182,7 +182,7 @@ fn a_counts_only_snapshot_does_not_wait_for_the_screen_lock() {
     let (held, release) = hold_at(&screen, FeedStage::Locked);
     let feeding = {
         let (screen, printed) = (Arc::clone(&screen), Arc::clone(&printed));
-        thread::spawn(move || screen.feed_noting(b"12345678", &printed))
+        thread::spawn(move || screen.feed_noting(b"12345678", &printed, |_| {}))
     };
     held.recv_timeout(Duration::from_secs(5))
         .expect("the feed is held in the lock");
@@ -221,7 +221,7 @@ fn a_snapshot_with_lines_says_drawn_as_the_screen_it_read() {
     let (held, release) = hold_at(&screen, FeedStage::Locked);
     let feeding = {
         let (screen, printed) = (Arc::clone(&screen), Arc::clone(&printed));
-        thread::spawn(move || screen.feed_noting(b"abc", &printed))
+        thread::spawn(move || screen.feed_noting(b"abc", &printed, |_| {}))
     };
     held.recv_timeout(Duration::from_secs(5)).expect("held");
     let (told, snapshots) = channel();
@@ -256,7 +256,7 @@ fn a_snapshot_with_lines_says_drawn_as_the_screen_it_read() {
 fn a_reader_between_the_lines_and_the_counts_keeps_the_next_read_out_of_both() {
     let (arbiter, key, printed, screen) = window();
     printed.counts().took(1);
-    screen.feed_noting(b"a", &printed);
+    screen.feed_noting(b"a", &printed, |_| {});
     let (paused, resume) = hold_at(&screen, FeedStage::Snapshot);
     let reading = {
         let (arbiter, key, screen) = (Arc::clone(&arbiter), key.clone(), Arc::clone(&screen));
@@ -270,7 +270,7 @@ fn a_reader_between_the_lines_and_the_counts_keeps_the_next_read_out_of_both() {
     let feeding = {
         let (screen, printed) = (Arc::clone(&screen), Arc::clone(&printed));
         thread::spawn(move || {
-            screen.feed_noting(b"b", &printed);
+            screen.feed_noting(b"b", &printed, |_| {});
             done.send(()).unwrap();
         })
     };
@@ -436,7 +436,7 @@ impl Boxed {
     /// The window prints `text`: read, and drawn.
     fn print(&self, text: &str) -> bool {
         self.printed.counts().took(text.len());
-        self.screen.feed_noting(text.as_bytes(), &self.printed)
+        self.screen.feed_noting(text.as_bytes(), &self.printed, |_| {})
     }
 
     fn type_key(&self, key: &str) {
@@ -516,7 +516,7 @@ fn a_look_is_refused_for_the_echo_held_before_the_screen_and_for_the_echo_drawn(
     let at = window.look();
     window.printed.counts().took(1);
     assert_eq!(why(window.paste(at, true)), Some(Why::OutputPending), "pending");
-    assert!(window.screen.feed_noting(b"X", &window.printed));
+    assert!(window.screen.feed_noting(b"X", &window.printed, |_| {}));
     assert_eq!(why(window.paste(at, true)), Some(Why::BoxChanged), "drawn");
     assert_eq!(window.writer.written(), [b"X".to_vec()]);
 }
@@ -605,7 +605,7 @@ fn an_enter_of_a_look_waits_while_output_is_pending_and_is_refused_at_the_grace(
         let entering = scope.spawn(|| window.arbiter.enter(&window.writer, &window.key, at));
         thread::sleep(Duration::from_millis(60));
         assert!(window.writer.written().is_empty(), "pending: no Enter");
-        assert!(!window.screen.feed_noting(b"\x1b[0m", &window.printed));
+        assert!(!window.screen.feed_noting(b"\x1b[0m", &window.printed, |_| {}));
         entering.join().unwrap().expect("drawn: the Enter goes");
     });
     assert_eq!(window.writer.written(), [b"\r".to_vec()]);

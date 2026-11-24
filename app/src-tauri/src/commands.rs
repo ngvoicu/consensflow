@@ -457,9 +457,13 @@ pub async fn subscribe_output<R: Runtime>(
             )
         };
         if let Err(error) = inputs.with_current_page(&page_id, || {
-            output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
-            // Once the new page listens: everything sent before it went to the old.
-            panes.ack_all();
+            // Once the new page listens: everything sent before it went to the old. The pane
+            // table swaps the sink and settles the room in one step, and tells the journals of
+            // windows that keep them where the new page's history ends.
+            panes.attach_page(
+                &output,
+                Arc::new(move |message| on_output.send(message).is_ok()),
+            );
         }) {
             return json!({"ok":false,"error":error});
         }
