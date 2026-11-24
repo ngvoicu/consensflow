@@ -822,3 +822,61 @@ fn a_look_the_host_did_not_give_clears_no_box_and_pastes_nothing() {
     context.pass().unwrap();
     assert!(clears(&context) >= 1, "the key goes once there is a look");
 }
+
+/// N17 (T-2198 finding 2): a paste that went into the box its harness read empty used up the
+/// mark of the stale paste that was left there (the human erased it). The mark must not outlive
+/// the replacement: a later message into the same window, whose box holds words the host's count
+/// has not seen (a draft the arrow keys put back), is held for them, and is given no key that
+/// would clear them.
+#[test]
+fn a_paste_into_a_box_read_empty_retires_the_mark_of_the_stale_paste_it_replaced() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    note(&context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    let seam = "adapter:claude-code";
+    enter_again_with(&context, "p1-zeus-amber-pine", || {
+        context.pause_task(project, 1);
+    });
+    context.host.set_snapshot(json!({
+        "screenQuietMs": 5_000,
+        "bottom": ["────────────────────", "❯", "────────────────────"],
+    }));
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.arrive = true);
+    context.resume_task(project, 1, "Carry on again");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let resumed = tiers.task(1).messages.last().cloned().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(resumed.id).state, "delivered");
+    // The window's history put words back into the box, which the host's count of keys
+    // does not know of.
+    context.host.set_snapshot(json!({
+        "screenQuietMs": 6_000,
+        "typed": 4,
+        "typedQuietMs": 6_000,
+        "unsent": false,
+        "bottom": ["────────────────────", "❯ my unsent draft", "────────────────────"],
+    }));
+    let question = context.ask(project, "zeus-amber-pine", "chief", 1, "Format?");
+    let answer = context.answer(project, question.id, "JSON");
+    context.adapter.with("zeus-amber-pine", |agent| agent.settled = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key clears words that are not ours");
+    assert_eq!(times_handed(&context, seam, answer.id), 0, "the answer waits for the draft");
+}

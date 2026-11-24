@@ -887,21 +887,16 @@ impl Dispatcher {
         if let Some(cause) = admitting.report_failed.borrow_mut().take() {
             return Err(cause);
         }
-        // The key that empties a box of a paste whose Enter was withheld went with this one's
-        // write, unless the host wrote nothing: what the box held is not there to be pasted over.
+        // The paste whose Enter was withheld is not in the box any more where this one went in:
+        // its key went with this one's write, or the box was read empty (the human erased it), and
+        // the replacement went in behind that look. Its mark goes with it, unless the host wrote
+        // nothing: what the box held is not there to be pasted over, and the mark must not
+        // outlive it to clear a later draft that is not ours.
         let wrote = !matches!(
             outcome,
             Admission::Refused { .. } | Admission::Busy { .. } | Admission::LookAgain { .. }
         );
-        if wrote
-            && matches!(
-                &licence,
-                Some(PasteLicence::Go {
-                    clear_first: Some(_),
-                    ..
-                })
-            )
-        {
+        if wrote && matches!(&licence, Some(PasteLicence::Go { .. })) {
             let mut part = record.delivery.borrow_mut();
             if part
                 .uncleared
