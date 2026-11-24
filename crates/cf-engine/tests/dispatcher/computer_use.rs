@@ -245,3 +245,32 @@ fn the_note_says_how_to_mend_an_entry_macos_holds_for_another_copy_of_the_app() 
         assert!(!mend.contains(name), "the sentence names {name}");
     }
 }
+
+/// While the system is asked of computer use for a launch, and it waits (a privacy query
+/// that is not answered, a configuration file on a slow disk), the engine's thread is not
+/// held: the launch's turn ends at once and the system's answer is waited for off it
+/// (T-2203: the owner's board stood still for 14 minutes while a launch waited).
+#[test]
+fn a_launch_asking_the_system_of_computer_use_holds_no_thread() {
+    let context = Context::new();
+    context
+        .computer_use
+        .on_in
+        .borrow_mut()
+        .insert(FOLDER.to_owned());
+    context.computer_use.permissions.set(granted(false, false));
+    context
+        .computer_use
+        .blocks
+        .set(std::time::Duration::from_millis(700));
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open_body("Write the parser");
+    let began = std::time::Instant::now();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let held = began.elapsed();
+    assert!(
+        held < std::time::Duration::from_millis(300),
+        "the engine's thread was held {held:?} by the asks of the system"
+    );
+}

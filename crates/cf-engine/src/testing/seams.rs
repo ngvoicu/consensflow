@@ -96,18 +96,22 @@ pub struct FakeComputerUse {
     pub codex_set_up: Cell<bool>,
     /// How often each was asked of, permissions first.
     pub asked: Cell<(u32, u32)>,
+    /// How long each ask holds the thread it is made on (a system that waits).
+    pub blocks: Cell<std::time::Duration>,
 }
 
 impl crate::seams::ComputerUse for FakeComputerUse {
     fn permissions(&self) -> Option<crate::seams::ScreenPermissions> {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions + 1, claude));
+        std::thread::sleep(self.blocks.get());
         self.permissions.get()
     }
 
     fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions, claude + 1));
+        std::thread::sleep(self.blocks.get());
         cf_harness::claude::computer_use::ComputerUse {
             folder: directory.to_owned(),
             on: self.on_in.borrow().contains(directory),
