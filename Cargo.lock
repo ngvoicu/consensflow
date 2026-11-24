@@ -594,6 +594,7 @@ dependencies = [
  "base64 0.22.1",
  "cf-base",
  "cf-bridge",
+ "cf-harness",
  "cf-panes",
  "cf-process",
  "cf-proto",
