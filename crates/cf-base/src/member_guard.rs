@@ -80,7 +80,10 @@ impl Guarded {
 /// The program `program` is started as: its file name without a folder or `.exe`, in lower
 /// case, when it is one of the [`NAMES`].
 pub fn named(program: &OsStr) -> Option<Guarded> {
-    let file = Path::new(program).file_name()?.to_string_lossy().to_lowercase();
+    let file = Path::new(program)
+        .file_name()?
+        .to_string_lossy()
+        .to_lowercase();
     let stem = file.strip_suffix(".exe").unwrap_or(&file);
     NAMES
         .iter()
@@ -193,7 +196,9 @@ mod tests {
                 "{call:?}"
             );
         }
-        let real = PathBuf::from(r"D:\Win").join("System32").join("taskkill.exe");
+        let real = PathBuf::from(r"D:\Win")
+            .join("System32")
+            .join("taskkill.exe");
         assert_eq!(
             judge(Guarded::Taskkill, &args(&["/PID", "123", "/F", "/T"]), &env),
             Verdict::Run(real, args(&["/PID", "123", "/F", "/T"]))

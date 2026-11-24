@@ -68,7 +68,10 @@ fn a_file_that_is_no_link_of_ours_is_kept_and_the_failure_named() {
     let (file, _) = install(&home, &cf).unwrap_err();
     assert_eq!(file, folder(&home).join("pkill"));
     assert_eq!(std::fs::read(&file).unwrap(), b"someone's");
-    assert!(folder(&home).join("killall").exists(), "the others are made");
+    assert!(
+        folder(&home).join("killall").exists(),
+        "the others are made"
+    );
     std::fs::remove_dir_all(&home).unwrap();
 }
 

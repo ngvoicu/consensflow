@@ -36,7 +36,8 @@ fn found_first(frame: &Value, name: &str) -> Option<PathBuf> {
 
 #[cfg(unix)]
 #[test]
-fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and_they_refuse() -> Outcome {
+fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and_they_refuse(
+) -> Outcome {
     let rig = Rig::start(config().codex(FAKE_CODEX).devin(FAKE_DEVIN))?;
     rig.stand_ins(&json!({
         "schemaVersion": 1,

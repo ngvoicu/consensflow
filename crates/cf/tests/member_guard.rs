@@ -5,7 +5,7 @@
 //! the PATH; no test here starts the real command by its name.
 
 // The tests start programs themselves.
-#![allow(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_methods, clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,19 +40,28 @@ impl Window {
         }
         let cf = Path::new(env!("CARGO_BIN_EXE_cf"));
         let system = if cfg!(windows) {
-            std::env::var("SystemRoot").map_or_else(|_| r"C:\Windows\System32".into(), |root| format!(r"{root}\System32"))
+            std::env::var("SystemRoot").map_or_else(
+                |_| r"C:\Windows\System32".into(),
+                |root| format!(r"{root}\System32"),
+            )
         } else {
             "/usr/bin:/bin".into()
         };
         let delimiter = if cfg!(windows) { ';' } else { ':' };
-        let given = Env::from_vars([(
-            "PATH",
-            format!("{}{delimiter}{system}", recorder.display()),
-        )]);
-        let windows = WindowEnv::new(&given, "http://127.0.0.1:1", &cf.parent().unwrap().to_string_lossy());
+        let given =
+            Env::from_vars([("PATH", format!("{}{delimiter}{system}", recorder.display()))]);
+        let windows = WindowEnv::new(
+            &given,
+            "http://127.0.0.1:1",
+            &cf.parent().unwrap().to_string_lossy(),
+        );
         let guarded = guard(windows, &home, cf, &Log::new(&home));
         let path = guarded.path().to_owned();
-        Self { home, recorder, path }
+        Self {
+            home,
+            recorder,
+            path,
+        }
     }
 
     /// Whether a recorder ran.
@@ -76,7 +85,10 @@ impl Window {
             .env("CONSENSFLOW_TOOL_FOLDERS", "")
             .output()
             .unwrap();
-        (ran.status.code(), String::from_utf8_lossy(&ran.stderr).into_owned())
+        (
+            ran.status.code(),
+            String::from_utf8_lossy(&ran.stderr).into_owned(),
+        )
     }
 }
 
@@ -104,7 +116,10 @@ fn record(folder: &Path, command: &str) {
     let file = folder.join(command);
     std::fs::write(
         &file,
-        format!("#!/bin/sh\n: > \"{}/{command}.reached\"\n", folder.display()),
+        format!(
+            "#!/bin/sh\n: > \"{}/{command}.reached\"\n",
+            folder.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -123,7 +138,9 @@ fn pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reach
         let (code, said) = window.run(line);
         assert_eq!(code, Some(1), "{line}: {said}");
         assert!(
-            said.contains(&format!("ConsensFlow: {command} {OWNERS_WORDS} by its number")),
+            said.contains(&format!(
+                "ConsensFlow: {command} {OWNERS_WORDS} by its number"
+            )),
             "{line}: {said}"
         );
         assert!(!window.reached(command), "{line} reached the real command");
@@ -134,11 +151,19 @@ fn pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reach
 #[test]
 fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() {
     let window = Window::new("win", &["taskkill", "tskill"]);
-    for line in ["taskkill /IM x.exe", "taskkill /F /im x.exe", "taskkill /FI \"IMAGENAME eq x.exe\"", "tskill notepad"] {
+    for line in [
+        "taskkill /IM x.exe",
+        "taskkill /F /im x.exe",
+        "taskkill /FI \"IMAGENAME eq x.exe\"",
+        "tskill notepad",
+    ] {
         let (code, said) = window.run(line);
         assert_eq!(code, Some(1), "{line}: {said}");
         assert!(said.contains(OWNERS_WORDS), "{line}: {said}");
-        assert!(!window.reached("taskkill") && !window.reached("tskill"), "{line}");
+        assert!(
+            !window.reached("taskkill") && !window.reached("tskill"),
+            "{line}"
+        );
     }
     // By number it is the real program, with the arguments as they were: a SystemRoot of the
     // test's holds a harmless program as the real taskkill: the test's own executable.
