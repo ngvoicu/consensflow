@@ -5,12 +5,14 @@
 # waited for with a timeout.
 
 [run]
-lf-off-thread = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread"]
+lf-query = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_waits"]
+lf-config = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_read_of_claude_codes"]
+lf-never = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_never_ends"]
 
 [[plant]]
 name = 'launch-freeze: the permission query is made on the daemon thread again'
 meant = "a_permission_query_that_waits_leaves_the_thread_going_and_is_answered_when_it_ends"
-runs = ["lf-off-thread"]
+runs = ["lf-query"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
@@ -20,7 +22,7 @@ replace = """        Box::pin(async move { grants() })"""
 [[plant]]
 name = 'launch-freeze: Claude Code configuration is read on the daemon thread again'
 meant = "a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going"
-runs = ["lf-off-thread"]
+runs = ["lf-config"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
@@ -33,7 +35,7 @@ replace = """            match Some(computer_use::Configuration::default().compu
 [[plant]]
 name = 'launch-freeze: the wait for the system has no limit of its own'
 meant = "a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on"
-runs = ["lf-off-thread"]
+runs = ["lf-never"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
