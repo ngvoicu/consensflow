@@ -25,7 +25,8 @@ use crate::headless::ENTER;
 use crate::input_queue::{wait_for_input_blocking, InputQueue};
 use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pty::{PaneEnvironment, PaneKey, PaneTable};
-use crate::screen::{FeedStage, PaneScreen};
+use crate::arbiter::At;
+use crate::screen::{FeedStage, PaneScreen, Seen};
 
 const BOUND: Duration = Duration::from_secs(20);
 
@@ -63,6 +64,10 @@ if kind == "enter":
     (directory / "took-input").touch()
     gate("echo"); os.write(1, b"echo")
     gate("paint"); os.write(1, b"Z")
+elif kind == "recovery":
+    initial = b""
+    (directory / "took-input").touch()
+    gate("repaint"); os.write(1, b"\x1b[0m")
 else:
     initial = take_until(b"X")
     (directory / "took-input").touch()
@@ -264,7 +269,7 @@ fn paste_in_a_thread(
     let (told, result) = mpsc::channel();
     thread::spawn(move || {
         let sent = inputs
-            .paste(key, b"hello".to_vec(), None, None)
+            .paste(key, b"hello".to_vec(), None, None, None)
             .and_then(wait_for_input_blocking);
         let _ = told.send(sent);
     });
@@ -382,9 +387,9 @@ fn the_enter_looks_at_the_counts_again_with_the_writer_held() {
     window.end();
 }
 
-/// T-2139 3: the reader's `readEmpty` of the cursor prefix alone (the box empty, 6 bytes read)
-/// carries the shown-feed count it saw. The `X` came after in a read of its own, pending and then
-/// drawn: the paste with that answer is refused both times, and the child took only the `X`.
+/// T-2139 3: the reader's answer of the cursor prefix alone (the box empty, 6 bytes read) carries
+/// the look's `seen`. The `X` came after in a read of its own, pending and then drawn: the paste
+/// with that look is refused both times, and the child took only the `X`.
 #[test]
 fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
     let clock = Manual::new();
@@ -401,11 +406,10 @@ fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
     clock.advance(ms(1_200));
     let before = window.counts_only()["outputRead"].as_u64().unwrap();
     window.gate("prefix");
-    window.until(|snapshot| {
+    let looked = window.until(|snapshot| {
         snapshot["outputDrawn"].as_u64() == Some(before + 6) && is_current(snapshot)
     });
-    let answered_at = window.counts_only()["outputShown"].as_u64().unwrap();
-    let typed = window.counts_only()["typed"].as_u64().unwrap();
+    let at = look_of(&looked);
     // The answer was read here; the `X` comes in a read of its own, held before the screen.
     let (held, release) = hold_the_next_read(&window, FeedStage::Read);
     window.gate("paint");
@@ -416,17 +420,21 @@ fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
             .paste(
                 window.key.clone(),
                 b"hello".to_vec(),
-                Some(typed),
-                Some(answered_at),
+                Some(at),
+                Some(at.typed),
+                None,
             )
             .and_then(wait_for_input_blocking)
     };
     let pending = paste_over(&window).expect_err("X is pending: the answer is stale");
     assert_eq!(pending.paste_answer()["admitted"], false, "{pending}");
+    assert_eq!(pending.paste_answer()["error"], "look-again");
+    assert_eq!(pending.paste_answer()["cause"], "output-pending");
     release.send(()).unwrap();
     window.until(|snapshot| is_current(snapshot) && snapshot["bottom"].to_string().contains('X'));
     let drawn = paste_over(&window).expect_err("X is drawn: the answer is still stale");
     assert_eq!(drawn.paste_answer()["admitted"], false, "{drawn}");
+    assert_eq!(drawn.paste_answer()["cause"], "box-changed");
     wait_for_input_blocking(
         window
             .inputs
@@ -441,6 +449,41 @@ fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
         "no paste went over the key"
     );
     window.end();
+}
+
+/// T-2160 3: the recovery Enter of a look. A byte the pty gave (a repaint) is pending when the key
+/// is taken: the child gets no Enter while it is pending, and one once it is drawn; never one at
+/// the grace.
+#[test]
+fn the_enter_of_a_look_is_not_written_while_a_byte_is_pending_and_is_after_it_is_drawn() {
+    let clock = Manual::new();
+    let window = Window::new("recovery", InputArbiter::with_clock(ENTER, clock.clone()));
+    let at = look_of(&window.until(is_current));
+    let (held, release) = hold_the_next_read(&window, FeedStage::Read);
+    window.gate("repaint");
+    held.recv_timeout(BOUND).expect("the feed holds the repaint");
+    let (inputs, key) = (Arc::clone(&window.inputs), window.key.clone());
+    let entering = thread::spawn(move || {
+        inputs
+            .enter(key, at)
+            .and_then(wait_for_input_blocking)
+    });
+    thread::sleep(ms(150));
+    assert!(window.bytes().is_none(), "the child has no Enter while a byte is pending");
+    release.send(()).unwrap();
+    entering.join().unwrap().expect("drawn: the Enter goes");
+    window.wait_for(&window.directory.join("bytes"));
+    assert_eq!(window.bytes().unwrap(), b"\r");
+    window.end();
+}
+
+/// The look a `pane.snapshot` that asked for the lines is.
+fn look_of(snapshot: &Value) -> At {
+    At {
+        seen: Seen::parse(snapshot["seen"].as_str().expect("a snapshot with lines has a seen"))
+            .expect("sixteen hex digits"),
+        typed: snapshot["typed"].as_u64().unwrap(),
+    }
 }
 
 /// T-2132 3: the child echoes the human's key in two reads, the cursor move and then the `X`.
@@ -527,7 +570,7 @@ fn a_panic_in_the_feed_ends_the_pane_and_admits_no_input() {
     // written, the pane's own record gone with its generation.
     let refused = window
         .inputs
-        .paste(window.key.clone(), b"again".to_vec(), Some(1), None)
+        .paste(window.key.clone(), b"again".to_vec(), None, Some(1), None)
         .and_then(wait_for_input_blocking);
     let error = refused.expect_err("no input is admitted against the broken screen");
     assert_eq!(error.paste_answer()["admitted"], false, "{error}");

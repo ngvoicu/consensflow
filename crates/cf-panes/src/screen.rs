@@ -21,10 +21,14 @@ mod parser;
 #[cfg(test)]
 mod tests;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
 
 use grid::Grid;
 use parser::Parser;
+
+use cf_proto::panes::BOTTOM_LINES;
 
 use crate::arbiter::OutputClock;
 
@@ -34,6 +38,56 @@ pub struct Drawn {
     pub lines: Vec<String>,
     /// The cursor, where it is on one of `lines`.
     pub cursor: Option<Cursor>,
+}
+
+impl Drawn {
+    /// The last `max` lines of these, with the cursor where it is among them (none where it
+    /// is on a line that is cut).
+    pub fn cut(mut self, max: usize) -> Self {
+        let first = self.lines.len().saturating_sub(max);
+        self.lines.drain(..first);
+        self.cursor = self.cursor.and_then(|cursor| {
+            cursor.line.checked_sub(first).map(|line| Cursor { line, ..cursor })
+        });
+        self
+    }
+}
+
+/// Names what a reader of the input box is given of the screen: a digest of the lines and the
+/// cursor of the last [`BOTTOM_LINES`] lines, as `pane.snapshot` answers them. A harness's
+/// reader uses nothing else of the screen, so two looks with one name read the same box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Seen(u64);
+
+impl Seen {
+    /// The name of `drawn`: its lines, then the cursor (line, column, shown, plain after it) or
+    /// that there is none.
+    pub fn of(drawn: &Drawn) -> Self {
+        let mut hasher = DefaultHasher::new();
+        drawn.lines.len().hash(&mut hasher);
+        for line in &drawn.lines {
+            line.hash(&mut hasher);
+        }
+        match drawn.cursor {
+            Some(cursor) => {
+                1u8.hash(&mut hasher);
+                (cursor.line, cursor.col, cursor.shown, cursor.plain_after).hash(&mut hasher);
+            }
+            None => 0u8.hash(&mut hasher),
+        }
+        Self(hasher.finish())
+    }
+
+    /// Sixteen hex digits: a JSON number loses bits over 2^53.
+    pub fn hex(self) -> String {
+        format!("{:016x}", self.0)
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        (text.len() == 16 && text.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| u64::from_str_radix(text, 16).ok().map(Self))
+            .flatten()
+    }
 }
 
 /// Where the cursor is in [`Drawn`]'s lines: the line, by its place among them,
@@ -127,6 +181,11 @@ impl Screen {
                 plain_after,
             });
         Drawn { lines, cursor }
+    }
+
+    /// What a reader of the input box is given of the screen now ([`Seen`]).
+    pub fn seen(&self) -> Seen {
+        Seen::of(&self.bottom(BOTTOM_LINES))
     }
 }
 
@@ -224,6 +283,13 @@ impl PaneScreen {
         #[cfg(test)]
         self.hook.at(FeedStage::Snapshot);
         (drawn, clocks())
+    }
+
+    /// Runs `under` with the screen's lock held, given what the screen shows of the input
+    /// box at that moment ([`Seen`]).
+    pub(crate) fn with_seen(&self, under: &mut dyn FnMut(Seen)) {
+        let screen = self.locked();
+        under(screen.seen());
     }
 
     /// The pty has another size now ([`Screen::resize`]).

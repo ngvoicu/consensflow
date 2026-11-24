@@ -12,7 +12,7 @@ use futures_channel::oneshot;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use serde_json::{json, Value};
 
-use crate::arbiter::{ArbiterError, InputArbiter};
+use crate::arbiter::{ArbiterError, At, InputArbiter, Paste};
 use crate::pty::{PaneKey, PaneTable};
 use crate::validation::{validate_page_input, INVALID_BODY};
 
@@ -46,9 +46,12 @@ pub enum InputWork {
     Reply(Vec<u8>),
     Paste {
         body: Vec<u8>,
+        at: Option<At>,
         read_empty: Option<u64>,
-        shown_at: Option<u64>,
+        clear_first: Option<Vec<u8>>,
     },
+    /// An Enter of a delivery that is not a paste's first ([`InputArbiter::enter`]).
+    Enter(At),
     Claim,
 }
 
@@ -57,6 +60,7 @@ impl InputWork {
         match self {
             Self::Typed(bytes) | Self::Write(bytes) | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
+            Self::Enter(_) => 1,
             Self::Claim => 0,
         }
     }
@@ -141,6 +145,7 @@ impl From<ArbiterError> for InputError {
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => INPUT_FAILED,
             ArbiterError::Unsent => "unsent-text",
+            ArbiterError::LookAgain(why) => return Self::refused("look-again", why.cause().to_string()),
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
         };
@@ -253,7 +258,7 @@ impl InputQueue {
             | InputWork::Write(bytes)
             | InputWork::Reply(bytes)
             | InputWork::Paste { body: bytes, .. } => validate_page_input(bytes)?,
-            InputWork::Claim => {}
+            InputWork::Claim | InputWork::Enter(_) => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
             return Err("pane-input-ticket-capacity".to_string());
@@ -500,17 +505,28 @@ impl InputQueue {
         &self,
         key: PaneKey,
         body: Vec<u8>,
+        at: Option<At>,
         read_empty: Option<u64>,
-        shown_at: Option<u64>,
+        clear_first: Option<Vec<u8>>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(
             key,
             InputWork::Paste {
                 body,
+                at,
                 read_empty,
-                shown_at,
+                clear_first,
             },
         )
+    }
+
+    /// An Enter of a delivery, on the pane's worker, in order with its keys and pastes.
+    pub(crate) fn enter(
+        &self,
+        key: PaneKey,
+        at: At,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit(key, InputWork::Enter(at))
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
@@ -675,9 +691,20 @@ fn input_worker(
             }
             InputWork::Paste {
                 body,
+                at,
                 read_empty,
-                shown_at,
-            } => arbiter.write_paste(&panes, &key, &body, read_empty, shown_at),
+                clear_first,
+            } => arbiter.write_paste(
+                &panes,
+                &key,
+                Paste {
+                    body: &body,
+                    at,
+                    read_empty,
+                    clear_first: clear_first.as_deref(),
+                },
+            ),
+            InputWork::Enter(at) => arbiter.enter(&*panes, &key, at),
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);

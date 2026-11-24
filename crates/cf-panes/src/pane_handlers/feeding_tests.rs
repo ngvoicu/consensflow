@@ -10,9 +10,11 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::snapshot_of;
-use crate::arbiter::{ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, OutputCount};
+use crate::arbiter::{
+    ArbiterError, At, Clock, EnterTiming, InputArbiter, OutputClock, OutputCount, Paste, Why,
+};
 use crate::pty::{PaneError, PaneInputWriter, PaneKey};
-use crate::screen::{FeedStage, PaneScreen};
+use crate::screen::{FeedStage, PaneScreen, Seen};
 
 /// A clock that moves only when the test moves it.
 pub(super) struct Manual {
@@ -132,7 +134,7 @@ fn the_enter_wait_holds_at_its_cap_while_bytes_are_pending_and_then_sends_one_en
     let writer = Recording::default();
     let before = clock.now();
     arbiter
-        .write_paste_via(&writer, &key, b"body", None)
+        .write_paste_plain(&writer, &key, b"body", None)
         .expect("the paste is answered as admitted, not as uncertain");
     assert!(
         clock.now() - before >= Duration::from_millis(5_000),
@@ -303,7 +305,7 @@ fn a_pane_whose_feed_broke_admits_no_paste_and_no_claim() {
     let (arbiter, key, printed, _screen) = window();
     printed.counts().break_feed();
     let writer = Recording::default();
-    let answer = arbiter.write_paste_via(&writer, &key, b"body", None);
+    let answer = arbiter.write_paste_plain(&writer, &key, b"body", None);
     assert!(
         matches!(answer, Err(ArbiterError::InputFailed)),
         "{answer:?}"
@@ -368,46 +370,270 @@ fn a_snapshot_takes_both_counts_from_one_sampling() {
     );
 }
 
-/// T-2150 1: an answer is refused only for output that changed the screen, or that is not yet
-/// drawn. A window that repaints the same at rest (Muse Code after a stopped command prints
-/// every 50 ms: T-1083) leaves the answer good; the echo of the key, once drawn, or pending,
-/// does not.
-#[test]
-fn an_answer_is_refused_for_output_that_changed_the_screen_and_not_for_a_repaint_at_rest() {
-    let clock = Manual::new();
-    let arbiter = InputArbiter::with_clock(EnterTiming::fixed(0), clock.clone());
-    let key = PaneKey::new("rest", 1);
-    let printed = arbiter.register(&key).expect("register");
-    let screen = PaneScreen::new(24, 80);
-    let feed = |bytes: &[u8]| {
-        printed.counts().took(bytes.len());
-        screen.feed_noting(bytes, &printed)
-    };
-    assert!(feed(b"> "));
-    let writer = Recording::default();
-    arbiter.write_typed_via(&writer, &key, b"X").unwrap();
-    let answer = arbiter.snapshot(&key).unwrap();
-    let (typed, at) = (answer.typed, answer.output_shown);
-    for _ in 0..5 {
-        assert!(!feed(b"\x1b[0m"), "a colour reset changes nothing shown");
+/// A window that records what it is written, behind a screen: what the host checks a look
+/// against.
+struct Seeing {
+    written: Mutex<Vec<Vec<u8>>>,
+    screen: Arc<PaneScreen>,
+}
+
+impl Seeing {
+    fn over(screen: &Arc<PaneScreen>) -> Self {
+        Self {
+            written: Mutex::default(),
+            screen: Arc::clone(screen),
+        }
     }
-    arbiter
-        .write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at))
-        .expect("a repaint at rest does not refuse the answer");
-    // Typed again, answered, and then the echo comes: pending, then drawn.
-    arbiter.write_typed_via(&writer, &key, b"Y").unwrap();
-    let answer = arbiter.snapshot(&key).unwrap();
-    let (typed, at) = (answer.typed, answer.output_shown);
-    printed.counts().took(1);
-    let refused = arbiter.write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at));
-    assert!(
-        matches!(refused, Err(ArbiterError::Unsent)),
-        "pending: {refused:?}"
+
+    fn written(&self) -> Vec<Vec<u8>> {
+        self.written.lock().unwrap().clone()
+    }
+}
+
+impl PaneInputWriter for Seeing {
+    fn write(&self, _pane: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
+        self.written.lock().unwrap().push(bytes.to_vec());
+        Ok(())
+    }
+
+    fn with_seen(&self, _key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
+        self.screen.with_seen(&mut |seen| under(Some(seen)));
+    }
+}
+
+/// An empty Claude-shaped box with the cursor in it, as the window draws it.
+const BOX: &str = "────────\r\n❯ \r\n────────\x1b[2;3H";
+
+struct Boxed {
+    clock: Arc<Manual>,
+    arbiter: InputArbiter,
+    key: PaneKey,
+    printed: Arc<OutputClock>,
+    screen: Arc<PaneScreen>,
+    writer: Seeing,
+}
+
+impl Boxed {
+    fn new() -> Self {
+        let clock = Manual::new();
+        let arbiter = InputArbiter::with_clock(EnterTiming::fixed(0), clock.clone());
+        let key = PaneKey::new("boxed", 1);
+        let printed = arbiter.register(&key).expect("register");
+        let screen = Arc::new(PaneScreen::new(24, 80));
+        let writer = Seeing::over(&screen);
+        let window = Self {
+            clock,
+            arbiter,
+            key,
+            printed,
+            screen,
+            writer,
+        };
+        window.print(BOX);
+        window
+    }
+
+    /// The window prints `text`: read, and drawn.
+    fn print(&self, text: &str) -> bool {
+        self.printed.counts().took(text.len());
+        self.screen.feed_noting(text.as_bytes(), &self.printed)
+    }
+
+    fn type_key(&self, key: &str) {
+        self.arbiter
+            .write_typed_via(&self.writer, &self.key, key.as_bytes())
+            .unwrap();
+    }
+
+    /// The look now: what a reader of the box is given, and the count of the person's keys.
+    fn look(&self) -> At {
+        let mut seen = None;
+        self.writer.with_seen(&self.key, &mut |now| seen = now);
+        At {
+            seen: seen.unwrap(),
+            typed: self.arbiter.snapshot(&self.key).unwrap().typed,
+        }
+    }
+
+    fn paste(&self, at: At, read_empty: bool) -> Result<(), ArbiterError> {
+        self.paste_clearing(at, read_empty, None)
+    }
+
+    fn paste_clearing(
+        &self,
+        at: At,
+        read_empty: bool,
+        clear_first: Option<&[u8]>,
+    ) -> Result<(), ArbiterError> {
+        self.arbiter.write_paste_via(
+            &self.writer,
+            &self.key,
+            Paste {
+                body: b"body",
+                at: Some(at),
+                read_empty: read_empty.then_some(at.typed),
+                clear_first,
+            },
+        )
+    }
+
+    fn pasted(&self) -> usize {
+        self.writer
+            .written()
+            .iter()
+            .filter(|bytes| bytes.ends_with(b"\x1b[201~"))
+            .count()
+    }
+}
+
+fn why(refused: Result<(), ArbiterError>) -> Option<Why> {
+    match refused {
+        Err(ArbiterError::LookAgain(why)) => Some(why),
+        _ => None,
+    }
+}
+
+/// T-2160 1: the person typed `X`; the reader, seeing a faint `X` beyond the cursor, read the
+/// box empty; the window's echo moved only the cursor past it. The cursor is in `seen`: refused,
+/// and the window got the key and nothing more.
+#[test]
+fn a_cursor_only_echo_since_the_look_refuses_the_paste() {
+    let window = Boxed::new();
+    window.type_key("X");
+    let at = window.look();
+    assert!(!window.print("\x1b[2;4H"), "the grid's digest does not hold the cursor");
+    let refused = window.paste(at, true);
+    assert_eq!(why(refused), Some(Why::BoxChanged));
+    assert_eq!(window.writer.written(), [b"X".to_vec()]);
+}
+
+/// T-2160 1: a feed held after the pty gave its bytes, and the same drawn: pending, then the
+/// box changed. The digest and the count of pending bytes are one check, under the screen's lock.
+#[test]
+fn a_look_is_refused_for_the_echo_held_before_the_screen_and_for_the_echo_drawn() {
+    let window = Boxed::new();
+    window.type_key("X");
+    let at = window.look();
+    window.printed.counts().took(1);
+    assert_eq!(why(window.paste(at, true)), Some(Why::OutputPending), "pending");
+    assert!(window.screen.feed_noting(b"X", &window.printed));
+    assert_eq!(why(window.paste(at, true)), Some(Why::BoxChanged), "drawn");
+    assert_eq!(window.writer.written(), [b"X".to_vec()]);
+}
+
+/// T-2150 1: a window that repaints at rest (5 colour resets, the cursor put where it is) leaves
+/// the look good.
+#[test]
+fn a_repaint_at_rest_since_the_look_leaves_it_good() {
+    let window = Boxed::new();
+    window.type_key("X");
+    let at = window.look();
+    for _ in 0..5 {
+        assert!(!window.print("\x1b[0m\x1b[2;3H"));
+    }
+    window.paste(at, true).expect("a repaint changes no line and no cursor");
+    assert_eq!(window.pasted(), 1);
+}
+
+/// T-2160 1: a person's key since the look, typed and erased again, is refused: the count moved.
+#[test]
+fn a_key_typed_and_erased_since_the_look_refuses_the_paste() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.type_key("X");
+    window.type_key("\x7f");
+    assert!(matches!(window.paste(at, false), Err(ArbiterError::Unsent)));
+    assert_eq!(window.pasted(), 0);
+}
+
+/// T-2160 1: a scroll, a wrap and a resize that change a line the reader would read refuse the
+/// paste; a resize that changes none does not.
+#[test]
+fn a_wrap_a_scroll_and_a_resize_that_change_a_line_refuse_the_paste() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.screen.resize(24, 80);
+    window.paste(at, false).expect("a resize that moves no line");
+    let at = window.look();
+    window.print(&"w".repeat(120));
+    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a wrap");
+    let at = window.look();
+    window.screen.resize(24, 40);
+    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a resize that joins other rows");
+    let at = window.look();
+    window.print(&"\r\nline".repeat(40));
+    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a scroll");
+}
+
+/// A key that empties a stale paste is written with the body, in one write; a box that changed
+/// writes neither.
+#[test]
+fn the_clearing_key_goes_with_the_paste_and_never_alone() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.paste_clearing(at, false, Some(b"\x15")).unwrap();
+    assert_eq!(
+        window.writer.written(),
+        [b"\x15\x1b[200~body\x1b[201~".to_vec(), b"\r".to_vec()]
     );
-    assert!(screen.feed_noting(b"Y", &printed));
-    let refused = arbiter.write_paste_shown_at_via(&writer, &key, b"body", Some(typed), Some(at));
-    assert!(
-        matches!(refused, Err(ArbiterError::Unsent)),
-        "drawn: {refused:?}"
-    );
+    let at = window.look();
+    window.print("\x1b[2;4H");
+    window.paste_clearing(at, false, Some(b"\x15")).unwrap_err();
+    assert_eq!(window.writer.written().len(), 2, "nothing written when the box changed");
+}
+
+/// A paste with no look (a daemon older than `seen`) is refused for the person's unsent text
+/// alone.
+#[test]
+fn a_paste_with_no_look_is_refused_for_unsent_text_alone() {
+    let window = Boxed::new();
+    window.printed.counts().took(4);
+    window.arbiter.write_paste_plain(&window.writer, &window.key, b"a", None).unwrap();
+    window.type_key("X");
+    let refused = window.arbiter.write_paste_plain(&window.writer, &window.key, b"b", None);
+    assert!(matches!(refused, Err(ArbiterError::Unsent)));
+}
+
+/// T-2160 3: the Enter of a look never goes while output is pending. It waits for the screen to
+/// have what the pty gave and goes then; at the grace it is refused, never written.
+#[test]
+fn an_enter_of_a_look_waits_while_output_is_pending_and_is_refused_at_the_grace() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.printed.counts().took(4);
+    thread::scope(|scope| {
+        let entering = scope.spawn(|| window.arbiter.enter(&window.writer, &window.key, at));
+        thread::sleep(Duration::from_millis(60));
+        assert!(window.writer.written().is_empty(), "pending: no Enter");
+        assert!(!window.screen.feed_noting(b"\x1b[0m", &window.printed));
+        entering.join().unwrap().expect("drawn: the Enter goes");
+    });
+    assert_eq!(window.writer.written(), [b"\r".to_vec()]);
+
+    window.printed.counts().took(1);
+    thread::scope(|scope| {
+        let entering = scope.spawn(|| window.arbiter.enter(&window.writer, &window.key, at));
+        thread::sleep(Duration::from_millis(60));
+        window.clock.advance(Duration::from_millis(3_000));
+        let refused = entering.join().unwrap();
+        assert_eq!(why(refused), Some(Why::OutputPending), "the grace: refused");
+    });
+    assert_eq!(window.writer.written().len(), 1, "never written while pending");
+}
+
+/// An Enter after the person typed, or over a box that changed, writes nothing.
+#[test]
+fn an_enter_of_a_look_is_refused_for_a_key_since_and_for_a_box_that_changed() {
+    let window = Boxed::new();
+    let at = window.look();
+    window.type_key("X");
+    let refused = window.arbiter.enter(&window.writer, &window.key, at);
+    assert!(matches!(refused, Err(ArbiterError::Unsent)), "{refused:?}");
+    window.type_key("\x7f");
+    let written = window.writer.written().len();
+    let at = window.look();
+    window.print("\x1b[2;4H");
+    let refused = window.arbiter.enter(&window.writer, &window.key, at);
+    assert_eq!(why(refused), Some(Why::BoxChanged));
+    assert_eq!(window.writer.written().len(), written, "nothing written");
 }

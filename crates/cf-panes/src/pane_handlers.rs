@@ -21,7 +21,8 @@ use crate::pty::{
     validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneOutput, PaneTable,
     StreamedPane,
 };
-use crate::screen::{PaneScreen, Screen};
+use crate::arbiter::At;
+use crate::screen::{PaneScreen, Screen, Seen};
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
@@ -101,10 +102,26 @@ struct PasteRequest {
     /// window's adapter read its input box empty on the screen.
     #[serde(default, rename = "readEmpty")]
     read_empty: Option<u64>,
-    /// How many feeds had changed the window's screen (`pane.snapshot`'s `outputShown`) when it
-    /// did: a paste goes in over the count only while none has since and none is pending.
-    #[serde(default, rename = "shownAt")]
-    shown_at: Option<u64>,
+    /// The look that licensed the paste: its `seen` (`pane.snapshot`'s), and the count of the
+    /// human's keys then (`typed`). A request without it is a daemon's of an older version,
+    /// refused for the human's unsent text alone.
+    #[serde(default)]
+    at: Option<String>,
+    #[serde(default)]
+    typed: Option<u64>,
+    /// The key that empties the box, written with the body, where the look read it holding a
+    /// stale paste.
+    #[serde(default, rename = "clearFirst")]
+    clear_first: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnterRequest {
+    id: String,
+    generation: u64,
+    at: String,
+    typed: u64,
 }
 
 #[derive(Deserialize)]
@@ -257,11 +274,30 @@ fn register(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty, shown_at)| {
-            let pending = paste_queue.paste(key, body.into_bytes(), read_empty, shown_at)?;
+        let pasted = paste_request(body).and_then(|request| {
+            let pending = paste_queue.paste(
+                request.key,
+                request.body.into_bytes(),
+                request.at,
+                request.read_empty,
+                request.clear_first.map(String::into_bytes),
+            )?;
             wait_for_input_blocking(pending)
         });
         Ok(match pasted {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => error.paste_answer(),
+        })
+    });
+
+    // An Enter of a delivery that is not a paste's first, licensed by a look.
+    let enter_queue = Arc::clone(&inputs);
+    builder.on("pane.enter", move |_bridge, body| {
+        let entered = enter_request(body).and_then(|(key, at)| {
+            let pending = enter_queue.enter(key, at)?;
+            wait_for_input_blocking(pending)
+        });
+        Ok(match entered {
             Ok(()) => json!({"ok":true}),
             Err(error) => error.paste_answer(),
         })
@@ -410,7 +446,12 @@ fn snapshot_of(
     let lines = |screen: &Screen| {
         (
             tail.map(|lines| screen.tail(lines.min(TAIL_LINES))),
-            bottom.map(|lines| screen.bottom(lines.min(BOTTOM_LINES))),
+            // One reading of the screen's last lines: the answer is cut from it, and `seen`
+            // names it whole, whatever the request asked ([`Seen`]).
+            bottom.map(|lines| {
+                let whole = screen.bottom(BOTTOM_LINES);
+                (Seen::of(&whole), whole.cut(lines.min(BOTTOM_LINES)))
+            }),
         )
     };
     let counts = || arbiter.snapshot(key).map_err(|error| error.to_string());
@@ -424,7 +465,8 @@ fn snapshot_of(
     if let Some(tail) = tail {
         answer["tail"] = json!(tail);
     }
-    if let Some(drawn) = drawn {
+    if let Some((seen, drawn)) = drawn {
+        answer["seen"] = json!(seen.hex());
         answer["bottom"] = json!(drawn.lines);
         answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
             json!({
@@ -513,7 +555,6 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "screenQuietMs":snapshot.screen_quiet_ms,
         "outputRead":snapshot.output_read,
         "outputDrawn":snapshot.output_drawn,
-        "outputShown":snapshot.output_shown,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -752,11 +793,55 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>, Option<u64>), InputError> {
-    let refused = |cause| InputError::refused(INVALID_BODY, cause);
-    let request: PasteRequest = parse_body(body).map_err(refused)?;
-    let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body, request.read_empty, request.shown_at))
+/// A `pane.write_paste` request, read.
+struct PasteWanted {
+    key: PaneKey,
+    body: String,
+    at: Option<At>,
+    read_empty: Option<u64>,
+    clear_first: Option<String>,
+}
+
+fn paste_request(body: Value) -> Result<PasteWanted, InputError> {
+    let refused = |cause: &str| InputError::refused(INVALID_BODY, cause.to_string());
+    let request: PasteRequest = parse_body(body).map_err(|cause| refused(&cause))?;
+    let key = pane_key(&request.id, request.generation).map_err(|cause| refused(&cause))?;
+    let at = match (request.at, request.typed) {
+        (None, None) => None,
+        (Some(seen), Some(typed)) => Some(At {
+            seen: Seen::parse(&seen).ok_or_else(|| refused("at is not a seen"))?,
+            typed,
+        }),
+        _ => return Err(refused("at and typed come together")),
+    };
+    // The look's count of keys, at which its reader read the box empty over their unsent text:
+    // with a look it must be the look's own.
+    if let (Some(at), Some(read_empty)) = (&at, request.read_empty) {
+        if at.typed != read_empty {
+            return Err(refused("readEmpty is not the look's typed"));
+        }
+    }
+    Ok(PasteWanted {
+        key,
+        body: request.body,
+        at,
+        read_empty: request.read_empty,
+        clear_first: request.clear_first,
+    })
+}
+
+fn enter_request(body: Value) -> Result<(PaneKey, At), InputError> {
+    let refused = |cause: &str| InputError::refused(INVALID_BODY, cause.to_string());
+    let request: EnterRequest = parse_body(body).map_err(|cause| refused(&cause))?;
+    let key = pane_key(&request.id, request.generation).map_err(|cause| refused(&cause))?;
+    let seen = Seen::parse(&request.at).ok_or_else(|| refused("at is not a seen"))?;
+    Ok((
+        key,
+        At {
+            seen,
+            typed: request.typed,
+        },
+    ))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -1510,7 +1595,6 @@ mod tests {
             output_quiet_ms: None,
             output_read: 0,
             output_drawn: 0,
-            output_shown: 0,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![

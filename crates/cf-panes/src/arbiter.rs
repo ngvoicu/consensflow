@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use cf_proto::panes::SilentPaste;
 
-use crate::pty::{write_paste_if_via, PaneError, PaneInputWriter, PaneKey, PaneTable};
+use crate::pty::{bracketed, Gate, Gated, PaneError, PaneInputWriter, PaneKey, PaneTable};
+use crate::screen::Seen;
 
 mod keys;
 mod paste;
@@ -24,7 +26,7 @@ use state::{
     PaneStateMap, Written, HUMAN_WRITES,
 };
 pub(crate) use timing::Clock;
-use timing::{millis_since, WallClock};
+use timing::{millis_since, WallClock, PENDING_GRACE_MS};
 pub use timing::{EnterTiming, OutputClock, OutputCount};
 #[cfg(test)]
 pub(crate) use timing::{AFTER_LOADS, BETWEEN_LOADS};
@@ -54,6 +56,43 @@ impl fmt::Display for SanitizeError {
 
 impl std::error::Error for SanitizeError {}
 
+/// The look a paste, or an Enter, was licensed by: what the window's screen showed of its input
+/// box (`pane.snapshot`'s `seen`) and the count of the human's keys then (`typed`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct At {
+    pub seen: Seen,
+    pub typed: u64,
+}
+
+/// A delivery's paste and what licensed it.
+#[derive(Debug)]
+pub struct Paste<'a> {
+    pub body: &'a [u8],
+    /// None: a daemon older than `seen` (refused for the human's unsent text alone).
+    pub at: Option<At>,
+    /// The count of the human's keys at which the look's reader read the box empty over their
+    /// unsent text.
+    pub read_empty: Option<u64>,
+    /// The key that empties the box, written with the body.
+    pub clear_first: Option<&'a [u8]>,
+}
+
+/// Why a look is no longer true.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Why {
+    BoxChanged,
+    OutputPending,
+}
+
+impl Why {
+    pub fn cause(self) -> &'static str {
+        match self {
+            Self::BoxChanged => "box-changed",
+            Self::OutputPending => "output-pending",
+        }
+    }
+}
+
 /// Why the arbiter did not take a pane's input. Every one but `Pane` is a
 /// refusal before anything was written.
 #[derive(Debug)]
@@ -63,6 +102,9 @@ pub enum ArbiterError {
     InputFailed,
     /// The human has typed in the window and not sent it yet.
     Unsent,
+    /// The look that licensed this is no longer true of the window: nothing was written, and
+    /// the caller looks again.
+    LookAgain(Why),
     InvalidBody(SanitizeError),
     /// The write itself failed, once begun: some of the input may have
     /// reached the pane.
@@ -77,6 +119,7 @@ impl fmt::Display for ArbiterError {
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
             Self::Unsent => write!(formatter, "the human has unsent text in the window"),
+            Self::LookAgain(why) => write!(formatter, "{}", why.cause()),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
             Self::LockPoisoned => write!(formatter, "input arbiter lock is poisoned"),
@@ -119,8 +162,6 @@ pub struct ArbiterSnapshot {
     /// is the greater (`OutputCount`).
     pub output_read: u64,
     pub output_drawn: u64,
-    /// How many feeds changed what the screen shows.
-    pub output_shown: u64,
     /// How long what the pane's screen shows has not changed, once it has shown
     /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
     /// at work. A harness can print without end and change nothing shown (T-1083).
@@ -444,22 +485,16 @@ impl InputArbiter {
             .map_err(|error| fail_input(&state, pane, error, false))
     }
 
-    /// A paste and its Enter, held while the human's keys left text unsent,
-    /// unless `read_empty`: the window's adapter read its input box empty when
-    /// the pane had taken that many writes of the human's keys, and none came
-    /// since; and, where it says `shown_at`, when the pane's screen had changed that many times
-    /// by output, and has not since nor lacks bytes (the box it read may lack what the window
-    /// printed after it). Output that changes nothing shown (a window that repaints at rest)
-    /// is no change (T-1083).
+    /// A paste and its Enter ([`Paste`]): admitted by the gate of [`InputArbiter::paste_gate`]
+    /// with the pane's writer, the screen's lock and the pane's input state held, and its
+    /// Enter by the first Enter's gate.
     pub(crate) fn write_paste(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
-        body: &[u8],
-        read_empty: Option<u64>,
-        shown_at: Option<u64>,
+        paste: Paste<'_>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_shown_at_via(table, pane, body, read_empty, shown_at)
+        self.write_paste_via(table, pane, paste)
     }
 
     /// Admit a native-channel send (a harness's own server, inbox or socket)
@@ -472,90 +507,208 @@ impl InputArbiter {
         validate_admission(&state, pane)
     }
 
-    /// A paste and its Enter. While it goes in, the pane's snapshot says so,
-    /// and a newer generation of the pane cannot take its place.
-    #[cfg(test)]
+    /// A paste and its Enter. While it goes in, the pane's snapshot says so, and a newer
+    /// generation of the pane cannot take its place.
     pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
-        body: &[u8],
-        read_empty: Option<u64>,
+        paste: Paste<'_>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_shown_at_via(writer, pane, body, read_empty, None)
+        let body = sanitize(paste.body)?;
+        let state = self.pane_state(pane)?;
+        let mut bytes = paste.clear_first.map(<[u8]>::to_vec).unwrap_or_default();
+        bytes.extend_from_slice(&bracketed(&body));
+        // What the gate takes from the pane's state when it admits.
+        let mut admitted = None;
+        let first = writer.write_gated(pane, &bytes, &mut || {
+            let mut gate = Gate::Wait;
+            writer.with_seen(pane, &mut |seen| {
+                gate = self.paste_gate(&state, pane, &paste, seen, &body, &mut admitted);
+            });
+            gate
+        });
+        let Some((output, enter)) = admitted else {
+            return Err(match first {
+                Err(Gated::Refused(refused)) => refused,
+                Err(Gated::Pane(error)) => fail_input(&state, pane, error, false),
+                Ok(()) => ArbiterError::Stale,
+            });
+        };
+        if let Err(error) = first {
+            self.paste_ended(&state, false);
+            return Err(match error {
+                Gated::Refused(refused) => refused,
+                Gated::Pane(error) => fail_input(&state, pane, error, false),
+            });
+        }
+        // The Enter's wait begins once the paste itself is written. It goes once the window's
+        // output is drawn, and is looked at again with the pane's writer held, where it is
+        // written: a read that came while it waited for the writer holds it back too, up to the
+        // same cap.
+        let at = self.clock.now();
+        enter.wait(self.clock.as_ref(), &output, at);
+        let written = writer.write_gated(pane, b"\r", &mut || {
+            let overdue = millis_since(self.clock.now(), at) >= enter.pending_cap_ms();
+            if overdue || !output.counts().pending() {
+                Gate::Go
+            } else {
+                Gate::Wait
+            }
+        });
+        // A paste is answered as it went: a lock poisoned meanwhile fails the
+        // pane's next admission, never what this paste already wrote.
+        self.paste_ended(&state, true);
+        written.map_err(|error| match error {
+            Gated::Refused(refused) => refused,
+            Gated::Pane(error) => fail_input(&state, pane, error, true),
+        })
     }
 
-    /// [`InputArbiter::write_paste_via`] for an answer that says the bytes of output it was
-    /// read at.
-    pub(crate) fn write_paste_shown_at_via<W: PaneInputWriter + ?Sized>(
+    /// A paste with no look, only what the human's keys had left unsent: how a daemon older than
+    /// `seen` sends one (a test of the host's older rule and of what is not the look's).
+    #[cfg(test)]
+    pub(crate) fn write_paste_plain<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
-        shown_at: Option<u64>,
     ) -> Result<(), ArbiterError> {
-        let body = sanitize(body)?;
-        let state = self.pane_state(pane)?;
-        let (output, enter) = {
-            let mut state = lock_state(&state)?;
-            validate_admission(&state, pane)?;
-            if state.unsent > 0 {
-                if read_empty != Some(state.typed) {
-                    return Err(ArbiterError::Unsent);
-                }
-                // An answer read before output that changed the screen since, or while output
-                // is not yet drawn, is of a box that may lack the echo of the key: refused. Output
-                // that changes nothing shown (a window that repaints the same at rest) is no reason.
-                if shown_at.is_some_and(|at| {
-                    let counts = state.output.counts();
-                    counts.shown() != at || counts.pending()
-                }) {
-                    return Err(ArbiterError::Unsent);
-                }
-                state.unsent = 0;
-            }
-            state.paste_in_flight = true;
-            // The host's wait, or the longer of it and how the window's harness reads a paste of
-            // this length where it declared that.
-            (
-                Arc::clone(&state.output),
-                self.enter.for_delivery(state.silent_paste, &body),
-            )
-        };
-        // The Enter's wait begins once the paste itself is written. It goes once the window's
-        // output is drawn, and is looked at again with the pane's writer held, where it is
-        // written: a read that came while it waited for the writer holds it back too, up to the
-        // same cap.
-        let mut pasted = false;
-        let started = std::cell::Cell::new(None);
-        let written = write_paste_if_via(
+        self.write_paste_via(
             writer,
             pane,
-            &body,
-            || {
-                pasted = true;
-                let at = self.clock.now();
-                started.set(Some(at));
-                enter.wait(self.clock.as_ref(), &output, at);
+            Paste {
+                body,
+                at: None,
+                read_empty,
+                clear_first: None,
             },
-            &mut || {
-                let overdue = started
-                    .get()
-                    .is_none_or(|at| millis_since(self.clock.now(), at) >= enter.pending_cap_ms());
-                overdue || !output.counts().pending()
-            },
-        );
-        // A paste is answered as it went: a lock poisoned meanwhile fails the
-        // pane's next admission, never what this paste already wrote.
-        if let Ok(mut state) = lock_state(&state) {
+        )
+    }
+
+    fn paste_ended(&self, state: &PaneState, pasted: bool) {
+        if let Ok(mut state) = lock_state(state) {
             state.paste_in_flight = false;
             if pasted {
                 state.pasted = Some(self.clock.now());
             }
         }
-        written.map_err(|error| fail_input(&state, pane, error, pasted))?;
-        Ok(())
+    }
+
+    /// Whether a paste goes in, asked with the pane's writer, the screen's lock (`seen` is of
+    /// the screen under it) and, taken here, the pane's input state held: all of this holds at
+    /// that one moment or nothing is written. With the look it was licensed by (`at`): the
+    /// pane current and its input working; nothing pending (output read and not yet drawn);
+    /// what the screen shows of the box the look's; no key of the human's since; their unsent
+    /// text none, or the look's reader read the box empty over it. Without a look (a daemon that
+    /// makes none): refused for the human's unsent text alone, as it was.
+    fn paste_gate(
+        &self,
+        state: &PaneState,
+        pane: &PaneKey,
+        paste: &Paste<'_>,
+        seen: Option<Seen>,
+        body: &[u8],
+        admitted: &mut Option<(Arc<OutputClock>, EnterTiming)>,
+    ) -> Gate {
+        let mut state = match lock_state(state) {
+            Ok(state) => state,
+            Err(error) => return Gate::Refuse(error),
+        };
+        if let Err(error) = validate_admission(&state, pane) {
+            return Gate::Refuse(error);
+        }
+        match &paste.at {
+            Some(at) => {
+                if state.output.counts().pending() {
+                    return Gate::Refuse(ArbiterError::LookAgain(Why::OutputPending));
+                }
+                if seen != Some(at.seen) {
+                    return Gate::Refuse(ArbiterError::LookAgain(Why::BoxChanged));
+                }
+                if state.typed != at.typed {
+                    return Gate::Refuse(ArbiterError::Unsent);
+                }
+                if state.unsent > 0 && paste.read_empty != Some(at.typed) {
+                    return Gate::Refuse(ArbiterError::Unsent);
+                }
+            }
+            None => {
+                if state.unsent > 0 && paste.read_empty != Some(state.typed) {
+                    return Gate::Refuse(ArbiterError::Unsent);
+                }
+            }
+        }
+        state.unsent = 0;
+        state.paste_in_flight = true;
+        // The host's wait, or the longer of it and how the window's harness reads a paste of
+        // this length where it declared that.
+        *admitted = Some((
+            Arc::clone(&state.output),
+            self.enter.for_delivery(state.silent_paste, body),
+        ));
+        Gate::Go
+    }
+
+    /// An Enter of a delivery that is not a paste's first: the one pressed again for a paste the
+    /// window has not sent, the one for a turn that never began, Devin's for its `/bypass`. It
+    /// goes only on the look that licensed it (`at`), checked again where it is written, with the
+    /// pane's writer, the screen's lock and the pane's input state held: the pane current; no
+    /// unsent text of the human's and no key of theirs since; the box the look's; nothing pending.
+    /// Output pending makes it wait, for [`PENDING_GRACE_MS`] at the most and then it is
+    /// refused: it is never written while output is pending.
+    pub(crate) fn enter<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        at: At,
+    ) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        let started = self.clock.now();
+        writer
+            .write_gated(pane, b"\r", &mut || {
+                let mut gate = Gate::Wait;
+                writer.with_seen(pane, &mut |seen| {
+                    gate = self.enter_gate(&state, pane, &at, seen, started);
+                });
+                gate
+            })
+            .map_err(|error| match error {
+                Gated::Refused(refused) => refused,
+                Gated::Pane(error) => fail_input(&state, pane, error, false),
+            })
+    }
+
+    fn enter_gate(
+        &self,
+        state: &PaneState,
+        pane: &PaneKey,
+        at: &At,
+        seen: Option<Seen>,
+        started: Instant,
+    ) -> Gate {
+        let state = match lock_state(state) {
+            Ok(state) => state,
+            Err(error) => return Gate::Refuse(error),
+        };
+        if let Err(error) = validate_admission(&state, pane) {
+            return Gate::Refuse(error);
+        }
+        if state.unsent > 0 || state.typed != at.typed {
+            return Gate::Refuse(ArbiterError::Unsent);
+        }
+        if seen != Some(at.seen) {
+            return Gate::Refuse(ArbiterError::LookAgain(Why::BoxChanged));
+        }
+        if !state.output.counts().pending() {
+            return Gate::Go;
+        }
+        if millis_since(self.clock.now(), started) >= PENDING_GRACE_MS {
+            Gate::Refuse(ArbiterError::LookAgain(Why::OutputPending))
+        } else {
+            Gate::Wait
+        }
     }
 
     fn pane_state(&self, pane: &PaneKey) -> Result<PaneState, ArbiterError> {

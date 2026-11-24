@@ -10,7 +10,8 @@ use portable_pty::{Child, MasterPty, PtySize};
 
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
-use crate::screen::{Drawn, PaneScreen};
+use crate::arbiter::ArbiterError;
+use crate::screen::{Drawn, PaneScreen, Seen};
 
 mod close;
 #[cfg(windows)]
@@ -145,18 +146,81 @@ impl<'a> PaneEnvironment<'a> {
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
 
-    /// [`PaneInputWriter::write`], once `ready` says so with the pane's writer held: it is
-    /// asked again, the writer let go between, until it does. The paste's Enter is written so,
-    /// the window's output looked at last where the write is made.
-    fn write_when(
+    /// [`PaneInputWriter::write`], with the pane's writer held and `gate` asked there. Go:
+    /// the bytes are written. Wait: the writer is let go for 2 ms and `gate` is asked again.
+    /// Refuse: nothing is written, and the refusal is the answer. Every write of a delivery's
+    /// that looks at the window is made so: the check and the write are of one hold.
+    fn write_gated(
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        ready: &mut dyn FnMut() -> bool,
-    ) -> Result<(), PaneError> {
-        let _ = ready;
-        self.write(key, bytes)
+        gate: &mut dyn FnMut() -> Gate,
+    ) -> Result<(), Gated> {
+        loop {
+            match gate() {
+                Gate::Go => return self.write(key, bytes).map_err(Gated::Pane),
+                Gate::Wait => std::thread::sleep(GATE_REST),
+                Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
+            }
+        }
     }
+
+    /// Runs `under` with the pane's screen's lock held, given what the screen shows of the
+    /// input box now ([`Seen`]); none where the pane has no screen. The pane table's lock is
+    /// let go before.
+    fn with_seen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
+        let _ = key;
+        under(None);
+    }
+}
+
+/// What a write's gate says, asked with the pane's writer held.
+pub(crate) enum Gate {
+    Go,
+    Wait,
+    Refuse(ArbiterError),
+}
+
+/// Why a gated write did not go.
+pub(crate) enum Gated {
+    /// The gate said no: nothing was written.
+    Refused(ArbiterError),
+    Pane(PaneError),
+}
+
+/// How long the writer is let go between two asks of a gate that said wait.
+const GATE_REST: Duration = Duration::from_millis(2);
+
+/// Writes `bytes` into `writer` with its lock held and `gate` asked there
+/// ([`PaneInputWriter::write_gated`]); `rest` is how the wait between two asks is spent.
+pub(crate) fn write_gated_in(
+    writer: &Mutex<Box<dyn Write + Send>>,
+    bytes: &[u8],
+    gate: &mut dyn FnMut() -> Gate,
+    rest: &dyn Fn(Duration),
+) -> Result<(), Gated> {
+    let mut held = loop {
+        let held = lock_writer(writer)?;
+        match gate() {
+            Gate::Go => break held,
+            Gate::Wait => {
+                drop(held);
+                rest(GATE_REST);
+            }
+            Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
+        }
+    };
+    held.write_all(bytes).map_err(|error| Gated::Pane(error.into()))?;
+    held.flush().map_err(|error| Gated::Pane(error.into()))?;
+    Ok(())
+}
+
+fn lock_writer(
+    writer: &Mutex<Box<dyn Write + Send>>,
+) -> Result<MutexGuard<'_, Box<dyn Write + Send>>, Gated> {
+    writer
+        .lock()
+        .map_err(|_| Gated::Pane(PaneError::LockPoisoned))
 }
 
 struct Pane {
@@ -300,21 +364,26 @@ impl PaneTable {
     }
 
     pub(crate) fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
-        self.write_when(key, bytes, &mut || true)
+        match self.write_gated(key, bytes, &mut || Gate::Go) {
+            Ok(()) => Ok(()),
+            Err(Gated::Pane(error)) => Err(error),
+            Err(Gated::Refused(_)) => unreachable!("a gate that always goes refuses nothing"),
+        }
     }
 
-    /// [`PaneTable::write`], once `ready` says so with the writer held.
-    pub(crate) fn write_when(
+    /// [`PaneTable::write`], with `gate` asked with the writer held ([`PaneInputWriter::
+    /// write_gated`]).
+    pub(crate) fn write_gated(
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        ready: &mut dyn FnMut() -> bool,
-    ) -> Result<(), PaneError> {
+        gate: &mut dyn FnMut() -> Gate,
+    ) -> Result<(), Gated> {
         let (writer, last_activity, active_writes) = {
-            let panes = self.lock_panes()?;
+            let panes = self.lock_panes().map_err(Gated::Pane)?;
             let pane = panes
                 .get(key)
-                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+                .ok_or_else(|| Gated::Pane(PaneError::NotFound(key.clone())))?;
             pane.active_writes.fetch_add(1, Ordering::AcqRel);
             (
                 Arc::clone(&pane.writer),
@@ -323,17 +392,10 @@ impl PaneTable {
             )
         };
         let _active_write = ActiveWrite(active_writes);
-        let mut writer = loop {
-            let writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;
-            if ready() {
-                break writer;
-            }
-            drop(writer);
-            std::thread::sleep(Duration::from_millis(2));
-        };
-        writer.write_all(bytes)?;
-        writer.flush()?;
-        *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
+        write_gated_in(&writer, bytes, gate, &std::thread::sleep)?;
+        *last_activity
+            .lock()
+            .map_err(|_| Gated::Pane(PaneError::LockPoisoned))? = Instant::now();
         Ok(())
     }
 
@@ -464,13 +526,20 @@ impl PaneInputWriter for PaneTable {
         PaneTable::write(self, key, bytes)
     }
 
-    fn write_when(
+    fn write_gated(
         &self,
         key: &PaneKey,
         bytes: &[u8],
-        ready: &mut dyn FnMut() -> bool,
-    ) -> Result<(), PaneError> {
-        PaneTable::write_when(self, key, bytes, ready)
+        gate: &mut dyn FnMut() -> Gate,
+    ) -> Result<(), Gated> {
+        PaneTable::write_gated(self, key, bytes, gate)
+    }
+
+    fn with_seen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
+        match self.screen(key) {
+            Ok(screen) => screen.with_seen(&mut |seen| under(Some(seen))),
+            Err(_) => under(None),
+        }
     }
 }
 
@@ -484,25 +553,18 @@ pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
     body: &[u8],
     before_enter: impl FnOnce(),
 ) -> Result<(), PaneError> {
-    write_paste_if_via(writer, key, body, before_enter, &mut || true)
+    writer.write(key, &bracketed(body))?;
+    before_enter();
+    writer.write(key, b"\r")
 }
 
-/// [`write_paste_via`], the Enter written once `ready` says so, with the pane's writer held
-/// ([`PaneInputWriter::write_when`]).
-pub(crate) fn write_paste_if_via<W: PaneInputWriter + ?Sized>(
-    writer: &W,
-    key: &PaneKey,
-    body: &[u8],
-    before_enter: impl FnOnce(),
-    ready: &mut dyn FnMut() -> bool,
-) -> Result<(), PaneError> {
+/// `body` as a bracketed paste.
+pub(crate) fn bracketed(body: &[u8]) -> Vec<u8> {
     let mut bracketed = Vec::with_capacity(12 + body.len());
     bracketed.extend_from_slice(b"\x1b[200~");
     bracketed.extend_from_slice(body);
     bracketed.extend_from_slice(b"\x1b[201~");
-    writer.write(key, &bracketed)?;
-    before_enter();
-    writer.write_when(key, b"\r", ready)
+    bracketed
 }
 
 struct ActiveWrite(Arc<AtomicU64>);
