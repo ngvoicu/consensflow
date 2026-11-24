@@ -166,10 +166,10 @@ runs = ["pi-lib"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''        placed.push(Placed::Tree {
-            from: from.join(&source.folder),
+            from: from.join(&below).for_why(Purpose::Marketplace),
             to: to.join(&source.folder),
         });'''
-replace = '''        let _ = (from.join(&source.folder), to.join(&source.folder));'''
+replace = '''        let _ = (from.join(&below), to.join(&source.folder));'''
 
 [[plant]]
 name = "matrix: the run's settings.json names every package the owner's does"
@@ -400,8 +400,8 @@ runs = ["login-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''                &[projects.as_path()],'''
-replace = '''                &[],'''
+find = '''                &[&projects],'''
+replace = '''                &[] as &[&Owned],'''
 
 # ---------------------------------------------------------------------------- the package's source (T-1358)
 # Pi loads a provider's package from the source `packages` names it by: an `npm:` spec, below

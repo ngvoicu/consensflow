@@ -189,8 +189,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''        let ends_at = fs::canonicalize(path).ok();'''
-replace = '''        let ends_at = fs::canonicalize(path).ok().or_else(|| fs::read_link(path).ok());'''
+find = '''        let ends_at = path.real().ok();'''
+replace = '''        let ends_at = path.real().ok().or_else(|| path.link_target().ok().map(|_| path.clone()));'''
 
 [[plant]]
 name = "owner launcher: the guard looks again at the start of every rig, and so holds the look of the last"
@@ -233,8 +233,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''                folders.push((data.join("devin").join("cli").join("_versions"), None));'''
-replace = '''                folders.push((data.join("devin").join("cli").join("_versions_"), None));'''
+find = '''                folders.push((data.join("devin/cli/_versions"), None));'''
+replace = '''                folders.push((data.join("devin/cli/_versions_"), None));'''
 
 [[plant]]
 name = "owner launcher: Claude Code's folder of versions is not watched"
@@ -244,8 +244,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''                folders.push((data.join("claude").join("versions"), None));'''
-replace = '''                folders.push((data.join("claude").join("versions_"), None));'''
+find = '''                folders.push((data.join("claude/versions"), None));'''
+replace = '''                folders.push((data.join("claude/versions_"), None));'''
 
 [[plant]]
 name = "owner launcher: the link the harness's own installer re-points is not watched, only the program the kit runs"

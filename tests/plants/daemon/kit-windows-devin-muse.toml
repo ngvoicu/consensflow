@@ -130,11 +130,11 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 
 [[plant]]
@@ -147,11 +147,11 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![
                 owner.join("credentials.toml"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 
 [[plant]]
@@ -164,7 +164,7 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![owner.join("credentials.toml"), owner.join("config.json")],'''
 

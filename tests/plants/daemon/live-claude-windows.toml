@@ -204,8 +204,8 @@ runs = ["live-login"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''                cf_base::file::stat(file).is_ok_and(|now| now == *was)'''
-replace = '''                cf_base::file::stat(file).is_ok_and(|now| now == *was || now != *was)'''
+find = '''                    .is_ok_and(|now| now == *was)'''
+replace = '''                    .is_ok_and(|now| now == *was || now != *was)'''
 
 # T-858: `live monitor-wait` and `live mcp` ran their MCP server on `python3`, which a Windows machine
 # may have only as the Store's alias (zeewin2: exit 9009), and whose `os.setsid` has no Windows. The

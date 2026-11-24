@@ -365,8 +365,8 @@ runs = ["fm-kit-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = "    if config == real(home) || config.starts_with(&owners) {"
-replace = "    if config == real(home) && config.starts_with(&owners) {"
+find = '''        if home_real.is_path(&config) || owners.holds(&config) {'''
+replace = '''        if home_real.is_path(&config) && owners.holds(&config) {'''
 
 # Brought into 3.0.6-alpha.3's integration B (T-681), the chief's two rules. 1: a first message waits
 # until its window is at its prompt, past every question its harness asks as it starts (the folder's

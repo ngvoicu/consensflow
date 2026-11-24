@@ -101,10 +101,8 @@ runs = ["round3-lib"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''if meta.file_type().is_symlink()
-                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)'''
-replace = '''if false && (meta.file_type().is_symlink()
-                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?))'''
+find = '''if meta.file_type().is_symlink() || !path.real()?.is_inside(&from.real()?)'''
+replace = '''if false && (meta.file_type().is_symlink() || !path.real()?.is_inside(&from.real()?))'''
 
 [[plant]]
 name = "kit round3: Muse fingerprint reads a linked file"
@@ -190,8 +188,10 @@ runs = ["round3-dialog"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_harness_dialogs.rs"
-find = '''if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
-replace = '''if false && fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
+find = '''        .named(from, Purpose::Marketplace)
+        .copy_tree_into'''
+replace = '''        .named(std::fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf()), Purpose::Marketplace)
+        .copy_tree_into'''
 
 [[plant]]
 name = "kit round3: subagent reads a foreign parent record"
@@ -375,5 +375,5 @@ runs = ["round5-login-only"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''            super::machine::seed_claude_trust_login_only(config, &self.owner.home)'''
-replace = '''            super::machine::seed_claude_trust(config, &self.owner.home)'''
+find = '''            super::machine::seed_claude_trust_login_only(config, self.owner.owned())'''
+replace = '''            super::machine::seed_claude_trust(config, self.owner.owned())'''

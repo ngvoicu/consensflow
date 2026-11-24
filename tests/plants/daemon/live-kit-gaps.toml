@@ -133,7 +133,7 @@ runs = ["e2e-lib-machine"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''            Some(isolation) => isolation.owner_home().to_path_buf(),'''
+find = '''            Some(isolation) => PathBuf::from(isolation.owner_home().to_argument()),'''
 replace = '''            Some(_) => self.home.clone(),'''
 
 [[plant]]

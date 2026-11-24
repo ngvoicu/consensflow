@@ -461,9 +461,9 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''    let program = program_in(Path::new(program), &env);
+find = '''    let program = program_started(Path::new(program), args, &env)?;
     match program {'''
-replace = '''    let _ = program;
+replace = '''    let _ = (program, args);
     match spawn::Program::Plain {'''
 
 [[plant]]
@@ -691,11 +691,9 @@ runs = ["ki-lib-machine"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = '''        if self.harness == Harness::Muse {
-            return self
-                .command'''
+            return Account::this()'''
 replace = '''        if false {
-            return self
-                .command'''
+            return Account::this()'''
 
 [[plant]]
 name = "K3 doors: the judge opens and closes a file it judges"
