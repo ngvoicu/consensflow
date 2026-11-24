@@ -355,3 +355,31 @@ test('a replay that begins past the boundary drops what is below it and writes t
   expect(result.acks.at(-1)).toBe(3)
   expect(result.truncated).toBe(true)
 })
+
+test("the page reads the frame the app's pane_history command writes", async ({ page }) => {
+  await blankPage(page)
+  // The same header and bytes as `a_piece_of_history_is_framed_as_the_page_reads_it` in commands.rs.
+  const header =
+    '{"boundary":7,"done":true,"from":5,"ok":true,"reset":true,"resizes":[{"at":6,"cols":31,"rows":9}],"seedLength":2,"size":{"cols":30,"rows":8},"truncated":false}'
+  const frame = await page.evaluate(async (header) => {
+    const { historyFrame } = await import('/terminal-link.js')
+    const head = new TextEncoder().encode(header)
+    const out = new Uint8Array(4 + head.length + 4)
+    new DataView(out.buffer).setUint32(0, head.length, true)
+    out.set(head, 4)
+    out.set([0x1b, 0x5b, 0x68, 0x69], 4 + head.length)
+    const read = historyFrame(out.buffer)
+    return { ...read, seed: [...read.seed], bytes: [...read.bytes] }
+  }, header)
+  expect(frame).toMatchObject({
+    ok: true,
+    reset: true,
+    from: 5,
+    boundary: 7,
+    done: true,
+    size: { rows: 8, cols: 30 },
+    resizes: [{ at: 6, cols: 31, rows: 9 }],
+    seed: [0x1b, 0x5b],
+    bytes: [0x68, 0x69],
+  })
+})

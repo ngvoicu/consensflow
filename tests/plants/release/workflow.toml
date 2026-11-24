@@ -985,15 +985,11 @@ find = '''
         timeout-minutes: 15
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
         timeout-minutes: 10
 '''
 replace = '''
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
         timeout-minutes: 10
       - name: Build the app, ad hoc, of the smoke's identity
         run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
@@ -1020,15 +1016,11 @@ file = ".github/workflows/ci.yml"
 find = '''
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
         timeout-minutes: 10
 '''
 replace = '''
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
         timeout-minutes: 10
       - run: echo done
 '''
@@ -1175,15 +1167,11 @@ file = ".github/workflows/ci.yml"
 find = '''
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
         timeout-minutes: 10
 '''
 replace = '''
       - name: The built app passes the packaged smoke
         run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
-        env:
-          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
 '''
 
 [[plant]]
@@ -1330,56 +1318,19 @@ find = '''
 '''
 replace = ""
 
-# The case the job leaves out (T-1362): the hidden window's, until alpha.5's host-display core.
+# The packaged job runs every case of the smoke, the hidden window's too (P5-C).
 [[plant]]
-name = "workflow: CI's packaged job runs the hidden window's case"
-meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+name = "workflow: CI's packaged job leaves the hidden window's case out"
+meant = "leaves_no_case_of_the_smoke_out_the_hidden_windows_among_them"
 runs = ["workflow"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = '''
+find = """      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+"""
+replace = """      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
         env:
           CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
-'''
-replace = "\n"
-
-[[plant]]
-name = "workflow: CI's packaged job leaves out a case that is not the smoke's"
-meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
-runs = ["workflow"]
-
-[[plant.edit]]
-file = ".github/workflows/ci.yml"
-find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
-replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_shown"
-
-[[plant]]
-name = "workflow: CI's packaged job leaves out every case"
-meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
-runs = ["workflow"]
-
-[[plant.edit]]
-file = ".github/workflows/ci.yml"
-find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
-replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_"
-
-[[plant]]
-name = "workflow: CI's packaged job leaves out the pane case with the hidden one"
-meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
-runs = ["workflow"]
-
-[[plant.edit]]
-file = ".github/workflows/ci.yml"
-find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
-replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden,the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
-
-[[plant]]
-name = "workflow: CI's packaged job leaves the case out and does not say what it waits for"
-meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
-runs = ["workflow"]
-
-[[plant.edit]]
-file = ".github/workflows/ci.yml"
-find = "  # core (A5-04); then the line goes, and the case is in CI."
-replace = "  # core; then the line goes, and the case is in CI."
+"""

@@ -1,6 +1,6 @@
 //! The app reads its windows as fast with its own window hidden as shown. The pane host
 //! stops reading a window whose output the page has not acknowledged past a window of it
-//! (1 MiB), and its agent then waits on its terminal; a page WebKit throttled once the
+//! (8 MiB since P5-C, 1 MiB before), and its agent then waits on its terminal; a page WebKit throttled once the
 //! app was hidden drew one message a turn, a turn a second or so, and an agent that
 //! printed faster waited on the page (T-454: 8 MiB took 266 s hidden, 6 s shown).
 //!
@@ -25,8 +25,10 @@ use crate::{bundle, patience_of, Outcome, PASTE_READER};
 /// The stand-in harness of this case.
 const HARNESS: &str = include_str!("../../fixtures/smoke-hidden-harness.sh");
 
-/// The flood, in lines of 131 bytes on the terminal: 8 MiB, eight windows of unacknowledged output.
-const FLOOD_LINES: usize = 64_000;
+/// The flood, in lines of 143 bytes on the terminal (the harness's 141 and the terminal's carriage return):
+/// 7.6 MiB: seven of the old 1 MiB windows of unacknowledged output, and under the 8 MiB the window now
+/// has, so a hidden page's slow acknowledgements hold no part of it.
+const FLOOD_LINES: usize = 56_000;
 
 /// How long the app is hidden before its window prints: WebKit throttles a page it no
 /// longer shows within seconds, and puts it to sleep behind a locked screen about 30 s in.
@@ -139,7 +141,7 @@ fn drive(
     writeln!(
         out,
         "a hidden app read {printed} lines ({:.1} MiB) in {:.1} s",
-        (FLOOD_LINES * 131) as f64 / f64::from(1 << 20),
+        (FLOOD_LINES * 143) as f64 / f64::from(1 << 20),
         started.elapsed().as_secs_f64()
     )?;
     assert_eq!(printed, FLOOD_LINES.to_string());

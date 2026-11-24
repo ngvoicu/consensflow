@@ -670,22 +670,15 @@ mod tests {
             done: true,
         };
         let frame = history_frame(&piece);
-        assert_eq!(
-            hex_of(&frame),
-            "70000000".to_owned()
-                + "7b22626f756e64617279223a372c22646f6e65223a747275652c2266726f6d223a352c226f6b223a747275652c227265736574223a747275652c22726573697a6573223a5b7b226174223a362c22636f6c73223a33312c22726f7773223a397d5d2c2273656564 4c656e677468223a322c2273697a65223a7b22636f6c73223a33302c22726f7773223a387d2c227472756e6361746564223a66616c73657d"
-                    .replace(' ', "")
-                + "1b5b"
-                + "6869"
-        );
         let (header, seed, bytes) = read_frame(&frame);
-        assert_eq!(header["from"], 5);
+        // The same header, bytes and seed the page suite's frame holds.
+        assert_eq!(
+            header,
+            json!({"ok":true,"reset":true,"truncated":false,"from":5,"size":{"rows":8,"cols":30},
+                   "seedLength":2,"resizes":[{"at":6,"rows":9,"cols":31}],"boundary":7,"done":true})
+        );
         assert_eq!(seed, [0x1b, 0x5b]);
         assert_eq!(bytes, b"hi");
-    }
-
-    fn hex_of(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     /// A pull from a page that is not the current one is refused (a page that reloaded, or one
