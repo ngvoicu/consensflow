@@ -55,16 +55,6 @@ find = '        "ZDOTDIR".to_owned(),'
 replace = '        "ZDOTDIR_UNUSED".to_owned(),'
 
 [[plant]]
-name = "member-guard: bash 3.2's exported function is left out, so a login bash finds the real pkill"
-meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
-runs = ["guard-shells"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/member_guard.rs"
-find = "        vars.push((file.clone(), body.clone()));"
-replace = "        vars.push((format!(\"UNUSED_{file}\"), body.clone()));"
-
-[[plant]]
 name = "member-guard: the zsh files define no function, so a login zsh finds the real pkill"
 meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
 runs = ["guard-shells"]
@@ -85,9 +75,9 @@ find = '  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse'
 replace = '  :\nelse'
 
 [[plant]]
-name = "member-guard: bash 4.3's exported function is left out, so a login bash of Homebrew's finds the real pkill"
-meant = "member_guard::tests::the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_in_both_forms_bash_reads"
-runs = ["guard-daemon"]
+name = "member-guard: bash's exported function is left out, so a login bash finds the real pkill"
+meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
+runs = ["guard-shells"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/member_guard.rs"

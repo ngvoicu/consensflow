@@ -98,9 +98,10 @@ fn write_zshenv(folder: &Path) -> io::Result<()> {
 
 /// What a window's environment holds for the shells' function layer, on a Mac: `ZDOTDIR` the
 /// folder of the `.zshenv` above and the person's own, when there was one, in
-/// `CONSENSFLOW_ZDOTDIR_WAS`; and a function for each name in both forms bash reads from the
-/// environment, the system's bash 3.2 (`name`) and bash 4.3's (`BASH_FUNC_name%%`). None on
-/// Windows, whose shells read the PATH as it is given.
+/// `CONSENSFLOW_ZDOTDIR_WAS`; and a function for each name as bash reads one from the
+/// environment, `BASH_FUNC_name%%`. Apple's bash 3.2 (patched after Shellshock) and bash 4.3
+/// and later both read that form; the system's bash does not read a plain `name=() {...}`
+/// (measured on macOS 26, bash 3.2.57). None on Windows, whose shells read the PATH as given.
 pub fn shell_vars(folder: &Path, person_zdotdir: Option<&str>) -> Vec<(String, String)> {
     if cfg!(windows) {
         return Vec::new();
@@ -117,7 +118,6 @@ pub fn shell_vars(folder: &Path, person_zdotdir: Option<&str>) -> Vec<(String, S
             "() {{ {} \"$@\"; }}",
             quoted(&folder.join(&file).to_string_lossy())
         );
-        vars.push((file.clone(), body.clone()));
         vars.push((format!("BASH_FUNC_{file}%%"), body));
     }
     vars

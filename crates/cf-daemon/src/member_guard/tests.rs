@@ -85,7 +85,7 @@ fn tempfile_dir(what: &str) -> PathBuf {
 
 #[cfg(unix)]
 #[test]
-fn the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_in_both_forms_bash_reads() {
+fn the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_as_bash_reads_one() {
     let folder = Path::new("/h/member-guard");
     let vars = shell_vars(folder, Some("/own"));
     let get = |name: &str| {
@@ -97,7 +97,11 @@ fn the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_in_both_f
     assert_eq!(get("CONSENSFLOW_ZDOTDIR_WAS"), Some("/own"));
     for name in ["pkill", "killall"] {
         let body = format!("() {{ '/h/member-guard/{name}' \"$@\"; }}");
-        assert_eq!(get(name), Some(body.as_str()));
+        assert_eq!(
+            get(name),
+            None,
+            "a plain variable is read by no bash of ours"
+        );
         assert_eq!(get(&format!("BASH_FUNC_{name}%%")), Some(body.as_str()));
     }
     // A person with no ZDOTDIR is told none.
