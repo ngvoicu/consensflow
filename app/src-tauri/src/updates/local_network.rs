@@ -48,6 +48,7 @@ pub(crate) fn target_for(major: Option<u32>) -> Target {
 }
 
 /// The major and minor version of a `sw_vers -productVersion` answer (`27.2.1` is 27 and 2).
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn version_of(version: &str) -> Option<(u32, u32)> {
     let mut parts = version.trim().split('.');
     let major = parts.next()?.parse().ok()?;
