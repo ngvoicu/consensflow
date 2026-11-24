@@ -392,10 +392,13 @@ async fn run(
         time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds::new()),
         credentials: Rc::clone(&credentials) as _,
-        pane_env: Rc::new(
+        pane_env: Rc::new(crate::member_guard::guard(
             WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())
                 .with_cf(&options.bundle.pane_cf, cfg!(windows)),
-        ),
+            &home,
+            &options.bundle.cf,
+            &log,
+        )),
         app_settings: Rc::clone(&settings) as _,
         roles: Rc::new(RoleTexts::new(env.clone(), options.bundle.pane_cf.clone())),
         trace: Rc::clone(&trace) as _,

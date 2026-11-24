@@ -61,6 +61,20 @@ impl WindowEnv {
         }
     }
 
+    /// The PATH every window starts with.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// These windows given `folder` first on their PATH, before the bundle's: the stand-ins
+    /// of the commands a member's window may not run (`member_guard`).
+    #[must_use]
+    pub fn with_guard(mut self, folder: &std::path::Path) -> Self {
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        self.path = format!("{}{delimiter}{}", folder.display(), self.path);
+        self
+    }
+
     /// These windows told how a command starts in them: the bundle's `cf`, `pane_cf`, as the
     /// shell of each harness takes it, `windows` where they run on Windows.
     #[must_use]

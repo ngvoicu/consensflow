@@ -1,0 +1,234 @@
+//! The commands a member's window may not run: the ones that end every program whose name
+//! matches. On a machine shared by other members and the person's own apps, that ends their
+//! work and ConsensFlow itself (T-2130, T-2174, T-2196; the owner's 2026-11-12 live run ended
+//! 22 programs that were not its own).
+//!
+//! ConsensFlow puts a folder of stand-ins first on the `PATH` of every window it launches
+//! (`cf-daemon`'s `member_guard`): the bundle's `cf`, linked there under the names `pkill`
+//! and `killall` on a Mac, `taskkill.exe` and `tskill.exe` on Windows. `cf` started under one
+//! of those names asks this module what to do ([`judge`]).
+//!
+//! The limit, in the owner's words: a member window that calls the real command by its full
+//! path, or a PowerShell cmdlet, isn't stopped: the guard catches the habit, not a determined
+//! call.
+
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
+
+use crate::env::Env;
+
+/// A command the guard stands in for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guarded {
+    Pkill,
+    Killall,
+    Taskkill,
+    Tskill,
+}
+
+/// Every name a stand-in is linked under, with the command it stands in for.
+pub const NAMES: [(&str, Guarded); 4] = [
+    ("pkill", Guarded::Pkill),
+    ("killall", Guarded::Killall),
+    ("taskkill", Guarded::Taskkill),
+    ("tskill", Guarded::Tskill),
+];
+
+/// The names a stand-in is linked under on the platform this is built for, with the file
+/// each is: `pkill` and `killall` on a Mac, `taskkill.exe` and `tskill.exe` on Windows.
+pub fn file_names() -> Vec<(String, Guarded)> {
+    NAMES
+        .iter()
+        .filter(|(_, guarded)| guarded.is_of_this_platform())
+        .map(|(name, guarded)| {
+            let file = if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                (*name).to_owned()
+            };
+            (file, *guarded)
+        })
+        .collect()
+}
+
+impl Guarded {
+    fn is_of_this_platform(self) -> bool {
+        matches!(self, Self::Taskkill | Self::Tskill) == cfg!(windows)
+    }
+
+    /// The command's name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pkill => "pkill",
+            Self::Killall => "killall",
+            Self::Taskkill => "taskkill",
+            Self::Tskill => "tskill",
+        }
+    }
+
+    /// The real program a call that ends one program by its number goes to, on Windows:
+    /// `%SystemRoot%\System32\<name>.exe`.
+    fn real(self, env: &Env) -> PathBuf {
+        let root = env
+            .path("SystemRoot")
+            .or_else(|| env.path("windir"))
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), Path::to_path_buf);
+        root.join("System32").join(format!("{}.exe", self.name()))
+    }
+}
+
+/// The program `program` is started as: its file name without a folder or `.exe`, in lower
+/// case, when it is one of the [`NAMES`].
+pub fn named(program: &OsStr) -> Option<Guarded> {
+    let file = Path::new(program).file_name()?.to_string_lossy().to_lowercase();
+    let stem = file.strip_suffix(".exe").unwrap_or(&file);
+    NAMES
+        .iter()
+        .find(|(name, _)| *name == stem)
+        .map(|(_, guarded)| *guarded)
+}
+
+/// What a stand-in does with a call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// Print these words to standard error and exit with 1.
+    Refuse(String),
+    /// Run the real program with these arguments, and exit as it does.
+    Run(PathBuf, Vec<OsString>),
+}
+
+/// The words a refused call is answered with.
+pub fn refusal(guarded: Guarded) -> String {
+    let name = guarded.name();
+    let end = if matches!(guarded, Guarded::Taskkill | Guarded::Tskill) {
+        "End a program you started with `taskkill /PID <number>`, after checking it's yours."
+    } else {
+        "End a program you started by its number, after checking it's yours."
+    };
+    let by_name = if matches!(guarded, Guarded::Taskkill | Guarded::Tskill) {
+        format!("{name} by name isn't run in member windows.")
+    } else {
+        format!("{name} isn't run in member windows.")
+    };
+    format!(
+        "ConsensFlow: {by_name} It ends every program whose name matches, other members' and \
+         the owner's among them. {end}"
+    )
+}
+
+/// What `guarded` does with `args`: `pkill` and `killall` refuse every call; `taskkill`
+/// refuses `/IM` and `/FI` and runs the real one for any other call; `tskill` refuses a
+/// name and runs the real one for a number.
+pub fn judge(guarded: Guarded, args: &[OsString], env: &Env) -> Verdict {
+    let refused = match guarded {
+        Guarded::Pkill | Guarded::Killall => true,
+        Guarded::Taskkill => args.iter().any(|arg| by_name_or_filter(arg)),
+        Guarded::Tskill => args
+            .iter()
+            .filter(|arg| !is_switch(arg))
+            .any(|arg| !arg.to_string_lossy().chars().all(|c| c.is_ascii_digit())),
+    };
+    if refused {
+        Verdict::Refuse(refusal(guarded))
+    } else {
+        Verdict::Run(guarded.real(env), args.to_vec())
+    }
+}
+
+fn is_switch(arg: &OsStr) -> bool {
+    let text = arg.to_string_lossy();
+    text.starts_with('/') || text.starts_with('-')
+}
+
+/// Whether `arg` is taskkill's `/IM` or `/FI` (`-IM` and `-FI` too, as taskkill reads them),
+/// in any case: the two that select programs by what they are called.
+fn by_name_or_filter(arg: &OsStr) -> bool {
+    let text = arg.to_string_lossy().to_lowercase();
+    ["/im", "/fi", "-im", "-fi"].contains(&text.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(words: &[&str]) -> Vec<OsString> {
+        words.iter().map(OsString::from).collect()
+    }
+
+    const WORDS: &str = "ConsensFlow: pkill isn't run in member windows. It ends every \
+         program whose name matches, other members' and the owner's among them. End a program \
+         you started by its number, after checking it's yours.";
+
+    #[test]
+    fn pkill_and_killall_refuse_every_call_in_the_owners_words() {
+        let env = Env::default();
+        for call in [&["-f", "x"][..], &[][..], &["-9", "node"][..]] {
+            assert_eq!(
+                judge(Guarded::Pkill, &args(call), &env),
+                Verdict::Refuse(WORDS.to_owned())
+            );
+            assert_eq!(
+                judge(Guarded::Killall, &args(call), &env),
+                Verdict::Refuse(WORDS.replace("pkill", "killall"))
+            );
+        }
+    }
+
+    #[test]
+    fn taskkill_by_name_or_filter_is_refused_and_by_number_goes_to_the_real_one() {
+        let env = Env::from_vars([("SystemRoot", r"D:\Win")]);
+        let words = "ConsensFlow: taskkill by name isn't run in member windows. It ends every \
+             program whose name matches, other members' and the owner's among them. End a \
+             program you started with `taskkill /PID <number>`, after checking it's yours.";
+        for call in [
+            &["/IM", "x.exe"][..],
+            &["/F", "/im", "x.exe"][..],
+            &["/FI", "IMAGENAME eq x.exe"][..],
+            &["/pid", "5", "/Fi", "PID gt 1"][..],
+            &["-IM", "x.exe"][..],
+        ] {
+            assert_eq!(
+                judge(Guarded::Taskkill, &args(call), &env),
+                Verdict::Refuse(words.to_owned()),
+                "{call:?}"
+            );
+        }
+        let real = PathBuf::from(r"D:\Win").join("System32").join("taskkill.exe");
+        assert_eq!(
+            judge(Guarded::Taskkill, &args(&["/PID", "123", "/F", "/T"]), &env),
+            Verdict::Run(real, args(&["/PID", "123", "/F", "/T"]))
+        );
+    }
+
+    #[test]
+    fn tskill_by_name_is_refused_and_by_number_goes_to_the_real_one() {
+        let env = Env::default();
+        assert!(matches!(
+            judge(Guarded::Tskill, &args(&["notepad"]), &env),
+            Verdict::Refuse(_)
+        ));
+        assert!(matches!(
+            judge(Guarded::Tskill, &args(&["12", "/v"]), &env),
+            Verdict::Run(..)
+        ));
+    }
+
+    #[test]
+    fn a_program_is_known_by_its_file_name_in_any_case_with_or_without_exe() {
+        for (program, guarded) in [
+            ("/x/member-guard/pkill", Some(Guarded::Pkill)),
+            ("killall", Some(Guarded::Killall)),
+            (r"C:\x\TASKKILL.EXE", Some(Guarded::Taskkill)),
+            ("tskill.exe", Some(Guarded::Tskill)),
+            ("cf", None),
+            ("pkill-not", None),
+        ] {
+            let program = if cfg!(windows) {
+                program.to_owned()
+            } else {
+                program.replace('\\', "/")
+            };
+            assert_eq!(named(OsStr::new(&program)), guarded, "{program}");
+        }
+    }
+}

@@ -27,7 +27,7 @@ mod standalone;
 #[cfg(test)]
 mod memories_tests;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
@@ -43,6 +43,38 @@ use cf_board::Board;
 pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
     (first == "codex-session").then(|| cf_codex_session::run(env, rest))
+}
+
+/// Answers a call of `cf` started under the name of a command a member's window may not run
+/// (`pkill`, `killall`, `taskkill`, `tskill`: the stand-ins ConsensFlow puts first on its windows'
+/// `PATH`), as the owner decided it (`cf_base::member_guard`): its exit code, or `None` where
+/// `program` is no such name.
+pub fn member_guard(env: &Env, program: &OsStr, args: &[OsString]) -> Option<i32> {
+    use cf_base::member_guard::{judge, named, Verdict};
+    let guarded = named(program)?;
+    Some(match judge(guarded, args, env) {
+        Verdict::Refuse(words) => {
+            let _ = writeln!(std::io::stderr(), "{words}");
+            1
+        }
+        Verdict::Run(real, args) => {
+            // The one start that is no `cf-process`'s: the real program answers on this
+            // process's own streams, which `cf-process` would capture.
+            #[allow(clippy::disallowed_methods)]
+            let ran = std::process::Command::new(&real).args(&args).status();
+            match ran {
+                Ok(status) => status.code().unwrap_or(1),
+                Err(failed) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "ConsensFlow: {} could not be run: {failed}",
+                        real.display()
+                    );
+                    1
+                }
+            }
+        }
+    })
 }
 
 /// Runs `cf ui [--json] [--no-open]` as the daemon when `args` ask for it: its

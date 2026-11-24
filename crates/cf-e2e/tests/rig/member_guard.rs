@@ -1,0 +1,93 @@
+//! The commands that end every program by its name (`pkill`, `killall`) are refused in a member's
+//! window (T-2213): the folder of ConsensFlow's stand-ins is first on the PATH of every window the
+//! daemon opens, whatever its harness. The stand-ins of Claude Code, Codex and Devin are windows
+//! of the real daemon and pane host here; Pi has no stand-in in the rig (its window's environment
+//! is the daemon's alike: `WindowEnv`, held by its unit tests), and Muse Code's case is the
+//! kit's. The windows run scripts, so this is Unix's; `cf/tests/member_guard.rs` holds
+//! Windows's.
+//!
+//! No case here runs a command by its name: it finds the program the window's PATH names first,
+//! shows it is the stand-in, and runs that file itself.
+
+#[cfg(unix)]
+use std::path::PathBuf;
+
+#[cfg(unix)]
+use cf_e2e::process::{first_on_path, Run};
+#[cfg(unix)]
+use cf_e2e::rig::{Project, Rig, OPEN};
+#[cfg(unix)]
+use serde_json::{json, Value};
+
+#[cfg(unix)]
+use crate::{config, secs, Outcome};
+
+/// The stand-ins for Codex and Devin, built for these tests.
+#[cfg(unix)]
+const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
+#[cfg(unix)]
+const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
+
+#[cfg(unix)]
+/// The program `name` first on the PATH of the window opened as `frame`.
+fn found_first(frame: &Value, name: &str) -> Option<PathBuf> {
+    first_on_path(name, frame["env"]["PATH"].as_str()?, "")
+}
+
+#[cfg(unix)]
+#[test]
+fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and_they_refuse() -> Outcome {
+    let rig = Rig::start(config().codex(FAKE_CODEX).devin(FAKE_DEVIN))?;
+    rig.stand_ins(&json!({
+        "schemaVersion": 1,
+        "agents": [
+            { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
+            { "id": "claude-worker", "kind": "claude-code", "model": "fake", "workTier": "light" },
+            { "id": "codex-worker", "kind": "codex", "model": "gpt-6-astra", "effort": "medium", "workTier": "standard" },
+            { "id": "devin-worker", "kind": "devin", "model": "fake", "workTier": "complex" },
+        ],
+    }))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let id = project.id();
+    for agent in ["claude-worker", "codex-worker", "devin-worker"] {
+        project.add_member(agent)?;
+    }
+    rig.tell(
+        id,
+        "DISPATCH --tier light Reply with exactly: CLAUDE_DONE\n\
+         DISPATCH --tier standard Reply with exactly: CODEX_DONE\n\
+         DISPATCH --tier complex Reply with exactly: DEVIN_DONE",
+    )?;
+    let chief = rig.open_frame(&format!("p{id}-chief"), OPEN)?;
+    rig.wait_for("the chief and three members' windows", secs(120), || {
+        Ok(rig.open_frames().len() >= 4)
+    })?;
+    let guard = rig.home().join("member-guard");
+    let frames = rig.open_frames();
+    assert!(frames.iter().any(|frame| frame["id"] == chief["id"]));
+    for frame in &frames {
+        for name in ["pkill", "killall"] {
+            let found = found_first(frame, name)
+                .ok_or_else(|| format!("{}: no {name} on its PATH", frame["id"]))?;
+            assert_eq!(
+                found.parent(),
+                Some(guard.as_path()),
+                "{}: {name} is {}",
+                frame["id"],
+                found.display()
+            );
+            let ran = Run::new(&found).args(["-f", "x"]).run()?;
+            assert_eq!(ran.code, Some(1), "{ran}");
+            assert!(
+                ran.stderr.starts_with(&format!(
+                    "ConsensFlow: {name} isn't run in member windows. It ends every program \
+                     whose name matches, other members' and the owner's among them. End a \
+                     program you started by its number, after checking it's yours."
+                )),
+                "{ran}"
+            );
+        }
+    }
+    rig.close()?;
+    Ok(())
+}

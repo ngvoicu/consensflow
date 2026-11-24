@@ -7,7 +7,14 @@ use cf_base::env::Env;
 
 fn main() -> ExitCode {
     let env = Env::from_process();
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let mut argv = std::env::args_os();
+    let program = argv.next().unwrap_or_default();
+    let args: Vec<_> = argv.collect();
+    // Started under the name of a command a member's window may not run (`pkill`, `taskkill`):
+    // the window's stand-in, which answers it and starts nothing else.
+    if let Some(code) = cf::member_guard(&env, &program, &args) {
+        return exit_code(code);
+    }
     // A Codex window's supervisor reports from any of its threads: it runs
     // before this thread takes the standard streams' locks, which a panic
     // on another thread would then wait on for good.
