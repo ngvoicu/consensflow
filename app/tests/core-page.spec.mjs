@@ -21076,6 +21076,7 @@ test.describe('moving along the dock', () => {
     await expect.poll(() => docked(page)).toEqual(['chief'])
     await expect(map).toBeHidden()
   })
+})
 
 // D8, the staff as slots (`architecture/staff-slots.md`, sections 6 and 7): both staff screens show
 // every slot, the empty ones with their Add, and a member's own things once.
