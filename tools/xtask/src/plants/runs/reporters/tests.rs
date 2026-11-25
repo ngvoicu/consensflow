@@ -434,7 +434,6 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
             "--reporter=list,./app/src-tauri/target/plants-runs/run-7/plants-playwright.mjs",
             "--retries=0",
             "--repeat-each=1",
-            "--workers=4",
             "app/tests/core-page.spec.mjs",
             "-g",
             "file drop",
@@ -461,7 +460,6 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
                 "--reporter=list,./plants-playwright.mjs",
                 "--retries=0",
                 "--repeat-each=1",
-                "--workers=4",
                 "a.spec.mjs"
             ],
             "{asked:?}"
@@ -486,7 +484,6 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
                 "--reporter=list,./plants-playwright.mjs",
                 "--retries=0",
                 "--repeat-each=1",
-                "--workers=4",
                 "a.spec.mjs"
             ],
             "{asked:?}"
@@ -962,8 +959,8 @@ fn a_playwright_run_is_given_its_width_as_workers() {
     };
     let asked = ("CF_PLANTS_TEST_THREADS", "2");
     let machine = ("RUST_TEST_THREADS", "3");
-    // Nobody says: the runner's own width.
-    assert_eq!(widths(&[], &[]), ["--workers=4"]);
+    // Nobody says: Playwright picks its own, as nextest does.
+    assert_eq!(widths(&[], &[]), Vec::<String>::new());
     // The caller's, over the machine's and over the table's own, however it is written.
     assert_eq!(widths(&[], &[asked, machine]), ["--workers=2"]);
     for own in [
@@ -984,7 +981,7 @@ fn a_playwright_run_is_given_its_width_as_workers() {
     for none in ["", "many", "0", "-2", "4 "] {
         assert_eq!(
             widths(&[], &[("RUST_TEST_THREADS", none)]),
-            ["--workers=4"],
+            Vec::<String>::new(),
             "{none:?}"
         );
     }

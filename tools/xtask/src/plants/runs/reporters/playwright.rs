@@ -14,9 +14,6 @@ pub(super) const PLAYWRIGHT_REPORTER: &str = include_str!("playwright.mjs");
 const PLAYWRIGHT_REPORTER_FILE: &str = "plants-playwright.mjs";
 pub(super) const PLAYWRIGHT_REPORT: &str = "playwright.json";
 pub(super) const PLAYWRIGHT_REPORT_VAR: &str = "PLANTS_PLAYWRIGHT_REPORT";
-/// The workers of a run where nothing says how many: Playwright's own number is half the
-/// machine's cores, which is not a limit anybody chose.
-const DEFAULT_WORKERS: u32 = 4;
 
 pub(super) fn setup(
     command: &[String],
@@ -68,7 +65,7 @@ pub(super) fn retried(command: &[String]) -> Option<String> {
 /// The run is also given its width, `--workers`: the threads the driver was asked for
 /// (`caller_threads`), over the command's own; else the command's own, as written; else
 /// the machine's limit on tests at once (`RUST_TEST_THREADS`, which nextest is given too);
-/// else `DEFAULT_WORKERS`.
+/// else none, and Playwright picks its own, as nextest does.
 pub(super) fn playwright_words(
     command: &[String],
     reporter: &str,
@@ -79,11 +76,11 @@ pub(super) fn playwright_words(
     if width.is_some() {
         command = without_workers(&command);
     } else if without_workers(&command) == command {
-        let machine = context
+        width = context
             .env
             .text("RUST_TEST_THREADS")
-            .and_then(threads_value);
-        width = Some(machine.unwrap_or(DEFAULT_WORKERS).to_string());
+            .and_then(threads_value)
+            .map(|threads| threads.to_string());
     }
     let mut words: Vec<String> = Vec::new();
     let mut given = command.iter();
