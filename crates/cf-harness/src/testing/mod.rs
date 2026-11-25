@@ -714,7 +714,7 @@ pub fn finished<T>(mut work: Work<'_, T>) -> T {
         if let Poll::Ready(value) = work.as_mut().poll(&mut context) {
             return value;
         }
-        woken.wait("work that waited on nothing it was given");
+        assert!(woken.wait(), "work that waited on nothing it was given");
     }
 }
 
@@ -740,20 +740,23 @@ impl Woken {
         self.woken.swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Waits for the next wake: one already there is taken. Fails with `said` where none came
-    /// and nothing is being made off this thread, or none came in [`WOKEN_WITHIN`].
-    fn wait(&self, said: &str) {
+    /// Waits for the next wake, one already there is taken: whether one came. None where
+    /// nothing is being made off this thread, which a wake could come from; a call that does
+    /// not end in [`WOKEN_WITHIN`] fails the test.
+    fn wait(&self) -> bool {
         let began = std::time::Instant::now();
         loop {
             if self.took() {
-                return;
+                return true;
             }
             // Looked at again after: a call ends once its wake was given.
             if !crate::shared::off_thread::outstanding() {
-                assert!(self.took(), "{said}");
-                return;
+                return self.took();
             }
-            assert!(began.elapsed() < WOKEN_WITHIN, "{said}");
+            assert!(
+                began.elapsed() < WOKEN_WITHIN,
+                "a call made off the thread did not end in its time"
+            );
             std::thread::park_timeout(std::time::Duration::from_millis(10));
         }
     }
@@ -845,7 +848,9 @@ impl<T> Driver<T> {
                 }
                 return settled;
             }
-            woken.wait("a call made off the thread woke nothing in its time");
+            // A call whose answer nobody waits for any more (a future given up) ends with
+            // no wake: the next round finds nothing moving and nothing outstanding.
+            let _ = woken.wait();
         }
     }
 

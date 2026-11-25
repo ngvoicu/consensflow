@@ -9,9 +9,12 @@
 
 [run]
 lf-late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_whose_plan_was_late", "--", "--test-threads=2"]
-lf-logfile = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::log::tests"]
+lf-nowait = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_line_said_while_the_log_is_held"]
+lf-drop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "lines_the_writer_is_too_far_behind"]
 lf-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_check_the_system_did_not_answer"]
 lf-plan = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread", "--", "--test-threads=1"]
+lf-folder = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread::a_plan_that_waits_on_a_folder"]
+lf-whole = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread::a_launch_file_is_in_place_only"]
 lf-log = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_the_system_gave_no_answer", "--", "--test-threads=2"]
 lf-query = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_waits"]
 lf-config = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_read_of_claude_codes"]
@@ -53,7 +56,7 @@ replace = """        let _ = within;"""
 [[plant]]
 name = 'launch-freeze: the plan makes its files on the engine thread again'
 meant = "a_plan_that_waits_on_a_folder_of_the_project_leaves_the_thread_going"
-runs = ["lf-plan"]
+runs = ["lf-folder"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/off_thread.rs"
@@ -116,7 +119,7 @@ replace = """                let _ = &answer;"""
 [[plant]]
 name = 'launch-freeze: a launch file is written in place'
 meant = "a_launch_file_is_in_place_only_once_it_is_whole"
-runs = ["lf-plan"]
+runs = ["lf-whole"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/install.rs"
@@ -137,7 +140,7 @@ replace = """                    let _ = (step, seconds);
 [[plant]]
 name = 'launch-freeze: the log appends where the line is said'
 meant = "a_line_said_while_the_log_is_held_does_not_wait_for_it"
-runs = ["lf-logfile"]
+runs = ["lf-nowait"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/files/log.rs"
@@ -149,7 +152,7 @@ replace = """        let Some(writer) = None::<&Writer> else {
 [[plant]]
 name = 'launch-freeze: a dropped line of the log is not counted'
 meant = "lines_the_writer_is_too_far_behind_to_take_are_dropped_and_counted"
-runs = ["lf-logfile"]
+runs = ["lf-drop"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/files/log.rs"
