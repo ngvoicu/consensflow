@@ -806,26 +806,68 @@ fn seeds() -> (u64, u64) {
     (first, count)
 }
 
+/// `CF_N35_JOBS` threads take the seeds in turn (1 by default): a long run on one machine uses
+/// its cores; every seed is still one schedule with its own context.
+fn jobs() -> u64 {
+    std::env::var("CF_N35_JOBS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(1)
+}
+
 #[test]
 fn no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early() {
     let (first, count) = seeds();
-    eprintln!("n35 model: seeds {first}..{}", first + count);
-    let (mut charged, mut resets, mut renewals, mut steps) = (0, 0, 0, 0);
-    for seed in first..first + count {
-        let outcome = std::panic::catch_unwind(|| schedule(seed));
-        match outcome {
-            Ok((a, b, r, s)) => {
-                charged += a;
-                resets += b;
-                renewals += r;
-                steps += s;
-            }
-            Err(cause) => {
-                eprintln!("n35 model: SEED {seed} failed");
-                std::panic::resume_unwind(cause);
-            }
-        }
-    }
+    let jobs = jobs();
+    eprintln!(
+        "n35 model: seeds {first}..{} on {jobs} thread(s)",
+        first + count
+    );
+    let totals = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..jobs)
+            .map(|job| {
+                scope.spawn(move || {
+                    let (mut charged, mut resets, mut renewals, mut steps, mut done) =
+                        (0, 0, 0, 0, 0u64);
+                    let mut seed = first + job;
+                    while seed < first + count {
+                        let outcome = std::panic::catch_unwind(|| schedule(seed));
+                        match outcome {
+                            Ok((a, b, r, s)) => {
+                                charged += a;
+                                resets += b;
+                                renewals += r;
+                                steps += s;
+                            }
+                            Err(cause) => {
+                                eprintln!("n35 model: SEED {seed} failed");
+                                std::panic::resume_unwind(cause);
+                            }
+                        }
+                        done += 1;
+                        if done % 1_000 == 0 {
+                            eprintln!(
+                                "n35 model: thread {job} has run {done} schedules (seed {seed})"
+                            );
+                        }
+                        seed += jobs;
+                    }
+                    (charged, resets, renewals, steps)
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| match worker.join() {
+                Ok(totals) => totals,
+                Err(cause) => std::panic::resume_unwind(cause),
+            })
+            .fold((0, 0, 0, 0), |sum, t| {
+                (sum.0 + t.0, sum.1 + t.1, sum.2 + t.2, sum.3 + t.3)
+            })
+    });
+    let (charged, resets, renewals, steps) = totals;
     eprintln!(
         "n35 model: {count} schedules, {steps} steps, {charged} numbered retries charged, {resets} resets ({renewals} by time)"
     );
