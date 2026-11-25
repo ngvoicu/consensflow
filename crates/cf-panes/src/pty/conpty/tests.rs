@@ -537,7 +537,7 @@ fn a_form_with_no_envs_is_not_read() {
 /// handle). The wait takes nothing: what was written is read after it, whole.
 #[test]
 fn a_windows_output_pipe_is_waited_on_without_taking_and_asked_while_it_waits() {
-    use std::io::{Read, Write};
+    use std::io::Write;
 
     let (read, mut write) = super::output_pipe().expect("a pipe");
     let watch = super::Watch {
