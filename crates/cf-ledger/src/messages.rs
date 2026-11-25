@@ -759,6 +759,33 @@ pub(crate) fn inbox(
     )
 }
 
+/// [`inbox`] less the reminders withheld from their recipient, the newest
+/// `limit` of what is left: they are filtered before they are counted, so none of
+/// them hides an older message.
+pub(crate) fn readable_inbox(
+    store: &Store,
+    participant_id: i64,
+    limit: usize,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let ids: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT id FROM message WHERE recipient_id = ? AND state != 'gated' ORDER BY id DESC",
+        )?
+        .query_map([participant_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut shown = Vec::new();
+    for id in ids {
+        if shown.len() == limit {
+            break;
+        }
+        if !crate::waiting_questions::withheld(store, id)? {
+            shown.push(known_message(store, id)?);
+        }
+    }
+    Ok(shown)
+}
+
 /// The newest note ConsensFlow itself left the participant (one with no sender) whose
 /// body opens with `opening`; none where it left none.
 pub(crate) fn newest_own_note(

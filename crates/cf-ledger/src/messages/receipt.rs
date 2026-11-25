@@ -536,7 +536,6 @@ pub(crate) fn receive_read(
     cf: &CfWord,
 ) -> Result<usize, LedgerError> {
     store.write(|store| {
-        crate::waiting_questions::withdraw_stale(store, recipient)?;
         let mut received = 0;
         let mut tasks = Vec::new();
         for id in ids {
@@ -546,6 +545,10 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
+            // A reminder its recipient is not shown is not received either.
+            if crate::waiting_questions::withheld(store, message.id)? {
+                continue;
+            }
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
                 received += read_part(store, &message, 1, 1, cf)?;

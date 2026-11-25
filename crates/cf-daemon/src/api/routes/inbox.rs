@@ -1,6 +1,8 @@
 //! `GET /api/inbox`: the messages waiting in the caller's inbox, newest first,
 //! at most a hundred: what the ledger holds for it, less what still waits for
-//! the human. It lists first lines, cut, and changes nothing: a message is
+//! the human and the reminders it is not shown (the ledger's
+//! `reminder_withheld`, filtered before the hundred). It lists first lines, cut,
+//! and changes nothing: a message is
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), which
 //! a list of previews never does. While the project is closed, a message no
 //! window was handed yet is listed with none of its text: that it waits
@@ -14,29 +16,20 @@ use crate::api::waits::Waits;
 
 /// How many messages the ledger gives an inbox when it is not told: Node's
 /// default.
-const LIMIT: i64 = 100;
+const LIMIT: usize = 100;
 
 pub(super) async fn handle(
     context: &Context,
     caller: &Caller,
     _request: Request,
 ) -> Result<Answer, Failure> {
-    context
-        .ledger
-        .borrow_mut()
-        .withdraw_stale_reminders(caller.participant.id)?;
     let messages = context
         .ledger
         .borrow()
-        .inbox(caller.participant.id, LIMIT)?;
+        .readable_inbox(caller.participant.id, LIMIT)?;
     let waits = Waits::now(context, caller)?;
     let summaries = messages
         .iter()
-        .filter(|message| {
-            !(message.state == "cancelled"
-                && message.sender.is_none()
-                && message.reason.as_deref() == Some(cf_ledger::STALE_REASON))
-        })
         .map(|message| value(&waits.summary(message)))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Answer::ok(json!({ "messages": summaries })))

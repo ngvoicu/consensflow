@@ -257,6 +257,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
                     "question_wait",
                     "question_wait_note",
                     "question_wait_reminder",
+                    "question_reminder_sent",
                 ]
                 .contains(&name.as_str())
                 && name != "question_resume_anchor"

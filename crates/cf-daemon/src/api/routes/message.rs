@@ -1,5 +1,6 @@
 //! `GET /api/inbox/<id>`: one message, whole, to its recipient or its sender,
-//! unless it still waits for the human. The id is the digits as the path had
+//! unless it still waits for the human, or is a reminder its recipient is not
+//! shown (the ledger's `reminder_withheld`). The id is the digits as the path had
 //! them: the 404 quotes them as typed. It changes nothing: a message read here
 //! is received when `cf` says it wrote it whole (`POST /api/answers/read`). A
 //! message no window was handed yet, read while the project is closed, waits for
@@ -23,11 +24,6 @@ pub(super) async fn handle(
     _request: Request,
     id: &str,
 ) -> Result<Answer, Failure> {
-    // A reminder whose question no longer waits is withdrawn, and shown to none.
-    context
-        .ledger
-        .borrow_mut()
-        .withdraw_stale_reminders(caller.participant.id)?;
     // Digits past what a message's number holds name no message.
     let found = match id.parse::<i64>() {
         Ok(number) => context.ledger.borrow().message(number)?,
@@ -39,10 +35,12 @@ pub(super) async fn handle(
         message.project_id == caller.project.id
             && (Some(message.recipient.as_str()) == handle || message.sender.as_deref() == handle)
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
-            && !(message.state == "cancelled"
-                && message.sender.is_none()
-                && message.reason.as_deref() == Some(cf_ledger::STALE_REASON))
     });
+    // A reminder withheld from its recipient is shown to none.
+    let visible = match visible {
+        Some(message) if context.ledger.borrow().reminder_withheld(message.id)? => None,
+        other => other,
+    };
     let until = match &visible {
         Some(message) => Waits::now(context, caller)?.until(message),
         None => None,

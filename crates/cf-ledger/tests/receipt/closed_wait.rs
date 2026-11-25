@@ -5,6 +5,7 @@
 //! reminders' cursor of their own. The clock starts at the chief's earliest
 //! receipt of the note, and a reminder goes only while the wait is eligible.
 
+use cf_base::time::{Clock as _, SystemClock};
 use cf_ledger::{HandOver, NewNote, QuestionWait, Read};
 
 use crate::fixture::{gated_world, world, World};
@@ -145,7 +146,11 @@ fn a_returned_answers_note_starts_the_same_clock() {
     assert_eq!(w.message(answer).state, "queued");
     restart(&mut w);
     let reason = w.message(answer).reason.unwrap();
-    let note: i64 = reason.strip_prefix("returned in m-").unwrap().parse().unwrap();
+    let note: i64 = reason
+        .strip_prefix("returned in m-")
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(wait_of(&w, question).is_none());
     w.deliver(note);
     let wait = wait_of(&w, question).expect("the returned answer's note was delivered");
@@ -169,7 +174,10 @@ fn a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action() {
     restart(&mut w);
     assert_eq!(closed_value(&w, question), 2);
     w.ledger.set_gate(w.project, false).unwrap();
-    let tell = w.ledger.tell_queued(w.project, task, "chief", "Use the revised output").unwrap();
+    let tell = w
+        .ledger
+        .tell_queued(w.project, task, "chief", "Use the revised output")
+        .unwrap();
     w.ledger.approve_message(answer, "human").unwrap();
     let note = note_with(&w, "Return these words");
     assert!(tell.id < note, "the tell was queued before the note");
@@ -183,7 +191,10 @@ fn a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action() {
         .sqlite()
         .execute("UPDATE message SET state='cancelled' WHERE id=?", [tell.id])
         .unwrap();
-    assert!(wait_of(&w, question).is_some(), "a tell taken back lets the reminders go on");
+    assert!(
+        wait_of(&w, question).is_some(),
+        "a tell taken back lets the reminders go on"
+    );
 }
 
 #[test]
@@ -208,7 +219,9 @@ fn a_closed_questions_reminder_has_a_cursor_of_its_own_and_the_open_ones_link_st
             assert_eq!(w.ledger.admit(open.id, &[]).unwrap(), HandOver::Withdrawn);
         } else {
             // handed, then given back after the close.
-            w.ledger.retry_delivery(open.id, "returned after close", true).unwrap();
+            w.ledger
+                .retry_delivery(open.id, "returned after close", true)
+                .unwrap();
             assert_eq!(w.message(open.id).state, "cancelled");
         }
         w.deliver(note);
@@ -223,7 +236,10 @@ fn a_closed_questions_reminder_has_a_cursor_of_its_own_and_the_open_ones_link_st
             .unwrap();
         assert_eq!(linked, Some(open.id), "the open question's link is kept");
         let wait = wait_of(&w, question).expect("the closed wait");
-        assert!(wait.reminder.is_none(), "the closed cursor is empty: handed={handed}");
+        assert!(
+            wait.reminder.is_none(),
+            "the closed cursor is empty: handed={handed}"
+        );
         let closed = w
             .ledger
             .remind_question(w.project, question, None, &reminder_note(task, "It closed"))
@@ -243,7 +259,11 @@ fn a_closed_questions_reminder_has_a_cursor_of_its_own_and_the_open_ones_link_st
             wait_of(&w, question).unwrap().reminder.map(|m| m.id),
             Some(closed.id)
         );
-        assert_ne!(w.message(closed.id).state, "cancelled", "the closed reminder stands");
+        assert_ne!(
+            w.message(closed.id).state,
+            "cancelled",
+            "the closed reminder stands"
+        );
     }
 }
 
@@ -260,37 +280,64 @@ fn none_is_written_while_one_is_queued_and_the_next_follows_its_delivery() {
         .unwrap();
     assert!(w
         .ledger
-        .remind_question(w.project, question, Some(first.id), &reminder_note(task, "Again"))
+        .remind_question(
+            w.project,
+            question,
+            Some(first.id),
+            &reminder_note(task, "Again")
+        )
         .unwrap()
         .is_none());
     assert!(w
         .ledger
-        .remind_question(w.project, question, None, &reminder_note(task, "Stale cursor"))
+        .remind_question(
+            w.project,
+            question,
+            None,
+            &reminder_note(task, "Stale cursor")
+        )
         .unwrap()
         .is_none());
     w.deliver(first.id);
     let second = w
         .ledger
-        .remind_question(w.project, question, Some(first.id), &reminder_note(task, "Second"))
+        .remind_question(
+            w.project,
+            question,
+            Some(first.id),
+            &reminder_note(task, "Second"),
+        )
         .unwrap();
-    assert!(second.is_some(), "a delivered reminder gives way to the next");
+    assert!(
+        second.is_some(),
+        "a delivered reminder gives way to the next"
+    );
 }
 
 /// What ends the wait, as each is done to the task or the member.
 fn end_it(w: &mut World, end: &str, task: i64, session: &str) {
     match end {
         "a queued tell" => {
-            w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+            w.ledger
+                .tell_queued(w.project, task, "chief", "New words")
+                .unwrap();
         }
         "a delivered tell" => {
-            let tell = w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+            let tell = w
+                .ledger
+                .tell_queued(w.project, task, "chief", "New words")
+                .unwrap();
             w.deliver(tell.id);
         }
         "a finish" => {
-            w.ledger.record_finished(w.project, task, "Done", (0, 0)).unwrap();
+            w.ledger
+                .record_finished(w.project, task, "Done", (0, 0))
+                .unwrap();
         }
         "a pause" => {
-            w.ledger.pause_task(w.project, task, Some("human"), None).unwrap();
+            w.ledger
+                .pause_task(w.project, task, Some("human"), None)
+                .unwrap();
         }
         "a cancel" => {
             w.ledger.cancel_task(w.project, task, "human").unwrap();
@@ -300,7 +347,9 @@ fn end_it(w: &mut World, end: &str, task: i64, session: &str) {
             w.ledger.delete_tasks(w.project, &[task]).unwrap();
         }
         "the member's removal" => {
-            let member = session.rsplit_once("-session-").map_or(session, |(handle, _)| handle);
+            let member = session
+                .rsplit_once("-session-")
+                .map_or(session, |(handle, _)| handle);
             w.ledger.remove_member(w.project, member).unwrap();
         }
         other => panic!("{other}"),
@@ -334,7 +383,12 @@ fn each_end_stops_the_reminders_and_withdraws_a_queued_one() {
         );
         assert!(
             w.ledger
-                .remind_question(w.project, question, Some(reminder.id), &reminder_note(task, "Late"))
+                .remind_question(
+                    w.project,
+                    question,
+                    Some(reminder.id),
+                    &reminder_note(task, "Late")
+                )
                 .unwrap()
                 .is_none(),
             "{end}: no further reminder is written"
@@ -357,7 +411,10 @@ fn a_failed_tell_lets_the_reminders_go_on() {
     let (task, _session, question) = asked(&mut w);
     restart(&mut w);
     w.deliver(close_note(&w, question));
-    let tell = w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+    let tell = w
+        .ledger
+        .tell_queued(w.project, task, "chief", "New words")
+        .unwrap();
     assert!(wait_of(&w, question).is_none());
     w.ledger
         .sqlite()
@@ -371,7 +428,9 @@ fn no_wait_where_main_makes_none() {
     // A task a person paused before the restart.
     let mut w = world();
     let (task, _session, question) = asked(&mut w);
-    w.ledger.pause_task(w.project, task, Some("human"), None).unwrap();
+    w.ledger
+        .pause_task(w.project, task, Some("human"), None)
+        .unwrap();
     restart(&mut w);
     if let Some(note) = w
         .ledger
@@ -396,7 +455,10 @@ fn no_wait_where_main_makes_none() {
         .sqlite()
         .execute("UPDATE message SET state='failed' WHERE id=?", [note])
         .unwrap();
-    assert!(wait_of(&w, question).is_none(), "a failed note starts no clock");
+    assert!(
+        wait_of(&w, question).is_none(),
+        "a failed note starts no clock"
+    );
 }
 
 #[test]
@@ -420,15 +482,26 @@ fn a_second_restart_keeps_the_wait_and_writes_no_second_note() {
     assert_eq!(wait_of(&w, question).unwrap().received_at, before);
 }
 
-/// The wait an earlier build left: a row only where the ledger names the note.
+/// A wait an earlier build left: its note is linked where the ledger names it,
+/// as a returned answer's reason does, and its clock is that note's receipt;
+/// else its clock starts at the update.
 #[test]
-fn the_migration_links_only_the_notes_the_ledger_names() {
-    for case in ["closed note", "returned answer", "note queued", "a tell since", "no note"] {
+fn the_migration_links_only_the_note_the_ledger_names() {
+    for case in [
+        "closed note",
+        "returned answer",
+        "returned answer queued",
+        "a tell since",
+    ] {
         let mut w = world();
         let (task, _session, question) = asked(&mut w);
-        let answer = (case == "returned answer").then(|| w.answer(question, "Use tabs").id);
+        let answer = case
+            .starts_with("returned answer")
+            .then(|| w.answer(question, "Use tabs").id);
         if case == "a tell since" {
-            w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+            w.ledger
+                .tell_queued(w.project, task, "chief", "New words")
+                .unwrap();
         }
         restart(&mut w);
         let note = match answer {
@@ -442,26 +515,27 @@ fn the_migration_links_only_the_notes_the_ledger_names() {
                 .unwrap(),
             None => close_note(&w, question),
         };
-        if case != "note queued" {
+        if case != "returned answer queued" {
             w.deliver(note);
         }
         let arrived = w.message(note).delivered_at;
-        // The ledger as alpha.13 left it: no table of waits, version 44.
-        w.edit(|db| {
-            cf_ledger::testing::undo_migration_0046(db).unwrap();
-            if case == "no note" {
-                db.execute("UPDATE message SET body='something else' WHERE id=?", [note]).unwrap();
-            }
-            db.pragma_update(None, "user_version", 44).unwrap();
-        });
+        let updated = now_ms();
+        as_alpha_13(&mut w);
         match case {
-            "closed note" | "returned answer" => {
-                let wait = wait_of(&w, question)
-                    .unwrap_or_else(|| panic!("{case}: reminded from the note's receipt"));
+            "closed note" => {
+                assert_eq!(note_of_wait(&w, question), None, "{case}: no text is read");
+                from_the_update(&w, question, updated);
+            }
+            "returned answer" => {
+                assert_eq!(note_of_wait(&w, question), Some(note), "{case}");
+                let wait = wait_of(&w, question).expect("timed from the note");
                 assert_eq!(Some(wait.received_at), arrived, "{case}");
             }
-            "note queued" => {
-                assert!(wait_of(&w, question).is_none(), "{case}: its note has not arrived");
+            "returned answer queued" => {
+                assert!(
+                    wait_of(&w, question).is_none(),
+                    "{case}: its note has not arrived"
+                );
                 w.deliver(note);
                 let wait = wait_of(&w, question).expect("timed when it arrives");
                 assert_eq!(Some(wait.received_at), w.message(note).delivered_at);
@@ -471,10 +545,10 @@ fn the_migration_links_only_the_notes_the_ledger_names() {
     }
 }
 
-/// A gated answer that had no note at the migration: its approval later writes
-/// and delivers the note, and that first link inserts the wait.
+/// A gated answer with no note yet at the migration: its wait starts at the
+/// update, and the note its approval writes later is linked without moving it.
 #[test]
-fn the_first_link_of_a_wait_an_earlier_build_left_inserts_it() {
+fn a_note_written_after_the_update_leaves_the_clock_at_the_update() {
     let mut w = gated_world();
     let (task, session, brief) = assigned(&mut w, true);
     w.deliver(brief);
@@ -484,24 +558,37 @@ fn the_first_link_of_a_wait_an_earlier_build_left_inserts_it() {
     let answer = w.answer(question, "Return this answer after approval").id;
     restart(&mut w);
     assert_eq!(closed_value(&w, question), 2);
-    // The migration found no note: no row.
-    w.ledger.sqlite().execute("DELETE FROM question_wait", []).unwrap();
-    w.ledger.set_gate(w.project, false).unwrap();
-    w.ledger.approve_message(answer, "human").unwrap();
-    let note = note_with(&w, "Return this answer after approval");
-    assert_eq!(w.message(answer).reason, Some(format!("returned in m-{note}")));
-    w.deliver(note);
-    let wait = wait_of(&w, question).expect("the first link inserted the wait");
-    assert_eq!(wait.closed.as_deref(), Some(RESTARTED));
-    assert_eq!(Some(wait.received_at), w.message(note).delivered_at);
+    let updated = now_ms();
+    as_alpha_13(&mut w);
+    from_the_update(&w, question, updated);
+    let clock = wait_of(&w, question).unwrap().received_at;
     let after: i64 = w
         .ledger
         .sqlite()
-        .query_row("SELECT after_id FROM question_wait WHERE question_id=?", [question], |r| r.get(0))
+        .query_row(
+            "SELECT after_id FROM question_wait WHERE question_id=?",
+            [question],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(after, question, "the conservative boundary of an old question");
+    assert_eq!(
+        after, question,
+        "the conservative boundary of an old question"
+    );
+    w.ledger.set_gate(w.project, false).unwrap();
+    w.ledger.approve_message(answer, "human").unwrap();
+    let note = note_with(&w, "Return this answer after approval");
+    assert_eq!(
+        w.message(answer).reason,
+        Some(format!("returned in m-{note}"))
+    );
+    w.deliver(note);
+    assert_eq!(note_of_wait(&w, question), Some(note));
+    assert_eq!(wait_of(&w, question).unwrap().received_at, clock);
     // Any words of the chief to that member since the question are its action.
-    w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+    w.ledger
+        .tell_queued(w.project, task, "chief", "New words")
+        .unwrap();
     assert!(wait_of(&w, question).is_none());
 }
 
@@ -519,11 +606,20 @@ fn a_project_close_writes_none_while_it_lasts_and_its_resume_keeps_the_clock() {
         .unwrap();
     w.ledger
         .sqlite()
-        .execute("UPDATE project SET state='suspended' WHERE id=?", [w.project])
+        .execute(
+            "UPDATE project SET state='suspended' WHERE id=?",
+            [w.project],
+        )
         .unwrap();
-    assert!(wait_of(&w, question).is_none(), "nothing is reminded while the project is closed");
+    assert!(
+        wait_of(&w, question).is_none(),
+        "nothing is reminded while the project is closed"
+    );
     w.begin(reminder.id);
-    assert_ne!(w.ledger.admit(reminder.id, &[]).unwrap(), HandOver::Admitted);
+    assert_ne!(
+        w.ledger.admit(reminder.id, &[]).unwrap(),
+        HandOver::Admitted
+    );
     w.ledger
         .sqlite()
         .execute("UPDATE project SET state='open' WHERE id=?", [w.project])
@@ -549,10 +645,15 @@ fn a_project_with_a_recorded_wait_is_deleted_with_it() {
         .unwrap()
         .unwrap();
     w.deliver(reminder.id);
-    w.ledger.record_finished(w.project, task, "Done", (0, 0)).unwrap();
+    w.ledger
+        .record_finished(w.project, task, "Done", (0, 0))
+        .unwrap();
     w.ledger
         .sqlite()
-        .execute("UPDATE project SET state='suspended' WHERE id=?", [w.project])
+        .execute(
+            "UPDATE project SET state='suspended' WHERE id=?",
+            [w.project],
+        )
         .unwrap();
     let rows: i64 = w
         .ledger
@@ -572,11 +673,12 @@ fn a_project_with_a_recorded_wait_is_deleted_with_it() {
     assert_eq!(rows, 0, "the wait goes with its question");
 }
 
-/// The ledger as alpha.13 left it: no table of waits, version 44; opened again.
+/// The ledger as alpha.13 left it: no table of waits, opened again by this build,
+/// which applies this migration alone.
 fn as_alpha_13(w: &mut World) {
     w.edit(|db| {
         cf_ledger::testing::undo_migration_0046(db).unwrap();
-        db.pragma_update(None, "user_version", 44).unwrap();
+        db.pragma_update(None, "user_version", 45).unwrap();
     });
 }
 
@@ -584,33 +686,65 @@ fn quoting(question: i64, task: i64) -> String {
     format!("Re your notice: question m-{question} on T-{task} closed when the project closed, so what now?")
 }
 
-/// Round 2, 2: a member's quotation of the notice's words is not the notice.
+/// A member's quotation of the notice's words is not read: no note is linked, and
+/// the clock starts at the update.
 #[test]
 fn the_migration_takes_no_members_quotation_for_the_closure_notice() {
-    // The genuine notice reaches the chief after the quotation was written.
     let mut w = world();
     let (task, session, question) = asked(&mut w);
     let quote = w
         .ledger
-        .note(w.project, &NewNote { from: Some(session.clone()), to: "chief".into(), task: None, body: quoting(question, task) })
+        .note(
+            w.project,
+            &NewNote {
+                from: Some(session.clone()),
+                to: "chief".into(),
+                task: None,
+                body: quoting(question, task),
+            },
+        )
         .unwrap()
         .id;
     w.deliver(quote);
     restart(&mut w);
-    let genuine = close_note(&w, question);
-    assert_ne!(genuine, quote);
-    w.deliver(genuine);
+    w.deliver(close_note(&w, question));
+    let updated = now_ms();
     as_alpha_13(&mut w);
-    let wait = wait_of(&w, question).expect("the genuine notice names the wait");
-    assert_eq!(Some(wait.received_at), w.message(genuine).delivered_at);
-    let linked: i64 = w
-        .ledger
-        .sqlite()
-        .query_row("SELECT note_id FROM question_wait WHERE question_id=?", [question], |r| r.get(0))
-        .unwrap();
-    assert_eq!(linked, genuine, "not the member's note m-{quote}");
+    assert_eq!(note_of_wait(&w, question), None);
+    from_the_update(&w, question, updated);
+}
 
-    // No closure notice exists yet (its answer is still gated): the quotation links nothing.
+/// An old wait's clock, where the ledger names no note: the update's own time.
+fn from_the_update(w: &World, question: i64, since_ms: i64) {
+    let wait = wait_of(w, question).expect("reminded from the update");
+    let at = cf_base::time::parse(&wait.received_at).expect("a time");
+    // The migration reads SQLite's clock, which keeps milliseconds.
+    assert!(
+        at >= since_ms - 1,
+        "{at} from {since_ms}: {}",
+        wait.received_at
+    );
+}
+
+fn now_ms() -> i64 {
+    SystemClock.now_ms()
+}
+
+fn note_of_wait(w: &World, question: i64) -> Option<i64> {
+    w.ledger
+        .sqlite()
+        .query_row(
+            "SELECT note_id FROM question_wait WHERE question_id=?",
+            [question],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+/// Round 3 (review T-2019): a quotation that begins with the writer's own
+/// sentence is no notice. The migration matches no text.
+#[test]
+fn the_migration_takes_no_quotation_that_begins_with_the_writers_sentence() {
     let mut w = gated_world();
     let (task, session, brief) = assigned(&mut w, true);
     w.deliver(brief);
@@ -619,44 +753,68 @@ fn the_migration_takes_no_members_quotation_for_the_closure_notice() {
     w.deliver(question);
     let quote = w
         .ledger
-        .note(w.project, &NewNote { from: Some(session.clone()), to: "chief".into(), task: None, body: quoting(question, task) })
+        .note(w.project, &NewNote {
+            from: Some(session.clone()),
+            to: "chief".into(),
+            task: None,
+            body: format!("@{session}'s question m-{question} on T-{task} closed when the project closed.\nThat is an example from the draft."),
+        })
         .unwrap()
         .id;
     w.ledger.approve_message(quote, "human").unwrap();
     w.deliver(quote);
-    w.answer(question, "Return this").id;
+    w.answer(question, "Return this");
     restart(&mut w);
+    let updated = now_ms();
     as_alpha_13(&mut w);
-    assert!(wait_of(&w, question).is_none(), "no closure notice: no clock");
-    let rows: i64 = w
-        .ledger
-        .sqlite()
-        .query_row("SELECT count(*) FROM question_wait", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(rows, 0);
+    assert_ne!(
+        note_of_wait(&w, question),
+        Some(quote),
+        "the quotation is no notice"
+    );
+    from_the_update(&w, question, updated);
 }
 
+/// Round 3 (review T-2019): a renamed member's real notice names the old handle;
+/// the migration reads no handle, so the wait is kept.
 #[test]
-fn the_migration_skips_a_closure_notice_it_cannot_tell_from_another() {
+fn the_migration_keeps_the_wait_of_a_renamed_member() {
     let mut w = world();
-    let (task, _session, question) = asked(&mut w);
+    let (_task, session, question) = asked(&mut w);
     restart(&mut w);
-    let first = close_note(&w, question);
-    let body = w.message(first).body;
-    w.ledger
-        .note(w.project, &NewNote { from: None, to: "chief".into(), task: None, body })
+    w.deliver(close_note(&w, question));
+    let window = w.id(&session);
+    w.edit(|db| {
+        db.execute(
+            "UPDATE participant SET handle='hermes-session-1', former_handles=?1 WHERE id=?2",
+            rusqlite::params![format!("[\"{session}\"]"), window],
+        )
         .unwrap();
-    w.deliver(first);
+    });
+    let updated = now_ms();
     as_alpha_13(&mut w);
-    assert!(wait_of(&w, question).is_none(), "two notices match: skipped");
-    let _ = task;
+    from_the_update(&w, question, updated);
 }
 
-/// Round 2, 3: the inbox lists, serves and takes the receipt of no reminder the
-/// wait no longer allows.
+/// What the chief's inbox lists of `reminder`.
+fn listed(w: &World, reminder: i64) -> bool {
+    w.ledger
+        .readable_inbox(w.id("chief"), 100)
+        .unwrap()
+        .iter()
+        .any(|m| m.id == reminder)
+}
+
+/// Round 2 and 3: the inbox lists and takes the receipt of no reminder the wait
+/// no longer allows, and reading changes nothing.
 #[test]
 fn the_inbox_shows_no_stale_reminder_and_takes_no_receipt_of_it() {
-    for (end, in_progress) in [("a tell", false), ("a tell", true), ("a pause", false), ("a pause", true)] {
+    for (end, in_progress) in [
+        ("a tell", false),
+        ("a tell", true),
+        ("a pause", false),
+        ("a pause", true),
+    ] {
         let mut w = world();
         let (task, _session, question) = asked(&mut w);
         restart(&mut w);
@@ -669,32 +827,112 @@ fn the_inbox_shows_no_stale_reminder_and_takes_no_receipt_of_it() {
         if in_progress {
             w.begin(reminder.id);
         }
-        if end == "a tell" {
-            w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
-        } else {
-            w.ledger.pause_task(w.project, task, Some("human"), None).unwrap();
-        }
-        let chief = w.id("chief");
-        let shown = w.ledger.withdraw_stale_reminders(chief).unwrap();
-        assert_eq!(shown, vec![reminder.id], "{end}, in progress {in_progress}");
         assert!(
-            w.ledger
-                .inbox(chief, 100)
-                .unwrap()
-                .iter()
-                .filter(|m| m.id == reminder.id)
-                .all(|m| m.state == "cancelled"),
-            "{end}, in progress {in_progress}: not listed as pending"
+            listed(&w, reminder.id),
+            "{end}, in progress {in_progress}: it stands"
         );
-        let read = w
-            .ledger
-            .receive_read(chief, &[reminder.id], Read::Inbox, &cf_proto::cf_word::CfWord::bare())
-            .unwrap();
-        assert_eq!(read, 0, "{end}, in progress {in_progress}: no receipt");
+        if end == "a tell" {
+            w.ledger
+                .tell_queued(w.project, task, "chief", "New words")
+                .unwrap();
+        } else {
+            w.ledger
+                .pause_task(w.project, task, Some("human"), None)
+                .unwrap();
+        }
+        let before = w.message(reminder.id);
+        assert!(
+            w.ledger.reminder_withheld(reminder.id).unwrap(),
+            "{end}, in progress {in_progress}"
+        );
+        assert!(!listed(&w, reminder.id), "{end}, in progress {in_progress}");
+        read_in_the_inbox(&mut w, reminder.id);
         let after = w.message(reminder.id);
-        assert_eq!(after.state, "cancelled", "{end}, in progress {in_progress}");
+        assert_eq!(
+            after.state, before.state,
+            "{end}, in progress {in_progress}: a read changes nothing"
+        );
         assert!(after.receipt.get("readEarly").is_none());
     }
+}
+
+/// A reminder that failed and was replaced is shown to no reader, though no
+/// cursor names it any more.
+#[test]
+fn a_reminder_that_failed_and_was_replaced_is_not_listed() {
+    let mut w = world();
+    let (task, _session, question) = asked(&mut w);
+    restart(&mut w);
+    w.deliver(close_note(&w, question));
+    let first = w
+        .ledger
+        .remind_question(w.project, question, None, &reminder_note(task, "It closed"))
+        .unwrap()
+        .unwrap();
+    w.begin(first.id);
+    w.ledger
+        .fail_delivery(first.id, "the window refused it")
+        .unwrap();
+    let second = w
+        .ledger
+        .remind_question(
+            w.project,
+            question,
+            Some(first.id),
+            &reminder_note(task, "Still closed"),
+        )
+        .unwrap()
+        .expect("the next takes the cursor");
+    assert!(!listed(&w, first.id), "the failed one is nobody's");
+    assert!(listed(&w, second.id));
+}
+
+/// A reminder the chief had stays its own, whatever the wait does after.
+#[test]
+fn a_delivered_reminder_stays_readable() {
+    let mut w = world();
+    let (task, _session, question) = asked(&mut w);
+    restart(&mut w);
+    w.deliver(close_note(&w, question));
+    let reminder = w
+        .ledger
+        .remind_question(w.project, question, None, &reminder_note(task, "It closed"))
+        .unwrap()
+        .unwrap();
+    w.deliver(reminder.id);
+    w.ledger.cancel_task(w.project, task, "human").unwrap();
+    assert!(listed(&w, reminder.id));
+}
+
+/// A reminder a delivery gave back while the project was closed is held, not
+/// withdrawn, and goes after the Resume.
+#[test]
+fn a_reminder_given_back_during_a_close_is_kept() {
+    let mut w = world();
+    let (task, _session, question) = asked(&mut w);
+    restart(&mut w);
+    w.deliver(close_note(&w, question));
+    let reminder = w
+        .ledger
+        .remind_question(w.project, question, None, &reminder_note(task, "It closed"))
+        .unwrap()
+        .unwrap();
+    w.begin(reminder.id);
+    w.ledger.set_project_state(w.project, "suspended").unwrap();
+    w.ledger
+        .pause_with_project(w.project, task, "the project closed")
+        .unwrap();
+    w.ledger
+        .retry_delivery(reminder.id, "its window ended", true)
+        .unwrap();
+    assert_eq!(
+        w.message(reminder.id).state,
+        "queued",
+        "held for the Resume"
+    );
+    assert!(!listed(&w, reminder.id), "hidden while closed");
+    w.ledger.set_project_state(w.project, "open").unwrap();
+    assert!(listed(&w, reminder.id), "back at the Resume");
 }
 
 #[test]
@@ -709,10 +947,15 @@ fn a_reminder_that_still_stands_is_read_in_the_inbox_as_before() {
         .unwrap()
         .unwrap();
     let chief = w.id("chief");
-    assert!(w.ledger.withdraw_stale_reminders(chief).unwrap().is_empty());
+    assert!(!w.ledger.reminder_withheld(reminder.id).unwrap());
     let read = w
         .ledger
-        .receive_read(chief, &[reminder.id], Read::Inbox, &cf_proto::cf_word::CfWord::bare())
+        .receive_read(
+            chief,
+            &[reminder.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .unwrap();
     assert_eq!(read, 1);
 }
@@ -733,15 +976,26 @@ fn a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted() {
         if in_progress {
             w.begin(reminder.id);
         }
-        w.ledger.tell_queued(w.project, task, "chief", "New words").unwrap();
+        w.ledger
+            .tell_queued(w.project, task, "chief", "New words")
+            .unwrap();
         let chief = w.id("chief");
         let read = w
             .ledger
-            .receive_read(chief, &[reminder.id], Read::Inbox, &cf_proto::cf_word::CfWord::bare())
+            .receive_read(
+                chief,
+                &[reminder.id],
+                Read::Inbox,
+                &cf_proto::cf_word::CfWord::bare(),
+            )
             .unwrap();
         assert_eq!(read, 0, "in progress {in_progress}");
         let after = w.message(reminder.id);
-        assert_eq!(after.state, "cancelled", "in progress {in_progress}");
+        let pending = if in_progress { "delivering" } else { "queued" };
+        assert_eq!(
+            after.state, pending,
+            "in progress {in_progress}: a read changes nothing"
+        );
         assert!(after.receipt.get("readEarly").is_none());
     }
 }

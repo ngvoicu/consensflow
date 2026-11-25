@@ -4353,13 +4353,19 @@ fn t1924_reminded(restart: bool) {
                 .ledger
                 .borrow()
                 .sqlite()
-                .prepare("SELECT id FROM message WHERE kind='note' AND instr(body, 'closed when')>0")
+                .prepare(
+                    "SELECT id FROM message WHERE kind='note' AND instr(body, 'closed when')>0",
+                )
                 .unwrap()
                 .query_map([], |row| row.get::<_, i64>(0))
                 .unwrap()
                 .map(|id| context.message(id.unwrap())),
         )
-        .find(|m| m.kind == "note" && m.body.contains(&format!("question m-{} on T-2", question.id)))
+        .find(|m| {
+            m.kind == "note"
+                && m.body
+                    .contains(&format!("question m-{} on T-2", question.id))
+        })
         .expect("main's one note");
     let arrived = context
         .message(note.id)
@@ -4375,12 +4381,28 @@ fn t1924_reminded(restart: bool) {
     let first = reminders(&context);
     assert_eq!(first.len(), 1, "one reminder at 30 minutes: {first:?}");
     let body = &first[0].body;
-    assert!(body.contains(&format!("T-2's question m-{} closed when {why}", question.id)), "{body}");
-    assert!(body.contains("has waited 30 minutes since for your words"), "{body}");
-    assert!(body.contains("Tell @diana-brisk-birch with `cf tell T-2 \"…\"`."), "{body}");
+    assert!(
+        body.contains(&format!(
+            "T-2's question m-{} closed when {why}",
+            question.id
+        )),
+        "{body}"
+    );
+    assert!(
+        body.contains("has waited 30 minutes since for your words"),
+        "{body}"
+    );
+    assert!(
+        body.contains("Tell @diana-brisk-birch with `cf tell T-2 \"…\"`."),
+        "{body}"
+    );
     assert!(!body.contains("Answer it"), "{body}");
     step();
-    assert_eq!(reminders(&context).len(), 1, "none stacks while one is on its way");
+    assert_eq!(
+        reminders(&context).len(),
+        1,
+        "none stacks while one is on its way"
+    );
     context.adapter.answer("chief", "Noted.");
     for _ in 0..3 {
         step();
@@ -4390,13 +4412,25 @@ fn t1924_reminded(restart: bool) {
     {
         context.advance(119 * 60_000);
         step();
-        assert_eq!(reminders(&context).len(), 1, "the next is two hours after it");
+        assert_eq!(
+            reminders(&context).len(),
+            1,
+            "the next is two hours after it"
+        );
         context.advance(2 * 60_000);
         step();
-        assert_eq!(reminders(&context).len(), 2, "two hours after the first arrived");
+        assert_eq!(
+            reminders(&context).len(),
+            2,
+            "two hours after the first arrived"
+        );
     }
     // The chief tells the member: the reminders end.
-    context.ledger.borrow_mut().tell_queued(project, 2, "chief", "Use ANSI").unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 2, "chief", "Use ANSI")
+        .unwrap();
     context.advance(5 * 60 * 60_000);
     step();
     assert_eq!(reminders(&context).len(), 2);

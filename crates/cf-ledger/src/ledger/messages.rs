@@ -321,12 +321,11 @@ impl Ledger {
         crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
     }
 
-    /// Withdraws each unhanded reminder of `recipient` whose wait no longer allows
-    /// it, as transport does at admission, before the inbox lists it, serves its
-    /// text or takes a receipt of it: the ones it withdrew.
-    pub fn withdraw_stale_reminders(&mut self, recipient: i64) -> Result<Vec<i64>, LedgerError> {
-        self.store
-            .write(|store| crate::waiting_questions::withdraw_stale(store, recipient))
+    /// Whether `message` is a reminder its recipient is not shown now: not listed,
+    /// served or received ([`Ledger::readable_inbox`], [`Ledger::receive_read`]).
+    /// Asking changes nothing.
+    pub fn reminder_withheld(&self, message: i64) -> Result<bool, LedgerError> {
+        crate::waiting_questions::withheld(&self.store, message)
     }
 
     /// One message, or none.
@@ -1316,5 +1315,15 @@ impl Ledger {
     /// A participant's messages, newest first, at most `limit` (Node's default: 100).
     pub fn inbox(&self, participant_id: i64, limit: i64) -> Result<Vec<MessageView>, LedgerError> {
         messages::inbox(&self.store, participant_id, limit)
+    }
+
+    /// [`Ledger::inbox`] as its owner reads it: no reminder it is not shown
+    /// ([`Ledger::reminder_withheld`]), and `limit` counts what is shown.
+    pub fn readable_inbox(
+        &self,
+        participant_id: i64,
+        limit: usize,
+    ) -> Result<Vec<MessageView>, LedgerError> {
+        crate::messages::readable_inbox(&self.store, participant_id, limit)
     }
 }
