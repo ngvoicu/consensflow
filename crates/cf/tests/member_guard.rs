@@ -98,6 +98,17 @@ impl Drop for Window {
     }
 }
 
+/// Git for Windows's `bash.exe`, where it installs.
+#[cfg(windows)]
+fn git_bash() -> PathBuf {
+    let found = ["ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(|name| std::env::var_os(name))
+        .map(|root| Path::new(&root).join(r"Git\bin\bash.exe"))
+        .find(|bash| bash.is_file());
+    found.expect("Git Bash is installed with Git for Windows")
+}
+
 /// A recorder named `command` in `folder`: it writes `<command>.reached` beside itself.
 #[cfg(windows)]
 fn record(folder: &Path, command: &str) {
@@ -191,6 +202,54 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
             "{shell}"
         );
     }
+    // Git Bash, which Claude Code, Pi and Devin run commands in: it turns `/PID` into a
+    // path before a program reads it, so `//PID` is its spelling, and every other call is
+    // refused.
+    let bash = git_bash();
+    // The test's own executable stands for the real taskkill (below), so a call that goes
+    // through ends nothing.
+    let fake_root = window.home.join("bash-root");
+    std::fs::create_dir_all(fake_root.join("System32")).unwrap();
+    std::fs::copy(
+        std::env::current_exe().unwrap(),
+        fake_root.join(r"System32\taskkill.exe"),
+    )
+    .unwrap();
+    for (line, goes_through) in [
+        ("taskkill //PID 123", true),
+        ("taskkill -PID 123 //F", true),
+        ("taskkill /PID 123", false),
+        ("taskkill /IM x.exe", false),
+        ("taskkill //IM x.exe", false),
+        ("taskkill /FI 'IMAGENAME eq x.exe'", false),
+        ("tskill notepad", false),
+    ] {
+        let ran = Command::new(&bash)
+            .args(["--noprofile", "--norc", "-c", line])
+            .env("PATH", &window.path)
+            .env("SystemRoot", &fake_root)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&ran.stderr);
+        assert_eq!(
+            !said.contains("ConsensFlow:"),
+            goes_through,
+            "Git Bash {line}: {said}"
+        );
+        assert_eq!(
+            ran.status.code() == Some(0),
+            goes_through,
+            "Git Bash {line}: {said}"
+        );
+        eprintln!(
+            "SHELL git-bash {line}: {}",
+            if goes_through { "through" } else { "refused" }
+        );
+    }
+    assert!(
+        !window.reached("taskkill") && !window.reached("tskill"),
+        "Git Bash"
+    );
     // By number it is the real program, with the arguments as they were: a SystemRoot of the
     // test's holds a harmless program as the real taskkill: the test's own executable.
     let root = window.home.join("root");

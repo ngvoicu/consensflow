@@ -25,6 +25,9 @@ mod boundary;
 
 pub use boundary::{DaemonRecords, DaemonTime};
 
+/// The variable macOS's `path_helper` reads its files' root from.
+const PATH_HELPER_ROOT: &str = "PATH_HELPER_ROOT";
+
 /// The environment a window's pane starts with before its harness's own (as
 /// Node's daemon gave it): what the app took of a terminal's environment for its
 /// daemon ([`TERMINAL_ENV`]), where the API is, which project and participant the
@@ -43,10 +46,10 @@ pub struct WindowEnv {
     /// window is told how a command starts in it ([`cf_proto::cf_word::ENV`]), for the
     /// harness it is and the platform, and every `cf` it runs says its own hints so.
     cf: Option<(String, bool)>,
-    /// The `ZDOTDIR` the daemon was given, which the person's own zsh reads its files from.
-    zdotdir: Option<String>,
-    /// What the guard's shell layer adds to a window's environment (`member_guard::shell_vars`).
-    guard_vars: Vec<(String, String)>,
+    /// Whether the person has a `PATH_HELPER_ROOT` of their own, which their windows keep.
+    has_path_helper_root: bool,
+    /// The guard's `PATH_HELPER_ROOT` (`member_guard::mirror`), where the windows are given one.
+    guard_root: Option<String>,
 }
 
 impl WindowEnv {
@@ -62,14 +65,14 @@ impl WindowEnv {
             },
             terminal: terminal_of(env),
             cf: None,
-            zdotdir: env.text("ZDOTDIR").map(str::to_owned),
-            guard_vars: Vec::new(),
+            has_path_helper_root: env.os(PATH_HELPER_ROOT).is_some(),
+            guard_root: None,
         }
     }
 
-    /// What the guard's shell layer adds to every window's environment.
-    pub fn guard_vars(&self) -> &[(String, String)] {
-        &self.guard_vars
+    /// The `PATH_HELPER_ROOT` every window is given, where it is given one.
+    pub fn guard_root(&self) -> Option<&str> {
+        self.guard_root.as_deref()
     }
 
     /// The PATH every window starts with.
@@ -83,15 +86,21 @@ impl WindowEnv {
     pub fn with_guard(mut self, folder: &std::path::Path) -> Self {
         let delimiter = if cfg!(windows) { ';' } else { ':' };
         self.path = format!("{}{delimiter}{}", folder.display(), self.path);
-        // A login shell puts the system's folders before the PATH's first: zsh and bash get
-        // functions of the same names as well, which no PATH reaches past.
-        let person = self
-            .terminal
-            .iter()
-            .find(|(name, _)| name == "ZDOTDIR")
-            .map(|(_, value)| value.clone())
-            .or_else(|| self.zdotdir.clone());
-        self.guard_vars = crate::member_guard::shell_vars(folder, person.as_deref());
+        self
+    }
+
+    /// These windows given `root` as their `PATH_HELPER_ROOT`, unless the person has one of
+    /// their own, which is theirs.
+    #[must_use]
+    pub fn with_path_helper_root(mut self, root: &std::path::Path) -> Self {
+        let theirs = self.has_path_helper_root
+            || self
+                .terminal
+                .iter()
+                .any(|(name, _)| name == PATH_HELPER_ROOT);
+        if !theirs {
+            self.guard_root = Some(root.to_string_lossy().into_owned());
+        }
         self
     }
 
@@ -138,7 +147,6 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
 impl PaneEnv for WindowEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
         let mut env = self.terminal.clone();
-        env.retain(|(name, _)| !self.guard_vars.iter().any(|(own, _)| own == name));
         env.extend([
             ("CONSENSFLOW_URL".to_owned(), self.url.clone()),
             ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),
@@ -148,7 +156,9 @@ impl PaneEnv for WindowEnv {
             ),
         ]);
         env.push(("PATH".to_owned(), self.path.clone()));
-        env.extend(self.guard_vars.iter().cloned());
+        if let Some(root) = &self.guard_root {
+            env.push((PATH_HELPER_ROOT.to_owned(), root.clone()));
+        }
         if let Some((pane_cf, windows)) = &self.cf {
             let word = cf_word_of(participant, pane_cf, *windows);
             env.push((CF_ENV.to_owned(), word.as_str().to_owned()));

@@ -67,23 +67,26 @@ fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and
     let frames = rig.open_frames();
     assert!(frames.iter().any(|frame| frame["id"] == chief["id"]));
     for frame in &frames {
-        // The shell layer, which a login shell's reordering of the PATH cannot go past.
-        assert_eq!(
-            frame["env"]["ZDOTDIR"].as_str(),
-            Some(guard.join("zsh").to_string_lossy().as_ref()),
+        // A Mac's login shells keep the folder first through the root their `path_helper`
+        // reads; nothing else of the person's shell is touched.
+        if cfg!(target_os = "macos") {
+            let root = rig.home().join("member-guard-root");
+            assert_eq!(
+                frame["env"]["PATH_HELPER_ROOT"].as_str(),
+                Some(root.to_string_lossy().as_ref()),
+                "{}",
+                frame["id"]
+            );
+            let paths = std::fs::read_to_string(root.join("etc/paths"))?;
+            assert_eq!(paths.lines().next(), Some(guard.to_string_lossy().as_ref()));
+        }
+        let env = frame["env"].as_object().ok_or("no env")?;
+        assert!(
+            env.keys()
+                .all(|name| name != "ZDOTDIR" && !name.starts_with("BASH_FUNC_")),
             "{}",
             frame["id"]
         );
-        for name in ["pkill", "killall"] {
-            let function = frame["env"][format!("BASH_FUNC_{name}%%")]
-                .as_str()
-                .unwrap_or_default();
-            assert!(
-                function.contains("member-guard"),
-                "{}: {function}",
-                frame["id"]
-            );
-        }
         for name in ["pkill", "killall"] {
             let found = found_first(frame, name)
                 .ok_or_else(|| format!("{}: no {name} on its PATH", frame["id"]))?;

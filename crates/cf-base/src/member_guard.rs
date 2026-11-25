@@ -104,7 +104,8 @@ pub enum Verdict {
 pub fn refusal(guarded: Guarded) -> String {
     let name = guarded.name();
     let end = if matches!(guarded, Guarded::Taskkill | Guarded::Tskill) {
-        "End a program you started with `taskkill /PID <number>`, after checking it's yours."
+        "End a program you started with `taskkill /PID <number>` (`taskkill //PID <number>` in \
+         Git Bash), after checking it's yours."
     } else {
         "End a program you started by its number, after checking it's yours."
     };
@@ -119,35 +120,56 @@ pub fn refusal(guarded: Guarded) -> String {
     )
 }
 
-/// What `guarded` does with `args`: `pkill` and `killall` refuse every call; `taskkill`
-/// refuses `/IM` and `/FI` and runs the real one for any other call; `tskill` refuses a
-/// name and runs the real one for a number.
+/// What `guarded` does with `args`: `pkill` and `killall` refuse every call. `taskkill` and
+/// `tskill` go by what is allowed, not by what is refused: only a call that is purely by
+/// number runs the real one, in the spellings a shell hands over (`/PID` or `-PID`, any
+/// case). Git Bash turns an option written `/PID` into a path (`C:/Program Files/Git/PID`)
+/// before the program reads it, and such a call is refused with every other: `//PID` is
+/// Git Bash's spelling.
 pub fn judge(guarded: Guarded, args: &[OsString], env: &Env) -> Verdict {
-    let refused = match guarded {
-        Guarded::Pkill | Guarded::Killall => true,
-        Guarded::Taskkill => args.iter().any(|arg| by_name_or_filter(arg)),
-        Guarded::Tskill => args
-            .iter()
-            .filter(|arg| !is_switch(arg))
-            .any(|arg| !arg.to_string_lossy().chars().all(|c| c.is_ascii_digit())),
+    let by_number = match guarded {
+        Guarded::Pkill | Guarded::Killall => false,
+        Guarded::Taskkill => taskkill_by_number(args),
+        Guarded::Tskill => tskill_by_number(args),
     };
-    if refused {
-        Verdict::Refuse(refusal(guarded))
-    } else {
+    if by_number {
         Verdict::Run(guarded.real(env), args.to_vec())
+    } else {
+        Verdict::Refuse(refusal(guarded))
     }
 }
 
-fn is_switch(arg: &OsStr) -> bool {
+/// The name of the switch `arg` is, in lower case, when it is one (`/PID` and `-PID` alike).
+fn switch(arg: &OsStr) -> Option<String> {
     let text = arg.to_string_lossy();
-    text.starts_with('/') || text.starts_with('-')
+    let name = text.strip_prefix('/').or_else(|| text.strip_prefix('-'))?;
+    Some(name.to_lowercase())
 }
 
-/// Whether `arg` is taskkill's `/IM` or `/FI` (`-IM` and `-FI` too, as taskkill reads them),
-/// in any case: the two that select programs by what they are called.
-fn by_name_or_filter(arg: &OsStr) -> bool {
-    let text = arg.to_string_lossy().to_lowercase();
-    ["/im", "/fi", "-im", "-fi"].contains(&text.as_str())
+fn number(arg: &OsStr) -> bool {
+    let text = arg.to_string_lossy();
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
+}
+
+/// `/PID <number>`, once or more, with `/F` and `/T` or neither, and nothing else.
+fn taskkill_by_number(args: &[OsString]) -> bool {
+    let mut args = args.iter();
+    let mut named = 0;
+    while let Some(arg) = args.next() {
+        match switch(arg).as_deref() {
+            Some("f" | "t") => {}
+            Some("pid") if args.next().is_some_and(|value| number(value)) => named += 1,
+            _ => return false,
+        }
+    }
+    named > 0
+}
+
+/// One number or more, with `/V` or not, and nothing else.
+fn tskill_by_number(args: &[OsString]) -> bool {
+    args.iter()
+        .all(|arg| number(arg) || switch(arg).as_deref() == Some("v"))
+        && args.iter().any(|arg| number(arg))
 }
 
 #[cfg(test)]
@@ -182,17 +204,40 @@ mod tests {
         let env = Env::from_vars([("SystemRoot", r"D:\Win")]);
         let words = "ConsensFlow: taskkill by name isn't run in member windows. It ends every \
              program whose name matches, other members' and the owner's among them. End a \
-             program you started with `taskkill /PID <number>`, after checking it's yours.";
+             program you started with `taskkill /PID <number>` (`taskkill //PID <number>` in \
+             Git Bash), after checking it's yours.";
         for call in [
             &["/IM", "x.exe"][..],
             &["/F", "/im", "x.exe"][..],
             &["/FI", "IMAGENAME eq x.exe"][..],
             &["/pid", "5", "/Fi", "PID gt 1"][..],
             &["-IM", "x.exe"][..],
+            &["C:/Program Files/Git/IM", "x.exe"][..],
+            &["C:/Program Files/Git/FI", "IMAGENAME eq x.exe"][..],
+            &["C:/Program Files/Git/PID", "123"][..],
+            &["/PID", "123", "/IM", "x.exe"][..],
+            &["/PID", "x.exe"][..],
+            &["/PID"][..],
+            &["/F"][..],
+            &["/S", "other", "/PID", "123"][..],
+            &["/?"][..],
+            &[][..],
         ] {
             assert_eq!(
                 judge(Guarded::Taskkill, &args(call), &env),
                 Verdict::Refuse(words.to_owned()),
+                "{call:?}"
+            );
+        }
+        for call in [
+            &["-pid", "123"][..],
+            &["/pid", "1", "/PID", "2", "-f", "/t"][..],
+        ] {
+            assert!(
+                matches!(
+                    judge(Guarded::Taskkill, &args(call), &env),
+                    Verdict::Run(..)
+                ),
                 "{call:?}"
             );
         }
@@ -212,10 +257,23 @@ mod tests {
             judge(Guarded::Tskill, &args(&["notepad"]), &env),
             Verdict::Refuse(_)
         ));
-        assert!(matches!(
-            judge(Guarded::Tskill, &args(&["12", "/v"]), &env),
-            Verdict::Run(..)
-        ));
+        for call in [&["12"][..], &["12", "/v"][..]] {
+            assert!(matches!(
+                judge(Guarded::Tskill, &args(call), &env),
+                Verdict::Run(..)
+            ));
+        }
+        for call in [
+            &["12", "notepad"][..],
+            &["/a", "notepad"][..],
+            &[][..],
+            &["/v"][..],
+        ] {
+            assert!(matches!(
+                judge(Guarded::Tskill, &args(call), &env),
+                Verdict::Refuse(_)
+            ));
+        }
     }
 
     #[test]

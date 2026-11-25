@@ -44,14 +44,14 @@ fn the_guards_folder_holds_cf_under_each_name_of_the_platform_and_is_made_again_
     let expected: &[&str] = if cfg!(windows) {
         &["taskkill.exe", "tskill.exe"]
     } else {
-        &["killall", "pkill", "zsh"]
+        &["killall", "pkill"]
     };
     assert_eq!(names, expected);
     // Again, with the files in place, and with one gone.
     install(&home, &cf).unwrap();
     std::fs::remove_file(folder.join(expected[0])).unwrap();
     install(&home, &cf).unwrap();
-    for name in expected.iter().filter(|name| **name != "zsh") {
+    for name in expected {
         assert_eq!(std::fs::read(folder.join(name)).unwrap(), b"cf");
     }
     std::fs::remove_dir_all(&home).unwrap();
@@ -83,34 +83,130 @@ fn tempfile_dir(what: &str) -> PathBuf {
     dir
 }
 
+/// An `etc` as the system's, with what `path_helper` reads of it.
+#[cfg(unix)]
+fn system_etc(what: &str) -> PathBuf {
+    let etc = tempfile_dir(what);
+    std::fs::create_dir_all(etc.join("paths.d")).unwrap();
+    std::fs::write(etc.join("paths"), "/usr/bin\n/bin\n").unwrap();
+    std::fs::write(etc.join("manpaths"), "/usr/share/man\n").unwrap();
+    std::fs::write(etc.join("paths.d/10-one"), "/one\n").unwrap();
+    etc
+}
+
 #[cfg(unix)]
 #[test]
-fn the_shell_layer_names_the_folder_the_persons_zdotdir_and_a_function_as_bash_reads_one() {
-    let folder = Path::new("/h/member-guard");
-    let vars = shell_vars(folder, Some("/own"));
-    let get = |name: &str| {
-        vars.iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    };
-    assert_eq!(get("ZDOTDIR"), Some("/h/member-guard/zsh"));
-    assert_eq!(get("CONSENSFLOW_ZDOTDIR_WAS"), Some("/own"));
-    for name in ["pkill", "killall"] {
-        let body = format!("() {{ '/h/member-guard/{name}' \"$@\"; }}");
-        assert_eq!(
-            get(name),
-            None,
-            "a plain variable is read by no bash of ours"
-        );
-        assert_eq!(get(&format!("BASH_FUNC_{name}%%")), Some(body.as_str()));
-    }
-    // A person with no ZDOTDIR is told none.
-    assert!(shell_vars(folder, None)
-        .iter()
-        .all(|(n, _)| n != "CONSENSFLOW_ZDOTDIR_WAS"));
-    let zshenv = zshenv(folder);
-    assert!(
-        zshenv.contains("pkill() { '/h/member-guard/pkill' \"$@\"; }"),
-        "{zshenv}"
+fn the_root_mirrors_the_systems_files_with_the_guards_folder_first_and_follows_them() {
+    let etc = system_etc("mirror-etc");
+    let home = tempfile_dir("mirror-home");
+    let root = path_helper_root(&home);
+    mirror(&etc, &root, &folder(&home)).unwrap();
+    let read = |name: &str| std::fs::read_to_string(root.join("etc").join(name)).ok();
+    assert_eq!(
+        read("paths"),
+        Some(format!("{}\n/usr/bin\n/bin\n", folder(&home).display()))
     );
+    assert_eq!(read("manpaths").as_deref(), Some("/usr/share/man\n"));
+    assert_eq!(read("paths.d/10-one").as_deref(), Some("/one\n"));
+    assert_eq!(read("manpaths.d/x"), None);
+    // The system's files change: one gone, one new, one changed.
+    std::fs::remove_file(etc.join("paths.d/10-one")).unwrap();
+    std::fs::write(etc.join("paths.d/20-two"), "/two\n").unwrap();
+    std::fs::remove_file(etc.join("manpaths")).unwrap();
+    mirror(&etc, &root, &folder(&home)).unwrap();
+    assert_eq!(read("paths.d/10-one"), None);
+    assert_eq!(read("paths.d/20-two").as_deref(), Some("/two\n"));
+    assert_eq!(read("manpaths"), None);
+    let mut listed: Vec<_> = std::fs::read_dir(root.join("etc/paths.d"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    listed.sort();
+    assert_eq!(listed, ["20-two"], "no file of ours is left among them");
+    std::fs::remove_dir_all(&etc).unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_at_a_name_in_the_root_is_replaced_never_written_through_and_a_linked_folder_is_refused() {
+    let etc = system_etc("link-etc");
+    let home = tempfile_dir("link-home");
+    let root = path_helper_root(&home);
+    mirror(&etc, &root, &folder(&home)).unwrap();
+    let own = home.join("persons-file");
+    std::fs::write(&own, "the person's\n").unwrap();
+    std::fs::remove_file(root.join("etc/paths")).unwrap();
+    std::os::unix::fs::symlink(&own, root.join("etc/paths")).unwrap();
+    mirror(&etc, &root, &folder(&home)).unwrap();
+    assert_eq!(std::fs::read_to_string(&own).unwrap(), "the person's\n");
+    assert!(std::fs::symlink_metadata(root.join("etc/paths"))
+        .unwrap()
+        .is_file());
+    std::fs::remove_dir_all(root.join("etc/paths.d")).unwrap();
+    std::os::unix::fs::symlink(etc.join("paths.d"), root.join("etc/paths.d")).unwrap();
+    assert!(mirror(&etc, &root, &folder(&home)).is_err());
+    std::fs::remove_dir_all(&etc).unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
+fn a_person_with_a_path_helper_root_of_their_own_keeps_it() {
+    let root = Path::new("/ours");
+    let given = |vars: Vec<(&str, &str)>| {
+        WindowEnv::new(&Env::from_vars(vars), "http://127.0.0.1:1", "/bundle/bin")
+            .with_path_helper_root(root)
+            .guard_root()
+            .map(str::to_owned)
+    };
+    assert_eq!(given(vec![]), Some("/ours".to_owned()));
+    assert_eq!(given(vec![("PATH_HELPER_ROOT", "/theirs")]), None);
+    // As the app's terminal said it.
+    assert_eq!(
+        given(vec![
+            (cf_base::env::TERMINAL_ENV, r#"["PATH_HELPER_ROOT"]"#),
+            ("PATH_HELPER_ROOT", "/theirs"),
+        ]),
+        None
+    );
+}
+
+/// The system's own `path_helper`, on the root the daemon makes: the system's answer with the
+/// guard's folder first, and the same MANPATH. It fails where an OS stops reading
+/// `PATH_HELPER_ROOT`, which the guard's hold in a Mac's login shells stands on (CI's Mac
+/// runners run it).
+#[cfg(target_os = "macos")]
+#[test]
+#[allow(clippy::disallowed_methods)] // The test asks the system's own helper.
+fn macos_path_helper_reads_path_helper_root_and_answers_as_the_system_with_the_guards_folder_first()
+{
+    let home = tempfile_dir("helper home");
+    let root = path_helper_root(&home);
+    mirror(Path::new("/etc"), &root, &folder(&home)).unwrap();
+    let asked = |helper_root: Option<&Path>| {
+        let mut helper = std::process::Command::new("/usr/libexec/path_helper");
+        helper.arg("-s").env_clear().env("MANPATH", "/x");
+        if let Some(helper_root) = helper_root {
+            helper.env("PATH_HELPER_ROOT", helper_root);
+        }
+        let said = String::from_utf8(helper.output().unwrap().stdout).unwrap();
+        let value = |name: &str| {
+            let start = format!("{name}=\"");
+            said.lines()
+                .find_map(|line| line.strip_prefix(&start))
+                .and_then(|line| line.split('"').next())
+                .map(str::to_owned)
+        };
+        (value("PATH"), value("MANPATH"))
+    };
+    let (system_path, system_manpath) = asked(None);
+    let (path, manpath) = asked(Some(&root));
+    let system_path = system_path.expect("the system's PATH");
+    assert_eq!(
+        path,
+        Some(format!("{}:{system_path}", folder(&home).display())),
+        "path_helper no longer reads PATH_HELPER_ROOT, or reads it differently"
+    );
+    assert_eq!(manpath, system_manpath);
+    std::fs::remove_dir_all(&home).unwrap();
 }

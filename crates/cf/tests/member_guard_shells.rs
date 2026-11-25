@@ -1,107 +1,100 @@
-//! The guard holds in the shells a window's harness may run a command in, a login shell among
-//! them (T-2213, round 2): a login shell's `/etc/zprofile` or `/etc/profile` runs `path_helper`,
-//! which puts the system's folders before the PATH's own, so the guard's folder alone is not
-//! enough there; zsh and bash are also given functions of the same names (the window's `ZDOTDIR`
-//! and exported functions). Real shells, started as a window's are with its environment; the
-//! calls name no program a machine has (`pkill -f zz-…`), so the real command could end nothing
-//! if it ran, and a recorder named like it sits on the PATH where it would be found.
+//! The guard holds in the shells a window's harness may run a command in, a Mac's login shells
+//! among them, however one shell starts another: a login shell runs `/usr/libexec/path_helper`,
+//! which reads the guard's root (`PATH_HELPER_ROOT`) and so keeps the guard's folder ahead of
+//! the system's. Real shells, started with a window's environment, in a scratch home whose
+//! startup files put folders of their own first.
+//!
+//! No case runs a command by a name that could reach the real one: each shell is asked which
+//! program the name resolves to (`whence -p`, `type -P`, `command -v`), and only once that is
+//! the guard's own is the name run, for its words. Every shell runs where it may signal
+//! nothing but itself (`sandbox-exec`), so nothing it runs could end a program.
 
-#![cfg(unix)]
+#![cfg(target_os = "macos")]
 // The tests start programs themselves.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used)]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cf_base::env::Env;
 use cf_daemon::files::Log;
-use cf_daemon::member_guard::guard;
+use cf_daemon::member_guard::{folder, guard};
 use cf_daemon::seams::WindowEnv;
 
 const WORDS: &str = "isn't run in member windows. It ends every program whose name matches, other \
      members' and the owner's among them. End a program you started by its number, after \
      checking it's yours.";
-const PKILL: &str = "pkill -f zz-no-such-cmdline-t2213";
-const KILLALL: &str = "killall zz-no-such-program-t2213";
+
+/// Every form of the brief: a shell, its flags, and how it says what a name resolves to.
+const FORMS: [(&str, &str, &str); 6] = [
+    ("/bin/zsh", "-c", "whence -p"),
+    ("/bin/zsh", "-lc", "whence -p"),
+    ("/bin/zsh", "-ilc", "whence -p"),
+    ("/bin/bash", "-c", "type -P"),
+    ("/bin/bash", "-lc", "type -P"),
+    ("/bin/sh", "-c", "command -v"),
+];
+
+/// Nothing run here can signal a program that is not itself.
+const SANDBOX: &str = "(version 1)(allow default)(deny signal)(allow signal (target self))";
 
 struct Scene {
     root: PathBuf,
     home: PathBuf,
-    recorder: PathBuf,
-    path: String,
-    vars: Vec<(String, String)>,
+    guard: PathBuf,
+    env: Vec<(String, String)>,
 }
 
 impl Scene {
-    /// A window's environment as the daemon builds it, over a home of the test's own, given the
-    /// person's `ZDOTDIR` of the daemon's.
-    fn new(what: &str, zdotdir: Option<&Path>) -> Self {
-        let root = std::env::temp_dir().join(format!("cf-guard-sh-{what}-{}", std::process::id()));
+    /// A window's environment as the daemon builds it, over a home of the test's own (whose
+    /// folders have a space, as a Mac's may), and startup files that put folders of the
+    /// person's first.
+    fn new(what: &str) -> Self {
+        let root = std::env::temp_dir().join(format!("cf guard sh {what} {}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let home = root.join("home");
-        let recorder = root.join("recorder");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(&recorder).unwrap();
-        for command in ["pkill", "killall"] {
-            let file = recorder.join(command);
+        std::fs::create_dir_all(home.join("zsh bin")).unwrap();
+        std::fs::create_dir_all(home.join("bash bin")).unwrap();
+        for (file, bin) in [(".zshrc", "zsh bin"), (".bash_profile", "bash bin")] {
             std::fs::write(
-                &file,
-                format!(
-                    "#!/bin/sh\n: > \"{}/{command}.reached\"\n",
-                    recorder.display()
-                ),
+                home.join(file),
+                format!("export PATH=\"$HOME/{bin}:$PATH\"\n"),
             )
             .unwrap();
-            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let mut given = vec![(
-            "PATH".to_owned(),
-            format!("{}:/usr/bin:/bin", recorder.display()),
-        )];
-        if let Some(zdotdir) = zdotdir {
-            given.push(("ZDOTDIR".to_owned(), zdotdir.display().to_string()));
         }
         let cf = Path::new(env!("CARGO_BIN_EXE_cf"));
-        let windows = WindowEnv::new(&Env::from_vars(given), "http://127.0.0.1:1", "/bundle/bin");
+        let given = Env::from_vars([("PATH", "/usr/bin:/bin")]);
+        let windows = WindowEnv::new(&given, "http://127.0.0.1:1", "/bundle/bin");
         let guarded = guard(windows, &root, cf, &Log::new(&root));
+        let env = vec![
+            ("HOME".to_owned(), home.display().to_string()),
+            ("TERM".to_owned(), "dumb".to_owned()),
+            ("PATH".to_owned(), guarded.path().to_owned()),
+            (
+                "PATH_HELPER_ROOT".to_owned(),
+                guarded
+                    .guard_root()
+                    .expect("a Mac's windows are given a root")
+                    .to_owned(),
+            ),
+        ];
         Self {
-            path: guarded.path().to_owned(),
-            vars: guarded.guard_vars().to_vec(),
+            guard: folder(&root),
+            env,
             root,
             home,
-            recorder,
         }
     }
 
-    /// `shell` with `flags` and `line`, in the window's environment: the PATH and the shell
-    /// layer (`with_functions`), the home of the test's, nothing else.
-    fn run(
-        &self,
-        shell: &str,
-        flags: &str,
-        line: &str,
-        with_functions: bool,
-    ) -> (Option<i32>, String, String) {
-        let mut command = Command::new(shell);
-        command
-            .arg(flags)
-            .arg(line)
+    /// `line` run by `shell` with `flags`: its exit code, standard output and error.
+    fn run(&self, shell: &str, flags: &str, line: &str) -> (Option<i32>, String, String) {
+        let ran = Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", SANDBOX, shell, flags, line])
             .env_clear()
-            .env("HOME", &self.home)
-            .env("TERM", "dumb")
-            .env(
-                "PATH",
-                if with_functions {
-                    &self.path
-                } else {
-                    self.path.rsplit_once(':').map_or("", |_| &self.path)
-                },
-            );
-        if with_functions {
-            command.envs(self.vars.iter().map(|(n, v)| (n, v)));
-        }
-        let ran = command.output().unwrap();
+            .envs(self.env.iter().map(|(name, value)| (name, value)))
+            .current_dir(&self.home)
+            .output()
+            .unwrap();
         (
             ran.status.code(),
             String::from_utf8_lossy(&ran.stdout).into_owned(),
@@ -109,8 +102,16 @@ impl Scene {
         )
     }
 
-    fn reached(&self, command: &str) -> bool {
-        self.recorder.join(format!("{command}.reached")).exists()
+    /// What `shell` resolves each name to must be the guard's, as `how` asks it: every line of
+    /// its output the guard's own file.
+    fn resolves_to_the_guard(&self, shell: &str, flags: &str, line: &str, what: &str) {
+        let (_, out, said) = self.run(shell, flags, line);
+        let wanted: Vec<String> = ["pkill", "killall"]
+            .iter()
+            .map(|name| self.guard.join(name).display().to_string())
+            .collect();
+        let found: Vec<&str> = out.lines().collect();
+        assert_eq!(found, wanted, "{what}: {said}");
     }
 }
 
@@ -120,184 +121,46 @@ impl Drop for Scene {
     }
 }
 
-/// Every shell form of the brief that this machine has.
-fn forms() -> Vec<(&'static str, &'static str)> {
-    let mut forms = vec![
-        ("/bin/zsh", "-c"),
-        ("/bin/zsh", "-lc"),
-        ("/bin/zsh", "-ilc"),
-        ("/bin/bash", "-c"),
-        ("/bin/bash", "-lc"),
-        ("/bin/sh", "-c"),
-    ];
-    for brew in ["/opt/homebrew/bin/bash", "/usr/local/bin/bash"] {
-        if Path::new(brew).exists() {
-            forms.push((brew, "-c"));
-            forms.push((brew, "-lc"));
+fn resolving(how: &str) -> String {
+    format!("{how} pkill; {how} killall")
+}
+
+/// `text` as one word of a POSIX shell.
+fn word(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+#[test]
+fn pkill_and_killall_resolve_to_the_guard_in_every_form_alone_and_each_inside_each() {
+    let scene = Scene::new("resolve");
+    for (shell, flags, how) in FORMS {
+        let alone = format!("{shell} {flags}");
+        scene.resolves_to_the_guard(shell, flags, &resolving(how), &alone);
+        for (child, child_flags, child_how) in FORMS {
+            let line = format!("{child} {child_flags} {}", word(&resolving(child_how)));
+            let both = format!("{child} {child_flags} inside {alone}");
+            scene.resolves_to_the_guard(shell, flags, &line, &both);
         }
     }
-    forms
-}
-
-fn refused(said: &str, command: &str) -> bool {
-    said.contains(&format!("ConsensFlow: {command} {WORDS}"))
 }
 
 #[test]
-fn pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named() {
-    let scene = Scene::new("forms", None);
-    for (shell, flags) in forms() {
-        if !Path::new(shell).exists() {
-            continue;
+fn each_form_is_refused_in_the_words_once_the_guard_is_what_it_resolves_to() {
+    let scene = Scene::new("words");
+    for (shell, flags, how) in FORMS {
+        let form = format!("{shell} {flags}");
+        // Asked first: nothing is run by name unless it is the guard's.
+        scene.resolves_to_the_guard(shell, flags, &resolving(how), &form);
+        for (line, command) in [
+            ("pkill -f zz-no-such-cmdline-t2213", "pkill"),
+            ("killall zz-no-such-program-t2213", "killall"),
+        ] {
+            let (code, _, said) = scene.run(shell, flags, line);
+            assert_eq!(code, Some(1), "{form} {line}: {said}");
+            assert!(
+                said.contains(&format!("ConsensFlow: {command} {WORDS}")),
+                "{form} {line}: {said}"
+            );
         }
-        for (line, command) in [(PKILL, "pkill"), (KILLALL, "killall")] {
-            let (code, _, said) = scene.run(shell, flags, line, true);
-            assert_eq!(code, Some(1), "{shell} {flags} {line}: {said}");
-            assert!(refused(&said, command), "{shell} {flags} {line}: {said}");
-            // With the PATH alone: which layer held it.
-            let (_, _, bare) = scene.run(shell, flags, line, false);
-            let layer = if refused(&bare, command) {
-                "PATH"
-            } else {
-                "functions"
-            };
-            eprintln!("LAYER {shell} {flags} {command}: {layer}");
-        }
-    }
-    assert!(!scene.reached("pkill") && !scene.reached("killall"));
-}
-
-/// Startup files of the person's in `dir`, each writing its name to `marks`.
-fn person_files(dir: &Path, marks: &Path, names: &[&str], extra: &str) {
-    std::fs::create_dir_all(dir).unwrap();
-    for name in names {
-        let mut text = format!("echo {name}-read >> '{}'\n", marks.display());
-        if *name == ".zshrc" {
-            text.push_str(extra);
-        }
-        std::fs::write(dir.join(name), text).unwrap();
-    }
-}
-
-fn marks_of(marks: &Path) -> String {
-    std::fs::read_to_string(marks).unwrap_or_default()
-}
-
-const ALL: [&str; 3] = [".zshenv", ".zprofile", ".zshrc"];
-
-#[test]
-fn a_window_zsh_reads_the_persons_zshenv_zprofile_and_zshrc_with_no_zdotdir_of_theirs() {
-    let scene = Scene::new("zsh-none", None);
-    let marks = scene.root.join("marks");
-    person_files(&scene.home, &marks, &ALL, "");
-    let (code, out, said) = scene.run("/bin/zsh", "-ilc", "echo ZD=${ZDOTDIR-unset}", true);
-    assert_eq!(code, Some(0), "{said}");
-    assert_eq!(
-        marks_of(&marks),
-        ".zshenv-read\n.zprofile-read\n.zshrc-read\n",
-        "{said}"
-    );
-    assert!(
-        out.contains("ZD=unset"),
-        "the person's own shells see no ZDOTDIR of ours: {out}"
-    );
-}
-
-#[test]
-fn a_window_zsh_reads_the_files_of_a_zdotdir_the_person_had_before_consensflow_started() {
-    let own = std::env::temp_dir().join(format!("cf-guard-sh-own-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&own);
-    let scene = Scene::new("zsh-before", Some(&own));
-    let marks = scene.root.join("marks");
-    person_files(&own, &marks, &ALL, "");
-    // Files in the home are no part of it.
-    person_files(&scene.home, &scene.root.join("wrong"), &ALL, "");
-    let (code, out, said) = scene.run("/bin/zsh", "-ilc", "echo ZD=$ZDOTDIR", true);
-    let _ = std::fs::remove_dir_all(&own);
-    assert_eq!(code, Some(0), "{said}");
-    assert_eq!(
-        marks_of(&marks),
-        ".zshenv-read\n.zprofile-read\n.zshrc-read\n",
-        "{said}"
-    );
-    assert!(!scene.root.join("wrong").exists());
-    assert!(out.contains(&format!("ZD={}", own.display())), "{out}");
-}
-
-#[test]
-fn a_window_zsh_reads_the_files_of_a_zdotdir_the_persons_own_zshenv_sets() {
-    let scene = Scene::new("zsh-inside", None);
-    let marks = scene.root.join("marks");
-    let moved = scene.root.join("moved");
-    person_files(&moved, &marks, &[".zprofile", ".zshrc"], "");
-    std::fs::write(
-        scene.home.join(".zshenv"),
-        format!(
-            "echo .zshenv-read >> '{}'\nexport ZDOTDIR='{}'\n",
-            marks.display(),
-            moved.display()
-        ),
-    )
-    .unwrap();
-    let (code, _, said) = scene.run("/bin/zsh", "-ilc", "true", true);
-    assert_eq!(code, Some(0), "{said}");
-    assert_eq!(
-        marks_of(&marks),
-        ".zshenv-read\n.zprofile-read\n.zshrc-read\n",
-        "{said}"
-    );
-    // And the guard stands after all of it.
-    let (_, _, said) = scene.run("/bin/zsh", "-ilc", PKILL, true);
-    assert!(refused(&said, "pkill"), "{said}");
-}
-
-#[test]
-fn a_pkill_alias_or_function_in_the_persons_zshrc_wins_in_an_interactive_zsh() {
-    // A limit, said as one: the person's own definition is theirs.
-    let scene = Scene::new("zsh-alias", None);
-    let marks = scene.root.join("marks");
-    person_files(
-        &scene.home,
-        &marks,
-        &[".zshrc"],
-        "alias pkill='echo mine'\nkillall() { echo mine-fn \"$@\"; }\n",
-    );
-    let (code, out, said) = scene.run("/bin/zsh", "-ic", PKILL, true);
-    assert_eq!(code, Some(0), "{said}");
-    assert!(out.contains("mine -f"), "{out}");
-    let (_, out, _) = scene.run("/bin/zsh", "-ic", KILLALL, true);
-    assert!(out.contains("mine-fn"), "{out}");
-    assert!(!scene.reached("pkill") && !scene.reached("killall"));
-}
-
-#[test]
-fn a_program_that_reads_the_files_of_zdotdir_itself_gets_the_persons_own() {
-    // A harness that takes a snapshot of the person's shell may source `$ZDOTDIR/.zshrc` from
-    // a shell of its own, which never ran our `.zshenv` (`-f` reads none here).
-    let own = std::env::temp_dir().join(format!("cf-guard-sh-snap-own-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&own);
-    for zdotdir in [None, Some(own.as_path())] {
-        let scene = Scene::new(
-            if zdotdir.is_some() {
-                "snap-set"
-            } else {
-                "snap-none"
-            },
-            zdotdir,
-        );
-        let marks = scene.root.join("marks");
-        person_files(zdotdir.unwrap_or(&scene.home), &marks, &ALL, "");
-        let line = "source \"$ZDOTDIR/.zshrc\"; source \"$ZDOTDIR/.zprofile\"";
-        let (code, _, said) = scene.run("/bin/zsh", "-fc", line, true);
-        assert_eq!(code, Some(0), "{said}");
-        assert_eq!(marks_of(&marks), ".zshrc-read\n.zprofile-read\n", "{said}");
-        let (code, _, said) = scene.run("/bin/bash", "-c", "source \"$ZDOTDIR/.zshrc\"", true);
-        assert_eq!(code, Some(0), "{said}");
-        assert_eq!(
-            marks_of(&marks),
-            ".zshrc-read\n.zprofile-read\n.zshrc-read\n",
-            "{said}"
-        );
-        let _ = std::fs::remove_dir_all(&own);
     }
 }

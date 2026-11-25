@@ -4,7 +4,8 @@
 # refuses a call by name in the owner's words and never runs the real command.
 # One plant leaves the folder off the PATH; one makes a stand-in that goes on to the real command
 # (it names a program that is not there on a Mac, so no plant ever runs the real `pkill`); one
-# lets `taskkill /IM` through.
+# widens taskkill's allow-list; one leaves `PATH_HELPER_ROOT` unset, one the folder out of its
+# root. The shell cases resolve names and run none whose guard is not what they resolve to.
 #
 # Every name holds `member-guard`, so `npm run plants:daemon -- "member-guard:"` runs them all.
 
@@ -35,51 +36,31 @@ find = "        Guarded::Pkill | Guarded::Killall => true,"
 replace = "        Guarded::Pkill | Guarded::Killall => false,"
 
 [[plant]]
-name = "member-guard: taskkill /IM and /FI are let through to the real taskkill"
+name = "member-guard: the allow-list is widened to any switch, so a path Git Bash made of an option goes through"
 meant = "member_guard::tests::taskkill_by_name_or_filter_is_refused_and_by_number_goes_to_the_real_one"
 runs = ["guard-base"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/member_guard.rs"
-find = "    [\"/im\", \"/fi\", \"-im\", \"-fi\"].contains(&text.as_str())"
-replace = "    [\"/zz\"].contains(&text.as_str())"
+find = "            _ => return false,"
+replace = "            _ => named += 1,"
 
 [[plant]]
-name = "member-guard: zsh is given no ZDOTDIR of ours, so a login zsh puts the real pkill first and no function stands"
-meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
+name = "member-guard: PATH_HELPER_ROOT is left unset, so a login shell puts the real pkill first"
+meant = "pkill_and_killall_resolve_to_the_guard_in_every_form_alone_and_each_inside_each"
 runs = ["guard-shells"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/member_guard.rs"
-find = '        "ZDOTDIR".to_owned(),'
-replace = '        "ZDOTDIR_UNUSED".to_owned(),'
+file = "crates/cf-daemon/src/seams.rs"
+find = "            env.push((PATH_HELPER_ROOT.to_owned(), root.clone()));"
+replace = "            let _ = root;"
 
 [[plant]]
-name = "member-guard: the zsh files define no function, so a login zsh finds the real pkill"
-meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
-runs = ["guard-shells"]
+name = "member-guard: the root's paths file leaves the guard's folder out, so path_helper puts the system's first"
+meant = "member_guard::tests::the_root_mirrors_the_systems_files_with_the_guards_folder_first_and_follows_them"
+runs = ["guard-daemon", "guard-shells"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/member_guard.rs"
-find = '            "{file}() {{ {} \"$@\"; }}\n",'
-replace = '            "{file}_unused() {{ {} \"$@\"; }}\n",'
-
-[[plant]]
-name = "member-guard: the guard's .zshenv does not put the person's ZDOTDIR back, so their zsh files are never read"
-meant = "a_window_zsh_reads_the_files_of_a_zdotdir_the_person_had_before_consensflow_started"
-runs = ["guard-shells"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/member_guard.rs"
-find = '  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse'
-replace = '  :\nelse'
-
-[[plant]]
-name = "member-guard: bash's exported function is left out, so a login bash finds the real pkill"
-meant = "pkill_and_killall_are_refused_in_every_shell_form_and_the_layer_that_caught_each_is_named"
-runs = ["guard-shells"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/member_guard.rs"
-find = '        vars.push((format!("BASH_FUNC_{file}%%"), body));'
-replace = '        drop(body);'
+find = "    paths.push(b'\\n');"
+replace = "    paths.clear();"

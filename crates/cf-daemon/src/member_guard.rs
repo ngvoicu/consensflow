@@ -3,6 +3,12 @@
 //! bundle's `cf`, which answers started under those names (`cf_base::member_guard`). A
 //! window's program that runs one of them finds this before the real command. The person's
 //! own terminals, and ConsensFlow's own processes, never have this folder on their `PATH`.
+//!
+//! On a Mac a login shell runs `/usr/libexec/path_helper`, which puts the system's folders
+//! before the ones the window's PATH had. `path_helper` reads those folders from
+//! `$PATH_HELPER_ROOT/etc` when the variable is set, so a window is given a root of ours that
+//! mirrors the system's files with the guard's folder as the first line of `etc/paths`
+//! ([`mirror`]). Nothing is written in or beside the person's own startup files.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,6 +21,11 @@ use crate::seams::WindowEnv;
 /// The folder under the daemon's `home` the stand-ins are in.
 pub fn folder(home: &Path) -> PathBuf {
     home.join("member-guard")
+}
+
+/// The root a window's `path_helper` reads in place of `/` (`PATH_HELPER_ROOT`).
+pub fn path_helper_root(home: &Path) -> PathBuf {
+    home.join("member-guard-root")
 }
 
 /// Makes the stand-ins in [`folder`] of `home`, each `cf`'s own file (a link to it on a Mac,
@@ -30,98 +41,103 @@ pub fn install(home: &Path, cf: &Path) -> Result<PathBuf, (PathBuf, io::Error)> 
             first.get_or_insert((folder.join(&file), failed));
         }
     }
-    #[cfg(unix)]
-    if let Err(failed) = write_zshenv(&folder) {
-        first.get_or_insert((folder.join("zsh").join(".zshenv"), failed));
-    }
     match first {
         None => Ok(folder),
         Some(failed) => Err(failed),
     }
 }
 
-/// `text` in single quotes, for a POSIX shell.
-fn quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
-}
-
-/// The folder zsh is given as its `ZDOTDIR` in a window: its `.zshenv` puts the person's own
-/// `ZDOTDIR` back (or none), reads the person's own `.zshenv`, and then defines `pkill` and
-/// `killall`, so that the person's other startup files are read from their own place and
-/// `/etc/zprofile`'s `path_helper` has no PATH to reorder past them. It prints nothing.
-pub fn zshenv(folder: &Path) -> String {
-    let mut text = String::from(
-        "# ConsensFlow's member guard: makes pkill and killall refuse in a member's window.\n\
-         if [[ -n ${CONSENSFLOW_ZDOTDIR_WAS+x} ]]; then\n  ZDOTDIR=$CONSENSFLOW_ZDOTDIR_WAS\nelse\n  unset ZDOTDIR\nfi\n\
-         unset CONSENSFLOW_ZDOTDIR_WAS\n\
-         [[ -r ${ZDOTDIR:-$HOME}/.zshenv ]] && source \"${ZDOTDIR:-$HOME}/.zshenv\"\n",
-    );
-    for (file, _) in file_names() {
-        text.push_str(&format!(
-            "{file}() {{ {} \"$@\"; }}\n",
-            quoted(&folder.join(&file).to_string_lossy())
-        ));
+/// Makes in `root` what `path_helper` reads of the system's `etc` (`/etc`): `paths` with
+/// `folder` as its first line and the system's own lines after it, `manpaths`, and the files
+/// of `paths.d` and `manpaths.d`, so that it answers as it would for the system with `folder`
+/// first. A file that is gone from the system's goes from the root. Every file is written
+/// beside and renamed into place, so a window's shell reads a whole one, and a link at a
+/// name is replaced, never written through; a link where a folder of the root belongs is
+/// refused. Called at each of the daemon's starts: what the system gains while it runs is
+/// taken at the next.
+#[cfg(unix)]
+pub fn mirror(etc: &Path, root: &Path, folder: &Path) -> io::Result<()> {
+    let ours = root.join("etc");
+    for dir in [root, &ours, &ours.join("paths.d"), &ours.join("manpaths.d")] {
+        own_folder(dir)?;
     }
-    text
-}
-
-/// The `.zshrc`, `.zprofile` and `.zlogin` of the same folder. zsh never reads them: its
-/// `.zshenv` has put the person's `ZDOTDIR` back first. A program that reads
-/// `$ZDOTDIR/<name>` itself, as a harness taking a snapshot of the person's shell may, finds
-/// the person's own file through it.
-#[cfg(unix)]
-fn forward(folder: &Path, name: &str) -> String {
-    let ours = quoted(&folder.join("zsh").to_string_lossy());
-    format!(
-        "# ConsensFlow's member guard: the person's own {name}.\n\
-         if [[ -n ${{CONSENSFLOW_ZDOTDIR_WAS+x}} ]]; then _consensflow_dir=$CONSENSFLOW_ZDOTDIR_WAS\n\
-         elif [[ ${{ZDOTDIR:-}} == {ours} ]]; then _consensflow_dir=$HOME\n\
-         else _consensflow_dir=${{ZDOTDIR:-$HOME}}; fi\n\
-         [[ -r $_consensflow_dir/{name} ]] && source \"$_consensflow_dir/{name}\"\n\
-         unset _consensflow_dir\n"
-    )
-}
-
-#[cfg(unix)]
-fn write_zshenv(folder: &Path) -> io::Result<()> {
-    let dir = folder.join("zsh");
-    std::fs::create_dir_all(&dir)?;
-    let mut files = vec![(".zshenv", zshenv(folder))];
-    files.extend([".zshrc", ".zprofile", ".zlogin"].map(|name| (name, forward(folder, name))));
-    for (name, text) in files {
-        let file = dir.join(name);
-        if !std::fs::read_to_string(&file).is_ok_and(|had| had == text) {
-            std::fs::write(file, text)?;
+    let mut paths = folder.as_os_str().as_encoded_bytes().to_vec();
+    paths.push(b'\n');
+    paths.extend(read_or_nothing(&etc.join("paths"))?.unwrap_or_default());
+    replace(root, &ours.join("paths"), Some(&paths))?;
+    replace(
+        root,
+        &ours.join("manpaths"),
+        read_or_nothing(&etc.join("manpaths"))?.as_deref(),
+    )?;
+    for name in ["paths.d", "manpaths.d"] {
+        let theirs = names_in(&etc.join(name))?;
+        for gone in names_in(&ours.join(name))? {
+            if !theirs.contains(&gone) {
+                std::fs::remove_file(ours.join(name).join(gone))?;
+            }
+        }
+        for file in theirs {
+            let text = read_or_nothing(&etc.join(name).join(&file))?;
+            replace(root, &ours.join(name).join(&file), text.as_deref())?;
         }
     }
     Ok(())
 }
 
-/// What a window's environment holds for the shells' function layer, on a Mac: `ZDOTDIR` the
-/// folder of the `.zshenv` above and the person's own, when there was one, in
-/// `CONSENSFLOW_ZDOTDIR_WAS`; and a function for each name as bash reads one from the
-/// environment, `BASH_FUNC_name%%`. Apple's bash 3.2 (patched after Shellshock) and bash 4.3
-/// and later both read that form; the system's bash does not read a plain `name=() {...}`
-/// (measured on macOS 26, bash 3.2.57). None on Windows, whose shells read the PATH as given.
-pub fn shell_vars(folder: &Path, person_zdotdir: Option<&str>) -> Vec<(String, String)> {
-    if cfg!(windows) {
-        return Vec::new();
+/// The folder `dir`, made where it is not: never a link that someone put there.
+#[cfg(unix)]
+fn own_folder(dir: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(found) if found.is_dir() => Ok(()),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} is no folder of ConsensFlow's", dir.display()),
+        )),
+        Err(failed) if failed.kind() == io::ErrorKind::NotFound => std::fs::create_dir_all(dir),
+        Err(failed) => Err(failed),
     }
-    let mut vars = vec![(
-        "ZDOTDIR".to_owned(),
-        folder.join("zsh").to_string_lossy().into_owned(),
-    )];
-    if let Some(person) = person_zdotdir {
-        vars.push(("CONSENSFLOW_ZDOTDIR_WAS".to_owned(), person.to_owned()));
+}
+
+#[cfg(unix)]
+fn read_or_nothing(file: &Path) -> io::Result<Option<Vec<u8>>> {
+    match std::fs::read(file) {
+        Ok(text) => Ok(Some(text)),
+        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(failed) => Err(failed),
     }
-    for (file, _) in file_names() {
-        let body = format!(
-            "() {{ {} \"$@\"; }}",
-            quoted(&folder.join(&file).to_string_lossy())
-        );
-        vars.push((format!("BASH_FUNC_{file}%%"), body));
+}
+
+/// The names in `dir`, none where there is no such folder.
+#[cfg(unix)]
+fn names_in(dir: &Path) -> io::Result<Vec<std::ffi::OsString>> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => entries
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect(),
+        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(failed) => Err(failed),
     }
-    vars
+}
+
+/// `file` holding `text`, or gone where there is none: written in `scratch` (the root, which
+/// `path_helper` lists no files of) and renamed into place.
+#[cfg(unix)]
+fn replace(scratch: &Path, file: &Path, text: Option<&[u8]>) -> io::Result<()> {
+    let Some(text) = text else {
+        return match std::fs::remove_file(file) {
+            Err(failed) if failed.kind() != io::ErrorKind::NotFound => Err(failed),
+            _ => Ok(()),
+        };
+    };
+    let there = std::fs::symlink_metadata(file).is_ok_and(|found| found.is_file());
+    if there && std::fs::read(file).is_ok_and(|had| had == text) {
+        return Ok(());
+    }
+    let beside = scratch.join(format!(".writing-{}", std::process::id()));
+    let _ = std::fs::remove_file(&beside);
+    std::fs::write(&beside, text)?;
+    std::fs::rename(&beside, file)
 }
 
 #[cfg(unix)]
@@ -140,33 +156,53 @@ fn put(file: &Path, cf: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(cf, file)
 }
 
+/// A stand-in is `cf`'s own file or a copy of it: it is made again when its content differs
+/// from `cf`'s (an update that replaced `cf.exe` leaves the old hard link on the old file, of
+/// the same size and time as it may be). One that runs cannot be removed on Windows, and can
+/// be renamed: it is moved aside, and removed at a later start.
 #[cfg(windows)]
 fn put(file: &Path, cf: &Path) -> io::Result<()> {
-    let same = |a: &Path, b: &Path| match (std::fs::metadata(a), std::fs::metadata(b)) {
-        (Ok(a), Ok(b)) => a.len() == b.len() && a.modified().ok() == b.modified().ok(),
-        _ => false,
-    };
-    if same(file, cf) {
-        return Ok(());
+    let aside = file.with_extension("old");
+    let _ = std::fs::remove_file(&aside);
+    if let (Ok(had), Ok(wanted)) = (std::fs::read(file), std::fs::read(cf)) {
+        if had == wanted {
+            return Ok(());
+        }
     }
-    let _ = std::fs::remove_file(file);
+    if std::fs::remove_file(file).is_err() && file.exists() {
+        std::fs::rename(file, &aside)?;
+    }
     std::fs::hard_link(cf, file).or_else(|_| std::fs::copy(cf, file).map(|_| ()))
 }
 
 /// `windows` with the stand-ins of the commands a member's window may not run first on their
-/// PATH. Where they cannot be made the windows open without them, and the log says why: a
-/// guard that cannot stand is no reason for a board not to start.
+/// PATH, and on a Mac with the root that keeps them first in a login shell. Where either cannot
+/// be made the windows open without it, and the log says why: a guard that cannot stand is no
+/// reason for a board not to start.
 pub fn guard(windows: WindowEnv, home: &Path, cf: &Path, log: &Log) -> WindowEnv {
-    match install(home, cf) {
-        Ok(folder) => windows.with_guard(&folder),
+    let folder = match install(home, cf) {
+        Ok(folder) => folder,
         Err((file, failed)) => {
             log.error(
                 &format!("the member guard's {} could not be made", file.display()),
                 Some(&failed.to_string()),
             );
-            windows
+            return windows;
+        }
+    };
+    let windows = windows.with_guard(&folder);
+    #[cfg(target_os = "macos")]
+    {
+        let root = path_helper_root(home);
+        match mirror(Path::new("/etc"), &root, &folder) {
+            Ok(()) => return windows.with_path_helper_root(&root),
+            Err(failed) => log.error(
+                &format!("the member guard's {} could not be made", root.display()),
+                Some(&failed.to_string()),
+            ),
         }
     }
+    windows
 }
 
 #[cfg(test)]
