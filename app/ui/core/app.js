@@ -380,6 +380,8 @@ const pageNumber = canAdvancePage ? priorPage + 1 : 1
 const pageId = `${pageSession}:${pageNumber}`
 window.name = `consensflow-page-v1:${pageId}`
 const terminals = new TerminalsView(stage, {
+  // The dock's map: its windows in the row's order, which are in view, the way to each.
+  map: $('#dock-map'),
   pageId,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)

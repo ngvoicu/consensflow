@@ -2,9 +2,18 @@ import { button, element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
+import { DockStrip } from './dock-strip.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
+
+/** What a window's chip in the dock's map says: the chief, a session by its name, a member by its handle. */
+const chipLabel = (participant) =>
+  participant.role === 'chief'
+    ? 'Chief'
+    : participant.member
+      ? participant.session
+      : `@${participant.handle}`
 
 /**
  * What the chief is doing, then what it runs on: the line under its name on
@@ -75,6 +84,13 @@ export class TerminalsView {
   #gone = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
+  /**
+   * The card lit as the window typed into: the one last brought into view, until the keyboard
+   * goes into another's terminal (a click there, Ctrl+Tab, the dock's map).
+   */
+  #lit = null
+  /** The person's way along the row: its gestures, keys and map. */
+  #strip
   /** The number the next card to come into the dock takes: the dock keeps its cards in that order. */
   #arrivals = 0
   /**
@@ -89,6 +105,7 @@ export class TerminalsView {
   constructor(
     stage,
     {
+      map = null,
       invoke,
       pageId,
       report,
@@ -120,6 +137,23 @@ export class TerminalsView {
     this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId })
     this.#invoke = invoke
     this.#report = report
+    this.#strip = new DockStrip(stage, map, {
+      focus: (card) => {
+        const entry = this.#windowOf(card)
+        if (entry !== undefined) this.#registry.get(entry.pane)?.terminal?.focus()
+      },
+    })
+    // The window typed into is lit: the keyboard going into a terminal lights its card.
+    stage.addEventListener('focusin', (event) => {
+      if (!event.target?.closest?.('.terminal-host')) return
+      const entry = this.#windowOf(event.target.closest('.terminal-card'))
+      if (entry === undefined || entry.key === this.#lit) return
+      this.#lit = entry.key
+      for (const other of this.#cards.values()) {
+        if (other.card.isConnected) other.card.dataset.focused = String(other === entry)
+      }
+      this.#strip.redraw()
+    })
   }
 
   /**
@@ -324,18 +358,35 @@ export class TerminalsView {
     const wanted = [...windowless, ...cards.map((entry) => entry.card)]
     if (wanted.length === 0) {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
+      this.#strip.update([])
       return
     }
     this.#place(wanted)
+    this.#strip.update([
+      ...windowless.map((card) => ({
+        card,
+        name: laneName(chief.participant),
+        label: chipLabel(chief.participant),
+      })),
+      ...cards.map((entry) => ({
+        card: entry.card,
+        name: laneName(entry.participant),
+        label: chipLabel(entry.participant),
+      })),
+    ])
     // With no terminal in the dock, there is none to bring into view.
     if (cards.length === 0) return
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
-    for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
+    const fresh = shown.key !== this.#shownKey
+    if (fresh) this.#lit = shown.key
+    const lit = cards.find((entry) => entry.key === this.#lit) ?? shown
+    for (const entry of cards) entry.card.dataset.focused = String(entry === lit)
     for (const { pane } of cards) this.#registry.fit(pane)
     // A redraw follows the board every few seconds: scrolling and focusing
     // on each one would drag the human back from a card they scrolled to.
-    if (shown.key === this.#shownKey) return
+    if (!fresh) return
     this.#shownKey = shown.key
+    this.#strip.halt()
     shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     requestAnimationFrame(() => this.#registry.get(shown.pane)?.terminal?.focus())
   }

@@ -19792,3 +19792,290 @@ test('UTF-8 cut random malformed streams match an uncut xterm', async ({ page })
   expect(result.runs).toBe(400)
   expect(result.failures).toEqual([])
 })
+
+/**
+ * Moving along the dock (T-2180, the owner on alpha.12: "when i open member terminals they
+ * appear in the right of the chief but i cannot scroll back to the chief and if i start typing
+ * to the chief the members window dissapears"). Real terminals, on a Mac laptop's window: beside
+ * the board, the chief's card is the whole dock and a session's two-thirds of it, so with a
+ * session shown only the chief's last third is in view.
+ */
+test.describe('moving along the dock', () => {
+  const CHIEF = { id: 'p1-chief', generation: 5 }
+  const AMBER = { id: 'p1-zeus-amber-pine', generation: 9 }
+  const BIRCH = { id: 'p1-zeus-brisk-birch', generation: 9 }
+  let sequence = 0
+  /** `text` printed in the window of `pane`. */
+  const print = (page, pane, text) =>
+    page.evaluate(
+      ([pane, seq, bytes]) => window.__output.onmessage({ ...pane, seq, bytes }),
+      [pane, ++sequence, [...new TextEncoder().encode(text)]],
+    )
+  /** Eighty numbered lines, so a window has scrollback. */
+  const lines = (who) => Array.from({ length: 80 }, (_, n) => `${who} line ${n + 1}`).join('\r\n')
+  /**
+   * The board beside a dock with the chief's window and the sessions `shown` (shown in that
+   * order, the last with the keyboard), each printed some lines.
+   */
+  async function dock(page, shown = ['amber-pine']) {
+    await page.setViewportSize({ width: 1512, height: 900 })
+    await open(page, { ...threeSessions(), realTerminals: true })
+    await unfold(page)
+    for (const name of shown) {
+      await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+      await expect.poll(() => docked(page)).toContain(`zeus-${name}`)
+    }
+    await print(page, CHIEF, lines('chief'))
+    await print(page, AMBER, lines('amber'))
+    await print(page, BIRCH, lines('birch'))
+    await expect(
+      page.locator('#stage .terminal-card[data-handle="chief"] .xterm-rows'),
+    ).toContainText('chief line 80')
+  }
+  const stage = (page) => page.locator('#stage')
+  const scrolled = (page) => stage(page).evaluate((node) => Math.round(node.scrollLeft))
+  /** Where in the row the dock rests: polled until nothing moves it and it holds still. */
+  const resting = async (page) => {
+    let last = -1
+    await expect
+      .poll(async () => {
+        const [now, moving] = await stage(page).evaluate((node) => [
+          Math.round(node.scrollLeft),
+          node.dataset.moving === 'true',
+        ])
+        const still = !moving && now === last
+        last = moving ? -1 : now
+        return still
+      })
+      .toBe(true)
+    return last
+  }
+  const card = (page, handle) => page.locator(`#stage .terminal-card[data-handle="${handle}"]`)
+  /** The bytes that reached the window of `pane`, as text. */
+  const typedInto = (page, pane) =>
+    page.evaluate(
+      (id) =>
+        window.__calls
+          .filter(([command, args]) => command === 'pane_input_enqueue' && args.id === id)
+          .map(([, args]) => new TextDecoder().decode(new Uint8Array(args.bytes)))
+          .join(''),
+      pane.id,
+    )
+  /** The pointer over the middle of the terminal of `handle`'s card, where it is in view. */
+  async function over(page, handle) {
+    const host = await card(page, handle).locator('.xterm-screen').boundingBox()
+    const room = await stage(page).boundingBox()
+    const left = Math.max(host.x, room.x)
+    const right = Math.min(host.x + host.width, room.x + room.width)
+    await page.mouse.move((left + right) / 2, host.y + host.height / 2)
+  }
+  /** Which card the keyboard is in. */
+  const keyboardIn = (page) =>
+    page.evaluate(() => document.activeElement?.closest('.terminal-card')?.dataset.handle ?? null)
+
+  for (const [program, asked] of [
+    ['a program with scrollback', ''],
+    ['a program that took the mouse', '\x1b[?1000h\x1b[?1006h'],
+    ['a program on the alternate screen', '\x1b[?1049h'],
+  ]) {
+    test(`a short sideways swipe over a window moves the row a whole card, under ${program}`, async ({
+      page,
+    }) => {
+      await dock(page)
+      await print(page, AMBER, asked)
+      const start = await resting(page)
+      expect(start).toBeGreaterThan(0)
+      expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+      // A trackpad's swipe is a run of small steps, not quite level; a step of a mouse's
+      // wheel tilted left is one of them. Short of half a card, it still goes the whole way.
+      await over(page, 'zeus-amber-pine')
+      for (const step of [-12, -20, -24, -16]) await page.mouse.wheel(step, 2)
+      expect(await resting(page)).toBe(0)
+      expect(cardOf(await cardsOf(page), 'chief').inView).toBe(true)
+      // And back, over the chief's window.
+      await over(page, 'chief')
+      for (const step of [10, 18, 22]) await page.mouse.wheel(step, -1)
+      expect(await resting(page)).toBe(start)
+      // Neither program heard the swipe: no arrow keys, no mouse wheel.
+      expect(await typedInto(page, AMBER)).toBe('')
+      expect(await typedInto(page, CHIEF)).toBe('')
+    })
+  }
+
+  test('a nudge too small to mean a move puts the row back where it was', async ({ page }) => {
+    await dock(page)
+    const start = await resting(page)
+    await over(page, 'zeus-amber-pine')
+    await page.mouse.wheel(-6, 0)
+    await page.mouse.wheel(-5, 0)
+    expect(await resting(page)).toBe(start)
+  })
+
+  test('Shift and the wheel move the row, as a mouse with one wheel does on Windows', async ({
+    page,
+  }) => {
+    await dock(page)
+    const start = await resting(page)
+    await over(page, 'zeus-amber-pine')
+    await page.keyboard.down('Shift')
+    await page.mouse.wheel(0, -40)
+    await page.keyboard.up('Shift')
+    expect(await resting(page)).toBe(0)
+    await over(page, 'chief')
+    await page.keyboard.down('Shift')
+    await page.mouse.wheel(0, 40)
+    await page.keyboard.up('Shift')
+    expect(await resting(page)).toBe(start)
+    expect(await typedInto(page, AMBER)).toBe('')
+  })
+
+  test("a wheel up and down over a window still scrolls that window's own scrollback, not the row", async ({
+    page,
+  }) => {
+    await dock(page)
+    const start = await resting(page)
+    const rows = card(page, 'zeus-amber-pine').locator('.xterm-rows')
+    await expect(rows).toContainText('amber line 80')
+    await over(page, 'zeus-amber-pine')
+    for (let step = 0; step < 6; step += 1) await page.mouse.wheel(1, -120)
+    await expect(rows).not.toContainText('amber line 80')
+    expect(await resting(page)).toBe(start)
+  })
+
+  test('Ctrl+Tab and Ctrl+Shift+Tab go from window to window, each whole in view and with the keyboard', async ({
+    page,
+  }) => {
+    await dock(page, ['amber-pine', 'brisk-birch'])
+    await expect.poll(() => keyboardIn(page)).toBe('zeus-brisk-birch')
+    const goes = async (keys, handle) => {
+      await page.keyboard.press(keys)
+      await expect.poll(() => keyboardIn(page)).toBe(handle)
+      await resting(page)
+      expect(cardOf(await cardsOf(page), handle).inView).toBe(true)
+    }
+    await goes('Control+Shift+Tab', 'zeus-amber-pine')
+    await goes('Control+Shift+Tab', 'chief')
+    // From the first, back to the last; and on from the last to the first.
+    await goes('Control+Shift+Tab', 'zeus-brisk-birch')
+    await goes('Control+Tab', 'chief')
+    await goes('Control+Tab', 'zeus-amber-pine')
+    // The keys are the dock's: no tab, no Shift+Tab reached a program.
+    for (const pane of [CHIEF, AMBER, BIRCH]) expect(await typedInto(page, pane)).toBe('')
+  })
+
+  test("typing into the chief's window moves no window: the session's stays whole in view", async ({
+    page,
+  }) => {
+    await dock(page)
+    // The keyboard in the chief's window, its cursor at the start of a line, the session's
+    // window in view and the chief's last third beside it. Focused as xterm focuses it, the
+    // field not scrolled to (a script's plain focus() would scroll there itself).
+    await print(page, CHIEF, '\r\n> ')
+    await card(page, 'chief')
+      .locator('.xterm-helper-textarea')
+      .evaluate((field) => field.focus({ preventScroll: true }))
+    await stage(page).evaluate((node) => {
+      node.scrollLeft = node.scrollWidth
+    })
+    const start = await resting(page)
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+    // Keys xterm takes itself, a space it lets the browser put in its field, and text an
+    // input method commits.
+    await page.keyboard.type('how is T-21 going?')
+    await page.keyboard.insertText(' ș')
+    await expect.poll(() => typedInto(page, CHIEF)).toBe('how is T-21 going? ș')
+    expect(await resting(page)).toBe(start)
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+    expect(await keyboardIn(page)).toBe('chief')
+  })
+
+  test('a click into a window the dock cuts off brings it whole into view and lights it; a drag that selects moves nothing', async ({
+    page,
+  }) => {
+    await dock(page)
+    const start = await resting(page)
+    await expect(card(page, 'zeus-amber-pine')).toHaveAttribute('data-focused', 'true')
+    // A drag across the chief's third in view selects its words, and the row stays.
+    const room = await stage(page).boundingBox()
+    const host = await card(page, 'chief').locator('.xterm-screen').boundingBox()
+    const x = Math.max(host.x, room.x) + 20
+    await page.mouse.move(x, host.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(x + 80, host.y + 60, { steps: 5 })
+    await page.mouse.up()
+    expect(await resting(page)).toBe(start)
+    // A click there is the human going to the chief's window.
+    await page.mouse.click(x, host.y + 80)
+    expect(await resting(page)).toBe(0)
+    expect(cardOf(await cardsOf(page), 'chief').inView).toBe(true)
+    expect(await keyboardIn(page)).toBe('chief')
+    // The window typed into is the one lit, across the board's redraws.
+    await expect(card(page, 'chief')).toHaveAttribute('data-focused', 'true')
+    await expect(card(page, 'zeus-amber-pine')).toHaveAttribute('data-focused', 'false')
+    await page.evaluate(() => window.__listeners.get('state-changed')())
+    await page.waitForTimeout(100)
+    await expect(card(page, 'chief')).toHaveAttribute('data-focused', 'true')
+    expect(await scrolled(page)).toBe(0)
+  })
+
+  test('where motion is reduced the row goes at once, with no glide', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await dock(page, ['amber-pine', 'brisk-birch'])
+    await resting(page)
+    await page.keyboard.press('Control+Shift+Tab')
+    // Read in the same task as the key: a glide would be at its start.
+    const [left, moving] = await stage(page).evaluate((node) => [
+      Math.round(node.scrollLeft),
+      node.dataset.moving === 'true',
+    ])
+    expect(moving).toBe(false)
+    expect(cardOf(await cardsOf(page), 'zeus-amber-pine').inView).toBe(true)
+    expect(await resting(page)).toBe(left)
+  })
+
+  test("the dock's map names its windows in the row's order, shows which are in view and which has the keyboard, and goes to the one chosen", async ({
+    page,
+  }) => {
+    await dock(page, ['amber-pine', 'brisk-birch'])
+    const map = page.getByRole('navigation', { name: 'Terminals in the dock' })
+    const chips = map.getByRole('button')
+    await expect(chips).toHaveText(['Chief', 'amber-pine', 'brisk-birch'])
+    const states = () =>
+      chips.evaluateAll((all) => all.map((chip) => [chip.dataset.view, chip.dataset.keys]))
+    await resting(page)
+    // The last shown is whole in view at the right end, with the keyboard; the one before it
+    // partly; the chief's out of view, to the left.
+    await expect.poll(states).toEqual([
+      ['none', 'false'],
+      ['part', 'false'],
+      ['whole', 'true'],
+    ])
+    await expect(chips.nth(0)).toHaveAttribute('title', /out of view, to the left/)
+    await map.getByRole('button', { name: "Go to Chief of Staff's terminal" }).click()
+    await expect.poll(() => keyboardIn(page)).toBe('chief')
+    expect(await resting(page)).toBe(0)
+    await expect.poll(states).toEqual([
+      ['whole', 'true'],
+      ['none', 'false'],
+      ['none', 'false'],
+    ])
+    await expect(chips.nth(2)).toHaveAttribute('title', /out of view, to the right/)
+    // A swipe moves the view, not the keyboard: the map says both.
+    await over(page, 'chief')
+    for (const step of [20, 20]) await page.mouse.wheel(step, 0)
+    await resting(page)
+    await expect.poll(states).toEqual([
+      ['none', 'true'],
+      ['whole', 'false'],
+      ['part', 'false'],
+    ])
+    // With the chief's window alone in the dock there is nowhere to go: no map.
+    for (const name of ['amber-pine', 'brisk-birch']) {
+      await card(page, `zeus-${name}`)
+        .getByRole('button', { name: `Hide @zeus · ${name}'s terminal` })
+        .click()
+    }
+    await expect.poll(() => docked(page)).toEqual(['chief'])
+    await expect(map).toBeHidden()
+  })
+})

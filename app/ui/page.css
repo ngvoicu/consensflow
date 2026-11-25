@@ -348,8 +348,61 @@ button:disabled { opacity: .45; cursor: default; }
   border-left: 1px solid var(--line-soft);
   background: var(--ink);
 }
-/* The dock's title sits at its right edge, next to the arrow that folds it that way. */
+/* The dock's title sits at its right edge, next to the arrow that folds it that way; its map
+   takes the room to the left. */
 .dock-head { padding: 8px 10px 0; justify-content: flex-end; }
+/* The dock's map (T-2180): a chip for each window, in the row's order, the lit bar under them
+   the part of the row in view (the share of each window there), the chip of the window typed
+   into lit as its card. A chip goes to its window. Hidden with one window or none. Many
+   windows in a narrow dock: each chip gives way to its lamp; past that the last are cut, and
+   Ctrl+Tab still reaches every window. The bar sits in the map's own bottom padding. */
+.dock-map {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  margin-right: auto;
+  padding-bottom: 5px;
+  margin-bottom: -5px;
+  overflow: hidden;
+}
+.dock-map[hidden], .main[data-dock="hidden"] .dock-map { display: none; }
+.dock-chip {
+  position: relative;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 31px;
+  max-width: 20ch;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+.dock-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-chip .lamp { flex: none; width: 7px; height: 7px; margin: 0; }
+.dock-chip:hover { color: var(--text); border-color: var(--line); background: var(--panel-raised); }
+.dock-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dock-chip[data-view="whole"], .dock-chip[data-view="part"] { color: var(--text); }
+.dock-chip[data-view="whole"] { border-color: var(--line); background: var(--panel); }
+.dock-chip[data-keys="true"] { border-color: rgba(167, 139, 250, .7); box-shadow: 0 0 12px -5px var(--glow); }
+.dock-chip::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--seen-from, 0) * 100%);
+  right: calc((1 - var(--seen-to, 0)) * 100%);
+  bottom: -5px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--violet);
+  box-shadow: 0 0 6px var(--glow);
+  transition: left 120ms ease-out, right 120ms ease-out;
+}
+.dock-chip[data-view="none"]::after { visibility: hidden; }
 .dock-title {
   margin: 0;
   font: 700 10px var(--mono);
@@ -1068,6 +1121,8 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
   scroll-padding-inline: 8px;
 }
 .stage .terminal-card { scroll-snap-align: start; }
+/* While the person's swipe or a glide moves the row, the page's script snaps it, at the end. */
+.stage[data-moving="true"] { scroll-snap-type: none; }
 @media (min-width: 761px) {
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
@@ -1547,4 +1602,5 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   .lamp { animation: none !important; }
+  .dock-chip::after { transition: none; }
 }
