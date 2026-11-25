@@ -156,8 +156,10 @@ fn a_person_with_a_path_helper_root_of_their_own_keeps_it() {
     let given = |vars: Vec<(&str, &str)>| {
         WindowEnv::new(&Env::from_vars(vars), "http://127.0.0.1:1", "/bundle/bin")
             .with_path_helper_root(root)
-            .guard_root()
-            .map(str::to_owned)
+            .guard_env()
+            .into_iter()
+            .find(|(name, _)| name == "PATH_HELPER_ROOT")
+            .map(|(_, value)| value)
     };
     assert_eq!(given(vec![]), Some("/ours".to_owned()));
     assert_eq!(given(vec![("PATH_HELPER_ROOT", "/theirs")]), None);

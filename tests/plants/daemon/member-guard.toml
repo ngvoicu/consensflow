@@ -22,8 +22,8 @@ runs = ["guard-daemon", "guard-cf"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/member_guard.rs"
-find = "        Ok(folder) => windows.with_guard(&folder),"
-replace = "        Ok(_) => windows,"
+find = "    let windows = windows.with_guard(&folder);"
+replace = "    let _ = &folder;"
 
 [[plant]]
 name = "member-guard: a stand-in for pkill goes on to the real command instead of refusing"
@@ -32,8 +32,8 @@ runs = ["guard-base", "guard-cf"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/member_guard.rs"
-find = "        Guarded::Pkill | Guarded::Killall => true,"
-replace = "        Guarded::Pkill | Guarded::Killall => false,"
+find = "        Guarded::Pkill | Guarded::Killall => false,"
+replace = "        Guarded::Pkill | Guarded::Killall => true,"
 
 [[plant]]
 name = "member-guard: the allow-list is widened to any switch, so a path Git Bash made of an option goes through"
@@ -52,8 +52,8 @@ runs = ["guard-shells"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
-find = "            env.push((PATH_HELPER_ROOT.to_owned(), root.clone()));"
-replace = "            let _ = root;"
+find = "            .map(|root| (PATH_HELPER_ROOT.to_owned(), root.clone()))"
+replace = "            .map(|root| (String::from(\"UNUSED\"), root.clone()))"
 
 [[plant]]
 name = "member-guard: the root's paths file leaves the guard's folder out, so path_helper puts the system's first"

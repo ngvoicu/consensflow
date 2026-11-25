@@ -70,9 +70,13 @@ impl WindowEnv {
         }
     }
 
-    /// The `PATH_HELPER_ROOT` every window is given, where it is given one.
-    pub fn guard_root(&self) -> Option<&str> {
-        self.guard_root.as_deref()
+    /// What the guard adds to every window's environment besides its PATH: the
+    /// `PATH_HELPER_ROOT` it is given, where it is given one.
+    pub fn guard_env(&self) -> Vec<(String, String)> {
+        self.guard_root
+            .iter()
+            .map(|root| (PATH_HELPER_ROOT.to_owned(), root.clone()))
+            .collect()
     }
 
     /// The PATH every window starts with.
@@ -156,9 +160,7 @@ impl PaneEnv for WindowEnv {
             ),
         ]);
         env.push(("PATH".to_owned(), self.path.clone()));
-        if let Some(root) = &self.guard_root {
-            env.push((PATH_HELPER_ROOT.to_owned(), root.clone()));
-        }
+        env.extend(self.guard_env());
         if let Some((pane_cf, windows)) = &self.cf {
             let word = cf_word_of(participant, pane_cf, *windows);
             env.push((CF_ENV.to_owned(), word.as_str().to_owned()));

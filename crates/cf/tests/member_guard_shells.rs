@@ -66,18 +66,12 @@ impl Scene {
         let given = Env::from_vars([("PATH", "/usr/bin:/bin")]);
         let windows = WindowEnv::new(&given, "http://127.0.0.1:1", "/bundle/bin");
         let guarded = guard(windows, &root, cf, &Log::new(&root));
-        let env = vec![
+        let mut env = vec![
             ("HOME".to_owned(), home.display().to_string()),
             ("TERM".to_owned(), "dumb".to_owned()),
             ("PATH".to_owned(), guarded.path().to_owned()),
-            (
-                "PATH_HELPER_ROOT".to_owned(),
-                guarded
-                    .guard_root()
-                    .expect("a Mac's windows are given a root")
-                    .to_owned(),
-            ),
         ];
+        env.extend(guarded.guard_env());
         Self {
             guard: folder(&root),
             env,
