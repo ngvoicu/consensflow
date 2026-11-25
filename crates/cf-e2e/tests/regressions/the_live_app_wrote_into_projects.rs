@@ -141,10 +141,17 @@ fn a_full_round_writes_nothing_outside_the_home_and_the_projects_own_files() -> 
         .var("XDG_CONFIG_HOME", text(&home.join(".config")))
         .var("CF_TEST_ACCEPT_RESULTS", "1");
     config = if cfg!(windows) {
-        config
+        // The profile and its two halves name the one home.
+        let mut config = config
             .var("USERPROFILE", text(&home))
             .var("TEMP", text(&temp))
-            .var("TMP", text(&temp))
+            .var("TMP", text(&temp));
+        for (name, value) in cf_e2e::standin_process::home_vars(&home) {
+            if matches!(name, "HOMEDRIVE" | "HOMEPATH") {
+                config = config.var(name, text(&value));
+            }
+        }
+        config
     } else {
         config.var("TMPDIR", text(&temp))
     };

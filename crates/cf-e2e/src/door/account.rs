@@ -232,13 +232,30 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
         }
     }
     let (path, digest) = own_file()?;
-    Ok(vec![
+    let mut vars = vec![
         (
             PROTECTED_FILE.to_owned(),
             path.to_string_lossy().into_owned(),
         ),
         (PROTECTED_DIGEST.to_owned(), digest),
-    ])
+    ];
+    // A child has no home of the person's to find cargo's and rustup's folders by (its own are the
+    // run's): it is told the ones this process found them in, where its environment names none.
+    if let Some(home) = project_home() {
+        for (name, below) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            let held = home.join(below);
+            if own_variable(name).is_none() && held.is_dir() {
+                vars.push((name.to_owned(), held.to_string_lossy().into_owned()));
+            }
+        }
+    }
+    Ok(vars)
+}
+
+/// A variable of this process's environment, as the door's own reads take it.
+#[allow(clippy::disallowed_methods)] // The door reads the test's environment.
+fn own_variable(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 /// The file of the account's roots and the digest of what was written in it, written the first

@@ -1195,7 +1195,9 @@ fn a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_r
 }
 
 /// A name that comes to be while it is being resolved is resolved, not refused: a store's `-wal`,
-/// made by another window as this one judges it.
+/// made by another window as this one judges it. (On Windows a name being taken away is refused
+/// as access denied for a moment, and the judge's refusal of it is the safe answer there.)
+#[cfg(unix)]
 #[test]
 fn a_name_made_while_it_is_resolved_is_not_refused() {
     use std::sync::atomic::{AtomicBool, Ordering};

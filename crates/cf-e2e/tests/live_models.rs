@@ -235,10 +235,11 @@ mod tests {
         };
         let plan = vec![("CODEX_HOME".to_owned(), "/scratch/home/.codex".to_owned())];
         let env = env_with(&machine, plan, Path::new("/scratch"));
-        assert_eq!(env["HOME"], "/scratch/home");
-        assert_eq!(env["USERPROFILE"], "/scratch/home");
-        assert_eq!(env["XDG_CONFIG_HOME"], "/scratch/home/.config");
-        assert_eq!(env["CODEX_HOME"], "/scratch/home/.codex");
+        let slashed = |name: &str| env[name].as_str().unwrap_or("").replace('\\', "/");
+        assert_eq!(slashed("HOME"), "/scratch/home");
+        assert_eq!(slashed("USERPROFILE"), "/scratch/home");
+        assert_eq!(slashed("XDG_CONFIG_HOME"), "/scratch/home/.config");
+        assert_eq!(slashed("CODEX_HOME"), "/scratch/home/.codex");
         assert!(
             !env.to_string().contains("the-callers"),
             "a variable of the caller's reached the read: {env}"
