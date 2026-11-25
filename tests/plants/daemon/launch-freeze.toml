@@ -19,6 +19,7 @@ lf-new = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_taken_
 lf-open = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_s_open_that_ends_after_its_project_closed", "--", "--test-threads=2"]
 lf-nolink = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_new_file_is_written_where_the_volume_makes_no_link"]
 lf-claim = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_that_is_taken_is_refused_where_the_volume_makes_no_link"]
+lf-gaveup = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_window_given_up_after_its_project_closed", "--", "--test-threads=2"]
 lf-late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_whose_plan_was_late", "--", "--test-threads=2"]
 lf-nowait = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_line_said_while_the_log_is_held"]
 lf-drop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "lines_the_writer_is_too_far_behind"]
@@ -294,3 +295,13 @@ runs = ["lf-open"]
 file = "crates/cf-engine/src/windows.rs"
 find = """            return self.ended_closed(record, participant, delivering);"""
 replace = """            let _ = Self::ended_closed;"""
+
+[[plant]]
+name = 'launch-freeze: a first message a window never showed fails after a Close'
+meant = "a_window_given_up_after_its_project_closed_leaves_its_task_for_the_resume"
+runs = ["lf-gaveup"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """        if delivering.launch && !self.in_open_project(message.project_id)? {"""
+replace = """        if false && delivering.launch && !self.in_open_project(message.project_id)? {"""
