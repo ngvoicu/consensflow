@@ -420,7 +420,7 @@ try {
       if (running(dir).length > 0) fail('the app still runs after the upgrade')
       expectInstalled(dir, version)
       say(
-        `${previous} was upgraded to ${version} where it was${options['no-open'] ? '' : ', once the open app had quit when asked' + (mac ? '' : ' (Windows: the install stopped for it first)')}`,
+        `${previous} was upgraded to ${version} where it was${options['no-open'] ? '' : `, once the open app had quit when asked${mac ? '' : ' (Windows: the install stopped for it first)'}`}`,
       )
     } finally {
       await local.close()

@@ -1901,7 +1901,8 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
     })
 
     test('GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through', async () => {
-      const gnu = 'case "$1" in -f) echo "stat: cannot read file system information for \'$2\'" >&2; exit 1 ;; esac\nexec /usr/bin/stat "$@"'
+      const gnu =
+        'case "$1" in -f) echo "stat: cannot read file system information for \'$2\'" >&2; exit 1 ;; esac\nexec /usr/bin/stat "$@"'
       const at = freshCase(undefined, { fullPaths: true })
       // The script calls the system's osascript by its path, so no recorder on PATH sees it:
       // the applet's own receipt tells whether it was asked to quit.
