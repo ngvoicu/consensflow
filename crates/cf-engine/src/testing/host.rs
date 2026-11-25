@@ -176,7 +176,10 @@ impl FakeHost {
             InputBox::Empty => ("", 0),
             InputBox::Holds => (" a message the human typed", 26),
         };
-        answer.insert("bottom".to_owned(), json!([rule, format!("❯{typed}"), rule]));
+        answer.insert(
+            "bottom".to_owned(),
+            json!([rule, format!("❯{typed}"), rule]),
+        );
         answer.insert(
             "cursor".to_owned(),
             json!({ "line": 1, "col": 2, "shown": true, "plainAfter": plain }),
@@ -466,6 +469,10 @@ fn name_what_is_shown(answer: &mut Map<String, Value>) {
         .entry("bottom")
         .or_insert_with(|| Value::Array(Vec::new()));
     answer.entry("typed").or_insert_with(|| json!(0));
+    // A host that says nothing of whether it is current is read as current.
+    answer
+        .entry("outputCaughtUp")
+        .or_insert_with(|| json!(true));
     if !answer.contains_key("seen") {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         answer["bottom"].to_string().hash(&mut hasher);
@@ -473,7 +480,10 @@ fn name_what_is_shown(answer: &mut Map<String, Value>) {
             .get("cursor")
             .map(ToString::to_string)
             .hash(&mut hasher);
-        answer.insert("seen".to_owned(), json!(format!("{:016x}", hasher.finish())));
+        answer.insert(
+            "seen".to_owned(),
+            json!(format!("{:016x}", hasher.finish())),
+        );
     }
 }
 

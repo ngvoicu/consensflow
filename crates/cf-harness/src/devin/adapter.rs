@@ -36,11 +36,11 @@
 //! first message goes behind `/bypass`, Devin's own command, which switches it
 //! before the message runs and changes nothing in a window in full permission
 //! already; and no window is ready for a delivery while its wire says it is in
-//! the normal mode: `/bypass` is pasted into it once it has drawn (Enter again
-//! before it is pasted again), and the window is ready when the wire says, after
-//! the look at its screen, that the mode changed. One that has not changed in
-//! [`BYPASS_WITHIN_MS`] is unfit for work, and its launch is given up, as one
-//! that did not come up.
+//! the normal mode: it is given `/bypass`, one look and at most one act at a time
+//! ([`DevinWindow::switch_to_bypass`]), and the window is ready when the wire says,
+//! after the look at its screen, that the mode changed. One whose
+//! [`BYPASS_WITHIN_MS`] have run with the wire still saying the normal mode is unfit
+//! for work, and its launch is given up, as one that did not come up.
 //!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
@@ -76,10 +76,11 @@ use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box;
-use crate::shared::look::{
-    licence_enter, licence_paste, BoxReading, BoxState, EnterFor, EnterLicence, Look, PasteLicence, NO_LOOK,
-};
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{
+    licence_enter, licence_paste, BoxReading, BoxState, EnterFor, EnterLicence, Look, PasteLicence,
+    NO_LOOK,
+};
 use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
@@ -123,9 +124,9 @@ const SWITCHING: &str =
 /// taken as drawn, as the engine takes it.
 const DRAWN_QUIET_MS: f64 = 1_500.0;
 
-/// How long after it was pasted `/bypass` is pasted again while the wire still
-/// says the normal mode, and how long a window has to leave that mode from the
-/// look that first found it there.
+/// How long after the last act on `/bypass` (a paste or an Enter) another is made while the
+/// wire still says the normal mode, and how long a window has to leave that mode: the time
+/// its looks find it the launch's own, not held for the person's typing nor without a look.
 const BYPASS_AGAIN_MS: i64 = 10_000;
 pub(crate) const BYPASS_WITHIN_MS: i64 = 30_000;
 
@@ -213,14 +214,58 @@ fn first_message(message: Option<&str>, resumed: bool) -> Option<String> {
     })
 }
 
-/// Where a window is in its switch to full permission: since when the wire has
-/// said it is in the normal mode, when `/bypass` was last pasted into it, and when
-/// Enter was pressed again for that paste.
+/// Where a window is in its switch to full permission: how long its time has run, since when
+/// it has been running (none where the last look held it, or there was none), and when the
+/// last act on `/bypass` was.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Switch {
-    since: Option<i64>,
-    pasted: Option<i64>,
-    entered: Option<i64>,
+    ran: i64,
+    running: Option<i64>,
+    acted: Option<i64>,
+}
+
+impl Switch {
+    /// Counts the time run up to `now` and stands still from here.
+    fn stands_still(&mut self, now: i64) {
+        if let Some(since) = self.running.take() {
+            self.ran += now - since;
+        }
+    }
+}
+
+/// What a look finds of a window that is given `/bypass`.
+enum Found {
+    /// Its box holds the command and nothing else, and no key of the person's is counted: it
+    /// is sent with an Enter on this look.
+    Command,
+    /// Its box reads empty and a paste is licensed: the command is pasted.
+    Empty(PasteLicence),
+    /// No box (a dialog): nothing is done.
+    NoBox,
+    /// The person's typing, or a hold of the paste's: nothing is done, and the time stands.
+    Held(Held),
+}
+
+/// What `look` finds of a window that is given `/bypass`.
+fn found(look: &Look) -> Found {
+    let reads = look.reads(Harness::Devin);
+    if look.unsent() && reads != BoxReading::Empty {
+        return Found::Held(Held::Unsent);
+    }
+    match reads {
+        BoxReading::Holds => {
+            if look.words(Harness::Devin).as_deref() == Some(BYPASS) {
+                Found::Command
+            } else {
+                Found::Held(Held::Unsent)
+            }
+        }
+        BoxReading::Empty => match licence_paste(look, Harness::Devin, BoxState::default(), &[]) {
+            PasteLicence::Wait(held) => Found::Held(held),
+            go => Found::Empty(go),
+        },
+        BoxReading::Unread => Found::NoBox,
+    }
 }
 
 /// How often the wire log is asked which conversation Devin opened, and the
@@ -603,81 +648,74 @@ impl DevinWindow {
             .then(|| self.history.look(&self.env, &session))
     }
 
-    /// A look at a window whose wire says it is in the normal mode, which is no
-    /// mode to work in: `/bypass` goes into it once its screen is drawn (`snapshot`,
-    /// the pane host's word on it), and the window waits for the wire to say it
-    /// changed. While the wire says the same, one more Enter goes in after
-    /// [`BYPASS_AGAIN_MS`], and only after as long again `/bypass` once more: an
-    /// Enter that came before the window had read the paste leaves the command in
-    /// the input box, where a second paste would make `/bypass/bypass` of it, as
-    /// the engine's Enter again for a delivery has it (`arrival`). One still in that
-    /// mode [`BYPASS_WITHIN_MS`] after the first look that found it so is unfit for
-    /// work. A paste the host refused (it wrote nothing) is tried again at the next
-    /// look, and so is an Enter it did not take.
-    async fn switch_to_bypass(
-        &self,
-        host: &dyn PaneHost,
-        pane: &Pane,
-        look: &Look,
-    ) -> Readiness {
+    /// A look at a window whose wire says it is in the normal mode, which is no mode to work
+    /// in: one look, and at most one act, once its screen is drawn and still (`snapshot`, the
+    /// pane host's word on it). An act is due where none was made yet, or the last was
+    /// [`BYPASS_AGAIN_MS`] or more ago:
+    /// - the box holds `/bypass` and nothing else: Enter, on this look (an Enter that came
+    ///   before the window had read the paste leaves the command there, where a second paste
+    ///   would make `/bypass/bypass` of it);
+    /// - the box reads empty and a paste is licensed: the command is pasted (also where its
+    ///   Enter was swallowed, or the person cleared it);
+    /// - anything else: nothing. The person's typing holds the window ([`Held::Unsent`],
+    ///   [`Held::Unproven`]), and so does a hold of the paste's.
+    ///
+    /// Its [`BYPASS_WITHIN_MS`] run while the looks find the command, an empty box or no box;
+    /// they stand while the window is held and while there is no look. Once they have run with
+    /// the wire still saying the normal mode, the window is unfit for work. A paste or an
+    /// Enter the host refused (it wrote nothing) is no act.
+    async fn switch_to_bypass(&self, host: &dyn PaneHost, pane: &Pane, look: &Look) -> Readiness {
         let now = self.time.wall_ms();
         let mut switch = self.switch.get();
-        let since = *switch.since.get_or_insert(now);
-        if now - since >= BYPASS_WITHIN_MS {
-            self.switch.set(switch);
-            return Readiness::Unfit(stayed_in_normal());
+        switch.stands_still(now);
+        let found = found(look);
+        if !matches!(found, Found::Held(_)) {
+            switch.running = Some(now);
+            if switch.ran >= BYPASS_WITHIN_MS {
+                self.switch.set(switch);
+                return Readiness::Unfit(stayed_in_normal());
+            }
         }
         // A window the host says has shown nothing yet has not drawn.
         let drawn = look
             .screen_quiet_ms()
             .is_some_and(|ms| ms as f64 >= DRAWN_QUIET_MS);
         let due = switch
-            .entered
-            .or(switch.pasted)
+            .acted
             .is_none_or(|last| now - last >= BYPASS_AGAIN_MS);
-        if drawn && due {
-            let mut paste = true;
-            if switch.pasted.is_some() && switch.entered.is_none() {
-                paste = false;
+        let mut held = None;
+        match found {
+            Found::Held(why) => held = Some(why),
+            Found::Command if drawn && due => {
                 // The Enter is the look's: the host checks it again where it writes.
-                match licence_enter(look, Harness::Devin, EnterFor::DevinBypass) {
-                    EnterLicence::Go(at) => {
-                        if pane::enter(host, pane, &at).await.ok {
-                            switch.entered = Some(now);
-                        }
-                    }
-                    // The command is no longer in the box the Enter was for: the window shows
-                    // it empty and quiet, in the mode it was in (a swallowed Enter, the person
-                    // cleared the command). No Enter will be allowed there, so the command goes
-                    // in again, within the launch's budget.
-                    EnterLicence::Wait(_) => {
-                        paste = !look.unsent() && look.reads(Harness::Devin) == BoxReading::Empty;
+                if let EnterLicence::Go(at) =
+                    licence_enter(look, Harness::Devin, EnterFor::DevinBypass)
+                {
+                    if pane::enter(host, pane, &at).await.ok {
+                        switch.acted = Some(now);
                     }
                 }
             }
-            if paste {
-                let licence = licence_paste(look, Harness::Devin, BoxState::default(), &[]);
-                if matches!(licence, PasteLicence::Go { .. }) {
-                    let session = self.session.borrow().clone();
-                    let sent = channel::send(
-                        host,
-                        pane,
-                        self.wire.path(),
-                        session.as_deref(),
-                        channel::Guard::Configured,
-                        BYPASS,
-                        &licence,
-                    )
-                    .await;
-                    if !sent.refused {
-                        switch.pasted = Some(now);
-                        switch.entered = None;
-                    }
+            Found::Empty(licence) if drawn && due => {
+                let session = self.session.borrow().clone();
+                let sent = channel::send(
+                    host,
+                    pane,
+                    self.wire.path(),
+                    session.as_deref(),
+                    channel::Guard::Configured,
+                    BYPASS,
+                    &licence,
+                )
+                .await;
+                if !sent.refused {
+                    switch.acted = Some(now);
                 }
             }
+            _ => {}
         }
         self.switch.set(switch);
-        Readiness::Held(Held::Because(SWITCHING.to_owned()))
+        Readiness::Held(held.unwrap_or_else(|| Held::Because(SWITCHING.to_owned())))
     }
 
     /// Which conversation the window shows, as its wire says `said`: the one place that
@@ -800,6 +838,10 @@ impl Window for DevinWindow {
                 return Ok(Readiness::Held(held));
             }
             let Some(look) = look else {
+                // No look: a switch to full permission stands still.
+                let mut switch = self.switch.get();
+                switch.stands_still(self.time.wall_ms());
+                self.switch.set(switch);
                 return Ok(Readiness::Held(Held::Because(NO_LOOK.to_owned())));
             };
             let input = look.human_input();
@@ -814,11 +856,6 @@ impl Window for DevinWindow {
             self.input.replace(input);
             if look.paste_in_flight() {
                 return Ok(Readiness::Held(Held::Unsaid));
-            }
-            // The count is the human's keys, a guess: the box on the screen says. Nothing is
-            // switched in a window the human has typed in.
-            if look.unsent() && !look.read_empty_over_count(Harness::Devin) {
-                return Ok(Readiness::Held(Held::Unsent));
             }
             // The window as it is once the host answered: the human may have chosen
             // a mode, opened another conversation or begun a turn meanwhile, and

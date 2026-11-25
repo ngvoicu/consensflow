@@ -89,7 +89,11 @@ impl Sched {
     }
 
     /// A new actor, parked at its start until it is chosen.
-    pub(crate) fn spawn(&mut self, name: &'static str, work: impl FnOnce() + Send + 'static) -> Actor {
+    pub(crate) fn spawn(
+        &mut self,
+        name: &'static str,
+        work: impl FnOnce() + Send + 'static,
+    ) -> Actor {
         let index = self.names.len();
         self.names.push(name);
         {
@@ -137,14 +141,20 @@ impl Sched {
 
     /// Whether `actor` can be chosen: it is at a point, or waits (and may find what it waits for).
     pub(crate) fn alive(&self, actor: Actor) -> bool {
-        matches!(self.stands(actor), Stands::At(_) | Stands::Blocked(_) | Stands::Resting)
+        matches!(
+            self.stands(actor),
+            Stands::At(_) | Stands::Blocked(_) | Stands::Resting
+        )
     }
 
     /// Lets `actor` run to its next point, or its end. The steps are written down.
     pub(crate) fn step(&self, actor: Actor) -> Stands {
         let mut core = self.shared.core.lock().unwrap();
         assert!(
-            matches!(core.stands[actor.0], Stands::At(_) | Stands::Blocked(_) | Stands::Resting),
+            matches!(
+                core.stands[actor.0],
+                Stands::At(_) | Stands::Blocked(_) | Stands::Resting
+            ),
             "{} is not parked: {:?}",
             self.names[actor.0],
             core.stands[actor.0]
@@ -164,7 +174,8 @@ impl Sched {
             core.trace.join("\n")
         );
         let to = core.stands[actor.0].clone();
-        core.trace.push(format!("{}: {:?} -> {:?}", self.names[actor.0], from, to));
+        core.trace
+            .push(format!("{}: {:?} -> {:?}", self.names[actor.0], from, to));
         to
     }
 

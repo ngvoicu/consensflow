@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use cf_proto::panes::BOTTOM_LINES;
+use cf_proto::panes::{ReadEmpty, BOTTOM_LINES};
 
 use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
@@ -16,8 +16,8 @@ fn named(pane: &Pane) -> Value {
 
 /// Pastes `body` into the pane (`writePaste`), as the look that licensed it says: its `at` (the
 /// look's `seen` and its count of the human's keys, which the host checks again where it writes),
-/// the count again as `readEmpty` where the look's reader read the box empty over the human's
-/// unsent keys, and the key that empties the box (`clearFirst`), written with the body. Only a
+/// `readEmpty` (that count again and the evidence) where the look's reader read the box empty
+/// over the human's unsent keys, and the key that empties the box (`clearFirst`), written with the body. Only a
 /// licence of a look makes a paste: a wait writes nothing. The host says whether a paste it did
 /// not finish wrote nothing (`admitted: false`) or may have written some; an answer that never
 /// came (the bridge ended) or did not say (its deadline passed: the bridge's thirty seconds,
@@ -46,8 +46,11 @@ pub(crate) async fn write_paste(
     request["body"] = json!(body);
     request["at"] = json!(at.seen);
     request["typed"] = json!(at.typed);
-    if *read_empty {
-        request["readEmpty"] = json!(at.typed);
+    if let Some(by) = *read_empty {
+        request["readEmpty"] = json!(ReadEmpty {
+            typed: at.typed,
+            by,
+        });
     }
     if let Some(keys) = clear_first {
         // The key is one control byte; the body of a request is text.

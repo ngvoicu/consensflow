@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use super::text;
 use cf_proto::agents::Harness;
 
-use crate::contract::{HostError, Held, Pane, PaneHost, Readiness, Work};
+use crate::contract::{Held, HostError, Pane, PaneHost, Readiness, Work};
 use crate::seams::{Services, SystemTime};
 use crate::testing::Fakes;
 
@@ -124,8 +124,7 @@ pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
             let over = !matches!(readiness, Readiness::Held(_)) || started.elapsed() >= within;
             if over {
                 let deliver = question.get("deliver").and_then(Value::as_str);
-                let delivered = match (deliver.filter(|_| readiness == Readiness::Ready), &looked)
-                {
+                let delivered = match (deliver.filter(|_| readiness == Readiness::Ready), &looked) {
                     (Some(text), Ok(look)) => {
                         let licence = crate::licence_paste(
                             look,
@@ -134,7 +133,9 @@ pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
                             &[],
                         );
                         Some(matches!(
-                            window.deliver_on(&Relay, &pane, text, Some(&licence)).await?,
+                            window
+                                .deliver_on(&Relay, &pane, text, Some(&licence))
+                                .await?,
                             crate::contract::Admission::Admitted { .. }
                         ))
                     }

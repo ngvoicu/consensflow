@@ -40,6 +40,10 @@ enum Person {
     Erase,
     /// A line and its Enter in one burst.
     Line(String),
+    /// Ctrl+W, Ctrl+U or an arrow: keys the count cannot follow, or that clear.
+    Control(&'static [u8]),
+    /// A dialog of the window's own is shown, and the person answers it with a key.
+    Answer(u64),
     Pause(u64),
 }
 
@@ -54,6 +58,10 @@ enum Feed {
     Flood(usize),
     /// The window drops the next Enter: it came before it had read the paste.
     Swallow,
+    /// The window stops taking its input, and goes on printing.
+    Stall,
+    /// It takes all the input that waits.
+    Resume,
     Pause(u64),
 }
 
@@ -69,26 +77,33 @@ impl Plan {
         let messages = 1 + rng.below(3) as u32;
         let mut person = Vec::new();
         for _ in 0..rng.below(24) {
-            person.push(match rng.below(10) {
+            person.push(match rng.below(13) {
                 0..=4 => Person::Key(
                     char::from(b'a' + rng.below(26) as u8),
                     [Echo::Whole, Echo::Split, Echo::CursorOnly, Echo::Prefix][rng.below(4)],
                 ),
                 5..=6 => Person::Erase,
                 7 => Person::Line("a line".to_owned()),
+                8..=9 => Person::Control([&b"\x17"[..], b"\x15", b"\x1b[D"][rng.below(3)]),
+                10 => Person::Answer(20 + rng.below(3_000) as u64),
                 _ => Person::Pause(200 + rng.below(4_000) as u64),
             });
         }
         let mut feed = Vec::new();
         for _ in 0..rng.below(24) {
-            feed.push(match rng.below(12) {
+            feed.push(match rng.below(14) {
                 0..=2 => Feed::Repaint(1 + rng.below(6)),
-                3 => Feed::Line(2 + rng.below(14) as u16, "output ".repeat(1 + rng.below(14))),
+                3 => Feed::Line(
+                    2 + rng.below(14) as u16,
+                    "output ".repeat(1 + rng.below(14)),
+                ),
                 4 => Feed::Wrap,
                 5 => Feed::Resize(70 + rng.below(40) as u16),
                 6 => Feed::Scroll,
                 7 => Feed::Flood(2 + rng.below(30)),
                 8 => Feed::Swallow,
+                9 => Feed::Stall,
+                10 => Feed::Resume,
                 _ => Feed::Pause(100 + rng.below(3_000) as u64),
             });
         }
@@ -129,7 +144,11 @@ pub(crate) fn walk(harness: Harness, seed: u64) -> Result<(), String> {
     let mut steps = 0;
     let mut stuck = 0;
     let outcome = loop {
-        let alive: Vec<Actor> = sched.actors().into_iter().filter(|actor| sched.alive(*actor)).collect();
+        let alive: Vec<Actor> = sched
+            .actors()
+            .into_iter()
+            .filter(|actor| sched.alive(*actor))
+            .collect();
         if alive.is_empty() {
             break Ok(());
         }
@@ -147,11 +166,17 @@ pub(crate) fn walk(harness: Harness, seed: u64) -> Result<(), String> {
             .copied()
             .filter(|actor| matches!(sched.stands(*actor), Stands::At(_)))
             .collect();
-        let pool = if ready.is_empty() || rng.below(8) == 0 { &alive } else { &ready };
+        let pool = if ready.is_empty() || rng.below(8) == 0 {
+            &alive
+        } else {
+            &ready
+        };
         let pick = pool[rng.below(pool.len())];
         let before = sched.stands(pick);
         let after = sched.step(pick);
-        stuck = if matches!((&before, &after), (Stands::Blocked(_), Stands::Blocked(_))) && ready.is_empty() {
+        stuck = if matches!((&before, &after), (Stands::Blocked(_), Stands::Blocked(_)))
+            && ready.is_empty()
+        {
             stuck + 1
         } else {
             0
@@ -161,7 +186,9 @@ pub(crate) fn walk(harness: Harness, seed: u64) -> Result<(), String> {
         }
         steps += 1;
         if steps > LIMIT || stuck > 5_000 {
-            break Err(format!("the schedule does not end after {steps} steps ({stuck} waiting)"));
+            break Err(format!(
+                "the schedule does not end after {steps} steps ({stuck} waiting)"
+            ));
         }
     };
     let outcome = outcome.and_then(|()| world.finish());
@@ -196,6 +223,12 @@ fn human(world: &Arc<World>, steps: &[Person]) {
             }
             Person::Erase => world.type_keys(&[0x7f]),
             Person::Line(line) => world.type_keys(format!("{line}\r").as_bytes()),
+            Person::Control(keys) => world.type_keys(keys),
+            Person::Answer(after) => {
+                world.program.lock().unwrap().show_dialog();
+                crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(*after));
+                world.type_keys(b"2");
+            }
             Person::Pause(millis) => {
                 crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(*millis));
             }
@@ -214,7 +247,11 @@ fn window(world: &Arc<World>, steps: &[Feed]) {
                 (0..*times).for_each(|_| program.repaint());
             }
             Feed::Line(row, text) => world.program.lock().unwrap().print_line(*row, text),
-            Feed::Wrap => world.program.lock().unwrap().print_line(10, &"w".repeat(120)),
+            Feed::Wrap => world
+                .program
+                .lock()
+                .unwrap()
+                .print_line(10, &"w".repeat(120)),
             Feed::Resize(cols) => {
                 world.screen.resize(24, *cols);
                 world.program.lock().unwrap().redraw();
@@ -222,12 +259,16 @@ fn window(world: &Arc<World>, steps: &[Feed]) {
             Feed::Scroll => world.program.lock().unwrap().scroll(),
             Feed::Flood(reads) => world.program.lock().unwrap().flood(*reads),
             Feed::Swallow => world.program.lock().unwrap().swallow += 1,
+            Feed::Stall => world.program.lock().unwrap().stall(),
+            Feed::Resume => world.program.lock().unwrap().resume(),
             Feed::Pause(millis) => {
                 crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(*millis));
             }
         }
         super::sched::at("window.step");
     }
+    // A window that fell behind goes on in the end.
+    world.program.lock().unwrap().resume();
 }
 
 fn walks(harness: Harness) {

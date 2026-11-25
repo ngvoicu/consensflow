@@ -244,16 +244,20 @@ pub(crate) struct ActivityReader {
 
 impl Read for ActivityReader {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let byte_count = self.inner.read(buffer)?;
+        // Inside the gate, which is held across a read that cannot wait (the thread waited for
+        // the terminal before, outside it): while the gate is free, no byte is in hand and not
+        // counted.
+        let byte_count = {
+            let _intake = self.counts.intake();
+            let byte_count = self.inner.read(buffer)?;
+            if byte_count > 0 {
+                self.counts.took(byte_count);
+            }
+            byte_count
+        };
         if byte_count > 0 {
-            self.counts.took(byte_count);
             *crate::sync::lock(&self.last_activity)
                 .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
-            // Returned from its wait with bytes: no longer waiting for any, whatever its next
-            // step is ([`OutputCount::caught_up`]). Counted first: from the count on, the pair
-            // says the read is pending; the moment between the pty's answer and the count is as
-            // short as a look can be taken in.
-            self.counts.reader_busy();
         }
         Ok(byte_count)
     }
@@ -272,19 +276,14 @@ pub(super) fn stream_output(
     const MAX_CHUNK_BYTES: usize = 8 * 1024;
     let mut buffer = [0; MAX_CHUNK_BYTES];
 
-    counts.reader_busy();
+    // Held at the page's credit the thread reads nothing: what the window prints stays at its
+    // terminal, where the question finds it ([`OutputCount::sample`]).
     while let Some(allowance) = flow.read_allowance() {
-        // Waiting for the pty, which has nothing more at this moment (the credit is there to
-        // read what it gives): the counts say the reader is caught up, and the read's own count
-        // ([`OutputCount::took`]) says it no longer is the moment bytes are in hand. Held at the
-        // credit above, or handing on what it read below, the reader is behind.
-        counts.reader_waits();
         let output_end::Got::Bytes(byte_count) =
             output.read(&mut buffer[..allowance.min(MAX_CHUNK_BYTES)])
         else {
             break;
         };
-        counts.reader_busy();
         // The bytes were counted as read as the pty returned them ([`ActivityReader`]): before
         // the activity lock, the flow, the queue and the lock of the screen.
         let Some(seq) = flow.record(byte_count) else {
@@ -307,11 +306,13 @@ pub(super) fn stream_output(
     let mut discarded = [0; MAX_CHUNK_BYTES];
     while let output_end::Got::Bytes(_) = output.read(&mut discarded) {}
     flow.close();
-    counts.reader_ended();
+    // The question holds the terminal open, so it is let go with the output.
+    counts.unwatch();
 }
 
-/// A descriptor of the pane's terminal of the output's own, which it asks whether there
-/// is anything to read (Unix); none is needed elsewhere.
+/// A descriptor of the pane's terminal of the output's own, which it waits on and asks
+/// whether there is anything to read; a second one is the pane's question
+/// ([`question_of`]).
 #[cfg(unix)]
 pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
     use std::os::fd::BorrowedFd;
@@ -326,9 +327,31 @@ pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError
     Ok(borrowed.try_clone_to_owned()?)
 }
 
-#[cfg(not(unix))]
-pub(super) fn terminal_of(_pane: &Pane) -> Result<output_end::Terminal, PaneError> {
-    Ok(output_end::Terminal)
+#[cfg(windows)]
+pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
+    Ok(Some(super::conpty::watch(pane.master.as_ref())?))
+}
+
+/// The question to the pane's terminal, whether it holds bytes not yet read
+/// (`OutputCount::sample`), with a handle of its own, which it holds while the output is read.
+/// A terminal that cannot be asked answers that it holds some: such a window is behind.
+#[cfg(unix)]
+pub(super) fn question_of(
+    terminal: &output_end::Terminal,
+) -> Result<crate::arbiter::Waiting, PaneError> {
+    let terminal = terminal.try_clone()?;
+    Ok(Box::new(move || output_end::holds_bytes(&terminal)))
+}
+
+#[cfg(windows)]
+pub(super) fn question_of(
+    terminal: &output_end::Terminal,
+) -> Result<crate::arbiter::Waiting, PaneError> {
+    let Some(terminal) = terminal else {
+        return Ok(Box::new(|| false));
+    };
+    let terminal = terminal.try_clone()?;
+    Ok(Box::new(move || terminal.holds_bytes()))
 }
 
 pub(super) fn close_output(pane: &Pane) {
@@ -354,10 +377,10 @@ mod tiny_read_tests {
             let terminal = reader.try_clone().expect("duplicate descriptor").into();
             (Box::new(reader) as Box<dyn Read + Send>, terminal)
         };
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         let (reader, terminal) = (
             Box::new(std::io::Cursor::new(vec![b'x'])) as Box<dyn Read + Send>,
-            output_end::Terminal,
+            None,
         );
 
         let output = output_end::Output::new(reader, terminal, Box::new(|_| true));

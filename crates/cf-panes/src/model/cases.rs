@@ -8,13 +8,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cf_harness::{EnterFor, Look, NoLook};
+use cf_harness::{EnterFor, NoLook};
 use cf_proto::agents::Harness;
 
 use super::program::Echo;
 use super::sched::{self, Actor, Sched, Stands};
 use super::world::{State, World};
-use crate::arbiter::{ArbiterError, Clock, Why};
+use crate::arbiter::{ArbiterError, Why};
 
 /// A window, its service actors, and a script: the engine's part of the case, with the points
 /// the test stops it at.
@@ -89,16 +89,10 @@ impl Case {
 
     /// Runs every actor until the script stands at the point `name`.
     fn until_script(&self, name: &'static str) {
-        self.run(&[], |case| {
-            matches!(case.sched.stands(case.script), Stands::At(at) if at == name)
-        });
-    }
-
-    /// Runs every actor but `held` until the script stands at the point `name`.
-    fn until_script_but(&self, name: &'static str, held: &[Actor]) {
-        self.run(held, |case| {
-            matches!(case.sched.stands(case.script), Stands::At(at) if at == name)
-        });
+        self.run(
+            &[],
+            |case| matches!(case.sched.stands(case.script), Stands::At(at) if at == name),
+        );
     }
 
     /// Runs the reader until it has handed on what it counted: the read waits for the consumer.
@@ -162,7 +156,11 @@ fn kept<T>() -> Kept<T> {
 
 /// The window prints a line that changes what its screen shows (no key's echo).
 fn prints(world: &World) {
-    world.program.lock().unwrap().print_line(4, "something the window said");
+    world
+        .program
+        .lock()
+        .unwrap()
+        .print_line(4, "something the window said");
 }
 
 /// A script: a look, a stop at `case.looked`, the paste of that look, and its answer kept.
@@ -193,7 +191,10 @@ fn t2132_the_enter_while_a_read_waits_for_the_screens_lock() {
         case.read_in_hand();
         case.to(case.consumer, "feed.start");
         case.steps(case.worker, 300);
-        assert!(case.taken().is_empty(), "{harness:?}: no Enter while a read is not drawn");
+        assert!(
+            case.taken().is_empty(),
+            "{harness:?}: no Enter while a read is not drawn"
+        );
         case.rules();
         case.finish();
         assert_eq!(case.taken(), [1], "{harness:?}");
@@ -266,7 +267,12 @@ fn t2132_a_feed_that_panics_admits_nothing() {
     case.until_script("case.looked");
     case.world.printed.counts().break_feed();
     case.finish();
-    let refused = answer.lock().unwrap().take().expect("a paste was asked").unwrap_err();
+    let refused = answer
+        .lock()
+        .unwrap()
+        .take()
+        .expect("a paste was asked")
+        .unwrap_err();
     assert!(matches!(refused, ArbiterError::InputFailed), "{refused:?}");
     assert!(case.held().is_empty() && case.taken().is_empty());
     case.end();
@@ -280,7 +286,10 @@ fn t2132_a_feed_that_panics_admits_nothing() {
 fn t2139_a_read_is_counted_before_the_activity_lock() {
     let case = Case::new(Harness::Claude, |_| {});
     case.world.program.lock().unwrap().repaint();
-    // The reader's first lock is the activity time's, taken once the pty has given its bytes.
+    // The reader's first lock is its gate's; the next is the activity time's, taken once the
+    // pty has given its bytes.
+    case.to(case.reader, "lock");
+    case.steps(case.reader, 1);
     case.to(case.reader, "lock");
     assert!(
         sched::without_points(|| case.world.printed.counts().pending()),
@@ -299,11 +308,16 @@ fn t2139_the_enter_after_the_final_check_at_the_writer() {
         case.until_script("case.looked");
         case.run(&[], |case| !case.held().is_empty());
         // The Enter's wait is over: the worker stands at the writer for the Enter.
-        case.run(&[], |case| matches!(case.sched.stands(case.worker), Stands::At("writer.locked")));
+        case.run(&[], |case| {
+            matches!(case.sched.stands(case.worker), Stands::At("writer.locked"))
+        });
         case.world.program.lock().unwrap().repaint();
         case.to(case.reader, "took.after");
         case.steps(case.worker, 200);
-        assert!(case.taken().is_empty(), "{harness:?}: the read counted before the write holds the Enter");
+        assert!(
+            case.taken().is_empty(),
+            "{harness:?}: the read counted before the write holds the Enter"
+        );
         case.rules();
         case.finish();
         assert_eq!(case.taken(), [1]);
@@ -311,111 +325,53 @@ fn t2139_the_enter_after_the_final_check_at_the_writer() {
     });
 }
 
-/// T-2139: an answer read after the first read of a key's echo (the cursor's move to where it is,
-/// the box empty) and before the second (the key) is a stale one: the paste on it is refused while
-/// the key is pending, and again once it is drawn, and the child gets the key and nothing more.
+/// T-2233: the window printed after the look and the host has not read it, or has read it and
+/// not drawn it: the paste on that look is refused, to be looked at again, with the person's
+/// count at zero.
 #[test]
-fn t2139_a_look_read_before_the_echo_admits_no_paste_over_a_pending_or_a_drawn_x() {
+fn t2233_printed_since_the_look_a_paste() {
     each_harness(|harness| {
-        let (pending, drawn) = (kept(), kept());
-        let (first, second) = (Arc::clone(&pending), Arc::clone(&drawn));
-        let case = Case::new(harness, move |world| {
-            // The window's echo comes late (the checks assume it comes within a second).
-            world.program.lock().unwrap().late = true;
-            world.echo_as([Echo::Prefix]);
-            world.type_keys(b"X");
-            sched::wait_until("the key is written", || {
-                world.program.lock().unwrap().draft == "X"
-            });
-            sched::at("case.typed");
-            // The window's first read of its echo comes a moment after the key.
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(20));
-            sched::at("case.answered");
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(1_500));
-            let look = world.look().expect("a look before the key's echo is read");
-            sched::at("case.looked");
-            *first.lock().unwrap() = world.paste_on(&look);
-            sched::at("case.pending");
-            *second.lock().unwrap() = world.paste_on(&look);
-        });
-        // The window printed the cursor's move (read and drawn), and the key's own read is in the
-        // reader's hand, not counted.
-        case.until_script_but("case.answered", &[case.reader, case.consumer]);
-        case.run(&[case.script, case.consumer, case.worker], |case| case.world.fed_len() > 0);
-        case.to(case.reader, "took.before");
-        case.run(&[case.script, case.reader], |case| {
-            let (read, drawn) = sched::without_points(|| case.world.printed.counts().both());
-            read == drawn
-                && case.world.fed_len() == 0
-                && matches!(case.sched.stands(case.consumer), Stands::Blocked(_))
-        });
-        // Time passes; the look is taken then, with the key's read not yet counted.
-        case.until_script_but("case.looked", &[case.reader, case.consumer]);
-        // The key's read is counted now, and not yet drawn.
-        case.run(&[case.script, case.consumer, case.worker], |case| case.world.fed_len() > 0);
-        case.to(case.consumer, "feed.start");
-        case.run(&[case.consumer], |case| {
-            matches!(case.sched.stands(case.script), Stands::At("case.pending"))
-        });
-        // Drawn: the second paste is on the same look.
-        case.drawn();
-        case.finish();
-        let refused = |kept: &Kept<Result<(), ArbiterError>>| kept.lock().unwrap().take();
-        let first = refused(&pending).expect("asked");
-        assert!(
-            matches!(first, Err(ArbiterError::LookAgain(Why::OutputPending | Why::BoxChanged)) | Err(ArbiterError::Unsent)),
-            "{harness:?}: {first:?}"
-        );
-        let second = refused(&drawn).expect("asked");
-        assert!(
-            matches!(second, Err(ArbiterError::LookAgain(_)) | Err(ArbiterError::Unsent)),
-            "{harness:?}: {second:?}"
-        );
-        assert!(case.held().is_empty(), "{harness:?}: nothing pasted over the key");
-        case.rules();
-        case.end();
+        for read in [false, true] {
+            let answer = kept();
+            let case = Case::new(harness, paste_after_a_look(&answer));
+            case.until_script("case.looked");
+            prints(&case.world);
+            let held = if read {
+                case.read_in_hand();
+                vec![case.consumer]
+            } else {
+                vec![case.reader, case.consumer]
+            };
+            case.run(&held, |case| !case.sched.alive(case.script));
+            case.finish();
+            let outcome = answer.lock().unwrap().take().expect("asked");
+            assert!(
+                matches!(outcome, Err(ArbiterError::LookAgain(Why::OutputPending))),
+                "{harness:?}, read {read}: {outcome:?}"
+            );
+            assert!(case.held().is_empty(), "{harness:?}, read {read}");
+            case.rules();
+            case.end();
+        }
     });
 }
 
-/// T-2160: the digest of what the screen shows and the check that nothing is pending are made
-/// with the screen's lock held, both: a feed that draws the key's echo between them would leave a
-/// digest of the box before the key and a count that says nothing is pending.
+/// T-2160: the digest of what the screen shows and the check that the pane is current are made
+/// with the screen's lock held, both: a feed that drew the window's output between them would
+/// leave a digest of the screen before it and a pane that reads as current.
 #[test]
 fn t2160_the_digest_and_the_pending_check_are_under_one_lock() {
     each_harness(|harness| {
         let answer = kept();
-        let kept_answer = Arc::clone(&answer);
-        let case = Case::new(harness, move |world| {
-            world.program.lock().unwrap().late = true;
-            world.echo_as([Echo::Prefix]);
-            world.type_keys(b"X");
-            sched::wait_until("the key is written", || {
-                world.program.lock().unwrap().draft == "X"
-            });
-            sched::at("case.typed");
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(20));
-            sched::at("case.answered");
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(1_500));
-            let look = world.look().expect("a look before the key's echo is read");
-            sched::at("case.looked");
-            *kept_answer.lock().unwrap() = world.paste_on(&look);
+        let case = Case::new(harness, paste_after_a_look(&answer));
+        case.until_script("case.looked");
+        // The host has made the digest of the screen as the look saw it, and not yet asked
+        // whether the pane is current.
+        case.run(&[], |case| {
+            matches!(case.sched.stands(case.worker), Stands::At("admit.seen"))
         });
-        case.until_script_but("case.answered", &[case.reader, case.consumer]);
-        case.run(&[case.script, case.consumer, case.worker], |case| case.world.fed_len() > 0);
-        case.to(case.reader, "took.before");
-        case.run(&[case.script, case.reader], |case| {
-            let (read, drawn) = sched::without_points(|| case.world.printed.counts().both());
-            read == drawn
-                && case.world.fed_len() == 0
-                && matches!(case.sched.stands(case.consumer), Stands::Blocked(_))
-        });
-        case.until_script_but("case.looked", &[case.reader, case.consumer]);
-        // The host has made the digest of the box before the key's echo, and has not yet asked
-        // whether anything is pending.
-        case.run(&[case.reader, case.consumer], |case| {
-            matches!(case.sched.stands(case.worker), Stands::At("seen.locked"))
-        });
-        // Now the window's echo is read, and the screen is asked to draw it.
+        // Now the window prints, and what it printed is read and offered to the screen.
+        prints(&case.world);
         for _ in 0..300 {
             case.steps(case.reader, 1);
             case.steps(case.consumer, 1);
@@ -423,10 +379,10 @@ fn t2160_the_digest_and_the_pending_check_are_under_one_lock() {
         case.finish();
         let outcome = answer.lock().unwrap().take().expect("asked");
         assert!(
-            matches!(outcome, Err(ArbiterError::LookAgain(_)) | Err(ArbiterError::Unsent)),
+            matches!(outcome, Err(ArbiterError::LookAgain(_))),
             "{harness:?}: {outcome:?}"
         );
-        assert!(case.held().is_empty(), "{harness:?}: nothing pasted over the key");
+        assert!(case.held().is_empty(), "{harness:?}");
         case.rules();
         case.end();
     });
@@ -459,17 +415,26 @@ fn t2139_the_recovery_enter_while_pending() {
         case.run(&[case.consumer], |case| {
             matches!(case.sched.stands(case.script), Stands::At("case.entered"))
         });
-        assert!(case.taken().is_empty(), "{harness:?}: no Enter was written while a byte was pending");
+        assert!(
+            case.taken().is_empty(),
+            "{harness:?}: no Enter was written while a byte was pending"
+        );
         let first = refused.lock().unwrap().take();
         assert!(
-            matches!(first, Some(Err(ArbiterError::LookAgain(Why::OutputPending)))),
+            matches!(
+                first,
+                Some(Err(ArbiterError::LookAgain(Why::OutputPending)))
+            ),
             "{harness:?}: {first:?}"
         );
         // Drawn: a look taken now licenses it.
         case.drawn();
         case.finish();
         let second = goes.lock().unwrap().take();
-        assert!(matches!(second, Some(Ok(()))), "{harness:?}: the Enter goes once it is drawn: {second:?}");
+        assert!(
+            matches!(second, Some(Ok(()))),
+            "{harness:?}: the Enter goes once it is drawn: {second:?}"
+        );
         assert_eq!(case.taken(), [1], "{harness:?}");
         case.rules();
         case.end();
@@ -503,26 +468,34 @@ fn t2139_the_cap_never_doubles_a_paste() {
     case.end();
 }
 
-/// T-2139: the pair of counts is sampled once, the drawn count first and the read count after: a
-/// byte read between the two loads makes the window pending, and never the reverse.
+/// T-2233: bytes in hand. A reader stopped between its read and its count holds the gate: a
+/// look waits for it, and then says the output is pending.
 #[test]
-fn t2139_the_counts_are_sampled_in_one_order() {
-    let looked = kept();
-    let answer = Arc::clone(&looked);
-    let case = Case::new(Harness::Claude, move |world| {
-        *answer.lock().unwrap() = Some(world.look());
+fn t2233_a_look_waits_for_bytes_in_hand() {
+    each_harness(|harness| {
+        let looked = kept();
+        let answer = Arc::clone(&looked);
+        let case = Case::new(harness, move |world| {
+            sched::at("case.looking");
+            *answer.lock().unwrap() = Some(world.look());
+        });
+        case.to(case.script, "case.looking");
+        case.world.program.lock().unwrap().repaint();
+        case.to(case.reader, "took.before");
+        // The look is asked; it cannot answer while the reader holds what it read.
+        case.steps(case.script, 50);
+        assert!(
+            looked.lock().unwrap().is_none(),
+            "{harness:?}: answered with bytes in hand"
+        );
+        case.run(&[case.consumer], |case| !case.sched.alive(case.script));
+        let outcome = looked.lock().unwrap().take().expect("a look was taken");
+        assert!(
+            matches!(outcome, Err(NoLook::Behind)),
+            "{harness:?}: {outcome:?}"
+        );
+        case.end();
     });
-    case.until_script("both.drawn");
-    // A read comes between the two loads.
-    case.world.program.lock().unwrap().repaint();
-    case.to(case.reader, "took.after");
-    case.run(&[case.consumer], |case| !case.sched.alive(case.script));
-    let outcome = looked.lock().unwrap().take().expect("a look was taken");
-    assert!(
-        matches!(outcome, Err(NoLook::Behind)),
-        "a byte read after the drawn count was loaded makes it pending: {outcome:?}"
-    );
-    case.end();
 }
 
 // ---- T-2150 ---------------------------------------------------------------------------------
@@ -552,45 +525,26 @@ fn t2150_a_repaint_at_rest_leaves_the_look_good() {
 
 // ---- T-2160 ---------------------------------------------------------------------------------
 
-/// T-2160: the human typed X, the window drew it faint, and the reader read the box empty; the echo
-/// then moved only the cursor. The cursor is in `seen`: the paste is refused, and the window gets
-/// the key and nothing more.
+/// T-2160: after the look the window moves only its cursor. The cursor is in `seen`: the paste
+/// is refused.
 #[test]
 fn t2160_a_cursor_only_echo_after_the_look() {
-    let answer = kept();
-    let case = Case::new(Harness::Claude, {
-        let answer = Arc::clone(&answer);
-        move |world| {
-            world.echo_as([Echo::Silent]);
-            world.type_keys(b"X");
-            sched::wait_until("the key is written", || world.program.lock().unwrap().draft == "X");
-            sched::at("case.typed");
-            // The window answers the key a moment after it: the box reads empty over the count.
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(20));
-            sched::at("case.faint");
-            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(1_500));
-            let look = world.look().expect("a look");
-            sched::at("case.looked");
-            *answer.lock().unwrap() = world.paste_on(&look);
-        }
+    each_harness(|harness| {
+        let answer = kept();
+        let case = Case::new(harness, paste_after_a_look(&answer));
+        case.until_script("case.looked");
+        case.world.program.lock().unwrap().move_cursor(5);
+        case.drawn();
+        case.finish();
+        let outcome = answer.lock().unwrap().take().expect("a paste was asked");
+        assert!(
+            matches!(outcome, Err(ArbiterError::LookAgain(Why::BoxChanged))),
+            "{harness:?}: {outcome:?}"
+        );
+        assert!(case.held().is_empty(), "{harness:?}");
+        case.rules();
+        case.end();
     });
-    // The faint X is drawn, and nothing else of the echo: the box reads empty.
-    case.until_script("case.faint");
-    case.world.program.lock().unwrap().faint_key('X');
-    case.drawn();
-    case.until_script("case.looked");
-    // The echo's cursor move comes after the look, and is drawn.
-    case.world.program.lock().unwrap().cursor_past_key();
-    case.drawn();
-    case.finish();
-    let outcome = answer.lock().unwrap().take().expect("a paste was asked");
-    assert!(
-        matches!(outcome, Err(ArbiterError::LookAgain(Why::BoxChanged)) | Err(ArbiterError::Unsent)),
-        "{outcome:?}"
-    );
-    assert!(case.held().is_empty(), "the window got the key and nothing more");
-    case.rules();
-    case.end();
 }
 
 /// T-2160: a key typed and erased again since the look: the screen shows what it showed, the human
@@ -605,13 +559,18 @@ fn t2160_a_key_typed_and_erased_since_the_look() {
         case.world.type_keys(b"x");
         case.world.type_keys(&[0x7f]);
         // Both keys are written and counted, and the erase's echo is drawn.
+        // Both keys are written whole, and the worker waits for more.
         case.run(&[case.script], |case| {
-            case.world.arbiter.snapshot(&case.world.key).is_ok_and(|now| now.typed >= 2)
+            case.world.arbiter.typed_count(&case.world.key) >= Some(2)
+                && matches!(case.sched.stands(case.worker), Stands::Blocked("a job"))
         });
         case.drawn();
         case.finish();
         let outcome = answer.lock().unwrap().take().expect("asked");
-        assert!(matches!(outcome, Err(ArbiterError::Unsent)), "{harness:?}: {outcome:?}");
+        assert!(
+            matches!(outcome, Err(ArbiterError::Unsent)),
+            "{harness:?}: {outcome:?}"
+        );
         assert!(case.held().is_empty(), "{harness:?}");
         case.rules();
         case.end();
@@ -630,7 +589,9 @@ fn t2160_an_echo_drawn_during_admission() {
         case.read_in_hand();
         // The feed holds the screen's lock, the read counted and not drawn.
         case.to(case.consumer, "feed.locked");
-        case.run(&[case.consumer], |case| matches!(case.sched.stands(case.worker), Stands::Blocked(_)));
+        case.run(&[case.consumer], |case| {
+            matches!(case.sched.stands(case.worker), Stands::Blocked(_))
+        });
         case.finish();
         let outcome = answer.lock().unwrap().take().expect("asked");
         assert!(
@@ -651,7 +612,12 @@ fn t2160_a_wrap_a_scroll_and_a_resize() {
         let case = Case::new(Harness::Claude, paste_after_a_look(&answer));
         case.until_script("case.looked");
         match change {
-            "wrap" => case.world.program.lock().unwrap().print_line(10, &"w".repeat(120)),
+            "wrap" => case
+                .world
+                .program
+                .lock()
+                .unwrap()
+                .print_line(10, &"w".repeat(120)),
             "scroll" => case.world.program.lock().unwrap().scroll(),
             _ => {
                 // A window that is resized draws its rules to the new width.
@@ -707,7 +673,11 @@ fn t2160_the_arrivals_old_look_pastes_nothing_again() {
         case.run(&[case.consumer], |case| {
             matches!(case.sched.stands(case.script), Stands::At("case.behind"))
         });
-        assert_eq!(case.held(), [1], "{harness:?}: not pasted again over the look that was behind");
+        assert_eq!(
+            case.held(),
+            [1],
+            "{harness:?}: not pasted again over the look that was behind"
+        );
         case.finish();
         assert_eq!(case.taken(), [1], "{harness:?}: one Enter took it");
         case.rules();
@@ -733,4 +703,415 @@ fn t2160_a_failed_look_presses_nothing() {
     let msgs = case.world.msgs.lock().unwrap().clone();
     assert!(matches!(msgs[0].state, State::Pasted(_)), "{msgs:?}");
     case.end();
+}
+
+// ---- T-2230 ---------------------------------------------------------------------------------
+
+/// A script: the person types `X` into a window that does not draw it, the window prints
+/// something else (`said`), and `after` later a look is taken and its paste asked.
+fn paste_after_an_undrawn_x(
+    said: bool,
+    after: Duration,
+    answers: &Kept<Vec<Option<Result<(), ArbiterError>>>>,
+) -> impl FnOnce(Arc<World>) + Send + 'static {
+    let answers = Arc::clone(answers);
+    move |world| {
+        world.echo_as([Echo::Silent]);
+        world.type_keys(b"X");
+        sched::wait_until("the key is written", || {
+            world.program.lock().unwrap().draft == "X"
+        });
+        crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(50));
+        if said {
+            world.program.lock().unwrap().colour_reset();
+        }
+        let mut asked = Vec::new();
+        for wait in [after, Duration::from_millis(4_600)] {
+            crate::arbiter::Clock::rest(&*world.clock, wait);
+            sched::at("case.looking");
+            asked.push(world.look().ok().and_then(|look| world.paste_on(&look)));
+        }
+        *answers.lock().unwrap() = Some(asked);
+    }
+}
+
+/// T-2230 3: the person's `X` is in the window's box and not drawn, and the window printed a
+/// colour reset since: no length of time and no other output sets their key aside. Nothing is
+/// pasted, at 1.4 s nor at 6 s.
+#[test]
+fn t2230_a_late_echo_beside_other_output_holds_the_paste() {
+    each_harness(|harness| {
+        let answers = kept();
+        let case = Case::new(
+            harness,
+            paste_after_an_undrawn_x(true, Duration::from_millis(1_350), &answers),
+        );
+        case.finish();
+        case.rules();
+        assert!(
+            case.held().is_empty(),
+            "{harness:?}: pasted over the person's X"
+        );
+        case.end();
+    });
+}
+
+/// T-2230 3: the same with no output since the key at all, at 5.2 s and past it.
+#[test]
+fn t2230_a_silent_late_echo_holds_the_paste() {
+    each_harness(|harness| {
+        let answers = kept();
+        let case = Case::new(
+            harness,
+            paste_after_an_undrawn_x(false, Duration::from_millis(5_200), &answers),
+        );
+        case.finish();
+        case.rules();
+        assert!(
+            case.held().is_empty(),
+            "{harness:?}: pasted over the person's X"
+        );
+        case.end();
+    });
+}
+
+// ---- T-2233: the amendment's schedules ------------------------------------------------------
+
+/// What a script does with the person's keys, and then takes a pass of the engine.
+fn types(world: &World, keys: &[u8]) {
+    let before = world.arbiter.snapshot(&world.key).expect("the pane").typed;
+    world.type_keys(keys);
+    sched::wait_until("the key is counted", || {
+        world
+            .arbiter
+            .snapshot(&world.key)
+            .is_ok_and(|now| now.typed > before)
+    });
+}
+
+/// A moment past the second a paste waits after the person's last key.
+fn a_while(world: &World) {
+    crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(1_500));
+}
+
+/// Runs a case whose script is `script`, to its end, and gives what the program holds and took.
+fn run_script(harness: Harness, script: impl FnOnce(Arc<World>) + Send + 'static) -> Case {
+    let case = Case::new(harness, script);
+    case.finish();
+    case
+}
+
+/// Everything the window shows once its output is drawn.
+fn settled(world: &World) {
+    sched::wait_until("what the window printed is drawn", || {
+        sched::without_points(|| {
+            let (read, drawn) = world.printed.counts().both();
+            read == drawn && world.pty.empty()
+        })
+    });
+}
+
+#[test]
+fn t2233_erased_and_seen_the_message_is_taken() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            types(&world, b"a");
+            types(&world, b"b");
+            settled(&world);
+            types(&world, b"\x17");
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+        });
+        assert_eq!(
+            case.taken(),
+            [1],
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_a_character_after_the_erase_holds() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            types(&world, b"a");
+            types(&world, b"b");
+            settled(&world);
+            types(&world, b"\x17");
+            settled(&world);
+            world.program.lock().unwrap().stall();
+            types(&world, b"X");
+            a_while(&world);
+            world.pass(false);
+            world.program.lock().unwrap().resume();
+        });
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_a_dialog_answered_the_message_is_taken() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            types(&world, b"2");
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+        });
+        assert_eq!(
+            case.taken(),
+            [1],
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_two_keys_at_a_dialog_hold() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            world.program.lock().unwrap().stall();
+            types(&world, b"2");
+            // The `x` is not drawn.
+            world.echo_as([Echo::Silent]);
+            types(&world, b"x");
+            world.program.lock().unwrap().resume();
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+        });
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_a_screen_behind_at_the_key_is_no_evidence() {
+    each_harness(|harness| {
+        let case = Case::new(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            sched::at("case.shown");
+            world.program.lock().unwrap().close_dialog();
+            world.echo_as([Echo::Silent]);
+            world.type_keys(b"X");
+            sched::wait_until("the key is counted", || {
+                world
+                    .arbiter
+                    .snapshot(&world.key)
+                    .is_ok_and(|now| now.typed >= 1)
+            });
+            sched::at("case.typed");
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+        });
+        case.until_script("case.shown");
+        // The dialog's end waits at the terminal while the key is written.
+        case.run(&[case.reader], |case| {
+            matches!(case.sched.stands(case.script), Stands::At("case.typed"))
+        });
+        case.finish();
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_a_paste_naming_evidence_the_host_lacks_is_refused() {
+    each_harness(|harness| {
+        // A character alone keeps no screen over a key that added none, and two characters
+        // leave "typed elsewhere" no first.
+        const ONE: &[&[u8]] = &[b"X"];
+        const TWO: &[&[u8]] = &[b"X", b"Y"];
+        for (keys, by) in [
+            (ONE, cf_proto::panes::Evidence::Erased),
+            (TWO, cf_proto::panes::Evidence::Elsewhere),
+        ] {
+            let answer = kept();
+            let kept_answer = Arc::clone(&answer);
+            let case = run_script(harness, move |world| {
+                world.program.lock().unwrap().stall();
+                for key in keys {
+                    types(&world, key);
+                }
+                a_while(&world);
+                let look = world.look().expect("a look");
+                *kept_answer.lock().unwrap() = Some(world.paste_saying(&look, by));
+                world.program.lock().unwrap().resume();
+            });
+            let outcome = answer.lock().unwrap().take().expect("asked");
+            assert!(
+                matches!(outcome, Err(ArbiterError::Unsent)),
+                "{harness:?} {by:?}: {outcome:?}"
+            );
+            assert!(case.held().is_empty(), "{harness:?} {by:?}");
+            case.rules();
+            case.end();
+        }
+    });
+}
+
+/// Our paste's echo waits at the terminal while the page holds its output back: no look, so
+/// nothing is pasted again, and nothing is pressed.
+#[test]
+fn t2233_the_room_gives_no_look_and_nothing_goes_again() {
+    each_harness(|harness| {
+        let case = Case::new(harness, |world| {
+            world.program.lock().unwrap().swallow = 1;
+            world.pass(false);
+            sched::at("case.pasted");
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_secs(70));
+            for _ in 0..3 {
+                world.pass(false);
+                crate::arbiter::Clock::rest(&*world.clock, Duration::from_secs(70));
+            }
+        });
+        // The reader is held at the page's room: what the window prints stays at its terminal.
+        case.run(&[], |case| {
+            matches!(case.sched.stands(case.script), Stands::At("case.pasted"))
+        });
+        case.drawn();
+        case.world.program.lock().unwrap().repaint();
+        case.run(&[case.reader], |case| !case.sched.alive(case.script));
+        assert_eq!(
+            case.held(),
+            [1],
+            "{harness:?}: pasted again over a look that was none"
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+#[test]
+fn t2233_printed_since_the_look_pane_enter_waits_and_is_refused() {
+    each_harness(|harness| {
+        let answer = kept();
+        let kept_answer = Arc::clone(&answer);
+        let case = Case::new(harness, move |world| {
+            world.program.lock().unwrap().swallow = 1;
+            world.pass(false);
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_secs(4));
+            let look = world.look().expect("a look");
+            sched::at("case.looked");
+            *kept_answer.lock().unwrap() = world.enter_on(&look, EnterFor::PasteStillThere);
+        });
+        case.until_script("case.looked");
+        case.drawn();
+        case.world.program.lock().unwrap().repaint();
+        case.run(&[case.reader], |case| !case.sched.alive(case.script));
+        let outcome = answer.lock().unwrap().take().expect("asked");
+        assert!(
+            matches!(outcome, Err(ArbiterError::LookAgain(Why::OutputPending))),
+            "{harness:?}: {outcome:?}"
+        );
+        assert_eq!(case.held(), [1], "{harness:?}: no Enter was written");
+        case.rules();
+        case.end();
+    });
+}
+
+/// A paste's own Enter waits while the terminal holds bytes, and goes at the cap and 3 s.
+#[test]
+fn t2233_the_first_enter_waits_for_the_terminal_and_goes_at_the_cap() {
+    each_harness(|harness| {
+        let answer = kept();
+        let case = Case::new(harness, paste_after_a_look(&answer));
+        case.until_script("case.looked");
+        case.run(&[], |case| !case.held().is_empty());
+        let pasted = case.world.clock.elapsed();
+        // The echo of the paste and a repaint wait at the terminal, never read.
+        case.world.program.lock().unwrap().repaint();
+        case.run(&[case.reader], |case| !case.sched.alive(case.script));
+        let waited = case.world.clock.elapsed() - pasted;
+        assert_eq!(case.taken(), [1], "{harness:?}");
+        assert!(
+            waited >= Duration::from_millis(super::world::ENTER_TIMING.most_ms + 3_000),
+            "{harness:?}: the Enter went after {waited:?}, before the cap and its grace"
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+// ---- The pinned limits (the design, "What the checks assume of a window") ---------------------
+
+/// A window that stalls twice between two of the person's keys: `ab`, Ctrl+W, `X`, an arrow.
+/// At the arrow the screen still shows `ab`; then it draws the erase and stalls again before
+/// the `X`. No evidence closes this: the paste goes over the `X`. The test pins the limit.
+#[test]
+fn the_limit_an_erase_drawn_late_and_a_character_after_it_stalled_again() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            types(&world, b"a");
+            types(&world, b"b");
+            settled(&world);
+            world.program.lock().unwrap().stall();
+            types(&world, b"\x17");
+            types(&world, b"X");
+            types(&world, b"\x1b[D");
+            // The erase is taken and drawn; the `X` and the arrow wait again.
+            world.program.lock().unwrap().resume_taking(1);
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+            world.program.lock().unwrap().resume();
+        });
+        assert!(
+            case.world.check().is_err(),
+            "{harness:?}: the limit is closed: take it out of the design and the limit list"
+        );
+        case.end();
+    });
+}
+
+/// A dialog answered with Enter and one character typed before the window drew the dialog's
+/// end, that one character then undrawn: the paste goes over it. The test pins the limit.
+#[test]
+fn the_limit_a_character_typed_before_the_dialogs_end_was_drawn() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            world.program.lock().unwrap().stall();
+            types(&world, b"\r");
+            types(&world, b"x");
+            // The Enter is taken: the dialog ends. The `x` waits.
+            world.program.lock().unwrap().resume_taking(1);
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+            world.program.lock().unwrap().resume();
+        });
+        assert!(
+            case.world.check().is_err(),
+            "{harness:?}: the limit is closed: take it out of the design and the limit list"
+        );
+        case.end();
+    });
 }

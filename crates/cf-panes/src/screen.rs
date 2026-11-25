@@ -47,7 +47,10 @@ impl Drawn {
         let first = self.lines.len().saturating_sub(max);
         self.lines.drain(..first);
         self.cursor = self.cursor.and_then(|cursor| {
-            cursor.line.checked_sub(first).map(|line| Cursor { line, ..cursor })
+            cursor
+                .line
+                .checked_sub(first)
+                .map(|line| Cursor { line, ..cursor })
         });
         self
     }
@@ -207,6 +210,8 @@ pub(crate) enum FeedStage {
     Read,
     /// The screen's lock is held; the read is not yet fed.
     Locked,
+    /// The screen has been fed the read, and the clock not yet noted.
+    Fed,
     /// A reader has the screen's lines and not yet the clocks.
     Snapshot,
 }
@@ -253,15 +258,18 @@ impl PaneScreen {
         self.locked().feed(bytes)
     }
 
-    /// The program printed `bytes` ([`Screen::feed`]), under the screen's lock, and the output
-    /// clock says so and counts them drawn when the feed ends: no reader under the lock
+    /// The one place a read of the window's output is taken in, in this order and under the
+    /// screen's lock: `kept` takes it (the journal), the screen is fed ([`Screen::feed`]), the
+    /// output clock says so, and it is counted drawn. No reader under the lock
     /// ([`PaneScreen::observe`]) sees the clock or the count past a read the screen does not
-    /// show. Whether the screen changed.
+    /// show. The journal takes it first, so that a feed that panics half-way leaves the kept
+    /// journal whole and the screen part of it, never the screen ahead of the journal (T-2230).
+    /// Whether the screen changed.
     pub(crate) fn feed_noting(
         &self,
         bytes: &[u8],
         printed: &OutputClock,
-        between: impl FnOnce(&[u8]),
+        kept: impl FnOnce(&[u8]),
     ) -> bool {
         #[cfg(test)]
         self.hook.at(FeedStage::Read);
@@ -270,9 +278,11 @@ impl PaneScreen {
         #[cfg(test)]
         self.hook.at(FeedStage::Locked);
         crate::sync::point("feed.locked");
+        kept(bytes);
         let changed = screen.feed(bytes);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Fed);
         crate::sync::point("feed.fed");
-        between(bytes);
         // The clock first: between the two the window still reads as having output pending.
         printed.note(changed);
         crate::sync::point("feed.noted");
@@ -300,12 +310,11 @@ impl PaneScreen {
         (drawn, clocked)
     }
 
-    /// Runs `under` with the screen's lock held, given what the screen shows of the input
-    /// box at that moment ([`Seen`]).
-    pub(crate) fn with_seen(&self, under: &mut dyn FnMut(Seen)) {
+    /// Runs `under` with the screen's lock held, given the screen at that moment.
+    pub(crate) fn with_screen(&self, under: &mut dyn FnMut(&Screen)) {
         let screen = self.locked();
         crate::sync::point("seen.locked");
-        under(screen.seen());
+        under(&screen);
     }
 
     /// The pty has another size now ([`Screen::resize`]).

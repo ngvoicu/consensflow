@@ -77,8 +77,6 @@ use cf_proto::specs::Variant;
 use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
-use crate::shared::input_box;
-use crate::shared::look::{Look, PasteLicence, NO_LOOK};
 use crate::contract::{
     Adapter, Admission, Decline, Dialog, DialogSign, FirstMessage, Held, Input, Launch, LaunchId,
     NoDefault, Observed, Over, Pane, PaneHost, Prepared, Question, Readiness, Records,
@@ -89,7 +87,9 @@ use crate::records::{Boundary, Options, Reading, Settlement};
 use crate::seams::processes::Processes;
 use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::input_box;
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{Look, PasteLicence, NO_LOOK};
 use crate::shared::record_state::{observed_from, switched_to};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::trust;
@@ -618,7 +618,6 @@ impl ClaudeWindow {
             .as_ref()
             .is_some_and(|pressed| pressed.stopped(record, self.time.wall_ms()))
     }
-
 }
 
 impl Window for ClaudeWindow {
@@ -667,6 +666,9 @@ impl Window for ClaudeWindow {
         super::trust::shows_prompt(screen)
     }
 
+    /// Claude Code's offers to install a plugin close by themselves after 30 s, answered
+    /// "timeout" (an LSP plugin, which counts it as ignored) or "no" (a command's hint), as
+    /// 2.1.317's dialog of them draws them (`Zlt=30000`).
     /// Claude Code's offers to install a plugin close by themselves after 30 s, answered
     /// "timeout" (an LSP plugin, which counts it as ignored) or "no" (a command's hint), as
     /// 2.1.317's dialog of them draws them (`Zlt=30000`).

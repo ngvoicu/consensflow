@@ -86,7 +86,8 @@ pub trait EngineHost: PaneHost {
     /// Node traces hold: those hold every call of the host the engine made, and a fake writes
     /// none down. Where the traces hold a snapshot at the point of decision, the request is made
     /// through [`PaneHost::request`] (`Dispatcher::look_recorded`) and read as a look all the same.
-    fn look<'a>(&'a self, pane: &'a Pane) -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>>;
+    fn look<'a>(&'a self, pane: &'a Pane)
+        -> Work<'a, Result<cf_harness::Look, cf_harness::NoLook>>;
     /// How many alerts of the system's notification centre are on the Mac's screen now (a
     /// macOS privacy dialog raised in the app's name is one): none said where the host does
     /// not say (a Windows host, an older one, a Mac with no window server). The engine's look

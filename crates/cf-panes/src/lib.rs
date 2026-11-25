@@ -19,9 +19,6 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod alerts;
-#[cfg(test)]
-mod model;
-mod sync;
 pub mod arbiter;
 mod background;
 #[cfg(any(windows, test))]
@@ -32,6 +29,8 @@ pub mod input_queue;
 #[cfg(windows)]
 mod job_object;
 pub mod journal;
+#[cfg(test)]
+mod model;
 pub mod output_hub;
 pub mod pane_handlers;
 pub mod privacy;
@@ -39,6 +38,7 @@ pub mod privacy;
 mod process_tree;
 pub mod pty;
 pub mod screen;
+mod sync;
 #[cfg(any(target_os = "macos", test))]
 mod tcc;
 #[cfg(all(test, unix))]

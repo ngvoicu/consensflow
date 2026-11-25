@@ -33,6 +33,19 @@ impl PaneOutputMessage {
         &self.bytes
     }
 
+    /// What the journal of `key`'s window holds from `offset` and was not handed on, under
+    /// `seq`, the last read the consumer took: a consumer whose feed panicked has no message
+    /// of its own for it.
+    pub(crate) fn of_journal(key: &PaneKey, seq: u64, offset: u64, bytes: Vec<u8>) -> Self {
+        Self {
+            id: key.id.clone(),
+            generation: key.generation,
+            seq,
+            offset: Some(offset),
+            bytes,
+        }
+    }
+
     /// A message of bytes the window's journal holds from `offset` on.
     pub(crate) fn at_offset(output: PaneOutput, offset: u64) -> Self {
         Self {

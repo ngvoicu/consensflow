@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use portable_pty::PtySize;
 
-use cf_proto::panes::SilentPaste;
+use cf_proto::panes::{Evidence, ReadEmpty, SilentPaste};
 
 use super::{
     sanitize, ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, Paste, SanitizeError,
@@ -553,12 +553,12 @@ fn unsent_typing_holds_a_paste_until_it_is_sent_but_never_a_claim() {
 }
 
 /// Keys typed into a harness's dialog and left there with Escape count as
-/// unsent, though the input box is empty (T-288). A paste whose adapter read
-/// the box empty at the count of the human's keys it names goes in and
-/// clears the count; at any other count, or with no read, it is held: a key
-/// of the human's since the read may be text in the box.
+/// unsent, though the input box is empty (T-288). A paste that goes over them
+/// names evidence the host holds: a screen the pane has none of, as here, is
+/// none, and a paste with no evidence is held like one of a count of its own
+/// (N17).
 #[test]
-fn a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it() {
+fn a_paste_over_the_count_names_evidence_the_host_holds_or_is_held() {
     let key = PaneKey::new("dialog", 1);
     let (writer, _observed) = RecordingWriter::new(None);
     let arbiter = InputArbiter::new(EnterTiming::fixed(0));
@@ -585,7 +585,7 @@ fn a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it() {
     );
     assert!(read.typed_quiet_ms.is_some());
 
-    for read_empty in [None, Some(2), Some(4)] {
+    let held = |read_empty: Option<ReadEmpty>| {
         assert!(
             matches!(
                 arbiter.write_paste_plain(writer.as_ref(), &key, b"held", read_empty),
@@ -593,22 +593,16 @@ fn a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it() {
             ),
             "{read_empty:?}"
         );
+    };
+    held(None);
+    for by in [Evidence::Erased, Evidence::Elsewhere] {
+        for typed in [2, 3, 4] {
+            held(Some(ReadEmpty { typed, by }));
+        }
     }
-    arbiter
-        .write_paste_plain(writer.as_ref(), &key, b"result", Some(3))
-        .expect("read empty at the last key, it goes in");
-    assert!(!snapshot().unsent, "and the count is cleared");
-
-    arbiter
-        .write_typed_via(writer.as_ref(), &key, b"new words")
-        .expect("type again");
-    assert!(matches!(
-        arbiter.write_paste_plain(writer.as_ref(), &key, b"held", Some(3)),
-        Err(ArbiterError::Unsent)
-    ));
     assert_eq!(
         writer.records().last().map(|record| record.bytes.clone()),
-        Some(b"new words".to_vec()),
+        Some(b"x".to_vec()),
         "nothing held was written"
     );
 }
@@ -2216,6 +2210,7 @@ fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
     assert_eq!(
         arbiter.snapshot(&new_key).expect("new generation state"),
         super::ArbiterSnapshot {
+            unsent_at: None,
             generation: 2,
             paste_in_flight: false,
             input_failed: false,

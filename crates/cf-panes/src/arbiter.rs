@@ -3,10 +3,10 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use cf_proto::panes::SilentPaste;
+use cf_proto::panes::{ReadEmpty, SilentPaste, BOTTOM_LINES};
 
 use crate::pty::{bracketed, Gate, Gated, PaneError, PaneInputWriter, PaneKey, PaneTable};
-use crate::screen::Seen;
+use crate::screen::{Drawn, Screen, Seen};
 
 mod keys;
 mod paste;
@@ -15,9 +15,9 @@ mod state;
 mod tests;
 mod timing;
 
-use keys::keys_of;
 #[cfg(test)]
 use keys::unsent_after;
+use keys::{keys_of, Keys};
 use paste::{parts_ending_pastes, Fed, Segment};
 #[cfg(test)]
 use paste::{PasteEnd, PasteWatch};
@@ -26,6 +26,7 @@ use state::{
     PaneStateMap, Written, HUMAN_WRITES,
 };
 pub(crate) use timing::Clock;
+pub(crate) use timing::Waiting;
 use timing::{millis_since, WallClock, PENDING_GRACE_MS};
 pub use timing::{EnterTiming, OutputClock, OutputCount};
 #[cfg(test)]
@@ -70,11 +71,38 @@ pub struct Paste<'a> {
     pub body: &'a [u8],
     /// None: a daemon older than `seen` (refused for the human's unsent text alone).
     pub at: Option<At>,
-    /// The count of the human's keys at which the look's reader read the box empty over their
-    /// unsent text.
-    pub read_empty: Option<u64>,
+    /// The look's reader read the box empty over the person's unsent keys, and on what
+    /// evidence.
+    pub read_empty: Option<ReadEmpty>,
     /// The key that empties the box, written with the body.
     pub clear_first: Option<&'a [u8]>,
+}
+
+/// A screen the host kept at one of the person's keys: what a look gives a reader, and whether
+/// the pane was current then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kept {
+    pub drawn: Drawn,
+    pub current: bool,
+}
+
+/// The screen as it stood before the write that added the last of the person's characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedInto {
+    pub screen: Arc<Kept>,
+    /// Whether nothing was unsent before that write.
+    pub first: bool,
+}
+
+/// The two screens a pane keeps while it counts the person's keys as unsent (N17): the
+/// evidence a box read empty may set the count aside on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnsentAt {
+    pub typed_into: Option<TypedInto>,
+    /// The screen as it stood before the first write that added no character and left the
+    /// count above zero (Backspace, any other control key or escape sequence), since the last
+    /// character.
+    pub pressed_over: Option<Arc<Kept>>,
 }
 
 /// Why a look is no longer true.
@@ -162,10 +190,11 @@ pub struct ArbiterSnapshot {
     /// is the greater (`OutputCount`).
     pub output_read: u64,
     pub output_drawn: u64,
-    /// Whether the thread that reads the pty has read all it has to give (`OutputCount`): not
-    /// while it is held at the page's credit or has bytes in hand. What the screen shows is then
-    /// behind the window, and an empty box says nothing of the person's last keys.
+    /// Whether the window was current (`OutputCount::sample`): nothing waits at its terminal
+    /// and what the screen shows is all it printed. A look that is behind licenses nothing.
     pub output_caught_up: bool,
+    /// The screens kept at the person's keys, while the count is above zero.
+    pub unsent_at: Option<UnsentAt>,
     /// How long what the pane's screen shows has not changed, once it has shown
     /// anything ([`crate::screen::Screen::feed`]): how a screen at rest is told from one
     /// at work. A harness can print without end and change nothing shown (T-1083).
@@ -353,6 +382,16 @@ impl InputArbiter {
         }
     }
 
+    /// How many writes of the person's keys the pane has taken, with no gate of its terminal
+    /// taken: for a test of the model that asks while an actor may be parked inside it.
+    #[cfg(test)]
+    pub(crate) fn typed_count(&self, pane: &PaneKey) -> Option<u64> {
+        let state = self.pane_state(pane).ok()?;
+        // None where an actor holds it, parked at a point under it.
+        let state = state.try_lock().ok()?;
+        Some(state.typed)
+    }
+
     pub fn snapshot(&self, pane: &PaneKey) -> Result<ArbiterSnapshot, ArbiterError> {
         let state = self.pane_state(pane)?;
         let state = lock_state(&state)?;
@@ -399,12 +438,15 @@ impl InputArbiter {
             };
             (silent, fed)
         };
+        // The count and the screens move with the first write of these keys, in the hold of the
+        // writer, the screen and the input state ([`InputArbiter::write_of_the_persons`]).
+        let mut counted = None;
         if let Some(silent) = silent {
             for (part, ended) in parts_ending_pastes(bytes, &fed.ends) {
                 if !part.is_empty() {
                     self.settle_human_paste(pane)?;
                 }
-                self.write_via(writer, pane, part)?;
+                self.write_of_the_persons(writer, pane, part, bytes, &fed, &mut counted)?;
                 if let Some(characters) = ended {
                     let timing = EnterTiming::of_silent_paste(silent, characters);
                     let state = self.pane_state(pane)?;
@@ -415,32 +457,96 @@ impl InputArbiter {
                 }
             }
         } else {
-            self.write_via(writer, pane, bytes)?;
+            self.write_of_the_persons(writer, pane, bytes, bytes, &fed, &mut counted)?;
         }
         let state = self.pane_state(pane)?;
         let mut state = lock_state(&state)?;
         if state.generation == pane.generation {
-            let read = keys_of(state.unsent, bytes, &fed.segments);
-            state.unsent = read.unsent;
             let now = self.clock.now();
             state.paste.idle(now);
-            // What came, and when, and never a byte of it (`HumanWrite`).
-            if state.writes.len() == HUMAN_WRITES {
-                state.writes.pop_front();
-            }
-            state.writes.push_back(Written {
-                at: now,
-                length: bytes.len(),
-                classes: read.classes,
-            });
-            // A write that holds no key (what the terminal reports of itself) is no key
-            // of the human's: the adapter's wait for their last key does not start again.
-            if read.keyed {
-                state.typed += 1;
-                state.typed_at = Some(now);
+            if let Some(read) = counted {
+                // What came, and when, and never a byte of it (`HumanWrite`).
+                if state.writes.len() == HUMAN_WRITES {
+                    state.writes.pop_front();
+                }
+                state.writes.push_back(Written {
+                    at: now,
+                    length: bytes.len(),
+                    classes: read.classes,
+                });
+                // The age of their last key runs from when it was written.
+                if read.keyed {
+                    state.typed_at = Some(now);
+                }
             }
         }
         Ok(())
+    }
+
+    /// Writes `part` of the person's keys, `whole` being the write of theirs it is of, and the
+    /// first time (`counted` none) counts what `whole` leaves unsent and keeps the screen as it
+    /// stood, with the pane's writer, the screen and the input state held. A write that holds
+    /// no key (what the terminal reports of itself) is no key of the person's: the count and the
+    /// age of their last key do not move.
+    fn write_of_the_persons<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        part: &[u8],
+        whole: &[u8],
+        fed: &Fed,
+        counted: &mut Option<Keys>,
+    ) -> Result<(), ArbiterError> {
+        let state = self.pane_state(pane)?;
+        validate_admission(&*lock_state(&state)?, pane)?;
+        if part.is_empty() {
+            return Ok(());
+        }
+        writer
+            .write_gated(pane, part, &mut |screening| {
+                if counted.is_none() {
+                    screening(&mut |screen| {
+                        *counted = self.count_keys(&state, pane, whole, fed, screen);
+                    });
+                }
+                Gate::Go
+            })
+            .map_err(|error| match error {
+                Gated::Refused(refused) => refused,
+                Gated::Pane(error) => fail_input(&state, pane, error, false),
+            })
+    }
+
+    /// Moves the count of the person's keys, its keeping of screens and the age of their last
+    /// key for the write `bytes`, `screen` the pane's before it (none where it has none): what
+    /// the write holds; none where the pane is another generation's now.
+    fn count_keys(
+        &self,
+        state: &PaneState,
+        pane: &PaneKey,
+        bytes: &[u8],
+        fed: &Fed,
+        screen: Option<&Screen>,
+    ) -> Option<Keys> {
+        let mut state = lock_state(state).ok()?;
+        if state.generation != pane.generation {
+            return None;
+        }
+        let before = state.unsent;
+        let read = keys_of(before, bytes, &fed.segments);
+        if read.keyed {
+            let kept = screen.map(|screen| {
+                Arc::new(Kept {
+                    drawn: screen.bottom(BOTTOM_LINES),
+                    current: state.output.counts().current(),
+                })
+            });
+            state.keep_screens(before, read.unsent, read.added, kept);
+            state.typed += 1;
+            state.typed_at = Some(self.clock.now());
+        }
+        state.unsent = read.unsent;
+        Some(read)
     }
 
     /// Waits, where the human's last paste has keys of theirs after it not yet gone, until the
@@ -527,7 +633,8 @@ impl InputArbiter {
         let mut admitted = None;
         let first = writer.write_gated(pane, &bytes, &mut |screening| {
             let mut gate = Gate::Wait;
-            screening(&mut |seen| {
+            screening(&mut |screen| {
+                let seen = screen.map(Screen::seen);
                 gate = self.paste_gate(&state, pane, &paste, seen, &body, &mut admitted);
             });
             gate
@@ -554,7 +661,7 @@ impl InputArbiter {
         enter.wait(self.clock.as_ref(), &output, at);
         let written = writer.write_gated(pane, b"\r", &mut |_| {
             let overdue = millis_since(self.clock.now(), at) >= enter.pending_cap_ms();
-            if overdue || !output.counts().pending() {
+            if overdue || output.counts().current() {
                 Gate::Go
             } else {
                 Gate::Wait
@@ -577,7 +684,7 @@ impl InputArbiter {
         writer: &W,
         pane: &PaneKey,
         body: &[u8],
-        read_empty: Option<u64>,
+        read_empty: Option<ReadEmpty>,
     ) -> Result<(), ArbiterError> {
         self.write_paste_via(
             writer,
@@ -601,12 +708,13 @@ impl InputArbiter {
     }
 
     /// Whether a paste goes in, asked with the pane's writer, the screen's lock (`seen` is of
-    /// the screen under it) and, taken here, the pane's input state held: all of this holds at
-    /// that one moment or nothing is written. With the look it was licensed by (`at`): the
-    /// pane current and its input working; nothing pending (output read and not yet drawn);
-    /// what the screen shows of the box the look's; no key of the human's since; their unsent
-    /// text none, or the look's reader read the box empty over it. Without a look (a daemon that
-    /// makes none): refused for the human's unsent text alone, as it was.
+    /// the screen under it) and, taken here, the pane's input state held, and the terminal
+    /// asked under the gate: all of this holds at that one moment or nothing is written. The
+    /// pane's input working. With the look it was licensed by (`at`): the pane current (nothing
+    /// waits at its terminal, nothing read is undrawn), what the screen shows of the box the
+    /// look's, and no key of the person's since. Their unsent text none, or the paste's
+    /// `readEmpty` names evidence the host holds. Without a look (a daemon that makes none):
+    /// refused for the person's unsent text alone, as it was.
     fn paste_gate(
         &self,
         state: &PaneState,
@@ -616,6 +724,7 @@ impl InputArbiter {
         body: &[u8],
         admitted: &mut Option<(Arc<OutputClock>, EnterTiming)>,
     ) -> Gate {
+        crate::sync::point("admit.seen");
         let mut state = match lock_state(state) {
             Ok(state) => state,
             Err(error) => return Gate::Refuse(error),
@@ -623,33 +732,21 @@ impl InputArbiter {
         if let Err(error) = validate_admission(&state, pane) {
             return Gate::Refuse(error);
         }
-        match &paste.at {
-            Some(at) => {
-                if state.output.counts().pending() {
-                    return Gate::Refuse(ArbiterError::LookAgain(Why::OutputPending));
-                }
-                if seen != Some(at.seen) {
-                    return Gate::Refuse(ArbiterError::LookAgain(Why::BoxChanged));
-                }
-                if state.typed != at.typed {
-                    return Gate::Refuse(ArbiterError::Unsent);
-                }
-                // The look's reader read the box empty over the person's keys: that holds only
-                // where the window's reader has read all there is, or the echo of those keys
-                // may still be on its way (the page's credit holds the reader back).
-                if state.unsent > 0
-                    && (paste.read_empty != Some(at.typed)
-                        || !state.output.counts().caught_up())
-                {
-                    return Gate::Refuse(ArbiterError::Unsent);
-                }
+        if let Some(at) = &paste.at {
+            if !state.output.counts().current() {
+                return Gate::Refuse(ArbiterError::LookAgain(Why::OutputPending));
             }
-            None => {
-                if state.unsent > 0 && paste.read_empty != Some(state.typed) {
-                    return Gate::Refuse(ArbiterError::Unsent);
-                }
+            if seen != Some(at.seen) {
+                return Gate::Refuse(ArbiterError::LookAgain(Why::BoxChanged));
+            }
+            if state.typed != at.typed {
+                return Gate::Refuse(ArbiterError::Unsent);
             }
         }
+        if state.unsent > 0 && !state.admits_over_count(paste.read_empty) {
+            return Gate::Refuse(ArbiterError::Unsent);
+        }
+        state.unsent_at = UnsentAt::default();
         state.unsent = 0;
         state.paste_in_flight = true;
         // The host's wait, or the longer of it and how the window's harness reads a paste of
@@ -664,10 +761,10 @@ impl InputArbiter {
     /// An Enter of a delivery that is not a paste's first: the one pressed again for a paste the
     /// window has not sent, the one for a turn that never began, Devin's for its `/bypass`. It
     /// goes only on the look that licensed it (`at`), checked again where it is written, with the
-    /// pane's writer, the screen's lock and the pane's input state held: the pane current; no
-    /// unsent text of the human's and no key of theirs since; the box the look's; nothing pending.
-    /// Output pending makes it wait, for [`PENDING_GRACE_MS`] at the most and then it is
-    /// refused: it is never written while output is pending.
+    /// pane's writer, the screen's lock and the pane's input state held: no unsent text of the
+    /// person's and no key of theirs since; the box the look's; the pane current. A pane that is
+    /// not current makes it wait, for [`PENDING_GRACE_MS`] at the most and then it is refused: it
+    /// is never written while the pane is not current. No evidence sets the count aside here.
     pub(crate) fn enter<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
@@ -679,7 +776,8 @@ impl InputArbiter {
         writer
             .write_gated(pane, b"\r", &mut |screening| {
                 let mut gate = Gate::Wait;
-                screening(&mut |seen| {
+                screening(&mut |screen| {
+                    let seen = screen.map(Screen::seen);
                     gate = self.enter_gate(&state, pane, &at, seen, started);
                 });
                 gate
@@ -711,7 +809,7 @@ impl InputArbiter {
         if seen != Some(at.seen) {
             return Gate::Refuse(ArbiterError::LookAgain(Why::BoxChanged));
         }
-        if !state.output.counts().pending() {
+        if state.output.counts().current() {
             return Gate::Go;
         }
         if millis_since(self.clock.now(), started) >= PENDING_GRACE_MS {

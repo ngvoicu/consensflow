@@ -77,6 +77,10 @@ impl Engine for Scripted {
         Ok(false)
     }
 
+    fn holding_unproven(&self, _: i64) -> Result<bool, EngineError> {
+        Ok(false)
+    }
+
     fn hidden(&self, _: i64) -> bool {
         false
     }

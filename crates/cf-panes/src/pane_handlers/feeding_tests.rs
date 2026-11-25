@@ -14,7 +14,8 @@ use crate::arbiter::{
     ArbiterError, At, Clock, EnterTiming, InputArbiter, OutputClock, OutputCount, Paste, Why,
 };
 use crate::pty::{PaneError, PaneInputWriter, PaneKey};
-use crate::screen::{FeedStage, PaneScreen, Seen};
+use crate::screen::{FeedStage, PaneScreen, Screen, Seen};
+use cf_proto::panes::{Evidence, ReadEmpty};
 
 /// A clock that moves only when the test moves it.
 pub(super) struct Manual {
@@ -396,8 +397,8 @@ impl PaneInputWriter for Seeing {
         Ok(())
     }
 
-    fn with_seen(&self, _key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
-        self.screen.with_seen(&mut |seen| under(Some(seen)));
+    fn with_screen(&self, _key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
+        self.screen.with_screen(&mut |screen| under(Some(screen)));
     }
 }
 
@@ -436,7 +437,38 @@ impl Boxed {
     /// The window prints `text`: read, and drawn.
     fn print(&self, text: &str) -> bool {
         self.printed.counts().took(text.len());
-        self.screen.feed_noting(text.as_bytes(), &self.printed, |_| {})
+        self.screen
+            .feed_noting(text.as_bytes(), &self.printed, |_| {})
+    }
+
+    /// A paste that goes over the count on `by`, whatever the look's count of keys says.
+    fn paste_by(&self, at: At, by: Evidence) -> Result<(), ArbiterError> {
+        self.arbiter.write_paste_via(
+            &self.writer,
+            &self.key,
+            Paste {
+                body: b"body",
+                at: Some(at),
+                read_empty: Some(ReadEmpty {
+                    typed: at.typed,
+                    by,
+                }),
+                clear_first: None,
+            },
+        )
+    }
+
+    /// What a look carries of the screens kept at the person's keys (`unsentAt`).
+    fn unsent_at(&self) -> Option<Value> {
+        let answer = snapshot_of(
+            &self.arbiter,
+            &self.key,
+            Some(Arc::clone(&self.screen)),
+            None,
+            Some(40),
+        )
+        .unwrap();
+        answer.get("unsentAt").cloned()
     }
 
     fn type_key(&self, key: &str) {
@@ -448,7 +480,8 @@ impl Boxed {
     /// The look now: what a reader of the box is given, and the count of the person's keys.
     fn look(&self) -> At {
         let mut seen = None;
-        self.writer.with_seen(&self.key, &mut |now| seen = now);
+        self.writer
+            .with_screen(&self.key, &mut |screen| seen = screen.map(Screen::seen));
         At {
             seen: seen.unwrap(),
             typed: self.arbiter.snapshot(&self.key).unwrap().typed,
@@ -471,7 +504,10 @@ impl Boxed {
             Paste {
                 body: b"body",
                 at: Some(at),
-                read_empty: read_empty.then_some(at.typed),
+                read_empty: read_empty.then_some(ReadEmpty {
+                    typed: at.typed,
+                    by: Evidence::Elsewhere,
+                }),
                 clear_first,
             },
         )
@@ -501,7 +537,10 @@ fn a_cursor_only_echo_since_the_look_refuses_the_paste() {
     let window = Boxed::new();
     window.type_key("X");
     let at = window.look();
-    assert!(!window.print("\x1b[2;4H"), "the grid's digest does not hold the cursor");
+    assert!(
+        !window.print("\x1b[2;4H"),
+        "the grid's digest does not hold the cursor"
+    );
     let refused = window.paste(at, true);
     assert_eq!(why(refused), Some(Why::BoxChanged));
     assert_eq!(window.writer.written(), [b"X".to_vec()]);
@@ -515,7 +554,11 @@ fn a_look_is_refused_for_the_echo_held_before_the_screen_and_for_the_echo_drawn(
     window.type_key("X");
     let at = window.look();
     window.printed.counts().took(1);
-    assert_eq!(why(window.paste(at, true)), Some(Why::OutputPending), "pending");
+    assert_eq!(
+        why(window.paste(at, true)),
+        Some(Why::OutputPending),
+        "pending"
+    );
     assert!(window.screen.feed_noting(b"X", &window.printed, |_| {}));
     assert_eq!(why(window.paste(at, true)), Some(Why::BoxChanged), "drawn");
     assert_eq!(window.writer.written(), [b"X".to_vec()]);
@@ -531,7 +574,9 @@ fn a_repaint_at_rest_since_the_look_leaves_it_good() {
     for _ in 0..5 {
         assert!(!window.print("\x1b[0m\x1b[2;3H"));
     }
-    window.paste(at, true).expect("a repaint changes no line and no cursor");
+    window
+        .paste(at, true)
+        .expect("a repaint changes no line and no cursor");
     assert_eq!(window.pasted(), 1);
 }
 
@@ -553,16 +598,30 @@ fn a_wrap_a_scroll_and_a_resize_that_change_a_line_refuse_the_paste() {
     let window = Boxed::new();
     let at = window.look();
     window.screen.resize(24, 80);
-    window.paste(at, false).expect("a resize that moves no line");
+    window
+        .paste(at, false)
+        .expect("a resize that moves no line");
     let at = window.look();
     window.print(&"w".repeat(120));
-    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a wrap");
+    assert_eq!(
+        why(window.paste(at, false)),
+        Some(Why::BoxChanged),
+        "a wrap"
+    );
     let at = window.look();
     window.screen.resize(24, 40);
-    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a resize that joins other rows");
+    assert_eq!(
+        why(window.paste(at, false)),
+        Some(Why::BoxChanged),
+        "a resize that joins other rows"
+    );
     let at = window.look();
     window.print(&"\r\nline".repeat(40));
-    assert_eq!(why(window.paste(at, false)), Some(Why::BoxChanged), "a scroll");
+    assert_eq!(
+        why(window.paste(at, false)),
+        Some(Why::BoxChanged),
+        "a scroll"
+    );
 }
 
 /// A key that empties a stale paste is written with the body, in one write; a box that changed
@@ -579,7 +638,11 @@ fn the_clearing_key_goes_with_the_paste_and_never_alone() {
     let at = window.look();
     window.print("\x1b[2;4H");
     window.paste_clearing(at, false, Some(b"\x15")).unwrap_err();
-    assert_eq!(window.writer.written().len(), 2, "nothing written when the box changed");
+    assert_eq!(
+        window.writer.written().len(),
+        2,
+        "nothing written when the box changed"
+    );
 }
 
 /// A paste with no look (a daemon older than `seen`) is refused for the person's unsent text
@@ -588,9 +651,14 @@ fn the_clearing_key_goes_with_the_paste_and_never_alone() {
 fn a_paste_with_no_look_is_refused_for_unsent_text_alone() {
     let window = Boxed::new();
     window.printed.counts().took(4);
-    window.arbiter.write_paste_plain(&window.writer, &window.key, b"a", None).unwrap();
+    window
+        .arbiter
+        .write_paste_plain(&window.writer, &window.key, b"a", None)
+        .unwrap();
     window.type_key("X");
-    let refused = window.arbiter.write_paste_plain(&window.writer, &window.key, b"b", None);
+    let refused = window
+        .arbiter
+        .write_paste_plain(&window.writer, &window.key, b"b", None);
     assert!(matches!(refused, Err(ArbiterError::Unsent)));
 }
 
@@ -605,7 +673,9 @@ fn an_enter_of_a_look_waits_while_output_is_pending_and_is_refused_at_the_grace(
         let entering = scope.spawn(|| window.arbiter.enter(&window.writer, &window.key, at));
         thread::sleep(Duration::from_millis(60));
         assert!(window.writer.written().is_empty(), "pending: no Enter");
-        assert!(!window.screen.feed_noting(b"\x1b[0m", &window.printed, |_| {}));
+        assert!(!window
+            .screen
+            .feed_noting(b"\x1b[0m", &window.printed, |_| {}));
         entering.join().unwrap().expect("drawn: the Enter goes");
     });
     assert_eq!(window.writer.written(), [b"\r".to_vec()]);
@@ -618,7 +688,11 @@ fn an_enter_of_a_look_waits_while_output_is_pending_and_is_refused_at_the_grace(
         let refused = entering.join().unwrap();
         assert_eq!(why(refused), Some(Why::OutputPending), "the grace: refused");
     });
-    assert_eq!(window.writer.written().len(), 1, "never written while pending");
+    assert_eq!(
+        window.writer.written().len(),
+        1,
+        "never written while pending"
+    );
 }
 
 /// An Enter after the person typed, or over a box that changed, writes nothing.
@@ -647,12 +721,15 @@ fn a_refused_paste_writes_no_clearing_key() {
     window.print("\x1b[2;4H");
     let refused = window.paste_clearing(at, false, Some(b"\x15"));
     assert_eq!(why(refused), Some(Why::BoxChanged));
-    assert!(window.writer.written().is_empty(), "no key alone, and no paste");
+    assert!(
+        window.writer.written().is_empty(),
+        "no key alone, and no paste"
+    );
 }
 
-/// A paste the look's reader read empty over the person's unsent count goes in and clears the
-/// count; one that does not say so is refused for the unsent text; one with a key of theirs since
-/// the look is refused all the same.
+/// A paste that names evidence the host holds goes in over the person's unsent count and
+/// clears the count and the kept screens; one that names none is refused for the unsent text;
+/// one with a key of theirs since the look is refused all the same.
 #[test]
 fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
     let window = Boxed::new();
@@ -660,18 +737,115 @@ fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
     let at = window.look();
     assert!(matches!(window.paste(at, false), Err(ArbiterError::Unsent)));
     assert_eq!(window.pasted(), 0);
-    window.type_key("Y");
+    window.type_key("\x1b[D");
     assert!(
         matches!(window.paste(at, true), Err(ArbiterError::Unsent)),
         "a key since the look is no reason"
     );
     assert_eq!(window.pasted(), 0);
     let at = window.look();
-    window.paste(at, true).expect("read empty over the count, at the last key");
+    window
+        .paste_by(at, Evidence::Erased)
+        .expect("read empty over the count");
     assert_eq!(window.pasted(), 1);
+    assert_eq!(window.unsent_at(), None, "forgotten with the count");
     let at = window.look();
-    window.paste(at, false).expect("the count was cleared by that paste");
+    window
+        .paste(at, false)
+        .expect("the count was cleared by that paste");
     assert_eq!(window.pasted(), 2);
+}
+
+/// The host keeps a screen before the write that added a character, with whether it was the
+/// first, and one before the first write since that added none; it forgets both when the count
+/// is zero.
+#[test]
+fn the_screens_kept_at_the_persons_keys_are_as_the_table_says() {
+    let window = Boxed::new();
+    window.type_key("a");
+    let at = window.unsent_at().expect("a count above zero");
+    assert_eq!(at["typedInto"]["first"], true);
+    assert_eq!(at["typedInto"]["current"], true);
+    assert!(at.get("pressedOver").is_none());
+    assert_eq!(
+        at["typedInto"]["bottom"][1], "❯",
+        "the screen as it stood before the key"
+    );
+    // The window draws what it was given, then a second character: not the first.
+    window.print("\x1b[2;3Hab\x1b[2;5H");
+    window.type_key("b");
+    let at = window.unsent_at().unwrap();
+    assert_eq!(at["typedInto"]["first"], false);
+    assert_eq!(at["typedInto"]["bottom"][1], "❯ ab");
+    // A key that adds none keeps the screen before it, once.
+    window.type_key("\x17");
+    window.print("\x1b[2;3H\x1b[K");
+    window.type_key("\x1b[D");
+    let at = window.unsent_at().unwrap();
+    assert_eq!(
+        at["pressedOver"]["bottom"][1], "❯ ab",
+        "the first such write's"
+    );
+    // A character forgets it.
+    window.type_key("c");
+    assert!(window.unsent_at().unwrap().get("pressedOver").is_none());
+    // A write that leaves the count at zero forgets both.
+    window.type_key("\x15");
+    assert_eq!(window.unsent_at(), None);
+    // A write that holds a character and other keys counts as one that adds.
+    window.type_key("\x1b[Dd");
+    let at = window.unsent_at().unwrap();
+    assert_eq!(at["typedInto"]["first"], true);
+    assert!(at.get("pressedOver").is_none());
+    // What the terminal reports of itself moves nothing.
+    window.type_key("\x1b[I");
+    assert!(window.unsent_at().unwrap().get("pressedOver").is_none());
+}
+
+/// A screen kept while the pane was behind is marked so, and admits nothing; nor does
+/// "elsewhere" a screen before a key that was not the first.
+#[test]
+fn the_host_admits_evidence_only_where_it_holds_that_screen_current() {
+    let window = Boxed::new();
+    window.printed.counts().took(1);
+    window.type_key("X");
+    assert_eq!(window.unsent_at().unwrap()["typedInto"]["current"], false);
+    window.printed.counts().took(3);
+    window
+        .screen
+        .feed_noting(b"\x1b[0m", &window.printed, |_| {});
+    let at = window.look();
+    for by in [Evidence::Elsewhere, Evidence::Erased] {
+        assert!(
+            matches!(window.paste_by(at, by), Err(ArbiterError::Unsent)),
+            "{by:?}"
+        );
+    }
+    // The same for a screen kept over a key that added none.
+    window.type_key("\r");
+    window.type_key("Y");
+    window.printed.counts().took(1);
+    window.type_key("\x17");
+    assert_eq!(window.unsent_at().unwrap()["pressedOver"]["current"], false);
+    window.printed.counts().took(3);
+    window
+        .screen
+        .feed_noting(b"\x1b[0m", &window.printed, |_| {});
+    let at = window.look();
+    assert!(matches!(
+        window.paste_by(at, Evidence::Erased),
+        Err(ArbiterError::Unsent)
+    ));
+    // A second character: its screen is not the first's.
+    window.type_key("\r");
+    window.type_key("a");
+    window.type_key("b");
+    let at = window.look();
+    assert!(matches!(
+        window.paste_by(at, Evidence::Elsewhere),
+        Err(ArbiterError::Unsent)
+    ));
+    assert_eq!(window.pasted(), 0);
 }
 
 /// Main's journal and N17's counts meet in one step (T-2198 note 7): a window that keeps a journal
@@ -701,4 +875,88 @@ fn a_read_is_in_the_screen_and_the_journal_before_it_is_counted_drawn() {
     printed.counts().took(2);
     super::took_in_journaled(&screen, &printed, &journal, b"de");
     assert_eq!((journal.end(), printed.counts().both()), (5, (5, 5)));
+}
+
+/// A page that holds its output back: the reader is held at the room, and what the window prints
+/// stays at its terminal, where the host's question finds it, on a real terminal (a ConPTY on
+/// Windows). The pane is behind though every byte read is drawn: the look says so, and a paste
+/// and an Enter of a look are refused.
+#[test]
+fn a_reader_held_at_the_room_is_behind_on_a_real_terminal() {
+    let _pty_guard = crate::pty::serial_pty_test();
+    let panes = Arc::new(crate::pty::PaneTable::new());
+    let key = PaneKey::new("room", 1);
+    #[cfg(unix)]
+    let argv: Vec<String> = [
+        "/bin/sh",
+        "-c",
+        "head -c 65536 /dev/zero | tr '\\0' a; sleep 30",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    #[cfg(windows)]
+    let argv = crate::pty::conpty_test::powershell("[Console]::Write('a' * 65536); Start-Sleep 30");
+    let cwd = std::env::temp_dir();
+    let streamed = panes
+        .open_streamed_at(
+            key.clone(),
+            &cwd,
+            &argv,
+            crate::pty::PaneEnvironment::new(&Default::default(), &[]),
+            portable_pty::PtySize {
+                rows: 8,
+                cols: 64,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            4096,
+        )
+        .expect("open the program");
+    let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+    let printed = arbiter
+        .register_counted(&key, None, &streamed.counts)
+        .expect("register");
+    let screen = Arc::clone(&streamed.screen);
+    let consumer = {
+        let (screen, printed, output) =
+            (Arc::clone(&screen), Arc::clone(&printed), streamed.output);
+        thread::spawn(move || {
+            while let Ok(message) = output.recv() {
+                super::took_in(&screen, &printed, &message.bytes);
+            }
+        })
+    };
+    let look = || snapshot_of(&arbiter, &key, Some(Arc::clone(&screen)), None, Some(8)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let held = loop {
+        let now = look();
+        if now["outputDrawn"].as_u64() >= Some(4096) && now["outputRead"] == now["outputDrawn"] {
+            break now;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the room was never filled: {now}"
+        );
+        thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(held["outputCaughtUp"], false, "{held}");
+    let at = At {
+        seen: Seen::parse(held["seen"].as_str().unwrap()).unwrap(),
+        typed: 0,
+    };
+    let refused = arbiter.write_paste_via(
+        panes.as_ref(),
+        &key,
+        Paste {
+            body: b"DELIVERY",
+            at: Some(at),
+            read_empty: None,
+            clear_first: None,
+        },
+    );
+    assert_eq!(why(refused), Some(Why::OutputPending), "a paste");
+    let refused = arbiter.enter(panes.as_ref(), &key, at);
+    assert_eq!(why(refused), Some(Why::OutputPending), "an Enter");
+    let _ = panes.kill(&key);
+    let _ = consumer.join();
 }

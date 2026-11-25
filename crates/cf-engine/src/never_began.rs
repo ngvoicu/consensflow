@@ -49,9 +49,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::time;
-use cf_harness::{licence_enter, EnterFor, EnterLicence};
 use cf_harness::contract::{Input, Observed};
 use cf_harness::records::{Reading, Role};
+use cf_harness::{licence_enter, EnterFor, EnterLicence};
 use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::trace::WindowEvent;
 

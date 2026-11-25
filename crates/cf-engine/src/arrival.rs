@@ -88,8 +88,8 @@ use std::rc::Rc;
 
 use cf_base::{js, time};
 use cf_harness::contract::{Input, Observed, Pane};
-use cf_harness::{after_wait, licence_enter, AfterWait, EnterFor, EnterLicence, Look};
 use cf_harness::records::{Item, Reading, Role, Settlement};
+use cf_harness::{after_wait, licence_enter, AfterWait, EnterFor, EnterLicence, Look};
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
 use cf_proto::panes::{SCREEN_QUIET_MS, TAIL_LINES};
@@ -253,7 +253,9 @@ impl Dispatcher {
                 && waited > ENTER_AGAIN_MS
                 && self.pasted(record)
             {
-                return self.enter_again(record, delivering.message, None, EnterFor::PasteNotSent).await;
+                return self
+                    .enter_again(record, delivering.message, None, EnterFor::PasteNotSent)
+                    .await;
             }
             // The chief's window is the human's own, and its wait is told of by itself (T-629).
             if at_work && !delivering.chief {
@@ -1208,4 +1210,3 @@ fn item_ms(item: &Item) -> Option<i64> {
         _ => None,
     }
 }
-

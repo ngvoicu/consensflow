@@ -137,8 +137,12 @@ impl Dispatcher {
     /// that request is the look.
     pub(crate) async fn look_recorded(&self, pane: &Pane) -> Result<Look, NoLook> {
         let asked = self.now();
-        let answer: Result<Value, _> =
-            returning(self.seams.host.request("pane.snapshot", pane_body_drawn(pane))).await;
+        let answer: Result<Value, _> = returning(
+            self.seams
+                .host
+                .request("pane.snapshot", pane_body_drawn(pane)),
+        )
+        .await;
         match answer {
             // An answer that came after a stall says what the window did, not what it does.
             Ok(_) if self.now() - asked > SLOW_READ_MS => Err(NoLook::NoAnswer),

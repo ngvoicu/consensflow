@@ -757,13 +757,14 @@ fn host_call(method: Option<&str>, args: &Value, answer: &Value) -> Value {
                 body.shift_remove("bottom");
             }
             if let Some(answer) = answer.as_object_mut() {
-                for looked in ["bottom", "typed", "seen"] {
+                for looked in ["bottom", "typed", "seen", "outputCaughtUp"] {
                     answer.shift_remove(looked);
                 }
             }
         }
         Some("pane.enter") => {
-            let body = json!({ "id": args[1]["id"], "generation": args[1]["generation"], "bytes": [13] });
+            let body =
+                json!({ "id": args[1]["id"], "generation": args[1]["generation"], "bytes": [13] });
             args = json!(["pane.input", body]);
         }
         Some("pane.write_paste") => {

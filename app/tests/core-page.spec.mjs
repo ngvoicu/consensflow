@@ -15773,6 +15773,21 @@ test('says on a card and a row when a message waits for what the human typed the
   await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(words)
 })
 
+test('a message held for keys nothing shows are gone says to press Ctrl+U', async ({ page }) => {
+  const data = model()
+  for (const handle of ['chief', 'zeus']) {
+    const lane = data.boards[1].lanes.find((found) => found.participant.handle === handle)
+    Object.assign(lane, { holding: true, holdingUnproven: true })
+  }
+  await open(page, data)
+  const words =
+    "A message waits: ConsensFlow can't tell that what you typed here is gone. Press Ctrl+U in this window."
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText(words)
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(words)
+})
+
 test('says a message waits for what the human typed in a window out of quota too', async ({
   page,
 }) => {

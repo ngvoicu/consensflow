@@ -1,18 +1,16 @@
-//! The model's time: it moves when an actor rests, and not past the moment a key's echo is due
-//! while that echo has not been read.
+//! The model's time: it moves when an actor rests, and only then. No echo and no read is owed
+//! within any time: a window may stall for as long as the schedule has it.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::arbiter::Clock;
 
-use super::program::Pty;
 use super::sched;
 
 pub(crate) struct ModelClock {
     base: Instant,
     elapsed: Mutex<Duration>,
-    pty: Mutex<Option<Arc<Pty>>>,
 }
 
 impl ModelClock {
@@ -20,13 +18,7 @@ impl ModelClock {
         Arc::new(Self {
             base: Instant::now(),
             elapsed: Mutex::new(Duration::ZERO),
-            pty: Mutex::new(None),
         })
-    }
-
-    /// The pty whose unread echoes hold the time back.
-    pub(crate) fn watching(&self, pty: &Arc<Pty>) {
-        *self.pty.lock().unwrap() = Some(Arc::clone(pty));
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
@@ -39,16 +31,11 @@ impl Clock for ModelClock {
         self.base + self.elapsed()
     }
 
-    /// A point; then the time moves by `duration`, once no key's echo that is due before then is
-    /// unread: the host reads it within a second of the key.
+    /// A point; then the time moves by `duration`.
     fn rest(&self, duration: Duration) {
         sched::at("rest");
         sched::resting();
         let to = self.elapsed() + duration;
-        let pty = self.pty.lock().unwrap().clone();
-        if let Some(pty) = pty {
-            sched::wait_until("an echo is due", || !pty.overdue(to));
-        }
         let mut elapsed = self.elapsed.lock().unwrap();
         *elapsed = (*elapsed).max(to);
     }

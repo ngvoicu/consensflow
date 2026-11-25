@@ -79,6 +79,7 @@ fn host(
             "pane.snapshot" => {
                 let mut snapshot = json!({ "ok": true, "pasteInFlight": false, "unsent": unsent,
                     "seen": "00000000000000aa", "typed": u64::from(unsent), "typedQuietMs": 60_000,
+                    "outputCaughtUp": true,
                     "outputQuietMs": 30_000 });
                 if let Some(bottom) = &bottom {
                     snapshot["bottom"] = bottom.clone();

@@ -44,6 +44,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use portable_pty::{
@@ -51,18 +52,27 @@ use portable_pty::{
 };
 use windows_sys::core::HRESULT;
 use windows_sys::Win32::Foundation::{
-    FreeLibrary, HANDLE, INVALID_HANDLE_VALUE, S_OK, WAIT_FAILED, WAIT_OBJECT_0,
+    FreeLibrary, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    S_OK, WAIT_FAILED, WAIT_OBJECT_0,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, ReadFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
+    PIPE_ACCESS_INBOUND,
 };
 use windows_sys::Win32::System::Console::{COORD, HPCON};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows_sys::Win32::System::Pipes::CreatePipe;
+use windows_sys::Win32::System::Pipes::{
+    CreateNamedPipeW, CreatePipe, PeekNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
+    PIPE_TYPE_BYTE, PIPE_WAIT,
+};
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
+    CreateEventW, CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, TerminateProcess, UpdateProcThreadAttribute,
     WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_JOB_LIST,
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
+use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 
 use crate::job_object::JobObject;
 use environment::environment_block;
@@ -92,7 +102,7 @@ impl ConPty {
         let host = Host::get()?;
         // What the window types, which the console reads; and what the console writes.
         let (input_read, input_write) = pipe()?;
-        let (output_read, output_write) = pipe()?;
+        let (output_read, output_write) = output_pipe()?;
         let console = Arc::new(Console::new(host, size, &input_read, &output_write)?);
         // The console holds the ends it was given, as copies of its own: these go, so
         // that the output ends when the console host has gone.
@@ -103,7 +113,7 @@ impl ConPty {
                 job: Arc::clone(&self.job),
             }),
             master: Box::new(Master {
-                output: Output::new(output_read, &console),
+                output: Output::new(output_read, &console)?,
                 input: Mutex::new(Some(Input::new(input_write, &console))),
                 size: Mutex::new(size),
                 console,
@@ -211,6 +221,180 @@ fn pipe() -> io::Result<(File, File)> {
     Ok(unsafe { (File::from_raw_handle(read), File::from_raw_handle(write)) })
 }
 
+/// How much the console may have written that the window has not read yet, as `CreatePipe`
+/// gives a pipe by default.
+const OUTPUT_PIPE_BYTES: u32 = 4096;
+
+/// The pipe the console writes its output to: its end of it as any pipe's, and the window's
+/// own end **overlapped**, so that a thread that waits for the output (a read of nothing) does
+/// not stop another from asking whether there is any (`Watch::holds_bytes`). On a pipe of
+/// `CreatePipe`, whose handles are synchronous, every call on it waits for the one before:
+/// `PeekNamedPipe` waited 2 s for a read that was waiting for the program, even on a duplicate
+/// of the handle (probed on Windows 11 26200, N17).
+fn output_pipe() -> io::Result<(File, File)> {
+    static PIPES: AtomicU64 = AtomicU64::new(0);
+    let name = wide(OsStr::new(&format!(
+        r"\\.\pipe\consensflow-conpty-{}-{}",
+        std::process::id(),
+        PIPES.fetch_add(1, Ordering::Relaxed),
+    )));
+    // SAFETY: a NUL-terminated name; no attributes, so the end is not inheritable. The
+    // first instance of its name, and only for this machine: a name held already fails.
+    let read = unsafe {
+        CreateNamedPipeW(
+            name.as_ptr(),
+            PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            OUTPUT_PIPE_BYTES,
+            OUTPUT_PIPE_BYTES,
+            0,
+            ptr::null(),
+        )
+    };
+    if read == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: just made, open, and owned by nothing else.
+    let read = unsafe { File::from_raw_handle(read) };
+    // SAFETY: the same name; the end writes only, synchronously, and is not inheritable.
+    let write = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            GENERIC_WRITE,
+            0,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null_mut(),
+        )
+    };
+    if write == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: just made, open, and owned by nothing else.
+    Ok((read, unsafe { File::from_raw_handle(write) }))
+}
+
+/// One read of an overlapped pipe, waited for to its end: `into` empty waits until the pipe
+/// has bytes and takes none. A pipe whose writers have gone gives nothing (`Ok(0)`), as a
+/// synchronous one does.
+fn read_overlapped(file: &File, event: &OwnedHandle, into: &mut [u8]) -> io::Result<usize> {
+    // SAFETY: all zeroes is a valid OVERLAPPED.
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    overlapped.hEvent = event.as_raw_handle();
+    let length = u32::try_from(into.len()).unwrap_or(u32::MAX);
+    // SAFETY: `into` is writable for `length` bytes, and the OVERLAPPED and its event live
+    // until the read is over, which is waited for below.
+    let started = unsafe {
+        ReadFile(
+            file.as_raw_handle(),
+            into.as_mut_ptr(),
+            length,
+            ptr::null_mut(),
+            &mut overlapped,
+        )
+    };
+    let broken = |error: io::Error| {
+        if error.raw_os_error() == i32::try_from(ERROR_BROKEN_PIPE).ok() {
+            Ok(0)
+        } else {
+            Err(error)
+        }
+    };
+    if started == 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != i32::try_from(ERROR_IO_PENDING).ok() {
+            return broken(error);
+        }
+    }
+    let mut read = 0;
+    // SAFETY: the read started above on this handle with this OVERLAPPED, waited for to its end.
+    if unsafe { GetOverlappedResult(file.as_raw_handle(), &overlapped, &mut read, 1) } == 0 {
+        return broken(io::Error::last_os_error());
+    }
+    Ok(read as usize)
+}
+
+/// An event a read of the pipe is waited for by, one a reader.
+fn event() -> io::Result<OwnedHandle> {
+    // SAFETY: no attributes, a manual-reset event not signalled, and no name.
+    let made = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
+    if made.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: just made, open, and owned by nothing else.
+    Ok(unsafe { OwnedHandle::from_raw_handle(made) })
+}
+
+/// A handle of the console's output of its own, to wait on and to ask: what the pane host
+/// asks of a window's terminal (`OutputCount::sample`).
+pub(super) struct Watch {
+    file: File,
+    event: OwnedHandle,
+}
+
+impl Watch {
+    pub(super) fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            event: event()?,
+        })
+    }
+
+    /// How many bytes the pipe holds that nobody read; an error where it cannot be asked,
+    /// a broken one among them.
+    fn waiting(&self) -> io::Result<u32> {
+        let mut waiting = 0;
+        // SAFETY: an open pipe, and no buffer to be written to: only the count is asked.
+        let asked = unsafe {
+            PeekNamedPipe(
+                self.file.as_raw_handle(),
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                &mut waiting,
+                ptr::null_mut(),
+            )
+        };
+        if asked == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(waiting)
+    }
+
+    /// Whether the pipe holds bytes nobody read: asked with no wait. One that cannot be asked
+    /// answers that it does, and so is behind.
+    pub(super) fn holds_bytes(&self) -> bool {
+        self.waiting().map_or(true, |waiting| waiting > 0)
+    }
+
+    /// Waits until the pipe holds bytes, or has ended: takes none of them. A read of nothing
+    /// that a writer's write of nothing ended waits again.
+    pub(super) fn wait(&self) {
+        loop {
+            if read_overlapped(&self.file, &self.event, &mut []).is_err() {
+                return;
+            }
+            match self.waiting() {
+                Ok(0) => {}
+                _ => return,
+            }
+        }
+    }
+}
+
+/// A [`Watch`] of `master`'s output.
+pub(super) fn watch(master: &dyn MasterPty) -> io::Result<Watch> {
+    let master = master
+        .downcast_ref::<Master>()
+        .ok_or_else(|| io::Error::other("the terminal has no output to ask"))?;
+    Ok(Watch {
+        file: master.output.file.try_clone()?,
+        event: event()?,
+    })
+}
+
 /// A pseudoconsole, closed when the last of its master and its program's side goes:
 /// its host then ends, and with it the output.
 struct Console {
@@ -290,22 +474,26 @@ struct Master {
 /// An end of the console's output: the master's, or a reader's copy of it.
 struct Output {
     file: File,
+    /// What a read of the overlapped end is waited for by.
+    event: OwnedHandle,
     #[cfg(test)]
     console: u64,
 }
 
 impl Output {
-    fn new(file: File, _console: &Console) -> Self {
-        Self {
+    fn new(file: File, _console: &Console) -> io::Result<Self> {
+        Ok(Self {
             file,
+            event: event()?,
             #[cfg(test)]
             console: _console.id,
-        }
+        })
     }
 
     fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             file: self.file.try_clone()?,
+            event: event()?,
             #[cfg(test)]
             console: self.console,
         })
@@ -314,7 +502,10 @@ impl Output {
 
 impl io::Read for Output {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.file.read(bytes)
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        read_overlapped(&self.file, &self.event, bytes)
     }
 }
 

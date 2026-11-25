@@ -58,8 +58,6 @@ pub(super) const CLEAR_INPUT: [u8; 1] = [0x03];
 const HOLD: &str = "Muse has not said yet which session its window shows";
 
 /// What a window whose prompt is not drawn yet is held for.
-/// Held while the screen lacks output the host has read.
-
 const STARTING: &str = "Muse has not shown its prompt yet";
 
 /// Why a paste waits while the message of a turn taken back is in a box the screen does

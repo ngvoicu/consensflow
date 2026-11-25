@@ -407,3 +407,53 @@ fn a_held_message_that_leaves_the_head_of_its_queue_is_never_told_and_lends_no_t
         notes[0]
     );
 }
+
+/// N17: a box read empty over the person's keys with nothing that shows where they went holds
+/// the message with words of its own: the board says to press Ctrl+U in that window, and the
+/// note of ten minutes says the same, with nothing of the box.
+#[test]
+fn a_message_held_for_keys_nothing_shows_are_gone_says_to_press_ctrl_u() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let held = Rc::new(Cell::new(true));
+    let asked = Rc::clone(&held);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Held(Held::Unproven)
+        } else {
+            Readiness::Ready
+        })
+    }));
+    *context.adapter.box_words.borrow_mut() = Some("words it must not quote".to_owned());
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    assert!(context.dispatcher.holding(chief).unwrap());
+    assert!(context.dispatcher.holding_unproven(chief).unwrap());
+    held_for(&context, 11);
+    let told = |who: &str| {
+        tiers
+            .notes(who)
+            .into_iter()
+            .filter(|note| note.contains("can't tell"))
+            .collect::<Vec<_>>()
+    };
+    let human = told("human");
+    assert_eq!(human.len(), 1, "{human:?}");
+    assert!(
+        human[0].ends_with(
+            "held: ConsensFlow can't tell that what you typed there is gone. Press Ctrl+U in that window and it goes in."
+        ),
+        "{}",
+        human[0]
+    );
+    assert!(!human[0].contains("quote"), "{}", human[0]);
+    held.set(false);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(!context.dispatcher.holding_unproven(chief).unwrap());
+}

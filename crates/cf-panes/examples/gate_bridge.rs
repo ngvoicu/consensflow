@@ -97,8 +97,12 @@ fn main() {
                 let key = PaneKey::new(name.clone(), generation);
                 let path = scratch.join(format!("{name}.fifo"));
                 let c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+                // The gate's page drives a Mac or Linux host: a fifo is how its window is told.
+                #[cfg(unix)]
                 // SAFETY: a fresh path under this process's own scratch folder.
                 assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+                #[cfg(not(unix))]
+                panic!("the gate's host runs on Unix: {c:?}");
                 let program = panes
                     .open_streamed_at_while(
                         &|| true,

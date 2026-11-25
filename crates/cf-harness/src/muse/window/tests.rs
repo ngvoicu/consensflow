@@ -243,7 +243,8 @@ fn a_window_is_ready_at_its_prompt_and_held_before_it_for_another_session_or_for
     };
     host.answer("pane.snapshot", [typed("half a sentence"), typed("")]);
     assert_eq!(ready(&host), Readiness::Held(Held::Unsent));
-    assert_eq!(ready(&host), Readiness::Ready);
+    // An empty box over the count, with nothing that shows where their keys went (N17).
+    assert_eq!(ready(&host), Readiness::Held(Held::Unproven));
     // A session the window started since (a /clear) is not the one it is known on.
     let cleared = v7(5_000);
     home.log(&cleared, 40_085, "");
@@ -292,7 +293,10 @@ fn a_turn_taken_back_is_read_so_and_its_box_cleared_before_the_next_paste_only_w
     assert_eq!(delivered, Admission::Admitted { queued: false });
     assert_eq!(
         asked(&host),
-        ["pane.snapshot", "paste The next one. (the box emptied first)"]
+        [
+            "pane.snapshot",
+            "paste The next one. (the box emptied first)"
+        ]
     );
     // Read again taken back, but the box is empty now: Control-C would stop a turn at
     // work there, and nothing is pressed.
@@ -338,7 +342,10 @@ fn a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_nothing_is
     finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
     assert_eq!(
         asked(&host),
-        ["pane.snapshot", "paste The next one. (the box emptied first)"]
+        [
+            "pane.snapshot",
+            "paste The next one. (the box emptied first)"
+        ]
     );
 }
 
@@ -390,6 +397,7 @@ fn the_engine_is_told_the_box_is_empty_only_where_muse_draws_it_empty() {
     let reads_empty = |snapshot: &serde_json::Value| {
         let mut snapshot = snapshot.clone();
         snapshot["seen"] = json!("00000000000000aa");
+        snapshot["outputCaughtUp"] = json!(true);
         snapshot["typed"] = json!(0);
         crate::Look::of(&snapshot)
             .is_ok_and(|look| look.reads(Harness::Muse) == crate::BoxReading::Empty)
@@ -618,7 +626,7 @@ fn a_window_whose_screen_lacks_bytes_the_host_has_read_is_held_and_never_read_em
     let counted = |read: u64, drawn: u64, unsent: bool| {
         Answer::Now(Ok(json!({
             "ok": true, "unsent": unsent, "typed": 1, "typedQuietMs": 1_200, "outputQuietMs": 0,
-            "outputRead": read, "outputDrawn": drawn,
+            "outputRead": read, "outputDrawn": drawn, "outputCaughtUp": read == drawn,
             "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ ", RULE, "  echo · YOLO"],
         })))
     };
@@ -638,18 +646,22 @@ fn a_window_whose_screen_lacks_bytes_the_host_has_read_is_held_and_never_read_em
         "a box is not read over a key"
     );
     assert_eq!(ready(&host), Readiness::Ready);
-    // With the counts equal the empty box is read empty, as before.
-    assert_eq!(ready(&host), Readiness::Ready);
+    // With the counts equal the empty box is read empty, and the count holds with no evidence.
+    assert_eq!(ready(&host), Readiness::Held(Held::Unproven));
     let look = crate::Look::of(&json!({
         "ok": true, "unsent": true, "typed": 1, "typedQuietMs": 1_200, "outputQuietMs": 0,
-        "outputRead": 262, "outputDrawn": 262, "seen": "00000000000000aa",
+        "outputRead": 262, "outputDrawn": 262, "outputCaughtUp": true,
+        "seen": "00000000000000aa",
         "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ ", RULE, "  echo · YOLO"],
+        // The person erased what their box held with a key the count cannot follow.
+        "unsentAt": { "pressedOver": { "current": true,
+            "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ a word", RULE, "  echo · YOLO"] } },
     }))
     .unwrap();
     assert!(matches!(
         crate::licence_paste(&look, Harness::Muse, crate::BoxState::default(), &[3]),
         crate::PasteLicence::Go {
-            read_empty: true,
+            read_empty: Some(cf_proto::panes::Evidence::Erased),
             ..
         }
     ));
@@ -671,7 +683,7 @@ fn a_taken_back_brief_whose_box_is_out_of_view_is_held_not_cleared_blind_while_t
     let counted = |read: u64, drawn: u64| {
         Answer::Now(Ok(json!({
             "ok": true, "unsent": false, "typed": 0,
-            "outputRead": read, "outputDrawn": drawn,
+            "outputRead": read, "outputDrawn": drawn, "outputCaughtUp": read == drawn,
             "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ Stop me before a word.", RULE, "  echo · YOLO"],
         })))
     };
@@ -688,6 +700,9 @@ fn a_taken_back_brief_whose_box_is_out_of_view_is_held_not_cleared_blind_while_t
     finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
     assert_eq!(
         asked(&host),
-        ["pane.snapshot", "paste The next one. (the box emptied first)"]
+        [
+            "pane.snapshot",
+            "paste The next one. (the box emptied first)"
+        ]
     );
 }

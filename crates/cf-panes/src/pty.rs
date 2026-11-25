@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, MasterPty, PtySize};
 
+use crate::arbiter::ArbiterError;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
-use crate::arbiter::ArbiterError;
 use crate::journal::Journal;
-use crate::screen::{Drawn, PaneScreen, Seen};
+use crate::screen::{Drawn, PaneScreen, Screen};
 
 mod close;
 #[cfg(windows)]
@@ -42,9 +42,9 @@ pub use close::CLOSE_GRACE;
 pub use error::PaneError;
 #[cfg(all(test, unix))]
 use flow::terminal_of;
-use flow::OutputFlow;
 #[cfg(test)]
 pub(crate) use flow::ActivityReader;
+use flow::OutputFlow;
 pub(crate) use output_end::Handed;
 pub use owed::ExitOwed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
@@ -157,7 +157,7 @@ impl<'a> PaneEnvironment<'a> {
 /// `under` with the screen's lock held, given what the screen shows of the input box then
 /// ([`Seen`]; none where the pane has no screen). The pane's table is not asked for it: the
 /// writer and the screen were taken in one lookup of it, before the writer was held.
-pub(crate) type Screening<'a> = &'a dyn Fn(&mut dyn FnMut(Option<Seen>));
+pub(crate) type Screening<'a> = &'a dyn Fn(&mut dyn FnMut(Option<&Screen>));
 
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
@@ -173,7 +173,7 @@ pub(crate) trait PaneInputWriter {
         bytes: &[u8],
         gate: &mut dyn FnMut(Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
-        let screening = |under: &mut dyn FnMut(Option<Seen>)| self.with_seen(key, under);
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| self.with_screen(key, under);
         loop {
             match gate(&screening) {
                 Gate::Go => return self.write(key, bytes).map_err(Gated::Pane),
@@ -183,10 +183,9 @@ pub(crate) trait PaneInputWriter {
         }
     }
 
-    /// Runs `under` with the pane's screen's lock held, given what the screen shows of the
-    /// input box now ([`Seen`]); none where the pane has no screen. The pane table's lock is
-    /// let go before.
-    fn with_seen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
+    /// Runs `under` with the pane's screen's lock held, given the screen now; none where the
+    /// pane has no screen. The pane table's lock is let go before.
+    fn with_screen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
         let _ = key;
         under(None);
     }
@@ -231,7 +230,8 @@ pub(crate) fn write_gated_in(
             Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
         }
     };
-    held.write_all(bytes).map_err(|error| Gated::Pane(error.into()))?;
+    held.write_all(bytes)
+        .map_err(|error| Gated::Pane(error.into()))?;
     held.flush().map_err(|error| Gated::Pane(error.into()))?;
     crate::sync::point("writer.written");
     Ok(())
@@ -424,10 +424,15 @@ impl PaneTable {
             )
         };
         let _active_write = ActiveWrite(active_writes);
-        let screening = |under: &mut dyn FnMut(Option<Seen>)| {
-            screen.with_seen(&mut |seen| under(Some(seen)));
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| {
+            screen.with_screen(&mut |screen| under(Some(screen)));
         };
-        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;
+        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;
         *last_activity
             .lock()
             .map_err(|_| Gated::Pane(PaneError::LockPoisoned))? = Instant::now();
@@ -586,9 +591,9 @@ impl PaneInputWriter for PaneTable {
         PaneTable::write_gated(self, key, bytes, gate)
     }
 
-    fn with_seen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
+    fn with_screen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
         match self.screen(key) {
-            Ok(screen) => screen.with_seen(&mut |seen| under(Some(seen))),
+            Ok(screen) => screen.with_screen(&mut |screen| under(Some(screen))),
             Err(_) => under(None),
         }
     }

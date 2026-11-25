@@ -8,20 +8,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use cf_harness::contract::Held;
 use cf_harness::{
-    after_wait, licence_enter, licence_paste, AfterWait, At as Named, BoxState, EnterFor,
-    EnterLicence, Look, NoLook, PasteLicence,
+    after_wait, licence_enter, licence_paste, AfterWait, At as Named, BoxReading, BoxState,
+    EnterFor, EnterLicence, Look, NoLook, PasteLicence,
 };
 use cf_proto::agents::Harness;
-use cf_proto::panes::BOTTOM_LINES;
+use cf_proto::panes::{ReadEmpty, BOTTOM_LINES};
 
 use super::clock::ModelClock;
 use super::program::{Echo, Program, Pty, Written};
 use super::sched;
-use crate::arbiter::{ArbiterError, At, EnterTiming, InputArbiter, OutputClock, OutputCount, Paste};
+use crate::arbiter::{
+    ArbiterError, At, EnterTiming, InputArbiter, OutputClock, OutputCount, Paste,
+};
 use crate::pane_handlers::{snapshot_of, took_in};
 use crate::pty::{ActivityReader, Gate, Gated, PaneError, PaneInputWriter, PaneKey};
-use crate::screen::{PaneScreen, Seen};
+use crate::screen::{PaneScreen, Screen, Seen};
 
 /// The host's wait of a delivery's Enter, shorter than the product's (2 s) so that a schedule
 /// ends: its cap and grace are the arbiter's.
@@ -54,6 +57,7 @@ pub(crate) struct ModelPane {
     screen: Arc<PaneScreen>,
     clock: Arc<ModelClock>,
     printed: Arc<OutputClock>,
+    pty: Arc<Pty>,
     kind: Mutex<EnterKind>,
     pasted_at: Mutex<Option<Duration>>,
     violations: Arc<Mutex<Vec<String>>>,
@@ -74,15 +78,20 @@ impl PaneInputWriter for ModelPane {
         bytes: &[u8],
         gate: &mut dyn FnMut(crate::pty::Screening<'_>) -> Gate,
     ) -> Result<(), Gated> {
-        let screening = |under: &mut dyn FnMut(Option<Seen>)| self.with_seen(_key, under);
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| self.with_screen(_key, under);
         let enter = bytes == b"\r";
-        // Whether output was pending where the last check let the write go: read in the same
-        // turn as the check, with no point between.
-        let pending = std::cell::Cell::new(false);
+        let pasting = bytes.windows(6).any(|window| window == b"\x1b[200~");
+        // Whether the program had printed a byte the screen did not show where the last check
+        // let the write go: one already unshown as the check began and still unshown after it.
+        // What the program prints after the host's question, no check of the host's can see.
+        let unshown = std::cell::Cell::new(false);
+        let behind =
+            || sched::without_points(|| !self.pty.empty() || self.printed.counts().pending());
         let mut checked = || {
+            let before = (enter || pasting) && behind();
             let gated = gate(&screening);
-            if enter && matches!(gated, Gate::Go) {
-                pending.set(sched::without_points(|| self.printed.counts().pending()));
+            if (enter || pasting) && matches!(gated, Gate::Go) {
+                unshown.set(before && behind());
             }
             gated
         };
@@ -91,26 +100,31 @@ impl PaneInputWriter for ModelPane {
         });
         if written.is_ok() {
             let now = self.clock.elapsed();
-            if enter && pending.get() {
+            if pasting && unshown.get() {
+                self.violations.lock().unwrap().push(format!(
+                    "a paste was written at {now:?} with output the screen did not show"
+                ));
+            }
+            if enter && unshown.get() {
                 let kind = *self.kind.lock().unwrap();
                 let since = now.saturating_sub(self.pasted_at.lock().unwrap().unwrap_or(now));
                 let cap = Duration::from_millis(ENTER_TIMING.most_ms + 3_000);
                 if kind == EnterKind::Pane || since < cap {
                     self.violations.lock().unwrap().push(format!(
-                        "an Enter ({kind:?}) was written at {now:?} with output pending, \
-                         {since:?} after its paste"
+                        "an Enter ({kind:?}) was written at {now:?} with output the screen did \
+                         not show, {since:?} after its paste"
                     ));
                 }
             }
-            if bytes.windows(6).any(|window| window == b"\x1b[200~") {
+            if pasting {
                 *self.pasted_at.lock().unwrap() = Some(now);
             }
         }
         written
     }
 
-    fn with_seen(&self, _key: &PaneKey, under: &mut dyn FnMut(Option<Seen>)) {
-        self.screen.with_seen(&mut |seen| under(Some(seen)));
+    fn with_screen(&self, _key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
+        self.screen.with_screen(&mut |screen| under(Some(screen)));
     }
 }
 
@@ -121,7 +135,7 @@ pub(crate) enum Job {
     Paste {
         id: u32,
         at: Option<At>,
-        read_empty: Option<u64>,
+        read_empty: Option<ReadEmpty>,
         clear_first: Option<&'static [u8]>,
         reply: Reply,
     },
@@ -176,7 +190,6 @@ impl World {
     pub(crate) fn new(harness: Harness, messages: u32) -> Arc<Self> {
         let clock = ModelClock::new();
         let pty = Arc::new(Pty::default());
-        clock.watching(&pty);
         let arbiter = Arc::new(InputArbiter::with_clock(ENTER_TIMING, clock.clone()));
         let key = PaneKey::new("model", 1);
         let counts = Arc::new(OutputCount::default());
@@ -184,13 +197,16 @@ impl World {
             .register_counted(&key, None, &counts)
             .expect("the pane registers");
         let screen = Arc::new(PaneScreen::new(24, 80));
-        let program = Arc::new(Mutex::new(Program::new(harness, &clock, &pty)));
+        let asked = Arc::clone(&pty);
+        counts.watch(Box::new(move || asked.holds()));
+        let program = Arc::new(Mutex::new(Program::new(harness, &pty)));
         let violations = Arc::new(Mutex::new(Vec::new()));
         let pane = Arc::new(ModelPane {
             writer: Mutex::new(Box::new(Written(Arc::clone(&program)))),
             screen: Arc::clone(&screen),
             clock: Arc::clone(&clock),
             printed: Arc::clone(&printed),
+            pty: Arc::clone(&pty),
             kind: Mutex::new(EnterKind::First),
             pasted_at: Mutex::new(None),
             violations: Arc::clone(&violations),
@@ -227,45 +243,39 @@ impl World {
         })
     }
 
-    /// The reader: the pty's reads, counted the moment they are in hand, and handed on.
+    /// The reader: waits for the pty, then reads it, counted the moment the bytes are in hand,
+    /// as the pane's reader does (`pty::flow::stream_output`).
     pub(crate) fn reader(self: &Arc<Self>) {
-        let due = Arc::new(Mutex::new(None));
-        struct FromPty {
-            pty: Arc<Pty>,
-            due: Arc<Mutex<Option<Duration>>>,
-        }
+        struct FromPty(Arc<Pty>);
         impl Read for FromPty {
             fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                let Some(chunk) = self.pty.next() else {
+                let Some(chunk) = self.0.take() else {
                     return Ok(0);
                 };
-                *self.due.lock().unwrap() = chunk.due;
-                let length = chunk.bytes.len().min(buffer.len());
-                buffer[..length].copy_from_slice(&chunk.bytes[..length]);
+                let length = chunk.len().min(buffer.len());
+                buffer[..length].copy_from_slice(&chunk[..length]);
                 Ok(length)
             }
         }
         let mut reader = ActivityReader {
-            inner: Box::new(FromPty {
-                pty: Arc::clone(&self.pty),
-                due: Arc::clone(&due),
-            }),
+            inner: Box::new(FromPty(Arc::clone(&self.pty))),
             last_activity: Arc::new(Mutex::new(Instant::now())),
             counts: Arc::clone(self.printed.counts()),
         };
         let mut buffer = [0; 8192];
         loop {
-            // As the pane's reader waits for the pty (`pty::flow::stream_output`).
-            self.printed.counts().reader_waits();
+            self.pty.wait();
             let Ok(length) = reader.read(&mut buffer) else {
                 break;
             };
             if length == 0 {
                 break;
             }
-            let due = due.lock().unwrap().take();
-            self.fed.lock().unwrap().push_back(buffer[..length].to_vec());
-            self.pty.counted(due);
+            self.pty.counted();
+            self.fed
+                .lock()
+                .unwrap()
+                .push_back(buffer[..length].to_vec());
         }
     }
 
@@ -286,7 +296,9 @@ impl World {
     /// The pane's worker: the keys, pastes and Enters, one at a time, in order.
     pub(crate) fn worker(self: &Arc<Self>) {
         loop {
-            sched::wait_until("a job", || !self.jobs.lock().unwrap().is_empty() || self.stopping());
+            sched::wait_until("a job", || {
+                !self.jobs.lock().unwrap().is_empty() || self.stopping()
+            });
             let job = self.jobs.lock().unwrap().pop_front();
             let Some(job) = job else {
                 break;
@@ -342,7 +354,10 @@ impl World {
 
     /// The human's keys, as the window's page sends them.
     pub(crate) fn type_keys(&self, bytes: &[u8]) {
-        self.jobs.lock().unwrap().push_back(Job::Typed(bytes.to_vec()));
+        self.jobs
+            .lock()
+            .unwrap()
+            .push_back(Job::Typed(bytes.to_vec()));
     }
 
     /// What the host says of the window now, as a look.
@@ -380,7 +395,7 @@ impl World {
         Some(self.ask(|reply| Job::Paste {
             id: 1,
             at: Some(named),
-            read_empty: read_empty.then_some(typed),
+            read_empty: read_empty.map(|by| ReadEmpty { typed, by }),
             clear_first,
             reply,
         }))
@@ -388,7 +403,11 @@ impl World {
 
     /// An Enter of a delivery that is not a paste's first, on the licence of `look`; none where the
     /// look licenses none.
-    pub(crate) fn enter_on(&self, look: &Look, needs: EnterFor) -> Option<Result<(), ArbiterError>> {
+    pub(crate) fn enter_on(
+        &self,
+        look: &Look,
+        needs: EnterFor,
+    ) -> Option<Result<(), ArbiterError>> {
         let EnterLicence::Go(named) = licence_enter(look, self.harness, needs) else {
             return None;
         };
@@ -396,10 +415,31 @@ impl World {
         Some(self.ask(|reply| Job::Enter { at, reply }))
     }
 
+    /// A paste on `look` that says the box read empty over the count on `by`, whatever the
+    /// look licenses: what a daemon that is wrong would send.
+    pub(crate) fn paste_saying(
+        &self,
+        look: &Look,
+        by: cf_proto::panes::Evidence,
+    ) -> Result<(), ArbiterError> {
+        let at = look.at();
+        let (named, typed) = (self.named(&at), at.typed);
+        self.ask(|reply| Job::Paste {
+            id: 1,
+            at: Some(named),
+            read_empty: Some(ReadEmpty { typed, by }),
+            clear_first: None,
+            reply,
+        })
+    }
+
     /// Hands a job to the worker and waits for its answer.
     fn ask(&self, make: impl FnOnce(Reply) -> Job) -> Result<(), ArbiterError> {
         let reply: Reply = Arc::new(Mutex::new(None));
-        self.jobs.lock().unwrap().push_back(make(Arc::clone(&reply)));
+        self.jobs
+            .lock()
+            .unwrap()
+            .push_back(make(Arc::clone(&reply)));
         sched::wait_until("the worker answers", || reply.lock().unwrap().is_some());
         let answer = reply.lock().unwrap().take().expect("an answer");
         answer
@@ -425,7 +465,10 @@ impl World {
                 this.look()
             }
         };
-        for msg in msgs.iter().filter(|msg| matches!(msg.state, State::Pasted(_))) {
+        for msg in msgs
+            .iter()
+            .filter(|msg| matches!(msg.state, State::Pasted(_)))
+        {
             let State::Pasted(at) = msg.state else {
                 continue;
             };
@@ -476,22 +519,25 @@ impl World {
             return;
         };
         let look = match looked(self) {
+            // A window whose screen shows no box shows a dialog or a picker, which the
+            // engine's dialog reader holds the window for.
+            Ok(look) if look.reads(self.harness) == BoxReading::Unread => return,
             Ok(look) => look,
             Err(no_look) => {
-                self.log.lock().unwrap().push(format!("{now:?}: no look: {no_look:?}"));
+                self.log
+                    .lock()
+                    .unwrap()
+                    .push(format!("{now:?}: no look: {no_look:?}"));
                 return;
             }
         };
         let state = BoxState::default();
         let licence = licence_paste(&look, self.harness, state, &[3]);
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!(
-                "{now:?}: {licence:?}, box {:?}, lines {:?}",
-                look.reads(self.harness),
-                look.lines()
-            ));
+        self.log.lock().unwrap().push(format!(
+            "{now:?}: {licence:?}, box {:?}, lines {:?}",
+            look.reads(self.harness),
+            look.lines()
+        ));
         let PasteLicence::Go {
             at,
             read_empty,
@@ -505,19 +551,25 @@ impl World {
         let done = self.ask(|reply| Job::Paste {
             id,
             at: Some(named),
-            read_empty: read_empty.then_some(typed),
+            read_empty: read_empty.map(|by| ReadEmpty { typed, by }),
             clear_first,
             reply,
         });
         match done {
             Ok(()) => {
-                self.log.lock().unwrap().push(format!("{now:?}: m-{id} pasted"));
+                self.log
+                    .lock()
+                    .unwrap()
+                    .push(format!("{now:?}: m-{id} pasted"));
                 self.set(id, State::Pasted(self.clock.elapsed()));
             }
             // The look was no longer true, or the human typed: nothing was written, and no attempt
             // is spent.
             Err(refused @ (ArbiterError::LookAgain(_) | ArbiterError::Unsent)) => {
-                self.log.lock().unwrap().push(format!("{now:?}: refused: {refused}"));
+                self.log
+                    .lock()
+                    .unwrap()
+                    .push(format!("{now:?}: refused: {refused}"));
             }
             Err(other) => {
                 let mut msgs = self.msgs.lock().unwrap();
@@ -576,24 +628,38 @@ impl World {
         }
     }
 
-    /// At the end of a schedule: every message was taken once, unless the human still holds unsent
-    /// text, in which case it is neither pasted (but in a box it was pasted into before) nor
-    /// failed.
+    /// What the last look holds a message for, where it is a hold the rule names: the person's
+    /// keys counted and the box holding text, or reading empty with no evidence.
+    pub(crate) fn held_by_rule(&self) -> bool {
+        let Ok(look) = self.look() else {
+            return false;
+        };
+        matches!(
+            licence_paste(&look, self.harness, BoxState::default(), &[3]),
+            PasteLicence::Wait(Held::Unsent | Held::Unproven)
+        )
+    }
+
+    /// At the end of a schedule: every message was taken once, unless the last look gives a
+    /// hold the rule names ([`World::held_by_rule`]), in which case it is neither pasted (but in
+    /// a box it was pasted into before) nor failed.
     pub(crate) fn finish(&self) -> Result<(), String> {
         self.check()?;
+        let held = self.held_by_rule();
         let program = self.program.lock().unwrap();
-        let draft = !program.draft.is_empty();
         for msg in self.msgs.lock().unwrap().iter() {
             let taken = program.taken.iter().filter(|id| **id == msg.id).count();
             let fine = match (msg.state, taken) {
                 (State::Done, 1) => true,
-                (State::Queued, 0) => draft,
-                (State::Pasted(_), 0) => draft && program.held.contains(&msg.id),
+                (State::Queued, 0) => held,
+                // The person's Ctrl+U or Ctrl+W may have taken our paste out of the box with
+                // theirs; a hold of the rule keeps it from going again.
+                (State::Pasted(_), 0) => held,
                 _ => false,
             };
             if !fine {
                 return Err(format!(
-                    "m-{} ends {:?} (taken {taken} times, attempts {}) with the human's draft {:?}, held {:?}",
+                    "m-{} ends {:?} (taken {taken} times, attempts {}) with the human's draft {:?}, held {:?} (a hold of the rule: {held})",
                     msg.id, msg.state, msg.attempts, program.draft, program.held
                 ));
             }

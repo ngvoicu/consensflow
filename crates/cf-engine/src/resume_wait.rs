@@ -96,7 +96,9 @@ impl Dispatcher {
                     .clone()
                     .filter(|held| held.message == message.id);
                 if let Some(held) = held {
-                    if held.unsent {
+                    if held.unproven {
+                        "window may have unsent text".to_owned()
+                    } else if held.unsent {
                         "window has unsent text".to_owned()
                     } else {
                         format!("window: {}", held.reason)

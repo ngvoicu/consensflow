@@ -424,7 +424,11 @@ fn a_box_emptied_counts_as_empty_until_a_paste_goes_in() {
         [true, true],
         "the key goes with the paste: a refused paste wrote none, so the one after it carries it too"
     );
-    assert_eq!(clears(&context), 2, "the refused paste's and the one that went");
+    assert_eq!(
+        clears(&context),
+        2,
+        "the refused paste's and the one that went"
+    );
 }
 
 /// The same review (P3-5): a pane that would not take the key that empties its

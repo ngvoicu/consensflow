@@ -23,12 +23,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, LaunchId, NoDefault,
-    Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
-    Work,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, LaunchId, NoDefault, Opening, Over,
+    Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window, Work,
 };
-use cf_harness::Look;
 use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::Look;
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};

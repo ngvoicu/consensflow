@@ -164,7 +164,10 @@ fn a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_p
     for _ in 0..2 {
         context.pass().unwrap();
     }
-    assert!(clears(&context) >= 1, "the paste carries the key that clears the box");
+    assert!(
+        clears(&context) >= 1,
+        "the paste carries the key that clears the box"
+    );
     assert_ne!(
         context.message(words.id).state,
         "delivered",
@@ -873,10 +876,16 @@ fn a_paste_into_a_box_read_empty_retires_the_mark_of_the_stale_paste_it_replaced
     }));
     let question = context.ask(project, "zeus-amber-pine", "chief", 1, "Format?");
     let answer = context.answer(project, question.id, "JSON");
-    context.adapter.with("zeus-amber-pine", |agent| agent.settled = true);
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = true);
     for _ in 0..4 {
         context.pass().unwrap();
     }
     assert_eq!(clears(&context), 0, "no key clears words that are not ours");
-    assert_eq!(times_handed(&context, seam, answer.id), 0, "the answer waits for the draft");
+    assert_eq!(
+        times_handed(&context, seam, answer.id),
+        0,
+        "the answer waits for the draft"
+    );
 }

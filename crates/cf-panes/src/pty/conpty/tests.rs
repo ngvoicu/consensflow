@@ -530,3 +530,58 @@ fn a_form_with_no_envs_is_not_read() {
     let unread = names_of(&Other { args: vec![] }).expect_err("no envs");
     assert!(unread.to_string().contains("envs"), "{unread}");
 }
+
+/// N17: the window's own end of the console's output is overlapped, so that the question
+/// whether it holds bytes answers while a thread waits for the output (on a pipe of
+/// `CreatePipe` it waited for that read, 2 s on Windows 11 26200, even on a duplicate of the
+/// handle). The wait takes nothing: what was written is read after it, whole.
+#[test]
+fn a_windows_output_pipe_is_waited_on_without_taking_and_asked_while_it_waits() {
+    use std::io::{Read, Write};
+
+    let (read, mut write) = super::output_pipe().expect("a pipe");
+    let watch = super::Watch {
+        event: super::event().expect("an event"),
+        file: read,
+    };
+    let asker = watch.try_clone().expect("a handle of its own");
+    let reading = watch.try_clone().expect("another");
+    let (done, waited) = mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        watch.wait();
+        done.send(()).unwrap();
+    });
+    assert!(
+        waited.recv_timeout(Duration::from_millis(300)).is_err(),
+        "it waits while the pipe holds nothing"
+    );
+    let asked = Instant::now();
+    assert!(!asker.holds_bytes(), "nothing waits");
+    assert!(
+        asked.elapsed() < Duration::from_millis(100),
+        "the question waited for the read: {:?}",
+        asked.elapsed()
+    );
+    write.write_all(b"abc").expect("write");
+    waited
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the wait ends with bytes");
+    waiter.join().unwrap();
+    assert!(asker.holds_bytes(), "the wait took nothing");
+    let mut buffer = [0; 8];
+    let got = super::read_overlapped(&reading.file, &reading.event, &mut buffer).unwrap();
+    assert_eq!(&buffer[..got], b"abc");
+    assert!(!asker.holds_bytes());
+    // A writer that has gone ends the wait and answers behind: nothing is current over it.
+    drop(write);
+    reading.wait();
+    assert!(
+        asker.holds_bytes(),
+        "a broken pipe cannot be asked, and is behind"
+    );
+    assert_eq!(
+        super::read_overlapped(&reading.file, &reading.event, &mut buffer).unwrap(),
+        0,
+        "the end of the output"
+    );
+}

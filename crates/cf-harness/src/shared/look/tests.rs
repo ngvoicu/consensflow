@@ -4,6 +4,7 @@
 use serde_json::{json, Value};
 
 use super::*;
+use cf_proto::panes::Evidence;
 
 const RULE: &str = "────────────────────────────────────────";
 
@@ -24,6 +25,7 @@ fn snapshot(typed: &str, unsent: bool, typed_ago: Option<u64>) -> Value {
         "screenQuietMs": 60_000,
         "outputRead": 262,
         "outputDrawn": 262,
+        "outputCaughtUp": true,
         "pasteInFlight": false,
     })
 }
@@ -68,7 +70,7 @@ fn a_box_with_no_words_and_no_keys_goes_with_the_look_it_was_read_on() {
                 seen: "00000000000000aa".to_owned(),
                 typed: 4
             },
-            read_empty: false,
+            read_empty: None,
             clear_first: None,
         }
     );
@@ -92,17 +94,199 @@ fn a_box_that_holds_the_humans_draft_waits_whatever_the_counts_say_after() {
     );
 }
 
-#[test]
-fn a_box_read_empty_over_the_count_goes_over_it_and_says_so() {
-    let empty = look(&snapshot("", true, Some(2_000)));
-    match licence_paste(&empty, Harness::Claude, BoxState::default(), CLEAR) {
-        PasteLicence::Go { read_empty, at, .. } => {
-            assert!(read_empty);
-            assert_eq!(at.typed, 4);
+/// A screen the host kept: `lines` as drawn, current or not.
+fn kept(lines: &[&str], current: bool) -> Value {
+    json!({ "bottom": lines, "cursor": null, "current": current })
+}
+
+/// The box of a Claude Code window holding `typed`.
+fn boxed(typed: &str) -> Vec<String> {
+    vec![RULE.to_owned(), format!("❯ {typed}"), RULE.to_owned()]
+}
+
+/// A dialog of Claude Code's, as drawn in the box's place.
+const DIALOG: &[&str] = &[
+    "Do you want to proceed?",
+    "❯ 1. Yes",
+    "  2. No",
+    "Esc to cancel",
+];
+
+/// A look of an empty box over the person's unsent keys, carrying the screens `unsent_at`.
+fn over_count(unsent_at: Value) -> Look {
+    let mut answer = snapshot("", true, Some(2_000));
+    answer["unsentAt"] = unsent_at;
+    look(&answer)
+}
+
+fn paste_on(look: &Look) -> PasteLicence {
+    licence_paste(look, Harness::Claude, BoxState::default(), CLEAR)
+}
+
+fn goes_on(look: &Look) -> Option<Evidence> {
+    match paste_on(look) {
+        PasteLicence::Go { read_empty, .. } => read_empty,
+        PasteLicence::Wait(held) => {
+            assert_eq!(held, Held::Unproven, "an empty box over the count");
+            None
         }
-        other => panic!("{other:?}"),
     }
 }
+
+/// T-2230: no length of time and no output sets the count aside: only evidence does. A box read
+/// empty with none holds, with the words that say what to press.
+#[test]
+fn a_box_read_empty_over_the_count_with_no_evidence_holds_however_long_ago_they_typed() {
+    for typed in [2_000, 5_156, 60_000, 3_600_000] {
+        let mut answer = snapshot("", true, Some(typed));
+        answer["outputQuietMs"] = json!(typed.saturating_sub(10));
+        assert_eq!(
+            paste_on(&look(&answer)),
+            PasteLicence::Wait(Held::Unproven),
+            "{typed}"
+        );
+    }
+}
+
+/// Erased: at the first key the count cannot follow after their last character, the screen was
+/// current and the box held text.
+#[test]
+fn a_box_read_empty_after_a_key_over_a_box_that_held_text_was_erased() {
+    let box_with = |typed: &str, current| {
+        let lines = boxed(typed);
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        over_count(json!({ "pressedOver": kept(&lines, current) }))
+    };
+    assert_eq!(goes_on(&box_with("ab", true)), Some(Evidence::Erased));
+    assert_eq!(goes_on(&box_with("ab", false)), None, "behind at the key");
+    assert_eq!(goes_on(&box_with("", true)), None, "it held no text");
+    assert_eq!(
+        goes_on(&over_count(json!({ "pressedOver": kept(DIALOG, true) }))),
+        None,
+        "no box to hold text"
+    );
+}
+
+/// Typed elsewhere: every character the count holds came in one write, into a screen that showed
+/// a dialog and not the box.
+#[test]
+fn keys_typed_into_a_dialog_and_nowhere_else_set_the_count_aside() {
+    let into = |lines: &[&str], first: bool, current: bool| {
+        let mut screen = kept(lines, current);
+        screen["first"] = json!(first);
+        over_count(json!({ "typedInto": screen }))
+    };
+    assert_eq!(
+        goes_on(&into(DIALOG, true, true)),
+        Some(Evidence::Elsewhere)
+    );
+    assert_eq!(goes_on(&into(DIALOG, false, true)), None, "not the first");
+    assert_eq!(
+        goes_on(&into(DIALOG, true, false)),
+        None,
+        "behind at the key"
+    );
+    let held = boxed("");
+    let held: Vec<&str> = held.iter().map(String::as_str).collect();
+    assert_eq!(goes_on(&into(&held, true, true)), None, "the box took it");
+    // A conversation that quotes a list is drawn over the box, which took the key.
+    let mut quoted = DIALOG.to_vec();
+    quoted.extend(held.iter().copied());
+    assert_eq!(
+        goes_on(&into(&quoted, true, true)),
+        None,
+        "the box is shown"
+    );
+}
+
+/// The count holds while the box holds text or cannot be read, whatever was kept.
+#[test]
+fn a_box_that_holds_text_or_is_not_read_holds_as_the_persons_words() {
+    let lines = boxed("ab");
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let mut unread = snapshot("", true, Some(2_000));
+    unread["bottom"] = json!(["⏺ 4"]);
+    for mut answer in [snapshot("ab", true, Some(2_000)), unread] {
+        answer["unsentAt"] = json!({ "pressedOver": kept(&lines, true) });
+        assert_eq!(paste_on(&look(&answer)), PasteLicence::Wait(Held::Unsent));
+    }
+}
+
+/// A look exists only where it is current: `outputCaughtUp` is `true`. Absent, no Boolean or
+/// false: no look, with equal counts or none.
+#[test]
+fn a_snapshot_that_does_not_say_it_is_current_is_no_look() {
+    for said in [
+        None,
+        Some(json!("true")),
+        Some(json!(null)),
+        Some(json!(1)),
+        Some(json!(false)),
+    ] {
+        let mut answer = snapshot("", false, None);
+        match &said {
+            None => {
+                answer.as_object_mut().unwrap().remove("outputCaughtUp");
+            }
+            Some(said) => answer["outputCaughtUp"] = said.clone(),
+        }
+        assert_eq!(Look::of(&answer).unwrap_err(), NoLook::Behind, "{said:?}");
+    }
+}
+
+/// The dialog reader on a kept screen, in the form the host's tail gives it, over every dialog
+/// recorded and fixed of Claude Code, Devin and Muse Code: it reads each, or the person's key
+/// typed there holds until they press Ctrl+U; and no screen of a window at rest is read as one,
+/// which would let a key typed into its box go over.
+#[test]
+fn the_dialog_reader_over_every_screen_as_drawn() {
+    use crate::testing::corpus::{drawn_screens, Source, State};
+
+    let mut unread = Vec::new();
+    let mut read_idle = Vec::new();
+    let mut dialogs = 0;
+    for screen in drawn_screens() {
+        let kept = Kept {
+            lines: screen.rows.clone(),
+            cursor: None,
+            current: true,
+        };
+        let shown = shows_a_dialog(screen.harness, &kept);
+        // The corpus cuts Devin's box without the rule over it as the host's tail does; a whole
+        // screen as kept has the rule, which is drawn right over the box.
+        if screen.name.contains("no rule in the tail") {
+            continue;
+        }
+        match screen.state {
+            State::Dialog => {
+                dialogs += 1;
+                if !shown {
+                    unread.push(screen.name.clone());
+                }
+            }
+            _ if shown && screen.source != Source::Rendered => read_idle.push(screen.name.clone()),
+            _ => {}
+        }
+    }
+    assert!(dialogs > 10, "{dialogs}");
+    assert_eq!(
+        read_idle,
+        Vec::<String>::new(),
+        "a screen at rest reads as a dialog"
+    );
+    assert_eq!(
+        unread, UNREAD_DIALOGS,
+        "the dialogs the reader does not read"
+    );
+}
+
+/// The dialogs the kept screen's reader reads none of: a key typed there holds the window's
+/// deliveries until the person presses Ctrl+U in it.
+const UNREAD_DIALOGS: [&str; 2] = [
+    // Claude Code's effort menu: a slider, with no list of choices and no cursor on one.
+    "recorded: claude 08-effort-menu.txt dialog",
+    "recorded: claude 08b-effort-right.txt dialog",
+];
 
 /// A key a moment ago may not be drawn yet: nothing goes in for a second, count or none.
 #[test]
@@ -117,27 +301,16 @@ fn a_key_younger_than_a_second_waits_for_the_screen_to_catch_up() {
 }
 
 #[test]
-fn a_window_that_answered_no_key_is_believed_only_after_the_undrawn_bound() {
-    let mut quiet = snapshot("", true, Some(2_000));
-    // It printed nothing since the key, so the key may have been drawn nowhere.
-    quiet["outputQuietMs"] = json!(5_000);
-    assert!(matches!(
-        licence_paste(&look(&quiet), Harness::Claude, BoxState::default(), CLEAR),
-        PasteLicence::Wait(Held::Unsent)
-    ));
-    quiet["typedQuietMs"] = json!(6_000);
-    assert!(matches!(
-        licence_paste(&look(&quiet), Harness::Claude, BoxState::default(), CLEAR),
-        PasteLicence::Go { .. }
-    ));
-}
-
-#[test]
 fn a_paste_on_its_way_waits() {
     let mut on_its_way = snapshot("", false, None);
     on_its_way["pasteInFlight"] = json!(true);
     assert!(matches!(
-        licence_paste(&look(&on_its_way), Harness::Claude, BoxState::default(), CLEAR),
+        licence_paste(
+            &look(&on_its_way),
+            Harness::Claude,
+            BoxState::default(),
+            CLEAR
+        ),
         PasteLicence::Wait(Held::Because(_))
     ));
 }
@@ -246,39 +419,14 @@ fn after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets
         AfterWait::EnterAgain(holds.at())
     );
     let empty = look(&snapshot("", false, None));
-    assert_eq!(after_wait(Ok(&empty), Harness::Claude), AfterWait::PasteAgain);
+    assert_eq!(
+        after_wait(Ok(&empty), Harness::Claude),
+        AfterWait::PasteAgain
+    );
     let mut printing = snapshot("a pasted message", false, None);
     printing["screenQuietMs"] = json!(1_000);
     assert_eq!(
         after_wait(Ok(&look(&printing)), Harness::Claude),
         AfterWait::Printing
-    );
-}
-
-/// T-2198 finding 3: the five-second override counts only with a look that is not behind. The
-/// host says whether the window's reader has caught up (`outputCaughtUp`): one held at the
-/// page's credit, or not yet back from a read, may leave the echo of the person's key unread, so
-/// the box that reads empty says nothing of their unsent character.
-#[test]
-fn the_override_of_the_humans_unsent_count_needs_a_look_that_is_not_behind() {
-    let mut old = snapshot("", true, Some(5_156));
-    old["outputQuietMs"] = json!(5_158);
-    let current = look(&old);
-    assert!(
-        matches!(
-            licence_paste(&current, Harness::Claude, BoxState::default(), CLEAR),
-            PasteLicence::Go { read_empty: true, .. }
-        ),
-        "a reader that has caught up: the box read empty, the keys long answered"
-    );
-    old["outputCaughtUp"] = json!(true);
-    assert!(look(&old).read_empty_over_count(Harness::Claude));
-    old["outputCaughtUp"] = json!(false);
-    let behind = look(&old);
-    assert!(!behind.read_empty_over_count(Harness::Claude));
-    assert_eq!(
-        licence_paste(&behind, Harness::Claude, BoxState::default(), CLEAR),
-        PasteLicence::Wait(Held::Unsent),
-        "the person's unsent typing holds while the reader is behind"
     );
 }

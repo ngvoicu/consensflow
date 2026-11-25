@@ -24,8 +24,8 @@ use cf_harness::records::Role;
 use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Fakes, OtherProcess, FIRST_MESSAGE_MS,
 };
-use cf_proto::specs::Variant;
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -719,7 +719,9 @@ fn gives_the_window_text_it_can_take_and_leaves_a_paste_the_bridge_lost_uncertai
     let answer: RefCell<Result<Value, HostError>> = RefCell::new(Ok(json!({ "ok": true })));
     let host = AnsweringHost::new(|op| {
         if op == "pane.snapshot" {
-            return Ok(json!({ "ok": true, "typed": 0, "seen": "00000000000000aa", "bottom": [] }));
+            return Ok(json!({
+                "ok": true, "typed": 0, "seen": "00000000000000aa", "bottom": [], "outputCaughtUp": true,
+            }));
         }
         answer.borrow().clone()
     });
@@ -825,7 +827,10 @@ fn the_engine_is_told_the_box_is_empty_only_where_claude_draws_it_empty() {
     };
     assert!(reads_empty(Harness::Claude, &drawn("❯ ")));
     assert!(!reads_empty(Harness::Claude, &drawn("❯ half a sentence")));
-    assert!(!reads_empty(Harness::Claude, &json!({ "ok": true, "bottom": ["⏺ 4"] })));
+    assert!(!reads_empty(
+        Harness::Claude,
+        &json!({ "ok": true, "bottom": ["⏺ 4"] })
+    ));
 }
 
 /// Whether the look `snapshot` is (given the `seen` and `typed` a real host's carries) reads the
@@ -833,26 +838,28 @@ fn the_engine_is_told_the_box_is_empty_only_where_claude_draws_it_empty() {
 fn reads_empty(harness: cf_proto::agents::Harness, snapshot: &Value) -> bool {
     let mut snapshot = snapshot.clone();
     snapshot["seen"] = json!("00000000000000aa");
+    snapshot["outputCaughtUp"] = json!(true);
     snapshot["typed"] = json!(0);
     cf_harness::Look::of(&snapshot)
         .is_ok_and(|look| look.reads(harness) == cf_harness::BoxReading::Empty)
 }
-
 
 #[test]
 fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog() {
     const RULE: &str = "────────────────────────────────────────";
     let home = Home::new();
     let typed_in_box = RefCell::new("❯ ".to_owned());
-    // The human's last key 2 s ago, and the window has printed since.
+    // The human's last key 2 s ago.
     let quiet = Cell::new(2_000_u64);
-    let printed = Cell::new(1_000_u64);
     let cursor = RefCell::new(Value::Null);
     let host = AnsweringHost::new(|op| {
         Ok(match op {
             "pane.snapshot" => json!({
-                "ok": true, "pasteInFlight": false, "unsent": true,
-                "typed": 4, "typedQuietMs": quiet.get(), "outputQuietMs": printed.get(),
+                "ok": true, "pasteInFlight": false, "unsent": true, "outputCaughtUp": true,
+                "typed": 4, "typedQuietMs": quiet.get(),
+                // They erased what their box held with a key the count cannot follow.
+                "unsentAt": { "pressedOver": { "current": true,
+                    "bottom": [RULE, "❯ half a thought", RULE] } },
                 "bottom": ["⏺ 4", "", RULE, typed_in_box.borrow().clone(), RULE,
                     "  ⏵⏵ bypass permissions on (shift+tab to cycle)"],
                 "cursor": cursor.borrow().clone(),
@@ -886,27 +893,23 @@ fn a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dial
     let pasted = host.asked.borrow().last().unwrap().clone();
     assert_eq!(pasted.0, "pane.write_paste");
     assert_eq!(
-        (&pasted.1["body"], &pasted.1["readEmpty"], &pasted.1["typed"]),
-        (&json!("hello"), &json!(4), &json!(4)),
-        "told the box read empty at the count, over the look it was read on"
+        (
+            &pasted.1["body"],
+            &pasted.1["readEmpty"],
+            &pasted.1["typed"]
+        ),
+        (
+            &json!("hello"),
+            &json!({ "typed": 4, "by": "erased" }),
+            &json!(4)
+        ),
+        "told the box read empty at the count and why, over the look it was read on"
     );
     assert!(pasted.1["at"].is_string());
-    // A key a moment ago may not be drawn yet; nor one the window has printed nothing
-    // since (T-330), unless it is 5 s past: a key that changes nothing draws nothing.
+    // A key a moment ago may not be drawn yet.
     quiet.set(200);
     assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
-    // Drawn since, but a moment ago: the window may draw more of it.
-    printed.set(100);
-    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
     quiet.set(2_000);
-    printed.set(2_500);
-    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
-    quiet.set(4_999);
-    printed.set(9_000);
-    assert_eq!(ready(), Ok(Readiness::Held(Held::Unsent)));
-    quiet.set(5_000);
-    assert_eq!(ready(), Ok(Readiness::Ready));
-    printed.set(1_000);
     // The suggestion in a conversation with nothing said yet, the cursor at the box's
     // start and nothing after it drawn plain: an empty box (T-330).
     *typed_in_box.borrow_mut() = "❯ Try \"how do I log an error?\"".to_owned();

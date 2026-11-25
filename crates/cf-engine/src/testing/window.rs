@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, CompactionWord, Decline, Dialog, DialogSign, Held, Observed, Over, Pane,
-    PaneHost, Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
+    Admission, CompactionWord, Decline, Dialog, DialogSign, Held, Observed, Over, Pane, PaneHost,
+    Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use cf_harness::{Look, PasteLicence};

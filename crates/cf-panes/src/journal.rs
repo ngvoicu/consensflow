@@ -164,6 +164,14 @@ impl Journal {
         self.locked().end
     }
 
+    /// What was taken in and not handed on: from [`Journal::published_to`] to the end, and
+    /// where it starts; none where all was. What a consumer whose feed panicked hands on.
+    pub(crate) fn unpublished(&self) -> Option<(u64, Vec<u8>)> {
+        let inner = self.locked();
+        let from = self.published_to().max(inner.start);
+        (inner.end > from).then(|| (from, inner.copy(from, inner.end)))
+    }
+
     /// Copy a read in and track it. Nothing is allocated unless it starts a segment.
     pub(crate) fn append(&self, bytes: &[u8]) {
         self.locked().append(bytes);

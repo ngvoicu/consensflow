@@ -9,7 +9,7 @@
 //! `stopped-in-the-stop-hook`: Escape while a Stop hook that ignores signals
 //! ran after the answer; Claude's record of the interrupt names no message.
 
-use cf_harness::contract::{HostError, PaneHost, Work, NOT_ADMITTED};
+use cf_harness::contract::{HostError, NOT_ADMITTED};
 use cf_harness::testing::{Answer, Driver, ScriptedHost, EPOCH_MS};
 
 use super::*;
@@ -100,6 +100,7 @@ fn looked(typed: &str) -> Value {
     let rule = "─".repeat(40);
     json!({
         "ok": true, "pasteInFlight": false, "unsent": false, "typed": 0, "seen": "00000000000000aa",
+        "outputCaughtUp": true,
         "bottom": ["⏺ READY", "", rule, format!("❯ {typed}"), rule],
         "cursor": { "line": 3, "col": 2, "shown": true, "plainAfter": typed.chars().count() },
     })

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cf_proto::panes::SilentPaste;
@@ -57,32 +57,39 @@ pub struct OutputClock {
 /// or lock; and `drawn`, advanced by whoever feeds the screen when each feed ends (N17, T-2125).
 /// Output is pending while more was read than drawn, and the window is quiet only once both are
 /// equal again.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct OutputCount {
     read: AtomicU64,
     drawn: AtomicU64,
     /// The feed panicked: the screen is partly written and the window's generation is over.
     broken: AtomicBool,
-    /// What the thread that reads the pty is doing ([`Reader`]).
-    reader: AtomicU8,
+    /// The gate of the terminal's output ([`Intake`]).
+    intake: Mutex<Intake>,
 }
 
-/// What the thread that reads a window's pty is doing: whether the window may have printed
-/// what it has not read. The echo of the person's key is such output while the reader is held at
-/// the page's credit (the page has not acknowledged what it was sent), or while it is between
-/// two reads, so a look that reads it so is behind, whatever the two byte counts say.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum Reader {
-    /// No thread reads this count: a pane with no output stream (a test's own, a table that
-    /// keeps none). It has no reader that could be behind.
-    Untracked = 0,
-    /// Holding bytes it has read, held at the credit, or not yet back in a read.
-    Busy = 1,
-    /// Waiting in a read of the pty, which has nothing more to give.
-    Waiting = 2,
-    /// The pty has ended for good: nothing more will be read.
-    Ended = 3,
+impl std::fmt::Debug for OutputCount {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OutputCount")
+            .field("read", &self.read)
+            .field("drawn", &self.drawn)
+            .field("broken", &self.broken)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether the window's terminal holds bytes that have not been read.
+pub(crate) type Waiting = Box<dyn Fn() -> bool + Send>;
+
+/// The gate of a pane's terminal output (N17). It is held across one read that cannot wait, with
+/// its count ([`OutputCount::took`]), or across one question to the terminal with the counts
+/// loaded ([`OutputCount::sample`]): so while it is free, no byte is in hand and not counted. It
+/// is a leaf: nothing is taken under it, and it is never held across a wait.
+#[derive(Default)]
+pub(crate) struct Intake {
+    /// The question to the terminal, while a thread reads it. None for a pane with no output
+    /// stream (a test's own, a table that keeps none), which has no terminal anyone reads.
+    waiting: Option<Waiting>,
 }
 
 #[cfg(test)]
@@ -130,34 +137,39 @@ impl OutputCount {
         pair
     }
 
-    /// The thread that reads the pty is about to wait in a read, having given on all it read
-    /// and been given the credit to read more.
-    pub(crate) fn reader_waits(&self) {
-        self.reader_is(Reader::Waiting);
+    /// The gate ([`Intake`]), for the reader to hold across a read that cannot wait.
+    pub(crate) fn intake(&self) -> MutexGuard<'_, Intake> {
+        crate::sync::lock(&self.intake).unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The thread that reads the pty has bytes in hand, or is held at the page's credit.
-    pub(crate) fn reader_busy(&self) {
-        self.reader_is(Reader::Busy);
+    /// The window's terminal is read from now on: `waiting` asks it whether it holds bytes not
+    /// yet read.
+    pub(crate) fn watch(&self, waiting: Waiting) {
+        self.intake().waiting = Some(waiting);
     }
 
-    /// The pty has ended for good.
-    pub(crate) fn reader_ended(&self) {
-        self.reader_is(Reader::Ended);
+    /// Nothing reads the terminal any more: what it asks with is let go.
+    pub(crate) fn unwatch(&self) {
+        self.intake().waiting = None;
     }
 
-    fn reader_is(&self, state: Reader) {
-        self.reader.store(state as u8, Ordering::Release);
+    /// `(read, drawn, current)` of one moment, under the gate: **the window is current** when
+    /// nothing waits at its terminal, `read` equals `drawn`, and its feed is not broken. With
+    /// the screen's lock held too, what the screen shows is exactly the first `drawn` bytes the
+    /// window printed. It does not say what the program has not written to its terminal yet.
+    pub(crate) fn sample(&self) -> (u64, u64, bool) {
+        let intake = self.intake();
+        let waiting = intake.waiting.as_ref().is_some_and(|waiting| waiting());
+        crate::sync::point("current.asked");
+        let (read, drawn) = self.both();
+        let current = !waiting && read == drawn && !self.is_broken();
+        drop(intake);
+        (read, drawn, current)
     }
 
-    /// Whether the window's reader has read all the pty has to give at this moment: it is
-    /// waiting in a read, or the pty has ended, or no thread reads it. A reader held at the page's
-    /// credit, or between two reads, has not: the window may have printed more (the echo of a
-    /// key of the person's), and what its screen shows may be behind it however long ago they
-    /// typed. A look taken with the screen's lock held and this loaded first is current to that
-    /// moment: bytes that arrive after it are after the look.
-    pub(crate) fn caught_up(&self) -> bool {
-        self.reader.load(Ordering::Acquire) != Reader::Busy as u8
+    /// Whether the window is current ([`OutputCount::sample`]).
+    pub(crate) fn current(&self) -> bool {
+        self.sample().2
     }
 
     /// Whether the screen lacks bytes the pty has given.
@@ -321,17 +333,17 @@ impl EnterTiming {
     }
 
     /// Waits until the Enter of a paste written at `pasted` may go: at once, where the
-    /// window has taken it in already. The Enter does not go while output the pty gave is not
-    /// yet in the screen ([`OutputCount`]), up to the cap and [`PENDING_GRACE_MS`] more: a
-    /// window that prints without pause for longer than that gets its Enter at the end of it,
-    /// as it did before the counts (the cap is a limit, `.specs`).
+    /// window has taken it in already. The Enter does not go while the pane is not current
+    /// ([`OutputCount::sample`]), up to the cap and [`PENDING_GRACE_MS`] more: a window that
+    /// prints without pause for longer than that gets its Enter at the end of it, as it did
+    /// before the counts (the cap is a limit, `.specs`).
     pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {
             // One look at the time for both numbers: the paste's age and the quiet are of the
             // same moment, however long the thread was kept from running between them.
             let now = clock.now();
             let since = millis_since(now, pasted);
-            if output.counts().pending() && since < self.pending_cap_ms() {
+            if since < self.pending_cap_ms() && !output.counts().current() {
                 clock.rest(Duration::from_millis(5));
                 continue;
             }

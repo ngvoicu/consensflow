@@ -2,14 +2,14 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use cf_proto::panes::SilentPaste;
+use cf_proto::panes::{Evidence, ReadEmpty, SilentPaste};
 
 use crate::pty::{PaneError, PaneKey};
 
 use super::keys::Classes;
 use super::paste::PasteWatch;
 use super::timing::{millis_since, Clock, EnterTiming, OutputClock, OutputCount};
-use super::{ArbiterError, ArbiterSnapshot, HumanWrite};
+use super::{ArbiterError, ArbiterSnapshot, HumanWrite, Kept, TypedInto, UnsentAt};
 
 /// How many of the human's last writes a pane keeps.
 pub(super) const HUMAN_WRITES: usize = 8;
@@ -32,9 +32,9 @@ pub(super) struct Written {
 /// send's claim leaves the input box alone, so unsent text holds none. Keys
 /// are a guess: those typed into a harness's dialog and left there with
 /// Escape count as unsent though the box is empty. So a paste whose adapter
-/// read the box empty on the screen, with no key of the human's since
-/// (`typed`), goes in, and the count is cleared (T-288). The lock is never
-/// held across a write.
+/// read the box empty goes in over the count where the host holds the evidence
+/// of where those keys went ([`UnsentAt`], N17), and the count is cleared
+/// (T-288). The lock is never held across a write.
 pub(super) struct PaneInputState {
     pub(super) generation: u64,
     pub(super) paste_in_flight: bool,
@@ -42,6 +42,8 @@ pub(super) struct PaneInputState {
     pub(super) unsent: usize,
     pub(super) typed: u64,
     pub(super) typed_at: Option<Instant>,
+    /// The screens kept at the person's keys while the count is above zero.
+    pub(super) unsent_at: UnsentAt,
     pub(super) output: Arc<OutputClock>,
     /// When a paste was last written into this generation of the pane.
     pub(super) pasted: Option<Instant>,
@@ -70,6 +72,7 @@ impl PaneInputState {
             unsent: 0,
             typed: 0,
             typed_at: None,
+            unsent_at: UnsentAt::default(),
             output: Arc::new(OutputClock::new(Arc::clone(clock), counts)),
             pasted: None,
             silent_paste: None,
@@ -83,11 +86,10 @@ impl PaneInputState {
     /// writes, read one after another, are never aged from different ones and an older write
     /// never reads younger than a newer.
     pub(super) fn snapshot(&self, now: Instant) -> ArbiterSnapshot {
-        // One sampling of the pair, drawn first and read after it ([`OutputCount::both`]): two
-        // samplings, one for each number, could tell 10/10 of a stream going 10/9, 11/9, 11/10.
-        // Caught up first, then the counts: a read that comes after it is after the look.
-        let output_caught_up = self.output.counts().caught_up();
-        let (output_read, output_drawn) = self.output.counts().both();
+        // One question to the terminal with one sampling of the pair, under the gate
+        // ([`OutputCount::sample`]): two samplings, one for each number, could tell 10/10 of a
+        // stream going 10/9, 11/9, 11/10.
+        let (output_read, output_drawn, output_caught_up) = self.output.counts().sample();
         ArbiterSnapshot {
             generation: self.generation,
             paste_in_flight: self.paste_in_flight,
@@ -100,6 +102,7 @@ impl PaneInputState {
             output_read,
             output_drawn,
             output_caught_up,
+            unsent_at: (self.unsent > 0).then(|| self.unsent_at.clone()),
             paste_quiet_ms: self.pasted.map(|pasted| millis_since(now, pasted)),
             human_writes: self
                 .writes
@@ -111,6 +114,53 @@ impl PaneInputState {
                 })
                 .collect(),
         }
+    }
+}
+
+impl PaneInputState {
+    /// A write of the person's that holds a key, `before` and `after` what it leaves unsent,
+    /// `added` whether it added a character, `kept` the screen as it stood before it: the
+    /// evidence of where the keys the count holds went (the design's table).
+    pub(super) fn keep_screens(
+        &mut self,
+        before: usize,
+        after: usize,
+        added: bool,
+        kept: Option<Arc<Kept>>,
+    ) {
+        if after == 0 {
+            self.unsent_at = UnsentAt::default();
+        } else if added {
+            self.unsent_at.typed_into = kept.map(|screen| TypedInto {
+                screen,
+                first: before == 0,
+            });
+            self.unsent_at.pressed_over = None;
+        } else if self.unsent_at.pressed_over.is_none() {
+            self.unsent_at.pressed_over = kept;
+        }
+    }
+
+    /// Whether the paste that says `read_empty` may go over the count: the host holds the
+    /// screen it names, which was current, and for [`Evidence::Elsewhere`] it was the first of
+    /// the keys the count holds. The host cannot check the reader's reading of it.
+    pub(super) fn admits_over_count(&self, read_empty: Option<ReadEmpty>) -> bool {
+        let Some(ReadEmpty { typed, by }) = read_empty else {
+            return false;
+        };
+        typed == self.typed
+            && match by {
+                Evidence::Erased => self
+                    .unsent_at
+                    .pressed_over
+                    .as_ref()
+                    .is_some_and(|screen| screen.current),
+                Evidence::Elsewhere => self
+                    .unsent_at
+                    .typed_into
+                    .as_ref()
+                    .is_some_and(|into| into.first && into.screen.current),
+            }
     }
 }
 

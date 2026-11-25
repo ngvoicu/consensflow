@@ -50,6 +50,10 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         );
         // A message that waits until the human sends what they typed there.
         fields.insert("holding".to_owned(), json!(page.engine.holding(id)?));
+        // That wait is for keys nothing shows are gone: the person is told to press Ctrl+U.
+        if page.engine.holding_unproven(id)? {
+            fields.insert("holdingUnproven".to_owned(), json!(true));
+        }
         // A window that would not stop: its task, and how often it was told to.
         if let Some(ignored) = page.engine.unstopped(id) {
             fields.insert("unstopped".to_owned(), ignored);

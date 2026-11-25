@@ -5,6 +5,7 @@ use super::*;
 use crate::contract::Admission;
 use crate::shared::admission::admission;
 use crate::testing::{finished, paste_answers, Answer, AnsweringHost, Driver, ScriptedHost};
+use cf_proto::panes::Evidence;
 
 fn pane() -> Pane {
     Pane {
@@ -41,7 +42,7 @@ fn a_claim_names_its_pane_pane_and_returns_the_hosts_answer_as_it_came() {
 }
 
 /// The licence of a look at the pane's box, as a delivery that went through them has it.
-fn go(read_empty: bool, clear_first: Option<&'static [u8]>) -> PasteLicence {
+fn go(read_empty: Option<Evidence>, clear_first: Option<&'static [u8]>) -> PasteLicence {
     PasteLicence::Go {
         at: At {
             seen: "00000000000000aa".to_owned(),
@@ -97,7 +98,7 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
             &host,
             &pane(),
             "the cache key is per conversation",
-            &go(false, None),
+            &go(None, None),
         )));
         assert_eq!(admission(&sent, "refused", false), read, "{way}");
         assert_eq!(
@@ -123,7 +124,7 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
 /// goes in over the human's keys because the box read empty (T-288) as any other.
 #[test]
 fn a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane() {
-    for read_empty in [false, true] {
+    for read_empty in [None, Some(Evidence::Erased)] {
         let host = ScriptedHost::default();
         host.refuse_hand_overs();
         let sent = finished(Box::pin(write_paste(
@@ -191,16 +192,24 @@ fn a_paste_says_the_look_it_was_licensed_by_and_a_wait_writes_nothing() {
         &host,
         &pane(),
         "hello",
-        &go(true, Some(&[3])),
+        &go(Some(Evidence::Erased), Some(&[3])),
     )));
     let asked = host.asked.borrow();
     assert_eq!(asked[0].1["at"], "00000000000000aa");
     assert_eq!(asked[0].1["typed"], 3);
-    assert_eq!(asked[0].1["readEmpty"], 3);
+    assert_eq!(
+        asked[0].1["readEmpty"],
+        json!({ "typed": 3, "by": "erased" })
+    );
     assert_eq!(asked[0].1["clearFirst"], "\u{3}");
     drop(asked);
     let host = AnsweringHost::new(|_| Ok(json!({"ok": true, "admitted": true})));
-    finished(Box::pin(write_paste(&host, &pane(), "hello", &go(false, None))));
+    finished(Box::pin(write_paste(
+        &host,
+        &pane(),
+        "hello",
+        &go(None, None),
+    )));
     assert!(host.asked.borrow()[0].1.get("readEmpty").is_none());
     assert!(host.asked.borrow()[0].1.get("clearFirst").is_none());
     let host = AnsweringHost::new(|_| Ok(json!({"ok": true})));

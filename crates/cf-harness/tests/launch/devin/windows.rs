@@ -142,7 +142,10 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
     home.selects("mild-coin");
     assert_eq!(deliver("hi"), Admission::Admitted { queued: false });
     let pasted = host.asked.borrow().last().unwrap().clone();
-    assert_eq!((pasted.0.as_str(), &pasted.1["body"]), ("pane.write_paste", &json!("hi")));
+    assert_eq!(
+        (pasted.0.as_str(), &pasted.1["body"]),
+        ("pane.write_paste", &json!("hi"))
+    );
     // Node's case began with half a surrogate pair, which it dropped: a Rust
     // text holds none.
     deliver("half  of it, \u{1b}[31mred\u{1b}[0m and 50%\r60%");
@@ -173,9 +176,9 @@ fn pastes_only_into_the_conversation_it_knows_and_never_into_what_the_human_has_
 
 /// Keys the human typed into Devin's model picker and left with Escape count as
 /// unsent, though its input box shows its hint again (T-288, `cargo xtask live
-/// escape-unsent`): read empty, with the human's last key a second past, the window
-/// is ready and its paste says at which count the box read empty. Words in the box,
-/// or a key a moment ago, still hold it.
+/// escape-unsent`): read empty, with the human's last key a second past and the keys
+/// shown to have gone into the picker, the window is ready and its paste says at which
+/// count and why. Words in the box, or a key a moment ago, still hold it.
 #[test]
 fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its_picker() {
     const RULE: &str = "────────────────────────────────────────";
@@ -190,8 +193,12 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     let host = AnsweringHost::new(|op| {
         Ok(match op {
             "pane.snapshot" => json!({
-                "ok": true, "pasteInFlight": false, "unsent": true,
-                "typed": 9, "typedQuietMs": quiet.get(), "outputQuietMs": 1_000,
+                "ok": true, "pasteInFlight": false, "unsent": true, "outputCaughtUp": true,
+                "typed": 9, "typedQuietMs": quiet.get(),
+                // Their keys went into the picker, in one write.
+                "unsentAt": { "typedInto": { "first": true, "current": true,
+                    "bottom": ["Select a model", "❭ 1 Devin 1.5", "2 Devin 2",
+                        "↑↓ select · ↵ confirm · esc cancel"] } },
                 "bottom": ["❭ /model", "", format!("{RULE} (bypass permissions on) ─"),
                     typed_in_box.borrow().clone(), RULE, "SWE-2 Medium"],
                 "cursor": cursor.borrow().clone(),
@@ -208,8 +215,16 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
     let pasted = host.asked.borrow().last().unwrap().clone();
     assert_eq!(pasted.0, "pane.write_paste");
     assert_eq!(
-        (&pasted.1["body"], &pasted.1["readEmpty"], &pasted.1["typed"]),
-        (&json!("hi"), &json!(9), &json!(9))
+        (
+            &pasted.1["body"],
+            &pasted.1["readEmpty"],
+            &pasted.1["typed"]
+        ),
+        (
+            &json!("hi"),
+            &json!({ "typed": 9, "by": "elsewhere" }),
+            &json!(9)
+        )
     );
     assert!(pasted.1["at"].is_string());
     quiet.set(200);
@@ -240,9 +255,15 @@ fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
             "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain_after },
         })
     };
-    assert!(reads_empty(Harness::Devin, &drawn("❭ Ask Devin anything about your code", 0)));
+    assert!(reads_empty(
+        Harness::Devin,
+        &drawn("❭ Ask Devin anything about your code", 0)
+    ));
     assert!(!reads_empty(Harness::Devin, &drawn("❭ probe words", 10)));
-    assert!(!reads_empty(Harness::Devin, &json!({ "ok": true, "bottom": ["SWE-2 Medium"] })));
+    assert!(!reads_empty(
+        Harness::Devin,
+        &json!({ "ok": true, "bottom": ["SWE-2 Medium"] })
+    ));
 }
 
 /// Whether the look `snapshot` is (given the `seen` and `typed` a real host's carries) reads the
@@ -250,11 +271,11 @@ fn the_engine_is_told_the_box_is_empty_only_where_devin_reads_it_so() {
 fn reads_empty(harness: cf_proto::agents::Harness, snapshot: &Value) -> bool {
     let mut snapshot = snapshot.clone();
     snapshot["seen"] = json!("00000000000000aa");
+    snapshot["outputCaughtUp"] = json!(true);
     snapshot["typed"] = json!(0);
     cf_harness::Look::of(&snapshot)
         .is_ok_and(|look| look.reads(harness) == cf_harness::BoxReading::Empty)
 }
-
 
 /// Both reviews of 2026-10-16, round 4: a paste asks the host whether it still
 /// admits it as it is asked for, after the window's own reads.
@@ -276,7 +297,9 @@ fn a_paste_the_host_no_longer_admits_is_refused_and_never_reaches_the_pane() {
         })
     );
     assert!(
-        host.take_asked().iter().all(|(op, _)| op == "pane.snapshot"),
+        host.take_asked()
+            .iter()
+            .all(|(op, _)| op == "pane.snapshot"),
         "nothing reached the pane"
     );
     assert_eq!(host.admissions(), 1);

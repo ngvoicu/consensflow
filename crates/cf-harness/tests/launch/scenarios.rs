@@ -179,7 +179,24 @@ struct Played {
     /// The name a recorded status file's name stands for now: Node read every file of the folder,
     /// the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3).
     status_files: HashMap<String, String>,
+    /// Whether the scenario's harness is Devin.
+    devin: bool,
     _dir: TempDir,
+}
+
+/// `given`, a recorded answer of a Devin window's snapshot, with its empty box drawn where
+/// it draws no screen of its own and counts nothing of the person's.
+fn at_its_box(given: &Value) -> Value {
+    let mut given = given.clone();
+    // One that counts the person's keys stays unread, as it was held for them.
+    if given.get("ok") == Some(&json!(true))
+        && given.get("bottom").is_none()
+        && given.get("unsent") != Some(&json!(true))
+    {
+        let rule = "─".repeat(40);
+        given["bottom"] = json!([format!("{rule} (normal) ─"), "❭", rule]);
+    }
+    given
 }
 
 /// A scenario's answer to a host request: at once, failing, or held.
@@ -540,12 +557,20 @@ fn script(played: &mut Played, step: &Value) {
         played.fakes.loopback.serve(route, answers);
     }
     script_children(played, step);
+    let devin = played.devin;
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
             .as_array()
             .unwrap()
             .iter()
-            .map(|given| answer(&played.names, given))
+            .map(|given| match given {
+                // Recorded before looks: a Devin window whose answer draws nothing is one at
+                // rest at its empty box, where Devin is given `/bypass` (N17).
+                given if devin && op == "pane.snapshot" => {
+                    answer(&played.names, &at_its_box(given))
+                }
+                given => answer(&played.names, given),
+            })
             .collect();
         played.host.answer(op, answers);
     }
@@ -587,7 +612,7 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
                     seen: "0000000000000000".to_owned(),
                     typed: 0,
                 },
-                read_empty: false,
+                read_empty: None,
                 clear_first: None,
             };
             let outcome = window
@@ -1219,6 +1244,7 @@ pub(crate) fn play(scenario: &Value) -> Vec<Value> {
     let services = fakes.services(&env_vars, &root);
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
+        devin: scenario["harness"] == "devin",
         status_files: HashMap::new(),
         _dir: dir,
         _other: other,

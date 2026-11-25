@@ -20,7 +20,6 @@ use cf_proto::panes::{HumanInput, Servers, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::shared::look::{Look, PasteLicence};
 /// What an input box on the screen holds ([`Window::input_box`]).
 pub use crate::claude::Status as ProcessStatus;
 use crate::records::{
@@ -28,6 +27,7 @@ use crate::records::{
     Timeline,
 };
 pub use crate::shared::input_box::InputBox;
+use crate::shared::look::{Look, PasteLicence};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -1037,6 +1037,9 @@ pub enum Over {
 pub enum Held {
     /// The human typed into the window and has not sent it: the board says so.
     Unsent,
+    /// The box reads empty, the host counts keys of the person's as left unsent, and nothing
+    /// shows where they went ([`crate::Look::evidence`]): the board says so, and what to do.
+    Unproven,
     /// The window shows another conversation than its launch's.
     ShowsAnother,
     /// A harness that said no more than "not yet" (Devin's `false`).
@@ -1050,10 +1053,17 @@ pub enum Held {
 }
 
 impl Held {
+    /// Whether what holds the delivery is what the person typed in the window: the engine
+    /// spends no launch's time waiting for it, and the board says so.
+    pub fn for_typing(&self) -> bool {
+        matches!(self, Held::Unsent | Held::Unproven)
+    }
+
     /// The sentence the engine says it in.
     pub fn sentence(&self) -> &str {
         match self {
             Held::Unsent => "you have typed in this window and not sent it",
+            Held::Unproven => "ConsensFlow can't tell that what you typed in this window is gone",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
             Held::Because(reason) | Held::ForHuman(reason) => reason,

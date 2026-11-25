@@ -185,6 +185,15 @@ impl Dispatcher {
                 .is_some())
     }
 
+    /// Whether that wait is for keys of theirs that nothing shows are gone
+    /// ([`Held::Unproven`]): the board says to press Ctrl+U.
+    pub fn holding_unproven(&self, participant: i64) -> Result<bool, EngineError> {
+        Ok(self
+            .record(participant)
+            .is_some_and(|record| record.delivery.borrow().unproven)
+            && self.holding(participant)?)
+    }
+
     /// Whether the human hid this window and it has not closed yet: Show
     /// makes it theirs again.
     pub fn hidden(&self, participant: i64) -> bool {
@@ -1934,6 +1943,7 @@ impl Dispatcher {
                     part.held = None;
                     part.for_human = None;
                     part.unsent = false;
+                    part.unproven = false;
                 }
             }
             if let Some(next) = next {

@@ -14,7 +14,7 @@ use portable_pty::{CommandBuilder, PtySize};
 
 use cf_proto::agents::parent_session_variables;
 
-use super::flow::{stream_output, terminal_of, ActivityReader, OutputFlow};
+use super::flow::{question_of, stream_output, terminal_of, ActivityReader, OutputFlow};
 use super::output_end;
 #[cfg(any(test, feature = "test-support"))]
 use super::OpenedPane;
@@ -365,10 +365,22 @@ impl PaneTable {
             Ok(terminal) => terminal,
             Err(error) => return Err(self.abandon_open(&key, reader, error)),
         };
+        let question = match question_of(&terminal) {
+            Ok(question) => question,
+            Err(error) => {
+                drop(terminal);
+                return Err(self.abandon_open(&key, reader, error));
+            }
+        };
         #[cfg(windows)]
         if let Err(error) = self.watch_exit(&key) {
+            // Let go before the window is ended: a console closed while its output is held
+            // open and unread may wait for ever (`conpty`).
+            drop((terminal, question));
             return Err(self.abandon_open(&key, reader, error));
         }
+        // Before the thread that reads: a look from here on asks the terminal.
+        counts.watch(question);
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();

@@ -4,7 +4,7 @@
 //! the wire says it changed, or is unfit for work once it has had its time (the
 //! field report B1 of 2026-10-15, and `cargo xtask live devin-resume`).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
@@ -45,6 +45,7 @@ fn looked(quiet: f64, holds: bool) -> Value {
     };
     json!({
         "ok": true, "outputQuietMs": 0, "screenQuietMs": quiet as u64, "typed": 0,
+        "outputCaughtUp": true,
         "seen": format!("{:016x}", u64::from(holds)),
         "bottom": [format!("{RULE} (normal) ─"), words, RULE, "SWE-2 Medium"],
         "cursor": { "line": 1, "col": 2, "shown": true, "plainAfter": plain },
@@ -494,4 +495,200 @@ fn a_box_known_empty_that_lost_its_bypass_while_the_mode_is_normal_gets_the_comm
         ["/bypass", "/bypass"],
         "the command goes again, once"
     );
+}
+
+// ---- T-2233: Devin's recovery --------------------------------------------------------------
+
+/// A Devin box that holds `words`, none where the box shows its hint.
+fn boxed_words(words: &str) -> Vec<String> {
+    let line = if words.is_empty() {
+        "❭ Ask Devin anything about your code".to_owned()
+    } else {
+        format!("❭ {words}")
+    };
+    vec![
+        format!("{RULE} (normal) ─"),
+        line,
+        RULE.to_owned(),
+        "SWE-2 Medium".to_owned(),
+    ]
+}
+
+/// What the host says of a still, current Devin window whose box holds `words`.
+fn shown(words: &str) -> Value {
+    json!({
+        "ok": true, "outputCaughtUp": true, "outputQuietMs": 0, "screenQuietMs": 5_000,
+        "typed": 0, "seen": format!("{:016x}", words.len() + 1),
+        "bottom": boxed_words(words),
+        "cursor": { "line": 1, "col": 2 + words.chars().count(), "shown": true,
+            "plainAfter": if words.is_empty() { 0 } else { words.chars().count() } },
+    })
+}
+
+/// `snapshot` with `keys` writes of the person's, the last a while ago, and the count above
+/// zero, the screens kept as `unsent_at` says.
+fn counted(mut snapshot: Value, keys: u64, unsent_at: Value) -> Value {
+    snapshot["typed"] = json!(keys);
+    snapshot["typedQuietMs"] = json!(5_000);
+    snapshot["unsent"] = json!(true);
+    snapshot["unsentAt"] = unsent_at;
+    snapshot
+}
+
+/// What the stand-in host answers each operation with.
+type Answers = Box<dyn Fn(&str) -> Result<Value, crate::contract::HostError>>;
+
+/// A window in the normal mode, its host answering `says` to each look, and the clock `fakes`
+/// settled `ms` after the epoch before the readiness: what it was.
+struct Switching {
+    _dir: tempfile::TempDir,
+    fakes: Fakes,
+    window: Rc<DevinWindow>,
+    says: Rc<RefCell<Value>>,
+    host: AnsweringHost<Answers>,
+}
+
+impl Switching {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let wire = dir.path().join("wire.jsonl");
+        fs::write(&wire, configured("mild-coin", "normal")).unwrap();
+        let fakes = Fakes::new(&Env::default());
+        let window = window(&fakes, &wire, Some("mild-coin"));
+        let says = Rc::new(RefCell::new(shown("")));
+        let looks = Rc::clone(&says);
+        let host: Answers = Box::new(move |op| {
+            Ok(match op {
+                "pane.snapshot" => looks.borrow().clone(),
+                _ => json!({ "ok": true }),
+            })
+        });
+        Self {
+            _dir: dir,
+            fakes,
+            window,
+            says,
+            host: AnsweringHost::new(host),
+        }
+    }
+
+    fn ready_at(&self, ms: i64, snapshot: Value) -> Readiness {
+        *self.says.borrow_mut() = snapshot;
+        self.fakes.time.settle_at(EPOCH_MS + ms);
+        finished(self.window.ready(&self.host, &pane())).expect("a readiness")
+    }
+
+    fn done(&self) -> (usize, usize) {
+        (pastes(&self.host.asked).len(), enters(&self.host.asked))
+    }
+}
+
+/// T-2230 4: the command is in the box, the person types `X` and erases twice with Ctrl+W: the
+/// box reads empty and the host still counts their keys. The screen at the first Ctrl+W held
+/// `/bypassX`, so the box was erased: the command is pasted again, and the launch is not given
+/// up.
+#[test]
+fn a_word_erase_of_the_command_lets_it_be_pasted_again() {
+    let window = Switching::new();
+    assert_eq!(window.ready_at(0, shown("")), switching());
+    assert_eq!(window.done(), (1, 0));
+    let erased = counted(
+        shown(""),
+        3,
+        json!({ "pressedOver": { "bottom": boxed_words("/bypassX"), "current": true } }),
+    );
+    assert_eq!(window.ready_at(BYPASS_AGAIN_MS, erased), switching());
+    assert_eq!(
+        window.done(),
+        (2, 0),
+        "pasted again, and no Enter into an empty box"
+    );
+}
+
+/// T-2230 8: the command sits in the box, drawn behind the page's room: the look is behind, so
+/// nothing goes, however long. When the room returns the box reads `/bypass` and gets its Enter.
+/// One paste.
+#[test]
+fn the_command_behind_the_room_is_never_pasted_again() {
+    let window = Switching::new();
+    assert_eq!(window.ready_at(0, shown("")), switching());
+    let mut behind = shown("");
+    behind["outputCaughtUp"] = json!(false);
+    for ms in [10_000, 20_000, 40_000, 100_000] {
+        assert!(matches!(
+            window.ready_at(ms, behind.clone()),
+            Readiness::Held(_)
+        ));
+    }
+    assert_eq!(window.done(), (1, 0), "one paste, nothing more");
+    assert_eq!(window.ready_at(110_000, shown("/bypass")), switching());
+    assert_eq!(window.done(), (1, 1), "its Enter");
+}
+
+/// A person who types in the window does not end its launch, however long: the time stands
+/// while the window is held for them, and while there is no look.
+#[test]
+fn the_launch_is_not_given_up_while_the_person_types() {
+    let window = Switching::new();
+    assert_eq!(window.ready_at(0, shown("")), switching());
+    for ms in [10_000, 20_000, 30_000, 40_000] {
+        let typing = counted(shown("/bypassX"), 1, json!({}));
+        assert_eq!(
+            window.ready_at(ms, typing),
+            Readiness::Held(Held::Unsent),
+            "{ms}"
+        );
+    }
+    // Erased: they cleared the box, and nothing shows how.
+    let cleared = counted(shown(""), 2, json!({}));
+    assert_eq!(
+        window.ready_at(50_000, cleared),
+        Readiness::Held(Held::Unproven)
+    );
+    assert_eq!(window.ready_at(60_000, shown("")), switching());
+    assert_eq!(window.done(), (2, 0), "pasted again once the count is zero");
+    assert_eq!(window.ready_at(70_000, shown("")), switching());
+}
+
+/// The Enter goes only where the box's words are the command and nothing else: never over the
+/// person's words.
+#[test]
+fn no_enter_goes_over_the_persons_words_behind_the_command() {
+    let window = Switching::new();
+    assert_eq!(window.ready_at(0, shown("")), switching());
+    assert_eq!(
+        window.ready_at(10_000, shown("/bypass X")),
+        Readiness::Held(Held::Unsent)
+    );
+    assert_eq!(window.done(), (1, 0));
+}
+
+/// No box (a dialog): nothing is done, and the time runs.
+#[test]
+fn a_dialog_is_given_nothing_and_the_time_runs() {
+    let window = Switching::new();
+    let mut dialog = shown("");
+    dialog["bottom"] = json!(["Do you want to proceed?", "❭ 1 Yes", "2 No"]);
+    assert_eq!(window.ready_at(0, dialog.clone()), switching());
+    assert!(matches!(
+        window.ready_at(BYPASS_WITHIN_MS, dialog),
+        Readiness::Unfit(_)
+    ));
+    assert_eq!(window.done(), (0, 0));
+}
+
+/// A swallowed Enter, and a box the person cleared: an empty box read empty at zero is pasted
+/// again once the while since the last act is over, and not before.
+#[test]
+fn one_act_a_look_and_none_before_the_while_is_over() {
+    let window = Switching::new();
+    assert_eq!(window.ready_at(0, shown("")), switching());
+    assert_eq!(window.ready_at(9_999, shown("/bypass")), switching());
+    assert_eq!(window.done(), (1, 0));
+    assert_eq!(window.ready_at(10_000, shown("/bypass")), switching());
+    assert_eq!(window.done(), (1, 1));
+    assert_eq!(window.ready_at(19_999, shown("")), switching());
+    assert_eq!(window.done(), (1, 1));
+    assert_eq!(window.ready_at(20_000, shown("")), switching());
+    assert_eq!(window.done(), (2, 1));
 }

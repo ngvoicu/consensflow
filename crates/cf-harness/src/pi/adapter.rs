@@ -29,7 +29,6 @@ use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
-use crate::shared::look::{Look, PasteLicence};
 use crate::contract::{
     Adapter, Admission, CompactionWord, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
     Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
@@ -40,6 +39,7 @@ use crate::seams::processes::Processes;
 use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{Look, PasteLicence};
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{compacting, specmint, window_args};

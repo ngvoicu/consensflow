@@ -33,7 +33,7 @@ fn go() -> PasteLicence {
             seen: "00000000000000aa".to_owned(),
             typed: 0,
         },
-        read_empty: false,
+        read_empty: None,
         clear_first: None,
     }
 }

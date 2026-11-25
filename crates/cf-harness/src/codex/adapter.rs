@@ -44,7 +44,6 @@ use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
-use crate::shared::look::{Look, PasteLicence};
 use crate::contract::{
     Adapter, Admission, Agent, Dialog, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
     Over, Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
@@ -54,6 +53,7 @@ use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{Look, PasteLicence};
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::{compacting, specmint, window_args};

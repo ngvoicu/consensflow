@@ -2003,7 +2003,10 @@ fn a_read_is_counted_while_the_activity_lock_is_held() {
 fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
     let _serial = serial_pty_test();
     let table = Arc::new(PaneTable::new());
-    let OpenedPane { key: pane_key, mut reader } = open_shell(&table, "exec /bin/cat");
+    let OpenedPane {
+        key: pane_key,
+        mut reader,
+    } = open_shell(&table, "exec /bin/cat");
     // The window's output is read, as the host reads it: a program that ends with its terminal
     // output unread waits for it to drain.
     let drain = thread::spawn(move || {
@@ -2016,7 +2019,9 @@ fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
     let holder = {
         let table = Arc::clone(&table);
         thread::spawn(move || {
-            asked.recv_timeout(Duration::from_secs(10)).expect("the gate is asked");
+            asked
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the gate is asked");
             let busy = table.lock_panes().expect("the table");
             held_tx.send(()).unwrap();
             let waited = looked.recv_timeout(Duration::from_secs(3)).is_err();
@@ -2029,7 +2034,8 @@ fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
         writing
             .write_gated(&key, b"x", &mut |screening| {
                 asked_tx.send(()).unwrap();
-                held.recv_timeout(Duration::from_secs(10)).expect("the table is held");
+                held.recv_timeout(Duration::from_secs(10))
+                    .expect("the table is held");
                 let mut shown = false;
                 screening(&mut |seen| shown = seen.is_some());
                 looked_tx.send(()).unwrap();

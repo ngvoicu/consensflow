@@ -12,6 +12,8 @@ use futures_channel::oneshot;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use serde_json::{json, Value};
 
+use cf_proto::panes::ReadEmpty;
+
 use crate::arbiter::{ArbiterError, At, InputArbiter, Paste};
 use crate::pty::{PaneKey, PaneTable};
 use crate::validation::{validate_page_input, INVALID_BODY};
@@ -47,7 +49,7 @@ pub enum InputWork {
     Paste {
         body: Vec<u8>,
         at: Option<At>,
-        read_empty: Option<u64>,
+        read_empty: Option<ReadEmpty>,
         clear_first: Option<Vec<u8>>,
     },
     /// An Enter of a delivery that is not a paste's first ([`InputArbiter::enter`]).
@@ -145,7 +147,9 @@ impl From<ArbiterError> for InputError {
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => INPUT_FAILED,
             ArbiterError::Unsent => "unsent-text",
-            ArbiterError::LookAgain(why) => return Self::refused("look-again", why.cause().to_string()),
+            ArbiterError::LookAgain(why) => {
+                return Self::refused("look-again", why.cause().to_string())
+            }
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
         };
@@ -506,7 +510,7 @@ impl InputQueue {
         key: PaneKey,
         body: Vec<u8>,
         at: Option<At>,
-        read_empty: Option<u64>,
+        read_empty: Option<ReadEmpty>,
         clear_first: Option<Vec<u8>>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         self.submit(

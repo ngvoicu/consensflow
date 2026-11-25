@@ -9,11 +9,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::PasteLicence;
 use cf_harness::contract::{
     Admission, Held, HostError, Observed, Over, Pane, PaneHost, Readiness, Work,
 };
 use cf_harness::records::{Reading, Role};
+use cf_harness::PasteLicence;
 use cf_ledger::model::MAX_BODY;
 use cf_ledger::{
     is_told, reopen_or_accept, resumed_in_vain, waiting_for_the_reopen, GivenUp, HandOver,
@@ -115,9 +115,11 @@ pub struct HeldBack {
     /// Since when this message has been held, on the engine's clock, whatever its
     /// reasons since.
     pub since_ms: i64,
-    /// Whether what holds it is words typed in its window and not sent ([`Held::Unsent`]):
-    /// the human's note of a message held long says then what the window's box shows.
+    /// Whether what holds it is what the person typed in its window ([`Held::for_typing`]).
     pub unsent: bool,
+    /// Whether it is that the box reads empty and nothing shows where their keys went
+    /// ([`Held::Unproven`]): the note says then what to press; otherwise what the box shows.
+    pub unproven: bool,
     /// Whether the trace has been told this reason: a chief's window read at work holds
     /// its head quietly until the human is told (`held_not_at_rest`).
     pub traced: bool,
@@ -133,6 +135,8 @@ pub(crate) struct DeliveryPart {
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
+    /// That wait is for [`Held::Unproven`].
+    pub(crate) unproven: bool,
     /// A message waits for what only the human can do in the window, in the window's words
     /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
     /// asked again at every look.
@@ -663,7 +667,8 @@ impl Dispatcher {
         // Held for what the human typed and has not sent: the board says so.
         {
             let mut part = record.delivery.borrow_mut();
-            part.unsent = held == Some(Held::Unsent);
+            part.unsent = held.as_ref().is_some_and(Held::for_typing);
+            part.unproven = held == Some(Held::Unproven);
             part.for_human = match &held {
                 Some(Held::ForHuman(words)) => Some(words.clone()),
                 _ => None,
@@ -672,9 +677,7 @@ impl Dispatcher {
         if let Some(held) = held {
             // Said once a reason, so a wait is in the trace, not a mystery.
             let reason = format!("the window is not ready for a paste: {}", held.sentence());
-            return self
-                .hold(record, message.id, &reason, held == Held::Unsent)
-                .await;
+            return self.hold(record, message.id, &reason, Some(&held)).await;
         }
         // A paste whose Enter was withheld waits in the input box, where this one
         // would go in beside it, to be sent with it (both reviews of 2026-10-20,
@@ -870,13 +873,14 @@ impl Dispatcher {
         // open and nothing of the paste was withdrawn since it was begun.
         let admitting = Admitting::handing(self, message.id, carried.clone());
         let awaiting_report = AwaitingBriefReport::new(record, &pane, message.id);
-        let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {
-            Ok(admission) => admission,
-            // An adapter that failed never handed it over, and its error must show.
-            Err(error) => Admission::Refused {
-                reason: format!("the delivery failed: {error}"),
-            },
-        };
+        let outcome =
+            match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {
+                Ok(admission) => admission,
+                // An adapter that failed never handed it over, and its error must show.
+                Err(error) => Admission::Refused {
+                    reason: format!("the delivery failed: {error}"),
+                },
+            };
         let reported = record
             .delivery
             .borrow()
@@ -1041,10 +1045,11 @@ impl Dispatcher {
         match ready {
             Readiness::Ready => self.came_up(record),
             Readiness::Held(held) => {
-                let unsent = held == Held::Unsent;
+                let unsent = held.for_typing();
                 {
                     let mut part = record.delivery.borrow_mut();
                     part.unsent = unsent;
+                    part.unproven = held == Held::Unproven;
                     part.for_human = match &held {
                         Held::ForHuman(words) => Some(words.clone()),
                         _ => None,
@@ -1068,7 +1073,7 @@ impl Dispatcher {
                     "the window is not ready for its first message: {}",
                     held.sentence()
                 );
-                return self.hold(record, first.message, &reason, unsent).await;
+                return self.hold(record, first.message, &reason, Some(&held)).await;
             }
             Readiness::Unfit(reason) => return self.give_up_unfit(record, &message, &reason).await,
         }
@@ -1093,7 +1098,11 @@ impl Dispatcher {
         {
             return Ok(());
         }
-        record.delivery.borrow_mut().unsent = false;
+        {
+            let mut part = record.delivery.borrow_mut();
+            part.unsent = false;
+            part.unproven = false;
+        }
         // The rest the window was seen at came before the turn this message begins, as
         // every monitor of that turn will (`deliver`).
         record.held.borrow_mut().rests.pasted();
@@ -1315,7 +1324,7 @@ impl Dispatcher {
             return Ok(());
         }
         let words = match self.window_of(record) {
-            (Some(window), Some(pane)) if held.unsent => {
+            (Some(window), Some(pane)) if held.unsent && !held.unproven => {
                 window.unsent_words(&*self.seams.host, &pane).await
             }
             _ => None,
@@ -1355,7 +1364,13 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let project = self.known_project(message.project_id)?;
         // The human sees two characters of the box; a member's window, the count alone.
-        let why = |shown: &dyn Fn(&str) -> String| {
+        // `whose` window: the human's own note speaks to them, the requester's of them.
+        let why = |whose: &str, shown: &dyn Fn(&str) -> String| {
+            if held.unproven {
+                return format!(
+                    "held: ConsensFlow can't tell that what {whose} typed there is gone"
+                );
+            }
             if !held.unsent {
                 return format!("held: {}", held.reason);
             }
@@ -1370,13 +1385,13 @@ impl Dispatcher {
             };
             format!("held for words typed there and not sent: {shows}")
         };
-        let said = |shown: &dyn Fn(&str) -> String| {
+        let said = |whose: &str, shown: &dyn Fn(&str) -> String| {
             format!(
                 "{} {} minutes for @{}'s window, {}",
                 held_note_head(message),
                 waited / 60_000,
                 message.recipient,
-                why(shown)
+                why(whose, shown)
             )
         };
         let note = |to: &str, body: String| {
@@ -1390,12 +1405,14 @@ impl Dispatcher {
                 },
             )
         };
-        let to_do = if held.unsent {
+        let to_do = if held.unproven {
+            " Press Ctrl+U in that window and it goes in."
+        } else if held.unsent {
             " Send or erase them in that window and it goes in."
         } else {
             ""
         };
-        note("human", format!("{}.{to_do}", said(&masked)))?;
+        note("human", format!("{}.{to_do}", said("you", &masked)))?;
         let requester = match message.task_number {
             Some(number) => self
                 .seams
@@ -1418,7 +1435,7 @@ impl Dispatcher {
             if !already_told {
                 note(
                     &requester,
-                    format!("{}. The human is told.", said(&counted)),
+                    format!("{}. The human is told.", said("the human", &counted)),
                 )?;
             }
         }
@@ -1433,11 +1450,11 @@ impl Dispatcher {
         message: i64,
         reason: &str,
     ) -> Result<(), EngineError> {
-        self.hold(record, message, reason, false).await
+        self.hold(record, message, reason, None).await
     }
 
-    /// [`Dispatcher::held_once`], where `unsent` says whether what holds the message is words
-    /// typed in its window and not sent. The clock is the message's: a new reason for the
+    /// [`Dispatcher::held_once`], where `held` is the window's readiness's hold, where that is
+    /// what holds the message. The clock is the message's: a new reason for the
     /// same message keeps it, and only a message that went in (its paste), or that left
     /// the head of its queue (the step), ends it.
     pub(crate) async fn hold(
@@ -1445,7 +1462,7 @@ impl Dispatcher {
         record: &Record,
         message: i64,
         reason: &str,
-        unsent: bool,
+        by: Option<&Held>,
     ) -> Result<(), EngineError> {
         let was = record.delivery.borrow().held.clone();
         let held = match was.filter(|held| held.message == message) {
@@ -1455,7 +1472,8 @@ impl Dispatcher {
                     message,
                     reason: reason.to_owned(),
                     since_ms: was.map_or_else(|| self.now(), |was| was.since_ms),
-                    unsent,
+                    unsent: by.is_some_and(Held::for_typing),
+                    unproven: by == Some(&Held::Unproven),
                     traced: true,
                 };
                 record.delivery.borrow_mut().held = Some(held.clone());
@@ -1545,6 +1563,7 @@ impl Dispatcher {
                     reason: reason.clone(),
                     since_ms,
                     unsent: false,
+                    unproven: false,
                     traced: was.is_some_and(|was| was.traced && was.reason == reason),
                 });
                 return Ok(());

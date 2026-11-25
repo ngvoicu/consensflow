@@ -370,7 +370,7 @@ function teamStatus(row, board, now) {
   const words = Number.isFinite(back)
     ? `Neither can take a task until ${backAt(lead.participant.outUntil, now)}`
     : 'Neither can take a task now'
-  return ['out', lead.holding ? `${words}. ${HOLDING}` : words]
+  return ['out', lead.holding ? `${words}. ${holdingWords(lead)}` : words]
 }
 
 /**
@@ -381,7 +381,7 @@ function teamStatus(row, board, now) {
 function soloStatus(lane, board, now) {
   const said = besideWords(laneStatus(lane, board, now), partState(lane, lane, now))
   if (said?.[0] !== 'out') return said
-  return lane.holding ? ['holding', HOLDING] : null
+  return lane.holding ? ['holding', holdingWords(lane)] : null
 }
 
 /**
@@ -651,6 +651,13 @@ function route(task, busy = null) {
 /** What a lane says while what the human typed and did not send holds a message (T-288). */
 const HOLDING = 'A message waits until you send or erase what you typed here'
 
+/** What it says where the box reads empty and nothing shows where those keys went (N17). */
+const UNPROVEN =
+  "A message waits: ConsensFlow can't tell that what you typed here is gone. Press Ctrl+U in this window."
+
+/** What a lane that is `holding` says. */
+const holdingWords = (lane) => (lane.holdingUnproven ? UNPROVEN : HOLDING)
+
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
@@ -832,7 +839,7 @@ export function laneStatus(lane, board, now) {
   }
   // What the human typed and did not send holds a message whether or not the window
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
-  const holding = HOLDING
+  const holding = holdingWords(lane)
   // A chief the update could not tell the model of (T-1202), whose harness's record named
   // none: its window stays closed until a model is picked for it, and nothing is lost.
   if (participant.needsEdit && participant.role === 'chief') {

@@ -348,13 +348,14 @@ impl Window<'_> {
     }
 
     /// [`Window::send`], the paste telling the pane host that the input box read
-    /// empty when it had taken `typed` writes of the human's keys (`readEmpty`), as
-    /// an adapter that reads its harness's box sends one.
-    pub fn send_read_empty(&self, body: &str, answer: &str, typed: u64) -> Result<Sent> {
+    /// empty over the human's keys (`readEmpty`: their count and the evidence, as
+    /// `harness-ask unsent` answers it), as an adapter that reads its harness's box
+    /// sends one.
+    pub fn send_read_empty(&self, body: &str, answer: &str, read_empty: &Value) -> Result<Sent> {
         self.sent(answer, || {
             self.rig.host(
                 "pane.write_paste",
-                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": typed }),
+                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": read_empty }),
             )
         })
     }

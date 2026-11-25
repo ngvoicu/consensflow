@@ -1179,7 +1179,9 @@ fn a_paced_paste_goes_only_on_a_look_its_window_approved() {
             .iter()
             .any(|line| line.contains("pick another session"));
         if picked {
-            return Some(Readiness::Unfit("the session is open in another window".to_owned()));
+            return Some(Readiness::Unfit(
+                "the session is open in another window".to_owned(),
+            ));
         }
         // The screen changes to the picker after the readiness that opened the gate.
         host.upgrade().unwrap().set_snapshot(picker.clone());
@@ -1196,5 +1198,8 @@ fn a_paced_paste_goes_only_on_a_look_its_window_approved() {
         "nothing goes into a screen its window refuses"
     );
     assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
-    assert!(asked.get() >= 2, "the look the paste carries was asked about again");
+    assert!(
+        asked.get() >= 2,
+        "the look the paste carries was asked about again"
+    );
 }

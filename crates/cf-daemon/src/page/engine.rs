@@ -161,6 +161,10 @@ pub trait Engine {
     /// participant's window (`holding`).
     fn holding(&self, participant: i64) -> Result<bool, EngineError>;
 
+    /// Whether that wait is for keys nothing shows are gone (`holdingUnproven`): the page
+    /// says to press Ctrl+U.
+    fn holding_unproven(&self, participant: i64) -> Result<bool, EngineError>;
+
     /// Whether the human hid the window and it has not closed yet (`hidden`).
     fn hidden(&self, participant: i64) -> bool;
 
@@ -367,6 +371,10 @@ impl Engine for Rc<Dispatcher> {
 
     fn holding(&self, participant: i64) -> Result<bool, EngineError> {
         Dispatcher::holding(self, participant)
+    }
+
+    fn holding_unproven(&self, participant: i64) -> Result<bool, EngineError> {
+        Dispatcher::holding_unproven(self, participant)
     }
 
     fn hidden(&self, participant: i64) -> bool {

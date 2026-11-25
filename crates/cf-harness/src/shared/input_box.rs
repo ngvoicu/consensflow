@@ -173,20 +173,10 @@ pub(crate) fn boxed(screen: &[String], mark: char) -> Option<Boxed<'_>> {
     })
 }
 
-/// How long the human's last key must be past before the screen is believed over
-/// the count: a key typed a moment before the look may not be drawn yet.
+/// How long the person's last key must be past before a paste is licensed: a key typed a
+/// moment before the look may not be drawn yet. A hold only: no time licenses a paste over the
+/// count (`shared::look`, evidence).
 pub(crate) const SETTLED_MS: u64 = 1_000;
-
-/// How long a key the window has printed nothing since must be past before the
-/// screen is believed over the count. A key not drawn yet reads as a box without
-/// it, and the paste would go in behind it, the two sent as one; but a key that
-/// changes nothing on the screen (Escape at a box it leaves as it is) is never
-/// drawn. `cargo xtask live escape-unsent` (2026-10-23) measured the longest a key
-/// took to be drawn at 69 ms in Devin 3000.11.92 and 89 ms in Claude Code 2.1.309
-/// (its model picker closing): this is over fifty times that. Ctrl+U at an empty
-/// box, Escape at a box it leaves as it is, and keys typed into Claude's model
-/// picker, which takes no filter, were drawn in neither.
-pub(crate) const UNDRAWN_MS: u64 = 5_000;
 
 /// The screen's last lines as drawn that a snapshot holds (`bottom`).
 fn bottom(snapshot: &Value) -> Option<Vec<String>> {
@@ -211,14 +201,17 @@ mod tests {
         let mut snapshot: Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         snapshot["seen"] = Value::from("0123456789abcdef");
+        // Recorded before the host asked the terminal: current, as these were.
+        snapshot["outputCaughtUp"] = Value::from(true);
         snapshot
     }
 
     /// Screens recorded live (`cargo xtask live held-typed`), each the pane host's snapshot an
     /// adapter decided on: a box Claude Code drew empty, or with only its own words in it (its
     /// prompt suggestion; its recap above the box), the human's keys counted as unsent with
-    /// nothing of them left (T-839). Each is read empty, the paste told so, and the human told
-    /// of a box that shows nothing.
+    /// nothing of them left (T-839). Each is read empty, and the human told of a box that shows
+    /// nothing. The recording holds no screen kept at a key, so the count holds until Ctrl+U
+    /// (N17).
     #[test]
     fn recorded_screens_of_a_box_with_no_words_of_the_humans_read_empty() {
         let folder =
@@ -235,7 +228,7 @@ mod tests {
             let snapshot = recorded(&path);
             let look = Look::of(&snapshot).expect("a look");
             assert_eq!(look.reads(harness), BoxReading::Empty, "{name}");
-            assert!(look.read_empty_over_count(harness), "{name}");
+            assert_eq!(look.evidence(harness), None, "{name}");
             let lines = bottom(&snapshot).unwrap();
             assert_eq!(
                 shown(harness, &lines, Cursor::of(snapshot.get("cursor"))).as_deref(),
@@ -245,23 +238,6 @@ mod tests {
             read += 1;
         }
         assert!(read > 0, "no screen was read");
-    }
-
-    /// Whether the window answered the human's last key is asked of its output, not of what
-    /// its screen shows (T-1083): a key that changed nothing shown (Backspace in an empty box)
-    /// was answered all the same, and the box is read a second after it, not at UNDRAWN_MS.
-    #[test]
-    fn a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read() {
-        let screens = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/screens/claude-2.1.312-keys-cleared-at-rest.json");
-        let mut snapshot = recorded(&screens);
-        // The last key 2 s ago, printed after at once, the screen as it was 60 s ago.
-        snapshot["typedQuietMs"] = Value::from(2_000);
-        snapshot["outputQuietMs"] = Value::from(1_990);
-        snapshot["screenQuietMs"] = Value::from(60_000);
-        assert!(Look::of(&snapshot)
-            .unwrap()
-            .read_empty_over_count(Harness::Claude));
     }
 
     /// A look is current only when the screen shows every byte the host has read (N17,
@@ -277,9 +253,7 @@ mod tests {
         snapshot["typedQuietMs"] = Value::from(1_200);
         snapshot["outputQuietMs"] = Value::from(0);
         snapshot["screenQuietMs"] = Value::from(1_500);
-        assert!(Look::of(&snapshot)
-            .unwrap()
-            .read_empty_over_count(Harness::Claude));
+        assert!(Look::of(&snapshot).is_ok());
         snapshot["outputRead"] = Value::from(262);
         snapshot["outputDrawn"] = Value::from(261);
         assert_eq!(Look::of(&snapshot).unwrap_err(), NoLook::Behind);

@@ -20,15 +20,24 @@ use serde_json::{json, Value};
 
 use super::feeding_tests::{hold_at, Manual};
 use super::{snapshot_of, stream_to_page};
+use crate::arbiter::At;
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::headless::ENTER;
 use crate::input_queue::{wait_for_input_blocking, InputQueue};
 use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pty::{PaneEnvironment, PaneKey, PaneTable};
-use crate::arbiter::At;
 use crate::screen::{FeedStage, PaneScreen, Seen};
+use cf_proto::panes::{Evidence, ReadEmpty};
 
 const BOUND: Duration = Duration::from_secs(20);
+
+/// What a paste says that goes over the count of the person's keys at the look.
+fn over(at: At) -> ReadEmpty {
+    ReadEmpty {
+        typed: at.typed,
+        by: Evidence::Elsewhere,
+    }
+}
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -64,6 +73,9 @@ if kind == "enter":
     (directory / "took-input").touch()
     gate("echo"); os.write(1, b"echo")
     gate("paint"); os.write(1, b"Z")
+elif kind == "journal":
+    initial = b""
+    gate("paint"); os.write(1, b"\r\n\r\nJOURNAL-MARKER")
 elif kind == "recovery":
     initial = b""
     (directory / "took-input").touch()
@@ -93,6 +105,7 @@ struct Window {
     peer: BufReader<UnixStream>,
     bridge: Bridge,
     _published: mpsc::Receiver<PaneOutputMessage>,
+    hub: Arc<OutputHub>,
 }
 
 impl Window {
@@ -103,6 +116,11 @@ impl Window {
     /// A window whose reader is held once `credit` bytes of its output have not been
     /// acknowledged by a page.
     fn with_credit(kind: &str, arbiter: InputArbiter, credit: usize) -> Self {
+        Self::opened(kind, arbiter, credit, false)
+    }
+
+    /// [`Window::with_credit`] of a table that keeps journals where `journals`.
+    fn opened(kind: &str, arbiter: InputArbiter, credit: usize, journals: bool) -> Self {
         static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let directory = std::env::temp_dir().join(format!(
             "cf-n17-{kind}-{}-{}",
@@ -113,6 +131,9 @@ impl Window {
         fs::create_dir(&directory).unwrap();
         let key = PaneKey::new(format!("n17-{kind}"), 1);
         let panes = Arc::new(PaneTable::new());
+        if journals {
+            panes.keep_journals();
+        }
         let argv = vec![
             "/usr/bin/python3".to_owned(),
             "-c".to_owned(),
@@ -159,7 +180,7 @@ impl Window {
             Arc::clone(&panes),
             clock,
             Arc::clone(&inputs),
-            hub,
+            Arc::clone(&hub),
         );
         let window = Self {
             key,
@@ -171,6 +192,7 @@ impl Window {
             peer,
             bridge,
             _published: output,
+            hub,
         };
         window.until(|snapshot| {
             snapshot["bottom"].to_string().contains('\u{276f}') && is_current(snapshot)
@@ -432,7 +454,7 @@ fn an_answer_read_before_output_that_came_since_does_not_admit_a_paste() {
                 window.key.clone(),
                 b"hello".to_vec(),
                 Some(at),
-                Some(at.typed),
+                Some(over(at)),
                 None,
             )
             .and_then(wait_for_input_blocking)
@@ -472,15 +494,15 @@ fn the_enter_of_a_look_is_not_written_while_a_byte_is_pending_and_is_after_it_is
     let at = look_of(&window.until(is_current));
     let (held, release) = hold_the_next_read(&window, FeedStage::Read);
     window.gate("repaint");
-    held.recv_timeout(BOUND).expect("the feed holds the repaint");
+    held.recv_timeout(BOUND)
+        .expect("the feed holds the repaint");
     let (inputs, key) = (Arc::clone(&window.inputs), window.key.clone());
-    let entering = thread::spawn(move || {
-        inputs
-            .enter(key, at)
-            .and_then(wait_for_input_blocking)
-    });
+    let entering = thread::spawn(move || inputs.enter(key, at).and_then(wait_for_input_blocking));
     thread::sleep(ms(150));
-    assert!(window.bytes().is_none(), "the child has no Enter while a byte is pending");
+    assert!(
+        window.bytes().is_none(),
+        "the child has no Enter while a byte is pending"
+    );
     release.send(()).unwrap();
     entering.join().unwrap().expect("drawn: the Enter goes");
     window.wait_for(&window.directory.join("bytes"));
@@ -491,8 +513,12 @@ fn the_enter_of_a_look_is_not_written_while_a_byte_is_pending_and_is_after_it_is
 /// The look a `pane.snapshot` that asked for the lines is.
 fn look_of(snapshot: &Value) -> At {
     At {
-        seen: Seen::parse(snapshot["seen"].as_str().expect("a snapshot with lines has a seen"))
-            .expect("sixteen hex digits"),
+        seen: Seen::parse(
+            snapshot["seen"]
+                .as_str()
+                .expect("a snapshot with lines has a seen"),
+        )
+        .expect("sixteen hex digits"),
         typed: snapshot["typed"].as_u64().unwrap(),
     }
 }
@@ -581,7 +607,16 @@ fn a_panic_in_the_feed_ends_the_pane_and_admits_no_input() {
     // written, the pane's own record gone with its generation.
     let refused = window
         .inputs
-        .paste(window.key.clone(), b"again".to_vec(), None, Some(1), None)
+        .paste(
+            window.key.clone(),
+            b"again".to_vec(),
+            None,
+            Some(ReadEmpty {
+                typed: 1,
+                by: Evidence::Elsewhere,
+            }),
+            None,
+        )
         .and_then(wait_for_input_blocking);
     let error = refused.expect_err("no input is admitted against the broken screen");
     assert_eq!(error.paste_answer()["admitted"], false, "{error}");
@@ -602,9 +637,7 @@ fn a_panic_in_the_feed_ends_the_pane_and_admits_no_input() {
 fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
     let window = Window::with_credit("credit", InputArbiter::new(timing(200)), 4096);
     window.gate("fill");
-    window.until(|snapshot| {
-        snapshot["outputRead"].as_u64() >= Some(4096) && is_current(snapshot)
-    });
+    window.until(|snapshot| snapshot["outputRead"].as_u64() >= Some(4096) && is_current(snapshot));
     window
         .inputs
         .typed(window.key.clone(), b"X".to_vec())
@@ -624,9 +657,18 @@ fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
     let at = look_of(&held);
     let refused = window
         .inputs
-        .paste(window.key.clone(), b"DELIVERY".to_vec(), Some(at.clone()), Some(at.typed), None)
+        .paste(
+            window.key.clone(),
+            b"DELIVERY".to_vec(),
+            Some(at.clone()),
+            Some(over(at.clone())),
+            None,
+        )
         .and_then(wait_for_input_blocking);
-    assert!(refused.is_err(), "the paste went over the person's unsent key");
+    assert!(
+        refused.is_err(),
+        "the paste went over the person's unsent key"
+    );
     window.panes.ack_all();
     let current = window.until(|snapshot| {
         snapshot["bottom"].to_string().contains('X') && snapshot["outputCaughtUp"] == true
@@ -639,5 +681,46 @@ fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
         .unwrap();
     window.wait_for(&window.directory.join("bytes"));
     assert_eq!(window.bytes().unwrap(), b"X\r", "nothing was pasted");
+    window.end();
+}
+
+/// T-2230's note 9: a feed that panics once the screen has the read leaves the kept journal with
+/// the whole read, handed on to the page before the exit is told, so that a page that subscribes
+/// later gets it by its pull, and holds what the exit's screen shows. The journal takes a read
+/// before the screen does.
+#[test]
+fn a_feed_that_panics_leaves_the_journal_whole_and_handed_on() {
+    let mut window = Window::opened("journal", InputArbiter::new(timing(200)), 1 << 20, true);
+    let mut said = String::new();
+    window.screen.hook.set(move |stage| {
+        if stage == FeedStage::Fed {
+            panic!("planted: the feed panics after the screen has the read");
+        }
+    });
+    window.gate("paint");
+    assert!(
+        window.peer.read_line(&mut said).unwrap() > 0,
+        "no pane.exit came"
+    );
+    let event: Value = serde_json::from_str(&said).unwrap();
+    assert_eq!(event["op"], "pane.exit");
+    assert!(
+        event["body"]["tail"].to_string().contains("JOURNAL-MARKER"),
+        "the exit's screen shows it: {event}"
+    );
+    let mut handed = Vec::new();
+    while let Ok(message) = window._published.try_recv() {
+        handed.extend_from_slice(message.bytes());
+    }
+    assert!(
+        String::from_utf8_lossy(&handed).contains("JOURNAL-MARKER"),
+        "the page now subscribed has it"
+    );
+    window.panes.attach_page(&window.hub, Arc::new(|_| true));
+    let piece = window.panes.history(&window.key, None).expect("kept");
+    assert!(
+        String::from_utf8_lossy(&piece.bytes).contains("JOURNAL-MARKER"),
+        "a later page's pull holds it"
+    );
     window.end();
 }

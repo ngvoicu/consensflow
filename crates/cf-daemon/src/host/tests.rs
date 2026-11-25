@@ -174,7 +174,8 @@ async fn a_paste_into_a_window_that_declared_its_read_is_answered_after_the_host
 /// pending, and five): a pane host that has not answered by then has not
 /// held the Enter for the window's read, and the daemon stops waiting.
 #[tokio::test(start_paused = true)]
-async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_what_the_host_holds() {
+async fn a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_what_the_host_holds()
+{
     LocalSet::new()
         .run_until(async {
             let (host, _app) =
