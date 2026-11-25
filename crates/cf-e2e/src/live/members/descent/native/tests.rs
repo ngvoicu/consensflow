@@ -163,7 +163,10 @@ fn a_child_of_the_tests_own_process_is_in_the_tree_of_the_tests_own_process() {
         .unwrap()
         .expect("this process is there");
     let all = ThisMachine.processes().unwrap();
-    let own = all.iter().find(|one| one.identity == me).expect("it is listed");
+    let own = all
+        .iter()
+        .find(|one| one.identity == me)
+        .expect("it is listed");
     assert_ne!(own.link, Link::Unread, "{own:?}");
     assert_ne!(own.link, Link::Number, "{own:?}");
     let child = all

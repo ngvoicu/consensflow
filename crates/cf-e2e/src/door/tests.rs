@@ -982,7 +982,10 @@ fn what_the_windows_tree_names_and_does_not_prove_is_said_as_left_running_never_
         unread(running(11, 2, 10, "launcher")),
         running(12, 3, 11, "worker"),
     ];
-    let root = Identity { pid: 10, started: 1 };
+    let root = Identity {
+        pid: 10,
+        started: 1,
+    };
     let chosen = Grounded::descending_from(&rows, root);
     assert!(chosen.processes().is_empty());
     assert_eq!(
@@ -995,7 +998,11 @@ fn what_the_windows_tree_names_and_does_not_prove_is_said_as_left_running_never_
     );
     let said = left_running(Ended::default(), &chosen);
     assert_eq!(said.failed.len(), 2, "{said:?}");
-    assert!(said.problems()[0].contains("process 11"), "{:?}", said.problems());
+    assert!(
+        said.problems()[0].contains("process 11"),
+        "{:?}",
+        said.problems()
+    );
     assert!(
         said.problems()[0].contains("left running"),
         "{:?}",
@@ -1019,9 +1026,21 @@ fn under_a_chosen_command() -> (Vec<Running>, Identity) {
     (
         vec![
             row(5000, 1_000_000, 1, "window", forked(100, 1)),
-            row(5040, 2_000_000, 5000, "node ./long --mark", forked(200, 100)),
+            row(
+                5040,
+                2_000_000,
+                5000,
+                "node ./long --mark",
+                forked(200, 100),
+            ),
             row(5080, 3_000_000, 5040, "sleep 99", Link::Unread),
-            row(5090, 4_000_000, 5080, "worker of the sleep", forked(400, 300)),
+            row(
+                5090,
+                4_000_000,
+                5080,
+                "worker of the sleep",
+                forked(400, 300),
+            ),
         ],
         Identity {
             pid: 5000,
@@ -1042,11 +1061,16 @@ fn what_is_under_a_chosen_command_and_not_proved_is_said_as_left_running() {
     };
     let holding = Grounded::holding(&rows, window, "--mark");
     assert_eq!(
-        holding.processes().iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
+        holding
+            .processes()
+            .iter()
+            .map(|p| p.identity.pid)
+            .collect::<Vec<_>>(),
         [5040]
     );
     assert_eq!(numbers(&holding), [5080, 5090]);
-    let where_ = Grounded::in_window_where(&rows, window, |line| line.ends_with("--mark"), "--mark");
+    let where_ =
+        Grounded::in_window_where(&rows, window, |line| line.ends_with("--mark"), "--mark");
     assert_eq!(numbers(&where_), [5080, 5090]);
     let said = left_running(Ended::default(), &holding);
     assert_eq!(said.problems().len(), 2, "{:?}", said.problems());
@@ -1070,7 +1094,13 @@ fn a_process_chosen_by_a_later_look_is_no_longer_said_as_left_running() {
         })
         .collect();
     chosen.add(Grounded::descending_from(&unread, window));
-    assert!(chosen.unproved().iter().any(|(p, _)| p.identity.pid == 5040));
+    assert!(chosen
+        .unproved()
+        .iter()
+        .any(|(p, _)| p.identity.pid == 5040));
     chosen.add(Grounded::descending_from(&rows, window));
-    assert!(!chosen.unproved().iter().any(|(p, _)| p.identity.pid == 5040));
+    assert!(!chosen
+        .unproved()
+        .iter()
+        .any(|(p, _)| p.identity.pid == 5040));
 }

@@ -223,12 +223,7 @@ pub fn pause_chosen(chosen: &[Running], pause: Pause) -> Ended {
 pub(crate) fn pause_chosen_by(holds: &dyn Holds, chosen: &[Running], pause: Pause) -> Ended {
     let mut said = Ended::default();
     for process in chosen {
-        match act_on_one(
-            holds,
-            process,
-            &|held| held.pause(pause),
-            "its pause",
-        ) {
+        match act_on_one(holds, process, &|held| held.pause(pause), "its pause") {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(why) => said.failed.push((process.clone(), why)),
@@ -270,9 +265,7 @@ fn act_on_one(
             Ok(Some(now)) if now == own => {}
             Ok(Some(_)) => return Outcome::Gone,
             Ok(None) => {
-                return Outcome::Failed(
-                    "its unique identifier could not be read again".to_owned(),
-                )
+                return Outcome::Failed("its unique identifier could not be read again".to_owned())
             }
             Err(failed) => {
                 return Outcome::Failed(format!(
@@ -341,8 +334,7 @@ fn proof(all: &[Running], parent: &Running, child: &Running) -> Made {
                     "two processes of one reading are number {}",
                     parent.identity.pid
                 ))
-            } else if by == parent.identity.pid
-                || (held && described == Some(parent.identity.pid))
+            } else if by == parent.identity.pid || (held && described == Some(parent.identity.pid))
             {
                 Made::Yes
             } else {
@@ -397,7 +389,10 @@ fn tree_of(all: &[Running], root: Identity) -> (Vec<Running>, Vec<Unproved>) {
                 }
                 Made::No => {}
                 Made::Unproved(why) => {
-                    if !refused.iter().any(|(seen, _)| seen.identity == process.identity) {
+                    if !refused
+                        .iter()
+                        .any(|(seen, _)| seen.identity == process.identity)
+                    {
                         refused.push((process.clone(), why));
                     }
                 }
@@ -407,7 +402,9 @@ fn tree_of(all: &[Running], root: Identity) -> (Vec<Running>, Vec<Unproved>) {
     let mut left: Vec<Unproved> = Vec::new();
     let add = |left: &mut Vec<Unproved>, process: &Running, why: String| {
         if !found.iter().any(|seen| seen.identity == process.identity)
-            && !left.iter().any(|(seen, _)| seen.identity == process.identity)
+            && !left
+                .iter()
+                .any(|(seen, _)| seen.identity == process.identity)
         {
             left.push((process.clone(), why));
         }

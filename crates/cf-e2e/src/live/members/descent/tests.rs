@@ -636,8 +636,8 @@ fn forked() -> Vec<Running> {
 }
 
 #[test]
-fn a_cygwin_program_whose_parent_has_gone_is_described_with_the_parent_git_bash_says_and_is_not_the_windows()
-{
+fn a_cygwin_program_whose_parent_has_gone_is_described_with_the_parent_git_bash_says_and_is_not_the_windows(
+) {
     let asked = std::cell::RefCell::new(Vec::new());
     let repaired = not_held(forked(), |folder| {
         asked.borrow_mut().push(folder.to_owned());
@@ -780,14 +780,22 @@ fn a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents() {
     let mut list = forked();
     list.push(at(
         r"C:\Program Files\Git\usr\bin\cat.exe",
-        created(running(31000, 15, 7777, r#""C:\Program Files\Git\usr\bin\cat.exe""#)),
+        created(running(
+            31000,
+            15,
+            7777,
+            r#""C:\Program Files\Git\usr\bin\cat.exe""#,
+        )),
     ));
     let repaired = not_held(list, |_| Some(PS_W_FLAGGED.to_owned()));
-    let parent = |pid: u32| {
-        match repaired.iter().find(|one| one.identity.pid == pid).unwrap().link {
-            Link::Created { described, .. } => described,
-            other => panic!("{other:?}"),
-        }
+    let parent = |pid: u32| match repaired
+        .iter()
+        .find(|one| one.identity.pid == pid)
+        .unwrap()
+        .link
+    {
+        Link::Created { described, .. } => described,
+        other => panic!("{other:?}"),
     };
     assert_eq!(parent(25892), Some(9736));
     // And the cat, whose own parent has gone too, is described as the sleep's: the row of a sleep

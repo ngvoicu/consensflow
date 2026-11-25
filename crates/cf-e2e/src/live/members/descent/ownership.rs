@@ -108,8 +108,8 @@ const STRANGER_CHILD_ID: u64 = 950;
 const LISTING: &str = "5000 1 Thu Jan 1 00:00:01 1970 window\n5040 5000 Thu Jan 1 00:00:02 1970 owned launcher\n5080 5040 Thu Jan 1 00:00:04 1970 owned worker\n";
 
 #[test]
-fn a_mac_leaf_whose_number_and_parent_number_a_stranger_took_in_the_same_printed_second_is_left_running()
-{
+fn a_mac_leaf_whose_number_and_parent_number_a_stranger_took_in_the_same_printed_second_is_left_running(
+) {
     // ps saw the window's parent 5040 (2.000 s) and its leaf 5080 (4.100 s). The parent's
     // answer came before the turnover. Then a stranger took 5040 (4.500 s) and its own child took
     // 5080 (4.800 s), in the second `ps` printed for the leaf: the last answer names parent 5040.
@@ -146,7 +146,13 @@ fn a_mac_leaf_born_an_hour_after_the_one_listed_in_the_same_printed_second_is_le
         ],
         // Both births print as the same second of the repeated hour.
         |micros| {
-            Some(if micros > 3_000_000_000 { 4 } else { micros / 1_000_000 } + 19_700_101_000_000)
+            Some(
+                if micros > 3_000_000_000 {
+                    4
+                } else {
+                    micros / 1_000_000
+                } + 19_700_101_000_000,
+            )
         },
     );
     let ended = ended_of(&rows, w, &[(P, 3_600_000_000), (L, 3_604_800_000)]);
@@ -177,22 +183,30 @@ fn win_rows_by(
 ) -> Vec<Running> {
     let listed = table_of(&serde_json::Value::Array(table.to_vec()).to_string()).unwrap();
     let opened = refined_by_handle(listed, |pid| {
-        Ok(table.iter().find(|row| row["pid"] == pid).map(|row| Opened {
-            created: row["started"].as_u64().unwrap(),
-            creator: Some(creator(pid, row["ppid"].as_u64().unwrap() as u32)),
-        }))
+        Ok(table
+            .iter()
+            .find(|row| row["pid"] == pid)
+            .map(|row| Opened {
+                created: row["started"].as_u64().unwrap(),
+                creator: Some(creator(pid, row["ppid"].as_u64().unwrap() as u32)),
+            }))
     });
     with_cygwin_parents(opened, |_| Some(git.to_owned()), held)
 }
 
 /// As [`win_rows_by`], every handle held and saying after the reading what it said before.
 fn win_rows(table: &[serde_json::Value], git: &str) -> Vec<Running> {
-    win_rows_by(table, |_, ppid| ppid, git, |pid| {
-        table
-            .iter()
-            .find(|row| row["pid"] == pid)
-            .map(|row| row["started"].as_u64().unwrap())
-    })
+    win_rows_by(
+        table,
+        |_, ppid| ppid,
+        git,
+        |pid| {
+            table
+                .iter()
+                .find(|row| row["pid"] == pid)
+                .map(|row| row["started"].as_u64().unwrap())
+        },
+    )
 }
 
 /// As [`win_rows`], the handles of the numbers in `changed` saying another time (or none: not held,
@@ -202,22 +216,25 @@ fn win_rows_changed(
     git: &str,
     changed: &[(u32, Option<u64>)],
 ) -> Vec<Running> {
-    win_rows_by(table, |_, ppid| ppid, git, |pid| {
-        match changed.iter().find(|(number, _)| *number == pid) {
+    win_rows_by(
+        table,
+        |_, ppid| ppid,
+        git,
+        |pid| match changed.iter().find(|(number, _)| *number == pid) {
             Some((_, now)) => *now,
             None => table
                 .iter()
                 .find(|row| row["pid"] == pid)
                 .map(|row| row["started"].as_u64().unwrap()),
-        }
-    })
+        },
+    )
 }
 
 const SH: &str = r"C:\fixture\usr\bin\sh.exe";
 
 #[test]
-fn a_windows_leaf_of_a_foreign_process_is_left_running_when_a_later_git_bash_listing_names_its_number_under_the_window()
-{
+fn a_windows_leaf_of_a_foreign_process_is_left_running_when_a_later_git_bash_listing_names_its_number_under_the_window(
+) {
     // Table: the window's own shell S, a foreign P (its starter gone, 9080) and P's child L, all
     // read exactly. Later a different process took P's number under S; Git Bash says so. Its
     // parent is that other process's, not the foreign P's.
@@ -241,8 +258,8 @@ fn a_windows_leaf_of_a_foreign_process_is_left_running_when_a_later_git_bash_lis
 }
 
 #[test]
-fn a_windows_foreign_descendant_is_left_running_when_a_later_git_bash_listing_gives_its_parents_numbers_to_the_window()
-{
+fn a_windows_foreign_descendant_is_left_running_when_a_later_git_bash_listing_gives_its_parents_numbers_to_the_window(
+) {
     // The table: the window's P (100 s), a foreign M (130 s, its starter gone) and M's child L
     // (150 s). After the handles were closed an outside process took P's number and its own child
     // took M's; Git Bash describes that pair, and the kit gave its edge to the two older rows.
@@ -321,10 +338,16 @@ fn a_chosen_leaf_whose_unique_identifier_is_another_processs_at_the_send_is_gone
 fn a_child_the_system_would_not_read_is_named_and_left_running_with_what_is_under_it() {
     let w = id(W, 1_000_000);
     let mut rows = genuine();
-    rows.iter_mut().find(|row| row.identity.pid == P).unwrap().link = Link::Unread;
+    rows.iter_mut()
+        .find(|row| row.identity.pid == P)
+        .unwrap()
+        .link = Link::Unread;
     assert!(descending_from(&rows, w).is_empty());
     let named = unproved_under(&rows, w);
-    assert_eq!(numbers(&named.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()), [P, L]);
+    assert_eq!(
+        numbers(&named.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()),
+        [P, L]
+    );
     assert!(named[0].1.contains("said nothing"), "{}", named[0].1);
     assert!(named[1].1.contains("under process 5040"), "{}", named[1].1);
 }
@@ -352,7 +375,12 @@ fn a_windows_child_whose_handle_names_another_creator_than_the_table_is_named_an
         win_row(L, P, at(150), None),
     ];
     // The handle of the leaf says a creator that is not the one the table names.
-    let rows = win_rows_by(&table, |pid, ppid| if pid == L { 77 } else { ppid }, "PID PPID PGID WINPID\n", |_| None);
+    let rows = win_rows_by(
+        &table,
+        |pid, ppid| if pid == L { 77 } else { ppid },
+        "PID PPID PGID WINPID\n",
+        |_| None,
+    );
     assert_eq!(numbers(&descending_from(&rows, w)), [P]);
     let named = unproved_under(&rows, w);
     assert_eq!(named.len(), 1);
@@ -360,7 +388,8 @@ fn a_windows_child_whose_handle_names_another_creator_than_the_table_is_named_an
 }
 
 #[test]
-fn a_windows_child_born_before_the_process_that_holds_its_creators_number_is_no_one_of_the_windows() {
+fn a_windows_child_born_before_the_process_that_holds_its_creators_number_is_no_one_of_the_windows()
+{
     // The creator of L ended, and its number went to P, born after L: L is another's.
     let w = id(W, at(90));
     let table = [
@@ -389,7 +418,8 @@ fn the_stuck_scripts_sleep_whose_creator_has_gone_is_the_windows_when_both_ends_
 }
 
 #[test]
-fn the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs() {
+fn the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs(
+) {
     let w = id(W, at(90));
     let table = [
         win_row(W, 0, w.started, None),
@@ -430,7 +460,10 @@ fn a_leaf_proved_by_its_identifier_whose_identifier_cannot_be_read_at_the_send_i
     assert_eq!(recorder.ended(), [P]);
     assert_eq!(said.failed.len(), 1, "{said:?}");
     assert_eq!(said.failed[0].0.identity.pid, L);
-    assert!(said.failed[0].1.contains("could not be read again"), "{said:?}");
+    assert!(
+        said.failed[0].1.contains("could not be read again"),
+        "{said:?}"
+    );
 }
 
 #[test]
