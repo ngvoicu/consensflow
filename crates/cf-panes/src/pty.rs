@@ -10,6 +10,7 @@ use portable_pty::{Child, MasterPty, PtySize};
 
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
+use crate::journal::Journal;
 use crate::screen::{Drawn, PaneScreen};
 
 mod close;
@@ -20,6 +21,8 @@ pub(crate) mod conpty_test;
 mod error;
 mod flow;
 mod holding;
+#[cfg(test)]
+mod journal_tests;
 #[cfg(test)]
 mod keys;
 mod output_end;
@@ -70,6 +73,9 @@ const EXIT_FLUSH: Duration = Duration::from_secs(1);
 /// of windows long gone, which find nothing too, make room for the latest.
 const CANCELLED_KEPT: usize = 256;
 
+/// How many journals of windows that have ended a table keeps for their page to pull.
+const ENDED_JOURNALS_KEPT: usize = 16;
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PaneKey {
     pub id: String,
@@ -113,6 +119,8 @@ pub struct StreamedPane {
     pub output: mpsc::Receiver<PaneOutput>,
     /// What the window's screen shows: whoever reads `output` feeds it.
     pub screen: Arc<PaneScreen>,
+    /// The window's journal, where the table keeps them ([`PaneTable::keep_journals`]).
+    pub journal: Option<Arc<Journal>>,
     /// How the window's program ended, once anyone read its status.
     pub ended: Arc<EndedSlot>,
     /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
@@ -160,6 +168,7 @@ struct Pane {
     #[cfg(target_os = "macos")]
     clock: Arc<Mutex<crate::background::PaneClock>>,
     output_flow: Option<Arc<OutputFlow>>,
+    journal: Option<Arc<Journal>>,
     active_writes: Arc<AtomicU64>,
     alive: bool,
     last_activity: Arc<Mutex<Instant>>,
@@ -183,6 +192,11 @@ pub struct PaneTable {
     /// How long a closed window's programs are given to end once asked to
     /// ([`CLOSE_GRACE`]): a test gives less.
     close_grace: Duration,
+    /// Whether windows opened from now on keep a journal.
+    journals: AtomicBool,
+    /// The journals of windows that have ended, the last [`ENDED_JOURNALS_KEPT`], until their
+    /// page forgets them ([`PaneTable::forget_ended_journal`]).
+    ended_journals: Mutex<VecDeque<(PaneKey, Arc<Journal>)>>,
     /// A test's hold on the opens that reach the table ([`PaneTable::hold_opens`]).
     #[cfg(any(test, feature = "test-support"))]
     open_hold: Mutex<Option<Arc<HoldState>>>,
@@ -237,6 +251,8 @@ impl PaneTable {
             ending: Arc::new(Ending::default()),
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
+            journals: AtomicBool::new(false),
+            ended_journals: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             open_hold: Mutex::new(None),
         }
@@ -314,6 +330,19 @@ impl PaneTable {
     }
 
     pub fn resize(&self, key: &PaneKey, rows: u16, cols: u16) -> Result<(), PaneError> {
+        self.resize_at(key, rows, cols, None)
+    }
+
+    /// [`PaneTable::resize`] of a window whose page's emulator took the size once it had
+    /// parsed `at` bytes of the window's output (`None`: the size is not the current page's,
+    /// and takes the journal's end).
+    pub fn resize_at(
+        &self,
+        key: &PaneKey,
+        rows: u16,
+        cols: u16,
+        at: Option<u64>,
+    ) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let pane = panes
             .get_mut(key)
@@ -327,6 +356,9 @@ impl PaneTable {
             })
             .map_err(|error| PaneError::Pty(error.to_string()))?;
         pane.screen.resize(rows, cols);
+        if let Some(journal) = &pane.journal {
+            journal.resize(at, (rows, cols));
+        }
         *pane
             .last_activity
             .lock()
