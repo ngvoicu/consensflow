@@ -1193,3 +1193,26 @@ fn a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_r
         .unwrap();
     assert_eq!(ran.stdout.trim(), "ready");
 }
+
+/// A name that comes to be while it is being resolved is resolved, not refused: a store's `-wal`,
+/// made by another window as this one judges it.
+#[test]
+fn a_name_made_while_it_is_resolved_is_not_refused() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let mine = made("k3-made-meanwhile-").unwrap();
+    let file = mine.path().join("sessions.db-wal");
+    let done = std::sync::Arc::new(AtomicBool::new(false));
+    let other = {
+        let (file, done) = (file.clone(), std::sync::Arc::clone(&done));
+        std::thread::spawn(move || {
+            while !done.load(Ordering::Relaxed) {
+                crate::door::write(&file, "x").unwrap();
+                crate::door::remove(&file).unwrap();
+            }
+        })
+    };
+    let refused = (0..50_000).find_map(|_| super::place::resolve(&file).err());
+    done.store(true, Ordering::Relaxed);
+    other.join().unwrap();
+    assert!(refused.is_none(), "{refused:?}");
+}

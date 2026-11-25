@@ -80,6 +80,9 @@ pub(crate) fn real(path: &Path) -> io::Result<PathBuf> {
     })
 }
 
+/// How often [`resolve`] asks again of a name that others are making as it looks.
+const ASKED_AGAIN: usize = 16;
+
 /// Every way `path` resolves: one, or more where a link on the way leads nowhere (its own name,
 /// and where it points). An error where a name of the absent part is `..`, where a link chain is
 /// too deep, or where a part cannot be read for any reason but its absence.
@@ -97,6 +100,8 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
     let path = std::path::absolute(path)?;
     let mut absent: Vec<OsString> = Vec::new();
     let mut at = path.clone();
+    // How often a name that came to be between the two looks below is asked of again.
+    let mut asked_again = 0;
     loop {
         match real(&at) {
             Ok(there) => {
@@ -137,6 +142,12 @@ fn resolve_within(path: &Path, depth: usize) -> io::Result<Vec<Resolved>> {
                 let target = rest.iter().fold(target, |path, name| path.join(name));
                 ways.extend(resolve_within(&target, depth + 1)?);
                 return Ok(ways);
+            }
+            // Made since it was asked for above (SQLite's `-wal`, beside a store another
+            // window opens): asked again, and refused where it still has no real path.
+            Ok(_) if asked_again < ASKED_AGAIN => {
+                asked_again += 1;
+                continue;
             }
             Ok(_) => {
                 return Err(refused(format!(
