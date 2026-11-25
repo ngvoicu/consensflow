@@ -54,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 28] = [
+const BY_HAND: [(&str, &str, &str); 29] = [
     (
         "crates/cf-e2e/src/live/ask.rs",
         "HOME",
@@ -70,6 +70,12 @@ const BY_HAND: [(&str, &str, &str); 28] = [
         "crates/cf-e2e/src/live/ask.rs",
         "APPDATA",
         "the roaming folder below that same run-owned config folder on Windows",
+    ),
+    (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "HOME",
+        "its questions' HOME is a folder the case makes below its own scratch folder (a home of the \
+         run's, as every start's is); the copy of Muse's login is in the scratch's config folder",
     ),
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
