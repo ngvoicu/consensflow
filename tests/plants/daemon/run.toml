@@ -252,9 +252,9 @@ runs = ["daemon-lib-start", "stop"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-    if started.is_err() {
-        announce();
-        log.info("exit 1");
+    if let Err(failed) = &started {
+        announce(true);
+        log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
     started'''
 replace = "    started"

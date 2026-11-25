@@ -532,13 +532,9 @@ runs = ["viewer-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer.rs"
-find = '''            copies::place_checked(&home, &found, kept_for, &*during, &|| {
-                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))
-            })
+find = '''            copies::place_checked(&home, &found, kept_for, &*during, &halt, &*at_rename)
 '''
-replace = '''            copies::place_checked(&home, &found, kept_for, &*during, &|| {
-                halt.refusal().map_or(Ok(()), |words| Err(words.to_owned()))
-            })
+replace = '''            copies::place_checked(&home, &found, kept_for, &*during, &halt, &*at_rename)
             .map(|_| directory.join(&name).join(&read))
 '''
 
