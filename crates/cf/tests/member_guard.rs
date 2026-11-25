@@ -272,13 +272,11 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
                 + &String::from_utf8_lossy(&ran.stderr),
         )
     };
-    // The real program here is this test's own executable, which lists its tests for `--list`
-    // and takes `/PID 123` for a filter of them: it ran, with the arguments as they were given.
-    let (code, said) = through(&["--list"]);
-    assert_eq!(code, Some(0), "{said}");
-    assert!(said.contains("taskkill_by_name_in_a_window"), "{said}");
+    // The real program here is this test's own executable, which takes `/PID` and `123` for
+    // filters of its tests and runs none: it ran, with the arguments as they were given.
     let (code, said) = through(&["/PID", "123"]);
     assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("running 0 tests"), "{said}");
     assert!(!said.contains("ConsensFlow:"), "{said}");
     assert!(!window.reached("taskkill"));
 }
