@@ -94,5 +94,7 @@ runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = '''        "done" => format!("To send words to its window, reopen the task:'''
-replace = '''        "done" => format!("To send words to its window, use cf tell:'''
+find = '''            "To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`."
+        ),'''
+replace = '''            "To send words to its window, use `cf tell T-{number}`."
+        ),'''
