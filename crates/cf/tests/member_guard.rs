@@ -103,7 +103,7 @@ impl Drop for Window {
 fn git_bash() -> PathBuf {
     let found = ["ProgramFiles", "ProgramFiles(x86)"]
         .iter()
-        .filter_map(|name| std::env::var_os(name))
+        .filter_map(std::env::var_os)
         .map(|root| Path::new(&root).join(r"Git\bin\bash.exe"))
         .find(|bash| bash.is_file());
     found.expect("Git Bash is installed with Git for Windows")
