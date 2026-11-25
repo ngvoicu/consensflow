@@ -421,6 +421,7 @@ mod tests {
             ppid,
             command: command.to_owned(),
             exe: None,
+            link: crate::live::members::Link::Number,
         }
     }
 

@@ -64,8 +64,9 @@ pub use command::{
     quiet_command, run_word, runs_command, shown, ticking_command, ticks_in, LongCommand, Moving,
 };
 pub use descent::{
-    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, with_cygwin_parents,
-    working_folder, Ended, Identity, Machine, Pause, RunFolder, Running, ThisMachine,
+    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, unproved_under,
+    with_cygwin_parents, working_folder, Ended, Identity, Link, Machine, Pause, RunFolder, Running,
+    ThisMachine, Unproved,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use left::{Swept, Watch};

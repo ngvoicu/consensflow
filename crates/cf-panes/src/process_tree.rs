@@ -82,6 +82,31 @@ use cf_proto::panes::PossiblyLeft;
 use native::process;
 pub(crate) use native::{awake_start, clocks};
 
+/// What the system records of a process's identity, for a reader that is no pane host (the live
+/// test kit's descent, which proves each child against the parent that forked it): the same
+/// read the host's own looks make ([`native::process`]), not a second one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UniqueIdentity {
+    /// The process's own unique identifier, which no later process of a boot takes.
+    pub unique: u64,
+    /// The identifier of the process that was its parent when it was forked, and again at each
+    /// exec; the system keeps it after that process has gone (init's, 1, for one that execs
+    /// after).
+    pub starter: u64,
+    /// When it began, as the same read says it: seconds and microseconds since 1970.
+    pub born: (u64, u64),
+}
+
+/// The identity the system records for the process `pid`: none where there is none, where it is
+/// not the user's own, where it is a zombie, and for the host itself.
+pub fn read_identity(pid: i32) -> Option<UniqueIdentity> {
+    process(pid).map(|read| UniqueIdentity {
+        unique: read.identity.unique,
+        starter: read.parent,
+        born: read.identity.born,
+    })
+}
+
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
 
 /// How many times a look that must read all of the tree is made where a process was born

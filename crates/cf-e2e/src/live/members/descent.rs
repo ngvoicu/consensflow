@@ -48,6 +48,30 @@ pub struct Identity {
     pub started: u64,
 }
 
+/// What a reader read, with the process, to tie it to the process that made it. A child is
+/// the window's only where its link proves the particular parent that made it
+/// ([`descending_from`]): a parent's number alone is no proof, for the number may be another
+/// process's by now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Link {
+    /// Its parent's number and the order they began in, which is all Linux's `ps` says (that
+    /// reader is not changed here), and all a test's table says unless it says more.
+    #[default]
+    Number,
+    /// The system would not say what made it (a process that is not the user's, or that changed
+    /// while it was read): it proves no edge, as a child or as a parent.
+    Unread,
+    /// The Mac's: its own unique identifier, and the identifier of the process that forked it
+    /// (or that was its parent at its last exec), which the system keeps after that process has
+    /// gone. The parent's identifier is the one thing no process takes after it.
+    Forked { own: u64, forker: u64 },
+    /// Windows': the number of the process that created it, read on the process's own handle,
+    /// which was held open with every other row's until the whole table was read, so that no
+    /// number in it was another process's meanwhile. `described` is the parent Git Bash's `ps -W`
+    /// said of it later, which describes it in a report and proves nothing.
+    Created { by: u32, described: Option<u32> },
+}
+
 /// A process of the machine as a check reads it: which it is, the number of the process
 /// that started it, and its command line, and, where the system says it, the path of the
 /// image it runs (Windows' table does, and `ps` does not).
@@ -57,6 +81,7 @@ pub struct Running {
     pub ppid: u32,
     pub command: String,
     pub exe: Option<String>,
+    pub link: Link,
 }
 
 /// What a check reads of the machine's processes: the seam by which it finds what
@@ -87,6 +112,9 @@ impl Machine for ThisMachine {
 pub(crate) trait Held {
     /// When the process held began: none where it has ended.
     fn started(&self) -> io::Result<Option<u64>>;
+    /// The unique identifier the process held has now, where the machine gives one (a Mac's),
+    /// which the process chosen was proved by: none where the machine gives none or says nothing.
+    fn unique(&self) -> io::Result<Option<u64>>;
     /// Ends the process held.
     fn end(&self) -> io::Result<()>;
     /// Stops the process held where it is, or lets it go on ([`Pause`]).
@@ -167,7 +195,7 @@ pub fn end_chosen(chosen: &[Running]) -> Ended {
 pub(crate) fn end_chosen_by(holds: &dyn Holds, chosen: &[Running]) -> Ended {
     let mut said = Ended::default();
     for process in chosen {
-        match end_one(holds, process.identity) {
+        match end_one(holds, process) {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(why) => said.failed.push((process.clone(), why)),
@@ -190,7 +218,7 @@ pub(crate) fn pause_chosen_by(holds: &dyn Holds, chosen: &[Running], pause: Paus
     for process in chosen {
         match act_on_one(
             holds,
-            process.identity,
+            process,
             &|held| held.pause(pause),
             "its pause",
         ) {
@@ -202,58 +230,226 @@ pub(crate) fn pause_chosen_by(holds: &dyn Holds, chosen: &[Running], pause: Paus
     said
 }
 
-/// Ends the process `identity` names, only while what `holds` holds of its number began
-/// when it did: one that has ended, or whose number another process has now, is gone.
-fn end_one(holds: &dyn Holds, identity: Identity) -> Outcome {
-    act_on_one(holds, identity, &|held| held.end(), "its end")
+/// Ends the process `process` names, only while what `holds` holds of its number began
+/// when it did and has the identifier it was proved by: one that has ended, or whose number
+/// another process has now, is gone.
+fn end_one(holds: &dyn Holds, process: &Running) -> Outcome {
+    act_on_one(holds, process, &|held| held.end(), "its end")
 }
 
-/// Does `act` to the process `identity` names, only while what `holds` holds of its number
-/// began when it did; `what` names the act where it failed.
+/// Does `act` to the process `process` names, only while what `holds` holds of its number began
+/// when it did and, where it was proved by a unique identifier ([`Link::Forked`]), has that
+/// identifier; `what` names the act where it failed.
 fn act_on_one(
     holds: &dyn Holds,
-    identity: Identity,
+    process: &Running,
     act: &dyn Fn(&dyn Held) -> io::Result<()>,
     what: &str,
 ) -> Outcome {
-    let held = match holds.hold(identity.pid) {
+    let held = match holds.hold(process.identity.pid) {
         Ok(Some(held)) => held,
         Ok(None) => return Outcome::Gone,
         Err(failed) => return Outcome::Failed(format!("it could not be reached: {failed}")),
     };
     match held.started() {
-        Ok(Some(started)) if started == identity.started => match act(&*held) {
-            Ok(()) => Outcome::Ended,
-            Err(failed) => Outcome::Failed(format!("{what} failed: {failed}")),
-        },
-        Ok(_) => Outcome::Gone,
-        Err(failed) => Outcome::Failed(format!("when it began could not be read again: {failed}")),
+        Ok(Some(started)) if started == process.identity.started => {}
+        Ok(_) => return Outcome::Gone,
+        Err(failed) => {
+            return Outcome::Failed(format!("when it began could not be read again: {failed}"))
+        }
     }
-}
-
-/// What descends from the process `root` among `all`: the processes it started, and what
-/// they started in turn, a child being one that names its parent's number and began no
-/// earlier than its parent did. None where `root` is not among them: the window's process
-/// has gone, and its number may be another's.
-pub fn descending_from(all: &[Running], root: Identity) -> Vec<Running> {
-    if !all.iter().any(|process| process.identity == root) {
-        return Vec::new();
-    }
-    let mut found: Vec<Running> = Vec::new();
-    let mut parents = vec![root];
-    while let Some(parent) = parents.pop() {
-        for process in all {
-            let child = process.ppid == parent.pid
-                && process.identity.started >= parent.started
-                && process.identity != root
-                && !found.iter().any(|seen| seen.identity == process.identity);
-            if child {
-                parents.push(process.identity);
-                found.push(process.clone());
+    if let Link::Forked { own, .. } = process.link {
+        match held.unique() {
+            Ok(Some(now)) if now == own => {}
+            Ok(Some(_)) => return Outcome::Gone,
+            Ok(None) => {
+                return Outcome::Failed(
+                    "its unique identifier could not be read again".to_owned(),
+                )
+            }
+            Err(failed) => {
+                return Outcome::Failed(format!(
+                    "its unique identifier could not be read again: {failed}"
+                ))
             }
         }
     }
-    found
+    match act(&*held) {
+        Ok(()) => Outcome::Ended,
+        Err(failed) => Outcome::Failed(format!("{what} failed: {failed}")),
+    }
+}
+
+/// What the links of two rows say of whether `parent` made `child`, which names its number as its
+/// parent's.
+enum Made {
+    /// The parent made it.
+    Yes,
+    /// Another process made it, as the links read say: a child that began before the parent, or
+    /// whose forker is not the parent's identifier, is no one's of the window by this number.
+    No,
+    /// The links prove neither, and why: it runs on, named ([`unproved_under`]).
+    Unproved(String),
+}
+
+/// Whether `parent` is proved to be the process that made `child`, which names its number as its
+/// parent's. The proof is the link both rows were read with:
+/// on a Mac the child's forker is the parent's own unique identifier; on Windows the creator the
+/// child's handle names is the parent's number, both held open in one reading, with the parent
+/// born no later than the child. A link of any other kind than the parent's, a link the system
+/// would not say, and a parent two rows could be (one number or one identifier twice in a
+/// reading) prove nothing. Only a table with no better link (Linux's) goes by the number and the
+/// order they began in.
+fn proof(all: &[Running], parent: &Running, child: &Running) -> Made {
+    if child.identity.started < parent.identity.started {
+        return Made::No;
+    }
+    let twice = |same: &dyn Fn(&Running) -> bool| all.iter().filter(|row| same(row)).count() > 1;
+    match (parent.link, child.link) {
+        (Link::Number, Link::Number) => Made::Yes,
+        (Link::Forked { own, .. }, Link::Forked { forker, .. }) => {
+            if own == 0
+                || twice(&|row| matches!(row.link, Link::Forked { own: same, .. } if same == own))
+            {
+                Made::Unproved(format!(
+                    "two processes of one reading are process {}'s identifier",
+                    parent.identity.pid
+                ))
+            } else if forker != own {
+                Made::No
+            } else {
+                Made::Yes
+            }
+        }
+        (Link::Created { .. }, Link::Created { by, .. }) => {
+            if twice(&|row| row.identity.pid == parent.identity.pid) {
+                Made::Unproved(format!(
+                    "two processes of one reading are number {}",
+                    parent.identity.pid
+                ))
+            } else if by != parent.identity.pid {
+                Made::No
+            } else {
+                Made::Yes
+            }
+        }
+        (Link::Unread, _) | (_, Link::Unread) => Made::Unproved(format!(
+            "the system said nothing of what made it, or of process {}",
+            parent.identity.pid
+        )),
+        _ => Made::Unproved(format!(
+            "it and process {} were not read the same way",
+            parent.identity.pid
+        )),
+    }
+}
+
+/// A process the window's tree names as its parent that is not proved its child, with why: it is
+/// not ended, and runs on.
+pub type Unproved = (Running, String);
+
+/// The window's tree among `all`, as proved: what descends from the process `root` (the processes it
+/// started, and what they started in turn, each a child [`proof`] proves of its particular
+/// parent), and, apart, each process the tree names as its parent that is not proved, with what
+/// descends from it by number alone, each with why. None of either where `root` is not among `all`:
+/// the window's process has gone, and its number may be another's.
+fn tree_of(all: &[Running], root: Identity) -> (Vec<Running>, Vec<Unproved>) {
+    let Some(first) = all.iter().find(|process| process.identity == root) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut found: Vec<Running> = Vec::new();
+    let mut refused: Vec<Unproved> = Vec::new();
+    let mut parents = vec![first.clone()];
+    while let Some(parent) = parents.pop() {
+        for process in all {
+            let named = process.ppid == parent.identity.pid
+                && process.identity != root
+                && process.identity != parent.identity
+                && !found.iter().any(|seen| seen.identity == process.identity);
+            if !named {
+                continue;
+            }
+            match proof(all, &parent, process) {
+                Made::Yes => {
+                    parents.push(process.clone());
+                    found.push(process.clone());
+                }
+                Made::No => {}
+                Made::Unproved(why) => {
+                    if !refused.iter().any(|(seen, _)| seen.identity == process.identity) {
+                        refused.push((process.clone(), why));
+                    }
+                }
+            }
+        }
+    }
+    let mut left: Vec<Unproved> = Vec::new();
+    let add = |left: &mut Vec<Unproved>, process: &Running, why: String| {
+        if !found.iter().any(|seen| seen.identity == process.identity)
+            && !left.iter().any(|(seen, _)| seen.identity == process.identity)
+        {
+            left.push((process.clone(), why));
+        }
+    };
+    // What Git Bash described, later, as under a process of the window, and no table proved.
+    for process in all {
+        if let Link::Created {
+            described: Some(parent),
+            ..
+        } = process.link
+        {
+            if parent != 0
+                && (parent == first.identity.pid
+                    || found.iter().any(|seen| seen.identity.pid == parent))
+            {
+                refused.push((
+                    process.clone(),
+                    format!(
+                        "Git Bash said, in a later listing, that process {parent} of the window made it; no reading of the table proves it"
+                    ),
+                ));
+            }
+        }
+    }
+    for (process, why) in refused {
+        add(&mut left, &process, why.clone());
+        // What descends from it by number alone is named too, with the same why.
+        let mut under = vec![process.identity];
+        while let Some(parent) = under.pop() {
+            for child in all.iter().filter(|row| {
+                row.ppid == parent.pid
+                    && row.identity.started >= parent.started
+                    && row.identity != root
+            }) {
+                if !left.iter().any(|(seen, _)| seen.identity == child.identity) {
+                    under.push(child.identity);
+                }
+                add(
+                    &mut left,
+                    child,
+                    format!(
+                        "it is under process {}, which is not proved the window's: {why}",
+                        parent.pid
+                    ),
+                );
+            }
+        }
+    }
+    (found, left)
+}
+
+/// What descends from the process `root` among `all`, each child proved to be the one its particular
+/// parent made ([`proof`]): a link that is missing or ambiguous leaves that process, and all that is
+/// under it, out ([`unproved_under`] names them). None where `root` is not among them: the window's
+/// process has gone, and its number may be another's.
+pub fn descending_from(all: &[Running], root: Identity) -> Vec<Running> {
+    tree_of(all, root).0
+}
+
+/// What the window's tree names as made by a process of it and does not prove: left running, with
+/// why.
+pub fn unproved_under(all: &[Running], root: Identity) -> Vec<Unproved> {
+    tree_of(all, root).1
 }
 
 /// What descends from the window's process `window` among `all` and holds `text` in its
@@ -374,6 +570,9 @@ pub fn orphans_in_folder(
 pub(crate) struct Bsd {
     pub ppid: u32,
     pub started: u64,
+    /// What the same read says made it ([`Link::Forked`]), or [`Link::Unread`] where the system
+    /// would not say.
+    pub link: Link,
 }
 
 /// The processes `ps` listed (`listed`), each with when it began as macOS says it to the
@@ -397,6 +596,7 @@ pub(crate) fn refined_by_bsd(
                 return None;
             }
             process.identity.started = bsd.started;
+            process.link = bsd.link;
             Some(process)
         })
         .collect()
@@ -407,26 +607,49 @@ pub(crate) fn refined_by_bsd(
 #[cfg(any(windows, test))]
 const TABLE_GRAIN: u64 = 10;
 
-/// The processes Windows' table listed (`listed`), each with its creation time as its own
-/// handle says it (`read`), to the 100 ns. One the handle says has exited, or that no
-/// process has the number of, is not listed; nor one whose handle says another creation
-/// time than the table, give or take its grain ([`TABLE_GRAIN`]): its number is
-/// another's now. One that cannot be opened (the system's own, another user's) keeps
-/// what the table said: no check can end it.
+/// What a process's own handle says: when it was created, to the 100 ns, and the number of the
+/// process that created it where the system says it.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Opened {
+    pub created: u64,
+    pub creator: Option<u32>,
+}
+
+/// The processes Windows' table listed (`listed`), each with its creation time and its creator
+/// as its own handle says them (`read`), to the 100 ns. One the handle says has exited, or that
+/// no process has the number of, is not listed; nor one whose handle says another creation time
+/// than the table, give or take its grain ([`TABLE_GRAIN`]): its number is another's now. One
+/// that cannot be opened (the system's own, another user's) keeps what the table said and proves
+/// nothing ([`Link::Unread`]): no check can end it. The handles are read from one set held open
+/// together by the caller, so that no number in the reading was another process's meanwhile
+/// (a number is not given again while a handle to its process is open): the creator one handle
+/// says and the creation time another says are of processes that all stood at once.
 #[cfg(any(windows, test))]
 pub(crate) fn refined_by_handle(
     listed: Vec<Running>,
-    read: impl Fn(u32) -> io::Result<Option<u64>>,
+    read: impl Fn(u32) -> io::Result<Option<Opened>>,
 ) -> Vec<Running> {
     listed
         .into_iter()
         .filter_map(|mut process| match read(process.identity.pid) {
-            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {
-                process.identity.started = created;
+            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {
+                process.identity.started = opened.created;
+                // The table and the handle name one creator, or neither is believed.
+                process.link = match opened.creator {
+                    Some(by) if by == process.ppid => Link::Created {
+                        by,
+                        described: None,
+                    },
+                    _ => Link::Unread,
+                };
                 Some(process)
             }
             Ok(_) => None,
-            Err(_) => Some(process),
+            Err(_) => {
+                process.link = Link::Unread;
+                Some(process)
+            }
         })
         .collect()
 }
@@ -478,28 +701,31 @@ fn image_folder(exe: &str) -> Option<String> {
 }
 
 /// `listed` (Windows' table) with the parent Git Bash says for each Cygwin program whose own
-/// has gone. Git Bash's `sh` runs a program of its own kind from a script by forking a copy of
-/// itself, which starts the program and is gone by the time anyone looks (zeewin, 2026-10-21:
-/// the sleep of the `stuck` script, started by `sh ./script`, names a parent that no process
-/// has, and descends from nothing of the window's, whose script it is the child of). `ps -W` of
-/// the folder of the image the program runs (`ps`, asked once for each folder: its text, or none
-/// where there is no `ps` there) says its Cygwin parent, and which Windows process that is. The
-/// folder is the image's, which Windows' table gives plain, and not the command line's spelling of
-/// it (`Git\bin\..\usr\bin` and `Git\usr\bin` are one folder); a process whose image the table
-/// could not say is left as it was. A parent is given only where Windows lists it and it began no
-/// later than the child: a number another process has taken since is none.
+/// has gone, as a description and no more ([`Link::Created::described`]). Git Bash's `sh` runs
+/// a program of its own kind from a script by forking a copy of itself, which starts the program
+/// and is gone by the time anyone looks (zeewin, 2026-10-21: the sleep of the `stuck` script,
+/// started by `sh ./script`, names a parent that no process has). `ps -W` of the folder of the
+/// image the program runs (`ps`, asked once for each folder: its text, or none where there is no
+/// `ps` there) says its Cygwin parent, and which Windows process that is. It is read after the
+/// table, and its numbers are of the moment it ran: a number may be another process's by then
+/// (T-2228). So it decides no edge: the process stays out of the window's tree, and where Git
+/// Bash says a process of the window made it, the kit names it as left running
+/// ([`unproved_under`]). The folder is the image's, which Windows' table gives plain, and not the
+/// command line's spelling of it (`Git\bin\..\usr\bin` and `Git\usr\bin` are one folder); a
+/// process whose image the table could not say is left as it was.
 pub fn with_cygwin_parents(
     mut listed: Vec<Running>,
     ps: impl Fn(&str) -> Option<String>,
 ) -> Vec<Running> {
-    let began: std::collections::HashMap<u32, u64> = listed
-        .iter()
-        .map(|process| (process.identity.pid, process.identity.started))
-        .collect();
+    let began: std::collections::HashSet<u32> =
+        listed.iter().map(|process| process.identity.pid).collect();
     let mut tables: std::collections::HashMap<String, Vec<CygwinRow>> =
         std::collections::HashMap::new();
     for process in &mut listed {
-        if process.ppid == 0 || began.contains_key(&process.ppid) {
+        let Link::Created { by, .. } = process.link else {
+            continue;
+        };
+        if process.ppid == 0 || began.contains(&process.ppid) {
             continue;
         }
         let Some(folder) = process.exe.as_deref().and_then(image_folder) else {
@@ -515,12 +741,11 @@ pub fn with_cygwin_parents(
             .find(|row| row.winpid == process.identity.pid)
             .and_then(|own| table.iter().find(|row| row.pid == own.ppid))
             .map(|row| row.winpid);
-        if let Some(parent) = parent.filter(|parent| {
-            began
-                .get(parent)
-                .is_some_and(|started| *started <= process.identity.started)
-        }) {
-            process.ppid = parent;
+        if let Some(parent) = parent {
+            process.link = Link::Created {
+                by,
+                described: Some(parent),
+            };
         }
     }
     listed
@@ -575,6 +800,7 @@ fn ps_lines(listing: &str) -> Vec<Running> {
                 ppid: words[1].parse().ok()?,
                 command: rest.to_owned(),
                 exe: None,
+                link: Link::Number,
             })
         })
         .collect()
@@ -663,6 +889,7 @@ fn table_of(listing: &str) -> Result<Vec<Running>> {
                     .as_str()
                     .filter(|exe| !exe.is_empty())
                     .map(str::to_owned),
+                link: Link::Number,
             })
         })
         .collect())

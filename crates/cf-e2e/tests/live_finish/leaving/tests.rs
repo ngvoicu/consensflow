@@ -124,6 +124,7 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: cf_e2e::live::members::Link::Number,
     }
 }
 

@@ -142,6 +142,11 @@ cf-ledger.workspace = true
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term", "user"] }
 
+# The pane host's own read of a process's unique identifier and its starter's: what the descent
+# proves each child against the process that forked it by (`src/live/members/descent/native.rs`).
+[target.'cfg(target_os = "macos")'.dependencies]
+cf-panes.workspace = true
+
 # A descriptor left open and not close-on-exec, for a test of what the programs a case starts
 # hold.
 [target.'cfg(unix)'.dev-dependencies]
@@ -151,7 +156,7 @@ nix = { workspace = true, features = ["fs"] }
 # to a process a live check ends, on which its creation time is read and through which
 # it is ended; and a file's identity, which the write door checks a file it made by.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Threading", "Wdk_System_Threading"] }
 
 [lints]
 workspace = true
