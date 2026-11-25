@@ -290,6 +290,11 @@ fn begins_with(ours: &[OsString], theirs: &[OsString], any_case: bool) -> bool {
 /// `path` that is not there yet is judged by its nearest ancestor that is. An error where an
 /// identity cannot be read for any reason but absence, or where a name is `..`.
 pub fn chain(path: &Path) -> io::Result<Vec<Link>> {
+    climb(path, false)
+}
+
+/// [`chain`], or only its first link where `deepest_only`.
+fn climb(path: &Path, deepest_only: bool) -> io::Result<Vec<Link>> {
     let path = std::path::absolute(path)?;
     let mut links = Vec::new();
     let mut tail: Vec<OsString> = Vec::new();
@@ -307,6 +312,9 @@ pub fn chain(path: &Path) -> io::Result<Vec<Link>> {
                         io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
                     ) => {}
             Err(failed) => return Err(unresolved(&at, &failed)),
+        }
+        if deepest_only && !links.is_empty() {
+            break;
         }
         match at.components().next_back() {
             Some(Component::Normal(name)) => tail.push(name.to_os_string()),
@@ -345,42 +353,10 @@ pub fn inside_by_identity(chain: &[Link], outer: &Link, any_case: bool) -> bool 
 /// names after it. Refused where it cannot be read. It stops at that part: the parts above it
 /// are the place's to be asked of, never the root's.
 pub fn key_of(root: &Path) -> io::Result<Link> {
-    let path = std::path::absolute(root)?;
-    let mut tail: Vec<OsString> = Vec::new();
-    let mut at = path.clone();
-    loop {
-        match super::identity::of_path(&at) {
-            Ok(id) => {
-                tail.reverse();
-                return Ok(Link { id, tail });
-            }
-            Err(failed)
-                if matches!(
-                    failed.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-                ) => {}
-            Err(failed) => return Err(unresolved(&at, &failed)),
-        }
-        match at.components().next_back() {
-            Some(Component::Normal(name)) => tail.push(name.to_os_string()),
-            Some(Component::ParentDir) => {
-                return Err(refused(format!(
-                    "{} leads up out of the folder it names",
-                    path.display()
-                )))
-            }
-            _ => {}
-        }
-        at = match at.parent() {
-            Some(parent) => parent.to_path_buf(),
-            None => {
-                return Err(refused(format!(
-                    "{} has no part that is there",
-                    path.display()
-                )))
-            }
-        };
-    }
+    climb(root, true)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| refused(format!("{} has no part that is there", root.display())))
 }
 
 /// What the run made, as the judge asks it: a folder, or a file and its identity.

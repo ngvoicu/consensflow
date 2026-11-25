@@ -503,8 +503,8 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''        if let Some(root) = roots.iter().find(|root| within(&place, root, any_case)) {'''
-replace = '''        if let Some(root) = roots.iter().find(|_| false) {'''
+find = '''        if let Some(root) = inside_root(&place, &roots, &keys, any_case)? {'''
+replace = '''        if let Some(root) = inside_root(&place, &roots, &keys, any_case)?.filter(|_| false) {'''
 
 [[plant]]
 name = "K3 doors: the judge takes away a tree that holds a root"
@@ -513,8 +513,8 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''            if let Some(root) = roots.iter().find(|root| within(root, &place, any_case)) {'''
-replace = '''            if let Some(root) = roots.iter().find(|_| false) {'''
+find = '''            if let Some(root) = holds_root(&place, &roots, any_case)? {'''
+replace = '''            if let Some(root) = holds_root(&place, &roots, any_case)?.filter(|_| false) {'''
 
 [[plant]]
 name = "K3 doors: the judge compares absent names byte for byte"
@@ -537,10 +537,12 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''            Some(Component::ParentDir) => {
+find = '''            Some(Component::CurDir) => OsString::new(),
+            Some(Component::ParentDir) => {
                 return Err(refused(format!(
                     "{} leads up out of the folder it names",'''
-replace = '''            Some(Component::ParentDir) => {
+replace = '''            Some(Component::CurDir) => OsString::new(),
+            Some(Component::ParentDir) => {
                 OsString::new()
             }
             Some(Component::Prefix(_)) => {
@@ -554,8 +556,9 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''                    && identity::of_path(real).is_ok_and(|now| now == *identity)'''
-replace = '''                    && identity::of_path(real).is_ok()'''
+find = '''                identity::of_path(real).is_ok_and(|now| now == *identity)
+                    && identity::of_path(&made.real).is_ok_and(|now| now == *identity)'''
+replace = '''                identity::of_path(real).is_ok() && identity::of_path(&made.real).is_ok()'''
 
 [[plant]]
 name = "K3 doors: the roots' file is no root"
@@ -783,8 +786,19 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''            Err(failed) => return Err(unresolved(&at, &failed)),'''
-replace = '''            Err(_) => {}'''
+find = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
+            Err(failed) => return Err(unresolved(&at, &failed)),'''
+replace = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {}'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) => return Err(unresolved(&at, &failed)),
+        }
+        if deepest_only'''
+replace = '''            Err(_) => {}
+        }
+        if deepest_only'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"

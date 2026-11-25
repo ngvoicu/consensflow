@@ -79,4 +79,4 @@ runs = ["kdi-made"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
 find = '''                .any(|part| part.id == id && !part.tail.is_empty())'''
-replace = '''                .any(|part| part.id == id && !part.tail.is_empty() && false)'''
+replace = '''                .any(|part| part.id == id && !part.tail.is_empty() && !real.starts_with("/System") && !real.starts_with(r"\\localhost"))'''
