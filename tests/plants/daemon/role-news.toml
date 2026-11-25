@@ -1,7 +1,7 @@
 # A setting that changes the chief's role while its window is open is told to the window at its
 # next rest (T-1182; `crates/cf-engine/src/role_news.rs`, the wording in `roles/news.rs`): the
 # project's specs (on, off, the folder, the variant, and what the app says for a project that
-# follows it) and the project's rules for its staff. A launch gives the role as it is; the note
+# follows it), the project's rules for its staff and the roles the staff holds. A launch gives the role as it is; the note
 # gives a window that is open the section that changed, once, at its rest, on every harness, and
 # a Codex conversation is recorded as told it, so its resume says nothing of it again. Each plant
 # breaks one rule and the test written for it fails: the dispatcher's tests (`tests/dispatcher/
@@ -47,8 +47,8 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            if let Err(cause) = adapter.place_specmint(&specs.launch(), launch) {"
-replace = "            if let Err(cause) = Ok::<(), String>(()).and_then(|()| {\n                let _ = (&specs, launch);\n                Ok(())\n            }) {"
+find = "                adapter\n                    .place_specmint(&specs.launch(), launch)\n                    .map_err("
+replace = "                Ok::<(), String>(())\n                    .and_then(|()| {\n                        let _ = (&specs, launch);\n                        Ok(())\n                    })\n                    .map_err("
 
 [[plant]]
 name = "role news: a change one look finds is told"
@@ -97,8 +97,8 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            if part.news.refused.as_ref() != Some(&wanted) {"
-replace = "            if false {"
+find = "            if part.news.refused_specs.as_ref() != Some(&wanted.specs) {"
+replace = "            if part.news.refused_specs.is_none() {"
 
 [[plant]]
 name = "role news: a change that could not be put in place is not remembered"
@@ -107,8 +107,8 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "        record.window.borrow_mut().news.refused = Some(wanted);"
-replace = "        let _ = &wanted;"
+find = "        record.window.borrow_mut().news.refused_specs = Some(specs);"
+replace = "        let _ = &specs;"
 
 [[plant]]
 name = "role news: the conversation is recorded as told the staff it was never told"
@@ -179,6 +179,66 @@ runs = ["rn-dispatcher"]
 file = "crates/cf-engine/src/windows.rs"
 find = "        let told = (participant.role == \"chief\")\n            .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
 replace = "        let told = true.then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
+
+[[plant]]
+name = "role news: the roles the staff holds are left out of what a change is told by"
+meant = "an_advisor_gained_and_the_last_researcher_lost_are_each_one_note_with_the_section_whole"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        if told.parts == wanted {"
+replace = "        if told.parts.specs == wanted.specs\n            && told.parts.rules == wanted.rules\n            && told.parts.own_hands == wanted.own_hands\n        {"
+
+[[plant]]
+name = "role news: the text a note records has the role lines of the launch"
+meant = "a_codex_resume_says_the_role_again_when_a_role_gained_and_told_is_gone_before_its_loss_went_in"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            &wanted.held,\n            wanted.specs.clone(),"
+replace = "            &told.parts.held,\n            wanted.specs.clone(),"
+
+[[plant]]
+name = "role news: a conversation shown after a switch is taken as told what the last was"
+meant = "a_clear_after_a_role_gained_or_lost_tells_the_new_conversation_what_it_was_not_given_on_every_harness"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            part.news.told = Some(launched);"
+replace = "            let _ = launched;"
+
+[[plant]]
+name = "role news: a note that waited for the conversation left still goes in"
+meant = "a_clear_cancels_a_note_that_waited_for_the_conversation_left_and_says_it_anew"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "            .is_some_and(|message| message.state == \"queued\");"
+replace = "            .is_some_and(|_| false);"
+
+[[plant]]
+name = "role news: a failed specs change holds back the rest of the same rest"
+meant = "a_specs_change_that_cannot_be_put_in_place_holds_back_no_role_change_of_the_same_rest"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        if made.is_err() && wanted.specs != told.parts.specs {"
+replace = "        if false {"
+
+[[plant]]
+name = "role news: specs that did not change are written again before every note"
+meant = "a_role_change_is_told_though_the_skill_of_specs_that_did_not_change_cannot_be_written_again"
+runs = ["rn-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = "        if wanted.specs != told.parts.specs {\n            if let (Some(specs)"
+replace = "        if true {\n            if let (Some(specs)"
 
 [[plant]]
 name = "role news: specs turned off are told to plan as specs"

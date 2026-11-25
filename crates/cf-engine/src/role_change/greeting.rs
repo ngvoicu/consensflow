@@ -16,7 +16,10 @@ impl Dispatcher {
     /// runs no SessionStart hook), began that conversation with none. On a harness that
     /// takes its role at every launch (no `keeps_first_instructions`: one that keeps them
     /// is told at its launches, `compare_role`), the role is written for it and goes in
-    /// first (`DeliveryPart::greeting`), and is recorded told once delivered. It is no
+    /// first (`DeliveryPart::greeting`), and is recorded told once delivered. A session a
+    /// hook greeted, or whose harness's system prompt gives it the role, holds the role the
+    /// window launched with, and is told what changed since at its next rest
+    /// (`holds_launch_role`). It is no
     /// launch's prelude: the window is up, and is given the note as it is given any
     /// message, its failure any message's (T-931 P1-1). A session a hook greeted, one
     /// already told the role as it is now, a window whose launch prelude is not done
@@ -30,10 +33,14 @@ impl Dispatcher {
         session: &str,
     ) -> Result<(), EngineError> {
         let window = record.window.borrow().window.clone();
-        if window.is_none_or(|window| window.greeted(session))
-            || self.prelude_waits(record)?
-            || self.greeting(record)?.is_some()
-        {
+        let Some(window) = window else {
+            return Ok(());
+        };
+        if window.greeted(session) {
+            // It holds the role its window launched with, not what was told since.
+            return self.holds_launch_role(record);
+        }
+        if self.prelude_waits(record)? || self.greeting(record)?.is_some() {
             return Ok(());
         }
         let harness = participant.harness.as_deref().unwrap_or_default();
@@ -56,6 +63,8 @@ impl Dispatcher {
                 .borrow()
                 .conversation_role_text(conversation.id)?;
             if told.is_some_and(|told| told == role.instructions) {
+                // It holds the role as it is now already.
+                self.told_by_greeting(project, participant, record, &role);
                 return Ok(());
             }
         }
@@ -97,6 +106,8 @@ impl Dispatcher {
                 .borrow_mut()
                 .cancel_message(note.id, GREETED_SINCE)?;
             record.delivery.borrow_mut().greeting = None;
+            // The hook gave the session the role the window launched with.
+            self.holds_launch_role(record)?;
             self.changed();
             return Ok(None);
         }

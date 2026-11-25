@@ -158,6 +158,9 @@ pub struct FakeRoles {
     /// Whether a chief's text says how many members its staff has, as the real text's table
     /// of them makes it differ from a staff to another: not, as no trace of Node's has.
     pub with_staff: Cell<bool>,
+    /// Whether a chief's text says which roles it is given the lines of, as the real text's
+    /// differ by them: not, as no trace of Node's has any.
+    pub with_held: Cell<bool>,
     /// How a command starts in every window: the word `cf`, unless a test gives the
     /// windows a path.
     pub cf: RefCell<CfWord>,
@@ -175,6 +178,7 @@ impl Roles for FakeRoles {
         &self,
         participant: &ParticipantView,
         project: &ProjectView,
+        held: &[&str],
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
         let mut text = format!(
@@ -193,6 +197,9 @@ impl Roles for FakeRoles {
         );
         if self.with_staff.get() && participant.role == "chief" {
             text += &format!(" staff {}", crate::roles::staff_of(project).len());
+        }
+        if self.with_held.get() && participant.role == "chief" {
+            text += &format!(" holding {}", held.join(" "));
         }
         if let Some(specs) = specs {
             text += &format!(

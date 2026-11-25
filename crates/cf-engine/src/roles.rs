@@ -26,7 +26,7 @@ use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::cf_word::{CfWord, CF_STANDS_FOR};
 use cf_proto::ledger::ProjectView;
 
-pub use skill::{team_table, work_tier_list};
+pub use skill::{held_roles, team_table, work_tier_list};
 pub use specs::ProjectSpecs;
 
 /// Whether a text names its window's `cf` by path once, at its start, and says `cf` after
@@ -189,6 +189,33 @@ pub fn role_instructions_on(
     own_hands: bool,
     mac: bool,
 ) -> Result<String, RoleError> {
+    built(role, staff, &held_roles(staff), cf, specs, own_hands, mac)
+}
+
+/// The same role with the chief's lines of the roles `held`, which need not be those of its
+/// table: a note that tells a running chief of its roles keeps the staff table its window
+/// launched with.
+pub fn role_instructions_holding(
+    _env: &Env,
+    role: &str,
+    staff: &[StaffRow],
+    held: &[&str],
+    cf: &CfWord,
+    specs: Option<&ProjectSpecs<'_>>,
+    own_hands: bool,
+) -> Result<String, RoleError> {
+    built(role, staff, held, cf, specs, own_hands, on_a_mac())
+}
+
+fn built(
+    role: &str,
+    staff: &[StaffRow],
+    held: &[&str],
+    cf: &CfWord,
+    specs: Option<&ProjectSpecs<'_>>,
+    own_hands: bool,
+    mac: bool,
+) -> Result<String, RoleError> {
     // The staff's members, who have one window a task, hold the roles of the ledger's table.
     if role != "chief" && !cf_ledger::roles::is_role(role) {
         return Err(RoleError::Unknown(role.to_owned()));
@@ -204,7 +231,7 @@ pub fn role_instructions_on(
         let specs = specs.map_or_else(String::new, |specs| specs.section_for(true));
         return Ok(chief + &specs);
     }
-    let chief = filled(chief::text(false)?, staff, cf)?;
+    let chief = filled(chief::text(false)?, staff, held, cf)?;
     Ok(chief + &specs.map_or_else(String::new, ProjectSpecs::section))
 }
 
@@ -220,7 +247,7 @@ pub fn guide_instructions(
     specs_folder: Option<&str>,
     rules: Option<&str>,
 ) -> Result<String, RoleError> {
-    let guide = filled(chief::guide(true)?, staff, cf)?;
+    let guide = filled(chief::guide(true)?, staff, &held_roles(staff), cf)?;
     let specs = specs_folder.map_or_else(String::new, ProjectSpecs::board_for);
     Ok(with_staff_rules(guide + &specs, "chief", rules))
 }
@@ -232,7 +259,7 @@ pub fn ordinary_guide_instructions(
     specs_section: Option<&str>,
     rules: Option<&str>,
 ) -> Result<String, RoleError> {
-    let guide = filled(chief::guide(false)?, staff, cf)?;
+    let guide = filled(chief::guide(false)?, staff, &held_roles(staff), cf)?;
     Ok(with_staff_rules(
         guide + specs_section.unwrap_or_default(),
         "chief",
@@ -240,10 +267,18 @@ pub fn ordinary_guide_instructions(
     ))
 }
 
-/// `text`, a chief's, with the shell paragraph, the work tiers, the staff table and the
-/// window's `cf` put in its slots. The `cf` goes in last, so nothing in a path is read as a slot.
-fn filled(text: String, staff: &[StaffRow], cf: &CfWord) -> Result<String, RoleError> {
+/// `text`, a chief's, with the lines of the roles `held`, the shell paragraph, the work tiers,
+/// the staff table and the window's `cf` put in its slots. The roles' lines go in first, as the
+/// staff table holds names, and the `cf` goes in last, so nothing in a path is read as a slot.
+fn filled(
+    text: String,
+    staff: &[StaffRow],
+    held: &[&str],
+    cf: &CfWord,
+) -> Result<String, RoleError> {
     let text = text
+        .replacen("{{role_commands}}\n", &skill::role_commands(held)?, 1)
+        .replacen("{{role_work}}", &skill::role_work(held)?, 1)
         .replacen(
             "{{chief_input}}",
             shells::paragraph(cf.shell(), "chief_input")?,
@@ -253,6 +288,20 @@ fn filled(text: String, staff: &[StaffRow], cf: &CfWord) -> Result<String, RoleE
         .replacen("{{staff}}", &team_table(staff)?, 1)
         .replace("{{cf}}", cf_in_text(cf));
     Ok(with_cf_note(text, cf))
+}
+
+/// The roles' section of a chief's text, as a note of its roles says it whole: the card lines
+/// of the roles `held`, then their paragraphs, what is said of the roles nobody holds, with the
+/// window's `cf` in them. The card lines are none where nobody holds a role.
+pub(crate) fn role_section(held: &[&str], cf: &CfWord) -> Result<String, RoleError> {
+    let commands = skill::role_commands(held)?;
+    let work = skill::role_work(held)?;
+    let section = if commands.is_empty() {
+        work
+    } else {
+        format!("{commands}\n{work}")
+    };
+    Ok(section.replace("{{cf}}", cf_in_text(cf)))
 }
 
 /// The heading of the project's rules for its staff, in every text that has them.
