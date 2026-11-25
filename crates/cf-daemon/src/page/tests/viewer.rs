@@ -642,3 +642,95 @@ async fn a_break_inside_the_copy_leaves_no_file_at_the_destination() {
         })
         .await;
 }
+
+/// The reaction the daemon's ledger tells, on this rig: the page's halt, its bridge and its
+/// ledger, the home's trace and log.
+fn reacting(asked: &Asked) {
+    let halt = Arc::clone(&asked.rig.page.halt);
+    let log = Rc::new(crate::files::Log::new(asked.home.path()));
+    let trace = Rc::new(crate::files::Trace::new(asked.home.path()));
+    let errors = Rc::new(crate::errors::Errors::new(log, trace));
+    let latch = crate::stop::Latch::over(halt);
+    let reaction = crate::broken::reaction(
+        &asked.home.path().join("consensflow.db"),
+        &errors,
+        &asked._daemon,
+        &latch,
+    );
+    asked.rig.kit.ledger.borrow_mut().on_broken(reaction);
+}
+
+/// A spec's copy is put at its name by one rename under the halt's hold (finding 8): a break
+/// that comes while the file worker is at the rename waits for it, so the app is told only
+/// once the copy is at its name, and no rename begins after.
+#[tokio::test]
+async fn the_app_is_not_told_of_the_break_while_a_copy_is_at_its_rename() {
+    LocalSet::new()
+        .run_until(async {
+            let inside = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (let_go, held) = std::sync::mpsc::channel::<()>();
+            let held = std::sync::Mutex::new(held);
+            let entered = Arc::clone(&inside);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>fixture</p>")],
+                move |specs| {
+                    specs.at_each_rename(Arc::new(move || {
+                        entered.store(true, std::sync::atomic::Ordering::SeqCst);
+                        // Let go by the test; never for longer than this, so a broken test ends.
+                        let _ = held
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(std::time::Duration::from_secs(5));
+                    }))
+                },
+            );
+            reacting(&asked);
+            // What was at its name when the app heard of the break.
+            let heard: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let (told, home) = (Rc::clone(&heard), asked.home.path().to_path_buf());
+            asked.app.on_event(crate::broken::EVENT, move |_| {
+                told.borrow_mut().push(named_copy(&home));
+            });
+            let opening = asked.app.request(
+                "specs.open",
+                json!({ "project": asked.project, "path": "checkout/SPEC.html" }),
+                None,
+            );
+            let opening = tokio::task::spawn_local(opening);
+            while !inside.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+            assert!(!named_copy(asked.home.path()), "held at the rename");
+            // Let go a moment after the break begins, well within the bound.
+            let released = std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                let _ = let_go.send(());
+            });
+            break_the_ledger_of(&asked);
+            let answer = opening.await.unwrap().unwrap();
+            released.join().unwrap();
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert_eq!(
+                *heard.borrow(),
+                [true],
+                "told once, the copy at its name already"
+            );
+            assert!(asked.opened.borrow().is_empty(), "and nothing opened");
+        })
+        .await;
+}
+
+/// Whether a copy is at its name, and not still in its staging folder.
+fn named_copy(home: &Path) -> bool {
+    copies_in(home)
+        .iter()
+        .any(|copy| !copy.to_string_lossy().contains(".part"))
+}
+
+fn break_the_ledger_of(asked: &Asked) {
+    let mut ledger = asked.rig.kit.ledger.borrow_mut();
+    cf_ledger::refuse_next_rollback();
+    assert!(ledger.rename_project(99_999, "nowhere").is_err());
+    assert!(ledger.broken().is_some());
+}

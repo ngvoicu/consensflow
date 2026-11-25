@@ -306,6 +306,24 @@ pub struct HandleLine {
     pub token: String,
 }
 
+/// A start of the daemon that was refused, said in the handle line's place where `cf ui`
+/// was asked for `--json`: one line, [`RefusedLine`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Refused {
+    /// The status the process ends with.
+    pub exit: i32,
+    /// The process that says it.
+    pub pid: u32,
+    /// What it says.
+    pub words: String,
+}
+
+/// The line itself: `{"refused":{"exit":…,"pid":…,"words":"…"}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefusedLine {
+    pub refused: Refused,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +499,19 @@ mod tests {
             )
         );
         assert_eq!(serde_json::from_str::<HandleLine>(&written).unwrap(), line);
+    }
+
+    #[test]
+    fn a_refused_start_is_one_line_under_the_key_that_marks_it() {
+        let line = RefusedLine {
+            refused: Refused {
+                exit: 74,
+                pid: 12,
+                words: "no".to_owned(),
+            },
+        };
+        let written = serde_json::to_string(&line).unwrap();
+        assert_eq!(written, r#"{"refused":{"exit":74,"pid":12,"words":"no"}}"#);
+        assert_eq!(serde_json::from_str::<RefusedLine>(&written).unwrap(), line);
     }
 }

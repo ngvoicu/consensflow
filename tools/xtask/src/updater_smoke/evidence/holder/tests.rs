@@ -19,6 +19,18 @@ fn is_refused_in_the_ledgers_own_words_with_no_handle_line_out() {
     assert_ledger_held(&held(), DB).unwrap();
 }
 
+/// A build from P23-A on says the refusal in the handle line's place, which is no handle.
+#[test]
+fn takes_the_refusal_line_in_the_handle_lines_place() {
+    let attempt = Attempt {
+        out: format!(
+            "{{\"refused\":{{\"exit\":1,\"pid\":1,\"words\":\"another ConsensFlow has {DB} open\"}}}}\n"
+        ),
+        ..held()
+    };
+    assert_ledger_held(&attempt, DB).unwrap();
+}
+
 #[test]
 fn is_no_proof_when_the_second_one_ran_or_was_refused_for_something_else() {
     let scenarios = [

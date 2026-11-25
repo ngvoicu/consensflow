@@ -60,8 +60,8 @@ pub fn lost_ledger_words(ledger: &std::path::Path) -> String {
     let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
     let home = whole.parent().unwrap_or(&whole);
     format!(
-        "{} This home has held a board before, and ConsensFlow does not open it empty. If you \
-         meant to start a new board, move {} away, or point ConsensFlow at a new folder \
+        "{} ConsensFlow has run in this home before, and it doesn't open it with an empty board. \
+         If you meant to start a new board, move {} away, or point ConsensFlow at a new folder \
          (CONSENSFLOW_HOME), and open it again.",
         cannot_save_words(ledger),
         home.display()
@@ -76,32 +76,25 @@ pub fn marker_words(marker: &std::path::Path) -> String {
     format!(
         "ConsensFlow can't write {}, the file that says this home has a board, so it has not \
          started. The disk may be full, failing or disconnected, or you may have lost write \
-         permission. Restore access to it, then open ConsensFlow again. Nothing of the board \
-         was changed.",
+         permission. Restore access to it, then open ConsensFlow again.",
         whole.display()
     )
 }
 
-/// The words for a ledger that ended a daemon with [`CANNOT_SAVE_EXIT`], where the one that
-/// ended did not say them: a ledger that is not there as a file with something in it is a
-/// home that lost its board ([`lost_ledger_words`]); any other cannot be saved to.
-pub fn unsaved_words(ledger: &std::path::Path) -> String {
-    if is_a_ledger(ledger) {
-        cannot_save_words(ledger)
-    } else {
-        lost_ledger_words(ledger)
-    }
-}
-
-/// Whether `file` is a readable file with an SQLite header: what a ledger that cannot be
-/// saved to still is, as against one that is gone, empty, unreadable or something else.
-fn is_a_ledger(file: &std::path::Path) -> bool {
-    use std::io::Read;
-    let mut header = [0_u8; 16];
-    std::fs::File::open(file)
-        .and_then(|mut open| open.read_exact(&mut header))
-        .is_ok()
-        && &header == b"SQLite format 3\0"
+/// What the app says of a daemon that ended with [`CANNOT_SAVE_EXIT`] before its handle and
+/// said nothing of why: it names the ledger and every cause that status can have, and claims
+/// none. The app opens no ledger; the daemon is its one judge.
+pub fn unsaid_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "ConsensFlow stopped because it can't use its ledger at {}, and it couldn't say why. The \
+         disk may be full, failing or disconnected, you may have lost permission to it, or the \
+         ledger may be missing or damaged. Quit ConsensFlow. Once that ledger is back and can be \
+         written to, reopen ConsensFlow. Check the board before retrying an unconfirmed change, \
+         because it may already be there. Choose Resume for each project so its members continue \
+         from their saved records.",
+        whole.display()
+    )
 }
 
 /// The variable as text when it is set to something, a byte that is no UTF-8

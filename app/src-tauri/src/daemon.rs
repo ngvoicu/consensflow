@@ -444,13 +444,14 @@ impl Daemon {
         // A daemon that ended because its ledger cannot save is not started again: the
         // windows are closed, as for any stop, and the person is told why. Its status says
         // it; the words come from what it said, if it said them and this daemon is the one
-        // that did, and from the app otherwise.
+        // that did, and from the app otherwise. A daemon that has given its handle ends with
+        // that status for a ledger that broke, and for nothing else.
         let from = state.pid;
         let said = from.and_then(|pid| state.broken.remove(&pid));
         state.broken.clear();
         let ledger = state.ledger.clone().unwrap_or_default();
         let broken = (exit == Some(LEDGER_EXIT) || said.is_some())
-            .then(|| said.unwrap_or_else(|| cf_base::home::unsaved_words(&ledger)));
+            .then(|| said.unwrap_or_else(|| cf_base::home::cannot_save_words(&ledger)));
         let Some(restart) = state.restart.clone() else {
             let cause = broken.as_deref().unwrap_or(DAEMON_STOPPED);
             self.change(&mut state, DaemonStatus::down(cause, false));
@@ -1414,10 +1415,23 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
-    /// What the app says where the daemon's own words were lost: for the ledger of the
-    /// process's launch (no home of the command's own: the app's).
+    /// What the app says of a daemon that gave its handle and then ended for its ledger, and
+    /// said nothing itself: for the ledger of the process's launch (no home of the command's
+    /// own: the app's).
     fn fallback_words() -> String {
-        cf_base::home::unsaved_words(&crate::daemon_command::launch_ledger(&Command::new("x")))
+        cf_base::home::cannot_save_words(&crate::daemon_command::launch_ledger(
+            &crate::testing::command("x"),
+        ))
+    }
+
+    /// Whether `status` is the app's word for a daemon that ended for its ledger before its
+    /// handle and said nothing.
+    fn unsaid(status: &DaemonStatus) -> bool {
+        status.ledger
+            && status
+                .cause
+                .as_deref()
+                .is_some_and(|said| said.contains("couldn't say why"))
     }
 
     /// A stand-in whose launch names `home`, as a login shell's home does.
@@ -1529,10 +1543,8 @@ mod tests {
         let (report, heard) = listener();
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
-        assert_eq!(
-            told_of(&heard, 1),
-            [DaemonStatus::ledger(&fallback_words())]
-        );
+        let told = told_of(&heard, 1);
+        assert!(unsaid(&told[0]), "{told:?}");
         assert!(heard.recv_timeout(Duration::from_millis(1500)).is_err());
         assert_eq!(starts.load(Ordering::SeqCst), 1, "no retry");
     }
@@ -1558,7 +1570,7 @@ mod tests {
         assert!(told[2].ledger, "{:?}", told[2]);
         let said = told[2].cause.clone().unwrap_or_default();
         assert!(said.contains(&ledger.display().to_string()), "{said}");
-        assert_eq!(said, cf_base::home::unsaved_words(&ledger));
+        assert_eq!(said, cf_base::home::cannot_save_words(&ledger));
         assert_ne!(said, fallback_words(), "not the app's own");
     }
 
@@ -1589,7 +1601,7 @@ mod tests {
         daemon.start(starter, Arc::clone(&panes), QUICK);
         let told = told_of(&heard, 4);
         assert_eq!(told[0], DaemonStatus::up());
-        assert_eq!(told[3], DaemonStatus::ledger(&fallback_words()), "{told:?}");
+        assert!(unsaid(&told[3]), "{told:?}");
         assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
         assert_eq!(starts.load(Ordering::SeqCst), 2, "no third start");
     }
@@ -1654,77 +1666,207 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
-    /// The app's first start, through the supervisor, on a fresh home as `run()` leaves it: the
-    /// `app/` folder and the open `app/app.log` (the daemon's stderr is behind it), which the
-    /// daemon must take for a first use, never a used home with no ledger. The daemon's own
-    /// decision is asked of its code (`cf_daemon::broken`); the stand-in is the child.
-    #[test]
-    fn the_first_start_on_a_home_as_the_app_leaves_it_is_a_first_use_and_comes_up() {
-        let home = tempfile::tempdir().expect("a home");
-        let log = crate::prepare_error_log(home.path(), 1024).expect("the app's folder and log");
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log)
-            .expect("the log opened as redirect_stderr opens it");
-        assert!(log.starts_with(home.path().join("app")));
-        assert!(
-            !cf_daemon::broken::home_was_used(home.path()),
-            "what the app wrote is no witness of a used home"
-        );
-        let starts = Arc::new(AtomicUsize::new(0));
-        let (report, heard) = listener();
-        let daemon = Daemon::new(report);
-        let starter = a_ledger_stand_in_at(
-            &starts,
-            &daemon.hears_broken(),
-            &[],
-            Then::StayUp,
-            home.path(),
-        );
-        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
-        assert_eq!(told_of(&heard, 1), [DaemonStatus::up()]);
-        assert_eq!(starts.load(Ordering::SeqCst), 1);
-        let (child, bridge) = daemon.stop().expect("the app stops");
-        if let Some(bridge) = bridge {
-            bridge.close_input();
+    /// The `cf` of this checkout, built here: the app's tests link no binary of the daemon's.
+    fn real_cf() -> PathBuf {
+        let mut build = crate::testing::command(env!("CARGO"));
+        build
+            .args([
+                "build",
+                "--offline",
+                "--locked",
+                "--package",
+                "cf",
+                "--bin",
+                "cf",
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
+        if !cfg!(debug_assertions) {
+            build.arg("--release");
         }
-        if let Some(mut child) = child {
-            stop_daemon(&mut child);
+        let built = build.status().expect("cargo runs");
+        assert!(built.success(), "cf did not build");
+        // This test's binary is in `<target>/<profile>/deps`.
+        let mut folder = std::env::current_exe().expect("this test's binary");
+        folder.pop();
+        if folder.ends_with("deps") {
+            folder.pop();
         }
+        folder.join(if cfg!(windows) { "cf.exe" } else { "cf" })
     }
 
-    /// A start refused for a ledger that is no ledger carries the same new-board words as the
-    /// daemon's own command line, and is never tried again.
-    #[test]
-    fn a_start_refused_for_an_unreadable_ledger_says_how_to_start_a_new_board() {
-        let home = tempfile::tempdir().expect("a home");
-        let ledger = home.path().join("consensflow.db");
-        std::fs::write(&ledger, b"not a database, but not empty either, not at all")
-            .expect("a file");
+    /// The real `cf ui --json --no-open` on the scratch home `home`, under the supervisor: what
+    /// the person is told, and how many times a daemon was started.
+    fn under_the_supervisor(home: &std::path::Path) -> (Vec<DaemonStatus>, usize) {
+        let cf = real_cf();
         let starts = Arc::new(AtomicUsize::new(0));
-        let (counted, at) = (Arc::clone(&starts), home.path().to_path_buf());
+        let (counted, at) = (Arc::clone(&starts), home.to_path_buf());
         let starter: DaemonStarter = Arc::new(move |closed| {
             counted.fetch_add(1, Ordering::SeqCst);
-            let mut builder = BridgeBuilder::new(Role::Host, 1024);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
             builder.on_close(closed);
-            let mut command = an_exit_with(LEDGER_EXIT);
-            command.env("CONSENSFLOW_HOME", &at);
-            connect_daemon(command, builder, Duration::from_secs(30))
+            let mut command = crate::testing::command(&cf);
+            for (name, _) in cf_base::env::Env::from_process().iter() {
+                if name.to_string_lossy().starts_with("CONSENSFLOW_") {
+                    command.env_remove(name);
+                }
+            }
+            command
+                .args(["ui", "--json", "--no-open"])
+                .env("CONSENSFLOW_HOME", &at)
+                .env("HOME", &at)
+                .env("USERPROFILE", &at);
+            connect_daemon(command, builder, Duration::from_secs(60))
         });
         let (report, heard) = listener();
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
         let told = told_of(&heard, 1);
-        assert!(told[0].ledger, "{:?}", told[0]);
-        let said = told[0].cause.clone().unwrap_or_default();
-        assert_eq!(said, cf_base::home::lost_ledger_words(&ledger));
-        assert!(
-            said.contains("move") && said.contains("a new folder"),
-            "{said}"
-        );
         assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
-        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        (told, starts.load(Ordering::SeqCst))
+    }
+
+    /// A scratch home that has had a board, and its ledger's path.
+    fn a_marked_home() -> (tempfile::TempDir, PathBuf) {
+        let home = tempfile::tempdir().expect("a home");
+        std::fs::write(home.path().join("consensflow.board"), "{\"board\":true}\n")
+            .expect("a marker");
+        let ledger = home.path().join("consensflow.db");
+        (home, ledger)
+    }
+
+    /// Damage behind a valid SQLite header: the child is the one judge of the ledger, and the
+    /// app shows its words.
+    #[test]
+    fn a_ledger_damaged_behind_its_header_is_told_in_the_childs_own_words() {
+        let (home, ledger) = a_marked_home();
+        let mut damaged = b"SQLite format 3\0".to_vec();
+        damaged.resize(4096, 0xff);
+        std::fs::write(&ledger, damaged).expect("a file");
+        let (told, starts) = under_the_supervisor(home.path());
+        assert_eq!(
+            told,
+            [DaemonStatus::ledger(&cf_base::home::lost_ledger_words(
+                &ledger
+            ))]
+        );
+        assert_eq!(starts, 1);
+    }
+
+    /// A FIFO at the ledger's name: the child refuses it at once, and the app, which opens no
+    /// ledger, is not held by it.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_at_the_ledgers_name_is_refused_by_the_child_and_never_opened_by_the_app() {
+        let (home, ledger) = a_marked_home();
+        let made = crate::testing::command("/usr/bin/mkfifo")
+            .arg(&ledger)
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success());
+        let (told, starts) = under_the_supervisor(home.path());
+        assert_eq!(
+            told,
+            [DaemonStatus::ledger(&cf_base::home::lost_ledger_words(
+                &ledger
+            ))]
+        );
+        assert_eq!(starts, 1);
+    }
+
+    /// A stand-in that says `line` where the handle line goes (`{pid}` its own number) and ends
+    /// with `code`.
+    fn a_refusing_stand_in(line: &str, code: i32) -> Command {
+        #[cfg(unix)]
+        {
+            let line = line.replace("{pid}", "'\"$$\"'");
+            let mut command = crate::testing::command("/bin/sh");
+            command
+                .arg("-c")
+                .arg(format!("printf '%s\\n' '{line}'; exit {code}"));
+            command
+        }
+        #[cfg(windows)]
+        {
+            let line = line.replace('\'', "''").replace("{pid}", "' + $PID + '");
+            let mut command = crate::testing::command("powershell.exe");
+            command
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!("[Console]::Out.WriteLine('{line}'); exit {code}"));
+            command
+        }
+    }
+
+    /// The refusal line is used where its pid is the child's: another's is not, and the app says
+    /// what it knows itself.
+    #[test]
+    fn a_refusal_line_is_the_childs_words_only_where_its_pid_is_the_childs() {
+        for (pid, words) in [("{pid}", Some("said by the child")), ("999999999", None)] {
+            let line =
+                format!(r#"{{"refused":{{"exit":74,"pid":{pid},"words":"said by the child"}}}}"#);
+            let starts = Arc::new(AtomicUsize::new(0));
+            let counted = Arc::clone(&starts);
+            let starter: DaemonStarter = Arc::new(move |closed| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+                builder.on_close(closed);
+                connect_daemon(
+                    a_refusing_stand_in(&line, LEDGER_EXIT),
+                    builder,
+                    Duration::from_secs(30),
+                )
+            });
+            let (report, heard) = listener();
+            let daemon = Daemon::new(report);
+            daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+            let told = told_of(&heard, 1);
+            assert!(told[0].ledger, "{pid}: {told:?}");
+            let said = told[0].cause.clone().unwrap_or_default();
+            match words {
+                Some(words) => assert_eq!(said, words, "{pid}"),
+                None => assert!(said.contains("couldn't say why"), "{pid}: {said}"),
+            }
+            assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
+            assert_eq!(starts.load(Ordering::SeqCst), 1, "{pid}");
+        }
+    }
+
+    /// The app opens and measures no ledger (findings 14 and 15): the child is its one judge.
+    /// The guard reads the product's sources of the daemon's supervision.
+    #[test]
+    fn the_app_opens_and_measures_no_ledger() {
+        let sources = [
+            ("daemon.rs", include_str!("daemon.rs")),
+            ("daemon/connect.rs", include_str!("daemon/connect.rs")),
+            ("daemon_command.rs", include_str!("daemon_command.rs")),
+        ];
+        let looks = [
+            "File::open",
+            "OpenOptions",
+            "metadata(",
+            "fs::read",
+            "read_to_string",
+            "try_exists",
+            ".exists()",
+            ".is_file()",
+            "read_exact",
+            "unsaved_words",
+        ];
+        let mut found = Vec::new();
+        for (name, source) in sources {
+            let product = source
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or_default();
+            for (at, line) in product.lines().enumerate() {
+                if !line.trim_start().starts_with("//")
+                    && line.contains("ledger")
+                    && looks.iter().any(|look| line.contains(look))
+                {
+                    found.push(format!("{name}:{}: {}", at + 1, line.trim()));
+                }
+            }
+        }
+        assert!(found.is_empty(), "the app looks at the ledger: {found:#?}");
     }
 
     /// A daemon that ends for its ledger before it is ready is not a start to try again.
@@ -1742,10 +1884,8 @@ mod tests {
         let daemon = Daemon::new(report);
         daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
 
-        assert_eq!(
-            told_of(&heard, 1),
-            [DaemonStatus::ledger(&fallback_words())]
-        );
+        let told = told_of(&heard, 1);
+        assert!(unsaid(&told[0]), "{told:?}");
         assert!(
             heard.recv_timeout(Duration::from_millis(1500)).is_err(),
             "no retry"

@@ -7,10 +7,11 @@
 //! Resume, and its members go on from their records.
 //!
 //! This is the one place that reaction is made: [`reaction`] is what the ledger
-//! tells when it breaks. In this order: no new work is admitted (the bridge is
-//! fenced), the app is told and the latch is tripped, and only then is the cause
-//! written down, for as long as the files let it ([`SETTLE`]): a log that another
-//! process holds must not keep the daemon from ending.
+//! tells when it breaks. In this order: the latch is tripped (the halt first), no new
+//! work is admitted (the bridge is fenced) and nothing more is asked of the app, an
+//! effect under way off this thread is waited for ([`SETTLE`] at most), the app is told,
+//! and only then is the cause written down, for as long as the files let it
+//! ([`SETTLE`]): a log that another process holds must not keep the daemon from ending.
 
 use std::fs;
 use std::path::Path;
@@ -68,6 +69,9 @@ pub fn reaction(
         bridge.fence();
         // From here no ordinary event or request goes: the daemon's last word is the only one.
         bridge.ask_no_more();
+        // An act under way off this thread (a spec's copy put at its name) is over before the
+        // app hears, within the bound; none begins after the flags.
+        let settled = latch.halt().settled(SETTLE);
         // The app hears it before the bridge closes with the stop.
         bridge.final_event(
             EVENT,
@@ -76,22 +80,26 @@ pub fn reaction(
         errors
             .trace()
             .error(&format!("the ledger cannot save any more: {cause}"));
-        errors
-            .log()
-            .error_within("the ledger cannot save any more", Some(cause), SETTLE);
+        let said = if settled {
+            "the ledger cannot save any more"
+        } else {
+            "the ledger cannot save any more (an effect was still under way)"
+        };
+        errors.log().error_within(said, Some(cause), SETTLE);
     })
 }
 
 /// The file that says a home has a board: written beside the ledger when the ledger is
 /// first made, and again at every start that opens one that has none, so a home that an
 /// earlier build made is marked by its first start under this one. It names the ledger.
+/// A home that holds it is used, and is never started with an empty board.
 pub const MARKER: &str = "consensflow.board";
 
 /// The ledger's file in a home.
 pub const LEDGER: &str = "consensflow.db";
 
-/// Says in `home` that its board is `LEDGER`. A marker that cannot be written is a loss of
-/// this one witness only: the other signs ([`home_was_used`]) stand.
+/// Says in `home` that its board is `LEDGER`. It is written only once a ledger has been
+/// opened whole, so a home that holds it had one.
 pub fn mark(home: &Path) -> std::io::Result<()> {
     let marker = home.join(MARKER);
     if marker.exists() {
@@ -102,41 +110,10 @@ pub fn mark(home: &Path) -> std::io::Result<()> {
         .map_err(|failed| std::io::Error::other(failed.to_string()))
 }
 
-/// What ConsensFlow writes in a home beside its ledger, each by its name in the home: a
-/// file that is there shows the home has been run in, whichever build wrote it.
-const WRITTEN: [&str; 8] = [
-    MARKER,
-    "consensflow.db-wal",
-    "consensflow.db-shm",
-    "daemon.log",
-    "daemon.log.1",
-    "daemon.log.lock",
-    "events.jsonl",
-    "events.jsonl.1",
-];
-
-/// Whether `home` has been run in: it holds any file the daemon writes in a home (the
-/// marker, the ledger's side files, the log or its lock, the trace), a project trace (any
-/// other `*.jsonl`), or a `consensflow.db` that is a link, dangling or not. **The app's own
-/// files are no witness:** the app makes `app/`, opens `app/app.log` and may keep
-/// `app/updates.json` before the daemon's first start, and a home with only these is a first
-/// use. Looked at as names, not followed. A home moved before its first start on the build
-/// that writes the marker is used all the same. Where the whole folder is replaced by
-/// another, empty one (a mount point whose disk is not there) nothing is left to show it:
-/// a known limit (39), and it starts as a first use.
-pub fn home_was_used(home: &Path) -> bool {
-    let named = |name: &str| fs::symlink_metadata(home.join(name)).is_ok();
-    if WRITTEN.iter().any(|name| named(name)) || named(LEDGER) {
-        return true;
-    }
-    fs::read_dir(home).is_ok_and(|names| {
-        names.flatten().any(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "jsonl")
-        })
-    })
+/// Whether `home` holds the marker, as a name that is there (a link included): the one sign,
+/// until a first start is all or nothing (P23-A2), that a home has had a board.
+pub fn marked(home: &Path) -> bool {
+    fs::symlink_metadata(home.join(MARKER)).is_ok()
 }
 
 /// What a home's ledger file is, looked at where SQLite will open it (a link is followed:

@@ -11,15 +11,18 @@
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use cf_base::args::{Opt, Positionals};
 use cf_base::env::Env;
 use cf_process::{execute, on_path, runnable, Limits};
 use cf_proto::agents::is_parent_session_variable;
-use cf_proto::page::HandleLine;
+use cf_proto::page::{HandleLine, Refused, RefusedLine};
 
 use crate::errors::install_hook;
+use crate::files::SETTLE;
 use crate::start::{start, OnOut, Options};
 
 /// What the verb's arguments asked for.
@@ -30,9 +33,9 @@ struct Flags {
 }
 
 /// `cf ui`: runs the daemon of this process, to the end of it. It returns only
-/// when the daemon could not start (the code is 1, and the reason is on the
-/// error output as `cf: <reason>`); a daemon that started ends the process
-/// itself.
+/// when the daemon could not start, with the status that says why (1, or 74 for a
+/// ledger that cannot be saved to), the reason said by [`refuse`]; a daemon that
+/// started ends the process itself.
 ///
 /// It must run before the standard streams' locks are taken: the daemon reads
 /// its input and writes its output from other threads, which would wait for a
@@ -43,10 +46,15 @@ pub fn ui(env: &Env, args: &[OsString]) -> i32 {
 
 /// `ui`, with `serve` the daemon it hands to its thread (the tests give it another).
 fn ui_with(env: &Env, args: &[OsString], serve: fn(&Env, &[OsString]) -> i32) -> i32 {
+    let args_text = texts(args);
     let (env, args) = (env.clone(), args.to_vec());
     match on_a_stack_of_its_own(move || serve(&env, &args)) {
         Ok(code) => code,
-        Err(failed) => fail(&format!("could not start its thread: {failed}")),
+        Err(failed) => refuse(
+            asked_for_json(&args_text),
+            1,
+            &format!("could not start its thread: {failed}"),
+        ),
     }
 }
 
@@ -77,25 +85,25 @@ pub(crate) fn on_a_stack_of_its_own<T: Send + 'static>(
 /// `ui` on the thread it was given.
 fn serve(env: &Env, args: &[OsString]) -> i32 {
     let env = &outside_parent_sessions(env);
-    let words: Vec<String> = args
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
+    let words = texts(args);
+    let json = asked_for_json(&words);
     let flags = match parse(&words) {
         Ok(flags) => flags,
-        Err(words) => return fail(&words),
+        Err(words) => return refuse(json, 1, &words),
     };
     install_hook();
-    let options = match Options::process(on_out(flags, env)) {
+    // Once the handle line is said the output is the bridge's: nothing more is said on it.
+    let handed = Arc::new(AtomicBool::new(false));
+    let options = match Options::process(on_out(flags, env, Arc::clone(&handed))) {
         Ok(options) => options,
-        Err(failed) => return fail(&failed.to_string()),
+        Err(failed) => return refuse(json, 1, &failed.to_string()),
     };
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     {
         Ok(runtime) => runtime,
-        Err(failed) => return fail(&format!("could not start its runtime: {failed}")),
+        Err(failed) => return refuse(json, 1, &format!("could not start its runtime: {failed}")),
     };
     let local = tokio::task::LocalSet::new();
     let outcome = local.block_on(&runtime, async {
@@ -114,10 +122,11 @@ fn serve(env: &Env, args: &[OsString]) -> i32 {
     runtime.shutdown_background();
     match outcome {
         Ok(()) => 0,
-        Err(failed) => {
-            fail(&failed.to_string());
-            failed.exit_code()
-        }
+        Err(failed) => refuse(
+            json && !handed.load(Ordering::SeqCst),
+            failed.exit_code(),
+            &failed.to_string(),
+        ),
     }
 }
 
@@ -130,10 +139,54 @@ fn outside_parent_sessions(env: &Env) -> Env {
     env.clone().without_vars(is_parent_session_variable)
 }
 
-/// What the verb says when it cannot go on, in `cf`'s words.
-fn fail(words: &str) -> i32 {
-    let _ = writeln!(io::stderr(), "cf: {words}");
-    1
+/// Says a refusal of `cf ui` and gives the status the process ends with, whatever became of
+/// the saying: under `--json` the refusal line goes to the output, in the handle line's place,
+/// and then the words to the error output, as `cf: <words>`. A thread says it and is waited
+/// for [`SETTLE`] at most; one that cannot be made, or is still writing (a reader that drains
+/// nothing), loses the words, never the end.
+fn refuse(json: bool, exit: i32, words: &str) -> i32 {
+    let words = words.to_owned();
+    let line = json
+        .then(|| {
+            serde_json::to_string(&RefusedLine {
+                refused: Refused {
+                    exit,
+                    pid: std::process::id(),
+                    words: words.clone(),
+                },
+            })
+            .ok()
+        })
+        .flatten();
+    let (done, heard) = mpsc::channel();
+    let saying = std::thread::Builder::new()
+        .name("consensflow-refusal".to_owned())
+        .spawn(move || {
+            if let Some(line) = line {
+                let mut out = io::stdout().lock();
+                let _ = writeln!(out, "{line}").and_then(|()| out.flush());
+            }
+            let _ = writeln!(io::stderr(), "cf: {words}");
+            let _ = done.send(());
+        });
+    if saying.is_ok() {
+        let _ = heard.recv_timeout(SETTLE);
+    }
+    exit
+}
+
+/// The arguments as text.
+fn texts(args: &[OsString]) -> Vec<String> {
+    args.iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Whether the words ask for `--json`, read where the arguments are themselves refused.
+fn asked_for_json(args: &[String]) -> bool {
+    args.iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--json" || arg.starts_with("--json="))
 }
 
 /// The verb's options as `parseArgs` of Node reads them (`cf_base::args`):
@@ -168,7 +221,7 @@ fn address(handle: &HandleLine) -> String {
 }
 
 /// Says the handle line, and for a person opens the screens.
-fn on_out(flags: Flags, env: &Env) -> OnOut {
+fn on_out(flags: Flags, env: &Env, handed: Arc<AtomicBool>) -> OnOut {
     let env = env.clone();
     Box::new(move |handle| {
         {
@@ -180,6 +233,7 @@ fn on_out(flags: Flags, env: &Env) -> OnOut {
             }
             out.flush()?;
         }
+        handed.store(true, Ordering::SeqCst);
         if !flags.json && !flags.no_open {
             open(&address(handle), &env);
         }

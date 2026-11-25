@@ -50,7 +50,7 @@ use crate::app_settings::{settings_path, SettingsFile};
 use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
-use crate::files::{Log, Trace};
+use crate::files::{Log, Trace, SETTLE};
 use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
 use crate::machine;
 use crate::models::ModelLists;
@@ -225,47 +225,45 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
     let home = config_root(&env).ok_or(StartError::NoHome)?;
-    // A home that has had a board (its marker, or what an earlier build left) and whose
-    // ledger is missing, empty, unreadable or a dangling link is not a first use: it is
-    // refused, in the words of a ledger that cannot be saved to with how to start anew on
-    // purpose, and is never started as an empty board. (Read before this start writes a
-    // line of its own.) A ledger that is there is opened with no leave to make it, so one
-    // that goes between this look and the open is refused too.
-    let used = crate::broken::home_was_used(&home);
+    // A home that holds the marker has had a board: with its ledger missing, empty,
+    // unreadable or a dangling link it is not a first use, and is refused, in the words of a
+    // ledger that cannot be saved to with how to start anew on purpose, and never started as
+    // an empty board. A ledger that is there is opened with no leave to make it, so one that
+    // goes between this look and the open is refused too. A home without the marker is opened
+    // as main opens it, with leave to make the ledger, whatever is at its name.
+    let used = crate::broken::marked(&home);
     make_folder(&home, 0o777, Mkdir::Sync)
         .map_err(|failed| StartError::System(failed.to_string()))?;
     let ledger_file = home.join(crate::broken::LEDGER);
-    let looked = crate::broken::ledger_file(&ledger_file);
-    if used && looked != crate::broken::Ledgerfile::Held {
+    if used && crate::broken::ledger_file(&ledger_file) != crate::broken::Ledgerfile::Held {
         return Err(StartError::CannotSave(crate::broken::lost_words(
             &ledger_file,
         )));
     }
-    let create = !used
-        && matches!(
-            looked,
-            crate::broken::Ledgerfile::Missing | crate::broken::Ledgerfile::Empty
-        );
+    let create = !used;
     let trace = Rc::new(Trace::new(&home));
     trace
         .started()
         .map_err(|failed| StartError::System(failed.to_string()))?;
     let log = Rc::new(Log::new(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
-    // The start's first line waits for the ledger: on a home that is not used, the ledger is
-    // made before `daemon.log` or any other witness is, so a start that is cut off leaves
-    // nothing that counts, or a ledger (and only a ledger that is empty can then be
-    // refused: the instant between SQLite making the file and its first page).
+    // The start's first line is said once the ledger is open and the home marked; a start that
+    // is refused before says it with its exit, within the bound of a write of a stop.
     let announced = Rc::new(std::cell::Cell::new(false));
-    let announce: Rc<dyn Fn()> = {
+    let announce: Rc<dyn Fn(bool)> = {
         let (log, announced, home) = (Rc::clone(&log), Rc::clone(&announced), home.clone());
-        Rc::new(move || {
+        Rc::new(move |within| {
             if !announced.replace(true) {
-                log.info(&format!(
+                let line = format!(
                     "start pid {} rust {VERSION} home {}",
                     std::process::id(),
                     home.display()
-                ));
+                );
+                if within {
+                    log.info_within(&line, SETTLE);
+                } else {
+                    log.info(&line);
+                }
             }
         })
     };
@@ -273,18 +271,27 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         env,
         options,
         home,
-        create,
         trace,
         Rc::clone(&log),
         errors,
-        Rc::clone(&announce),
+        Opening {
+            create,
+            announce: Rc::clone(&announce),
+        },
     )
     .await;
-    if started.is_err() {
-        announce();
-        log.info("exit 1");
+    if let Err(failed) = &started {
+        announce(true);
+        log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
     started
+}
+
+/// What the start knows of the ledger it is about to open: whether it may make one, and
+/// how it says its first line.
+struct Opening {
+    create: bool,
+    announce: Rc<dyn Fn(bool)>,
 }
 
 /// The rest of the start, in Node's order, from the ledger on.
@@ -292,11 +299,10 @@ async fn run(
     env: Env,
     options: Options,
     home: PathBuf,
-    create: bool,
     trace: Rc<Trace>,
     log: Rc<Log>,
     errors: Rc<Errors>,
-    announce: Rc<dyn Fn()>,
+    Opening { create, announce }: Opening,
 ) -> Result<Daemon, StartError> {
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
@@ -312,20 +318,20 @@ async fn run(
         cf_ledger::open_existing_ledger(&ledger_file, ledger_options)
     };
     let ledger = opened.map_err(|failed| at_start_of_used(&ledger_file, create, failed))?;
-    // The ledger is there: the first line of the log may be written now, and the home says
-    // it has a board from now on.
-    announce();
+    // The ledger is there: the home says it has a board from now on.
     // A marker that cannot be written stops the start: a home that would not be known to
     // have a board is one that could open empty at the next start.
     if let Err(failed) = crate::broken::mark(&home) {
-        log.error(
+        log.error_within(
             "the home could not be marked as having a board",
             Some(&failed.to_string()),
+            SETTLE,
         );
         return Err(StartError::CannotSave(cf_base::home::marker_words(
             &home.join(crate::broken::MARKER),
         )));
     }
+    announce(false);
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
     let limits = Limits::of(&env);

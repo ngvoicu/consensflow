@@ -61,6 +61,15 @@ impl Latch {
         })
     }
 
+    /// A latch over a halt that another already reads (a test's page).
+    #[cfg(test)]
+    pub(crate) fn over(halt: Arc<Halt>) -> Rc<Self> {
+        Rc::new(Self {
+            reason: watch::Sender::new(None),
+            halt,
+        })
+    }
+
     /// What every effect asks before it acts, and the log before it writes.
     pub fn halt(&self) -> Arc<Halt> {
         Arc::clone(&self.halt)

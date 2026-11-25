@@ -213,27 +213,12 @@ async fn an_ordinary_stop_ends_with_its_log_held_too() {
         .await;
 }
 
-/// What a home that was used holds: a trace with a line of the board in it.
-fn a_used_home(root: &Path) -> PathBuf {
-    let home = root.join("consensflow");
-    std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(
-        home.join("events.jsonl"),
-        concat!(
-            "{\"at\":\"2026-11-22T10:00:00.000Z\",\"kind\":\"daemon.start\"}\n",
-            "{\"at\":\"2026-11-22T10:00:01.000Z\",\"project\":1,\"kind\":\"project.created\"}\n"
-        ),
-    )
-    .unwrap();
-    home
-}
-
 #[tokio::test]
 async fn a_home_that_was_used_and_has_no_ledger_is_refused_and_never_started_as_an_empty_board() {
     LocalSet::new()
         .run_until(async {
             let root = tempfile::tempdir().unwrap();
-            let home = a_used_home(root.path());
+            let home = a_marked_home(root.path());
             let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
             let (options, _app) = options(root.path(), &said, &exited, &handles);
             let refused = start(environment(root.path()), options).await.err();
@@ -256,110 +241,39 @@ async fn a_home_that_was_used_and_has_no_ledger_is_refused_and_never_started_as_
         .await;
 }
 
+/// Until the first start is all or nothing (P23-A2) the marker alone makes a home used: a home
+/// without it is opened as main opens it, whatever else it holds, so that a first start that was
+/// cut or failed, and left its log and its trace and maybe a ledger of no bytes, is retried.
 #[tokio::test]
-async fn a_home_with_nothing_of_ours_in_it_is_a_first_use() {
+async fn a_home_without_the_marker_is_opened_as_main_opens_it() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let home = root.path().join("consensflow");
-            std::fs::create_dir_all(&home).unwrap();
-            std::fs::write(home.join("notes.txt"), "the person's own").unwrap();
-            assert!(!crate::broken::home_was_used(&home));
-            started_over(root.path()).await.expect("a first use starts");
-        })
-        .await;
-}
-
-/// A home is used if it holds any file ConsensFlow writes in a home, a link at the ledger's
-/// name included, and one that is used and has no usable ledger is refused and made nothing
-/// in: a home moved before its first start on the build that writes the marker as well.
-#[tokio::test]
-async fn any_file_of_ours_makes_a_home_used_and_a_used_home_with_no_ledger_is_refused() {
-    LocalSet::new()
-        .run_until(async {
-            let witnesses: Vec<(&str, fn(&Path))> = vec![
-                ("the marker", |home| crate::broken::mark(home).unwrap()),
-                ("daemon.log", |home| {
-                    std::fs::write(home.join("daemon.log"), "x\n").unwrap()
+            type Left = fn(&Path);
+            let table: Vec<(&str, Left)> = vec![
+                ("nothing of ours", |home| {
+                    std::fs::write(home.join("notes.txt"), "the person's own").unwrap();
                 }),
-                ("daemon.log.lock", |home| {
-                    std::fs::write(home.join("daemon.log.lock"), "").unwrap()
-                }),
-                ("events.jsonl", |home| {
+                ("a failed first start's log and trace", |home| {
+                    std::fs::write(home.join("daemon.log"), "start\n").unwrap();
+                    std::fs::write(home.join("daemon.log.lock"), "").unwrap();
                     std::fs::write(home.join("events.jsonl"), "{\"kind\":\"daemon.start\"}\n")
-                        .unwrap()
+                        .unwrap();
                 }),
-                ("a project's trace", |home| {
-                    std::fs::write(home.join("p1.jsonl"), "{}\n").unwrap()
-                }),
-                ("a wal", |home| {
-                    std::fs::write(home.join("consensflow.db-wal"), "").unwrap()
-                }),
-                #[cfg(unix)]
-                ("a dangling link", |home| {
-                    std::os::unix::fs::symlink(
-                        home.join("away/consensflow.db"),
-                        home.join("consensflow.db"),
-                    )
-                    .unwrap();
+                ("a ledger of no bytes", |home| {
+                    std::fs::write(home.join("daemon.log"), "start\n").unwrap();
+                    std::fs::write(home.join("consensflow.db"), b"").unwrap();
                 }),
             ];
-            for (row, make) in witnesses {
+            for (row, leave) in table {
                 let root = tempfile::tempdir().unwrap();
                 let home = root.path().join("consensflow");
                 std::fs::create_dir_all(&home).unwrap();
-                make(&home);
-                assert!(crate::broken::home_was_used(&home), "{row}");
-                let before = std::fs::read_dir(&home).unwrap().count();
-                let refused = started_over(root.path()).await.err();
-                let Some(StartError::CannotSave(words)) = refused else {
-                    panic!("{row}: it was started: {refused:?}");
-                };
-                assert!(
-                    words.contains("move") && words.contains("a new folder"),
-                    "{row}: {words}"
-                );
-                assert_eq!(
-                    std::fs::read_dir(&home).unwrap().count(),
-                    before,
-                    "{row}: something was made"
-                );
-                assert!(!home.join("away").exists(), "{row}");
+                leave(&home);
+                started_over(root.path())
+                    .await
+                    .unwrap_or_else(|failed| panic!("{row}: it was refused: {failed}"));
+                assert!(home.join(crate::broken::MARKER).exists(), "{row}: marked");
             }
-        })
-        .await;
-}
-
-/// What the app and the CLI write in a home before the daemon's first start (read from the
-/// app's `run()`: `app/`, `app/app.log` with the daemon's stderr behind it; its updater:
-/// `app/updates.json`, `app/updates/`; the terminal command is written outside the home;
-/// `cf ui` writes nothing before `start`; the page's `agents.json` comes after a daemon) is no
-/// witness: the home is a first use, a new ledger is made, and the start succeeds.
-#[tokio::test]
-async fn a_home_that_holds_what_the_app_writes_before_the_daemon_is_a_first_use() {
-    LocalSet::new()
-        .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let home = root.path().join("consensflow");
-            std::fs::create_dir_all(home.join("app/updates")).unwrap();
-            std::fs::write(home.join("app/app.log"), "consensflow: the app started\n").unwrap();
-            std::fs::write(home.join("app/app.log.1"), "an older one\n").unwrap();
-            std::fs::write(home.join("app/updates.json"), "{\"channel\":\"stable\"}").unwrap();
-            std::fs::write(home.join("agents.json"), "{}").unwrap();
-            assert!(
-                !crate::broken::home_was_used(&home),
-                "none of them is a witness"
-            );
-            started_over(root.path()).await.expect("a first use starts");
-            assert!(home.join("consensflow.db").exists(), "its ledger was made");
-            assert!(home.join(crate::broken::MARKER).exists());
-            // And from then on the home is used: the next start with no ledger is refused.
-            std::fs::remove_file(home.join("consensflow.db")).unwrap();
-            let refused = started_over(root.path()).await.err();
-            assert!(
-                matches!(refused, Some(StartError::CannotSave(_))),
-                "{refused:?}"
-            );
         })
         .await;
 }
@@ -408,7 +322,7 @@ async fn an_unreadable_ledger_in_a_used_home_exits_74_with_the_new_board_words()
                 b"this is not a database, but it is not empty either, no",
             )
             .unwrap();
-            let refused = started_over(root.path()).await.err().expect("refused");
+            let refused = started_over(root.path()).await.expect_err("refused");
             assert_eq!(refused.exit_code(), crate::broken::EXIT);
             let StartError::CannotSave(words) = refused else {
                 panic!("{refused:?}");
@@ -419,7 +333,9 @@ async fn an_unreadable_ledger_in_a_used_home_exits_74_with_the_new_board_words()
         .await;
 }
 
-/// A marker that cannot be written stops the start with 74 and words that name the file.
+/// A marker that cannot be written stops the start with 74 and words that name the file; the
+/// words claim nothing of the board, for an upgrade may have committed already, and the log
+/// says the status the process ends with.
 #[tokio::test]
 async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
     LocalSet::new()
@@ -427,6 +343,15 @@ async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
             let root = tempfile::tempdir().unwrap();
             let home = root.path().join("consensflow");
             std::fs::create_dir_all(&home).unwrap();
+            // An earlier build's ledger: its upgrade commits before the marker is written.
+            let file = home.join("consensflow.db");
+            let older = cf_ledger::open_ledger(&file, LedgerOptions::default()).unwrap();
+            cf_ledger::testing::undo_migration_0044(older.sqlite()).unwrap();
+            older
+                .sqlite()
+                .execute_batch("PRAGMA user_version = 43")
+                .unwrap();
+            drop(older);
             // Where the marker's temporary file would go.
             std::fs::create_dir(home.join(format!(
                 "{}.{}.tmp",
@@ -434,13 +359,29 @@ async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
                 std::process::id()
             )))
             .unwrap();
-            let refused = started_over(root.path()).await.err().expect("refused");
+            let refused = started_over(root.path()).await.expect_err("refused");
             assert_eq!(refused.exit_code(), crate::broken::EXIT);
             let StartError::CannotSave(words) = refused else {
                 panic!("{refused:?}");
             };
             assert!(words.contains(crate::broken::MARKER), "{words}");
             assert!(!home.join(crate::broken::MARKER).exists());
+            let now = rusqlite::Connection::open(&file).unwrap();
+            let version: i64 = now
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 44, "the upgrade had committed");
+            assert!(
+                !words.contains("Nothing of the board"),
+                "the words claim nothing of the board: {words}"
+            );
+            let log = log_lines(&home);
+            let said: Vec<&str> = log.iter().map(|line| said_of(line)).collect();
+            assert_eq!(
+                said.last(),
+                Some(&"info exit 74"),
+                "the status the process ends with: {said:?}"
+            );
         })
         .await;
 }
@@ -556,7 +497,7 @@ async fn the_marker_is_written_at_first_use_and_at_the_first_open_of_an_older_ho
         .run_until(async {
             let root = tempfile::tempdir().unwrap();
             let home = root.path().join("consensflow");
-            assert!(!crate::broken::home_was_used(&home), "nothing yet");
+            assert!(!home.join(crate::broken::MARKER).exists(), "nothing yet");
             started_over(root.path()).await.expect("a first use starts");
             assert!(
                 home.join(crate::broken::MARKER).exists(),
@@ -625,6 +566,64 @@ async fn a_stop_already_under_way_ends_with_the_ledgers_status_when_the_ledger_b
                 .await
                 .expect("the daemon stops");
             assert_eq!(*rig.exited.borrow(), [crate::broken::EXIT]);
+        })
+        .await;
+}
+
+/// An act under way that outlasts the bound is not waited for for good: the app is told at the
+/// bound, the daemon ends with 74 within its stop's time, and the log's line of the cause says
+/// an effect was still under way.
+#[tokio::test]
+async fn an_act_held_past_the_bound_does_not_hold_the_break() {
+    LocalSet::new()
+        .run_until(async {
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
+            let halt = rig.daemon.latch.halt();
+            let (entered, inside) = std::sync::mpsc::channel();
+            let (let_go, held) = std::sync::mpsc::channel::<()>();
+            let acting = std::thread::spawn(move || {
+                halt.act(move || {
+                    let _ = entered.send(());
+                    // Let go by the test; never for longer than this, so a broken one ends.
+                    let _ = held.recv_timeout(Duration::from_secs(6));
+                })
+            });
+            inside.recv_timeout(Duration::from_secs(5)).unwrap();
+            let heard: Rc<RefCell<Vec<std::time::Instant>>> = Rc::default();
+            let told = Rc::clone(&heard);
+            rig.app.on_event(crate::broken::EVENT, move |_| {
+                told.borrow_mut().push(std::time::Instant::now());
+            });
+
+            let began = std::time::Instant::now();
+            break_the_ledger(&rig);
+            let reacted = began.elapsed();
+            assert!(
+                reacted >= crate::files::SETTLE,
+                "the break waits for the act under way: {reacted:?}"
+            );
+            assert!(
+                reacted < Duration::from_secs(2),
+                "and no longer than the bound: {reacted:?}"
+            );
+            tokio::time::timeout(Duration::from_secs(4), rig.daemon.finished())
+                .await
+                .expect("the daemon stops while the act is still under way");
+            assert_eq!(*rig.exited.borrow(), [crate::broken::EXIT]);
+            assert_eq!(heard.borrow().len(), 1, "the app was told");
+            let log = log_lines(&rig.home);
+            assert!(
+                log.iter()
+                    .any(|line| line.contains("the ledger cannot save any more")
+                        && line.contains("an effect was still under way")),
+                "{log:?}"
+            );
+            let _ = let_go.send(());
+            acting
+                .join()
+                .unwrap()
+                .expect("the act that had begun was made");
         })
         .await;
 }

@@ -25,6 +25,7 @@ use std::time::Duration;
 use cf_base::time::{Clock, SystemClock};
 
 use super::folder::ForBrowser;
+use crate::halt::Halt;
 
 #[cfg(unix)]
 mod unix;
@@ -69,20 +70,22 @@ struct Seen {
 /// HTML file, the first of its files.
 #[cfg(test)]
 pub(super) fn place(home: &Path, read: &ForBrowser, kept_for: Duration) -> Result<PathBuf, String> {
-    place_checked(home, read, kept_for, &|| {}, &|| Ok(()))
+    place_checked(home, read, kept_for, &|| {}, &Halt::new(), &|| {})
 }
 
 /// [`place`], as the daemon makes it: the files are written into a staging folder beside
-/// the copy's name, `step` called after each, and only when every file is there is `check`
-/// asked (the daemon is not ending) and one rename puts the whole copy at its name. Nothing
-/// reaches that name before the check, however far the writing had gone, and a refusal
-/// removes the staging folder.
+/// the copy's name, `step` called after each, and only when every file is there is one rename
+/// put the whole copy at its name, made under the halt's hold ([`Halt::act`]; `at_rename` is
+/// called inside it, right before the rename): a break waits for it before the app is told, and
+/// one that came first refuses it. Nothing reaches that name before, however far the writing had
+/// gone, and a refusal removes the staging folder.
 pub(super) fn place_checked(
     home: &Path,
     read: &ForBrowser,
     kept_for: Duration,
     step: &dyn Fn(),
-    check: &dyn Fn() -> Result<(), String>,
+    halt: &Halt,
+    at_rename: &dyn Fn(),
 ) -> Result<PathBuf, String> {
     if read.files.is_empty() {
         return Err("nothing was read for the browser".to_owned());
@@ -95,10 +98,7 @@ pub(super) fn place_checked(
     // until the one rename.
     let (stage, name) = made(&root)?;
     let staging = format!("{name}.part");
-    let staged = match written(stage, read, step) {
-        Ok(()) => check(),
-        Err(error) => Err(error),
-    };
+    let staged = written(stage, read, step);
     let gone = |root: &Folder| {
         root.remove(
             &staging,
@@ -112,9 +112,19 @@ pub(super) fn place_checked(
         gone(&root);
         return Err(error);
     }
-    if let Err(error) = root.replace(&staging, &name) {
-        gone(&root);
-        return Err(failed(&root.path().join(&name), &error));
+    match halt.act(|| {
+        at_rename();
+        root.replace(&staging, &name)
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            gone(&root);
+            return Err(failed(&root.path().join(&name), &error));
+        }
+        Err(words) => {
+            gone(&root);
+            return Err(words.to_owned());
+        }
     }
     let first = read
         .files

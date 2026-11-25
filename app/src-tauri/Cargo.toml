@@ -65,8 +65,6 @@ webview2-com = "0.39.1"
 cf-base = { workspace = true, features = ["test-support"] }
 cf-panes = { workspace = true, features = ["test-support"] }
 cf-bridge = { workspace = true, features = ["test-support"] }
-# What the daemon takes for a used home, asked of the home the app leaves before its first start.
-cf-daemon.workspace = true
 # Detection as the daemon the app starts runs it, in the tests of the daemon's PATH.
 cf-harness.workspace = true
 portable-pty.workspace = true

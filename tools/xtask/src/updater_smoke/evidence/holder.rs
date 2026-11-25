@@ -36,8 +36,9 @@ pub struct Attempt {
 
 /// A second ConsensFlow on the home, started the way the daemon is (the bundle's
 /// `cf ui --json --no-open`, its input closed) while the app's daemon runs: the
-/// ledger refuses it, in its own words, with no handle line out. Exit 1 alone
-/// could be a program the bundle lacks, so the words are the proof.
+/// ledger refuses it, in its own words, with no handle line out (a build from P23-A on
+/// says the refusal in the handle line's place, an earlier one says nothing there). Exit 1
+/// alone could be a program the bundle lacks, so the words are the proof.
 pub fn assert_ledger_held(attempt: &Attempt, db: &str) -> Result {
     let said = format!("{}{}", attempt.out, attempt.err);
     ensure!(
@@ -59,11 +60,18 @@ pub fn assert_ledger_held(attempt: &Attempt, db: &str) -> Result {
         attempt.err
     );
     ensure!(
-        attempt.out.is_empty(),
+        attempt.out.is_empty() || is_a_refusal_line(&attempt.out),
         "the second cf ui printed a handle line: {}",
         attempt.out
     );
     Ok(())
+}
+
+/// Whether the output is the one line that says a start was refused, and no handle.
+fn is_a_refusal_line(out: &str) -> bool {
+    out.lines().count() == 1
+        && serde_json::from_str::<serde_json::Value>(out)
+            .is_ok_and(|line| line.get("refused").is_some() && line.get("url").is_none())
 }
 
 /// What a process wrote to a stream, kept as it is read.
