@@ -858,9 +858,17 @@ impl Dispatcher {
                     Startup::new(Stage::Prepare, why),
                     &cause.to_string(),
                 );
-                // A launch that is over fails nothing, its cause in the log all the same:
-                // what it was to deliver waits, as where its plan was made (T-2263).
-                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {
+                // A pause or a withdrawal while the plan was made ends the launch with no
+                // failure, as where the plan was made (T-2263); a project closed meanwhile
+                // is `launch_failed`'s to see.
+                if self.in_open_project(project.id)?
+                    && self.over_though_failed(
+                        record,
+                        participant,
+                        failing.as_ref(),
+                        asked_before,
+                    )?
+                {
                     return Ok(());
                 }
                 return self.launch_failed(record, project, participant, failing, &said);
@@ -1667,12 +1675,11 @@ impl Dispatcher {
         Ok(true)
     }
 
-    /// [`Dispatcher::launch_over`] for a launch whose plan failed, asked before the failure is
-    /// settled: its project closed or its record forgotten while the plan was made, or, for a
-    /// member, its message withdrawn or a pause asked since `captured` was read (none where the
-    /// plan failed before it read them, with nothing begun). `failing` is still queued where
-    /// the window was to be told its role first, and fails all the same unless the launch is
-    /// over.
+    /// [`Dispatcher::launch_over`] for a launch whose plan failed in an open project, asked
+    /// before the failure is settled: its record forgotten, or, for a member, its message
+    /// withdrawn or a pause asked since `captured` was read (none where the plan failed before
+    /// it read them, with nothing begun). `failing` is still queued where the window was to be
+    /// told its role first, and fails all the same unless the launch is over.
     fn over_though_failed(
         &self,
         record: &Rc<Record>,

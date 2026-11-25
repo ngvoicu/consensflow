@@ -11,13 +11,14 @@
 # was given and what it dropped, and a file that must be new takes no name that is taken.
 
 [run]
-lf-closed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_launch_that_fails_after_its_project_closed", "--", "--test-threads=2"]
-lf-chief = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_chief_launch_that_fails_after_its_project_closed", "--", "--test-threads=2"]
 lf-pause = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_launch_that_fails_after_a_pause", "--", "--test-threads=2"]
 lf-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_launch_is_told_it_is_over", "--", "--test-threads=2"]
 lf-steps = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::off_thread::tests::a_launch_that_is_over_begins_no_further_step"]
 lf-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::stop_log::a_stop_writes_what_it_holds"]
 lf-new = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_taken_while_a_new_file"]
+lf-open = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_s_open_that_ends_after_its_project_closed", "--", "--test-threads=2"]
+lf-nolink = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_new_file_is_written_where_the_volume_makes_no_link"]
+lf-claim = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_that_is_taken_is_refused_where_the_volume_makes_no_link"]
 lf-late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_whose_plan_was_late", "--", "--test-threads=2"]
 lf-nowait = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_line_said_while_the_log_is_held"]
 lf-drop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "lines_the_writer_is_too_far_behind"]
@@ -193,43 +194,16 @@ find = """    let codex_set_up = codex.ok().map(|codex| codex.set_up);"""
 replace = """    let codex_set_up = Some(codex.unwrap_or_default().set_up);"""
 
 [[plant]]
-name = 'launch-freeze: a launch that fails after a Close is settled as a failure'
-meant = "a_member_launch_that_fails_after_its_project_closed_leaves_its_task_for_the_resume"
-runs = ["lf-closed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = """                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {"""
-replace = """                if false && self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {"""
-
-[[plant]]
-name = 'launch-freeze: a closed chief is told of a chief that could not start'
-meant = "a_chief_launch_that_fails_after_its_project_closed_says_nothing_of_it"
-runs = ["lf-chief"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = """        self.launch_over(
-            record,
-            participant,
-            failing.filter(|_| !displaced && captured.is_some()),"""
-replace = """        if participant.role == "chief" {
-            return Ok(false);
-        }
-        self.launch_over(
-            record,
-            participant,
-            failing.filter(|_| !displaced && captured.is_some()),"""
-
-[[plant]]
 name = 'launch-freeze: a pause during a failed plan is not seen'
 meant = "a_member_launch_that_fails_after_a_pause_leaves_the_paused_task_as_it_is"
 runs = ["lf-pause"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = """failing.as_ref(), asked_before)? {"""
-replace = """failing.as_ref(), Some(self.seams.ledger.borrow().stop_of(participant.id)?))? {"""
+find = """                        asked_before,
+                    )?"""
+replace = """                        Some(self.seams.ledger.borrow().stop_of(participant.id)?),
+                    )?"""
 
 [[plant]]
 name = 'launch-freeze: a launch is never told it is over'
@@ -288,5 +262,35 @@ runs = ["lf-new"]
 
 [[plant.edit]]
 file = "crates/cf-base/src/file/write.rs"
-find = """    fs::hard_link(from, to).map_err(|error| publish_failed(error, from, to))"""
-replace = """    fs::rename(from, to).map_err(|error| publish_failed(error, from, to))"""
+find = """    let linked = write_new_with(path, bytes, mode, |from, to| fs::hard_link(from, to));"""
+replace = """    let linked = write_new_with(path, bytes, mode, |from, to| fs::rename(from, to));"""
+
+[[plant]]
+name = 'launch-freeze: a volume that makes no link refuses a new file'
+meant = "a_new_file_is_written_where_the_volume_makes_no_link"
+runs = ["lf-nolink"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/write.rs"
+find = """        Err(error) if makes_no_link(&error) => claim_and_rename(from, to, mode),"""
+replace = """        Err(error) if false && makes_no_link(&error) => claim_and_rename(from, to, mode),"""
+
+[[plant]]
+name = 'launch-freeze: the claim of a name takes over one that is there'
+meant = "a_name_that_is_taken_is_refused_where_the_volume_makes_no_link"
+runs = ["lf-claim"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/write.rs"
+find = """    options.write(true).create_new(true);"""
+replace = """    options.write(true).create(true);"""
+
+[[plant]]
+name = 'launch-freeze: a launch that ends after a Close is settled as a failure'
+meant = "a_member_s_open_that_ends_after_its_project_closed_leaves_its_task_for_the_resume"
+runs = ["lf-open"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """            return self.ended_closed(record, participant, delivering);"""
+replace = """            let _ = Self::ended_closed;"""
