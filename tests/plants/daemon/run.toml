@@ -253,6 +253,7 @@ runs = ["daemon-lib-start", "stop"]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
     if started.is_err() {
+        announce();
         log.info("exit 1");
     }
     started'''

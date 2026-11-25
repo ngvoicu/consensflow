@@ -77,11 +77,11 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-    log.info(&format!(
-        "start pid {} rust {VERSION} home {}",
-        std::process::id(),
-        home.display()
-    ));
+                log.info(&format!(
+                    "start pid {} rust {VERSION} home {}",
+                    std::process::id(),
+                    home.display()
+                ));
 '''
 replace = ""
 
