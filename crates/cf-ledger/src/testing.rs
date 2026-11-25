@@ -106,7 +106,8 @@ pub use staff_rules::undo_migration_0026;
 /// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0045.
 pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "ALTER TABLE task DROP COLUMN retry_hold;
+        "ALTER TABLE task DROP COLUMN turn_renewed_at;
+         ALTER TABLE task DROP COLUMN retry_hold;
          ALTER TABLE task DROP COLUMN turn_retries;
          DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
     )
@@ -243,6 +244,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "out_kind"),
             ("task", "turn_retries"),
             ("task", "retry_hold"),
+            ("task", "turn_renewed_at"),
         ])
     {
         take_column_out(tables, table, column);
@@ -369,7 +371,8 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                         ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2)",
                         "",
                     )
-                    .replace(", retry_hold INTEGER", "");
+                    .replace(", retry_hold INTEGER", "")
+                    .replace(", turn_renewed_at TEXT", "");
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the

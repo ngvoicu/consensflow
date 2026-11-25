@@ -1725,3 +1725,102 @@ fn the_card_shows_the_try_the_next_resume_will_use_after_a_tell_in_the_hold() {
         "the next Resume is the first of two again"
     );
 }
+
+/// The task's held try comes due and its Resume is queued; the window goes on by itself with a
+/// job still running, so the Resume is withdrawn: charged, never delivered.
+fn a_try_queued_and_withdrawn(c: &Context, t: &Tiers<'_>, window: &str) {
+    let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+    c.advance(due - c.time.wall_ms() + 1);
+    c.adapter.with(window, |agent| agent.settled = false);
+    passes(c, 2);
+    let queued = t
+        .task(1)
+        .messages
+        .into_iter()
+        .find(|m| m.kind == "task" && m.state == "queued" && m.sender.is_none())
+        .expect("the try waits for the window");
+    c.adapter.wake(
+        window,
+        "<task-notification>One background step finished.</task-notification>",
+    );
+    c.adapter.with(window, |agent| {
+        agent.failed = false;
+        agent.failure = None;
+    });
+    c.adapter
+        .answer_leaving_a_job(window, "The other background step is still running.");
+    passes(c, 3);
+    assert_eq!(c.message(queued.id).state, "cancelled", "withdrawn");
+    assert_eq!(t.task(1).task.state, "working");
+}
+
+/// The window's next turn, woken by its last job, fails.
+fn woken_and_failed(c: &Context, t: &Tiers<'_>, window: &str) -> Option<i64> {
+    c.advance(1_000);
+    c.adapter.wake(
+        window,
+        "<task-notification>The last background step finished.</task-notification>",
+    );
+    fails_again_held(c, t, window)
+}
+
+/// Try 1 delivered, then a failure 30 minutes after it: the count renews. Where it is held.
+fn renewed_after_30_minutes(c: &Context, t: &Tiers<'_>, window: &str) {
+    fail(c, window);
+    passes(c, 3);
+    c.advance(31_000);
+    until_resumed(c, "zeus", 1);
+    let delivered = c.time.wall_ms();
+    next_turn_opens(c, window);
+    passes(c, 2);
+    c.advance(delivered + 30 * 60_000 - c.time.wall_ms());
+    assert_eq!(fails_again_held(c, t, window), Some(1), "renewed");
+    assert_eq!(stored_tries(c), 0);
+}
+
+#[test]
+fn one_delivery_renews_the_count_once_though_the_fresh_pair_s_first_try_is_withdrawn() {
+    // T-2262 finding 8: the delivery that renewed the count renewed it again a second after
+    // the fresh pair's first try was queued and withdrawn.
+    let c = retrying();
+    let (t, window) = working(&c);
+    renewed_after_30_minutes(&c, &t, &window);
+    a_try_queued_and_withdrawn(&c, &t, &window);
+    assert_eq!(stored_tries(&c), 1, "withdrawn, and still charged");
+    assert_eq!(
+        woken_and_failed(&c, &t, &window),
+        Some(2),
+        "the second of the pair"
+    );
+    assert_eq!(stored_tries(&c), 1);
+    let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+    c.advance(due - c.time.wall_ms() + 1);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), None);
+    assert_eq!(
+        t.task(1).task.state,
+        "failed",
+        "two charged in the fresh pair, no third"
+    );
+}
+
+#[test]
+fn a_fresh_pair_withdrawn_whole_renews_again_31_minutes_after_the_renewal() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    renewed_after_30_minutes(&c, &t, &window);
+    let renewed = c.time.wall_ms();
+    a_try_queued_and_withdrawn(&c, &t, &window);
+    assert_eq!(woken_and_failed(&c, &t, &window), Some(2));
+    a_try_queued_and_withdrawn(&c, &t, &window);
+    assert_eq!(stored_tries(&c), 2);
+    c.advance(renewed + 31 * 60_000 - c.time.wall_ms());
+    assert_eq!(
+        woken_and_failed(&c, &t, &window),
+        Some(1),
+        "nothing was sent since the renewal, 31 minutes ago"
+    );
+    assert_eq!(stored_tries(&c), 0);
+}

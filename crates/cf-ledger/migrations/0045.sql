@@ -3,8 +3,9 @@
 -- changed but for the message that carried its Resume, once. The tries a task has used in a
 -- row are a number on the task, `turn_retries`: it goes up by one in the write that queues a
 -- numbered Resume and back to zero in the write of a person's or the chief's action on the
--- task, of its result, or of the first failure 30 minutes after the last numbered Resume was
--- delivered. Every task that exists reads zero.
+-- task, of its result, or of the first failure 30 minutes after the last numbered Resume that
+-- was delivered, and 30 minutes after the count last started again (`turn_renewed_at`). Every
+-- task that exists reads zero.
 CREATE TABLE turn_retry (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
@@ -25,3 +26,7 @@ ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_
 -- The retry hold the task is in now: the `turn_retry.id` written with it, none once it ends.
 -- It names the hold itself; no time says which hold a Resume belongs to.
 ALTER TABLE task ADD COLUMN retry_hold INTEGER;
+-- When the count last started again for a task that has had a retry: by time, or by an action
+-- or a result. Time renews the count at most once in 30 minutes, so one delivery cannot renew
+-- it twice.
+ALTER TABLE task ADD COLUMN turn_renewed_at TEXT;

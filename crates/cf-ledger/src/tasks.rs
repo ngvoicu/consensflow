@@ -49,6 +49,7 @@ pub(crate) use pausing::{
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 pub(crate) use plan::{create_plan, decide_tasks};
 pub use plan::{PlanCreated, PlanTask};
+pub(crate) use turn_retry::start_again as start_tries_again;
 pub use turn_retry::{RetryFact, RetryHold, RetryPlan};
 
 /// What a paused task's window is told when it goes on: the human's Resume

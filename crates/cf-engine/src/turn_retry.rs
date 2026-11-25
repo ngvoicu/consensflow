@@ -8,7 +8,8 @@
 //! a row are a number on the task (`task.turn_retries`), raised by the ledger in the write that
 //! queues a numbered Resume and put back to zero in the write of a person's or the chief's
 //! action on the task (a Resume or reopen, a tell, an answer), of its result, or of the first
-//! failure 30 minutes or more after the last numbered Resume that was delivered (one queued and
+//! failure 30 minutes or more after both the last numbered Resume that was delivered and the last
+//! time the count started again, so time renews it at most once in 30 minutes (one queued and
 //! withdrawn counts toward the two, and hides no delivery). A task given to another window, by
 //! the daemon to its member's backup or by a person's Reassign, is a fresh run and begins at
 //! zero: each window gets at most two automatic Resumes in a row. A quota's or a busy model's
@@ -115,7 +116,7 @@ impl Dispatcher {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, another window (its member's backup, or a Reassign), or a failure 30 minutes after the last automatic try that reached it. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, another window (its member's backup, or a Reassign), or a failure 30 minutes or more after both the last automatic try that reached it and the last time the count started again. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
                 n = task.number,
                 first = spoken(unit),
                 second = spoken(SECOND_TRY_UNITS * unit),

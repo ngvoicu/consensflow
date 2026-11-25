@@ -60,7 +60,7 @@ runs = ["n35-dispatcher", "n35-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
 find = "    let Some(hold) = hold else {\n        return Ok(());"
-replace = "    let Some(hold) = hold else {\n        reset(store, task)?;\n        return Ok(());"
+replace = "    let Some(hold) = hold else {\n        start_again(store, task, \"2026-01-01T00:00:00.000Z\")?;\n        return Ok(());"
 
 [[plant]]
 name = "n35 hold: the last numbered Resume taken by its wall-clock time"
@@ -93,14 +93,24 @@ find = "        if to == \"done\" {"
 replace = "        if false {"
 
 [[plant]]
+name = "n35 hold: one delivery renews the count twice"
+meant = "one_delivery_renews_the_count_once_though_the_fresh_pair_s_first_try_is_withdrawn"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = " && renewed.as_deref().is_none_or(long_ago)"
+replace = ""
+
+[[plant]]
 name = "n35 hold: a person's Resume back to the board keeps the count"
 meant = "a_persons_resume_that_sends_the_task_back_to_the_board_begins_the_count_again"
 runs = ["n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = "        if by.is_some() {\n            super::turn_retry::reset(store, task.id)?;\n        }"
-replace = "        if false {\n            super::turn_retry::reset(store, task.id)?;\n        }"
+find = "        if by.is_some() && super::turn_retry::tried(store, task.id)? {\n            let at = store.at();\n            super::turn_retry::start_again(store, task.id, &at)?;"
+replace = "        if false {\n            let at = store.at();\n            super::turn_retry::start_again(store, task.id, &at)?;"
 
 [[plant]]
 name = "n35 hold: a person's Resume linked as a retry"
@@ -339,8 +349,8 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = ".is_some_and(|at| now - at >= renew_after_ms);"
-replace = ".is_some_and(|at| at - now >= renew_after_ms);"
+find = "now - at >= renew_after_ms)"
+replace = "at - now >= renew_after_ms)"
 
 [[plant]]
 name = "n35 hold: the 30 minutes counted from nothing (every failure a fresh pair)"
@@ -349,8 +359,8 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = ".is_some_and(|at| now - at >= renew_after_ms);"
-replace = ".is_some_and(|at| now - at >= 0);"
+find = "now - at >= renew_after_ms)"
+replace = "now - at >= 0)"
 
 [[plant]]
 name = "n35 hold: the folded card reads the primary's quota, not the task's member"

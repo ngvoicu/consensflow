@@ -419,6 +419,81 @@ fn the_30_minutes_run_from_the_last_delivered_resume_not_from_a_later_one_not_de
     assert_eq!(tries(&ledger), 0);
 }
 
+/// A renewal by time, then the fresh pair's first Resume queued and never delivered.
+fn renewed_and_one_withdrawn(
+    ledger: &mut Ledger,
+    project: &ProjectView,
+    session: i64,
+    clock: &Cell<i64>,
+) -> i64 {
+    failed_and_tried(ledger, project, session, clock);
+    clock.set(clock.get() + 30 * 60_000);
+    let renewed = clock.get();
+    assert_eq!(held(hold(ledger, project, session)), 1);
+    ledger
+        .resume_held_task(project.id, 1, RESUME_WORDS)
+        .expect("resumed");
+    ledger
+        .sqlite()
+        .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
+        .expect("working");
+    renewed
+}
+
+#[test]
+fn the_count_renews_by_time_at_most_once_in_30_minutes() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    let renewed = renewed_and_one_withdrawn(&mut ledger, &project, session, &clock);
+    clock.set(renewed + 30 * 60_000 - 1);
+    assert_eq!(held(hold(&mut ledger, &project, session)), 2, "not renewed");
+    assert_eq!(tries(&ledger), 1);
+}
+
+#[test]
+fn a_clock_put_back_after_a_renewal_never_renews_again() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    let renewed = renewed_and_one_withdrawn(&mut ledger, &project, session, &clock);
+    // Before the renewal, and still 30 minutes and more after the delivery.
+    clock.set(renewed - 1);
+    assert_eq!(held(hold(&mut ledger, &project, session)), 2);
+    assert_eq!(tries(&ledger), 1);
+}
+
+#[test]
+fn a_word_s_two_tries_are_not_renewed_from_a_delivery_before_it() {
+    // T-2262's shape, the count started again by a word: the delivery from before it is long
+    // past, and the first try after the word is queued and never delivered.
+    let (_dir, mut ledger, project, session, worker, clock) = working_at();
+    failed_and_tried(&mut ledger, &project, session, &clock);
+    clock.set(clock.get() + 31 * 60_000);
+    ledger
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("chief".into()),
+                to: worker,
+                body: "the west file".into(),
+                task: Some(1),
+            },
+        )
+        .expect("told");
+    assert_eq!(held(hold(&mut ledger, &project, session)), 1);
+    ledger
+        .resume_held_task(project.id, 1, RESUME_WORDS)
+        .expect("resumed");
+    ledger
+        .sqlite()
+        .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
+        .expect("working");
+    clock.set(clock.get() + 1_000);
+    assert_eq!(
+        held(hold(&mut ledger, &project, session)),
+        2,
+        "one is charged"
+    );
+    assert_eq!(tries(&ledger), 1);
+}
+
 #[test]
 fn the_write_itself_refuses_a_count_past_two() {
     let (_dir, ledger, _, _, _) = working();
@@ -608,7 +683,7 @@ fn dump(raw: &rusqlite::Connection) -> Vec<(String, Vec<String>)> {
         .filter(|table| table != "turn_retry")
         .map(|table| {
             let columns: Vec<String> = raw
-                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold') ORDER BY cid"))
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold', 'turn_renewed_at') ORDER BY cid"))
                 .expect("columns")
                 .query_map([], |row| row.get(0))
                 .expect("names")

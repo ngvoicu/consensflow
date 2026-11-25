@@ -102,16 +102,21 @@ pub struct RetryPlan {
 /// zero in this write. The comparison is of two times and orders nothing by the clock: a clock
 /// put back makes the time since smaller, so it can only delay the end. A Resume not yet
 /// delivered is no time to renew from.
+///
+/// One delivery renews once: time renews the count only when it also is `renew_after_ms` or more
+/// since the count last started again (`turn_renewed_at`: a renewal, or an action or result), so
+/// a try of the fresh pair queued and never delivered is not forgiven by the old delivery. A
+/// time that cannot be read, or a clock put back, renews nothing.
 pub(crate) fn standing(
     store: &Store,
     task: i64,
     now: i64,
     renew_after_ms: i64,
 ) -> Result<i64, LedgerError> {
-    let used: i64 = store.db.query_row(
-        "SELECT turn_retries FROM task WHERE id = ?",
+    let (used, renewed): (i64, Option<String>) = store.db.query_row(
+        "SELECT turn_retries, turn_renewed_at FROM task WHERE id = ?",
         [task],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     if used == 0 {
         return Ok(0);
@@ -126,22 +131,33 @@ pub(crate) fn standing(
         )
         .optional()?
         .flatten();
-    let over = delivered
-        .as_deref()
-        .and_then(cf_base::time::parse)
-        .is_some_and(|at| now - at >= renew_after_ms);
+    let long_ago = |at: &str| cf_base::time::parse(at).is_some_and(|at| now - at >= renew_after_ms);
+    let over =
+        delivered.as_deref().is_some_and(long_ago) && renewed.as_deref().is_none_or(long_ago);
     if over {
-        reset(store, task)?;
+        start_again(store, task, &cf_base::time::iso(now))?;
         return Ok(0);
     }
     Ok(used)
 }
 
-/// The task's tries in a row start again: a person's or the chief's action on it, its result.
-pub(crate) fn reset(store: &Store, task: i64) -> Result<(), LedgerError> {
-    store.db.execute(
-        "UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries <> 0",
+/// Whether the task has had a retry: only then is there a time to keep, or a clock to read.
+pub(crate) fn tried(store: &Store, task: i64) -> Result<bool, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM turn_retry WHERE task_id = ?)",
         [task],
+        |row| row.get(0),
+    )?)
+}
+
+/// The task's tries in a row start again at `at`: a renewal by time, a person's or the chief's
+/// action on it, its result. The time is kept for a task that has had a retry (one that never
+/// had has no delivery a renewal could come from, and its row is not touched).
+pub(crate) fn start_again(store: &Store, task: i64, at: &str) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE task SET turn_retries = 0, turn_renewed_at = ?1
+          WHERE id = ?2 AND EXISTS (SELECT 1 FROM turn_retry WHERE task_id = ?2)",
+        params![at, task],
     )?;
     Ok(())
 }

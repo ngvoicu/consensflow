@@ -110,11 +110,14 @@ pub(crate) fn queue(
     if let Some(task) = message.task_id {
         let given = message.kind == "answer" || message.from.is_some_and(|from| from != message.to);
         if given {
-            store.db.execute(
-                "UPDATE task SET turn_retries = 0
-                  WHERE id = ? AND assignee_id = ? AND turn_retries <> 0",
+            let assigned: bool = store.db.query_row(
+                "SELECT EXISTS (SELECT 1 FROM task WHERE id = ?1 AND assignee_id = ?2)",
                 params![task, message.to],
+                |row| row.get(0),
             )?;
+            if assigned {
+                crate::tasks::start_tries_again(store, task, &at)?;
+            }
         }
     }
     if landing == "queued" && matches!(message.kind, "answer" | "note") {

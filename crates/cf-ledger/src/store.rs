@@ -330,10 +330,7 @@ impl Store {
         // A result starts the task's failed turns' tries again (D3's N35); a reopen does so
         // by the message it queues (`queue`).
         if to == "done" {
-            self.db.execute(
-                "UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries <> 0",
-                [task.id],
-            )?;
+            crate::tasks::start_tries_again(self, task.id, &at)?;
         }
         if matches!(to, "accepted" | "cancelled" | "failed") {
             crate::holding::close_task(self, task, None)?;

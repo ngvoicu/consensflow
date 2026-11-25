@@ -1237,8 +1237,9 @@ pub(crate) fn resume_task(
         require_task_state(&task, &["paused"], "resume")?;
         // A person's or the chief's Resume starts the failed turns' tries again, whichever way
         // it goes on from here (D3's N35); a refusal below writes nothing.
-        if by.is_some() {
-            super::turn_retry::reset(store, task.id)?;
+        if by.is_some() && super::turn_retry::tried(store, task.id)? {
+            let at = store.at();
+            super::turn_retry::start_again(store, task.id, &at)?;
         }
         // A refusal below writes nothing, this withdrawal with it.
         leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;
