@@ -64,7 +64,9 @@ pub use conversations::{
 pub use holding::{QuestionStamp, WindowHolding};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
-pub use ledger::{open_existing_ledger, open_ledger, Event, Ledger, Options};
+pub use ledger::{
+    hold_ledger, make_ledger, open_existing_ledger, open_ledger, Event, Held, Ledger, Options,
+};
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,

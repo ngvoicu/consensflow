@@ -14,7 +14,7 @@
 //! ([`SETTLE`]): a log that another process holds must not keep the daemon from ending.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use cf_bridge::local::Bridge;
@@ -110,10 +110,177 @@ pub fn mark(home: &Path) -> std::io::Result<()> {
         .map_err(|failed| std::io::Error::other(failed.to_string()))
 }
 
-/// Whether `home` holds the marker, as a name that is there (a link included): the one sign,
-/// until a first start is all or nothing (P23-A2), that a home has had a board.
+/// What the daemon writes in a home once it has a ledger, each by its name in the home: a
+/// name that is there, whatever it is (a link included, dangling or not), shows that the
+/// home has been run in, whichever build wrote it. A ledger's file is one too, as anything.
+const WITNESSES: [&str; 9] = [
+    MARKER,
+    LEDGER,
+    "consensflow.db-wal",
+    "consensflow.db-shm",
+    "daemon.log",
+    "daemon.log.1",
+    "daemon.log.lock",
+    "events.jsonl",
+    "events.jsonl.1",
+];
+
+/// What a home is, judged before anything is written in it.
+#[derive(Debug)]
+pub enum Home {
+    /// It holds a witness: a board was kept here, and the start never makes it empty.
+    Used,
+    /// Every name asked was not there, and the folder was read whole or is not there.
+    Unused,
+    /// A look failed for a reason other than "not there", and no witness was found: the home
+    /// is refused, for its refusal to say whether a board is kept there is not given.
+    Unknown(PathBuf, std::io::Error),
+}
+
+/// The names in a folder, as the system lists them (a stand-in lists what a test says).
+pub type Lister = dyn Fn(&Path) -> std::io::Result<Vec<std::io::Result<String>>>;
+
+/// [`judge_with`] over the folder as the system lists it.
+pub fn judge(home: &Path) -> Home {
+    judge_with(home, &|folder| {
+        Ok(fs::read_dir(folder)?
+            .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+            .collect())
+    })
+}
+
+/// Says what `home` is. It only reads. **The app's own files are no witness:** the app makes
+/// `app/`, opens `app/app.log` and may keep `app/updates.json` before the daemon's first start,
+/// the page keeps `agents.json`, and a first start's staging file is its own: a home with
+/// only these is a first use. Where the whole folder is replaced by another, empty one (a
+/// mount point whose disk is not there) nothing is left to show it: a known limit (39).
+pub fn judge_with(home: &Path, list: &Lister) -> Home {
+    let mut unread = None;
+    for name in WITNESSES {
+        match fs::symlink_metadata(home.join(name)) {
+            Ok(_) => return Home::Used,
+            Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => {}
+            Err(failed) => unread = unread.or(Some(failed)),
+        }
+    }
+    match list(home) {
+        Ok(names) => {
+            for name in names {
+                match name {
+                    Ok(name) if name.ends_with(".jsonl") => return Home::Used,
+                    Ok(_) => {}
+                    Err(failed) => unread = unread.or(Some(failed)),
+                }
+            }
+        }
+        Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => {}
+        Err(failed) => unread = unread.or(Some(failed)),
+    }
+    match unread {
+        Some(failed) => Home::Unknown(home.to_path_buf(), failed),
+        None => Home::Unused,
+    }
+}
+
+/// Whether `home` holds the marker, as a name that is there (a link included).
 pub fn marked(home: &Path) -> bool {
     fs::symlink_metadata(home.join(MARKER)).is_ok()
+}
+
+/// What a first start does to the disk, each a file operation of its own: the real ones, or
+/// the ones a test puts in their place to refuse one or to be cut at it.
+#[derive(Clone, Copy)]
+pub struct Steps {
+    /// The ledger made whole in a new file ([`cf_ledger::make_ledger`]).
+    pub make: fn(&Path) -> std::io::Result<()>,
+    /// The closed file flushed.
+    pub flush: fn(&Path) -> std::io::Result<()>,
+    /// The file put at a name only if it is free, and the folder flushed.
+    pub put: fn(&Path, &Path) -> std::io::Result<()>,
+    /// A file removed.
+    pub remove: fn(&Path) -> std::io::Result<()>,
+}
+
+impl Steps {
+    /// What a start does.
+    pub const REAL: Steps = Steps {
+        make: |staging| {
+            cf_ledger::make_ledger(staging).map_err(|failed| std::io::Error::other(failed.to_string()))
+        },
+        flush: cf_base::file::flush_path,
+        put: cf_base::file::put_new,
+        remove: |file| fs::remove_file(file),
+    };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a test puts in place of the first start's file operations, for the start of its thread.
+    pub(crate) static STEPS: std::cell::Cell<Steps> = const { std::cell::Cell::new(Steps::REAL) };
+}
+
+/// The file operations of this start's first ledger.
+pub fn steps() -> Steps {
+    #[cfg(test)]
+    {
+        STEPS.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        Steps::REAL
+    }
+}
+
+/// What a leftover of a first start that was cut is called: the ledger's name, `.new-`, and
+/// sixteen hex digits of the system's entropy. Only a first start makes such a name.
+const STAGING: &str = "consensflow.db.new-";
+
+fn is_staging(name: &str) -> bool {
+    name.strip_prefix(STAGING)
+        .is_some_and(|rest| rest.len() == 16 && rest.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The first ledger of an unused home, made all or nothing (T-2241 findings 11, 12): whole
+/// under a name that is no witness, flushed, and put at [`LEDGER`] only if that name is free.
+/// A failure or a cut before the put leaves a staging file and nothing that counts; a name
+/// that was taken meanwhile is left to the start that goes on (it holds the ledger, or is
+/// refused as `ledger-locked`). Returns nothing the caller must clean up.
+pub fn first_ledger(home: &Path, steps: &Steps) -> Result<(), ()> {
+    let name = home.join(LEDGER);
+    let Ok(random) = crate::api::credentials::random_hex(&cf_harness::seams::SystemEntropy, 8) else {
+        return Err(());
+    };
+    let staging = home.join(format!("{STAGING}{random}"));
+    let put = (steps.make)(&staging)
+        .and_then(|()| (steps.flush)(&staging))
+        .and_then(|()| (steps.put)(&staging, &name));
+    if put.is_ok() {
+        return Ok(());
+    }
+    // Where the name is there now, another start took it, or this one did and failed to flush
+    // the folder: either way it goes on as a start on a ledger that is there.
+    let taken = fs::symlink_metadata(&name).is_ok();
+    let _ = (steps.remove)(&staging);
+    if taken {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+/// Removes what a first start that was cut left, by its name: the staging files of this home.
+/// Only the daemon that holds the ledger asks, after its open, so a start that builds its
+/// own is never beneath it (on Windows its removal is refused; on Unix that start finds its
+/// file gone at the put, the name taken, and goes on as a start that is refused as locked).
+pub fn remove_leftovers(home: &Path) {
+    let Ok(names) = fs::read_dir(home) else {
+        return;
+    };
+    for entry in names.flatten() {
+        if is_staging(&entry.file_name().to_string_lossy()) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// What a home's ledger file is, looked at where SQLite will open it (a link is followed:

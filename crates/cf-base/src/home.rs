@@ -76,7 +76,32 @@ pub fn marker_words(marker: &std::path::Path) -> String {
     format!(
         "ConsensFlow can't write {}, the file that says this home has a board, so it has not \
          started. The disk may be full, failing or disconnected, or you may have lost write \
-         permission. Restore access to it, then open ConsensFlow again.",
+         permission. Restore access to it, then open ConsensFlow again. No saved work was changed.",
+        whole.display()
+    )
+}
+
+/// What the person is told when the home can't be listed or looked into: ConsensFlow can't
+/// tell whether a board is kept there, so it has not started, and has changed nothing.
+pub fn unread_home_words(home: &std::path::Path) -> String {
+    let whole = std::path::absolute(home).unwrap_or_else(|_| home.to_path_buf());
+    format!(
+        "ConsensFlow can't read its folder {}, so it can't tell whether a board is kept there, \
+         and it has not started. You may have lost permission to that folder, or its disk may \
+         be failing or disconnected. Restore your access to it, then open ConsensFlow again. \
+         Nothing in it was changed.",
+        whole.display()
+    )
+}
+
+/// What the person is told when a first ledger can't be made or put at its name: the start
+/// is refused, and its retry is a first start again.
+pub fn first_ledger_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "ConsensFlow can't make its ledger at {}, so it has not started. The disk may be full, \
+         failing or disconnected, or you may not have write permission there. Once you can \
+         write to that folder, open ConsensFlow again.",
         whole.display()
     )
 }

@@ -15,12 +15,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// What makes the transaction, or opens the file, or is the tests' own.
-const THE_GUARD_AND_ITS_OWN: [&str; 9] = [
+const THE_GUARD_AND_ITS_OWN: [&str; 13] = [
     "write",
     "write_batch",
     "migrate",
     "open_ledger",
     "open_existing_ledger",
+    "hold_ledger",
+    "make_ledger",
+    "open",
+    "finish",
     "open_ledger_as",
     "write_raw",
     "roll_back",

@@ -24,6 +24,7 @@ use super::*;
 use crate::testing::Said;
 
 mod broken;
+mod first_start;
 mod held;
 mod input;
 mod restart;
@@ -463,7 +464,7 @@ async fn a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_th
 }
 
 #[tokio::test]
-async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_exit_1() {
+async fn a_file_that_is_no_ledger_fails_the_start_and_the_log_ends_with_exit_74() {
     LocalSet::new()
         .run_until(async {
             let root = Rc::new(tempfile::tempdir().unwrap());
@@ -485,7 +486,7 @@ async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_ex
                 said_of(&lines[0]).starts_with("info start pid "),
                 "{lines:?}"
             );
-            assert_eq!(said_of(&lines[1]), "info exit 1");
+            assert_eq!(said_of(&lines[1]), "info exit 74");
         })
         .await;
 }

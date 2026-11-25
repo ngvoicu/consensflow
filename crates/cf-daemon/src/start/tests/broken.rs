@@ -241,11 +241,10 @@ async fn a_home_that_was_used_and_has_no_ledger_is_refused_and_never_started_as_
         .await;
 }
 
-/// Until the first start is all or nothing (P23-A2) the marker alone makes a home used: a home
-/// without it is opened as main opens it, whatever else it holds, so that a first start that was
-/// cut or failed, and left its log and its trace and maybe a ledger of no bytes, is retried.
+/// A home with nothing of ours in it, or only what is no witness (the app's own files, the
+/// page's, a first start's staging file), is a first use: it starts, and is marked.
 #[tokio::test]
-async fn a_home_without_the_marker_is_opened_as_main_opens_it() {
+async fn a_home_with_no_witness_is_a_first_use() {
     LocalSet::new()
         .run_until(async {
             type Left = fn(&Path);
@@ -253,15 +252,16 @@ async fn a_home_without_the_marker_is_opened_as_main_opens_it() {
                 ("nothing of ours", |home| {
                     std::fs::write(home.join("notes.txt"), "the person's own").unwrap();
                 }),
-                ("a failed first start's log and trace", |home| {
-                    std::fs::write(home.join("daemon.log"), "start\n").unwrap();
-                    std::fs::write(home.join("daemon.log.lock"), "").unwrap();
-                    std::fs::write(home.join("events.jsonl"), "{\"kind\":\"daemon.start\"}\n")
-                        .unwrap();
+                ("the app's own files", |home| {
+                    std::fs::create_dir_all(home.join("app")).unwrap();
+                    std::fs::write(home.join("app/app.log"), "x\n").unwrap();
+                    std::fs::write(home.join("app/updates.json"), "{}").unwrap();
                 }),
-                ("a ledger of no bytes", |home| {
-                    std::fs::write(home.join("daemon.log"), "start\n").unwrap();
-                    std::fs::write(home.join("consensflow.db"), b"").unwrap();
+                ("the page's agents file", |home| {
+                    std::fs::write(home.join("agents.json"), "[]").unwrap();
+                }),
+                ("a staging file of a cut first start", |home| {
+                    std::fs::write(home.join("consensflow.db.new-0123456789abcdef"), "x").unwrap();
                 }),
             ];
             for (row, leave) in table {
@@ -300,7 +300,7 @@ async fn an_empty_file_in_a_used_home_is_refused_and_stays_empty() {
                 .err()
                 .expect("an empty file is no ledger");
             assert!(matches!(
-                at_start_of_used(&ledger, false, failed),
+                at_start_of_used(&ledger, failed),
                 StartError::CannotSave(words) if words == crate::broken::lost_words(&ledger)
             ));
             assert_eq!(std::fs::metadata(&ledger).unwrap().len(), 0);
@@ -333,9 +333,9 @@ async fn an_unreadable_ledger_in_a_used_home_exits_74_with_the_new_board_words()
         .await;
 }
 
-/// A marker that cannot be written stops the start with 74 and words that name the file; the
-/// words claim nothing of the board, for an upgrade may have committed already, and the log
-/// says the status the process ends with.
+/// A marker that cannot be written stops the start with 74 and words that name the file, before
+/// the first write to a ledger that was there: its bytes are the same after, and the words say
+/// so. The log says the status the process ends with.
 #[tokio::test]
 async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
     LocalSet::new()
@@ -352,6 +352,7 @@ async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
                 .execute_batch("PRAGMA user_version = 43")
                 .unwrap();
             drop(older);
+            let bytes = std::fs::read(&file).unwrap();
             // Where the marker's temporary file would go.
             std::fs::create_dir(home.join(format!(
                 "{}.{}.tmp",
@@ -366,14 +367,15 @@ async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
             };
             assert!(words.contains(crate::broken::MARKER), "{words}");
             assert!(!home.join(crate::broken::MARKER).exists());
+            assert_eq!(std::fs::read(&file).unwrap(), bytes, "the ledger was not written");
             let now = rusqlite::Connection::open(&file).unwrap();
             let version: i64 = now
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 44, "the upgrade had committed");
+            assert_eq!(version, 43, "the upgrade did not run");
             assert!(
-                !words.contains("Nothing of the board"),
-                "the words claim nothing of the board: {words}"
+                words.contains("No saved work was changed."),
+                "the words say what is true: {words}"
             );
             let log = log_lines(&home);
             let said: Vec<&str> = log.iter().map(|line| said_of(line)).collect();
@@ -410,7 +412,7 @@ fn a_ledger_that_cannot_be_saved_to_at_the_start_is_told_as_one_and_a_held_one_i
 }
 
 /// A home with a marker and no trace at all: what a home holds that this build has opened.
-fn a_marked_home(root: &Path) -> PathBuf {
+pub(super) fn a_marked_home(root: &Path) -> PathBuf {
     let home = root.join("consensflow");
     std::fs::create_dir_all(&home).unwrap();
     crate::broken::mark(&home).unwrap();
@@ -418,7 +420,7 @@ fn a_marked_home(root: &Path) -> PathBuf {
 }
 
 /// Starts a daemon over `root` and says what came of it: the refusal, or the daemon (stopped).
-async fn started_over(root: &Path) -> Result<(), StartError> {
+pub(super) async fn started_over(root: &Path) -> Result<(), StartError> {
     let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
     let (options, _app) = options(root, &said, &exited, &handles);
     let daemon = start(environment(root), options).await?;
@@ -547,7 +549,7 @@ async fn a_ledger_that_goes_between_the_look_and_the_open_is_refused_not_made_ag
     assert!(failed.cannot_save(), "{failed}");
     assert!(!file.exists(), "SQLite was given no leave to make it");
     assert!(matches!(
-        at_start_of_used(&file, false, failed),
+        at_start_of_used(&file, failed),
         StartError::CannotSave(words) if words == crate::broken::lost_words(&file)
     ));
 }

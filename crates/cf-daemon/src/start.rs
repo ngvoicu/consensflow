@@ -37,7 +37,7 @@ use cf_harness::seams::{
     Bundle, Entropy, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback,
     SystemProcesses,
 };
-use cf_ledger::{open_ledger, LedgerError, Options as LedgerOptions};
+use cf_ledger::{LedgerError, Options as LedgerOptions};
 use cf_proto::page::HandleLine;
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -163,10 +163,10 @@ fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
     }
 }
 
-/// [`at_start`] for the open of the ledger: one that was there and is not any more, between
-/// the look at it and the open, is a ledger lost, said as one.
-fn at_start_of_used(file: &std::path::Path, create: bool, failed: LedgerError) -> StartError {
-    if !create && (failed.cannot_save() || failed.code() == Some("ledger-unreadable")) {
+/// [`at_start`] for the look at a ledger that is there: one that was there and is not any more,
+/// is no ledger of ConsensFlow's, or can't be looked at, is a ledger lost, said as one.
+fn at_start_of_used(file: &std::path::Path, failed: LedgerError) -> StartError {
+    if failed.cannot_save() || failed.code() == Some("ledger-unreadable") {
         StartError::CannotSave(crate::broken::lost_words(file))
     } else {
         at_start(file, failed)
@@ -225,22 +225,37 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
     let home = config_root(&env).ok_or(StartError::NoHome)?;
-    // A home that holds the marker has had a board: with its ledger missing, empty,
-    // unreadable or a dangling link it is not a first use, and is refused, in the words of a
-    // ledger that cannot be saved to with how to start anew on purpose, and never started as
-    // an empty board. A ledger that is there is opened with no leave to make it, so one that
-    // goes between this look and the open is refused too. A home without the marker is opened
-    // as main opens it, with leave to make the ledger, whatever is at its name.
-    let used = crate::broken::marked(&home);
-    make_folder(&home, 0o777, Mkdir::Sync)
-        .map_err(|failed| StartError::System(failed.to_string()))?;
+    // The home is judged before anything is written in it: used (a witness is there), unused,
+    // or unknown (a look failed, and no witness was found). A used home whose ledger is
+    // missing, empty, a link to nothing or no file is not a first use: it is refused in the
+    // words of a ledger that cannot be saved to, with how to start anew on purpose, and never
+    // started as an empty board. An unused home makes its first ledger all or nothing, which
+    // writes nothing the next judging counts until the ledger is at its name.
     let ledger_file = home.join(crate::broken::LEDGER);
-    if used && crate::broken::ledger_file(&ledger_file) != crate::broken::Ledgerfile::Held {
-        return Err(StartError::CannotSave(crate::broken::lost_words(
-            &ledger_file,
-        )));
+    match crate::broken::judge(&home) {
+        crate::broken::Home::Unknown(..) => {
+            return Err(StartError::CannotSave(cf_base::home::unread_home_words(
+                &home,
+            )));
+        }
+        crate::broken::Home::Used => {
+            make_folder(&home, 0o777, Mkdir::Sync)
+                .map_err(|failed| StartError::System(failed.to_string()))?;
+            if crate::broken::ledger_file(&ledger_file) != crate::broken::Ledgerfile::Held {
+                return Err(StartError::CannotSave(crate::broken::lost_words(
+                    &ledger_file,
+                )));
+            }
+        }
+        crate::broken::Home::Unused => {
+            let first_failed = || {
+                StartError::CannotSave(cf_base::home::first_ledger_words(&ledger_file))
+            };
+            make_folder(&home, 0o777, Mkdir::Sync).map_err(|_| first_failed())?;
+            crate::broken::first_ledger(&home, &crate::broken::steps())
+                .map_err(|()| first_failed())?;
+        }
     }
-    let create = !used;
     let trace = Rc::new(Trace::new(&home));
     trace
         .started()
@@ -275,7 +290,6 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         Rc::clone(&log),
         errors,
         Opening {
-            create,
             announce: Rc::clone(&announce),
         },
     )
@@ -287,10 +301,8 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     started
 }
 
-/// What the start knows of the ledger it is about to open: whether it may make one, and
-/// how it says its first line.
+/// What the start knows of the ledger it is about to open: how it says its first line.
 struct Opening {
-    create: bool,
     announce: Rc<dyn Fn(bool)>,
 }
 
@@ -302,7 +314,7 @@ async fn run(
     trace: Rc<Trace>,
     log: Rc<Log>,
     errors: Rc<Errors>,
-    Opening { create, announce }: Opening,
+    Opening { announce }: Opening,
 ) -> Result<Daemon, StartError> {
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
@@ -312,15 +324,13 @@ async fn run(
         trace: Box::new(move |event| told.event(event)),
         ..LedgerOptions::default()
     };
-    let opened = if create {
-        open_ledger(&ledger_file, ledger_options)
-    } else {
-        cf_ledger::open_existing_ledger(&ledger_file, ledger_options)
-    };
-    let ledger = opened.map_err(|failed| at_start_of_used(&ledger_file, create, failed))?;
-    // The ledger is there: the home says it has a board from now on.
-    // A marker that cannot be written stops the start: a home that would not be known to
-    // have a board is one that could open empty at the next start.
+    // The ledger is held, known to be ConsensFlow's, with nothing of it written: a file that is
+    // not one is refused here (as lost, for the home is used), never migrated.
+    let held = cf_ledger::hold_ledger(&ledger_file)
+        .map_err(|failed| at_start_of_used(&ledger_file, failed))?;
+    // The home says it has a board from now on, before the first write to the ledger: a marker
+    // that cannot be written stops the start with nothing of the saved work changed, and a home
+    // that would not be known to have a board is one that could open empty at the next start.
     if let Err(failed) = crate::broken::mark(&home) {
         announce(true);
         log.error_within(
@@ -333,6 +343,13 @@ async fn run(
         )));
     }
     announce(false);
+    // The first writes to the ledger.
+    let ledger = held
+        .open(ledger_options)
+        .map_err(|failed| at_start(&ledger_file, failed))?;
+    // What an earlier first start that was cut left, by its name, is this one's to remove: it
+    // holds the ledger.
+    crate::broken::remove_leftovers(&home);
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
     let limits = Limits::of(&env);

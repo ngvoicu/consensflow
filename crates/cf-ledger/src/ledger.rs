@@ -108,11 +108,132 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     open_ledger_as(file, options, true)
 }
 
-/// [`open_ledger`] for a ledger that is there: SQLite is given no leave to make the file,
-/// so one that went (moved, a link left dangling) between the look at it and this open is
-/// refused (`SQLITE_CANTOPEN`) and never made again empty beside the board it was.
+/// [`open_ledger`] for a ledger that is there: it is held ([`hold_ledger`]) and known to be
+/// ConsensFlow's, and then opened. Nothing is made: a ledger that went (moved, a link left
+/// dangling) between the look at it and this open is refused and never made again empty
+/// beside the board it was.
 pub fn open_existing_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
-    open_ledger_as(file, options, false)
+    hold_ledger(file)?.open(options)
+}
+
+/// The eight tables every released ledger has, from schema version 1 to this build's:
+/// migration 1 makes them and sets `user_version` in one transaction.
+const TABLES_OF_EVERY_RELEASE: [&str; 8] = [
+    "project",
+    "participant",
+    "conversation",
+    "task",
+    "task_need",
+    "message",
+    "transcript",
+    "event",
+];
+
+/// A ledger of a file that is ConsensFlow's, held by this instance alone and with nothing of it
+/// written: [`Held::open`] makes the first writes.
+pub struct Held {
+    db: Connection,
+    file: std::path::PathBuf,
+}
+
+/// The ledger at `file`, held and known to be ConsensFlow's, with nothing of it written.
+///
+/// SQLite is given no leave to make the file. Before any statement that writes it asks, of
+/// the file as it is: at least one page, a `user_version` of 1 or more, and the eight tables
+/// every release has (the tables are asked once the instance lock is taken, so what is
+/// asked is what is held). A file that fails the look is `ledger-unreadable` and is never
+/// migrated; a file another instance holds is `ledger-locked`, and one a newer build wrote
+/// `ledger-newer` (at [`Held::open`]).
+pub fn hold_ledger(file: &Path) -> Result<Held, LedgerError> {
+    let mut flags = rusqlite::OpenFlags::default();
+    flags.remove(rusqlite::OpenFlags::SQLITE_OPEN_CREATE);
+    let db = Connection::open_with_flags(file, flags)?;
+    // SQLite's own default waits five seconds for a lock: a second instance
+    // is refused at once instead. Node set both of these when it opened.
+    db.busy_timeout(Duration::ZERO)?;
+    let looked = (|| {
+        let unreadable = |what: &str| {
+            Err(LedgerError::refused_with(
+                "ledger-unreadable",
+                format!("{} is not a ConsensFlow ledger: {what}", file.display()),
+                409,
+            ))
+        };
+        // A file with no page in it is no ledger that was; it is asked before the lock is
+        // taken, which would make the page of a new database.
+        let pages: i64 = db.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+        if pages == 0 {
+            return unreadable("the file is empty");
+        }
+        db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        // In exclusive mode the first lock is kept until the connection closes; taking it
+        // here is what makes this connection the only one. A transaction that changes
+        // nothing writes nothing.
+        db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
+        let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version < 1 {
+            return unreadable("it has no schema version");
+        }
+        let tables: i64 = db.query_row(
+            &format!(
+                "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name IN ({})",
+                crate::model::sql_list(&TABLES_OF_EVERY_RELEASE)
+            ),
+            [],
+            |row| row.get(0),
+        )?;
+        if tables != TABLES_OF_EVERY_RELEASE.len() as i64 {
+            return unreadable("it lacks the tables every ConsensFlow ledger has");
+        }
+        Ok(())
+    })();
+    if let Err(cause) = looked {
+        drop(db);
+        return Err(opening_refusal(file, cause));
+    }
+    Ok(Held {
+        db,
+        file: file.to_path_buf(),
+    })
+}
+
+impl Held {
+    /// The first writes: the ledger in WAL, brought to this build's schema, and reconciled.
+    pub fn open(self, options: Options) -> Result<Ledger, LedgerError> {
+        finish(self.db, &self.file, options)
+    }
+}
+
+/// A whole ledger of this build's schema, made in a new file at `staging` and closed.
+///
+/// The file is made new (a name that is there is refused). Every write of the build goes in
+/// the memory journal with no wait for the disk, in exclusive locking mode: no file is ever
+/// beside it, and nothing of it counts until it is put at the ledger's name, so no step of
+/// the build is waited for. The close is checked. A failure leaves the file made: the
+/// caller removes it.
+pub fn make_ledger(staging: &Path) -> Result<(), LedgerError> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(staging)
+        .map_err(|failed| {
+            LedgerError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(format!("{}: {failed}", staging.display())),
+            ))
+        })?;
+    let mut flags = rusqlite::OpenFlags::default();
+    flags.remove(rusqlite::OpenFlags::SQLITE_OPEN_CREATE);
+    let db = Connection::open_with_flags(staging, flags)?;
+    let built = (|| {
+        db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+        db.execute_batch("PRAGMA journal_mode = MEMORY")?;
+        db.execute_batch("PRAGMA synchronous = OFF")?;
+        db.execute_batch("PRAGMA foreign_keys = ON")?;
+        migrate(&db, &MIGRATIONS)
+    })();
+    let closed = db.close().map_err(|(_, cause)| LedgerError::from(cause));
+    built.and(closed)
 }
 
 fn open_ledger_as(file: &Path, options: Options, create: bool) -> Result<Ledger, LedgerError> {
@@ -125,22 +246,23 @@ fn open_ledger_as(file: &Path, options: Options, create: bool) -> Result<Ledger,
     // is refused at once instead. Node set both of these when it opened.
     db.busy_timeout(Duration::ZERO)?;
     db.execute_batch("PRAGMA foreign_keys = ON")?;
-    let ready = (|| {
-        if !create {
-            // Through the handle this open holds: a file with no page in it is no ledger
-            // that was, and is not made into one.
-            let pages: i64 = db.query_row("PRAGMA page_count", [], |row| row.get(0))?;
-            if pages == 0 {
-                return Err(LedgerError::Sqlite(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-                    Some("the ledger file is empty".to_owned()),
-                )));
-            }
-        }
+    let held = (|| {
         db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
         // In exclusive mode the first write lock is kept until the connection
         // closes; taking it here is what makes this connection the only one.
-        db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
+        db.execute_batch("BEGIN EXCLUSIVE; COMMIT")
+    })();
+    if let Err(cause) = held {
+        drop(db);
+        return Err(opening_refusal(file, cause.into()));
+    }
+    finish(db, file, options)
+}
+
+/// What `open_ledger` and [`Held::open`] share once the ledger is held.
+fn finish(db: Connection, file: &Path, options: Options) -> Result<Ledger, LedgerError> {
+    db.execute_batch("PRAGMA foreign_keys = ON")?;
+    let ready = (|| {
         db.execute_batch("PRAGMA journal_mode = WAL")?;
         db.execute_batch(&format!(
             "PRAGMA synchronous = {}",
