@@ -45,6 +45,7 @@ mod gate {
 
     const PROGRAM: &str = r#"
     import os, sys, tty
+    owner = os.getppid()
     tty.setraw(1)
     fd = os.open(sys.argv[1], os.O_RDWR)
     buf = b''
@@ -54,7 +55,7 @@ mod gate {
             v = v[os.write(1, v):]
     while True:
         d = os.read(fd, 1 << 20)
-        if not d:
+        if not d or os.getppid() != owner:
             sys.exit(0)
         buf += d
         while b'\n' in buf:

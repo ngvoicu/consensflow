@@ -139,6 +139,22 @@ pub fn assert_started(log: &str, pid: u32) -> Result<StartLine> {
     Ok(start)
 }
 
+/// [`assert_started`] on the log as `read` gives it, read again for up to ten seconds where
+/// the start line is not in it yet: the daemon's log is written by a thread of its own, so its
+/// start line may come a moment after the handle that says it is ready (T-2232).
+pub fn assert_started_in(mut read: impl FnMut() -> Result<String>, pid: u32) -> Result<StartLine> {
+    let began = std::time::Instant::now();
+    loop {
+        let log = read()?;
+        if start_line(&log, Some(pid)).is_some()
+            || began.elapsed() >= std::time::Duration::from_secs(10)
+        {
+            return assert_started(&log, pid);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
