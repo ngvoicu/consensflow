@@ -20651,30 +20651,31 @@ test('D8 the give choice of New project tells apart two members on the same mode
 
 test("D8 New project's refusal beside Start follows the slot as it is mended", async ({ page }) => {
   const data = staffOf(model())
+  // Three standard workers, two of them holding another role too: a worker role taken from
+  // either is asked nothing, and the member stays.
   data.lastStaff = [
     lastOf(30, ['worker'], 'standard', SONNET),
-    lastOf(31, ['worker'], 'standard', LUNA),
-    lastOf(32, ['worker'], 'standard', {}),
+    lastOf(31, ['worker', 'reviewer'], 'standard', LUNA),
+    lastOf(32, ['worker', 'tester'], 'standard', {}),
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const fresh = page.getByRole('dialog', { name: 'New project' })
   await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
   const refusal = fresh.locator('.dialog-refusal')
-  const members = fresh.getByRole('table', { name: 'Members for the staff' })
-  const moveTo = async (name, tier) => {
-    await members.getByRole('button', { name: `Edit ${name}` }).click()
-    await expect(fresh.locator('.staff-add [name="memberModel"]')).toBeEnabled()
-    await fresh.locator('.staff-add [name="memberTier"]').selectOption(tier)
-    await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
-  }
+  const cell = slotCell(fresh, 'worker:standard')
   await fresh.getByRole('button', { name: 'Start project' }).click()
   await expect(refusal).toHaveText(/^The standard worker slot holds three members, /)
-  // One moves to another tier: the refusal says the slot as it is now.
-  await moveTo('gpt-6-astra', 'complex')
+  // One worker role goes: the refusal says the slot as it is now.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await expect(cell.locator('.slot-holder')).toHaveCount(2)
   await expect(refusal).toHaveText(/^The standard worker slot holds two members, /)
-  // Mended: the refusal goes with the crowd, and Start starts.
-  await moveTo('gpt-5.6-luna', 'light')
+  // Mended by an Edit to another tier: the refusal goes with the crowd, and Start starts.
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await members.getByRole('button', { name: 'Edit gpt-6-astra' }).click()
+  await expect(fresh.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  await fresh.locator('.staff-add [name="memberTier"]').selectOption('light')
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
   await expect(fresh.locator('.slot-words')).toHaveCount(0)
   await expect(refusal).toBeHidden()
   expect(await calls(page, 'project.open')).toEqual([])
