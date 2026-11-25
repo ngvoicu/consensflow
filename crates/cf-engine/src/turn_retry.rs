@@ -6,17 +6,17 @@
 //!
 //! **The count is stored, never read from the order of messages.** The tries a task has used in
 //! a row are a number on the task (`task.turn_retries`), raised by the ledger in the write that
-//! queues a numbered Resume and put back to zero in the write of a person's or the chief's
-//! action on the task (a Resume or reopen, a tell, an answer), of its result, or of the first
-//! failure 30 minutes or more after both the last numbered Resume that was delivered and the last
-//! time the count started again, so time renews it at most once in 30 minutes (one queued and
-//! withdrawn counts toward the two, and hides no delivery). A task given to another window, by
-//! the daemon to its member's backup or by a person's Reassign, is a fresh run and begins at
-//! zero: each window gets at most two automatic Resumes in a row. A quota's or a busy model's
-//! own Resume is neither: the count stands across it, and the same window coming back from such a
-//! hold begins nothing again. Nothing is ordered by a wall-clock
-//! time, and no harness's reading of a turn's end resets it. The daemon alone can never try
-//! more than twice in a row; if the computer's clock jumps forward, the 30 minutes can end early.
+//! queues a numbered Resume and put back to zero on exactly three things: a person's or the
+//! chief's action on the task (a Resume or reopen, a tell, an answer), its result, and a failure
+//! 30 minutes or more after `task.turn_retry_at`, the last moment anything happened to a
+//! numbered retry of the task (one was charged, delivered or withdrawn: written in the same
+//! write as its cause, by nothing else). A clock that reads earlier than that time never renews.
+//! A task given to another window, by the daemon to its member's backup or by a person's
+//! Reassign, is a fresh run and begins at zero: each window gets at most two automatic Resumes
+//! in a row. A quota's or a busy model's own Resume is neither: the count stands across it, and
+//! the same window coming back from such a hold begins nothing again. No harness's reading of a
+//! turn's end resets it. The daemon alone can never try more than twice in a row; if the
+//! computer's clock jumps forward, the 30 minutes can end early.
 //!
 //! **Nothing reads why.** No code, no kind and no words of the failure decide: a missing model
 //! gets the same two tries.
@@ -35,7 +35,8 @@ use crate::turn_end::Watching;
 
 /// How many units a failed turn's second try waits (30 seconds, 2 minutes: four to one).
 const SECOND_TRY_UNITS: i64 = 4;
-/// How long after the last automatic Resume a failed turn gets a fresh pair of tries.
+/// How long after `turn_retry_at` (the last moment anything happened to a numbered retry) a failed
+/// turn gets a fresh pair of tries.
 const RENEWAL_MS: i64 = 30 * 60 * 1000;
 
 /// Whether the look shows a turn positively at work: its record's settlement says in flight.
@@ -89,8 +90,7 @@ impl Dispatcher {
         }
         // The tries used are a number on the task, kept by the ledger in the writes that queue
         // a numbered Resume and in those that start the count again (a person's or the chief's
-        // action on the task, its result, or a failure 30 minutes after the last numbered
-        // Resume was delivered). The ledger decides in this one write; nothing here orders
+        // action on the task, its result, or a failure 30 minutes after `turn_retry_at`). The ledger decides in this one write; nothing here orders
         // messages by their times or reads a harness's idea of how a turn ended.
         let held = self.seams.ledger.borrow_mut().hold_task_for_retry(
             project.id,
@@ -116,7 +116,7 @@ impl Dispatcher {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, or another window (its member's backup, or a Reassign); by time it starts again only 30 minutes after the last automatic try that reached it and 30 minutes after the count last started again. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, or another window (its member's backup, or a Reassign); by time it starts again on a failure 30 minutes or more after the last moment anything happened to one of its automatic tries. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
                 n = task.number,
                 first = spoken(unit),
                 second = spoken(SECOND_TRY_UNITS * unit),

@@ -2,7 +2,7 @@
 //! written with the hold, its message once when main's own Resume of that hold is queued, and
 //! never changed after. The tries a task has used in a row are a number on the task: raised in the
 //! write that queues a numbered Resume, back to zero in the write of an action on the task, of
-//! its result, or of a failure 30 minutes after the last numbered Resume was delivered.
+//! its result, or of a failure 30 minutes after `turn_retry_at`, the last moment anything happened to a numbered retry.
 
 #![allow(clippy::expect_used)]
 

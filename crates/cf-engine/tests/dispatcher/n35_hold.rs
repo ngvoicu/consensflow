@@ -2,7 +2,7 @@
 //! the task and main's own Resume, with nothing pending of its own: where main would fail a
 //! working task for a failed end, the task is held for 30 seconds, then for 2 minutes, and the
 //! pass that finds the hold due resumes it. The count is a number stored on the task (the
-//! ledger raises it with the numbered Resume and resets it on an action, a result or 30 minutes). Every case drives the stand-in window through real passes and the
+//! ledger raises it with the numbered Resume and resets it on an action, a result or a failure 30 minutes after `turn_retry_at`). Every case drives the stand-in window through real passes and the
 //! ledger's own messages, with the tries on at the daemon's pace.
 use super::fixtures::{given, Tiers};
 use cf_engine::testing::{Context, Made};

@@ -92,7 +92,7 @@ pub enum RetryHold {
 }
 
 /// How a failed turn's tries are paced: the unit (30 seconds as shipped), how many units the
-/// second try waits, and how long after the last numbered Resume was delivered a failure
+/// second try waits, and how long after `turn_retry_at` a failure
 /// begins its tries again.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPlan {
