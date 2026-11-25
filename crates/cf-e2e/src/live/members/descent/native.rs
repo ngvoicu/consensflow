@@ -328,18 +328,24 @@ mod win {
     /// process's before the end of it: one reading, with exact creation times, which the edges of
     /// the window's tree are proved by ([`super::super::descending_from`]).
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
-        let held: std::cell::RefCell<Vec<Handle>> = std::cell::RefCell::new(Vec::new());
+        let held: std::cell::RefCell<std::collections::HashMap<u32, Handle>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
         let listed = refined_by_handle(super::super::table()?, |pid| {
             match open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)? {
                 Some(handle) => {
                     let opened = handle.opened()?;
-                    held.borrow_mut().push(handle);
+                    held.borrow_mut().insert(pid, handle);
                     Ok(opened)
                 }
                 None => Ok(None),
             }
         });
-        let rows = with_cygwin_parents(listed, cygwin_ps);
+        // The handles are still open: each says its creation time again, after `ps -W` was read.
+        let rows = with_cygwin_parents(listed, cygwin_ps, |pid| {
+            held.borrow()
+                .get(&pid)
+                .and_then(|handle| handle.created().ok().flatten())
+        });
         drop(held);
         Ok(rows)
     }

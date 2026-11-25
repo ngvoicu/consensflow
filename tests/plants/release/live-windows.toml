@@ -247,8 +247,9 @@ file = "crates/cf-e2e/src/live/members/descent.rs"
 find = """            process.link = Link::Created {
                 by,
                 described: Some(parent),
+                held: both_held,
             };"""
-replace = "            let _ = (by, parent);"
+replace = "            let _ = (by, parent, both_held);"
 
 [[plant]]
 name = "live windows: Git Bash is asked of every process whose parent runs"
@@ -257,7 +258,7 @@ runs = ["e2e-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = "        if process.ppid == 0 || began.contains(&process.ppid) {"
+find = "        if process.ppid == 0 || began.contains_key(&process.ppid) {"
 replace = "        if process.ppid == 0 {"
 
 # T-194's P3-1 and P3-7: a row of `ps` with a status letter, the image path of an orphan, and the

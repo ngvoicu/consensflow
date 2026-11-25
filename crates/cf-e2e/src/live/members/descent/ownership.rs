@@ -167,24 +167,50 @@ fn win_row(pid: u32, ppid: u32, born: u64, exe: Option<&str>) -> serde_json::Val
 }
 
 /// Windows' reader over a table, each handle saying the birth the table says and the creator the
-/// table's parent says (`creator` says another for a number), and Git Bash's `ps -W` saying `git`.
+/// table's parent says (`creator` says another for a number), Git Bash's `ps -W` saying `git`, and
+/// `held` the creation time a handle held since before the reading says after it.
 fn win_rows_by(
     table: &[serde_json::Value],
     creator: impl Fn(u32, u32) -> u32,
     git: &str,
+    held: impl Fn(u32) -> Option<u64>,
 ) -> Vec<Running> {
     let listed = table_of(&serde_json::Value::Array(table.to_vec()).to_string()).unwrap();
-    let held = refined_by_handle(listed, |pid| {
+    let opened = refined_by_handle(listed, |pid| {
         Ok(table.iter().find(|row| row["pid"] == pid).map(|row| Opened {
             created: row["started"].as_u64().unwrap(),
             creator: Some(creator(pid, row["ppid"].as_u64().unwrap() as u32)),
         }))
     });
-    with_cygwin_parents(held, |_| Some(git.to_owned()))
+    with_cygwin_parents(opened, |_| Some(git.to_owned()), held)
 }
 
+/// As [`win_rows_by`], every handle held and saying after the reading what it said before.
 fn win_rows(table: &[serde_json::Value], git: &str) -> Vec<Running> {
-    win_rows_by(table, |_, ppid| ppid, git)
+    win_rows_by(table, |_, ppid| ppid, git, |pid| {
+        table
+            .iter()
+            .find(|row| row["pid"] == pid)
+            .map(|row| row["started"].as_u64().unwrap())
+    })
+}
+
+/// As [`win_rows`], the handles of the numbers in `changed` saying another time (or none: not held,
+/// or exited) after the reading.
+fn win_rows_changed(
+    table: &[serde_json::Value],
+    git: &str,
+    changed: &[(u32, Option<u64>)],
+) -> Vec<Running> {
+    win_rows_by(table, |_, ppid| ppid, git, |pid| {
+        match changed.iter().find(|(number, _)| *number == pid) {
+            Some((_, now)) => *now,
+            None => table
+                .iter()
+                .find(|row| row["pid"] == pid)
+                .map(|row| row["started"].as_u64().unwrap()),
+        }
+    })
 }
 
 const SH: &str = r"C:\fixture\usr\bin\sh.exe";
@@ -203,7 +229,7 @@ fn a_windows_leaf_of_a_foreign_process_is_left_running_when_a_later_git_bash_lis
         win_row(L, P, at(300), None),
     ];
     let git = "PID PPID PGID WINPID\n101 1 101 5020\n303 101 101 5040\n";
-    let rows = win_rows(&table, git);
+    let rows = win_rows_changed(&table, git, &[(P, Some(at(400)))]);
     let ended = ended_of(&rows, w, &[(S, at(100)), (P, at(400)), (L, at(300))]);
     assert!(
         !ended.contains(&L),
@@ -228,7 +254,7 @@ fn a_windows_foreign_descendant_is_left_running_when_a_later_git_bash_listing_gi
         win_row(L, M, at(150), None),
     ];
     let git = "PID PPID PGID WINPID\n700 1 700 9000\n701 700 700 5040\n702 701 700 5060\n";
-    let rows = win_rows(&table, git);
+    let rows = win_rows_changed(&table, git, &[(P, Some(at(250))), (M, Some(at(300)))]);
     let ended = ended_of(&rows, w, &[(P, at(250)), (M, at(300)), (L, at(150))]);
     assert!(
         !ended.contains(&L),
@@ -326,7 +352,7 @@ fn a_windows_child_whose_handle_names_another_creator_than_the_table_is_named_an
         win_row(L, P, at(150), None),
     ];
     // The handle of the leaf says a creator that is not the one the table names.
-    let rows = win_rows_by(&table, |pid, ppid| if pid == L { 77 } else { ppid }, "PID PPID PGID WINPID\n");
+    let rows = win_rows_by(&table, |pid, ppid| if pid == L { 77 } else { ppid }, "PID PPID PGID WINPID\n", |_| None);
     assert_eq!(numbers(&descending_from(&rows, w)), [P]);
     let named = unproved_under(&rows, w);
     assert_eq!(named.len(), 1);
@@ -345,4 +371,51 @@ fn a_windows_child_born_before_the_process_that_holds_its_creators_number_is_no_
     let rows = win_rows(&table, "PID PPID PGID WINPID\n");
     assert_eq!(numbers(&descending_from(&rows, w)), [P]);
     assert!(unproved_under(&rows, w).is_empty());
+}
+
+#[test]
+fn the_stuck_scripts_sleep_whose_creator_has_gone_is_the_windows_when_both_ends_were_held() {
+    // `sh ./script` forks a copy of itself that starts the sleep and is gone: the sleep's creator
+    // (9080) is no process. The shell S is the window's; Git Bash says S is the sleep's parent.
+    let w = id(W, at(90));
+    let table = [
+        win_row(W, 0, w.started, None),
+        win_row(S, W, at(100), None),
+        win_row(P, 9080, at(250), Some(SH)),
+    ];
+    let git = "PID PPID PGID WINPID\n101 1 101 5020\n303 101 101 5040\n";
+    let rows = win_rows(&table, git);
+    assert_eq!(numbers(&descending_from(&rows, w)), [S, P]);
+}
+
+#[test]
+fn the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs() {
+    let w = id(W, at(90));
+    let table = [
+        win_row(W, 0, w.started, None),
+        win_row(S, W, at(100), None),
+        win_row(P, 9080, at(250), Some(SH)),
+    ];
+    let git = "PID PPID PGID WINPID\n101 1 101 5020\n303 101 101 5040\n";
+    for changed in [
+        // The sleep is not held, or its number has another process by the end of the reading.
+        [(P, None)],
+        [(P, Some(at(400)))],
+        // The parent is not held, or says another time.
+        [(S, None)],
+        [(S, Some(at(101)))],
+    ] {
+        let rows = win_rows_changed(&table, git, &changed);
+        assert_eq!(numbers(&descending_from(&rows, w)), [S], "{changed:?}");
+        assert_eq!(numbers(&unproved_of(&rows, w)), [P], "{changed:?}");
+        assert!(!ended_of(&rows, w, &[]).contains(&P), "{changed:?}");
+    }
+    // A parent that began after the sleep is no parent of it.
+    let late = [
+        win_row(W, 0, w.started, None),
+        win_row(S, W, at(300), None),
+        win_row(P, 9080, at(250), Some(SH)),
+    ];
+    let rows = win_rows(&late, git);
+    assert_eq!(numbers(&descending_from(&rows, w)), [S]);
 }

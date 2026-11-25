@@ -26,9 +26,15 @@ fn created(process: Running) -> Running {
         link: Link::Created {
             by: process.ppid,
             described: None,
+            held: false,
         },
         ..process
     }
+}
+
+/// `with_cygwin_parents` with no handle held: Git Bash describes, and proves nothing.
+fn not_held(listed: Vec<Running>, ps: impl Fn(&str) -> Option<String>) -> Vec<Running> {
+    with_cygwin_parents(listed, ps, |_| None)
 }
 
 /// `process` as the Git Bash listing described its parent, and nothing else of it changed.
@@ -40,6 +46,7 @@ fn described(process: Running, parent: u32) -> Running {
         link: Link::Created {
             by,
             described: Some(parent),
+            held: false,
         },
         ..process
     }
@@ -632,7 +639,7 @@ fn forked() -> Vec<Running> {
 fn a_cygwin_program_whose_parent_has_gone_is_described_with_the_parent_git_bash_says_and_is_not_the_windows()
 {
     let asked = std::cell::RefCell::new(Vec::new());
-    let repaired = with_cygwin_parents(forked(), |folder| {
+    let repaired = not_held(forked(), |folder| {
         asked.borrow_mut().push(folder.to_owned());
         Some(PS_W.to_owned())
     });
@@ -681,7 +688,7 @@ fn what_git_bash_does_not_say_is_listed_as_it_was() {
         Some("     1466    1464    1464      25892  cons0  197609 18:25:26 /usr/bin/sleep\n"),
     ] {
         let list = forked();
-        let repaired = with_cygwin_parents(list.clone(), |_| ps.map(str::to_owned));
+        let repaired = not_held(list.clone(), |_| ps.map(str::to_owned));
         assert_eq!(repaired, list, "{ps:?}");
     }
     // A process whose parent runs, or that names none, is never looked up.
@@ -690,7 +697,7 @@ fn what_git_bash_does_not_say_is_listed_as_it_was() {
         r"C:\Program Files\Git\usr\bin\ls.exe",
         running(7, 1, 0, r#""C:\Program Files\Git\usr\bin\ls.exe""#),
     ));
-    let repaired = with_cygwin_parents(list.clone(), |folder| {
+    let repaired = not_held(list.clone(), |folder| {
         (folder == GIT_BIN).then(|| PS_W.to_owned())
     });
     assert_eq!(
@@ -775,7 +782,7 @@ fn a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents() {
         r"C:\Program Files\Git\usr\bin\cat.exe",
         created(running(31000, 15, 7777, r#""C:\Program Files\Git\usr\bin\cat.exe""#)),
     ));
-    let repaired = with_cygwin_parents(list, |_| Some(PS_W_FLAGGED.to_owned()));
+    let repaired = not_held(list, |_| Some(PS_W_FLAGGED.to_owned()));
     let parent = |pid: u32| {
         match repaired.iter().find(|one| one.identity.pid == pid).unwrap().link {
             Link::Created { described, .. } => described,
@@ -813,7 +820,7 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         r#""C:\Program Files\Git\usr\bin\ls.exe""#,
     ));
     let asked = std::cell::RefCell::new(Vec::new());
-    let repaired = with_cygwin_parents(list.clone(), |folder| {
+    let repaired = not_held(list.clone(), |folder| {
         asked.borrow_mut().push(folder.to_owned());
         (folder == GIT_BIN).then(|| PS_W.to_owned())
     });

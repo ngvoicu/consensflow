@@ -58,10 +58,12 @@ file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''            process.link = Link::Created {
                 by,
                 described: Some(parent),
+                held: both_held,
             };'''
 replace = '''            process.link = Link::Created {
                 by: parent,
                 described: Some(parent),
+                held: both_held,
             };
             process.ppid = parent;'''
 
@@ -113,3 +115,33 @@ find = '''    for (process, why) in chosen.unproved() {
         ended.failed.push(('''
 replace = '''    for (process, why) in chosen.unproved().iter().take(0) {
         ended.failed.push(('''
+
+[[plant]]
+name = "live descent: a Git Bash edge is accepted with the parent not held"
+meant = "the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                    && held(parent) == Some(*parent_began)'''
+replace = '''                    && true'''
+
+[[plant]]
+name = "live descent: a Git Bash edge is accepted with the program not held"
+meant = "the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                    && held(process.identity.pid) == Some(process.identity.started)'''
+replace = '''                    && true'''
+
+[[plant]]
+name = "live descent: a Git Bash edge is accepted whatever times the handles say"
+meant = "the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_held_or_a_time_differs"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                    && held(parent) == Some(*parent_began)'''
+replace = '''                    && held(parent).is_some()'''

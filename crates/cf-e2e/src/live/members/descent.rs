@@ -68,8 +68,15 @@ pub enum Link {
     /// Windows': the number of the process that created it, read on the process's own handle,
     /// which was held open with every other row's until the whole table was read, so that no
     /// number in it was another process's meanwhile. `described` is the parent Git Bash's `ps -W`
-    /// said of it later, which describes it in a report and proves nothing.
-    Created { by: u32, described: Option<u32> },
+    /// said of it later, which describes it in a report and proves nothing by itself: `held` says
+    /// that the process and the parent described were both held open, with the creation times they
+    /// were read with, before the `ps -W` reading and again after it, so that the number Git Bash
+    /// names is that very process (a held handle's number is no other process's).
+    Created {
+        by: u32,
+        described: Option<u32>,
+        held: bool,
+    },
 }
 
 /// A process of the machine as a check reads it: which it is, the number of the process
@@ -321,16 +328,25 @@ fn proof(all: &[Running], parent: &Running, child: &Running) -> Made {
                 Made::Yes
             }
         }
-        (Link::Created { .. }, Link::Created { by, .. }) => {
+        (
+            Link::Created { .. },
+            Link::Created {
+                by,
+                described,
+                held,
+            },
+        ) => {
             if twice(&|row| row.identity.pid == parent.identity.pid) {
                 Made::Unproved(format!(
                     "two processes of one reading are number {}",
                     parent.identity.pid
                 ))
-            } else if by != parent.identity.pid {
-                Made::No
-            } else {
+            } else if by == parent.identity.pid
+                || (held && described == Some(parent.identity.pid))
+            {
                 Made::Yes
+            } else {
+                Made::No
             }
         }
         (Link::Unread, _) | (_, Link::Unread) => Made::Unproved(format!(
@@ -362,7 +378,12 @@ fn tree_of(all: &[Running], root: Identity) -> (Vec<Running>, Vec<Unproved>) {
     let mut parents = vec![first.clone()];
     while let Some(parent) = parents.pop() {
         for process in all {
-            let named = process.ppid == parent.identity.pid
+            let by_git_bash = matches!(
+                process.link,
+                Link::Created { described: Some(said), held: true, .. }
+                    if said == parent.identity.pid
+            );
+            let named = (process.ppid == parent.identity.pid || by_git_bash)
                 && process.identity != root
                 && process.identity != parent.identity
                 && !found.iter().any(|seen| seen.identity == process.identity);
@@ -640,6 +661,7 @@ pub(crate) fn refined_by_handle(
                     Some(by) if by == process.ppid => Link::Created {
                         by,
                         described: None,
+                        held: false,
                     },
                     _ => Link::Unread,
                 };
@@ -701,31 +723,37 @@ fn image_folder(exe: &str) -> Option<String> {
 }
 
 /// `listed` (Windows' table) with the parent Git Bash says for each Cygwin program whose own
-/// has gone, as a description and no more ([`Link::Created::described`]). Git Bash's `sh` runs
-/// a program of its own kind from a script by forking a copy of itself, which starts the program
-/// and is gone by the time anyone looks (zeewin, 2026-10-21: the sleep of the `stuck` script,
-/// started by `sh ./script`, names a parent that no process has). `ps -W` of the folder of the
-/// image the program runs (`ps`, asked once for each folder: its text, or none where there is no
-/// `ps` there) says its Cygwin parent, and which Windows process that is. It is read after the
-/// table, and its numbers are of the moment it ran: a number may be another process's by then
-/// (T-2228). So it decides no edge: the process stays out of the window's tree, and where Git
-/// Bash says a process of the window made it, the kit names it as left running
+/// has gone ([`Link::Created::described`]). Git Bash's `sh` runs a program of its own kind from a
+/// script by forking a copy of itself, which starts the program and is gone by the time anyone
+/// looks (zeewin, 2026-10-21: the sleep of the `stuck` script, started by `sh ./script`, names a
+/// parent that no process has). `ps -W` of the folder of the image the program runs (`ps`, asked
+/// once for each folder: its text, or none where there is no `ps` there) says its Cygwin parent,
+/// and which Windows process that is. That parent decides nothing by itself (T-2228): its numbers
+/// are of the moment it ran. It becomes an edge only where `held` (the creation time a process's
+/// handle, held open since before the reading, says now: none where it is not held or has exited)
+/// says both the program and the parent described are the very processes of the table, to the
+/// 100 ns, after the reading, and the parent began no later than the program: a held handle's
+/// number is no other process's, so the number Git Bash names is that process. Where either end is
+/// not held or a time differs, the program stays out of the window's tree and is named
 /// ([`unproved_under`]). The folder is the image's, which Windows' table gives plain, and not the
 /// command line's spelling of it (`Git\bin\..\usr\bin` and `Git\usr\bin` are one folder); a
 /// process whose image the table could not say is left as it was.
 pub fn with_cygwin_parents(
     mut listed: Vec<Running>,
     ps: impl Fn(&str) -> Option<String>,
+    held: impl Fn(u32) -> Option<u64>,
 ) -> Vec<Running> {
-    let began: std::collections::HashSet<u32> =
-        listed.iter().map(|process| process.identity.pid).collect();
+    let began: std::collections::HashMap<u32, u64> = listed
+        .iter()
+        .map(|process| (process.identity.pid, process.identity.started))
+        .collect();
     let mut tables: std::collections::HashMap<String, Vec<CygwinRow>> =
         std::collections::HashMap::new();
     for process in &mut listed {
         let Link::Created { by, .. } = process.link else {
             continue;
         };
-        if process.ppid == 0 || began.contains(&process.ppid) {
+        if process.ppid == 0 || began.contains_key(&process.ppid) {
             continue;
         }
         let Some(folder) = process.exe.as_deref().and_then(image_folder) else {
@@ -742,9 +770,16 @@ pub fn with_cygwin_parents(
             .and_then(|own| table.iter().find(|row| row.pid == own.ppid))
             .map(|row| row.winpid);
         if let Some(parent) = parent {
+            // Read after the `ps -W` text is in hand: both ends, with the times they were listed with.
+            let both_held = began.get(&parent).is_some_and(|parent_began| {
+                *parent_began <= process.identity.started
+                    && held(process.identity.pid) == Some(process.identity.started)
+                    && held(parent) == Some(*parent_began)
+            });
             process.link = Link::Created {
                 by,
                 described: Some(parent),
+                held: both_held,
             };
         }
     }
