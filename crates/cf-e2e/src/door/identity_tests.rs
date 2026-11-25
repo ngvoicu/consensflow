@@ -42,6 +42,7 @@ fn other_spelling(real: &Path) -> Option<PathBuf> {
 /// The second spelling of `folder`, which must lead to the same file.
 fn second(folder: &Path) -> Option<PathBuf> {
     let spelled = other_spelling(folder)?;
+    eprintln!("second spelling: {} of {}", spelled.display(), folder.display());
     assert_eq!(
         super::identity::of_path(folder).unwrap(),
         super::identity::of_path(&spelled).unwrap(),
