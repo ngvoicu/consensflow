@@ -419,3 +419,31 @@ fn the_stuck_scripts_sleep_is_left_running_and_named_where_either_end_is_not_hel
     let rows = win_rows(&late, git);
     assert_eq!(numbers(&descending_from(&rows, w)), [S]);
 }
+
+#[test]
+fn a_leaf_proved_by_its_identifier_whose_identifier_cannot_be_read_at_the_send_is_not_ended() {
+    let w = id(W, 1_000_000);
+    let rows = genuine();
+    let chosen = descending_from(&rows, w);
+    let recorder = Listed::new(rows.clone()).without_unique(L);
+    let said = end_chosen_by(&recorder, &chosen);
+    assert_eq!(recorder.ended(), [P]);
+    assert_eq!(said.failed.len(), 1, "{said:?}");
+    assert_eq!(said.failed[0].0.identity.pid, L);
+    assert!(said.failed[0].1.contains("could not be read again"), "{said:?}");
+}
+
+#[test]
+fn one_number_twice_in_a_windows_reading_proves_no_edge_and_is_named() {
+    let w = id(W, at(90));
+    // Two rows with the leaf's parent's number (a reading that is not one reading).
+    let table = [
+        win_row(W, 0, w.started, None),
+        win_row(P, W, at(100), None),
+        win_row(P, W, at(100), None),
+        win_row(L, P, at(150), None),
+    ];
+    let rows = win_rows(&table, "PID PPID PGID WINPID\n");
+    assert!(!ended_of(&rows, w, &[]).contains(&L));
+    assert!(numbers(&unproved_of(&rows, w)).contains(&L));
+}

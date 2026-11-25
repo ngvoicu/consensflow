@@ -149,3 +149,33 @@ fn what_this_machine_lists_proves_a_child_against_the_process_that_made_it() {
     assert_eq!(said.ended, [child], "{said:?}");
     shell.kill();
 }
+
+/// The kit's own process is a root like any other: a Claude the parity case started from the test
+/// is its child, and the attribution reads the run's processes under it (T-2314, finding 2). The
+/// real read, rooted at this test process, with a child of its own the test holds.
+#[test]
+fn a_child_of_the_tests_own_process_is_in_the_tree_of_the_tests_own_process() {
+    use super::super::{descending_from, unproved_under, Link};
+
+    let mut program = waiting();
+    let me = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there");
+    let all = ThisMachine.processes().unwrap();
+    let own = all.iter().find(|one| one.identity == me).expect("it is listed");
+    assert_ne!(own.link, Link::Unread, "{own:?}");
+    assert_ne!(own.link, Link::Number, "{own:?}");
+    let child = all
+        .iter()
+        .find(|one| one.identity.pid == program.id())
+        .expect("the child is listed")
+        .clone();
+    let tree = descending_from(&all, me);
+    let named = unproved_under(&all, me);
+    program.kill();
+    assert!(
+        tree.iter().any(|one| one.identity == child.identity),
+        "the test's own child is not in its tree: {child:?}; named: {named:?}"
+    );
+}

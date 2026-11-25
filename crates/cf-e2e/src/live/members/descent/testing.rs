@@ -29,6 +29,7 @@ pub(crate) struct Listed {
     listed: Vec<Running>,
     now: Vec<(u32, Now)>,
     uniques: Vec<(u32, u64)>,
+    unreadable: Vec<u32>,
     ended: Rc<RefCell<Vec<u32>>>,
 }
 
@@ -39,6 +40,7 @@ impl Listed {
             listed,
             now: Vec::new(),
             uniques: Vec::new(),
+            unreadable: Vec::new(),
             ended: Rc::default(),
         }
     }
@@ -55,8 +57,17 @@ impl Listed {
         self
     }
 
+    /// The machine, the identifier of the process with the number `pid` unreadable now.
+    pub(crate) fn without_unique(mut self, pid: u32) -> Self {
+        self.unreadable.push(pid);
+        self
+    }
+
     /// The unique identifier the number has now: the one a test says, else the listed row's.
     fn unique_of(&self, pid: u32) -> Option<u64> {
+        if self.unreadable.contains(&pid) {
+            return None;
+        }
         self.uniques
             .iter()
             .find(|(number, _)| *number == pid)

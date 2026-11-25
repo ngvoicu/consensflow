@@ -98,9 +98,10 @@ pub struct UniqueIdentity {
 }
 
 /// The identity the system records for the process `pid`: none where there is none, where it is
-/// not the user's own, where it is a zombie, and for the host itself.
+/// not the user's own, and where it is a zombie. The caller's own process is read as any other (the
+/// host's looks skip it; this read is no look).
 pub fn read_identity(pid: i32) -> Option<UniqueIdentity> {
-    process(pid).map(|read| UniqueIdentity {
+    native::read_process(pid).map(|read| UniqueIdentity {
         unique: read.identity.unique,
         starter: read.parent,
         born: read.identity.born,

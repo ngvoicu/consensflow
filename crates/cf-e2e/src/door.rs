@@ -1580,6 +1580,8 @@ impl Grounded {
 
     fn push(&mut self, process: Running, ground: Ground) {
         if !self.contains(process.identity) {
+            // Chosen now: no longer a process the kit could only name.
+            self.unproved.retain(|(seen, _)| seen.identity != process.identity);
             self.processes.push(process);
             self.grounds.push(ground);
         }
@@ -1604,9 +1606,19 @@ impl Grounded {
         &self.unproved
     }
 
+    /// Whatever is under a process chosen and is not proved, whatever its command says: the kit
+    /// ends the command and what it proved under it, and says the rest as left running.
+    fn keep_unproved_under_chosen(&mut self, all: &[Running]) {
+        for chosen in self.processes.clone() {
+            self.keep_unproved(unproved_under(all, chosen.identity));
+        }
+    }
+
     fn keep_unproved(&mut self, more: Vec<(Running, String)>) {
         for (process, why) in more {
-            if !self.unproved.iter().any(|(seen, _)| seen.identity == process.identity) {
+            if !self.contains(process.identity)
+                && !self.unproved.iter().any(|(seen, _)| seen.identity == process.identity)
+            {
                 self.unproved.push((process, why));
             }
         }
@@ -1635,6 +1647,7 @@ impl Grounded {
                 .filter(|(process, _)| process.command.contains(text))
                 .collect(),
         );
+        grounded.keep_unproved_under_chosen(all);
         grounded
     }
 
@@ -1663,6 +1676,7 @@ impl Grounded {
                 .filter(|(process, _)| runs(&process.command))
                 .collect(),
         );
+        grounded.keep_unproved_under_chosen(all);
         grounded
     }
 

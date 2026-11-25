@@ -12,6 +12,7 @@
 [run]
 ld-recorded = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::ownership"]
 ld-tests = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests"]
+ld-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::native"]
 ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_the_windows_tree"]
 
 [[plant]]
@@ -145,3 +146,57 @@ runs = ["ld-recorded"]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''                    && held(parent) == Some(*parent_began)'''
 replace = '''                    && held(parent).is_some()'''
+
+[[plant]]
+name = "live descent: what is under a chosen command and not proved is not said"
+meant = "what_is_under_a_chosen_command_and_not_proved_is_said_as_left_running"
+runs = ["ld-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            self.keep_unproved(unproved_under(all, chosen.identity));'''
+replace = '''            let _ = &chosen;'''
+
+[[plant]]
+name = "live descent: a process chosen by a later look is still said as left running"
+meant = "a_process_chosen_by_a_later_look_is_no_longer_said_as_left_running"
+runs = ["ld-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            self.unproved.retain(|(seen, _)| seen.identity != process.identity);'''
+replace = ''''''
+
+[[plant]]
+name = "live descent: the kit's own process is not read as a root"
+meant = "a_child_of_the_tests_own_process_is_in_the_tree_of_the_tests_own_process"
+runs = ["ld-native"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''    native::read_process(pid).map('''
+replace = '''    process(pid).map('''
+
+[[plant]]
+name = "live descent: a leaf whose identifier cannot be read at the send is ended"
+meant = "a_leaf_proved_by_its_identifier_whose_identifier_cannot_be_read_at_the_send_is_not_ended"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Ok(None) => {
+                return Outcome::Failed(
+                    "its unique identifier could not be read again".to_owned(),
+                )
+            }'''
+replace = '''            Ok(None) => {}'''
+
+[[plant]]
+name = "live descent: one number twice in a Windows reading proves an edge"
+meant = "one_number_twice_in_a_windows_reading_proves_no_edge_and_is_named"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            if twice(&|row| row.identity.pid == parent.identity.pid) {'''
+replace = '''            if false {'''

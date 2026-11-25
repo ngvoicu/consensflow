@@ -1005,3 +1005,72 @@ fn what_the_windows_tree_names_and_does_not_prove_is_said_as_left_running_never_
     let (door, _) = saying_in(tempfile::tempdir().unwrap().path());
     assert_eq!(door.end(&chosen).failed.len(), 2);
 }
+
+/// A window runs a command (`--mark`) that the kit proves; a child of it, which the kit can't
+/// prove (the system won't say what made it) and whose command holds none of the command's words,
+/// is left running when the command is ended, and said so (T-2314, finding 1).
+fn under_a_chosen_command() -> (Vec<Running>, Identity) {
+    use crate::live::members::Link;
+    let forked = |own, forker| Link::Forked { own, forker };
+    let row = |pid, started, ppid, command: &str, link| Running {
+        link,
+        ..running(pid, started, ppid, command)
+    };
+    (
+        vec![
+            row(5000, 1_000_000, 1, "window", forked(100, 1)),
+            row(5040, 2_000_000, 5000, "node ./long --mark", forked(200, 100)),
+            row(5080, 3_000_000, 5040, "sleep 99", Link::Unread),
+            row(5090, 4_000_000, 5080, "worker of the sleep", forked(400, 300)),
+        ],
+        Identity {
+            pid: 5000,
+            started: 1_000_000,
+        },
+    )
+}
+
+#[test]
+fn what_is_under_a_chosen_command_and_not_proved_is_said_as_left_running() {
+    let (rows, window) = under_a_chosen_command();
+    let numbers = |chosen: &Grounded| {
+        chosen
+            .unproved()
+            .iter()
+            .map(|(process, _)| process.identity.pid)
+            .collect::<Vec<_>>()
+    };
+    let holding = Grounded::holding(&rows, window, "--mark");
+    assert_eq!(
+        holding.processes().iter().map(|p| p.identity.pid).collect::<Vec<_>>(),
+        [5040]
+    );
+    assert_eq!(numbers(&holding), [5080, 5090]);
+    let where_ = Grounded::in_window_where(&rows, window, |line| line.ends_with("--mark"), "--mark");
+    assert_eq!(numbers(&where_), [5080, 5090]);
+    let said = left_running(Ended::default(), &holding);
+    assert_eq!(said.problems().len(), 2, "{:?}", said.problems());
+}
+
+#[test]
+fn a_process_chosen_by_a_later_look_is_no_longer_said_as_left_running() {
+    // A look that could not prove 5040 named it; a later one proved it and chose it: it is ended
+    // or not, and no longer said as left (T-2314, finding 5).
+    let (rows, window) = under_a_chosen_command();
+    let mut chosen = Grounded::holding(&rows, window, "no such words");
+    let unread: Vec<Running> = rows
+        .iter()
+        .map(|row| Running {
+            link: if row.identity.pid == 5040 {
+                crate::live::members::Link::Unread
+            } else {
+                row.link
+            },
+            ..row.clone()
+        })
+        .collect();
+    chosen.add(Grounded::descending_from(&unread, window));
+    assert!(chosen.unproved().iter().any(|(p, _)| p.identity.pid == 5040));
+    chosen.add(Grounded::descending_from(&rows, window));
+    assert!(!chosen.unproved().iter().any(|(p, _)| p.identity.pid == 5040));
+}
