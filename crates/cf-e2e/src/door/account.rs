@@ -240,13 +240,16 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
         (PROTECTED_DIGEST.to_owned(), digest),
     ];
     // A child has no home of the person's to find cargo's and rustup's folders by (its own are the
-    // run's): it is told the ones this process found them in, where its environment names none.
-    if let Some(home) = project_home() {
-        for (name, below) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-            let held = home.join(below);
-            if own_variable(name).is_none() && held.is_dir() {
-                vars.push((name.to_owned(), held.to_string_lossy().into_owned()));
-            }
+    // run's): it is told the ones this process works with.
+    let home = project_home();
+    for (name, below) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+        let held = own_variable(name).map(PathBuf::from).or_else(|| {
+            home.as_ref()
+                .map(|home| home.join(below))
+                .filter(|dir| dir.is_dir())
+        });
+        if let Some(held) = held {
+            vars.push((name.to_owned(), held.to_string_lossy().into_owned()));
         }
     }
     Ok(vars)
