@@ -61,7 +61,7 @@ find = '''    if last_is_link && !matches!(act, Act::Remove | Act::Rename | Act:
 replace = '''    if false && last_is_link && !matches!(act, Act::Remove | Act::Rename | Act::Allocate) {'''
 
 [[plant]]
-name = "K3 part 3: a name below a file is a place"
+name = "K3 Windows: a name below a file is a place"
 meant = "a_name_below_a_file_is_no_place"
 runs = ["kd3-lib-door"]
 platforms = ["windows"]
