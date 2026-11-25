@@ -48,3 +48,51 @@ runs = ["oqr-dispatcher"]
 file = "crates/cf-ledger/src/messages/receipt.rs"
 find = '''            (Some(asked), Some(paste)) => asked > paste,'''
 replace = '''            (Some(_), Some(_)) => *question > pasted.id,'''
+
+[[plant]]
+name = "open question result: words on their way do not hold the result"
+meant = "a_queued_answer_on_its_way_holds_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        .exists(params![task, window])?
+    {
+        return Ok(Vec::new());
+    }
+    let Some(pasted)'''
+replace = '''        .exists(params![task, window])? && false
+    {
+        return Ok(Vec::new());
+    }
+    let Some(pasted)'''
+
+[[plant]]
+name = "open question result: a paste before the close still begins the turn"
+meant = "a_turn_that_ended_before_a_close_unlooked_at_is_no_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) {'''
+replace = '''    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) && false {'''
+
+[[plant]]
+name = "open question result: the result names questions it leaves open"
+meant = "a_question_closed_by_the_result_is_closed_in_a_window_the_human_keeps_open"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''                close_by_the_result(store, &task, &left)?;'''
+replace = '''                let _ = &left;'''
+
+[[plant]]
+name = "open question result: a done task's refusal points elsewhere"
+meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''        "done" => format!("To send words to its window, reopen the task:'''
+replace = '''        "done" => format!("To send words to its window, use cf tell:'''

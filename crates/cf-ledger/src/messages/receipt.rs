@@ -247,6 +247,7 @@ pub(crate) fn open_questions(
         .prepare(&format!(
             "SELECT q.id FROM message q
              WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' gave its result with it unanswered')
                AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
                  OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
                    AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
@@ -264,20 +265,33 @@ pub(crate) fn open_questions(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// The questions `window` left open on `task` when a message was pasted into it after all of
-/// them were asked: the turn that message began asked none of them, so its end is the task's
-/// result and not another wait for these. None where no message was pasted since, or where one
-/// of the open questions was asked after the latest paste began (the turn asked it and ended
-/// on it). "After" is the ledger's own order: the question's `message.sent` event against the
-/// paste's last `delivery.begun`, never the messages' ids (an answer written while the window
-/// was at work has a lower id than a question the same turn then asked, and is pasted after
-/// it). A question or a paste with no such event is placed by its message id.
+/// The questions `window` left open on `task` when the turn that just ended is past them, so
+/// that turn's words are the task's result (T-2197): a message was pasted into the window after
+/// every open question was asked, in the window's present run (since the project last closed,
+/// restarted or resumed), and nothing of the
+/// task is on its way to the window. Empty otherwise.
+///
+/// "After" is the ledger's own order: the question's `message.sent` event against the paste's
+/// last `delivery.begun`, never the messages' ids (an answer written while the window was at
+/// work has a lower id than a question the same turn then asked, and is pasted after it). A
+/// question or a paste with no such event is placed by its message id.
 pub(crate) fn left_open_before_the_turn(
     store: &Store,
     task: i64,
     window: i64,
 ) -> Result<Vec<i64>, LedgerError> {
     let open = open_questions(store, task, window)?;
+    // Words on their way are for the turn after them.
+    if store
+        .db
+        .prepare(
+            "SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2
+               AND state IN ('queued', 'gated', 'delivering')",
+        )?
+        .exists(params![task, window])?
+    {
+        return Ok(Vec::new());
+    }
     let Some(pasted) = super::delivery::last_pasted(store, window, task)? else {
         return Ok(Vec::new());
     };
@@ -290,6 +304,15 @@ pub(crate) fn left_open_before_the_turn(
         )?)
     };
     let paste = place("delivery.begun", pasted.id)?;
+    // A paste before the project closed, restarted or resumed is not of this run.
+    let run: Option<i64> = store.db.query_row(
+        "SELECT max(id) FROM event WHERE project_id = ?1 AND kind = 'project.state'",
+        [pasted.project_id],
+        |row| row.get(0),
+    )?;
+    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) {
+        return Ok(Vec::new());
+    }
     for question in &open {
         let after = match (place("message.sent", *question)?, paste) {
             (Some(asked), Some(paste)) => asked > paste,

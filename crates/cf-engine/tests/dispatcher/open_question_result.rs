@@ -30,6 +30,17 @@ fn asked_two<'a>(context: &'a Context) -> (Tiers<'a>, i64, i64) {
     (tiers, first.id, second.id)
 }
 
+/// The chief's late answer to `question`, and what refuses it.
+fn refused(context: &Context, tiers: &Tiers<'_>, question: i64) -> String {
+    let chief = tiers.id("chief");
+    let refusal = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&serde_json::json!("Late")), None)
+        .expect_err("a closed question takes no answer");
+    format!("{refusal}")
+}
+
 /// The field's order: the second question answered, the worker goes on and ends with its
 /// result while the first has no answer.
 #[test]
@@ -67,15 +78,27 @@ fn a_result_is_delivered_when_the_first_of_two_questions_is_still_open() {
         "cancelled",
         "the answered one is not closed"
     );
-    // Its question can no longer be answered, and the refusal says how to tell the worker.
-    let chief = tiers.id("chief");
-    let refused = context
+    // Its question can no longer be answered, and the refusal says what works on a done task.
+    let words = refused(&context, &tiers, first);
+    assert!(
+        words.contains(&format!(
+            "m-{first} is closed: T-1 gave its result with it unanswered. To send words to its window, reopen the task: `cf task reopen T-1"
+        )),
+        "{words}"
+    );
+    assert!(!words.contains("cf tell"), "{words}");
+    assert!(!results[0].contains("cf tell"), "{results:?}");
+
+    context
         .ledger
         .borrow_mut()
-        .answer(first, chief, Some(&serde_json::json!("Late")), None)
-        .expect_err("a closed question takes no answer");
-    let words = format!("{refused:?}");
-    assert!(words.contains("cf tell T-1"), "{words}");
+        .accept_task(tiers.project.id, 1, "chief")
+        .expect("accepted");
+    let words = refused(&context, &tiers, first);
+    assert!(
+        words.contains("add a follow-up: `cf task add --after T-1"),
+        "{words}"
+    );
 }
 
 /// Both questions unanswered; the chief's tell opens a turn that ends with the result.
@@ -224,4 +247,271 @@ fn a_result_held_for_background_jobs_closes_the_open_question_when_it_is_taken()
         results[0].contains(&format!("m-{first} was left unanswered and is closed")),
         "{results:?}"
     );
+}
+
+/// The human keeps the window open past its result: the question named closed is closed all
+/// the same.
+#[test]
+fn a_question_closed_by_the_result_is_closed_in_a_window_the_human_keeps_open() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let project = tiers.project.id;
+    let worker = tiers.assignee(1);
+    context.open_window(project, &worker).unwrap();
+    let first = context.ask(project, &worker, "chief", 1, "Which grammar?");
+    let second = context.ask(project, &worker, "chief", 1, "Which format?");
+    context.adapter.answer("zeus", "I asked two questions");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.answer(project, second.id, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(context.message(first.id).state, "cancelled");
+    refused(&context, &tiers, first.id);
+}
+
+/// A question from before holding tracking is closed by the result too.
+#[test]
+fn a_question_from_before_tracking_is_closed_by_the_result() {
+    let context = Context::new();
+    let (tiers, first, second) = asked_two(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "DELETE FROM question_binding WHERE question_id = {first}"
+        ))
+        .unwrap();
+    context.answer(tiers.project.id, second, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(context.message(first).state, "cancelled");
+    refused(&context, &tiers, first);
+}
+
+/// The turn that asked a third question ends while its answer, queued or held for the human,
+/// has not gone in: the task waits for it and for the turn after it.
+fn an_answer_still_on_its_way_holds_the_result(gated: bool) {
+    let context = Context::new();
+    let (tiers, _first, second) = asked_two(&context);
+    let project = tiers.project.id;
+    context.answer(project, second, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    let third = context.ask(project, &tiers.assignee(1), "chief", 1, "Which dialect?");
+    context.pass().unwrap();
+    if gated {
+        context.ledger.borrow_mut().set_gate(project, true).unwrap();
+    }
+    let answer = context.answer(project, third.id, "SQLite");
+    context.pass().unwrap();
+
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+    if gated {
+        context.pass().unwrap();
+        assert_eq!(results(&context, &tiers), Vec::<String>::new());
+        context
+            .ledger
+            .borrow_mut()
+            .approve_message(answer.id, "human")
+            .unwrap();
+        context
+            .ledger
+            .borrow_mut()
+            .set_gate(project, false)
+            .unwrap();
+    }
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+    assert_eq!(context.message(answer.id).state, "delivered");
+
+    context
+        .adapter
+        .answer("zeus", "Applied SQLite and finished");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let results = results(&context, &tiers);
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(
+        results[0].contains("Applied SQLite and finished"),
+        "{results:?}"
+    );
+}
+
+#[test]
+fn a_queued_answer_on_its_way_holds_the_result() {
+    an_answer_still_on_its_way_holds_the_result(false);
+}
+
+#[test]
+fn a_gated_answer_on_its_way_holds_the_result() {
+    an_answer_still_on_its_way_holds_the_result(true);
+}
+
+/// How the window that asked went, with nothing new reaching its successor.
+#[derive(Clone, Copy)]
+enum Gone {
+    Close,
+    Restart,
+    Window,
+}
+
+/// A turn that asked before the project closed, or the app restarted, or the window went, is
+/// no result afterwards.
+fn an_old_turn_is_not_taken_after(gone: Gone) {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = working(&context);
+    let project = tiers.project.id;
+    let worker = tiers.assignee(1);
+    let old = context.ask(project, &worker, "chief", 1, "An old question");
+    context.adapter.answer("zeus", "I asked");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "DELETE FROM question_binding WHERE question_id = {}",
+            old.id
+        ))
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 1, "chief", "Start with the defaults.")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.ask(project, &worker, "chief", 1, "Can I change the defaults?");
+    context
+        .adapter
+        .answer("zeus", "The cleanup ran on the old defaults.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+
+    match gone {
+        Gone::Close => {
+            context.close_project(project).unwrap();
+            context.resume_project(project).unwrap();
+            for _ in 0..6 {
+                context.pass().unwrap();
+            }
+        }
+        Gone::Restart => {
+            context.ledger.borrow_mut().suspend_for_restart().unwrap();
+            let after = context.make();
+            after.settle_after_restart().unwrap();
+            after.resume_project(project).unwrap();
+            for _ in 0..6 {
+                after.pass().unwrap();
+            }
+        }
+        Gone::Window => {
+            context.exit("zeus");
+            context.open_window(project, &worker).unwrap();
+            for _ in 0..6 {
+                context.pass().unwrap();
+            }
+        }
+    }
+
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+}
+
+#[test]
+fn a_turn_from_before_a_close_is_no_result() {
+    an_old_turn_is_not_taken_after(Gone::Close);
+}
+
+#[test]
+fn a_turn_from_before_a_restart_is_no_result() {
+    an_old_turn_is_not_taken_after(Gone::Restart);
+}
+
+#[test]
+fn a_turn_from_before_its_window_went_is_no_result() {
+    an_old_turn_is_not_taken_after(Gone::Window);
+}
+
+/// A turn that ended before the project closed, and that no pass looked at, is not taken as
+/// the result once the project is resumed.
+#[test]
+fn a_turn_that_ended_before_a_close_unlooked_at_is_no_result() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let (tiers, first, second) = asked_two(&context);
+    let project = tiers.project.id;
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "DELETE FROM question_binding WHERE question_id IN ({first}, {second})"
+        ))
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .tell_queued(project, 1, "chief", "Start with the defaults.")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", DONE);
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    for _ in 0..6 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+}
+
+/// A question of another task in the same window is not closed with the result.
+#[test]
+fn a_question_of_another_task_is_not_closed_by_the_result() {
+    let context = Context::new();
+    let (tiers, first, second) = asked_two(&context);
+    let project = tiers.project.id;
+    let other_task = context
+        .pool_task(project, "worker", "Another task for the same session")
+        .task;
+    let other = context.ask(project, &tiers.assignee(1), "chief", 1, "About T-2");
+    let window = context.id(project, &tiers.assignee(1));
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "UPDATE task SET assignee_id = {window}, state = 'paused' WHERE id = {t};
+             DELETE FROM question_binding WHERE question_id = {q};
+             UPDATE message SET task_id = {t} WHERE id = {q};",
+            t = other_task.id,
+            q = other.id
+        ))
+        .unwrap();
+    context.answer(project, second, "JSON");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.answer("zeus", DONE);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(context.message(first).state, "cancelled");
+    assert_ne!(context.message(other.id).state, "cancelled");
 }

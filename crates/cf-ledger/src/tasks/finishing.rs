@@ -35,10 +35,10 @@ use super::{
     task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, notes_waiting, open_questions,
-    put_back_paused_answers, queued_paused_answers, recover_after_lost_answer, release_carried,
-    say_again, tell_sent_back, warnings_on_their_way, warnings_queued, withdraw_at_work,
-    withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
+    close_by_the_result, drop_queued_but_told, fold, leave_pause_notes, notes_waiting,
+    open_questions, put_back_paused_answers, queued_paused_answers, recover_after_lost_answer,
+    release_carried, say_again, tell_sent_back, warnings_on_their_way, warnings_queued,
+    withdraw_at_work, withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
@@ -63,7 +63,14 @@ pub(crate) fn record_result(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
-    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)
+    record(
+        store,
+        project_id,
+        number,
+        body,
+        &ACTIVE_TASK_STATES,
+        Finishing::Own,
+    )
 }
 
 /// The window's turn ended with its result past questions of its task that are still open
@@ -75,15 +82,13 @@ pub(crate) fn record_result_past_questions(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
-    record_counted(
+    record(
         store,
         project_id,
         number,
         body,
         &ACTIVE_TASK_STATES,
-        false,
-        (0, 0),
-        true,
+        Finishing::PastQuestions,
     )
 }
 
@@ -101,15 +106,13 @@ pub(crate) fn record_finished(
     body: &str,
     left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
-    record_counted(
+    record(
         store,
         project_id,
         number,
         body,
         &FINISHABLE_TASK_STATES,
-        true,
-        left,
-        false,
+        Finishing::Word { left },
     )
 }
 
@@ -143,39 +146,32 @@ pub(crate) fn left_running(
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 
-/// `finished_by_word`: the chief or the human finishes the task, rather than the window.
+/// How a task's result came.
+#[derive(Clone, Copy)]
+enum Finishing {
+    /// The window's own word (`cf task done`).
+    Own,
+    /// The engine's reading of a turn's end, past questions of the task still open.
+    PastQuestions,
+    /// The chief or the human, with the jobs and agents the window was counted running.
+    Word { left: (usize, usize) },
+}
+
+/// A result, however it came: where the chief or the human finished it, the `left` jobs and
+/// agents are kept with the move to done for the accept to say.
 fn record(
     store: &mut Store,
     project_id: i64,
     number: i64,
     body: &str,
     states: &[&str],
-    finished_by_word: bool,
+    how: Finishing,
 ) -> Result<TaskMoved, LedgerError> {
-    record_counted(
-        store,
-        project_id,
-        number,
-        body,
-        states,
-        finished_by_word,
-        (0, 0),
-        false,
-    )
-}
-
-/// [`record`], and where the finish was at a word, the `left` jobs and agents its window was
-/// counted running, kept with the move to done for the accept to say.
-fn record_counted(
-    store: &mut Store,
-    project_id: i64,
-    number: i64,
-    body: &str,
-    states: &[&str],
-    finished_by_word: bool,
-    left: (usize, usize),
-    past_questions: bool,
-) -> Result<TaskMoved, LedgerError> {
+    let finished_by_word = matches!(how, Finishing::Word { .. });
+    let left = match how {
+        Finishing::Word { left } => left,
+        _ => (0, 0),
+    };
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
@@ -238,19 +234,20 @@ fn record_counted(
         if finished_by_word {
             withdraw_open_questions(store, &task, "was finished")?;
         }
-        // The window's own result, with questions of its task still open: it went on past
-        // them, so nobody waits for them now. They close, and the result names each.
+        // The window's result past questions of its task: they close with it, however they
+        // were tracked and whether its window stays, and the result names each.
         let mut body = body.to_owned();
         let mut closed = finished_by_word;
-        if let (true, "waiting", Some(window)) =
-            (past_questions, task.state.as_str(), task.assignee_id)
+        if let (Finishing::PastQuestions, "waiting", Some(window)) =
+            (how, task.state.as_str(), task.assignee_id)
         {
             let left = open_questions(store, task.id, window)?;
             if !left.is_empty() {
                 closed = true;
+                close_by_the_result(store, &task, &left)?;
                 for question in left {
                     body.push_str(&format!(
-                        "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. Say what it needed with `cf tell T-{number} \"…\"`.)"
+                        "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`.)"
                     ));
                 }
             }
