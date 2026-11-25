@@ -230,7 +230,7 @@ impl Journal {
         inner.acknowledged = inner.acknowledged.max(offset);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn acknowledged_to(&self) -> u64 {
         self.locked().acknowledged
     }

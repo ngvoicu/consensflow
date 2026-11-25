@@ -1,7 +1,6 @@
 //! The host's side of a page that comes back: the boundary a subscription fixes, the credit it
 //! settles, the journals of ended windows.
 
-#[cfg(unix)]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -14,6 +13,7 @@ use crate::pane_handlers::forward_journaled;
 
 type Live = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;
 type Kept = Arc<Mutex<Vec<(Page, u64, Vec<u8>, bool)>>>;
+#[cfg(unix)]
 type Seen = Arc<Mutex<Vec<(u64, usize, u64)>>>;
 
 /// A page's sink: what it was given, whether it is still there.
@@ -129,6 +129,7 @@ impl Window {
     }
 }
 
+#[cfg(unix)]
 /// A sink that takes every message and notes its offset, length and sequence.
 fn seeing(seen: &Seen) -> crate::output_hub::OutputSink {
     let seen = Arc::clone(seen);
@@ -142,14 +143,17 @@ fn seeing(seen: &Seen) -> crate::output_hub::OutputSink {
     })
 }
 
+#[cfg(unix)]
 fn held(seen: &Seen) -> usize {
     seen.lock().unwrap().iter().map(|(_, len, _)| len).sum()
 }
 
+#[cfg(unix)]
 fn last_seq(seen: &Seen) -> u64 {
     seen.lock().unwrap().last().expect("a message").2
 }
 
+#[cfg(unix)]
 /// The journal's published bytes once they have held still for 600 ms.
 fn settled(journal: &Journal) -> usize {
     let deadline = std::time::Instant::now() + Duration::from_secs(40);
@@ -939,7 +943,7 @@ fn a_window_nobody_draws_refuses_a_size_past_4096_and_keeps_its_terminals_size()
         .unwrap();
     let journal = pane.journal.clone().unwrap();
     journal.append(b"x");
-    let width = |i: usize| if i % 2 == 0 { 81 } else { 80 };
+    let width = |i: usize| if i.is_multiple_of(2) { 81 } else { 80 };
     for i in 0..4096 {
         table.resize_at(&key, 24, width(i), Some(0)).unwrap();
     }

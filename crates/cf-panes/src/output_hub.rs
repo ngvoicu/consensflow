@@ -144,7 +144,7 @@ impl OutputHub {
     }
 
     /// How many windows the hub keeps what it handed for.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn handed_windows(&self) -> usize {
         self.state
             .lock()
