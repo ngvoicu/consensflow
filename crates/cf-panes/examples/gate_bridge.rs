@@ -68,6 +68,19 @@ struct Window {
     fifo: std::fs::File,
 }
 
+/// The gate's page drives a Mac or Linux host: a fifo is how its window is told.
+#[cfg(unix)]
+fn fifo(path: &std::path::Path) {
+    let c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    // SAFETY: a fresh path under this process's own scratch folder.
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+}
+
+#[cfg(not(unix))]
+fn fifo(path: &std::path::Path) {
+    panic!("the gate's host runs on Unix: {}", path.display());
+}
+
 fn main() {
     let panes = Arc::new(PaneTable::new());
     panes.keep_journals();
@@ -96,13 +109,7 @@ fn main() {
                 generation += 1;
                 let key = PaneKey::new(name.clone(), generation);
                 let path = scratch.join(format!("{name}.fifo"));
-                let c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-                // The gate's page drives a Mac or Linux host: a fifo is how its window is told.
-                #[cfg(unix)]
-                // SAFETY: a fresh path under this process's own scratch folder.
-                assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
-                #[cfg(not(unix))]
-                panic!("the gate's host runs on Unix: {c:?}");
+                fifo(&path);
                 let program = panes
                     .open_streamed_at_while(
                         &|| true,
