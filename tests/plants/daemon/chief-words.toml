@@ -447,24 +447,8 @@ runs = ["cw-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''          member.designer
-            ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              {
-                harness: member.harness,
-                role,
-                _id: id,
-                backupOf: member.backupOf,
-                vacationSince: member.vacationSince,
-              }'''
-replace = '''          false
-            ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              {
-                harness: member.harness,
-                role,
-                _id: id,
-                backupOf: member.backupOf,
-                vacationSince: member.vacationSince,
-              }'''
+find = '''        if (member.designer) return drawn'''
+replace = '''        if (false) return drawn'''
 
 [[plant]]
 name = "chief-words: a designer's staff line says its tier"

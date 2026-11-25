@@ -269,26 +269,30 @@ replace = '''part('tier', participant.designer ? null : participant.tier)'''
 
 [[plant]]
 name = "role registry: New project picks the last scout with its tier"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''                ...(untiered(role) ? {} : { tier: member.tier }),'''
-replace = '''                tier: member.tier,'''
+find = '''          ...(takesNoTier(member.roles) ? {} : { tier: member.tier }),'''
+replace = '''          tier: member.tier,'''
 
 [[plant]]
 name = "role registry: New project starts a scout and worker with no tier"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      if (member.tier === undefined && tier !== undefined) member.tier = tier
-'''
-replace = ''''''
+find = '''      const tier = backupOf == null ? member.tier : this.#memberOf(backupOf)?.tier'''
+replace = '''      const tier =
+        backupOf == null
+          ? member.roles.some((role) => takesNoTier([role]))
+            ? undefined
+            : member.tier
+          : this.#memberOf(backupOf)?.tier'''
 
 [[plant]]
 name = "role registry: the staff route says a scout's tier"
@@ -311,15 +315,18 @@ find = '''    let tier = tier_for(roles, body)?;'''
 replace = '''    let tier = tier_of(body.get("tier"))?;'''
 
 [[plant]]
-name = "role registry: New project's scout after a worker takes the worker's tier away"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+name = "role registry: New project's scout given to a worker takes the worker's tier away"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      if (picked.tier !== undefined) {'''
-replace = '''      if (true) {'''
+find = '''          if (member && !member.roles.includes(role)) member.roles.push(role)'''
+replace = '''          if (member && !member.roles.includes(role)) {
+            member.roles.push(role)
+            if (takesNoTier([role])) delete member.tier
+          }'''
 
 [[plant]]
 name = "role registry: Edit member asks a scout the tier of the role picked"

@@ -13827,39 +13827,49 @@ test('New project asks no tier of a role whose one slot has none, and a member t
   ])
   await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
-  // Its one slot empty again, its Add asks no tier.
+  // Started as it is, the scout is sent with no tier, the worker with its own.
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  const opened = (staff) => ({
+    directory: '/work/fresh',
+    harness: 'pi',
+    model: 'meta/muse-spark',
+    gate: false,
+    compaction: 300000,
+    staff,
+  })
+  const zeus = {
+    harness: 'claude-code',
+    model: 'claude-sonnet-5',
+    effort: 'high',
+    tier: 'complex',
+    roles: ['worker'],
+  }
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      opened([
+        { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
+        zeus,
+      ]),
+    ])
+  // Again, the scout's one slot empty: its Add asks no tier.
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
   await dialog.getByRole('button', { name: 'Remove Field scout gpt-6-astra' }).click()
   await expect(scouts).toHaveCount(0)
   await openSlot(dialog, 'scout')
   await expect(dialog.locator('.staff-add legend')).toHaveText('Add the field scout')
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
   await dialog.locator('.staff-add').getByRole('button', { name: 'Cancel' }).click()
-  // Given to the worker, the slot leaves the member's tier as it was.
+  // Given to the worker, the slot leaves the member's tier as it was, and it starts with it.
   await dialog.getByRole('button', { name: 'Give the field scout slot to claude-sonnet-5' }).click()
   await expect(table.locator('tbody tr.staff-group')).toHaveText([
     /^claude-sonnet-5.*complex.*Worker · Field scout/,
   ])
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
-    .poll(() => calls(page, 'project.open'))
-    .toEqual([
-      {
-        directory: '/work/fresh',
-        harness: 'pi',
-        model: 'meta/muse-spark',
-        gate: false,
-        compaction: 300000,
-        staff: [
-          {
-            harness: 'claude-code',
-            model: 'claude-sonnet-5',
-            effort: 'high',
-            tier: 'complex',
-            roles: ['worker', 'scout'],
-          },
-        ],
-      },
-    ])
+    .poll(async () => (await calls(page, 'project.open')).at(-1))
+    .toEqual(opened([{ ...zeus, roles: ['worker', 'scout'] }]))
 })
 
 test('New project keeps an image designer a member of its own beside a worker, in either order', async ({
