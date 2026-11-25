@@ -601,6 +601,7 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
+ "getrandom 0.4.3",
  "libc",
  "portable-pty",
  "serde",
