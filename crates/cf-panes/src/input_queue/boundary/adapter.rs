@@ -144,8 +144,7 @@ impl Rig {
     }
 
     pub fn activate(&self, doc: &Doc) -> Result<Vec<Notice>, String> {
-        self.q
-            .activate_page(&doc.page, &doc.nonce, doc.at())
+        self.q.activate_page(&doc.page, &doc.nonce, doc.at())
     }
 
     pub fn open_page(&self, page: &str) -> Doc {
@@ -154,11 +153,23 @@ impl Rig {
         doc
     }
 
-    pub fn input(&self, doc: &Doc, window: &Window, number: u64, bytes: &[u8]) -> Result<String, Refused> {
+    pub fn input(
+        &self,
+        doc: &Doc,
+        window: &Window,
+        number: u64,
+        bytes: &[u8],
+    ) -> Result<String, Refused> {
         self.input_work(doc, window, number, InputWork::Typed(bytes.to_vec()))
     }
 
-    pub fn reply(&self, doc: &Doc, window: &Window, number: u64, bytes: &[u8]) -> Result<String, Refused> {
+    pub fn reply(
+        &self,
+        doc: &Doc,
+        window: &Window,
+        number: u64,
+        bytes: &[u8],
+    ) -> Result<String, Refused> {
         self.input_work(doc, window, number, InputWork::Reply(bytes.to_vec()))
     }
 
@@ -230,12 +241,14 @@ impl Rig {
 
     /// A drop's place: the number taken at the gesture, told to the host.
     pub fn place(&self, doc: &Doc, window: &Window, number: u64) -> Result<(), String> {
-        self.q.place_page_sequence(&doc.page, doc.at(), &window.key, number)
+        self.q
+            .place_page_sequence(&doc.page, doc.at(), &window.key, number)
     }
 
     /// A place nobody used, let go.
     pub fn release(&self, doc: &Doc, window: &Window, number: u64) -> Result<(), String> {
-        self.q.release_page_sequence(&doc.page, doc.at(), &window.key, number)
+        self.q
+            .release_page_sequence(&doc.page, doc.at(), &window.key, number)
     }
 
     /// What was handed to the window's writer since the last call, in order; the writer
@@ -266,7 +279,10 @@ impl Rig {
     /// The window's writer, which the test drives: take what it was handed next, and finish
     /// it with the result a worker would give.
     pub fn writer_finishes(&self, window: &Window, result: InputResponse) {
-        let job = window.jobs.try_recv().expect("a call was handed to the writer");
+        let job = window
+            .jobs
+            .try_recv()
+            .expect("a call was handed to the writer");
         let InputJob {
             response, outcome, ..
         } = job;
@@ -285,7 +301,12 @@ impl Rig {
 
     /// The window's writer disappears with the call it took, answering nothing.
     pub fn writer_vanishes(&self, window: &Window) {
-        drop(window.jobs.try_recv().expect("a call was handed to the writer"));
+        drop(
+            window
+                .jobs
+                .try_recv()
+                .expect("a call was handed to the writer"),
+        );
     }
 
     /// The window's writer queue is gone altogether.
@@ -356,10 +377,10 @@ impl Rig {
     /// Every bound the parked calls wait on has passed.
     pub fn bounds_pass(&self) {
         let mut events = Vec::new();
-        self.q
-            .page
-            .lock()
-            .pump_all(Instant::now() + ORDER_BOUND + Duration::from_millis(5), &mut events);
+        self.q.page.lock().pump_all(
+            Instant::now() + ORDER_BOUND + Duration::from_millis(5),
+            &mut events,
+        );
         self.q.page.flush(events);
     }
 

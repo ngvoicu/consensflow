@@ -14,8 +14,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use super::adapter::{Doc, Notice, Rig, Window};
 use super::super::*;
+use super::adapter::{Doc, Notice, Rig, Window};
 
 /// A small deterministic generator: a schedule is its seed.
 struct Rng(u64);
@@ -183,7 +183,9 @@ impl Schedule {
         if self.rng.below(5) == 0 {
             self.rng.pick(&self.docs).cloned()
         } else {
-            self.current.clone().or_else(|| self.rng.pick(&self.docs).cloned())
+            self.current
+                .clone()
+                .or_else(|| self.rng.pick(&self.docs).cloned())
         }
     }
 
@@ -244,15 +246,12 @@ impl Schedule {
         let bytes = format!("<{index}>").into_bytes();
         // The page never sends a number twice; one that does is a repeat of the first, and owes
         // nothing of its own.
-        let repeat = self
-            .calls
-            .iter()
-            .any(|call| {
-                call.completion.is_some()
-                    && call.key == *key
-                    && call.page == doc.page
-                    && call.number == number
-            });
+        let repeat = self.calls.iter().any(|call| {
+            call.completion.is_some()
+                && call.key == *key
+                && call.page == doc.page
+                && call.number == number
+        });
         self.log.push(format!(
             "enqueue call {index}: window {key:?} number {number} by {} (epoch {:?})",
             doc.page, doc.epoch
@@ -296,7 +295,8 @@ impl Schedule {
             .unwrap_or(1)
             + 2;
         let number = 1 + self.rng.below(upper);
-        self.log.push(format!("skip {key:?} number {number} by {}", doc.page));
+        self.log
+            .push(format!("skip {key:?} number {number} by {}", doc.page));
         let result = self.rig.skip(&doc, &self.windows[at], number);
         let current = self.current.as_ref().is_some_and(|c| c.page == doc.page);
         if current && doc.epoch == self.rig.host_epoch() {
@@ -329,7 +329,8 @@ impl Schedule {
         let Some(job) = self.rig.take(window) else {
             return;
         };
-        self.log.push(format!("writer {how:?} for {:?}", window.key));
+        self.log
+            .push(format!("writer {how:?} for {:?}", window.key));
         let key = window.key.clone();
         let index = parse(job.bytes());
         let (page, number) = {
@@ -340,7 +341,9 @@ impl Schedule {
         let last = self.handed.entry((page, key)).or_insert(0);
         if number <= *last {
             let last = *last;
-            self.fail(&format!("call {index} (number {number}) reached the writer after number {last}"));
+            self.fail(&format!(
+                "call {index} (number {number}) reached the writer after number {last}"
+            ));
         }
         *last = number;
         match how {
@@ -363,7 +366,9 @@ impl Schedule {
             }
         }
         if self.calls[index].failed && self.calls[index].loss().is_none() {
-            self.fail(&format!("call {index} failed at its writer and has no loss"));
+            self.fail(&format!(
+                "call {index} failed at its writer and has no loss"
+            ));
         }
     }
 
@@ -470,7 +475,8 @@ impl Schedule {
             None => {
                 let Some(doc) = self.some_doc() else { return };
                 let number = 1 + self.rng.below(6);
-                self.log.push(format!("release number {number} by {}", doc.page));
+                self.log
+                    .push(format!("release number {number} by {}", doc.page));
                 let result = self.rig.release(&doc, &self.windows[at], number);
                 let live = self.current.as_ref().is_some_and(|c| c.page == doc.page)
                     && doc.epoch == self.rig.host_epoch();
@@ -494,13 +500,20 @@ impl Schedule {
         let Some(doc) = self.some_doc() else { return };
         let live = self.current.as_ref().is_some_and(|c| c.page == doc.page)
             && doc.epoch == self.rig.host_epoch();
-        let Ok(before) = self.rig.pull(&doc).map(|list| list.into_iter().map(|n| n.id).collect::<Vec<_>>())
+        let Ok(before) = self
+            .rig
+            .pull(&doc)
+            .map(|list| list.into_iter().map(|n| n.id).collect::<Vec<_>>())
         else {
             if live {
                 self.fail("the current page could not pull");
             }
             // A stale page's dismissal is refused.
-            if let Some(id) = self.rng.pick(&self.seen.keys().copied().collect::<Vec<_>>()).copied() {
+            if let Some(id) = self
+                .rng
+                .pick(&self.seen.keys().copied().collect::<Vec<_>>())
+                .copied()
+            {
                 self.log.push(format!("dismiss {id} by stale {}", doc.page));
                 if self.rig.dismiss(&doc, id).is_ok() {
                     self.fail("a stale page dismissed a notice");
@@ -535,7 +548,9 @@ impl Schedule {
             }
             Err(error) => {
                 if live {
-                    self.fail(&format!("the current page's dismissal was refused: {error}"));
+                    self.fail(&format!(
+                        "the current page's dismissal was refused: {error}"
+                    ));
                 }
             }
         }
@@ -735,7 +750,10 @@ fn run(seed: u64, steps: usize) -> Reached {
 /// seeds `CF_SCHEDULE_FIRST_SEED` onwards, 40 to 120 steps each. Every seed run is appended to
 /// `CF_SCHEDULE_LOG` if it names a file; a failure is reported with its seed.
 #[test]
-#[allow(clippy::disallowed_methods, reason = "a gate run names its count and seeds in the environment")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a gate run names its count and seeds in the environment"
+)]
 fn a_randomized_schedule_over_the_native_queue_holds_its_invariants() {
     let count: u64 = std::env::var("CF_SCHEDULES")
         .ok()
@@ -762,8 +780,16 @@ fn a_randomized_schedule_over_the_native_queue_holds_its_invariants() {
         }
         if let Some(path) = &log {
             use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                let _ = writeln!(file, "{seed} {steps} {}", if outcome.is_ok() { "ok" } else { "FAIL" });
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
+                let _ = writeln!(
+                    file,
+                    "{seed} {steps} {}",
+                    if outcome.is_ok() { "ok" } else { "FAIL" }
+                );
             }
         }
         if let Err(panic) = outcome {
@@ -781,7 +807,11 @@ fn a_randomized_schedule_over_the_native_queue_holds_its_invariants() {
     eprintln!("schedules {first}..{}: reached {total:?}", first + count);
     if count >= 100 && failures.is_empty() {
         assert!(
-            total.written > 0 && total.lost > 0 && total.replaced > 0 && total.folded > 0 && total.dismissed > 0,
+            total.written > 0
+                && total.lost > 0
+                && total.replaced > 0
+                && total.folded > 0
+                && total.dismissed > 0,
             "the schedules never reached what they gate: {total:?}"
         );
     }

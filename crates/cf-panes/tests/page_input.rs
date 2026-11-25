@@ -14,7 +14,6 @@ use cf_panes::validation::MAX_PAGE_INPUT_BYTES;
 use futures_executor::block_on;
 use portable_pty::PtySize;
 
-
 /// The page calls at the host's own epoch, which these tests do not move except by navigating.
 trait Pages {
     fn enqueue(
@@ -409,19 +408,17 @@ fn the_largest_paste_goes_in_whole() {
 /// reads the rest (`count` bytes in all): the reader's first byte proves its writer is
 /// writing, and the test, not a timer, decides when the program reads on. The last is the
 /// way to let it go.
-#[allow(clippy::unwrap_used, reason = "a test fixture failure must fail the test")]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test fixture failure must fail the test"
+)]
 #[allow(clippy::disallowed_methods, reason = "a test's own FIFO")]
 fn begun_reader(
     panes: &Arc<PaneTable>,
     arbiter: &Arc<InputArbiter>,
     inputs: &InputQueue,
     count: usize,
-) -> (
-    PaneKey,
-    mpsc::Receiver<u8>,
-    mpsc::Receiver<Vec<u8>>,
-    Hold,
-) {
+) -> (PaneKey, mpsc::Receiver<u8>, mpsc::Receiver<Vec<u8>>, Hold) {
     static FIFOS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let hold = std::env::temp_dir().join(format!(
         "cf-panes-hold-{}-{}",
@@ -474,7 +471,15 @@ fn begun_reader(
         reader.read_exact(&mut bytes[1..]).unwrap();
         done.send(bytes).unwrap();
     });
-    (key, begun, finished, Hold { path: hold, writes: count > 1 })
+    (
+        key,
+        begun,
+        finished,
+        Hold {
+            path: hold,
+            writes: count > 1,
+        },
+    )
 }
 
 /// The FIFO a reader waits on: letting it go writes what the reader waits for, and the FIFO is
@@ -505,7 +510,12 @@ impl Drop for Hold {
 #[test]
 #[allow(clippy::unwrap_used, reason = "a test step must succeed")]
 fn a_reply_after_the_pastes_first_byte_reaches_the_program_after_the_whole_paste() {
-    let paste = bracketed(&vec![b'p'; MAX_PAGE_INPUT_BYTES - PASTE_OPEN.len() - PASTE_CLOSE.len()]);
+    let paste = bracketed(&vec![
+        b'p';
+        MAX_PAGE_INPUT_BYTES
+            - PASTE_OPEN.len()
+            - PASTE_CLOSE.len()
+    ]);
     let panes = Arc::new(PaneTable::new());
     let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
     let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
@@ -520,7 +530,9 @@ fn a_reply_after_the_pastes_first_byte_reaches_the_program_after_the_whole_paste
     release.release();
     finished(&inputs, "page", &ticket);
     finished(&inputs, "page", &answer);
-    let bytes = finished_reading.recv_timeout(Duration::from_secs(20)).unwrap();
+    let bytes = finished_reading
+        .recv_timeout(Duration::from_secs(20))
+        .unwrap();
     inputs.close_and_drain();
     panes.kill(&key).unwrap();
     assert_eq!(bytes[..paste.len()], paste[..], "the whole paste, untorn");
@@ -533,7 +545,12 @@ fn a_reply_after_the_pastes_first_byte_reaches_the_program_after_the_whole_paste
 #[test]
 #[allow(clippy::unwrap_used, reason = "a test step must succeed")]
 fn a_call_handed_to_a_blocked_writer_is_written_before_the_new_pages_key_and_other_windows_go_on() {
-    let paste = bracketed(&vec![b'p'; MAX_PAGE_INPUT_BYTES - PASTE_OPEN.len() - PASTE_CLOSE.len()]);
+    let paste = bracketed(&vec![
+        b'p';
+        MAX_PAGE_INPUT_BYTES
+            - PASTE_OPEN.len()
+            - PASTE_CLOSE.len()
+    ]);
     let panes = Arc::new(PaneTable::new());
     let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
     let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
@@ -555,7 +572,10 @@ fn a_call_handed_to_a_blocked_writer_is_written_before_the_new_pages_key_and_oth
         b"Z",
         "window X gets its key while W is blocked"
     );
-    assert!(w_done.try_recv().is_err(), "W is still blocked on its paste");
+    assert!(
+        w_done.try_recv().is_err(),
+        "W is still blocked on its paste"
+    );
     release_w.release();
     finished(&inputs, "s:2", &d);
     let _ = (paste_ticket, k);

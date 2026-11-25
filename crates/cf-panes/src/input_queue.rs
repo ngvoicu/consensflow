@@ -360,7 +360,9 @@ impl InputJob {
 
     /// The call's cell, if it is a page's.
     fn cell(&self) -> Option<Arc<CallCell>> {
-        self.outcome.as_ref().map(|outcome| Arc::clone(&outcome.cell))
+        self.outcome
+            .as_ref()
+            .map(|outcome| Arc::clone(&outcome.cell))
     }
 }
 
@@ -565,7 +567,15 @@ impl PageShared {
                 .unwrap_or_else(|error| error.into_inner()),
         );
         for (key, loss, closed) in orphans {
-            state.record(&key, loss, Flags { closed, ..Flags::default() }, &mut Vec::new());
+            state.record(
+                &key,
+                loss,
+                Flags {
+                    closed,
+                    ..Flags::default()
+                },
+                &mut Vec::new(),
+            );
         }
         state
     }
@@ -600,7 +610,14 @@ impl PageInputState {
     /// notice is replaced by a new one under a new id (so that a Dismiss of the old one cannot
     /// clear what came after it), and the page that is current is told to ask.
     fn lost(&mut self, key: &PaneKey, closed: bool, events: &mut Vec<Event>) -> u64 {
-        self.lost_with(key, Flags { closed, ..Flags::default() }, events)
+        self.lost_with(
+            key,
+            Flags {
+                closed,
+                ..Flags::default()
+            },
+            events,
+        )
     }
 
     fn lost_with(&mut self, key: &PaneKey, flags: Flags, events: &mut Vec<Event>) -> u64 {
@@ -687,7 +704,9 @@ impl PageInputState {
             .notices
             .iter()
             .find(|(_, notice)| match &notice.body {
-                NoticeBody::Window { key: of, dropped, .. } => of == key && *dropped == flags.dropped,
+                NoticeBody::Window {
+                    key: of, dropped, ..
+                } => of == key && *dropped == flags.dropped,
                 NoticeBody::Folded { .. } => false,
             })
             .map(|(id, _)| *id);
@@ -777,9 +796,11 @@ impl PageInputState {
             .notices
             .iter()
             .filter(|(_, notice)| match &notice.body {
-                NoticeBody::Window { key: of, name: said, .. } => {
-                    of == key && said.as_deref() != Some(name)
-                }
+                NoticeBody::Window {
+                    key: of,
+                    name: said,
+                    ..
+                } => of == key && said.as_deref() != Some(name),
                 NoticeBody::Folded { .. } => false,
             })
             .map(|(id, _)| *id)
@@ -917,7 +938,14 @@ impl PageInputState {
                 .collect();
             for number in &places {
                 self.places.remove(&(key.clone(), *number));
-                self.lost_with(key, Flags { dropped: true, ..Flags::default() }, events);
+                self.lost_with(
+                    key,
+                    Flags {
+                        dropped: true,
+                        ..Flags::default()
+                    },
+                    events,
+                );
             }
             if (upto - from + 1) > places.len() as u64 {
                 self.lost(key, false, events);
@@ -957,10 +985,18 @@ impl PageInputState {
             }
         }
         // A file dropped whose path the old page had not typed: the host says so itself.
-        let mut places: Vec<(PaneKey, u64)> = std::mem::take(&mut self.places).into_iter().collect();
+        let mut places: Vec<(PaneKey, u64)> =
+            std::mem::take(&mut self.places).into_iter().collect();
         places.sort();
         for (key, _) in places {
-            self.lost_with(&key, Flags { dropped: true, ..Flags::default() }, events);
+            self.lost_with(
+                &key,
+                Flags {
+                    dropped: true,
+                    ..Flags::default()
+                },
+                events,
+            );
         }
         // No departed identity is kept: a page is judged by the epoch and the nonce it echoes.
         self.current = None;
@@ -1117,8 +1153,7 @@ impl InputQueue {
 
     /// The host's epoch: how many main documents have loaded.
     pub fn epoch(&self) -> u64 {
-        self.page.lock()
-            .epoch
+        self.page.lock().epoch
     }
 
     /// Start the clock that settles what a bound passes over, if something
@@ -1287,7 +1322,12 @@ impl InputQueue {
             })
         };
         if page.lane(&key).slots.len() >= MAX_LANE_SLOTS {
-            return refuse(&mut page, events, InputError::queue_full().to_string(), false);
+            return refuse(
+                &mut page,
+                events,
+                InputError::queue_full().to_string(),
+                false,
+            );
         }
         match &work {
             InputWork::Typed(bytes)
@@ -1371,12 +1411,7 @@ impl InputQueue {
             work,
             response,
             _reserved: reserved,
-            outcome: Some(Outcome::new(
-                &self.page,
-                call,
-                alive,
-                Arc::clone(&cell),
-            )),
+            outcome: Some(Outcome::new(&self.page, call, alive, Arc::clone(&cell))),
         };
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
@@ -1496,7 +1531,8 @@ impl InputQueue {
             let lane = page.lane(key);
             if let Some((_, loss)) = lane.skipped.iter().find(|(number, _)| *number == sequence) {
                 Ok(*loss)
-            } else if let Some(loss) = held.as_ref().and_then(|cell| cell.get()).filter(|_| record) {
+            } else if let Some(loss) = held.as_ref().and_then(|cell| cell.get()).filter(|_| record)
+            {
                 // The call has its loss already (its writer failed first): this is that one.
                 Ok(loss)
             } else if !record && sequence <= lane.passed {
@@ -1932,7 +1968,6 @@ impl InputQueue {
         Ok(())
     }
 
-
     /// A pane gone from the table, killed or retired when its program ended,
     /// takes its input with it: its queue closes (the worker ends once what
     /// was queued has gone in or failed), what waited in order is refused and
@@ -1992,7 +2027,12 @@ impl InputQueue {
         }
         // A file dropped into a window that closes before the page reloads is told, as a
         // file, in a notice of the closed window.
-        let held: Vec<(PaneKey, u64)> = page.places.iter().filter(|(of, _)| of == key).cloned().collect();
+        let held: Vec<(PaneKey, u64)> = page
+            .places
+            .iter()
+            .filter(|(of, _)| of == key)
+            .cloned()
+            .collect();
         for place in held {
             page.places.remove(&place);
             page.lost_with(
@@ -2063,10 +2103,7 @@ impl InputQueue {
         drop(senders);
         // What waits in order holds a sender to its worker: refuse it, or the
         // worker never ends.
-        let lanes = std::mem::take(
-            &mut self.page.lock()
-                .lanes,
-        );
+        let lanes = std::mem::take(&mut self.page.lock().lanes);
         for lane in lanes.into_values() {
             for slot in lane.slots.into_values() {
                 if let Slot::Parked { job, .. } = slot {
@@ -2657,7 +2694,11 @@ mod tests {
         inputs
             .enqueue("page", key.clone(), 2, typed(b"B"), true)
             .unwrap();
-        assert_eq!(handed(&received), b"B", "the order goes on past the refused number");
+        assert_eq!(
+            handed(&received),
+            b"B",
+            "the order goes on past the refused number"
+        );
         inputs.close_and_drain();
     }
 
@@ -3002,7 +3043,11 @@ mod tests {
             .enqueue("s:1", key.clone(), 2, typed(b"B"), true)
             .unwrap();
         inputs.end_page().unwrap();
-        assert_eq!(handed(&received), b"", "B waited behind a missing number: it is cancelled");
+        assert_eq!(
+            handed(&received),
+            b"",
+            "B waited behind a missing number: it is cancelled"
+        );
         inputs.prepare("s:2").unwrap();
         let lost = inputs.activate("s:2").unwrap();
         assert_eq!(lost.len(), 1);
@@ -3027,7 +3072,11 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
         assert!(second[0].1 > first[0].1);
-        assert_eq!(inputs.dismiss(first[0].1), Ok(false), "the replaced id is nothing");
+        assert_eq!(
+            inputs.dismiss(first[0].1),
+            Ok(false),
+            "the replaced id is nothing"
+        );
         assert_eq!(inputs.activate("s:1").unwrap(), second);
         assert_eq!(inputs.dismiss(second[0].1), Ok(true));
         assert!(inputs.activate("s:1").unwrap().is_empty());
@@ -3077,7 +3126,10 @@ mod tests {
             .map(|lane| lane.slots.len())
             .sum();
         // What it parks, and the spent numbers of what it was refused, twice as many at most.
-        assert!(held > MAX_LANE_SLOTS && held <= 2 * MAX_LANE_SLOTS, "{held}");
+        assert!(
+            held > MAX_LANE_SLOTS && held <= 2 * MAX_LANE_SLOTS,
+            "{held}"
+        );
         inputs.close_and_drain();
     }
 

@@ -152,7 +152,12 @@ fn notices_json(notices: &PendingNotices) -> Value {
 /// The person dismissed the notice with this id: it goes if it is still outstanding under that
 /// id, on the current page of the current epoch. A notice the host replaced has a new id.
 #[tauri::command]
-pub fn pane_lost_dismiss<R: Runtime>(app: AppHandle<R>, page_id: String, epoch: u64, id: u64) -> Value {
+pub fn pane_lost_dismiss<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: u64,
+) -> Value {
     let state = app.state::<AppRuntime>();
     match state.inputs.dismiss_notice(&page_id, epoch, id) {
         Ok(removed) => json!({"ok":true,"removed":removed}),
@@ -246,10 +251,12 @@ fn enqueue_page_text<R: Runtime>(
             // order must not wait for this one.
             if let Ok(key) = pane_key(&call.id, call.generation) {
                 let state = app.state::<AppRuntime>();
-                match state
-                    .inputs
-                    .refuse_page_sequence(&call.page_id, call.epoch, &key, call.sequence)
-                {
+                match state.inputs.refuse_page_sequence(
+                    &call.page_id,
+                    call.epoch,
+                    &key,
+                    call.sequence,
+                ) {
                     Ok(loss) => return json!({"ok":false,"error":error,"loss":loss}),
                     // Its number cannot be spent yet (the page's slots are full): the page skips
                     // it until the host has, and never takes this for a final refusal.
@@ -1387,7 +1394,10 @@ mod tests {
                 .expect("command response JSON")
         };
         let page = json!({"pageId":"test-page"});
-        let prepared = invoke("pane_page_prepare", json!({"pageId":"test-page","nonce":"n-1"}));
+        let prepared = invoke(
+            "pane_page_prepare",
+            json!({"pageId":"test-page","nonce":"n-1"}),
+        );
         assert_eq!(prepared["ok"], true, "{prepared}");
         let epoch = prepared["epoch"].as_u64().expect("the host's epoch");
         let activated = invoke(
@@ -1417,7 +1427,10 @@ mod tests {
         );
         let skipped = invoke("pane_input_skip", at(json!({"sequence":2})));
         assert_eq!(skipped["ok"], true, "{skipped}");
-        let pulled = invoke("pane_lost_pull", json!({"pageId":"test-page","epoch":epoch}));
+        let pulled = invoke(
+            "pane_lost_pull",
+            json!({"pageId":"test-page","epoch":epoch}),
+        );
         assert_eq!(pulled["ok"], true, "{pulled}");
         let notices = pulled["notices"].as_array().expect("the list");
         assert_eq!(notices.len(), 1, "{pulled}");
@@ -1429,14 +1442,23 @@ mod tests {
         );
         // A Dismiss of an id the host does not hold clears nothing; its own clears it.
         assert_eq!(
-            invoke("pane_lost_dismiss", json!({"pageId":"test-page","epoch":epoch,"id":id + 1000})),
+            invoke(
+                "pane_lost_dismiss",
+                json!({"pageId":"test-page","epoch":epoch,"id":id + 1000})
+            ),
             json!({"ok":true,"removed":false})
         );
         assert_eq!(
-            invoke("pane_lost_dismiss", json!({"pageId":"test-page","epoch":epoch,"id":id})),
+            invoke(
+                "pane_lost_dismiss",
+                json!({"pageId":"test-page","epoch":epoch,"id":id})
+            ),
             json!({"ok":true,"removed":true})
         );
-        let pulled = invoke("pane_lost_pull", json!({"pageId":"test-page","epoch":epoch}));
+        let pulled = invoke(
+            "pane_lost_pull",
+            json!({"pageId":"test-page","epoch":epoch}),
+        );
         assert_eq!(pulled["notices"], json!([]));
         inputs.close_and_drain();
     }

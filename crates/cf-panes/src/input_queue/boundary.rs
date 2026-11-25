@@ -21,7 +21,9 @@ fn of_window<'a>(notice: &'a Notice, key: &PaneKey) -> Option<&'a NoticeBody> {
 }
 
 fn names(notices: &[Notice], key: &PaneKey) -> bool {
-    notices.iter().any(|notice| of_window(notice, key).is_some())
+    notices
+        .iter()
+        .any(|notice| of_window(notice, key).is_some())
 }
 
 /// The id of the window's outstanding notice.
@@ -36,7 +38,10 @@ fn id_of(notices: &[Notice], key: &PaneKey) -> u64 {
 /// Whether the window's outstanding notice says it has closed.
 fn says_closed(notices: &[Notice], key: &PaneKey) -> bool {
     notices.iter().any(|notice| {
-        matches!(of_window(notice, key), Some(NoticeBody::Window { closed: true, .. }))
+        matches!(
+            of_window(notice, key),
+            Some(NoticeBody::Window { closed: true, .. })
+        )
     })
 }
 
@@ -62,7 +67,10 @@ fn r1_an_old_first_call_in_transit_never_overtakes_the_new_pages() {
         let newest = rig.open_page(if middle_outage { "s:3" } else { "s:2" });
         rig.input(&newest, &w, 1, b"D").unwrap();
         let late = rig.input(&old, &w, 1, b"A");
-        assert!(late.is_err(), "the old page's first call is refused: {late:?}");
+        assert!(
+            late.is_err(),
+            "the old page's first call is refused: {late:?}"
+        );
         assert_eq!(
             text(rig.written(&w)),
             "D",
@@ -127,9 +135,15 @@ fn r2_a_stale_document_cannot_seize_the_page_or_spend_its_numbers() {
     rig.navigate();
     // The held second preparation and the old activation arrive after navigation.
     let _ = rig.try_prepare(&held_second_prepare.page);
-    assert!(rig.activate(&old).is_err(), "a stale activation seizes nothing");
+    assert!(
+        rig.activate(&old).is_err(),
+        "a stale activation seizes nothing"
+    );
     let newest = rig.prepare("b:1");
-    assert!(rig.activate(&old).is_err(), "nor before the newest page's own");
+    assert!(
+        rig.activate(&old).is_err(),
+        "nor before the newest page's own"
+    );
     rig.activate(&newest).unwrap();
     // Q's first activation answer was lost: asked again, the same answer.
     rig.activate(&newest).unwrap();
@@ -149,11 +163,21 @@ fn r2_a_stale_document_cannot_seize_the_page_or_spend_its_numbers() {
         );
     }
     rig.input(&newest, &w, 1, b"D").unwrap();
-    assert_eq!(text(rig.written(&w)), "D", "the newest page's number 1 writes once");
-    assert!(!rig.may_subscribe(&old), "a stale page does not replace the subscription");
+    assert_eq!(
+        text(rig.written(&w)),
+        "D",
+        "the newest page's number 1 writes once"
+    );
+    assert!(
+        !rig.may_subscribe(&old),
+        "a stale page does not replace the subscription"
+    );
     assert!(rig.may_subscribe(&newest));
     assert_eq!(rig.host_epoch(), epoch, "no stale call moves the epoch");
-    assert!(names(&rig.pull(&newest).unwrap(), &w.key), "each leaves a recoverable notice");
+    assert!(
+        names(&rig.pull(&newest).unwrap(), &w.key),
+        "each leaves a recoverable notice"
+    );
 }
 
 /// R3. Until a document is activated nothing it sends is enqueued; after it is, its first
@@ -168,12 +192,19 @@ fn r3_nothing_is_enqueued_before_the_documents_activation() {
         assert!(rig.input(&doc, &w, attempt, b"k").is_err());
     }
     assert!(rig.reply(&doc, &w, 4, b"r").is_err());
-    assert_eq!(text(rig.written(&w)), "", "zero input is enqueued before the acknowledgement");
+    assert_eq!(
+        text(rig.written(&w)),
+        "",
+        "zero input is enqueued before the acknowledgement"
+    );
     rig.activate(&doc).unwrap();
     // The page's own gate keeps these from being sent at all (the page suite); what the host
     // refused before is still owed to the person.
     let owed = rig.pull(&doc).unwrap();
-    assert!(names(&owed, &w.key), "nothing a refused call carried vanishes unsaid");
+    assert!(
+        names(&owed, &w.key),
+        "nothing a refused call carried vanishes unsaid"
+    );
     rig.input(&doc, &w, 1, b"D").unwrap();
     assert_eq!(text(rig.written(&w)), "D");
 }
@@ -209,13 +240,27 @@ fn r4_the_webview2_order_is_written_once_and_a_reload_cancels_what_is_parked() {
         rig.navigate();
         let next = rig.open_page("s:2");
         rig.input(&next, &w, 1, b"F").unwrap();
-        assert_eq!(text(rig.written(&w)), "F", "Q's call is not held behind the old page's");
+        assert_eq!(
+            text(rig.written(&w)),
+            "F",
+            "Q's call is not held behind the old page's"
+        );
         if deliver_three {
             assert!(rig.input(&old, &w, 3, b"C").is_err());
         }
-        assert!(rig.input(&old, &w, 6, b"U").is_err(), "an unload call is refused and told");
-        assert_eq!(text(rig.written(&w)), "", "no late arrival reaches the writer");
-        assert!(names(&rig.pull(&next).unwrap(), &w.key), "the parked calls and the gap are told");
+        assert!(
+            rig.input(&old, &w, 6, b"U").is_err(),
+            "an unload call is refused and told"
+        );
+        assert_eq!(
+            text(rig.written(&w)),
+            "",
+            "no late arrival reaches the writer"
+        );
+        assert!(
+            names(&rig.pull(&next).unwrap(), &w.key),
+            "the parked calls and the gap are told"
+        );
     }
     // The limit: a trailing unload call that never reaches the host has no number after it and
     // no skip, and nothing can be inferred of it.
@@ -229,7 +274,10 @@ fn r4_the_webview2_order_is_written_once_and_a_reload_cancels_what_is_parked() {
     rig.navigate();
     let next = rig.open_page("s:2");
     assert_eq!(text(rig.written(&w)), "ABC");
-    assert!(rig.pull(&next).unwrap().is_empty(), "a call that never arrived cannot be told");
+    assert!(
+        rig.pull(&next).unwrap().is_empty(),
+        "a call that never arrived cannot be told"
+    );
 }
 
 /// R5, in the lane: number 3 at 0 ms, number 2 at 1,000 ms, number 1 never; each call has its
@@ -279,12 +327,16 @@ fn r5_a_known_missing_number_owes_a_fresh_notice_after_an_earlier_one_was_shown(
     rig.refuse_decode(&old, &w, 2).unwrap();
     let first = id_of(&rig.pull(&old).unwrap(), &w.key);
     assert!(rig.dismiss(&old, first).unwrap());
-    assert!(rig.pull(&old).unwrap().is_empty(), "the first warning was shown and dismissed");
+    assert!(
+        rig.pull(&old).unwrap().is_empty(),
+        "the first warning was shown and dismissed"
+    );
     rig.navigate();
     let next = rig.open_page("s:2");
     let owed = rig.pull(&next).unwrap();
     assert!(
-        owed.iter().any(|notice| of_window(notice, &w.key).is_some() && notice.id > first),
+        owed.iter()
+            .any(|notice| of_window(notice, &w.key).is_some() && notice.id > first),
         "a new pending notice for the missing number 1: {owed:?}"
     );
 }
@@ -303,9 +355,17 @@ fn r6_parked_pastes_are_cancelled_at_the_cut_and_their_allowance_released() {
     assert!(rig.reserved(&w) > 7 * 1024 * 1024);
     rig.navigate();
     let next = rig.open_page("s:2");
-    assert_eq!(rig.reserved(&w), 0, "their reservations are released at the cut");
+    assert_eq!(
+        rig.reserved(&w),
+        0,
+        "their reservations are released at the cut"
+    );
     rig.input(&next, &w, 1, &paste).unwrap();
-    assert_eq!(rig.written(&w).len(), paste.len(), "only the new page's paste is written");
+    assert_eq!(
+        rig.written(&w).len(),
+        paste.len(),
+        "only the new page's paste is written"
+    );
     assert!(names(&rig.pull(&next).unwrap(), &w.key));
 }
 
@@ -324,7 +384,10 @@ fn r7_a_window_closed_with_a_call_waiting_is_named_on_the_current_page() {
             rig.retire(&w);
         } else {
             rig.retire(&w);
-            assert!(rig.wait(&old, &ticket).is_some(), "the page's wait is answered, not left hanging");
+            assert!(
+                rig.wait(&old, &ticket).is_some(),
+                "the page's wait is answered, not left hanging"
+            );
             rig.navigate();
         }
         let next = rig.open_page("s:2");
@@ -360,27 +423,39 @@ fn r8_every_refusal_exit_leaves_a_loss_for_the_surviving_page() {
     type Outcome = (Result<String, adapter::Refused>, PaneKey, Vec<u8>);
     type Setup = fn(&Rig, &Doc, &adapter::Window) -> Outcome;
     let exits: [(&str, Setup); 6] = [
-        ("a full writer queue refuses the call at once", |rig, doc, w| {
-            fill_the_writer(rig, doc, w);
-            let refused = rig.input(doc, w, INPUT_QUEUE_CAPACITY as u64 + 1, b"K");
-            (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
-        }),
-        ("a parked call pumped into a full writer queue", |rig, doc, w| {
-            fill_the_writer(rig, doc, w);
-            let n = INPUT_QUEUE_CAPACITY as u64;
-            rig.input(doc, w, n + 2, b"K").unwrap();
-            // Its number comes: the call before it takes the order past it into the full queue.
-            let refused = rig.input(doc, w, n + 1, b"J");
-            assert!(refused.is_err(), "the call that completes the order is refused: {refused:?}");
-            (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
-        }),
-        ("a human's bytes past the window's allowance", |rig, doc, w| {
-            let paste = vec![b'p'; 4 * 1024 * 1024 - 64];
-            rig.input(doc, w, 1, &paste).unwrap();
-            rig.input(doc, w, 2, &paste).unwrap();
-            let refused = rig.input(doc, w, 3, &[b'q'; 200]);
-            (refused, w.key.clone(), [paste.clone(), paste].concat())
-        }),
+        (
+            "a full writer queue refuses the call at once",
+            |rig, doc, w| {
+                fill_the_writer(rig, doc, w);
+                let refused = rig.input(doc, w, INPUT_QUEUE_CAPACITY as u64 + 1, b"K");
+                (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
+            },
+        ),
+        (
+            "a parked call pumped into a full writer queue",
+            |rig, doc, w| {
+                fill_the_writer(rig, doc, w);
+                let n = INPUT_QUEUE_CAPACITY as u64;
+                rig.input(doc, w, n + 2, b"K").unwrap();
+                // Its number comes: the call before it takes the order past it into the full queue.
+                let refused = rig.input(doc, w, n + 1, b"J");
+                assert!(
+                    refused.is_err(),
+                    "the call that completes the order is refused: {refused:?}"
+                );
+                (refused, w.key.clone(), vec![b'x'; INPUT_QUEUE_CAPACITY])
+            },
+        ),
+        (
+            "a human's bytes past the window's allowance",
+            |rig, doc, w| {
+                let paste = vec![b'p'; 4 * 1024 * 1024 - 64];
+                rig.input(doc, w, 1, &paste).unwrap();
+                rig.input(doc, w, 2, &paste).unwrap();
+                let refused = rig.input(doc, w, 3, &[b'q'; 200]);
+                (refused, w.key.clone(), [paste.clone(), paste].concat())
+            },
+        ),
         ("a reply past the replies' allowance", |rig, doc, w| {
             let refused = rig.reply(doc, w, 1, &vec![b'r'; 64 * 1024 + 1]);
             (refused, w.key.clone(), Vec::new())
@@ -431,7 +506,11 @@ fn r8_every_refusal_exit_leaves_a_loss_for_the_surviving_page() {
             Some(owed[0].id) >= result.unwrap_err().1,
             "{name}: and it is the caller's loss or a later one for the same window"
         );
-        assert_eq!(rig.written(&w), expected, "{name}: the writer got exactly what was committed");
+        assert_eq!(
+            rig.written(&w),
+            expected,
+            "{name}: the writer got exactly what was committed"
+        );
         assert_eq!(
             rig.replied(&w),
             Vec::<u8>::new(),
@@ -451,10 +530,19 @@ fn r10_a_dismissal_from_a_departed_document_clears_nothing() {
     rig.skip(&old, &w, 1).unwrap();
     let id = id_of(&rig.pull(&old).unwrap(), &w.key);
     rig.navigate();
-    assert!(rig.dismiss(&old, id).is_err(), "the departed document dismisses nothing");
+    assert!(
+        rig.dismiss(&old, id).is_err(),
+        "the departed document dismisses nothing"
+    );
     let next = rig.open_page("s:2");
-    assert!(rig.dismiss(&old, id).is_err(), "nor once the next page is current");
-    assert!(names(&rig.pull(&next).unwrap(), &w.key), "the next page has not seen it yet");
+    assert!(
+        rig.dismiss(&old, id).is_err(),
+        "nor once the next page is current"
+    );
+    assert!(
+        names(&rig.pull(&next).unwrap(), &w.key),
+        "the next page has not seen it yet"
+    );
 }
 
 /// R9. The old page's timeout skip for its missing number 1 arrives after the reload: only the
@@ -470,15 +558,24 @@ fn r9_a_delayed_skip_and_its_original_cannot_touch_the_new_pages_numbers() {
     rig.navigate();
     let next = rig.open_page("s:2");
     let ticket = rig.input(&next, &w, 1, b"D").unwrap();
-    assert!(rig.skip(&old, &w, 1).is_err(), "the delayed skip is no skip of the new page's");
+    assert!(
+        rig.skip(&old, &w, 1).is_err(),
+        "the delayed skip is no skip of the new page's"
+    );
     assert!(rig.skip(&old, &w, 1).is_err(), "nor its retry");
-    assert!(rig.input(&old, &w, 1, b"A").is_err(), "the original comes late");
+    assert!(
+        rig.input(&old, &w, 1, b"A").is_err(),
+        "the original comes late"
+    );
     assert_eq!(text(rig.written(&w)), "D");
     assert!(
         matches!(rig.wait(&next, &ticket), Some(Ok(Ok(())))),
         "the new page's ticket still resolves"
     );
-    assert!(names(&rig.pull(&next).unwrap(), &w.key), "the old loss survives");
+    assert!(
+        names(&rig.pull(&next).unwrap(), &w.key),
+        "the old loss survives"
+    );
 }
 
 /// R9, capacity: with the page's numbers full, a skip for an absent number is not final until
@@ -506,11 +603,23 @@ fn r9_a_skip_is_final_only_once_its_number_is_spent() {
     // The numbers' own bounds pass and the order drains: the page's retry is then final.
     thread::sleep(ORDER_BOUND + Duration::from_millis(300));
     let spent = rig.skip(&page, &w, absent).expect("the retry is final");
-    assert_eq!(rig.skip(&page, &w, absent), Ok(spent), "a retry makes no new notice");
-    assert!(rig.input(&page, &w, absent, b"Z").is_err(), "the original never writes");
+    assert_eq!(
+        rig.skip(&page, &w, absent),
+        Ok(spent),
+        "a retry makes no new notice"
+    );
+    assert!(
+        rig.input(&page, &w, absent, b"Z").is_err(),
+        "the original never writes"
+    );
     assert!(!rig.written(&w).contains(&b'Z'));
     let owed = rig.pull(&page).unwrap();
-    assert_eq!(owed.iter().filter(|notice| of_window(notice, &w.key).is_some()).count(), 1);
+    assert_eq!(
+        owed.iter()
+            .filter(|notice| of_window(notice, &w.key).is_some())
+            .count(),
+        1
+    );
 }
 
 /// R10. A notice goes only when the person dismisses its exact id, on the current document. A
@@ -534,7 +643,11 @@ fn r10_a_notice_goes_only_by_its_exact_id() {
     rig.skip(&next, &w1, 1).unwrap();
     let newer = id_of(&rig.pull(&next).unwrap(), &w1.key);
     assert!(newer > one);
-    assert_eq!(rig.dismiss(&next, one), Ok(false), "a replaced id dismisses nothing");
+    assert_eq!(
+        rig.dismiss(&next, one),
+        Ok(false),
+        "a replaced id dismisses nothing"
+    );
     assert_eq!(rig.dismiss(&next, two), Ok(true));
     let left = rig.pull(&next).unwrap();
     assert_eq!(left.len(), 1, "{left:?}");
@@ -543,7 +656,11 @@ fn r10_a_notice_goes_only_by_its_exact_id() {
     for _ in 0..5 {
         assert_eq!(rig.pull(&next).unwrap(), left);
     }
-    assert_eq!(rig.dismiss(&next, two), Ok(false), "a dismissed id comes back as nothing");
+    assert_eq!(
+        rig.dismiss(&next, two),
+        Ok(false),
+        "a dismissed id comes back as nothing"
+    );
     assert_eq!(rig.dismiss(&next, newer), Ok(true));
     assert!(rig.pull(&next).unwrap().is_empty());
 }
@@ -592,14 +709,22 @@ fn r11_the_65th_notice_folds_the_oldest_into_one_row() {
     let page = rig.open_page("s:1");
     let first = PaneKey::new("window-0", 1);
     for index in 0..MAX_OUTSTANDING_NOTICES {
-        rig.skip_key(&page, &PaneKey::new(format!("window-{index}"), 1), 1).unwrap();
+        rig.skip_key(&page, &PaneKey::new(format!("window-{index}"), 1), 1)
+            .unwrap();
     }
     let before = rig.pull(&page).unwrap();
     assert_eq!(before.len(), MAX_OUTSTANDING_NOTICES);
-    assert!(before.iter().all(|notice| matches!(notice.body, NoticeBody::Window { .. })));
-    rig.skip_key(&page, &PaneKey::new("window-64", 1), 1).unwrap();
+    assert!(before
+        .iter()
+        .all(|notice| matches!(notice.body, NoticeBody::Window { .. })));
+    rig.skip_key(&page, &PaneKey::new("window-64", 1), 1)
+        .unwrap();
     let after = rig.pull(&page).unwrap();
-    assert_eq!(after.len(), MAX_OUTSTANDING_NOTICES + 1, "64 rows and the fold");
+    assert_eq!(
+        after.len(),
+        MAX_OUTSTANDING_NOTICES + 1,
+        "64 rows and the fold"
+    );
     assert!(!names(&after, &first), "the oldest is in the fold");
     let fold = after
         .iter()
@@ -607,7 +732,8 @@ fn r11_the_65th_notice_folds_the_oldest_into_one_row() {
         .expect("the fold");
     assert_eq!(fold.body, NoticeBody::Folded { count: 1 });
     // A fold that changes is a new row: the old id is nothing, and the new one stands.
-    rig.skip_key(&page, &PaneKey::new("window-65", 1), 1).unwrap();
+    rig.skip_key(&page, &PaneKey::new("window-65", 1), 1)
+        .unwrap();
     let later = rig.pull(&page).unwrap();
     let fold_two = later
         .iter()
@@ -615,16 +741,25 @@ fn r11_the_65th_notice_folds_the_oldest_into_one_row() {
         .unwrap();
     assert_eq!(fold_two.body, NoticeBody::Folded { count: 2 });
     assert!(fold_two.id > fold.id);
-    assert_eq!(rig.dismiss(&page, fold.id), Ok(false), "the old fold's id clears nothing");
+    assert_eq!(
+        rig.dismiss(&page, fold.id),
+        Ok(false),
+        "the old fold's id clears nothing"
+    );
     // Dismissing the fold removes what was folded into it, and what is folded later stays.
     assert_eq!(rig.dismiss(&page, fold_two.id), Ok(true));
     let rest = rig.pull(&page).unwrap();
     assert_eq!(rest.len(), MAX_OUTSTANDING_NOTICES);
-    assert!(rest.iter().all(|notice| matches!(notice.body, NoticeBody::Window { .. })));
-    rig.skip_key(&page, &PaneKey::new("window-66", 1), 1).unwrap();
+    assert!(rest
+        .iter()
+        .all(|notice| matches!(notice.body, NoticeBody::Window { .. })));
+    rig.skip_key(&page, &PaneKey::new("window-66", 1), 1)
+        .unwrap();
     let again = rig.pull(&page).unwrap();
     assert!(
-        again.iter().any(|notice| notice.body == NoticeBody::Folded { count: 1 }),
+        again
+            .iter()
+            .any(|notice| notice.body == NoticeBody::Folded { count: 1 }),
         "a place folded after the dismissal is a fold of its own"
     );
 }
@@ -636,12 +771,20 @@ fn r12_a_failed_or_vanished_write_leaves_a_host_owned_outcome() {
     type Fate = fn(&Rig, &adapter::Window);
     let fates: [(&str, Fate); 3] = [
         ("fails before writing", |rig, w| {
-            rig.writer_finishes(w, Err(InputError::refused("stale-pane", "the pane is gone")))
+            rig.writer_finishes(
+                w,
+                Err(InputError::refused("stale-pane", "the pane is gone")),
+            )
         }),
         ("fails after a prefix", |rig, w| {
-            rig.writer_finishes(w, Err(InputError::Uncertain("the write stopped half way".into())))
+            rig.writer_finishes(
+                w,
+                Err(InputError::Uncertain("the write stopped half way".into())),
+            )
         }),
-        ("vanishes without answering", |rig, w| rig.writer_vanishes(w)),
+        ("vanishes without answering", |rig, w| {
+            rig.writer_vanishes(w)
+        }),
     ];
     for (name, fate) in fates {
         for after_the_cut in [false, true] {
@@ -655,7 +798,11 @@ fn r12_a_failed_or_vanished_write_leaves_a_host_owned_outcome() {
             }
             fate(&rig, &w);
             // The page never fetched its wait: nothing but the host's record can tell.
-            let current = if after_the_cut { rig.open_page("s:2") } else { page.clone() };
+            let current = if after_the_cut {
+                rig.open_page("s:2")
+            } else {
+                page.clone()
+            };
             let _ = ticket;
             let owed = rig.pull(&current).unwrap();
             assert!(
@@ -671,7 +818,10 @@ fn r12_a_failed_or_vanished_write_leaves_a_host_owned_outcome() {
     let page = rig.open_page("s:1");
     rig.input(&page, &w, 1, b"AB").unwrap();
     rig.writer_finishes(&w, Err(InputError::Uncertain("half".into())));
-    assert!(rig.input(&page, &w, 1, b"AB").is_err(), "the same number is not written again");
+    assert!(
+        rig.input(&page, &w, 1, b"AB").is_err(),
+        "the same number is not written again"
+    );
     assert_eq!(text(rig.written(&w)), "");
 }
 
@@ -699,7 +849,8 @@ fn f2_an_idle_refusal_keeps_the_gaps_deadline() {
     thread::sleep(ORDER_BOUND + Duration::from_millis(250));
     let owed = rig.pull(&next).unwrap();
     assert!(
-        owed.iter().any(|notice| of_window(notice, &w.key).is_some() && notice.id > first),
+        owed.iter()
+            .any(|notice| of_window(notice, &w.key).is_some() && notice.id > first),
         "the known gap below the refused number is told when its bound passes: {owed:?}"
     );
 }
@@ -716,9 +867,15 @@ fn f2_a_clock_that_cannot_start_leaves_nothing_parked() {
     let ticket = rig.input(&page, &w, 2, b"B").unwrap();
     rig.refuse_threads(false);
     assert_eq!(text(rig.written(&w)), "B", "the key is not left unwritten");
-    assert!(matches!(rig.wait(&page, &ticket), Some(Ok(Ok(())))), "its ticket resolves");
+    assert!(
+        matches!(rig.wait(&page, &ticket), Some(Ok(Ok(())))),
+        "its ticket resolves"
+    );
     assert_eq!(rig.reserved(&w), 0, "no byte stays reserved");
-    assert!(names(&rig.pull(&page).unwrap(), &w.key), "the missing number is a numbered loss");
+    assert!(
+        names(&rig.pull(&page).unwrap(), &w.key),
+        "the missing number is a numbered loss"
+    );
 }
 
 /// Finding 3. A skip confirmed final removes the parked job: `A` after a confirmed skip of
@@ -747,9 +904,15 @@ fn f3_a_refused_number_at_the_limit_stays_spent() {
         rig.input(&page, &w, number, b"x").unwrap();
     }
     let absent = MAX_LANE_SLOTS as u64 + 2;
-    assert!(rig.input(&page, &w, absent, b"K").is_err(), "the lane is full");
+    assert!(
+        rig.input(&page, &w, absent, b"K").is_err(),
+        "the lane is full"
+    );
     thread::sleep(ORDER_BOUND + Duration::from_millis(300));
-    assert!(rig.input(&page, &w, absent, b"K").is_err(), "its number was spent by the refusal");
+    assert!(
+        rig.input(&page, &w, absent, b"K").is_err(),
+        "its number was spent by the refusal"
+    );
     assert!(!rig.written(&w).contains(&b'K'));
 }
 
@@ -781,8 +944,15 @@ fn f4_a_changed_notice_is_a_new_notice_and_the_old_id_clears_nothing() {
     assert!(!says_closed(&open, &w.key));
     rig.retire(&w);
     let owed = rig.pull(&page).unwrap();
-    assert!(says_closed(&owed, &w.key) && id_of(&owed, &w.key) > open_id, "{owed:?}");
-    assert_eq!(rig.dismiss(&page, open_id), Ok(false), "the old id clears nothing");
+    assert!(
+        says_closed(&owed, &w.key) && id_of(&owed, &w.key) > open_id,
+        "{owed:?}"
+    );
+    assert_eq!(
+        rig.dismiss(&page, open_id),
+        Ok(false),
+        "the old id clears nothing"
+    );
     assert!(names(&rig.pull(&page).unwrap(), &w.key));
     // The notice itself never changed: asked twice, the same words under the same id.
     assert_eq!(rig.pull(&page).unwrap(), owed);
@@ -800,7 +970,11 @@ fn f4_a_late_name_and_new_advice_are_new_notices() {
     let plain_id = id_of(&plain, &w.key);
     assert!(matches!(
         of_window(&plain[0], &w.key),
-        Some(NoticeBody::Window { name: None, failed: false, .. })
+        Some(NoticeBody::Window {
+            name: None,
+            failed: false,
+            ..
+        })
     ));
     rig.name(&page, &w.key, "Chief of Staff").unwrap();
     let named = rig.pull(&page).unwrap();
@@ -820,7 +994,11 @@ fn f4_a_late_name_and_new_advice_are_new_notices() {
     assert!(id_of(&failed, &w.key) > named_id);
     assert!(matches!(
         of_window(&failed[0], &w.key),
-        Some(NoticeBody::Window { failed: true, name: Some(_), .. })
+        Some(NoticeBody::Window {
+            failed: true,
+            name: Some(_),
+            ..
+        })
     ));
 }
 
@@ -858,7 +1036,10 @@ fn f6_a_dismissal_clears_the_exact_id_of_its_own_window() {
     let (one, two) = (id_of(&both, &w1.key), id_of(&both, &w2.key));
     assert!(two > one);
     assert_eq!(rig.dismiss(&page, two), Ok(true));
-    assert!(names(&rig.pull(&page).unwrap(), &w1.key), "W2's id does not clear W1");
+    assert!(
+        names(&rig.pull(&page).unwrap(), &w1.key),
+        "W2's id does not clear W1"
+    );
     assert_eq!(rig.dismiss(&page, one), Ok(true));
     assert!(rig.pull(&page).unwrap().is_empty());
 }
@@ -887,7 +1068,10 @@ fn f7_a_writer_gone_with_the_lock_held_still_gets_its_number_and_notice() {
         rig.navigate();
         let next = rig.open_page("s:2");
         thread::sleep(Duration::from_millis(100));
-        assert!(names(&rig.pull(&next).unwrap(), &w.key), "helper fails={helper_fails}");
+        assert!(
+            names(&rig.pull(&next).unwrap(), &w.key),
+            "helper fails={helper_fails}"
+        );
     }
 }
 
@@ -903,7 +1087,11 @@ fn f7_a_skipped_call_whose_writer_then_fails_makes_one_loss() {
     rig.skip(&page, &w, 1).unwrap();
     let shown = rig.pull(&page).unwrap();
     rig.writer_finishes(&w, Err(InputError::Uncertain("half".into())));
-    assert_eq!(rig.pull(&page).unwrap(), shown, "the skip's loss was this call's: one notice, unchanged");
+    assert_eq!(
+        rig.pull(&page).unwrap(),
+        shown,
+        "the skip's loss was this call's: one notice, unchanged"
+    );
 }
 
 /// Finding 8. A surviving host recovers a poisoned admission lock: navigation and the next
@@ -932,7 +1120,11 @@ fn f9_cuts_keep_no_departed_identities() {
         rig.navigate();
         rig.open_page(&format!("s:{index}"));
     }
-    assert!(rig.held_identities() < 8, "{} identities held", rig.held_identities());
+    assert!(
+        rig.held_identities() < 8,
+        "{} identities held",
+        rig.held_identities()
+    );
 }
 
 /// Round 3, a call's identity: the window, its generation, the page's epoch and the number.
@@ -955,7 +1147,8 @@ fn g2_a_successors_acknowledged_skip_does_not_hide_the_old_writers_failure() {
     rig.writer_finishes(&w, Err(InputError::Uncertain("the write failed".into())));
     let owed = rig.pull(&next).unwrap();
     assert!(
-        owed.iter().any(|notice| of_window(notice, &w.key).is_some() && notice.id > skipped),
+        owed.iter()
+            .any(|notice| of_window(notice, &w.key).is_some() && notice.id > skipped),
         "the old call's own failure is owed to the person: {owed:?}"
     );
 }
@@ -976,7 +1169,8 @@ fn g2_a_successors_skip_does_not_hide_the_old_writers_disappearance() {
     rig.writer_vanishes(&w);
     let owed = rig.pull(&next).unwrap();
     assert!(
-        owed.iter().any(|notice| of_window(notice, &w.key).is_some() && notice.id > skipped),
+        owed.iter()
+            .any(|notice| of_window(notice, &w.key).is_some() && notice.id > skipped),
         "{owed:?}"
     );
 }
@@ -996,7 +1190,10 @@ fn g2_a_skipped_call_whose_writer_fails_after_a_cut_makes_one_loss() {
     rig.navigate();
     let next = rig.open_page("s:2");
     rig.writer_finishes(&w, Err(InputError::Uncertain("the write failed".into())));
-    assert!(rig.pull(&next).unwrap().is_empty(), "the skip's loss was this call's: no second");
+    assert!(
+        rig.pull(&next).unwrap().is_empty(),
+        "the skip's loss was this call's: no second"
+    );
 }
 
 /// A skip is never forgotten while its call is outstanding: not after 64 later skips.
@@ -1038,9 +1235,15 @@ fn g4_a_departed_pages_release_records_no_loss() {
         } else {
             None
         };
-        assert!(rig.release(&old, &w, 1).is_err(), "a departed page's release is refused");
+        assert!(
+            rig.release(&old, &w, 1).is_err(),
+            "a departed page's release is refused"
+        );
         let next = next.unwrap_or_else(|| rig.open_page("s:2"));
-        assert_eq!(text(rig.written(&w)), if successor_active { "D" } else { "" });
+        assert_eq!(
+            text(rig.written(&w)),
+            if successor_active { "D" } else { "" }
+        );
         assert!(
             rig.pull(&next).unwrap().is_empty(),
             "successor_active={successor_active}: a place that held no bytes is no loss"
@@ -1090,7 +1293,10 @@ fn g3_a_dropped_files_notice_and_a_typing_notice_are_dismissed_apart() {
     let (dropped, typing) = (of_kind(true), of_kind(false));
     assert_eq!(rig.dismiss(&next, typing), Ok(true));
     let left = rig.pull(&next).unwrap();
-    assert_eq!(left.iter().map(|notice| notice.id).collect::<Vec<_>>(), vec![dropped]);
+    assert_eq!(
+        left.iter().map(|notice| notice.id).collect::<Vec<_>>(),
+        vec![dropped]
+    );
 }
 
 #[test]
@@ -1126,12 +1332,18 @@ fn g3_a_lookup_longer_than_the_bound_is_one_loss_told_as_a_dropped_file() {
     assert_eq!(text(rig.written(&w)), "", "K waits for the drop's number");
     {
         let mut state = rig.hold_state();
-        state.pump_all(Instant::now() + ORDER_BOUND + Duration::from_millis(1), &mut Vec::new());
+        state.pump_all(
+            Instant::now() + ORDER_BOUND + Duration::from_millis(1),
+            &mut Vec::new(),
+        );
     }
     assert_eq!(text(rig.written(&w)), "K", "after the bound K goes on");
     let owed = rig.pull(&page).unwrap();
     assert_eq!(owed.len(), 1, "one loss: {owed:?}");
-    assert!(matches!(owed[0].body, NoticeBody::Window { dropped: true, .. }));
+    assert!(matches!(
+        owed[0].body,
+        NoticeBody::Window { dropped: true, .. }
+    ));
     // The path is typed at last: its call is refused, nothing is written, and nothing new told.
     assert!(rig.input(&page, &w, 1, b"/path").is_err());
     assert_eq!(text(rig.written(&w)), "");
@@ -1156,9 +1368,15 @@ fn g5_a_forgotten_session_is_refused_by_its_epoch_alone() {
         rig.held_identities()
     );
     // The forgotten session's activation at its own epoch, and a prepare it made then.
-    assert!(rig.activate(&forgotten).is_err(), "its epoch is not the host's");
+    assert!(
+        rig.activate(&forgotten).is_err(),
+        "its epoch is not the host's"
+    );
     let w = rig.window("W", 5);
-    assert!(rig.input(&forgotten, &w, 1, b"X").is_err(), "nor is its call at that epoch");
+    assert!(
+        rig.input(&forgotten, &w, 1, b"X").is_err(),
+        "nor is its call at that epoch"
+    );
     // A session the host never knew, claiming the current epoch with a made-up nonce.
     let stranger = Doc::unbound("stranger:1", rig.host_epoch());
     assert!(rig.activate(&stranger).is_err());
@@ -1177,7 +1395,10 @@ fn h1_two_documents_of_one_epoch_a_late_call_is_told() {
     rig.navigate();
     let a = rig.open_page("s:1");
     let b = rig.open_page("s:2");
-    assert_eq!(a.epoch, b.epoch, "the host let two documents share an epoch");
+    assert_eq!(
+        a.epoch, b.epoch,
+        "the host let two documents share an epoch"
+    );
     rig.input(&b, &w, 1, b"B1").unwrap();
     let late = rig.input(&a, &w, 1, b"A1");
     assert!(late.is_err(), "{late:?}");
@@ -1206,7 +1427,10 @@ fn h2_a_skipped_call_whose_write_fails_for_good_keeps_the_restart_advice() {
     let owed = rig.pull(&page).unwrap();
     assert_eq!(owed.len(), 1, "one loss, one notice: {owed:?}");
     assert!(
-        matches!(of_window(&owed[0], &w.key), Some(NoticeBody::Window { failed: true, .. })),
+        matches!(
+            of_window(&owed[0], &w.key),
+            Some(NoticeBody::Window { failed: true, .. })
+        ),
         "the notice says to restart: {owed:?}"
     );
     assert!(owed[0].id > before[0].id, "it is a new notice");
@@ -1236,7 +1460,11 @@ fn h3_a_place_in_a_window_that_closes_before_a_reload_is_told_as_a_file() {
     assert!(
         matches!(
             of_window(&owed[0], &w.key),
-            Some(NoticeBody::Window { closed: true, dropped: true, .. })
+            Some(NoticeBody::Window {
+                closed: true,
+                dropped: true,
+                ..
+            })
         ),
         "{owed:?}"
     );
