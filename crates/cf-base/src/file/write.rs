@@ -45,7 +45,11 @@ pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileEr
 
 /// [`write_in_place`] for a file that must be made new: written beside, then given its name only
 /// where the name is free, so that one another writer put there meanwhile stays as it is (an
-/// `EEXIST` of `open`, as `writeFile` with the flag `wx` says it). Nothing is renamed over a name.
+/// `EEXIST` of `open`, as `writeFile` with the flag `wx` says it). Nothing is renamed over a name
+/// another has: where a volume makes no link (Unix), the name is claimed by a file of its own,
+/// made new, and the finished one is renamed over that claim alone. A write stopped between the
+/// two leaves that empty file and the whole one beside it, in the launch's own folder, which a
+/// start sweeps; no later launch writes there.
 pub fn write_new_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
     #[cfg(unix)]
     let linked = write_new_with(path, bytes, mode, |from, to| fs::hard_link(from, to));
@@ -61,9 +65,35 @@ type Link = fn(&Path, &Path) -> io::Result<()>;
 /// [`write_new_in_place`] with the link a volume makes, which a test stands in for.
 #[cfg(unix)]
 fn write_new_with(path: &Path, bytes: &[u8], mode: u32, link: Link) -> Result<(), FileError> {
-    write_new_by(path, bytes, mode, |from, to| {
-        link(from, to).map_err(|error| publish_failed(error, from, to))
+    write_new_by(path, bytes, mode, |from, to| match link(from, to) {
+        Err(error) if makes_no_link(&error) => claim_and_rename(from, to, mode),
+        linked => linked.map_err(|error| publish_failed(error, from, to)),
     })
+}
+
+/// Whether a link failed because the volume makes none: exFAT and FAT, and the network shares
+/// that keep no second name for a file.
+#[cfg(unix)]
+fn makes_no_link(error: &io::Error) -> bool {
+    let none = [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS, libc::EPERM];
+    error
+        .raw_os_error()
+        .is_some_and(|code| none.contains(&code))
+}
+
+/// Takes the name `to` with a file made new, which the system refuses where the name is taken,
+/// and renames `from` over it. A rename that fails leaves the name as free as it was.
+#[cfg(unix)]
+fn claim_and_rename(from: &Path, to: &Path, mode: u32) -> Result<(), FileError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    drop(
+        options
+            .open(to)
+            .map_err(|error| publish_failed(error, from, to))?,
+    );
+    rename(from, to).map_err(|failure| remove(to).err().unwrap_or(failure))
 }
 
 /// The file written beside, given its name by `publish`.

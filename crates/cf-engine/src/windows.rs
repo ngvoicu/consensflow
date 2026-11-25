@@ -1793,6 +1793,11 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
+        // A launch that ends after its project closed, whatever step ended it, fails nothing
+        // and tells nobody: what it was to deliver waits for the Resume (T-2274).
+        if !self.in_open_project(participant.project_id)? {
+            return self.ended_closed(record, participant, delivering);
+        }
         if participant.role != "chief" {
             if record.window.borrow().coming.is_some() {
                 if let Some(delivering) = delivering {
@@ -1867,6 +1872,33 @@ impl Dispatcher {
                     body: format!("The chief could not start: {because}. {retry}"),
                 },
             )?;
+        }
+        self.changed();
+        Ok(())
+    }
+
+    /// A launch that ended after its project closed: its message goes back to its queue with
+    /// its attempt, where it was on its way. What a member's window was to be told of its role
+    /// first was written for that window, and goes with it.
+    fn ended_closed(
+        &self,
+        record: &Record,
+        participant: &ParticipantView,
+        delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        if let Some(delivering) = delivering {
+            self.give_back(
+                delivering.message,
+                "its project was closed before its window was up",
+            )?;
+            self.seams
+                .ledger
+                .borrow_mut()
+                .launch_called_off(delivering.message)?;
+        }
+        if participant.role != "chief" {
+            self.withdraw_replacements(participant)?;
+            record.window.borrow_mut().coming = None;
         }
         self.changed();
         Ok(())
