@@ -39,6 +39,12 @@ pub(crate) fn relaunch(
     windows: usize,
 ) -> Result<Value, cf_e2e::Error> {
     let id = project.id();
+    // The window before it is up: a Close that comes while the chief's window is still being
+    // prepared calls that launch off, and the Resume opens the only window there will be (on
+    // hosted Windows, T-2307), one fewer than the caller counts.
+    rig.wait_for("the chief's window before it", secs(60), || {
+        Ok(chief_windows(rig, project).len() >= windows - 1)
+    })?;
     let closed = rig.page("project.close", json!({ "project": id }))?;
     assert_eq!(closed["ok"], true, "{closed}");
     let resumed = rig.page("project.resume", json!({ "project": id }))?;

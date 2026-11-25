@@ -845,6 +845,25 @@ impl Dispatcher {
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
                 self.seams.launch_files.forget(&launch_id);
+                // A launch the plan found called off (a Close, a pause, a cancel, a move, the
+                // daemon's stop) failed nothing: no failure is written or told, no back-off
+                // is counted, and what it was to deliver waits for the next ask.
+                if cf_harness::called_off(&cause.to_string()) {
+                    if self.forgotten(record) {
+                        return Ok(());
+                    }
+                    if self.in_open_project(project.id)?
+                        && self.over_though_failed(
+                            record,
+                            participant,
+                            failing.as_ref(),
+                            asked_before,
+                        )?
+                    {
+                        return Ok(());
+                    }
+                    return self.ended_closed(record, participant, failing);
+                }
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
