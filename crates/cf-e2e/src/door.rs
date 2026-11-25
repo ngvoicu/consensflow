@@ -933,10 +933,13 @@ impl Roots {
         };
         let ways = match place::resolve(path) {
             Ok(ways) => ways.iter().map(place::Resolved::whole).collect::<Vec<_>>(),
-            // A value that is no path at all (a list of them, a word) has no identity to read; a
-            // path that is refused, or cannot be read, is held.
-            Err(failed) if failed.kind() == io::ErrorKind::PermissionDenied => return true,
-            Err(_) => Vec::new(),
+            // A value that is no path at all (a list of them, a word) is judged as it is
+            // spelled, where its identity can still be asked; a path that is refused or cannot
+            // be read is held.
+            Err(_) => match place::chain(path) {
+                Ok(_) => vec![path.to_path_buf()],
+                Err(_) => return true,
+            },
         };
         let any_case = cfg!(any(windows, target_os = "macos"));
         let by_identity = ways.iter().any(|way| {
