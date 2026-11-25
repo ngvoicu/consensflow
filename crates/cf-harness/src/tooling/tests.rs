@@ -795,7 +795,7 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
             "unsent",
             json!({ "kind": kind, "snapshot": {
                 "ok": true, "unsent": true, "typed": 4, "bottom": bottom, "seen": "00000000000000aa",
-                "outputCaughtUp": true,
+                "outputCaughtUp": true, "screenQuietMs": 60_000,
                 // The person erased what their box held with a key the count cannot follow.
                 "unsentAt": { "pressedOver": { "current": true,
                     "bottom": [RULE, "❯ a word", RULE] } },

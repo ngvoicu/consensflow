@@ -720,7 +720,8 @@ fn unsent_of(arbiter: &InputArbiter, key: &PaneKey) -> usize {
 /// A paste of the human's of 40,000 characters in 400 lines, as the page sends it: its
 /// opening marker and the first 32 KiB, then the rest and its closing marker.
 fn a_paste_in_chunks_of_lines() -> (Vec<Vec<u8>>, usize) {
-    let text = ("x".repeat(99) + "\n").repeat(400);
+    // A terminal's paste breaks its lines with carriage returns, the byte Enter sends.
+    let text = ("x".repeat(99) + "\r").repeat(400);
     let paste = [&b"\x1b[200~"[..], text.as_bytes(), b"\x1b[201~"].concat();
     let chunks = paste.chunks(32 * 1024).map(<[u8]>::to_vec).collect();
     (chunks, text.chars().count())

@@ -651,7 +651,7 @@ fn a_window_whose_screen_lacks_bytes_the_host_has_read_is_held_and_never_read_em
     let look = crate::Look::of(&json!({
         "ok": true, "unsent": true, "typed": 1, "typedQuietMs": 1_200, "outputQuietMs": 0,
         "outputRead": 262, "outputDrawn": 262, "outputCaughtUp": true,
-        "seen": "00000000000000aa",
+        "screenQuietMs": 1_200, "seen": "00000000000000aa",
         "bottom": ["── Voice input (⌥ + v to start) ────────", "❯ ", RULE, "  echo · YOLO"],
         // The person erased what their box held with a key the count cannot follow.
         "unsentAt": { "pressedOver": { "current": true,

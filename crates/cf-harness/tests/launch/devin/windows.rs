@@ -196,9 +196,9 @@ fn a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its
                 "ok": true, "pasteInFlight": false, "unsent": true, "outputCaughtUp": true,
                 "typed": 9, "typedQuietMs": quiet.get(),
                 // Their keys went into the picker, in one write.
-                "unsentAt": { "typedInto": { "first": true, "current": true,
+                "unsentAt": { "typedMore": false, "typedAt": [{ "current": true,
                     "bottom": ["Select a model", "❭ 1 Devin 1.5", "2 Devin 2",
-                        "↑↓ select · ↵ confirm · esc cancel"] } },
+                        "↑↓ select · ↵ confirm · esc cancel"] }] },
                 "bottom": ["❭ /model", "", format!("{RULE} (bypass permissions on) ─"),
                     typed_in_box.borrow().clone(), RULE, "SWE-2 Medium"],
                 "cursor": cursor.borrow().clone(),
