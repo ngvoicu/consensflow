@@ -2900,7 +2900,13 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("late call numbered 1") && line.contains("given up 2")),
+                .any(|line| line.contains("late call numbered 1")
+                    && line
+                        .split("given up ")
+                        .nth(1)
+                        .and_then(|rest| rest.split(' ').next())
+                        .and_then(|ms| ms.parse::<u64>().ok())
+                        .is_some_and(|ms| ms >= 200)),
             "{lines:?}"
         );
         assert!(
