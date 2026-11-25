@@ -743,7 +743,7 @@ runs = ["ki-lib-renew"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/renew.rs"
 find = '''    let machine = TestMachine::required_by("the renewal of a login", machine.cloned())?;'''
-replace = '''    let machine = machine.cloned().expect("a test machine");'''
+replace = '''    let machine = machine.cloned().unwrap_or_else(|| TestMachine(String::new()));'''
 
 [[plant]]
 name = "K3 doors: a harness window is opened without its update switches (T-2086 C1)"

@@ -118,7 +118,14 @@ fn a_machine_environment_holds_the_machine_and_nothing_of_the_account() {
 fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
     let kit = crate::door::made("kits-home-").unwrap();
     let home = kit.path().join("home");
-    let ran = Run::new("/usr/bin/env").var("HOME", &home).run().unwrap();
+    let ran = Run::new("/usr/bin/env").var("HOME", &home).run();
+    // Every home the case does not name is given below the one it does: the seal refuses the
+    // start where one is missing, which is the failure this asks about.
+    assert!(
+        ran.is_ok(),
+        "a run that names one home is not started with the others below it: {ran:?}"
+    );
+    let ran = ran.unwrap();
     assert!(ran
         .stdout
         .lines()
@@ -1071,4 +1078,26 @@ fn a_run_that_inherits_nothing_holds_no_variable_of_the_test_process() {
         "{}",
         ran.stdout
     );
+}
+
+/// T-2295 section 4: a script entry refuses a script with a word that names a harness's program,
+/// cargo or the Keychain's utility, as a judgement alone (nothing is started, so a guard that is
+/// out starts nothing either).
+#[test]
+fn a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts() {
+    for script in [
+        "echo a; cargo build",
+        "/usr/bin/security dump-keychain | cat",
+        "x=1; Claude --version",
+        "cd /tmp && codex exec",
+    ] {
+        let refused = Run::fixture_script(script).admitted(&[]).unwrap_err();
+        assert!(
+            refused.to_string().contains("door of its own"),
+            "{script}: {refused}"
+        );
+    }
+    for script in ["echo ready; echo again", "sleep 1; printf '%s' done"] {
+        Run::fixture_script(script).admitted(&[]).unwrap();
+    }
 }

@@ -187,11 +187,16 @@ meant = "kit_round3_dialog_marketplace_root_does_not_follow_a_link_out"
 runs = ["round3-dialog"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_harness_dialogs.rs"
-find = '''        .named(from, Purpose::Marketplace)
-        .copy_tree_into'''
-replace = '''        .named(std::fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf()), Purpose::Marketplace)
-        .copy_tree_into'''
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    if fs::symlink_metadata(from)
+        .map_err(Error::file("read", from))?
+        .file_type()
+        .is_symlink()
+    {
+        return Ok(());
+    }
+    make_dir_private(to)?;'''
+replace = '''    make_dir_private(to)?;'''
 
 [[plant]]
 name = "kit round3: subagent reads a foreign parent record"

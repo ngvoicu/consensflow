@@ -1463,3 +1463,41 @@ fn a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy() {
     }
     assert!(into("tree").join("inner").join("a.txt").is_file());
 }
+
+/// T-2295 section 4: a shell's command is judged by the program it starts, and one that cannot be
+/// read is refused, as judgements alone: nothing is started, so a guard that is out starts
+/// nothing either (the Keychain's utility among the programs named).
+#[cfg(unix)]
+#[test]
+fn a_shell_told_a_command_is_judged_by_its_program_and_an_unreadable_one_is_refused() {
+    use super::program_started;
+    let env = vars(&[("PATH", "/usr/bin:/bin")]);
+    let told = |command: &str| {
+        program_started(
+            Path::new("/bin/sh"),
+            &["-c".to_owned(), command.to_owned()],
+            &env,
+        )
+    };
+    assert_eq!(
+        told("/usr/bin/security list-keychains"),
+        Ok(Program::Keychain)
+    );
+    assert_eq!(told("exec cargo --version"), Ok(Program::Cargo));
+    assert_eq!(told("claude --version"), Ok(Program::Harness("claude")));
+    assert_eq!(told("echo hello"), Ok(Program::Plain));
+    // No command at all, or a script file: the shell is a plain program.
+    assert_eq!(
+        program_started(Path::new("/bin/sh"), &[], &env),
+        Ok(Program::Plain)
+    );
+    for command in [
+        "echo ready; cargo --version",
+        "echo hi && claude",
+        "$HOME/bin/claude",
+        "claude | cat",
+    ] {
+        let refused = told(command).unwrap_err();
+        assert!(refused.contains("cannot be read"), "{command}: {refused}");
+    }
+}

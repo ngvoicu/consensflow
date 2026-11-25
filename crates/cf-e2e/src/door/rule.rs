@@ -552,6 +552,12 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "a script entry refused where its program is no shell: the decoys it is given are the run's own",
     ),
     (
+        "src/process/tests.rs",
+        "a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts",
+        Class::Operation,
+        "a script entry judged and not started: its words are what the test asks the door about",
+    ),
+    (
         "src/live/codex.rs",
         "server",
         Class::Operation,
@@ -2214,6 +2220,28 @@ fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_it
         tally.iter().all(|found| found.class != Class::Owner),
         "{tally:?}"
     );
+}
+
+/// T-2295 section 4: the three entries that start a script through a shell are held to the files
+/// that call them today (each by a waiver): a call anywhere else is found, as an operation.
+#[test]
+fn a_new_caller_of_a_script_entry_is_found_outside_the_files_that_call_one_today() {
+    for text in [
+        "fn f() { let _ = Run::fixture_script(\"echo\"); }",
+        "fn f() { let _ = Run::script_in(\"sh\", &[\"-c\"], \"echo\"); }",
+        "fn f() { let _ = Run::shell_line(\"echo hello\"); }",
+        "fn f() { let _ = crate::process::Run::fixture_script(\"echo\"); }",
+    ] {
+        let found = read_as("tests/live_x.rs", text, false, &[], false);
+        assert!(
+            found.iter().any(|found| found.class == Class::Operation),
+            "{text} is not found: {found:?}"
+        );
+        assert!(
+            !found.iter().all(|found| waived(found)),
+            "{text} is waived in a file that has no waiver"
+        );
+    }
 }
 
 #[test]

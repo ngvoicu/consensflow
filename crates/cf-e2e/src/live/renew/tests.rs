@@ -458,11 +458,14 @@ mod running {
         let scratch = crate::door::made("t-").unwrap();
         let log = scratch.path().join("log");
         let program = stand_in(scratch.path(), &log, "", 0);
-        let refused = one_shot_within(None, Harness::Pi, &program, &[], &[], LIMIT, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(refused.contains("CONSENSFLOW_TEST_MACHINE"), "{refused}");
+        let answered = one_shot_within(None, Harness::Pi, &program, &[], &[], LIMIT, &[]);
         assert!(!log.exists(), "the harness was started");
+        assert!(
+            answered.is_err(),
+            "a renewal on an account that is no test machine was not refused: {answered:?}"
+        );
+        let refused = answered.unwrap_err().to_string();
+        assert!(refused.contains("CONSENSFLOW_TEST_MACHINE"), "{refused}");
     }
 
     #[test]
