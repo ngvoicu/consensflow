@@ -261,16 +261,22 @@ const DOOR_PROGRAMS: &[&str] = &[
 ];
 
 /// Whether any word of `args` names a program that has a door of its own, in any case and with or
-/// without an extension or a folder.
+/// without an extension: a word's last part, so that a folder of that name on the way to another
+/// program (`…/integrations/claude/…/cf hook`) names none.
 pub fn names_a_door_program(args: &[String]) -> Option<&'static str> {
     args.iter()
         .flat_map(|arg| {
-            arg.split(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')))
-                .map(str::to_lowercase)
-                .collect::<Vec<_>>()
+            arg.split(|c: char| {
+                c.is_whitespace()
+                    || matches!(c, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\'' | '"' | '=' | '`')
+            })
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect::<Vec<_>>()
         })
         .find_map(|word| {
-            let stem = word.split('.').next().unwrap_or_default().to_owned();
+            let last = word.rsplit(['/', '\\']).next().unwrap_or_default();
+            let stem = last.split('.').next().unwrap_or_default();
             DOOR_PROGRAMS.iter().find(|name| **name == stem).copied()
         })
 }
@@ -372,6 +378,15 @@ mod tests {
         assert_eq!(names_a_door_program(&words(&["/c", "cargo.exe build & dir"])), Some("cargo"));
         assert_eq!(names_a_door_program(&words(&["-c", "sleep 4; printf 'a' > /dev/null"])), None);
         assert_eq!(names_a_door_program(&words(&["-c", "pipe pizza opium"])), None);
+        // A folder of a harness's name on the way to another program names none; the program does.
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "'/x/integrations/claude/ab/bin/cf' hook"])),
+            None
+        );
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "/x/integrations/claude/ab/claude hook"])),
+            Some("claude")
+        );
     }
 
     #[test]

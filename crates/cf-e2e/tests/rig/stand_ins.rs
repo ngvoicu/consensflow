@@ -366,9 +366,16 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
     }
     assert_eq!(rig.refused_windows().len(), 2);
     let said = rig.workspace().join("window-env.txt");
+    // A window's shell is not told a command the door cannot read: the case's script is a file of
+    // the run's own.
+    let script = rig.workspace().join("window-env.sh");
+    cf_e2e::door::write(
+        &script,
+        format!("env > '{}'; sleep 30\n", said.display()),
+    )?;
     let opened = rig.open_pane(window(
         "the-next",
-        json!({ "argv": ["/bin/sh", "-c", format!("env > '{}'; sleep 30", said.display())] }),
+        json!({ "argv": ["/bin/sh", script] }),
     ))?;
     assert_eq!(opened["ok"], true, "{opened}");
     rig.wait_for("the window's environment", crate::secs(10), || {
