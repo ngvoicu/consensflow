@@ -554,6 +554,20 @@ impl FakeAdapter {
         change(&mut agents[at])
     }
 
+    /// The latest window of `handle` (or of a session of its name), where it has had one.
+    pub fn try_agent(&self, handle: &str) -> Option<FakeAgent> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rfind(|agent| agent.handle == handle)
+            .or_else(|| {
+                agents
+                    .iter()
+                    .rfind(|agent| agent.handle.starts_with(&format!("{handle}-")))
+            })
+            .cloned()
+    }
+
     /// The latest window of `handle`, as it is now.
     pub fn agent(&self, handle: &str) -> FakeAgent {
         self.with(handle, |agent| agent.clone())

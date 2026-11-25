@@ -214,12 +214,8 @@ runs = ["lf-told"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = """            Rc::new(move || {
-                !this.forgotten(&held)
-                    && held.window.borrow().moving == 0
-                    && this.in_open_project(id).unwrap_or(true)
-            })"""
-replace = """            let _ = (this, held, id);
+find = """            Rc::new(move || this.launch_still_wanted(&held, &who, first))"""
+replace = """            let _ = (this, held, who, first);
             Rc::new(|| true)"""
 
 [[plant]]
@@ -330,3 +326,14 @@ runs = ["lf-off"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = """        record.window.borrow_mut().moving += 1;"""
 replace = """        record.window.borrow_mut().moving += 0;"""
+
+[[plant]]
+name = 'launch-freeze: a window opens for a task handed on and is given its brief'
+meant = "a_window_that_opens_for_a_task_handed_to_a_backup_is_given_nothing_and_closes"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """        let handed_on = !self.launch_still_wanted(record, participant, first_id)
+            && first_id.is_some_and(|message| !self.first_message_held(participant, message));"""
+replace = """        let handed_on = false;"""

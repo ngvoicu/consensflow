@@ -15,6 +15,7 @@ use std::rc::Rc;
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
 use cf_harness::contract::FirstMessage;
+use cf_ledger::{HoldKind, NewMember};
 
 use crate::chiefs::{to, to_human, with_codex};
 use crate::fixtures::Tiers;
@@ -163,8 +164,7 @@ fn member_cell(calls: Calls, when: When) -> Option<String> {
     }
     let thread = context.task(project, asked);
     let reached = thread.messages.last().filter(|message| {
-        ["delivering", "delivered"].contains(&message.state.as_str())
-            && Some(&message.recipient) == thread.task.assignee.as_ref()
+        message.state == "delivered" && Some(&message.recipient) == thread.task.assignee.as_ref()
     });
     if reached.is_none() {
         wrong.push(format!(
@@ -406,6 +406,109 @@ fn a_move_asked_at_any_moment_of_a_launch_is_a_move() {
             let warned = context.log.warnings.borrow().clone();
             if !warned.is_empty() {
                 failed.push(format!("{seeds}: warned: {warned:?}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A task handed to the member's backup while the member's window is being opened (T-2317,
+/// finding 2: a launch that goes on after its task went elsewhere): the old window, if it
+/// opens at all, is given nothing and closes, and the backup has the brief once. The host's
+/// open is held, where the old window's program is on its way, by each way a first message
+/// goes in, for a member out of its quota and for one refused for its login.
+#[test]
+fn a_window_that_opens_for_a_task_handed_to_a_backup_is_given_nothing_and_closes() {
+    let mut failed = Vec::new();
+    for kind in [HoldKind::Quota, HoldKind::Account] {
+        for when in WHEN {
+            for first in [FirstMessage::Opened, FirstMessage::Delivered] {
+                let seeds = format!("{kind:?} {when:?} {first:?}");
+                let context = Context::new();
+                context.adapter.first.set(first);
+                context.adapter.honors_call_off.set(true);
+                let tiers = Tiers::new(&context, &["zeus"]);
+                let backup = context
+                    .ledger
+                    .borrow_mut()
+                    .add_backup(
+                        tiers.project.id,
+                        "zeus",
+                        &NewMember {
+                            harness: "claude-code".to_owned(),
+                            model: Some("a-model".to_owned()),
+                            effort: None,
+                            model_name: None,
+                            designer: false,
+                            roles: vec!["worker".to_owned()],
+                            tier: "standard".to_owned(),
+                        },
+                    )
+                    .expect("a backup");
+                context.pass().unwrap();
+                context.settle();
+                let plan = matches!(when, When::Plan)
+                    .then(|| context.adapter.prepare_holds.hold(first_of_a_member()));
+                let open =
+                    matches!(when, When::Open).then(|| context.host.open_holds.hold(|_| true));
+                let number = tiers.open().number;
+                context.pass().unwrap();
+                context.settle();
+                let old = tiers.assignee(number);
+                let zeus = tiers.id("zeus");
+                let until = "9999-12-31T23:59:59.998Z";
+                context
+                    .ledger
+                    .borrow_mut()
+                    .mark_out_with_kind(zeus, until, "out", kind)
+                    .unwrap();
+                for _ in 0..3 {
+                    context.pass().unwrap();
+                    context.settle();
+                }
+                if let Some(gate) = plan.as_ref().or(open.as_ref()) {
+                    gate.open();
+                }
+                for _ in 0..4 {
+                    context.pass().unwrap();
+                    context.settle();
+                }
+                let thread = tiers.task(number);
+                let holder = thread.task.assignee.clone();
+                if holder.as_deref() == Some(old.as_str()) || holder.is_none() {
+                    failed.push(format!(
+                        "{seeds}: the task did not go to the backup: {holder:?}"
+                    ));
+                    continue;
+                }
+                // The old window's program was given none of the task's words.
+                let words: Vec<String> = context
+                    .adapter
+                    .try_agent(&old)
+                    .map(|agent| {
+                        agent
+                            .items
+                            .iter()
+                            .map(|item| item.text.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let brief = thread.task.body.clone();
+                if words.iter().any(|text| text.contains(&brief)) {
+                    failed.push(format!("{seeds}: the old window was given the brief"));
+                }
+                if context.dispatcher.pane(tiers.id(&old)).is_some() {
+                    failed.push(format!("{seeds}: the old window stays open"));
+                }
+                let told = told_of_a_failure(&context, tiers.project.id);
+                if !told.is_empty() {
+                    failed.push(format!("{seeds}: told of a failure: {told:?}"));
+                }
+                let warned = context.log.warnings.borrow().clone();
+                if !warned.is_empty() {
+                    failed.push(format!("{seeds}: warned: {warned:?}"));
+                }
+                let _ = &backup;
             }
         }
     }
