@@ -51,7 +51,7 @@ pub(super) struct Watch<'a> {
     /// that stayed as it was for [`PRESS_AGAIN_LOOKS`], whose window did not take it.
     pressed_on: Option<PressedOn>,
     /// What the window's folder left out of the project's servers as the watch began.
-    pub(super) chosen: ServersChosen,
+    pub(super) chosen: Option<ServersChosen>,
     /// Whether ConsensFlow pressed into the dialog of new servers, and the servers its
     /// Enter there would use, as the dialog named them.
     pub(super) into_servers: bool,
@@ -83,6 +83,7 @@ impl<'a> Watch<'a> {
         pane: &'a Pane,
         window: &'a Rc<dyn Window>,
         trusts: Trusts,
+        chosen: Option<ServersChosen>,
     ) -> Self {
         let Trusts {
             folder,
@@ -105,7 +106,7 @@ impl<'a> Watch<'a> {
             stuck: false,
             asks_now: None,
             pressed_on: None,
-            chosen: window.servers_chosen(),
+            chosen,
             into_servers: false,
             using: None,
             gone: 0,

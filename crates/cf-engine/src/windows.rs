@@ -844,6 +844,8 @@ impl Dispatcher {
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
+                } else if let Some((step, seconds)) = cf_harness::late_step(&cause.to_string()) {
+                    Why::Late(step, seconds)
                 } else {
                     Why::Unsaid
                 };

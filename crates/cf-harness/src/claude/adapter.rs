@@ -250,8 +250,11 @@ impl Adapter for ClaudeAdapter {
             // folder are found and written on the plan's own thread: each can wait, and the
             // engine's thread must not (T-2203).
             let pane_cf = self.pane_cf.clone();
-            let (executable, settings, role, added, trusts) =
-                crate::shared::off_thread::plan(&self.env, launch, move |env, launch| {
+            let (executable, settings, role, added, trusts) = crate::shared::off_thread::plan(
+                &self.env,
+                launch,
+                crate::shared::off_thread::step::CLAUDE,
+                move |env, launch| {
                     let executable = executable(Harness::Claude, env)?;
                     let settings = install::settings(
                         env,
@@ -283,8 +286,9 @@ impl Adapter for ClaudeAdapter {
                         added,
                         trust::trusts(launch.directory),
                     ))
-                })
-                .await??;
+                },
+            )
+            .await??;
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks
             // `resumable` first, but a transcript that is not there has
@@ -373,6 +377,7 @@ impl Adapter for ClaudeAdapter {
                     records: Rc::clone(&self.records),
                     time: Rc::clone(&self.time),
                     statuses,
+                    env: self.env.clone(),
                     session: RefCell::new(session),
                     generation: Cell::new(0),
                     pid: Cell::new(None),
@@ -481,6 +486,9 @@ struct ClaudeWindow {
     records: Rc<dyn Records>,
     time: Rc<dyn Time>,
     statuses: String,
+    /// The environment the window was launched with, which says how long a read of the
+    /// project's folder is waited for.
+    env: Env,
     /// The conversation the window shows: its launch's, or the one it was
     /// followed to.
     session: RefCell<String>,
@@ -805,8 +813,17 @@ impl Window for ClaudeWindow {
         super::trust::servers_named(screen)
     }
 
-    fn servers_chosen(&self) -> ServersChosen {
-        trust::chosen(&self.directory)
+    fn servers_chosen(&self) -> Work<'_, Option<ServersChosen>> {
+        let directory = self.directory.clone();
+        Box::pin(async move {
+            crate::shared::off_thread::work(
+                &self.env,
+                crate::shared::off_thread::step::SETTINGS,
+                move |_| trust::chosen(&directory),
+            )
+            .await
+            .ok()
+        })
     }
 
     /// What the box on the screen shows, for the human told of a delivery held for it.

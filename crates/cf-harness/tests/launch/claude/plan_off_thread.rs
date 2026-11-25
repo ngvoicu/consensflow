@@ -264,7 +264,7 @@ fn a_plan_that_does_not_end_in_its_time_fails_naming_its_step() {
     assert!(took < Duration::from_secs(2), "given up after {took:?}");
     assert_eq!(
         said,
-        "making the launch's files and reading the project's folder took more than 0 s"
+        "reading the project's folder and writing the launch's files took more than 1 s"
     );
 }
 
@@ -303,7 +303,7 @@ fn the_trust_watch_reads_the_project_settings_off_the_thread() {
             }
         });
         tokio::time::sleep(Duration::from_millis(40)).await;
-        let chosen = window.servers_chosen();
+        let chosen = window.servers_chosen().await.unwrap();
         tokio::time::sleep(Duration::from_millis(40)).await;
         ticker.abort();
         (chosen, still.get())
@@ -322,7 +322,7 @@ fn a_launch_file_is_in_place_only_once_it_is_whole() {
     fs::create_dir_all(&project).unwrap();
     fs::create_dir_all(home.launch_folder()).unwrap();
     let settings = path::join(&[&home.launch_folder(), "settings.json"]);
-    let beside = format!("{settings}.part");
+    let beside = format!("{settings}.{}.tmp", std::process::id());
     mkfifo(&beside);
     let seen = {
         let (settings, beside) = (settings.clone(), beside.clone());

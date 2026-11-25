@@ -196,7 +196,7 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     trace
         .started()
         .map_err(|failed| StartError::System(failed.to_string()))?;
-    let log = Rc::new(Log::new(&home));
+    let log = Rc::new(Log::off_thread(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
     log.info(&format!(
         "start pid {} rust {VERSION} home {}",

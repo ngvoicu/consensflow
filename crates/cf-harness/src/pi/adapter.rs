@@ -132,26 +132,31 @@ impl Adapter for PiAdapter {
             // on the plan's own thread: each can wait, and the engine's thread must not
             // (T-2203).
             let (executable, configuration, role, specmint, appended) =
-                crate::shared::off_thread::plan(&self.env, launch, |env, launch| {
-                    let executable = executable(Harness::Pi, env)?;
-                    let extension = prepare_extension(env).into_path()?;
-                    let configuration =
-                        launch_configuration(env, launch.id, launch.directory, &extension)?;
-                    let role = write_role(
-                        Harness::Pi,
-                        launch.role,
-                        env,
-                        launch.id,
-                        launch.instructions,
-                    )?;
-                    // A chief given specs has ConsensFlow's own copy of its Specmint
-                    // skill written where it is kept for every launch, and Pi is given
-                    // it as a second skill; where Pi has the variant installed itself
-                    // it finds it.
-                    let specmint = specmint::write_own(Harness::Pi, env, launch)?;
-                    let appended = paths::append_system_prompt(env, launch.directory);
-                    Ok::<_, String>((executable, configuration, role, specmint, appended))
-                })
+                crate::shared::off_thread::plan(
+                    &self.env,
+                    launch,
+                    crate::shared::off_thread::step::FILES,
+                    |env, launch| {
+                        let executable = executable(Harness::Pi, env)?;
+                        let extension = prepare_extension(env).into_path()?;
+                        let configuration =
+                            launch_configuration(env, launch.id, launch.directory, &extension)?;
+                        let role = write_role(
+                            Harness::Pi,
+                            launch.role,
+                            env,
+                            launch.id,
+                            launch.instructions,
+                        )?;
+                        // A chief given specs has ConsensFlow's own copy of its Specmint
+                        // skill written where it is kept for every launch, and Pi is given
+                        // it as a second skill; where Pi has the variant installed itself
+                        // it finds it.
+                        let specmint = specmint::write_own(Harness::Pi, env, launch)?;
+                        let appended = paths::append_system_prompt(env, launch.directory);
+                        Ok::<_, String>((executable, configuration, role, specmint, appended))
+                    },
+                )
                 .await??;
             let session = match launch.resume {
                 Some(resume) => resume.to_owned(),

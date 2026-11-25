@@ -44,7 +44,8 @@ fn system() -> &'static str {
 /// there is one), for that folder: Claude Code keeps its switch by folder, and what the page
 /// is told is what a project of that folder would be told. `permissions` is null where the
 /// system keeps no grants, and `grantsOf` names the app they are of where it is not
-/// ConsensFlow (null where it is).
+/// ConsensFlow (null where it is). A check the system gave no answer to is null too: the page
+/// says it cannot tell, never that it is off.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = match (body.get("project"), body.get("directory")) {
         (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),
@@ -66,17 +67,20 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         machine.codex(),
     )
     .await;
-    // A system that gave no answer says nothing here: the page shows what it shows of none.
-    let permissions = permissions.ok().flatten().map_or(Value::Null, |granted| {
-        json!({
+    // A check that got no answer in its time is unknown, null, and never off (T-2232): the
+    // page says it cannot tell. `permissions` itself stays null only where the system keeps none.
+    let permissions = match permissions {
+        Ok(None) => Value::Null,
+        Ok(Some(granted)) => json!({
             "accessibility": granted.accessibility,
             "screenRecording": granted.screen_recording,
-        })
+        }),
+        Err(_) => json!({ "accessibility": null, "screenRecording": null }),
+    };
+    let (claude_on, claude_folder) = claude.map_or((None, directory.clone()), |claude| {
+        (Some(claude.on), claude.folder)
     });
-    let (claude_on, claude_folder) = claude.map_or((false, directory.clone()), |claude| {
-        (claude.on, claude.folder)
-    });
-    let codex_set_up = codex.unwrap_or_default().set_up;
+    let codex_set_up = codex.ok().map(|codex| codex.set_up);
     merged(json!({
         "system": system(),
         "permissions": permissions,

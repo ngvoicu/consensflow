@@ -7,6 +7,10 @@
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cf_base::file::append_rotating;
 use cf_base::time::{iso, Clock, SystemClock};
@@ -20,6 +24,28 @@ pub struct Log {
     file: PathBuf,
     limit: u64,
     clock: RefCell<Box<dyn Clock + Send>>,
+    /// The thread that appends the lines, where whoever says them must not wait for the file:
+    /// another process's lock on it or a slow disk holds that thread alone. None: the line is
+    /// appended where it is said.
+    writer: Option<Writer>,
+}
+
+/// How many lines wait for the writer: past that a line is dropped and counted, and the next
+/// one that is written says how many were.
+const QUEUE: usize = 1024;
+
+/// The queue to the writer's thread, and how many lines it dropped.
+#[derive(Clone)]
+struct Writer {
+    lines: SyncSender<Job>,
+    dropped: Arc<AtomicU64>,
+}
+
+/// A piece of the writer's work.
+enum Job {
+    Line(String),
+    /// Who waits to hear that everything before it is written.
+    Written(std::sync::mpsc::Sender<()>),
 }
 
 impl Log {
@@ -35,7 +61,60 @@ impl Log {
             file,
             limit,
             clock: RefCell::new(clock),
+            writer: None,
         }
+    }
+
+    /// The log of `home` as the daemon says it: each line is handed to a thread of the log's
+    /// own, and whoever says it never waits for the file (T-2232). A line the thread is too far
+    /// behind to take is dropped and counted. [`Log::written`] waits for what was said.
+    pub fn off_thread(home: &Path) -> Self {
+        let mut log = Self::new(home);
+        let (lines, queued) = sync_channel::<Job>(QUEUE);
+        let (file, limit) = (log.file.clone(), log.limit);
+        // A thread that cannot be made leaves the lines to be appended where they are said.
+        let spawned = std::thread::Builder::new()
+            .name("daemon-log".to_owned())
+            .spawn(move || {
+                for job in queued {
+                    match job {
+                        Job::Line(line) => {
+                            // The home may be read-only or gone mid-run.
+                            let _ = append_rotating(&file, &line, limit);
+                        }
+                        Job::Written(heard) => drop(heard.send(())),
+                    }
+                }
+            });
+        if spawned.is_ok() {
+            log.writer = Some(Writer {
+                lines,
+                dropped: Arc::new(AtomicU64::new(0)),
+            });
+        }
+        log
+    }
+
+    /// Waits for every line said so far to be written, `within` at most: whether they were.
+    pub fn written(&self, within: Duration) -> bool {
+        let Some(writer) = &self.writer else {
+            return true;
+        };
+        let (heard, hear) = std::sync::mpsc::channel();
+        let began = Instant::now();
+        let mut job = Job::Written(heard);
+        loop {
+            match writer.lines.try_send(job) {
+                Ok(()) => break,
+                Err(TrySendError::Full(again)) if began.elapsed() < within => {
+                    job = again;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(_) => return false,
+            }
+        }
+        hear.recv_timeout(within.saturating_sub(began.elapsed()))
+            .is_ok()
     }
 
     /// Where the log is.
@@ -65,8 +144,21 @@ impl Log {
         if let Some(text) = cause {
             lines.extend(text.split('\n').map(|line| format!("    {line}")));
         }
-        // The home may be read-only or gone mid-run.
-        let _ = append_rotating(&self.file, &format!("{}\n", lines.join("\n")), self.limit);
+        let text = format!("{}\n", lines.join("\n"));
+        let Some(writer) = &self.writer else {
+            // The home may be read-only or gone mid-run.
+            let _ = append_rotating(&self.file, &text, self.limit);
+            return;
+        };
+        let dropped = writer.dropped.swap(0, Ordering::SeqCst);
+        let text = if dropped == 0 {
+            text
+        } else {
+            format!("{at} warn {dropped} lines of the log were dropped: its file was held\n{text}")
+        };
+        if writer.lines.try_send(Job::Line(text)).is_err() {
+            writer.dropped.fetch_add(dropped + 1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -208,7 +300,7 @@ mod tests {
     #[test]
     fn a_line_said_while_the_log_is_held_does_not_wait_for_it() {
         let dir = tempfile::tempdir().unwrap();
-        let log = Log::new(dir.path());
+        let log = Log::off_thread(dir.path());
         let beside = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -228,5 +320,43 @@ mod tests {
             took < std::time::Duration::from_millis(200),
             "the line waited for the log's lock: {took:?}"
         );
+        assert!(log.written(std::time::Duration::from_secs(5)));
+        assert!(std::fs::read_to_string(log.file())
+            .unwrap()
+            .ends_with("warn the launch of @chief went on without it\n"));
+    }
+
+    #[test]
+    fn lines_the_writer_is_too_far_behind_to_take_are_dropped_and_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Log::off_thread(dir.path());
+        let beside = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(cf_base::file::lock_beside(log.file()))
+            .unwrap();
+        beside.lock().unwrap();
+        // One line is in the writer's hands and the queue is full: the rest are dropped.
+        for line in 0..QUEUE + 11 {
+            log.info(&format!("line {line}"));
+        }
+        beside.unlock().unwrap();
+        assert!(log.written(std::time::Duration::from_secs(20)));
+        log.info("after");
+        assert!(log.written(std::time::Duration::from_secs(20)));
+        let text = std::fs::read_to_string(log.file()).unwrap();
+        let said = text
+            .lines()
+            .find(|line| line.contains("lines of the log were dropped"))
+            .expect("the dropped lines are counted");
+        let count: usize = said
+            .split("warn ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|count| count.parse().ok())
+            .unwrap();
+        assert!((10..=11).contains(&count), "{said}");
+        assert!(text.ends_with("info after\n"));
     }
 }

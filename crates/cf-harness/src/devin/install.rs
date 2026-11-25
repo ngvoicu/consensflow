@@ -25,7 +25,7 @@ pub(crate) use version::{at_least, minimum as minimum_version};
 use std::fs;
 use std::path::Path;
 
-use cf_base::file::{make_folder, write_file, FileError, Mkdir};
+use cf_base::file::{make_folder, write_in_place, FileError, Mkdir};
 use cf_base::home::config_root;
 use cf_base::{js, path};
 use serde_json::{json, Map, Value};
@@ -74,19 +74,19 @@ fn said(unanswered: Unanswered) -> String {
     }
 }
 
-/// `writeFile(file, bytes, { mode, flag: 'wx' })`: the file is made first as
-/// no file there was, so one already there is the failure, in Node's words;
-/// then it is written as `write_file` writes one, its close checked. Writing
-/// it is a second opening, which `cf_base::file` has no call to spare.
+/// `writeFile(file, bytes, { mode, flag: 'wx' })`: one already there is the
+/// failure, in Node's words. Otherwise the file is written beside and renamed
+/// into place (`write_in_place`), whole or not there.
 fn write_new(file: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
-    options
-        .open(file)
-        .map_err(|error| FileError::call(error, "open", Some(file)))?;
-    write_file(file, bytes, mode)
+    if file.symlink_metadata().is_ok() {
+        // The system says so itself, in its own words.
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(file)
+            .map_err(|error| FileError::call(error, "open", Some(file)))?;
+    }
+    write_in_place(file, bytes, mode)
 }
 
 /// Adds `entry`, when there is one, to the hooks Devin runs for `event`,
@@ -198,35 +198,41 @@ pub(super) async fn integration(
     // The configuration is read and the launch's folder and file written on the plan's own
     // thread: each can wait, and the engine's thread must not (T-2203).
     let (pane_cf, launch) = (services.bundle.pane_cf.clone(), launch.to_owned());
-    crate::shared::off_thread::work(&services.env, move |env| {
-        let mut configuration = config::native(env)?;
-        let home = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;
-        let root = path::join(&[&home.to_string_lossy(), "integrations", "devin", &launch]);
-        make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
-        if configuration.get("hooks").is_none_or(Value::is_null) {
-            configuration.insert("hooks".to_owned(), json!({}));
-        }
-        let Some(Value::Object(hooks)) = configuration.get_mut("hooks") else {
-            return Err(
-                "the hooks of the native Devin configuration cannot take a hook".to_owned(),
-            );
-        };
-        for (event, entry) in added_hooks(&pane_cf, board_questions) {
-            extend(hooks, event, entry)?;
-        }
-        configuration.insert("auto_update".to_owned(), Value::Bool(false));
-        let file = path::join(&[&root, "config.json"]);
-        let text = js::stringify(&Value::Object(configuration));
-        write_new(Path::new(&file), text.as_bytes(), 0o600).map_err(|error| error.to_string())?;
-        let wire = path::join(&[&root, "wire.jsonl"]);
-        Ok(Integration {
-            args: vec!["--config".to_owned(), file],
-            env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
-            wire,
-            version,
-            root,
-        })
-    })
+    crate::shared::off_thread::work(
+        &services.env,
+        crate::shared::off_thread::step::CONFIGURATION,
+        move |env| {
+            let mut configuration = config::native(env)?;
+            let home = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;
+            let root = path::join(&[&home.to_string_lossy(), "integrations", "devin", &launch]);
+            make_folder(Path::new(&root), 0o700, Mkdir::Promise)
+                .map_err(|error| error.to_string())?;
+            if configuration.get("hooks").is_none_or(Value::is_null) {
+                configuration.insert("hooks".to_owned(), json!({}));
+            }
+            let Some(Value::Object(hooks)) = configuration.get_mut("hooks") else {
+                return Err(
+                    "the hooks of the native Devin configuration cannot take a hook".to_owned(),
+                );
+            };
+            for (event, entry) in added_hooks(&pane_cf, board_questions) {
+                extend(hooks, event, entry)?;
+            }
+            configuration.insert("auto_update".to_owned(), Value::Bool(false));
+            let file = path::join(&[&root, "config.json"]);
+            let text = js::stringify(&Value::Object(configuration));
+            write_new(Path::new(&file), text.as_bytes(), 0o600)
+                .map_err(|error| error.to_string())?;
+            let wire = path::join(&[&root, "wire.jsonl"]);
+            Ok(Integration {
+                args: vec!["--config".to_owned(), file],
+                env: vec![("CHISEL_PURE_ACP_WIRE_LOG".to_owned(), wire.clone())],
+                wire,
+                version,
+                root,
+            })
+        },
+    )
     .await?
 }
 

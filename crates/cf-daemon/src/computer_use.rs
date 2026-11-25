@@ -142,7 +142,7 @@ impl MachineComputerUse {
 impl ComputerUse for MachineComputerUse {
     fn permissions(&self) -> Work<'_, Result<Option<ScreenPermissions>, Waited>> {
         let grants = Arc::clone(&self.grants);
-        Box::pin(async move { Ok(self.ask(move |_| grants()).await?) })
+        Box::pin(async move { self.ask(move |_| grants()).await })
     }
 
     fn claude<'a>(

@@ -152,6 +152,8 @@ impl Stopping {
             );
         }
         self.errors.log().info("exit 0");
+        // What was said is written before the process goes, if the log's file lets it in time.
+        let _ = self.errors.log().written(SETTLE);
         (self.exit)(0);
     }
 }

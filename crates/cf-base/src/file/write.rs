@@ -29,10 +29,18 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
     {
         make_folder(folder, 0o777, Mkdir::Sync)?;
     }
+    write_in_place(path, bytes, 0o666)
+}
+
+/// [`write_whole`] for a file whose folder is there and which is made with `mode`: written
+/// beside to `<file>.<pid>.tmp` and renamed into place, so a write that is stopped half way
+/// (the daemon ending, a call that never ends) leaves the file as it was or not there, never
+/// half of it.
+pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
     let temporary = PathBuf::from(temporary);
-    write_file(&temporary, bytes, 0o666)
+    write_file(&temporary, bytes, mode)
         .and_then(|()| rename(&temporary, path))
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }

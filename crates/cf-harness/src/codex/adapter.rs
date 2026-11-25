@@ -222,16 +222,20 @@ impl Adapter for CodexAdapter {
             // The program is found and Specmint's copy written on the plan's own thread, as
             // the role's files are below: each can wait, and the engine's thread must not
             // (T-2203).
-            let executable =
-                crate::shared::off_thread::plan(&services.env, launch, |env, launch| {
+            let executable = crate::shared::off_thread::plan(
+                &services.env,
+                launch,
+                crate::shared::off_thread::step::PROGRAM,
+                |env, launch| {
                     // A chief given specs reads its Specmint skill by the path its role
                     // text names: where Codex has none of its own, ConsensFlow's is
                     // written where it is kept for every launch, which Codex is told of
                     // by that path alone.
                     specmint::write_own(Harness::Codex, env, launch)?;
                     executable(Harness::Codex, env)
-                })
-                .await??;
+                },
+            )
+            .await??;
             let launched =
                 launch::configuration(services, launch.id, launch.directory, &executable).await?;
             let texts = role::text(
@@ -272,13 +276,17 @@ impl Adapter for CodexAdapter {
             // The role goes by a file the window's broker reads, never its command line;
             // what the window's sub-agents start with in its place, by a file the
             // supervisor names to the app-server.
-            let (role, children) =
-                crate::shared::off_thread::plan(&services.env, launch, move |env, launch| {
+            let (role, children) = crate::shared::off_thread::plan(
+                &services.env,
+                launch,
+                crate::shared::off_thread::step::FILES,
+                move |env, launch| {
                     let role = role::write(env, launch.id, &texts.role)?;
                     let children = role::write_children(env, launch.id, &texts)?;
                     Ok::<_, String>((role, children))
-                })
-                .await??;
+                },
+            )
+            .await??;
             let mut args = Vec::new();
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));

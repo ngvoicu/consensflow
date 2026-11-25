@@ -702,34 +702,69 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
 }
 
 /// `work`, done: it must not wait on anything a test did not give it, and a test that gave it
-/// something to wait on uses a [`Driver`]. What a launch's plan makes on its worker thread
-/// (`shared::off_thread`) is waited for, as the engine's thread waits for it: the thread parks
-/// until the worker wakes it, and a work that is pending with nothing to wake it fails after
-/// [`FINISHED_WITHIN`].
+/// something to wait on uses a [`Driver`]. What a launch's plan makes on a thread of its own
+/// (`shared::off_thread`) is waited for, as the engine's thread waits for it: the work is polled
+/// again only once it was woken, and one that is pending with nothing outstanding and no wake
+/// fails at once.
 pub fn finished<T>(mut work: Work<'_, T>) -> T {
-    struct Unparks(std::thread::Thread);
-    impl std::task::Wake for Unparks {
-        fn wake(self: std::sync::Arc<Self>) {
-            self.0.unpark();
-        }
-    }
-    let waker = Waker::from(std::sync::Arc::new(Unparks(std::thread::current())));
+    let woken = std::sync::Arc::new(Woken::new());
+    let waker = Waker::from(std::sync::Arc::clone(&woken));
     let mut context = Context::from_waker(&waker);
-    let began = std::time::Instant::now();
     loop {
         if let Poll::Ready(value) = work.as_mut().poll(&mut context) {
             return value;
         }
-        assert!(
-            began.elapsed() < FINISHED_WITHIN,
-            "work that waited on nothing it was given"
-        );
-        std::thread::park_timeout(std::time::Duration::from_millis(50));
+        woken.wait("work that waited on nothing it was given");
     }
 }
 
-/// How long [`finished`] waits for work that waits on a thread of its own.
-const FINISHED_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
+/// How long a wake of work that waits on a thread of its own is waited for.
+const WOKEN_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A wake, remembered: the thread that polls waits for it and for nothing else.
+struct Woken {
+    thread: std::thread::Thread,
+    woken: std::sync::atomic::AtomicBool,
+}
+
+impl Woken {
+    fn new() -> Self {
+        Self {
+            thread: std::thread::current(),
+            woken: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether a wake came since the last look, which takes it.
+    fn took(&self) -> bool {
+        self.woken.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Waits for the next wake: one already there is taken. Fails with `said` where none came
+    /// and nothing is being made off this thread, or none came in [`WOKEN_WITHIN`].
+    fn wait(&self, said: &str) {
+        let began = std::time::Instant::now();
+        loop {
+            if self.took() {
+                return;
+            }
+            // Looked at again after: a call ends once its wake was given.
+            if !crate::shared::off_thread::outstanding() {
+                assert!(self.took(), "{said}");
+                return;
+            }
+            assert!(began.elapsed() < WOKEN_WITHIN, "{said}");
+            std::thread::park_timeout(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+impl std::task::Wake for Woken {
+    fn wake(self: std::sync::Arc<Self>) {
+        self.woken.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.thread.unpark();
+    }
+}
 
 /// What a prepared window is launched with (its arguments, the variables it
 /// adds and the ones it drops), with `root`, the throwaway home it was made
@@ -778,15 +813,17 @@ impl<T> Driver<T> {
     }
 
     /// Runs every begun work until none moves: what settled, in the order
-    /// it was begun.
+    /// it was begun. What waits on a thread of its own (`shared::off_thread`) is waited
+    /// for, by its wake: nothing else wakes work polled by hand.
     pub fn run(&mut self) -> Vec<(usize, T)> {
-        let mut context = Context::from_waker(Waker::noop());
+        let woken = std::sync::Arc::new(Woken::new());
+        let waker = Waker::from(std::sync::Arc::clone(&woken));
+        let mut context = Context::from_waker(&waker);
         let mut settled = Vec::new();
         loop {
             let mut moved = false;
             let mut index = 0;
             while index < self.begun.len() {
-                let ended = crate::shared::off_thread::finished_count();
                 POLLING.with(|polling| polling.set(Some(self.begun[index].0)));
                 let polled = self.begun[index].1.as_mut().poll(&mut context);
                 POLLING.with(|polling| polling.set(None));
@@ -795,16 +832,20 @@ impl<T> Driver<T> {
                     settled.push((id, value));
                     moved = true;
                 } else {
-                    // What waits on the plan's worker thread is waited for here: nothing
-                    // else wakes work polled by hand.
-                    moved |= crate::shared::off_thread::wait_idle()
-                        || crate::shared::off_thread::finished_count() != ended;
                     index += 1;
                 }
             }
-            if !moved {
+            if moved || woken.took() {
+                continue;
+            }
+            if self.begun.is_empty() || !crate::shared::off_thread::outstanding() {
+                // A wake between the two looks is taken by one more round.
+                if woken.took() {
+                    continue;
+                }
                 return settled;
             }
+            woken.wait("a call made off the thread woke nothing in its time");
         }
     }
 

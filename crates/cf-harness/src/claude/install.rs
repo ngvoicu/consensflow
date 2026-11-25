@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_base::file::{make_folder, write_file, FileError, Mkdir};
+use cf_base::file::{make_folder, write_in_place, FileError, Mkdir};
 use cf_base::{js, path};
 use cf_proto::agents::Harness;
 use serde_json::json;
@@ -119,7 +119,7 @@ pub(crate) fn settings(
         file["permissions"]["deny"] = json!(reads);
     }
     let text = js::stringify(&file);
-    write_file(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;
+    write_in_place(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;
     Ok(vec!["--settings".to_owned(), settings])
 }
 

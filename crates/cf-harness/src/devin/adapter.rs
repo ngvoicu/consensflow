@@ -325,9 +325,12 @@ impl Adapter for DevinAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let env = &self.services.env;
-            let executable = crate::shared::off_thread::plan(env, launch, |env, _| {
-                executable(Harness::Devin, env)
-            })
+            let executable = crate::shared::off_thread::plan(
+                env,
+                launch,
+                crate::shared::off_thread::step::PROGRAM,
+                |env, _| executable(Harness::Devin, env),
+            )
             .await??;
             let integration = install::integration(
                 &self.services,
@@ -338,21 +341,26 @@ impl Adapter for DevinAdapter {
             .await?;
             // The launch's files are written on the plan's own thread: each can wait, and the
             // engine's thread must not (T-2203).
-            let role = crate::shared::off_thread::plan(env, launch, |env, launch| {
-                let role = write_role(
-                    Harness::Devin,
-                    launch.role,
-                    env,
-                    launch.id,
-                    &role_text(launch.instructions, env),
-                )?;
-                // A chief given specs reads its Specmint skill by the path its role
-                // text names, which the session-start hook gives it: where Devin
-                // has none of its own, ConsensFlow's is written where it is kept
-                // for every launch.
-                specmint::write_own(Harness::Devin, env, launch)?;
-                Ok::<_, String>(role)
-            })
+            let role = crate::shared::off_thread::plan(
+                env,
+                launch,
+                crate::shared::off_thread::step::FILES,
+                |env, launch| {
+                    let role = write_role(
+                        Harness::Devin,
+                        launch.role,
+                        env,
+                        launch.id,
+                        &role_text(launch.instructions, env),
+                    )?;
+                    // A chief given specs reads its Specmint skill by the path its role
+                    // text names, which the session-start hook gives it: where Devin
+                    // has none of its own, ConsensFlow's is written where it is kept
+                    // for every launch.
+                    specmint::write_own(Harness::Devin, env, launch)?;
+                    Ok::<_, String>(role)
+                },
+            )
             .await??;
             let agent = launch.agent.unwrap_or_default();
             let message = first_message(launch.message, launch.resume.is_some());
@@ -364,10 +372,14 @@ impl Adapter for DevinAdapter {
             // None only for a conversation of an empty id, which no ledger holds.
             let invocation = open(Harness::Devin, agent, launch.resume, message.as_deref())
                 .ok_or_else(|| "a Devin window opens on a session id".to_owned())?;
-            let (invocation, integration) = crate::shared::off_thread::work(env, move |_| {
-                let invocation = install::prepare_prompt(invocation, &integration)?;
-                Ok::<_, String>((invocation, integration))
-            })
+            let (invocation, integration) = crate::shared::off_thread::work(
+                env,
+                crate::shared::off_thread::step::FILES,
+                move |_| {
+                    let invocation = install::prepare_prompt(invocation, &integration)?;
+                    Ok::<_, String>((invocation, integration))
+                },
+            )
             .await??;
             // What the record holds before this window exists is the old process's: a
             // turn it left open, which a window with no message to begin one is told

@@ -101,11 +101,7 @@ fn a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on() {
 fn a_read_of_claude_codes_configuration_that_waits_leaves_the_thread_going() {
     let home = tempfile::tempdir().unwrap();
     let pipe = home.path().join(".claude.json");
-    let made = std::process::Command::new("/usr/bin/mkfifo")
-        .arg(&pipe)
-        .status()
-        .unwrap();
-    assert!(made.success());
+    nix::unistd::mkfifo(&pipe, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
     // The size and the time the file is first stamped with are read before its text.
     let writer = {
         let pipe = pipe.clone();
@@ -138,6 +134,7 @@ mod call {
         machine.permissions().await
     }
 
+    #[cfg(unix)]
     pub(super) async fn claude(
         machine: &MachineComputerUse,
         directory: &str,
