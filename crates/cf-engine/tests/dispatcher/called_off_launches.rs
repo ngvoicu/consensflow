@@ -500,6 +500,10 @@ fn a_window_that_opens_for_a_task_handed_to_a_backup_is_given_nothing_and_closes
                 if context.dispatcher.pane(tiers.id(&old)).is_some() {
                     failed.push(format!("{seeds}: the old window stays open"));
                 }
+                // Where the hand-over came before the open was asked of the host, it never is.
+                if matches!(when, When::Plan) && context.host.last(&old).is_some() {
+                    failed.push(format!("{seeds}: the old window's open was asked"));
+                }
                 let told = told_of_a_failure(&context, tiers.project.id);
                 if !told.is_empty() {
                     failed.push(format!("{seeds}: told of a failure: {told:?}"));
@@ -513,4 +517,179 @@ fn a_window_that_opens_for_a_task_handed_to_a_backup_is_given_nothing_and_closes
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// What the once-probe's task asks of its window.
+const ACTION: &str = "Append one entry to the work receipt and report completion.";
+
+/// A window at work acts once when its pane is the participant's own and its record holds the
+/// brief, as a stand-in agent does: an entry in the work receipt, and its answer.
+fn act_where_asked(
+    context: &Context,
+    project: i64,
+    receipt: &std::path::Path,
+    acted: &mut std::collections::HashSet<(String, u64)>,
+) {
+    use std::io::Write;
+    for open in context.host.opened() {
+        let Some(handle) = open.pane.id.strip_prefix(&format!("p{project}-")) else {
+            continue;
+        };
+        let who = context
+            .project(project)
+            .participants
+            .into_iter()
+            .find(|who| who.handle == handle)
+            .expect("its participant");
+        if context.dispatcher.pane(who.id).as_ref() != Some(&open.pane) {
+            continue;
+        }
+        let adapter = if who.harness.as_deref() == Some("codex") {
+            &context.codex
+        } else {
+            &context.adapter
+        };
+        let agent = adapter.agent(handle);
+        let asked = agent
+            .items
+            .iter()
+            .any(|item| item.role == cf_harness::records::Role::User && item.text.contains(ACTION));
+        if agent.settled || !asked || !acted.insert((open.pane.id.clone(), open.pane.generation)) {
+            continue;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(receipt)
+            .unwrap();
+        writeln!(file, "{handle}").unwrap();
+        adapter.answer(
+            handle,
+            &format!("The work receipt was updated by {handle}."),
+        );
+    }
+}
+
+/// The reviewer's once-probe (T-2317): a Devin-mode primary, whose brief goes in with the host's
+/// open, is out of its login while that open is held, and its Codex-mode backup does the task;
+/// the human accepts it; then the old host answers. One entry in the receipt, not two: the old
+/// window is ended as the open answers. Run twenty times over. The stand-in acts where its
+/// record holds the brief and its pane is its own, so a window that is closed first never does;
+/// what a real program can do between its start and the close is the limit the brain's page
+/// names.
+#[test]
+fn a_task_handed_to_a_backup_as_the_old_open_answers_is_done_once() {
+    use cf_harness::seams::Time;
+    for run in 0..20 {
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join("entries.txt");
+        let context = Context::made(cf_engine::testing::Made {
+            harnesses: vec!["devin", "claude-code"],
+            codex: true,
+            ..Default::default()
+        });
+        context.adapter.first.set(FirstMessage::Opened);
+        context.codex.first.set(FirstMessage::Delivered);
+        context.adapter.honors_call_off.set(true);
+        let project = context
+            .open_project(serde_json::json!({
+                "directory": root.path(), "name": "receipt",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "zeus", "harness": "devin", "role": "worker", "tier": "standard" }],
+            }))
+            .unwrap()
+            .unwrap()
+            .id;
+        let primary = context
+            .project(project)
+            .participants
+            .into_iter()
+            .find(|who| who.harness.as_deref() == Some("devin") && who.member_id.is_none())
+            .unwrap()
+            .handle;
+        let backup = context
+            .ledger
+            .borrow_mut()
+            .add_backup(
+                project,
+                &primary,
+                &NewMember {
+                    harness: "codex".into(),
+                    model: Some("gpt-6-astra".into()),
+                    model_name: Some("athena".into()),
+                    effort: None,
+                    roles: vec!["worker".into()],
+                    tier: "standard".into(),
+                    designer: false,
+                },
+            )
+            .unwrap()
+            .handle;
+        let task = |body: &str| {
+            context
+                .create_task(
+                    project,
+                    cf_ledger::NewTask {
+                        from: "chief".into(),
+                        pool: Some("worker".into()),
+                        tier: Some("standard".into()),
+                        body: body.into(),
+                        ..Default::default()
+                    },
+                )
+                .task
+                .number
+        };
+        let passes = |count: usize| {
+            for _ in 0..count {
+                context.pass().unwrap();
+                context.settle();
+            }
+        };
+        let first = task("First window");
+        passes(4);
+        let source = context.task(project, first).task.assignee.unwrap();
+        let gate = context.host.open_holds.hold({
+            let seen = Rc::new(Cell::new(false));
+            move |_| !seen.replace(true)
+        });
+        let number = task(ACTION);
+        passes(2);
+        let old = context.task(project, number).task.assignee.unwrap();
+        context.adapter.refuse(
+            &source,
+            cf_harness::records::Quota::Unavailable {
+                at: Some(cf_base::time::iso(context.time.wall_ms())),
+                because: "the test login expired".to_owned(),
+            },
+        );
+        passes(6);
+        let current = context.task(project, number).task.assignee.unwrap();
+        assert_ne!(current, old, "run {run}: the task went to the backup");
+        let mut acted = std::collections::HashSet::new();
+        act_where_asked(&context, project, &receipt, &mut acted);
+        passes(6);
+        assert_eq!(
+            context.task(project, number).task.state,
+            "done",
+            "run {run}"
+        );
+        context
+            .ledger
+            .borrow_mut()
+            .accept_task(project, number, "human")
+            .unwrap();
+        passes(3);
+        gate.open();
+        context.settle();
+        passes(4);
+        act_where_asked(&context, project, &receipt, &mut acted);
+        passes(4);
+        let entries = std::fs::read_to_string(&receipt).unwrap();
+        assert_eq!(
+            entries.lines().count(),
+            1,
+            "run {run}: one task, one entry: {entries:?} (backup {backup})"
+        );
+    }
 }
