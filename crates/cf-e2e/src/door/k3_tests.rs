@@ -1151,42 +1151,18 @@ fn a_window_started_through_a_shell_is_judged_by_the_program_the_shell_is_told_t
     }
 }
 
-/// A start of a program the kit makes through a shell is judged the same way: a plain start of
-/// `sh -c "cargo …"` is a start of cargo, and one the door cannot read is not started.
+/// A start through a shell that is plain is started, and a script an offline fixture runs goes
+/// through its own start. What is refused, and by which program the shell is judged, is asked as
+/// judgements that start nothing (`a_shell_told_a_command_is_judged_by_its_program_and_an_unreadable_one_is_refused`,
+/// `a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts`): a start of
+/// the Keychain's utility, cargo or a harness's program is never a way to show a refusal, for a
+/// guard that is out would start it.
 #[cfg(unix)]
 #[test]
-fn a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run() {
+fn a_plain_start_through_a_shell_and_a_fixture_script_are_started() {
     use crate::process::Run;
-    let refused = Run::new("/bin/sh")
-        .args(["-c", "cargo --version"])
-        .run()
-        .unwrap_err();
-    assert!(refused.to_string().contains("cargo"), "{refused}");
-    let refused = Run::new("/bin/sh")
-        .args(["-c", "/usr/bin/security list-keychains"])
-        .run()
-        .unwrap_err();
-    assert!(refused.to_string().contains("Keychain"), "{refused}");
-    let refused = Run::new("/bin/sh")
-        .args(["-c", "echo ready; cargo --version"])
-        .run()
-        .unwrap_err();
-    assert!(refused.to_string().contains("cannot be read"), "{refused}");
-    // A script an offline fixture runs goes through its own start, and is refused there too where
-    // a word of it names a program with a door.
     let ran = Run::fixture_script("echo ready; echo again").run().unwrap();
     assert_eq!(ran.stdout.trim(), "ready\nagain");
-    for script in [
-        "echo a; cargo build",
-        "/usr/bin/security dump-keychain | cat",
-        "x=1; Claude --version",
-    ] {
-        let refused = Run::fixture_script(script).run().unwrap_err();
-        assert!(
-            refused.to_string().contains("door of its own"),
-            "{script}: {refused}"
-        );
-    }
     let ran = Run::new("/bin/sh")
         .args(["-c", "echo ready"])
         .run()

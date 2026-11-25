@@ -541,7 +541,7 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
     ),
     (
         "src/door/k3_tests.rs",
-        "a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run",
+        "a_plain_start_through_a_shell_and_a_fixture_script_are_started",
         Class::Operation,
         "an offline fixture's own script, started through `Run::fixture_script`",
     ),
