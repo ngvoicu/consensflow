@@ -116,7 +116,7 @@ impl Dispatcher {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, another window (its member's backup, or a Reassign), or a failure 30 minutes or more after both the last automatic try that reached it and the last time the count started again. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, or another window (its member's backup, or a Reassign); by time it starts again only 30 minutes after the last automatic try that reached it and 30 minutes after the count last started again. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
                 n = task.number,
                 first = spoken(unit),
                 second = spoken(SECOND_TRY_UNITS * unit),

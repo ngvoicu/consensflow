@@ -1824,3 +1824,47 @@ fn a_fresh_pair_withdrawn_whole_renews_again_31_minutes_after_the_renewal() {
     );
     assert_eq!(stored_tries(&c), 0);
 }
+
+#[test]
+fn one_word_then_its_first_try_withdrawn_then_two_failures_gets_two_tries_and_no_more() {
+    // The count started again by a word: the delivery from before it is long past, and must
+    // not renew away the first try after it.
+    let c = retrying();
+    let (t, window) = working(&c);
+    two_tries_used(&c, &window);
+    c.advance(31 * 60_000);
+    c.ledger
+        .borrow_mut()
+        .tell_queued(t.project.id, 1, "chief", "Use the west file.")
+        .unwrap();
+    // The window rests, takes the chief's word, and works on it.
+    c.adapter.with(&window, |agent| agent.settled = true);
+    passes(&c, 8);
+    assert!(
+        given(&c, "zeus")
+            .iter()
+            .any(|text| text.contains("Use the west file.")),
+        "the word reached the window"
+    );
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), Some(1));
+    a_try_queued_and_withdrawn(&c, &t, &window);
+    assert_eq!(stored_tries(&c), 1);
+    assert_eq!(
+        woken_and_failed(&c, &t, &window),
+        Some(2),
+        "one of the two is charged"
+    );
+    let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+    c.advance(due - c.time.wall_ms() + 1);
+    until_resumed(&c, "zeus", 3);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &window), None);
+    assert_eq!(
+        t.task(1).task.state,
+        "failed",
+        "no third try after the word"
+    );
+}
