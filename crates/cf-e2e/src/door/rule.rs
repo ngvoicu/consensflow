@@ -2238,7 +2238,7 @@ fn a_new_caller_of_a_script_entry_is_found_outside_the_files_that_call_one_today
             "{text} is not found: {found:?}"
         );
         assert!(
-            !found.iter().all(|found| waived(found)),
+            !found.iter().all(waived),
             "{text} is waived in a file that has no waiver"
         );
     }
