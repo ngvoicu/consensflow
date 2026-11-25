@@ -13,7 +13,8 @@
 ld-recorded = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::ownership"]
 ld-tests = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests"]
 ld-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::native"]
-ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_the_windows_tree"]
+ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_"]
+ld-later = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::a_process_chosen_by_a_later_look"]
 
 [[plant]]
 name = "live descent: a Mac child is the parent's on the parent's number alone"
@@ -160,7 +161,7 @@ replace = '''            let _ = &chosen;'''
 [[plant]]
 name = "live descent: a process chosen by a later look is still said as left running"
 meant = "a_process_chosen_by_a_later_look_is_no_longer_said_as_left_running"
-runs = ["ld-door"]
+runs = ["ld-later"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
