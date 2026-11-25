@@ -427,7 +427,7 @@ mod tests {
 
     fn store() -> (Store, Rc<RefCell<Vec<Event>>>) {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE event (id INTEGER PRIMARY KEY, project_id INTEGER, at TEXT, kind TEXT, data TEXT)")
+        db.execute_batch("CREATE TABLE event (id INTEGER PRIMARY KEY, project_id INTEGER, at TEXT, kind TEXT, data TEXT); CREATE TABLE task (id INTEGER PRIMARY KEY, turn_retry_at TEXT)")
             .unwrap();
         let events = Rc::new(RefCell::new(Vec::new()));
         let told = Rc::clone(&events);
