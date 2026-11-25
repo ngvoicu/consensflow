@@ -135,7 +135,7 @@ impl Owner {
 
     /// Pi's, on the model `model`, for a run of `run`.
     fn pi(&self, model: &str, run: Duration) -> Isolation {
-        let mut made = Isolation::pi(self.home.path(), &self.path(".pi/agent"), model, run);
+        let mut made = Isolation::pi(self.home.path(), self.path(".pi/agent"), model, run);
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -204,13 +204,13 @@ impl Owner {
     /// Pi's, on the models `models`, for a run of `run`.
     fn pi_on(&self, models: &[&str], run: Duration) -> Isolation {
         let models: Vec<String> = models.iter().map(|model| (*model).to_owned()).collect();
-        let mut made = Isolation::pi_on(self.home.path(), &self.path(".pi/agent"), &models, run);
+        let mut made = Isolation::pi_on(self.home.path(), self.path(".pi/agent"), &models, run);
         made.parent = self.parent.path().to_path_buf();
         made
     }
 
     fn codex(&self) -> Isolation {
-        let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
+        let mut made = Isolation::codex(self.home.path(), self.path(".codex"));
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -218,8 +218,8 @@ impl Owner {
     fn muse(&self) -> Isolation {
         let mut made = Isolation::muse(
             self.home.path(),
-            &self.path(".config"),
-            &self.path(".local/share"),
+            self.path(".config"),
+            self.path(".local/share"),
         );
         made.parent = self.parent.path().to_path_buf();
         made
@@ -228,8 +228,8 @@ impl Owner {
     fn devin(&self) -> Isolation {
         let mut made = Isolation::devin(
             self.home.path(),
-            &self.path(".config"),
-            &self.path(".local/share"),
+            self.path(".config"),
+            self.path(".local/share"),
         );
         made.parent = self.parent.path().to_path_buf();
         made
@@ -2058,7 +2058,7 @@ impl Renewing {
             pi::renewal(
                 machine,
                 self.owner.home.path(),
-                &self.owner.path(".pi/agent"),
+                self.owner.path(".pi/agent"),
                 model,
                 move || Ok(program.clone()),
             )
@@ -2111,7 +2111,7 @@ fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_sup
     let models = ["openai/gpt-6-luna".to_owned(), "openrouter/x".to_owned()];
     let mut isolation = Isolation::pi_on(
         run.owner.home.path(),
-        &run.owner.path(".pi/agent"),
+        run.owner.path(".pi/agent"),
         &models,
         hours(1),
     );
@@ -2120,7 +2120,7 @@ fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_sup
     isolation.renewal = Some(pi::renewal(
         zeewin2(),
         run.owner.home.path(),
-        &run.owner.path(".pi/agent"),
+        run.owner.path(".pi/agent"),
         &models[0],
         move || Ok(program.clone()),
     ));
@@ -2550,11 +2550,11 @@ fn every_store_a_plan_names_is_a_row_of_the_table() {
     let home = PathBuf::from("/the/account");
     let lookup = |name: &str| (name == "HOME").then(|| home.clone().into_os_string());
     let plans = [
-        Plan::codex(&home.join(".codex")),
-        Plan::pi(&home.join(".pi/agent"), None, Duration::from_secs(60)),
-        Plan::muse(&home.join(".config"), &home.join(".local/share")),
-        Plan::devin(&home.join(".config"), &home.join(".local/share")),
-        Plan::devin_on_windows(&home.join("AppData/Roaming")),
+        Plan::codex(home.join(".codex")),
+        Plan::pi(home.join(".pi/agent"), None, Duration::from_secs(60)),
+        Plan::muse(home.join(".config"), home.join(".local/share")),
+        Plan::devin(home.join(".config"), home.join(".local/share")),
+        Plan::devin_on_windows(home.join("AppData/Roaming")),
     ];
     for plan in &plans {
         let mut named: Vec<PathBuf> = Vec::new();

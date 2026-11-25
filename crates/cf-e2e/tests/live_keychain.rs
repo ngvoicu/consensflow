@@ -45,7 +45,7 @@ use cf_e2e::live::keychain::{without_keychain, Control, Listing, OwnItem};
 use cf_e2e::live::launcher::{updates_off, Guard};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, Harness, Installed, Log, ISOLATION};
-use cf_e2e::process::{own_var, Run};
+use cf_e2e::process::own_var;
 use cf_e2e::rig::HarnessHome;
 use cf_e2e::{Error, Result};
 

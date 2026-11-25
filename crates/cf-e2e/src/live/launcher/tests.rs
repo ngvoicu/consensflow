@@ -250,7 +250,7 @@ fn the_hash_of_a_big_file_reads_it_whole_and_tells_two_files_of_one_size_apart()
     assert_eq!(a.size, b.size);
     assert_ne!(a.hash, b.hash);
     assert_eq!(a.hash.len(), 64);
-    assert!(Bytes::of(&folder.path().join("missing")).is_none());
+    assert!(Bytes::of(folder.path().join("missing")).is_none());
 }
 
 #[test]

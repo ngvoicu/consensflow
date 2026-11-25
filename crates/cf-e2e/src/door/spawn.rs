@@ -106,6 +106,8 @@ impl Window {
     pub fn this() -> &'static Window {
         static THIS: std::sync::OnceLock<Window> = std::sync::OnceLock::new();
         THIS.get_or_init(|| {
+            // The door judges the window's own environment: it is what is read here.
+            #[allow(clippy::disallowed_methods)]
             let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
             let kit = kit_vars(&env);
             Window {

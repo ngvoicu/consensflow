@@ -217,8 +217,8 @@ runs = ["isolation-lib"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            Harness::Muse => Some(Self::muse(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),'''
 replace = '''            Harness::Muse => None,'''
 
@@ -232,8 +232,8 @@ platforms = ["windows"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            Harness::Muse => Some(Self::muse(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),'''
 replace = '''            Harness::Muse => None,'''
 

@@ -147,7 +147,7 @@ pub fn copy_muse_into(home: impl Into<Owned>, scratch: &Path, auth: &str) -> io:
     let home = home.into();
     copy_muse_login_text(auth, &scratch.join("config/muse/auth.json"))?;
     copy_folder_kept(
-        &home.join(".local/share/muse/model-catalog"),
+        home.join(".local/share/muse/model-catalog"),
         &scratch.join("data/muse/model-catalog"),
     )
 }

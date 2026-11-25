@@ -42,7 +42,7 @@ use cf_e2e::door::source::{Account as Owner, Purpose};
 use cf_e2e::live::members::{member, stand_in_chief, Account, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, text, Harness, Log};
-use cf_e2e::{Error, Result};
+use cf_e2e::Result;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 

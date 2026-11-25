@@ -255,7 +255,7 @@ impl Installed {
     /// `folder` spells it ([`Isolation::made_in`]), for a run that takes `planned`.
     pub fn with_homes_in(mut self, folder: &Path, planned: Duration) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine_lasting(self.harness, &self.owner(), planned)?
+            self.isolation = Isolation::of_machine_lasting(self.harness, self.owner(), planned)?
                 .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
@@ -642,7 +642,7 @@ fn rig_keeping_claude_in(
         }
         // The owner's launcher of every harness the rig seats is looked at when the rig starts
         // and when it ends, whatever home the harness runs on (T-1082).
-        let guard = Guard::new(install.harness, &install.command, &install.owner());
+        let guard = Guard::new(install.harness, &install.command, install.owner());
         let guard = if install
             .claude_config()
             .is_some_and(|config| config.keeps_its_findings())
@@ -835,7 +835,7 @@ fn with_homes(mut installed: Installed, planned: Duration, watch_owner: bool) ->
             installed = installed.with_claude_config(Arc::new(login));
         }
     }
-    if let Some(isolation) = Isolation::of_machine_lasting(harness, &installed.owner(), planned)? {
+    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.owner(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)

@@ -119,7 +119,7 @@ impl Owner {
     /// Devin's, as the machine's `APPDATA` names the Roaming folder.
     fn devin(&self) -> Isolation {
         let mut made =
-            Isolation::devin_on_windows(self.profile.path(), &self.path("AppData/Roaming"));
+            Isolation::devin_on_windows(self.profile.path(), self.path("AppData/Roaming"));
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -456,13 +456,13 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
         ),
         (
             "Codex".to_owned(),
-            Isolation::codex(profile, &profile.join(".codex")).vars_in(run),
+            Isolation::codex(profile, profile.join(".codex")).vars_in(run),
         ),
         (
             "Pi".to_owned(),
             Isolation::pi(
                 profile,
-                &profile.join(".pi").join("agent"),
+                profile.join(".pi").join("agent"),
                 "openai/gpt-5.6-luna",
                 Duration::from_secs(900),
             )
@@ -470,15 +470,15 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
         ),
         (
             "Devin".to_owned(),
-            Isolation::devin_on_windows(profile, &profile.join("AppData").join("Roaming"))
+            Isolation::devin_on_windows(profile, profile.join("AppData").join("Roaming"))
                 .vars_in(run),
         ),
         (
             "Muse Code".to_owned(),
             Isolation::muse(
                 profile,
-                &profile.join(".config"),
-                &profile.join(".local").join("share"),
+                profile.join(".config"),
+                profile.join(".local").join("share"),
             )
             .vars_in(run),
         ),

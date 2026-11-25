@@ -129,7 +129,10 @@ pub fn question_sealed(body: &mut Value) -> Result {
     // What the machine is, as every start of the kit is given it (the search path, the system's
     // variables, the temporary folders, the language): under what the caller named. The helper
     // starts the harness's program on this environment alone, so a caller no longer builds it.
-    for (name, value) in crate::process::machine_vars(std::env::vars_os()) {
+    // The kit's own process's environment, of which the machine's variables alone are kept.
+    #[allow(clippy::disallowed_methods)]
+    let held = std::env::vars_os();
+    for (name, value) in crate::process::machine_vars(held) {
         if !env.iter().any(|(held, _)| {
             held.to_string_lossy()
                 .eq_ignore_ascii_case(&name.to_string_lossy())

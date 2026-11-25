@@ -108,7 +108,7 @@ pub fn is_link(path: &Path) -> bool {
     {
         use std::os::windows::fs::MetadataExt;
         const REPARSE_POINT: u32 = 0x400;
-        return meta.file_attributes() & REPARSE_POINT != 0;
+        meta.file_attributes() & REPARSE_POINT != 0
     }
     #[cfg(not(windows))]
     false

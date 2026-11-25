@@ -54,7 +54,10 @@ pub fn again_under_audit(test: &str) -> Result {
     // The stand-in's own marks, which the program started finds at its start: the folders this
     // process made (its audit file's folder is below one), and that it is a stand-in.
     for name in [super::MADE_ROOTS, "CF_E2E_STAND_IN"] {
-        if let Some(value) = std::env::var_os(name) {
+        // The door hands on its own marks as this process holds them.
+        #[allow(clippy::disallowed_methods)]
+        let held = std::env::var_os(name);
+        if let Some(value) = held {
             run = run.var(name, value);
         }
     }

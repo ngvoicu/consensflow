@@ -496,15 +496,15 @@ impl Isolation {
             #[cfg(unix)]
             Harness::Devin => Some(Self::devin(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
             // Muse honours `XDG_CONFIG_HOME` and `XDG_DATA_HOME` on Windows too, and keeps its
             // login in `auth.json` there: the same row, below the owner's profile (T-1084).
             Harness::Muse => Some(Self::muse(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),
             // Devin on Windows keeps its folders where the system's known folders put them,
             // below the profile (T-1084): the owner's Roaming folder is `APPDATA`, else below
@@ -1131,7 +1131,7 @@ fn pi_discovery_copy(from: impl Into<Owned>) -> Result<PiDiscovery> {
 
 /// Resolve a Pi model from a sanitized copy, retaining its seed for the run's own home.
 pub(super) fn pi_provider_names(from: impl Into<Owned>) -> Result<Vec<String>> {
-    let discovery = pi_discovery_copy(&from.into())?;
+    let discovery = pi_discovery_copy(from.into())?;
     let names = discovery.names()?;
     let cleanup = PI_DISCOVERY_CLEANUP.get_or_init(register_pi_discovery_cleanup);
     if !cleanup {

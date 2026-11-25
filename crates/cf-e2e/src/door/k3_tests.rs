@@ -809,7 +809,7 @@ fn the_judges_ground_is_by_the_act() {
     let below_theirs = theirs.path().join("inner");
     crate::door::make_dir(&below_mine).unwrap();
     crate::standin_process::foreign_dir(&below_theirs);
-    crate::standin_process::foreign_write(&theirs.path().join("there.txt"), "theirs");
+    crate::standin_process::foreign_write(theirs.path().join("there.txt"), "theirs");
     crate::door::write(mine.path().join("here.txt"), "mine").unwrap();
     // A name: new anywhere nothing is, never over what is there.
     assert!(judge(&theirs.path().join("new.txt"), Act::Name).is_ok());
