@@ -562,7 +562,20 @@ async function open(page, given = model(), { ready = true } = {}) {
         board.lanes = board.lanes.filter((lane) => lane.participant.backupOf !== owner.id)
         return answer({ member: owner })
       },
+      // A member off the staff, as the daemon takes it: its sessions and its backup with it.
+      'member.remove': ({ project, agent }) => {
+        const board = data.boards[project]
+        const gone = board.lanes.find((lane) => lane.participant.handle === agent)?.participant
+        if (gone)
+          board.lanes = board.lanes.filter(
+            ({ participant: one }) =>
+              one.handle !== agent && one.member !== agent && one.backupOf !== gone.id,
+          )
+        return answer({})
+      },
       'member.roles': ({ project, agent, roles }) => {
+        // A refusal a test names, as the ledger's when another write took the slot first.
+        if (data.rolesRefusal !== undefined) return { ok: false, error: data.rolesRefusal }
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
         lane.participant.roles = roles
         return answer({ member: lane.participant })
@@ -1117,24 +1130,47 @@ const offered = (select) =>
     .evaluateAll((all) => all.map((option) => [option.textContent, option.disabled]))
 
 /**
- * Add member's form (T-1143): a role, a harness by its name, one of the models it lists by
- * its launch value, an effort and a tier, each where given.
+ * Opens the member form from the Add of a slot (D8): `role` at `tier`, or, with no tier said, the
+ * role's one slot where it has no tiers, else its first empty one, the most critical first.
+ */
+async function openSlot(dialog, role, tier) {
+  const cell =
+    tier === undefined
+      ? `[data-slot="${role}"], [data-slot^="${role}:"]`
+      : `[data-slot="${role}:${tier}"]`
+  await dialog
+    .locator('table.slots')
+    .locator(cell)
+    .getByRole('button', { name: /^Add / })
+    .first()
+    .click()
+  await expect(dialog.locator('.staff-add')).toBeVisible()
+}
+
+/**
+ * Add member's form (T-1143): shut, or open for a slot's Add and a role or a tier given, it is
+ * opened from that slot's Add (a worker's where no role is said, `openSlot`); then a harness by its
+ * name, one of the models it lists by its launch value and an effort, each where given. An Edit or
+ * a backup that has the form open is picked in as it is, its tier too where one is given.
  */
 async function pickMember(dialog, { role, harness, model, effort, tier }) {
   const add = dialog.locator('.staff-add')
-  if (role !== undefined) await add.locator('[name="role"]').selectOption(role)
+  const shown = await add.isVisible()
+  const forSlot = !shown || (await add.locator('legend').textContent()).startsWith('Add the ')
+  if (forSlot && (!shown || role !== undefined || tier !== undefined)) {
+    await openSlot(dialog, role ?? 'worker', tier)
+  }
   await add.locator('[name="memberHarness"]').selectOption({ label: harness })
   await expect(add.locator('[name="memberModel"]')).toBeEnabled()
   await add.locator('[name="memberModel"]').selectOption(model)
   if (effort !== undefined) await add.locator('[name="memberEffort"]').selectOption(effort)
-  if (tier !== undefined) await add.locator('[name="memberTier"]').selectOption(tier)
+  if (!forSlot && tier !== undefined) await add.locator('[name="memberTier"]').selectOption(tier)
 }
 
-/** An image designer, as Add member picks one: the role, and nothing else (Codex is picked for it). */
+/** An image designer, as its slot's Add picks one: nothing to pick, Codex is picked for it. */
 async function pickDesigner(dialog) {
-  const add = dialog.locator('.staff-add')
-  await add.locator('[name="role"]').selectOption('designer')
-  await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
+  await openSlot(dialog, 'designer')
+  await expect(dialog.locator('.staff-add [name="memberHarness"]')).toHaveValue('codex')
 }
 
 test('card state clocks follow the ledger time, tick, and reset only on a move', async ({
@@ -4640,7 +4676,7 @@ test('a button kept across redraws acts on what the board shows now', async ({ p
   data.projects[1] = { ...data.projects[1], state: 'open' }
   data.boards[2].project.state = 'open'
   await open(page, data)
-  // A role added to zeus leaves its Worker row drawn the same: removing the
+  // A role added to zeus leaves its worker slot drawn the same: removing the
   // worker role now takes that role only, and asks nothing.
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
@@ -4648,7 +4684,9 @@ test('a button kept across redraws acts on what the board shows now', async ({ p
     const zeus = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
     zeus.participant.roles = ['worker', 'reviewer']
   })
-  await expect(dialog.locator('tr[data-handle="zeus"]')).toHaveCount(2)
+  await expect(
+    dialog.locator('[data-slot="reviewer:standard"] .slot-holder[data-member="zeus"]'),
+  ).toHaveCount(1)
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
@@ -7773,7 +7811,8 @@ test("adds a member on a model its harness lists, the harness's own listing, nev
   await open(page, recordedModels())
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const add = dialog.getByRole('group', { name: 'Add a member' })
+  await openSlot(dialog, 'worker', 'complex')
+  const add = dialog.getByRole('group', { name: 'Add the complex worker' })
   const harness = add.locator('[name="memberHarness"]')
   const models = add.locator('[name="memberModel"]')
   // Every harness installed here, none picked; the model waits for one.
@@ -7930,7 +7969,7 @@ test("a harness whose models cannot be read leaves the chief's model unpicked, a
   expect(await calls(page, 'project.open')).toEqual([])
 })
 
-test('shows the staff as one row per member and role, and adds a member in a role, on a model its harness lists', async ({
+test('shows the staff as one row per member, and adds a member in an empty slot, on a model its harness lists', async ({
   page,
 }) => {
   const data = model()
@@ -7952,8 +7991,8 @@ test('shows the staff as one row per member and role, and adds a member in a rol
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const table = dialog.getByRole('table', { name: 'On the staff' })
-  await expect(table.locator('thead th')).toHaveText(['Member', 'Role', ''])
-  await expect(table.locator('tbody tr[data-role]')).toHaveText([
+  await expect(table.locator('thead th')).toHaveText(['Member', 'Slots', ''])
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
     /@zeus.*Worker/,
     /@diana.*Worker/,
     /@hera.*gpt-6-astra · max · critical · Codex.*Reviewer/,
@@ -7964,7 +8003,8 @@ test('shows the staff as one row per member and role, and adds a member in a rol
     'claude-sonnet-5 · high · standard · Claude Code',
   )
   await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('Worker')
-  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+  // The slots read by role, in the daemon's order of them.
+  await expect(slotGrid(dialog).locator('tbody th')).toHaveText([
     'Worker',
     'Frontend designer',
     'Architect',
@@ -7998,14 +8038,14 @@ test('shows the staff as one row per member and role, and adds a member in a rol
     ])
   await expect(page.locator('#status')).toHaveText('@muse-spark joined the staff as Advisor.')
   // An image designer draws on Codex: the harness select offers it alone.
-  await dialog.getByLabel('Role').selectOption('designer')
+  await openSlot(dialog, 'designer')
   expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
     ['Pick a harness', true],
     ['Codex', false],
   ])
 })
 
-test('adds a member as a tester, or as one more role of a member, in the place a tester has among the roles', async ({
+test('adds a member as a tester, or gives a member the tester slot of its tier, in the place a tester has among the roles', async ({
   page,
 }) => {
   const data = model()
@@ -8015,14 +8055,16 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await expect(
     dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help').first(),
   ).toContainText('a tester checks it by running it when the chief asks')
-  // The four roles of spec new-roles, each by its territory, and that they take no tier.
-  await expect(
-    dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help').first(),
-  ).toContainText(
-    'A frontend designer designs and builds how the product looks, an architect designs the software before it is built, a researcher finds what the chief asks for and changes no file, and an integrator brings accepted work together and lands it: these four take no tier.',
+  // Every role by its territory, and that each has a slot at every tier but the image designer.
+  const help = dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help')
+  await expect(help.first()).toContainText(
+    'A worker does the work, a frontend designer designs and builds how the product looks, an architect designs the software before it is built, a researcher finds what the chief asks for and changes no file, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks, and an integrator brings accepted work together and lands it.',
+  )
+  await expect(help.first()).toContainText(
+    'Every role has a slot at each tier but the image designer, which draws on Codex and takes no other role.',
   )
   // The tester has its place among the roles, after the reviewer.
-  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+  await expect(slotGrid(dialog).locator('tbody th')).toHaveText([
     'Worker',
     'Frontend designer',
     'Architect',
@@ -8049,12 +8091,11 @@ test('adds a member as a tester, or as one more role of a member, in the place a
       },
     ])
   await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Tester.')
-  // A model a member runs already: the daemon gives that member the role, and the page says so.
-  await page.evaluate(() => {
-    window.__model.memberHandle = 'zeus'
-  })
-  await pickMember(dialog, { harness: 'Claude Code', model: 'claude-sonnet-5', tier: 'standard' })
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  // A member already on the staff is given the tester slot of its own tier, and the page says so.
+  await dialog.getByRole('button', { name: 'Give the standard tester slot to @zeus' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'tester'] }])
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
 })
 
@@ -8111,7 +8152,7 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   await expect(row(/^@castor worker/).locator('.meta-tier')).toHaveText('complex')
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+  await expect(slotGrid(dialog).locator('tbody th')).toHaveText([
     'Worker',
     'Frontend designer',
     'Architect',
@@ -8123,37 +8164,20 @@ test("a role the daemon's table alone names is offered, listed and added in its 
     'Integrator',
     'Image designer',
   ])
+  // A role with no tier is one slot, across the tiers: both scouts hold it, with the rule.
+  await expect(slotCell(dialog, 'scout').locator('.slot-holder')).toHaveText([/@argus/, /@castor/])
+  await expect(dialog.locator('.slot-words[data-role="scout"]')).toHaveText(
+    'The field scout slot holds two members, @argus and @castor: a project has one field scout. Remove all but one; removing a member cancels the tasks it holds. All take work until then.',
+  )
   const table = dialog.getByRole('table', { name: 'On the staff' })
-  await expect(table.locator('tbody tr[data-role]').last()).toHaveText(/@argus.*Field scout/)
-  await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
-  // No tier in the row of a role with none; the member's tier in the row of one with tiers.
+  await expect(table.locator('tbody tr.staff-group').last()).toHaveText(/@argus.*Field scout/)
+  // No tier for a member whose roles have none; the member's tier for one with tiers.
   await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('light')
-  await expect(table.locator('tr[data-handle="castor"][data-role="scout"]')).not.toContainText(
-    'complex',
+  await expect(table.locator('tr[data-handle="castor"]')).toContainText('· complex ·')
+  await expect(table.locator('tr[data-handle="castor"] .member-slots')).toHaveText(
+    'Worker · Field scout',
   )
-  await expect(table.locator('tr[data-handle="castor"][data-role="worker"]')).toContainText(
-    '· complex ·',
-  )
-  // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
-  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
-  await dialog.getByRole('button', { name: 'Add to staff' }).click()
-  await expect
-    .poll(() => calls(page, 'member.add'))
-    .toEqual([
-      {
-        project: 1,
-        harness: 'devin',
-        model: 'swe-2',
-        effort: null,
-        roles: ['scout'],
-      },
-    ])
-  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
-  // Back to a role with tiers: the tier is asked for again.
-  await dialog.getByLabel('Role').selectOption('worker')
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
-  // Edit member asks a scout no tier either, and saves it with none.
+  // Edit member asks a scout no tier, and saves it with none.
   await dialog.getByRole('button', { name: 'Edit @argus', exact: true }).click()
   await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
@@ -8171,11 +8195,38 @@ test("a role the daemon's table alone names is offered, listed and added in its 
       },
     ])
   // A worker that scouts too is asked its tier.
-  await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).first().click()
+  await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).click()
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  await dialog.locator('.staff-add').getByRole('button', { name: 'Cancel' }).click()
+  // The slot met: castor's scouting goes, then argus, asked first.
+  await dialog.getByRole('button', { name: 'Remove Field scout @castor' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'castor', roles: ['worker'] }])
+  await expect(dialog.locator('.slot-words')).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Remove Field scout @argus' }).click()
+  await dialog.getByRole('button', { name: 'Remove @argus', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'argus' }])
+  // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
+  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
+  await expect(dialog.locator('.staff-add legend')).toHaveText('Add the field scout')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'swe-2',
+        effort: null,
+        roles: ['scout'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
 })
 
-test('the frontend designer, the architect, the researcher and the integrator are added on any harness and asked no tier', async ({
+test('the frontend designer, the architect, the researcher and the integrator are added on any harness, in the tier of their slot', async ({
   page,
 }) => {
   const data = model()
@@ -8190,16 +8241,29 @@ test('the frontend designer, the architect, the researcher and the integrator ar
   ]
   const added = []
   for (const [role, label] of roles) {
-    await pickMember(dialog, { role, harness: 'Devin', model: 'swe-2' })
+    // Every role but the image designer has tiers now: each is added in the tier of its slot,
+    // which the form names and does not ask.
+    await pickMember(dialog, { role, harness: 'Devin', model: 'swe-2', tier: 'standard' })
+    await expect(dialog.locator('.staff-add legend')).toHaveText(
+      `Add the standard ${label.toLowerCase()}`,
+    )
     await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
     await dialog.getByRole('button', { name: 'Add to staff' }).click()
-    added.push({ project: 1, harness: 'devin', model: 'swe-2', effort: null, roles: [role] })
+    added.push({
+      project: 1,
+      harness: 'devin',
+      model: 'swe-2',
+      effort: null,
+      tier: 'standard',
+      roles: [role],
+    })
     await expect.poll(() => calls(page, 'member.add')).toEqual(added)
     await expect(page.locator('#status')).toHaveText(`@swe-2 joined the staff as ${label}.`)
   }
-  // A worker is asked its tier again.
-  await dialog.getByLabel('Role').selectOption('worker')
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  // The image designer has one slot, with no tier.
+  await openSlot(dialog, 'designer')
+  await expect(dialog.locator('.staff-add legend')).toHaveText('Add the image designer')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({
@@ -8212,13 +8276,13 @@ test('an image designer is picked on Codex alone, and Add member says so when Co
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const hint = dialog.locator('#staff-hint')
-  await dialog.getByLabel('Role').selectOption('designer')
+  await openSlot(dialog, 'designer')
   await expect(hint).toHaveText(
     'Image designers draw on Codex, which is not installed here: install it from Agents, Harnesses.',
   )
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
-  // Another role: the harnesses installed here, Codex not among them.
-  await dialog.getByLabel('Role').selectOption('worker')
+  // Another role's slot: the harnesses installed here, Codex not among them.
+  await openSlot(dialog, 'worker', 'complex')
   await expect(hint).toBeHidden()
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeEnabled()
   expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
@@ -8237,11 +8301,14 @@ test('an image designer is added with no model, effort or tier: Codex is picked 
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const add = dialog.locator('.staff-add')
-  const controls = ['memberModel', 'memberEffort', 'memberTier', 'memberRefresh']
+  const controls = ['memberModel', 'memberEffort', 'memberRefresh']
+  await openSlot(dialog, 'worker', 'complex')
   for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeVisible()
   const read = await calls(page, 'models.get')
-  await add.locator('[name="role"]').selectOption('designer')
-  for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeHidden()
+  await openSlot(dialog, 'designer')
+  for (const name of [...controls, 'memberTier']) {
+    await expect(add.locator(`[name="${name}"]`)).toBeHidden()
+  }
   await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
   await expect(add.locator('.member-help')).toHaveText(
     "An image designer draws on Codex's own model: it takes no model, effort or tier.",
@@ -8260,22 +8327,21 @@ test('an image designer is added with no model, effort or tier: Codex is picked 
   await expect(page.locator('#status')).toHaveText(
     '@codex-default joined the staff as Image designer.',
   )
-  // Another role brings them back, and picks nothing.
-  await add.locator('[name="role"]').selectOption('worker')
+  // Another role's slot brings them back, and picks nothing.
+  await openSlot(dialog, 'worker', 'complex')
   for (const name of controls) await expect(add.locator(`[name="${name}"]`)).toBeVisible()
   await expect(add.locator('[name="memberHarness"]')).toHaveValue('')
   await expect(add.locator('.member-help')).toBeHidden()
 })
 
-test("drops one role from a member's row, and asks before its last", async ({ page }) => {
+test("drops one role from a member's slot, and asks before its last", async ({ page }) => {
   const data = model()
   const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
   lane.participant.roles = ['worker', 'reviewer']
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  const table = dialog.getByRole('table', { name: 'On the staff' })
-  await expect(table.locator('tbody tr[data-handle="diana"]')).toHaveCount(2)
+  await expect(dialog.locator('table.slots .slot-holder[data-member="diana"]')).toHaveCount(2)
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
@@ -8345,6 +8411,7 @@ test("Project settings reads every installed harness's models as it opens, all a
   await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
   expect(await answers(page, 'models.get')).toBe(0)
   const models = dialog.locator('[name="memberModel"]')
+  await openSlot(dialog, 'worker', 'complex')
   await dialog.locator('[name="memberHarness"]').selectOption({ label: 'Devin' })
   await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
   await expect(models).toBeEnabled()
@@ -8355,11 +8422,11 @@ test("Project settings reads every installed harness's models as it opens, all a
   expect(await harnessesAsked(page)).toEqual(HARNESSES)
 })
 
-test('Settings reads every installed harness as it opens again, whatever role was left picked (A4-28, review 4)', async ({
+test('Settings reads every installed harness as it opens again, whatever slot the form was left open for (A4-28, review 4)', async ({
   page,
 }) => {
   const data = model()
-  // A project with no ordinary staff: Add member's role stays where it was left.
+  // A project with no ordinary staff: the form is left open for the image designer's slot.
   data.boards[1].lanes = data.boards[1].lanes.filter((lane) =>
     ['chief', 'human'].includes(lane.participant.role),
   )
@@ -8367,8 +8434,8 @@ test('Settings reads every installed harness as it opens again, whatever role wa
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
-  // Designer is picked, and the dialog closed: the role is kept for the next opening.
-  await dialog.locator('[name="role"]').selectOption('designer')
+  // The image designer's slot is opened, and the dialog closed.
+  await openSlot(dialog, 'designer')
   await dialog.locator('[value="cancel"]').click()
   await page.evaluate(() => {
     window.__calls.length = 0
@@ -8429,6 +8496,7 @@ test('a Refresh in one picker updates every picker that shows the harness, and a
   const chiefModels = dialog.locator('[name="chiefModel"]')
   const memberModels = dialog.locator('[name="memberModel"]')
   await dialog.locator('[name="chiefHarness"]').selectOption('claude-code')
+  await openSlot(dialog, 'worker', 'complex')
   await dialog.locator('[name="memberHarness"]').selectOption('claude-code')
   await expect(memberModels).toBeEnabled()
   const reads = () => page.evaluate(() => window.__reads.filter((r) => r.harness === 'claude'))
@@ -8469,7 +8537,7 @@ test('Add member, New project and Edit member name the read their list was shown
   // Add member: the member is picked from Devin's list, and names that read.
   await page.getByRole('button', { name: 'Project settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Project settings' })
-  await pickMember(settings, { harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await pickMember(settings, { harness: 'Devin', model: 'swe-2', tier: 'complex' })
   await settings.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(async () => (await calls(page, 'member.add', { reads: true })).map((body) => body.read))
@@ -8672,6 +8740,7 @@ test('Add member shows what a harness listed when the dialog opened, says it rea
   // Every installed harness is read as the dialog opens (A4-28), the staff's and the others'.
   await expect.poll(() => harnessesAsked(page)).toEqual(HARNESSES)
   // Devin's read is on its way: the model select says it is reading, and fills when it comes.
+  await openSlot(dialog, 'worker', 'complex')
   await harness.selectOption({ label: 'Devin' })
   await expect(models.locator('option')).toHaveText(["Reading Devin's models…"])
   await expect(models).toBeDisabled()
@@ -8694,6 +8763,7 @@ test('Add member shows what a harness listed when the dialog opened, says it rea
   await dialog.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect.poll(async () => (await reads()).length).toBe(3)
+  await openSlot(dialog, 'worker', 'complex')
   await harness.selectOption({ label: 'Devin' })
   await expect(models).toBeEnabled()
   expect(await reads()).toHaveLength(3)
@@ -8720,13 +8790,14 @@ test('keeps a pending removal and what Add member has picked when the daemon red
     await expect.poll(boards).toBeGreaterThan(before)
   }
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
-  await expect(dialog.getByLabel('Role')).toHaveValue('reviewer')
+  await expect(dialog.locator('.staff-add legend')).toHaveText('Add the complex reviewer')
+  await expect(slotCell(dialog, 'reviewer:complex')).toHaveAttribute('data-picking', 'true')
   await expect(dialog.locator('[name="memberHarness"]')).toHaveValue('codex')
   await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
   await expect(dialog.locator('[name="memberTier"]')).toHaveValue('complex')
 })
 
-test('Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort', async ({
+test("Add member saves nothing until a harness and a model are picked, and adds in its slot's tier, which it does not ask", async ({
   page,
 }) => {
   await open(page, recordedModels())
@@ -8737,8 +8808,10 @@ test('Add member saves nothing until a tier is picked: the tier starts empty, wh
   const tier = dialog.locator('[name="memberTier"]')
   const add = dialog.getByRole('button', { name: 'Add to staff' })
   // Nothing picked: it says what to pick first.
+  await openSlot(dialog, 'worker', 'complex')
   await add.click()
   await expect(hint).toHaveText('Pick a harness for the member.')
+  expect(await calls(page, 'member.add')).toEqual([])
   // The model's efforts, as Muse lists them for it, the one it runs by default picked.
   await pickMember(dialog, { harness: 'Muse Code', model: 'muse-spark-1.2' })
   expect(await offered(effort)).toEqual([
@@ -8750,21 +8823,9 @@ test('Add member saves nothing until a tier is picked: the tier starts empty, wh
     ['xhigh', false],
   ])
   await expect(effort).toHaveValue('high')
-  expect(await offered(tier)).toEqual([
-    ['Pick a tier', true],
-    ['Critical work', false],
-    ['Complex work', false],
-    ['Standard work', false],
-    ['Light work', false],
-  ])
-  // No tier is picked for the human, and nothing is saved without one.
-  await expect(tier).toHaveValue('')
-  await add.click()
-  await expect(hint).toHaveText(
-    "Pick the member's tier: the work the chief gives it, from critical to light.",
-  )
-  expect(await calls(page, 'member.add')).toEqual([])
-  await tier.selectOption('standard')
+  // The tier is the slot's: not asked, and saved with the member.
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await expect(tier).toHaveValue('complex')
   await add.click()
   await expect
     .poll(() => calls(page, 'member.add'))
@@ -8774,11 +8835,12 @@ test('Add member saves nothing until a tier is picked: the tier starts empty, wh
         harness: 'muse',
         model: 'muse-spark-1.2',
         effort: 'high',
-        tier: 'standard',
+        tier: 'complex',
         roles: ['worker'],
       },
     ])
   await expect(hint).toBeHidden()
+  await expect(dialog.locator('.staff-add')).toBeHidden()
 })
 
 test("Add member marks a contributor model and a stale list, as the chief's picker does", async ({
@@ -8807,7 +8869,7 @@ test("Add member offers Devin's efforts for a model as Devin lists them, and sen
   await open(page, recordedModels())
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await pickMember(dialog, { harness: 'Devin', model: 'claude-opus-5-5-fast' })
+  await pickMember(dialog, { harness: 'Devin', model: 'claude-opus-5-5-fast', tier: 'complex' })
   expect(await offered(dialog.locator('[name="memberEffort"]'))).toEqual([
     ['Pick an effort', true],
     ['low', false],
@@ -8817,7 +8879,6 @@ test("Add member offers Devin's efforts for a model as Devin lists them, and sen
     ['max', false],
   ])
   await dialog.locator('[name="memberEffort"]').selectOption('medium')
-  await dialog.locator('[name="memberTier"]').selectOption('standard')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
@@ -8827,7 +8888,7 @@ test("Add member offers Devin's efforts for a model as Devin lists them, and sen
         harness: 'devin',
         model: 'claude-opus-5-5-fast',
         effort: 'medium',
-        tier: 'standard',
+        tier: 'complex',
         roles: ['worker'],
       },
     ])
@@ -8848,15 +8909,22 @@ test('Edit member moves a member to another model, effort and tier its harness l
   await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
   // The form takes the member as it is: its harness, its model, its effort and its tier.
   await expect(add.locator('legend')).toHaveText('Edit @zeus')
-  await expect(dialog.getByLabel('Role')).toBeDisabled()
+  await expect(add.locator('label:has([name="role"])')).toBeHidden()
   await expect(add.locator('[name="memberHarness"]')).toHaveValue('claude-code')
   await expect(add.locator('[name="memberModel"]')).toHaveValue('claude-sonnet-5')
   await expect(add.locator('[name="memberEffort"]')).toHaveValue('high')
   await expect(add.locator('[name="memberTier"]')).toHaveValue('standard')
-  // Cancel: nothing is sent, and the form adds again.
+  // Each tier its roles have, and whose slot is in the way of one it cannot take.
+  expect(await offered(add.locator('[name="memberTier"]'))).toEqual([
+    ['Pick a tier', true],
+    ['Critical work', false],
+    ['Complex work', false],
+    ['Standard work', false],
+    ["Light work: the light worker slot is @diana's", true],
+  ])
+  // Cancel: nothing is sent, and the form shuts until a slot or an Edit opens it.
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(add.locator('legend')).toHaveText('Add a member')
-  await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeVisible()
+  await expect(add).toBeHidden()
   expect(await calls(page, 'member.edit')).toEqual([])
   // Another model and tier, saved.
   await dialog.getByRole('button', { name: 'Edit @zeus' }).click()
@@ -8880,7 +8948,7 @@ test('Edit member moves a member to another model, effort and tier its harness l
   await expect(page.locator('#status')).toHaveText(
     '@zeus runs claude-opus-5-5 from its next window.',
   )
-  await expect(add.locator('legend')).toHaveText('Add a member')
+  await expect(add).toBeHidden()
 })
 
 test('marks a member whose harness no longer lists its model, and Refresh takes the mark off once it lists it again', async ({
@@ -8898,6 +8966,8 @@ test('marks a member whose harness no longer lists its model, and Refresh takes 
   await expect(zeus.locator('.member-gone')).toHaveText(
     'Claude Code no longer lists claude-sonnet-5: edit it to a model it lists.',
   )
+  // Its slot says so too, in a few words.
+  await expect(slotCell(dialog, 'worker:standard')).toContainText('model no longer listed')
   // diana's Codex lists her model: no mark.
   await expect(dialog.locator('tr[data-handle="diana"]')).not.toHaveAttribute('data-model-gone')
   // Claude Code lists it again, and the human's Refresh reads it.
@@ -8908,6 +8978,7 @@ test('marks a member whose harness no longer lists its model, and Refresh takes 
       efforts: [],
     })
   })
+  await openSlot(dialog, 'worker', 'complex')
   await dialog.locator('[name="memberHarness"]').selectOption({ label: 'Claude Code' })
   await dialog.getByRole('button', { name: 'Refresh models' }).click()
   await expect
@@ -8915,6 +8986,7 @@ test('marks a member whose harness no longer lists its model, and Refresh takes 
     .toContainEqual({ harness: 'claude', refresh: true })
   await expect(zeus).not.toHaveAttribute('data-model-gone')
   await expect(zeus.locator('.member-gone')).toHaveCount(0)
+  await expect(slotCell(dialog, 'worker:standard')).not.toContainText('model no longer listed')
 })
 
 test('starts a project with human approval required, and posts the checkbox with the staff', async ({
@@ -9076,9 +9148,8 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
   ])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
   // A member's roles are together, its name once (T-1847).
-  await expect(made.staff.locator('tbody tr[data-role]')).toHaveText([
-    /claude-sonnet-5.*Worker/,
-    /^Reviewer/,
+  await expect(made.staff.locator('tbody tr.staff-group')).toHaveText([
+    /claude-sonnet-5.*Worker · Reviewer/,
   ])
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
@@ -9271,7 +9342,7 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
   await expect(made.chief.model).toHaveValue('gpt-6-astra')
   await expect(made.specs.mode).toHaveValue('on')
   await expect(made.specs.folder).toHaveValue('../elsewhere')
-  await expect(made.staff.locator('tbody tr[data-role]')).toHaveText([/claude-sonnet-5.*Worker/])
+  await expect(made.staff.locator('tbody tr.staff-group')).toHaveText([/claude-sonnet-5.*Worker/])
   // Nothing was started: the project shown is the one that was, and the status line says nothing.
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(page.locator('#status')).toHaveText('')
@@ -9461,7 +9532,7 @@ test('Enter in a field of a section of Project settings adds nobody to the staff
     role: 'worker',
     harness: 'Codex',
     model: 'gpt-6-astra',
-    tier: 'standard',
+    tier: 'complex',
   })
   await dialog
     .getByRole('group', { name: 'Compaction' })
@@ -9850,7 +9921,7 @@ test("New project: computer use is read for the folder picked, shown while the c
     role: 'worker',
     harness: 'Codex',
     model: 'gpt-6-astra',
-    tier: 'standard',
+    tier: 'complex',
   })
   await made.dialog.getByRole('button', { name: 'Add', exact: true }).click()
   expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
@@ -9863,8 +9934,9 @@ test("New project: computer use is read for the folder picked, shown while the c
     .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
     .click()
   await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'screen-recording' }])
-  // The member leaves: Codex's block goes with it.
+  // The member leaves, once the person says so: Codex's block goes with it.
   await made.dialog.getByRole('button', { name: /^Remove Worker/ }).click()
+  await made.dialog.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
   expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
     'claude-code',
     'permissions',
@@ -10018,15 +10090,13 @@ test('says in New project who may be picked: nobody yet, and how a member is add
   const dialog = page.getByRole('dialog', { name: 'New project' })
   const rows = dialog.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr')
   await page.getByRole('button', { name: 'New project' }).click()
-  await expect(rows).toHaveText([
-    'Nobody yet: pick a role, a harness, a model and a tier, then Add.',
-  ])
+  await expect(rows).toHaveText(['Nobody yet: Add fills an empty slot with a new member.'])
   await expect(dialog.locator('#new-project-hint')).toBeHidden()
-  // Add with nothing picked adds nobody.
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(rows).toHaveText([
-    'Nobody yet: pick a role, a harness, a model and a tier, then Add.',
-  ])
+  // A slot's Add with nothing picked adds nobody, and says what to pick.
+  await openSlot(dialog, 'worker', 'standard')
+  await dialog.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(dialog.locator('#new-project-hint')).toHaveText('Pick a harness for the member.')
+  await expect(rows).toHaveText(['Nobody yet: Add fills an empty slot with a new member.'])
 })
 
 test('shows and sets human approval from Project settings, which has no review policy', async ({
@@ -12873,7 +12943,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Computer use',
   ])
   await expect(
-    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr[data-role]'),
+    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr.staff-group'),
   ).toHaveText([/@zeus.*Worker/, /@diana.*Worker/])
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
   // Left, it gives the keyboard back to the project it was asked of.
@@ -12895,7 +12965,7 @@ test('project menu: Project settings… on a project the board does not show sho
   // The dialog is foundry's, not harbour's: its calls were read, its staff is in it, and it acts on it.
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
   await expect(
-    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr[data-role]'),
+    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr.staff-group'),
   ).toHaveText([/@athena.*Worker/])
   await dialog
     .getByRole('group', { name: 'Human approval', exact: true })
@@ -12909,7 +12979,7 @@ test('project menu: Project settings… on a project the board does not show sho
   // And the board's own button opens the same dialog for the project shown now, without that asked again.
   await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(
-    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr[data-role]'),
+    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr.staff-group'),
   ).toHaveText([/@athena.*Worker/])
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Project settings' })).toBeFocused()
@@ -12932,7 +13002,7 @@ test('project menu: Project settings… on a project while the board of another 
   await expect(dialog).toBeVisible()
   await expect(page.locator('#project-title')).toHaveText('foundry')
   await expect(
-    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr[data-role]'),
+    dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr.staff-group'),
   ).toHaveText([/@athena.*Worker/])
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
 })
@@ -13187,8 +13257,8 @@ function twoWithOwnSettings() {
 
 /** What each of those projects has, as the dialog of Project settings shows it. */
 const HARBOURS = {
-  // A member's rows are together (T-1847): zeus's two roles, then diana.
-  staff: ['zeus', 'zeus', 'diana'],
+  // A member is one row however many slots it holds (D8): zeus, a worker and a reviewer, then diana.
+  staff: ['zeus', 'diana'],
   approval: false,
   specs: ['on', 'plans', 'tdd'],
   calls: [true, '2', 'hours', 'Harbour: anything left?'],
@@ -14413,17 +14483,16 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await expect(dialog.getByLabel('Project folder')).toHaveValue('/work/fresh')
   const table = dialog.getByRole('table', { name: 'Members for the staff' })
-  // The last staff, one row per member and role, a member's roles together (T-1847), by its
-  // first role and then by tier, each named by its model and saying what it runs on.
-  await expect(table.locator('tbody tr[data-role]')).toHaveText([
+  // The last staff, one row per member with its slots (D8), by its first role and then by tier,
+  // each named by its model and saying what it runs on.
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
     /^gpt-6-astra.*Codex · max · critical.*Worker/,
-    /^claude-sonnet-5.*Claude Code · high · standard.*Worker/,
-    /^Reviewer/,
+    /^claude-sonnet-5.*Claude Code · high · standard.*Worker · Reviewer/,
     /^gpt-5.6-luna.*Codex · low · light.*Worker/,
   ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
-  // A member as Add member picks one: a role, a harness, a model it lists and a tier.
+  // A member as a slot's Add picks one: a harness, a model it lists, in the slot's role and tier.
   await pickMember(dialog, {
     role: 'advisor',
     harness: 'Pi',
@@ -14444,7 +14513,8 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   await expect(drawing.locator('.member-name')).toHaveText('Codex default')
   await expect(drawing.locator('.member-meta')).toHaveText('Codex')
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
-  await expect(table.locator('tbody tr[data-role]')).toHaveCount(5)
+  await dialog.getByRole('button', { name: 'Remove gpt-5.6-luna', exact: true }).click()
+  await expect(table.locator('tbody tr.staff-group')).toHaveCount(4)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -14483,7 +14553,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
     ])
 })
 
-test('New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier', async ({
+test('New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier', async ({
   page,
 }) => {
   const data = model()
@@ -14502,66 +14572,82 @@ test('New project asks no tier of a role whose row has none, and a member that h
   ]
   data.lastStaff = [
     lastMember('hera', 'codex', ['scout'], 'light'),
-    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+    lastMember('zeus', 'claude-code', ['worker'], 'complex'),
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   const table = dialog.getByRole('table', { name: 'Members for the staff' })
-  // The last staff's scouts are picked as they were and said with no tier, and the one that
-  // works too keeps its tier for its work.
+  // The last staff's scout is picked as it was and said with no tier; the worker with its tier.
   const scouts = table.locator('tbody tr', { hasText: 'Field scout' })
-  await expect(table.locator('tbody tr[data-role]')).toHaveText([
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
     /^claude-sonnet-5.*complex.*Worker/,
-    /^Field scout/,
     /^gpt-6-astra.*Codex · max.*Field scout/,
   ])
   await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
-  // A worker is asked a tier; a scout on the same model after it is not, and leaves the
-  // member's tier as it was.
-  await pickMember(dialog, {
-    role: 'worker',
-    harness: 'Pi',
-    model: 'meta/muse-spark',
-    tier: 'complex',
-  })
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(scouts).toHaveCount(3)
-  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  // Started as it is, the scout is sent with no tier, the worker with its own.
   await dialog.getByRole('button', { name: 'Start project' }).click()
+  const opened = (staff) => ({
+    directory: '/work/fresh',
+    harness: 'pi',
+    model: 'meta/muse-spark',
+    gate: false,
+    compaction: 300000,
+    staff,
+  })
+  const zeus = {
+    harness: 'claude-code',
+    model: 'claude-sonnet-5',
+    effort: 'high',
+    tier: 'complex',
+    roles: ['worker'],
+  }
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
-      {
-        directory: '/work/fresh',
-        harness: 'pi',
-        model: 'meta/muse-spark',
-        gate: false,
-        compaction: 300000,
-        staff: [
-          { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
-          {
-            harness: 'claude-code',
-            model: 'claude-sonnet-5',
-            effort: 'high',
-            tier: 'complex',
-            roles: ['scout', 'worker'],
-          },
-          {
-            harness: 'pi',
-            model: 'meta/muse-spark',
-            effort: null,
-            tier: 'complex',
-            roles: ['worker', 'scout'],
-          },
-        ],
-      },
+      opened([{ harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] }, zeus]),
     ])
+  // Again, the scout's one slot empty: its Add asks no tier.
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  await dialog.getByRole('button', { name: 'Remove Field scout gpt-6-astra' }).click()
+  await dialog.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
+  await expect(scouts).toHaveCount(0)
+  await openSlot(dialog, 'scout')
+  await expect(dialog.locator('.staff-add legend')).toHaveText('Add the field scout')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.locator('.staff-add').getByRole('button', { name: 'Cancel' }).click()
+  // Given to the worker, the slot leaves the member's tier as it was, and it starts with it.
+  await dialog.getByRole('button', { name: 'Give the field scout slot to claude-sonnet-5' }).click()
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker · Field scout/,
+  ])
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open')).at(-1))
+    .toEqual(opened([{ ...zeus, roles: ['worker', 'scout'] }]))
+  // A last staff whose member already scouts and works is copied as it is: the scout said with
+  // no tier of its own, the member keeping its tier for its work, and started with it.
+  await page.evaluate(
+    (mixed) => {
+      window.__model.lastStaff = [mixed]
+    },
+    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+  )
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker · Field scout/,
+  ])
+  await expect(slotCell(dialog, 'scout').locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
+  await expect(slotCell(dialog, 'worker:complex').locator('.slot-holder')).toHaveText([
+    /claude-sonnet-5/,
+  ])
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open')).at(-1))
+    .toEqual(opened([{ ...zeus, roles: ['scout', 'worker'] }]))
 })
 
 test('New project keeps an image designer a member of its own beside a worker, in either order', async ({
@@ -14618,7 +14704,7 @@ test("New project carries the last staff's image designer as it runs: on Codex's
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   const table = dialog.getByRole('table', { name: 'Members for the staff' })
-  await expect(table.locator('tbody tr[data-role]')).toHaveText([
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
     /^claude-sonnet-5.*Worker/,
     /^Codex default.*Codex.*Image designer/,
   ])
@@ -18052,6 +18138,7 @@ test('the model selects show each harness listing as rows while retaining launch
   await page.getByRole('button', { name: 'Project settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Project settings' })
   const add = settings.locator('.staff-add')
+  await openSlot(settings, 'worker')
   for (const [harness, wanted] of Object.entries(MODEL_OPTIONS)) {
     await add.locator('[name="memberHarness"]').selectOption({ label: harness })
     await expect(add.locator('[name="memberModel"]')).toBeEnabled()
@@ -18093,22 +18180,27 @@ test("a member's card says its role, tier and harness under a name that holds it
   // The designer's name holds no model: what it runs on is said (its harness's default). A
   // design task has no tier, so none is said of it (designer P2).
   await expect(meta('codex-default', 'designer')).toHaveText('designer · Codex · Codex default')
-  // The same two lines in Project settings' table, where the role is a column of its own.
+  // The same two lines in Project settings' table, where the slots are a column of their own.
   await page.getByRole('button', { name: 'Project settings' }).click()
-  const table = page
-    .getByRole('dialog', { name: 'Project settings' })
-    .getByRole('table', { name: 'On the staff' })
-  const rows = table.locator('tbody tr[data-role]')
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const table = settings.getByRole('table', { name: 'On the staff' })
+  const rows = table.locator('tbody tr.staff-group')
   await expect(rows.filter({ hasText: '@gpt-6-astra-xhigh' }).locator('.member-meta')).toHaveText(
     'critical · Codex',
   )
   await expect(rows.filter({ hasText: '@codex-default' }).locator('.member-meta')).toHaveText(
     'Codex default · Codex',
   )
-  // It has nothing to edit: Codex's own model, no effort, no tier. A member has an Edit.
+  // It has nothing to edit: Codex's own model, no effort, no tier. A member has an Edit. Its
+  // slot is said by what it runs on too, and has its Remove.
   const designer = rows.filter({ hasText: '@codex-default' })
+  await expect(slotCell(settings, 'designer').locator('.slot-holder')).toHaveText(
+    /@codex-default.*Codex default · Codex/,
+  )
   await expect(
-    designer.getByRole('button', { name: 'Remove Image designer @codex-default' }),
+    slotCell(settings, 'designer').getByRole('button', {
+      name: 'Remove Image designer @codex-default',
+    }),
   ).toBeVisible()
   await expect(designer.getByRole('button', { name: /^Edit/ })).toHaveCount(0)
   await expect(
@@ -18660,7 +18752,7 @@ test('BKV New project keeps a last staff backup linked even on the same model', 
   data.lastStaff = [
     { ...lastMember('zeus', 'claude-code', ['worker']), id: 30 },
     { ...lastMember('zeus', 'claude-code', ['worker']), id: 31, backupOf: 30 },
-    lastMember('diana', 'codex', ['worker']),
+    lastMember('diana', 'codex', ['worker'], 'light'),
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
@@ -18749,7 +18841,7 @@ test('BKV New project can add change remove a backup and add its model as anothe
     role: 'worker',
     harness: 'Codex',
     model: 'gpt-6-astra',
-    tier: 'standard',
+    tier: 'complex',
   })
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await pickChief(dialog, 'Codex', 'gpt-6-astra')
@@ -18794,13 +18886,11 @@ test('BKV New project shows the backup following its member to the newly chosen 
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  await pickMember(dialog, {
-    role: 'reviewer',
-    harness: 'Claude Code',
-    model: 'claude-sonnet-5',
-    tier: 'critical',
-  })
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // The member edited to another tier: its backup follows it.
+  await dialog.getByRole('button', { name: 'Edit claude-sonnet-5' }).click()
+  await expect(dialog.locator('.staff-add [name="memberModel"]')).toHaveValue('claude-sonnet-5')
+  await dialog.locator('.staff-add [name="memberTier"]').selectOption('critical')
+  await dialog.getByRole('button', { name: 'Save member' }).click()
   const backup = dialog.locator('tr', { hasText: 'backup of claude-sonnet-5' })
   await expect(backup.locator('.member-meta').first()).toContainText('critical')
 })
@@ -18842,7 +18932,7 @@ test('BKV New project leaves out a backup on a missing harness and keeps its mem
   const dialog = page.getByRole('dialog', { name: 'New project' })
   const rows = dialog
     .getByRole('table', { name: 'Members for the staff' })
-    .locator('tbody tr[data-role]')
+    .locator('tbody tr.staff-group')
   await expect(rows).toHaveCount(1)
   await expect(rows.first()).toContainText('claude-sonnet-5')
   await expect(dialog.getByText('backup of claude-sonnet-5')).toHaveCount(0)
@@ -18897,7 +18987,7 @@ function everyKindOfMember() {
   ]
   lanes.push(
     member(11, 'hera', ['worker'], { harness: 'codex', backupOf: 3 }),
-    member(12, 'athena', ['frontend'], { harness: 'pi', model: 'muse-spark', tier: null }),
+    member(12, 'athena', ['frontend'], { harness: 'pi', model: 'muse-spark', tier: 'standard' }),
     member(13, 'kronos', ['advisor'], { harness: 'pi' }),
     member(14, 'ares', ['advisor'], { harness: 'codex', model: 'gpt-6-astra', backupOf: 13 }),
     member(15, 'iris', ['designer'], { harness: 'codex', designer: true, tier: null }),
@@ -18913,7 +19003,7 @@ const staffRows = (table) =>
       rows.map((row) => [
         row.dataset.backupOf
           ? `backup of ${row.dataset.backupOf}`
-          : `${row.dataset.handle ?? row.dataset.model} ${row.dataset.role}`,
+          : `${row.dataset.handle ?? row.dataset.model} ${row.dataset.roles}`,
         [...row.querySelectorAll('button')].map((button) => button.textContent),
       ]),
     )
@@ -18925,20 +19015,19 @@ test('BKG settings gives every member but an image designer the same backup slot
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const table = dialog.getByRole('table', { name: 'On the staff' })
-  // Each member once, its roles together and its backup's slot under them: with a backup,
-  // Change backup and Remove backup; with none, Add backup; the image designer, no slot.
+  // Each member once, one row with its slots and its own tools, and its backup's slot under it:
+  // with a backup, Change backup and Remove backup; with none, Add backup; the image designer,
+  // none. Each role's Remove is in its slot, above.
   expect(await staffRows(table)).toEqual([
-    ['zeus worker', ['Remove', 'Edit', 'Send on Vacation']],
-    ['zeus tester', ['Remove']],
+    ['zeus worker tester', ['Edit', 'Send on Vacation']],
     ['backup of @zeus', ['Change backup', 'Send on Vacation', 'Remove backup']],
-    ['diana worker', ['Try again now', 'Remove', 'Edit', 'Send on Vacation']],
-    ['diana reviewer', ['Remove']],
+    ['diana worker reviewer', ['Try again now', 'Edit', 'Send on Vacation']],
     ['backup of @diana', ['Add backup']],
-    ['athena frontend', ['Remove', 'Edit', 'Send on Vacation']],
+    ['athena frontend', ['Edit', 'Send on Vacation']],
     ['backup of @athena', ['Add backup']],
-    ['kronos advisor', ['Remove', 'Edit', 'Send on Vacation']],
+    ['kronos advisor', ['Edit', 'Send on Vacation']],
     ['backup of @kronos', ['Change backup', 'Send on Vacation', 'Remove backup']],
-    ['iris designer', ['Remove', 'Send on Vacation']],
+    ['iris designer', ['Send on Vacation']],
   ])
   for (const handle of ['zeus', 'diana', 'athena', 'kronos']) {
     const slot = table.locator(`tr[data-backup-of="@${handle}"]`)
@@ -18952,6 +19041,41 @@ test('BKG settings gives every member but an image designer the same backup slot
   ])
   await expect(table.getByRole('button', { name: /backup for @iris/ })).toHaveCount(0)
   await expect(table.getByRole('button', { name: /backup for @(hera|ares)/ })).toHaveCount(0)
+})
+
+test("D8 New project keeps an image designer's backup its backup: its id, backupOf and Vacation reach Start", async ({
+  page,
+}) => {
+  const data = model()
+  const drawing = {
+    harness: 'codex',
+    model: null,
+    modelName: null,
+    effort: null,
+    designer: true,
+    tier: 'light',
+    role: 'designer',
+    roles: ['designer'],
+  }
+  data.lastStaff = [
+    { ...drawing, id: 40 },
+    { ...drawing, id: 41, backupOf: 40, vacationSince: at(10) },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(2)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  const primary = staff.find((row) => row.id === 40)
+  const backup = staff.find((row) => row.id === 41)
+  expect(primary.roles).toEqual(['designer'])
+  expect(primary.backupOf).toBeUndefined()
+  expect(backup.roles).toEqual(['designer'])
+  expect(backup.backupOf).toBe(40)
+  expect(backup.vacationSince).toBeTruthy()
+  expect(staff.filter((row) => row.backupOf == null)).toHaveLength(1)
 })
 
 test('BKG New project gives every member but an image designer the same backup slot under its roles', async ({
@@ -18980,15 +19104,13 @@ test('BKG New project gives every member but an image designer the same backup s
   const dialog = page.getByRole('dialog', { name: 'New project' })
   const table = dialog.getByRole('table', { name: 'Members for the staff' })
   expect(await staffRows(table)).toEqual([
-    ['claude-sonnet-5 worker', ['Remove']],
-    ['claude-sonnet-5 tester', ['Remove']],
+    ['claude-sonnet-5 worker tester', ['Edit']],
     ['backup of claude-sonnet-5', ['Change backup', 'Remove backup']],
-    ['gpt-5.6-luna worker', ['Remove']],
-    ['gpt-5.6-luna reviewer', ['Remove']],
+    ['gpt-5.6-luna worker reviewer', ['Edit']],
     ['backup of gpt-5.6-luna', ['Add backup']],
-    ['muse-spark frontend', ['Remove']],
+    ['muse-spark frontend', ['Edit']],
     ['backup of muse-spark', ['Add backup']],
-    [' designer', ['Remove']],
+    [' designer', []],
   ])
   await expect(table.locator('tr[data-backup-of="claude-sonnet-5"]')).toContainText('gpt-6-astra')
   // The backup of a member with two roles is one backup, with the member's tier.
@@ -19103,7 +19225,9 @@ test('BKV05 New project says a copied member and backup are on Vacation and brin
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  const owner = dialog.locator('tr', { hasText: 'claude-sonnet-5' }).first()
+  const owner = dialog
+    .getByRole('table', { name: 'Members for the staff' })
+    .locator('tr.staff-group', { hasText: 'claude-sonnet-5' })
   const backup = dialog.locator('tr', { hasText: 'backup of claude-sonnet-5' })
   await expect(owner).toContainText('on Vacation')
   await expect(backup).toContainText('on Vacation')
@@ -19686,7 +19810,7 @@ test('T1789 New project offers one backup under a member of two roles', async ({
   const data = model()
   data.lastStaff = [
     lastMember('zeus', 'claude-code', ['architect', 'reviewer']),
-    lastMember('diana', 'codex', ['reviewer']),
+    lastMember('diana', 'codex', ['reviewer'], 'light'),
   ]
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
@@ -20005,7 +20129,7 @@ const staffShades = (table) =>
     for (const row of rows) {
       if (!row.classList.contains('staff-group-more')) groups.push({ rows: [], seen: new Set() })
       const group = groups.at(-1)
-      group.rows.push(row.dataset.backupOf ? 'backup' : row.dataset.role)
+      group.rows.push(row.dataset.backupOf ? 'backup' : row.dataset.roles)
       for (const cell of row.cells) group.seen.add(seen(cell))
     }
     return groups.map((group) => ({ rows: group.rows, seen: [...group.seen] }))
@@ -20029,8 +20153,8 @@ test('T-1855 settings shades each member in turn, odd and even, its roles and it
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const groups = await staffShades(dialog.getByRole('table', { name: 'On the staff' }))
   expect(groups.map(({ rows }) => rows)).toEqual([
-    ['worker', 'tester', 'backup'],
-    ['worker', 'reviewer', 'backup'],
+    ['worker tester', 'backup'],
+    ['worker reviewer', 'backup'],
     ['frontend', 'backup'],
     ['advisor', 'backup'],
     ['designer'],
@@ -20059,18 +20183,19 @@ test('T-1855 New project shades each member in turn, odd and even, its roles and
   const table = dialog.getByRole('table', { name: 'Members for the staff' })
   const groups = await staffShades(table)
   expect(groups.map(({ rows }) => rows)).toEqual([
-    ['worker', 'tester', 'backup'],
-    ['worker', 'reviewer', 'backup'],
+    ['worker tester', 'backup'],
+    ['worker reviewer', 'backup'],
     ['frontend', 'backup'],
     ['advisor', 'backup'],
   ])
   takeTurns(groups)
   // A member taken off shifts the turns on: the next member takes its shade.
-  await table.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
-  await table.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await dialog.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
+  await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await dialog.getByRole('button', { name: 'Remove gpt-5.6-luna', exact: true }).click()
   const after = await staffShades(table)
   expect(after.map(({ rows }) => rows)).toEqual([
-    ['worker', 'tester', 'backup'],
+    ['worker tester', 'backup'],
     ['frontend', 'backup'],
     ['advisor', 'backup'],
   ])
@@ -20951,4 +21076,809 @@ test.describe('moving along the dock', () => {
     await expect.poll(() => docked(page)).toEqual(['chief'])
     await expect(map).toBeHidden()
   })
+
+// D8, the staff as slots (`architecture/staff-slots.md`, sections 6 and 7): both staff screens show
+// every slot, the empty ones with their Add, and a member's own things once.
+
+/** Every slot the fixture's roles name, in their order: a role at each of its tiers, or alone. */
+const SLOTS = ROLES.flatMap((role) =>
+  role.tiers.length === 0 ? [role.id] : role.tiers.map((tier) => `${role.id}:${tier}`),
+)
+
+/** The slots of a staff dialog. */
+const slotGrid = (dialog) => dialog.getByRole('table', { name: 'Slots' })
+/** One slot of it: `worker:standard`, or `designer`. */
+const slotCell = (dialog, slot) => slotGrid(dialog).locator(`[data-slot="${slot}"]`)
+/** The slots shown, in their order. */
+const slotsShown = (dialog) =>
+  slotGrid(dialog)
+    .locator('[data-slot]')
+    .evaluateAll((cells) => cells.map((cell) => cell.dataset.slot))
+
+/** Opens the member form from a slot's Add, and picks a harness, one of its models and an effort. */
+async function addToSlot(dialog, name, { harness, model, effort }) {
+  await dialog.getByRole('button', { name, exact: true }).click()
+  const add = dialog.locator('.staff-add')
+  await expect(add).toBeVisible()
+  await add.locator('[name="memberHarness"]').selectOption({ label: harness })
+  if (model !== undefined) {
+    await expect(add.locator('[name="memberModel"]')).toBeEnabled()
+    await add.locator('[name="memberModel"]').selectOption(model)
+  }
+  if (effort !== undefined) await add.locator('[name="memberEffort"]').selectOption(effort)
+}
+
+/** A member's lane, as the board has it: `roles` at `tier`, on what `runs` says. */
+const staffLane = (id, handle, roles, tier, runs = {}) => ({
+  participant: participant(id, handle, roles[0], {
+    roles,
+    tier,
+    harness: 'codex',
+    model: 'gpt-6-astra',
+    modelName: 'gpt-6-astra',
+    effort: null,
+    nameApart: false,
+    ...runs,
+  }),
+  tasks: [],
+  activity: { state: 'closed' },
+  pane: null,
+})
+
+/** A board of the human and its chief alone, with `lanes` after them. */
+function staffOf(data, ...lanes) {
+  data.boards[1].lanes = [...data.boards[1].lanes.slice(0, 2), ...lanes]
+  data.boards[1].open = []
+  return data
+}
+
+/** A member of the last staff as `staff.last` answers it, with its id. */
+const lastOf = (id, roles, tier, runs, extra = {}) => ({
+  id,
+  harness: 'codex',
+  model: 'gpt-6-astra',
+  modelName: 'gpt-6-astra',
+  effort: null,
+  designer: false,
+  tier,
+  role: roles[0],
+  roles,
+  ...runs,
+  ...extra,
+})
+
+const SONNET = {
+  harness: 'claude-code',
+  model: 'claude-sonnet-5',
+  modelName: 'claude-sonnet-5',
+  effort: null,
+}
+const LUNA = { harness: 'codex', model: 'gpt-5.6-luna', modelName: 'gpt-5.6-luna', effort: null }
+
+test('D8 a first project shows its 33 slots empty, each with Add, on both screens', async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = []
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  expect(SLOTS).toHaveLength(33)
+  expect(await slotsShown(fresh)).toEqual(SLOTS)
+  await expect(slotGrid(fresh).locator('thead th')).toHaveText([
+    'Role',
+    'Critical',
+    'Complex',
+    'Standard',
+    'Light',
+  ])
+  await expect(slotGrid(fresh).getByRole('button', { name: /^Add an? / })).toHaveCount(33)
+  await expect(slotCell(fresh, 'worker:critical')).toContainText('empty')
+  await expect(slotCell(fresh, 'designer')).toContainText('empty')
+  await expect(
+    fresh.getByRole('button', { name: 'Add a standard worker', exact: true }),
+  ).toBeVisible()
+  await expect(
+    fresh.getByRole('button', { name: 'Add an image designer', exact: true }),
+  ).toBeVisible()
+  // Nothing is asked before a slot's Add: the form waits for one.
+  await expect(fresh.locator('.staff-add')).toBeHidden()
+  await fresh.getByRole('button', { name: 'Cancel' }).last().click()
+  // A project with no member yet shows every slot the same way.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  expect(await slotsShown(settings)).toEqual(SLOTS)
+  await expect(slotGrid(settings).getByRole('button', { name: /^Add an? / })).toHaveCount(33)
+  await expect(settings.locator('.staff-add')).toBeHidden()
+})
+
+test("D8 every slot the daemon's roles name is shown, in their order, a role only the daemon names included", async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  // A field scout after the reviewer, with two tiers, and a courier with none: the page draws the
+  // slots from the daemon's table, and holds no list of its own.
+  const afterReviewer = ROLES.findIndex((role) => role.id === 'reviewer') + 1
+  const scout = {
+    id: 'scout',
+    name: 'field scout',
+    label: 'Field scout',
+    article: 'a',
+    tiered: true,
+    tiers: ['standard', 'light'],
+    imageAgent: false,
+  }
+  const courier = {
+    id: 'courier',
+    name: 'courier',
+    label: 'Courier',
+    article: 'a',
+    tiered: false,
+    tiers: [],
+    imageAgent: false,
+  }
+  data.roles = [...ROLES.slice(0, afterReviewer), scout, ...ROLES.slice(afterReviewer), courier]
+  data.lastStaff = []
+  await open(page, data)
+  const expected = data.roles.flatMap((role) =>
+    role.tiers.length === 0 ? [role.id] : role.tiers.map((tier) => `${role.id}:${tier}`),
+  )
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  expect(await slotsShown(settings)).toEqual(expected)
+  await expect(slotGrid(settings).locator('tbody th')).toHaveText(
+    data.roles.map((role) => role.label),
+  )
+  await expect(settings.getByRole('button', { name: 'Add a light field scout' })).toBeVisible()
+  await expect(settings.getByRole('button', { name: 'Add a courier', exact: true })).toBeVisible()
+  await expect(
+    settings.getByRole('button', { name: /^Add a (critical|complex) field scout/ }),
+  ).toHaveCount(0)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  expect(await slotsShown(page.getByRole('dialog', { name: 'New project' }))).toEqual(expected)
+})
+
+test("D8 Add opens in sight, with the slot's role and tier set, and makes a new member", async ({
+  page,
+}) => {
+  const data = staffOf(model(), staffLane(3, 'hera', ['reviewer'], 'complex'))
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Add a standard reviewer', exact: true }).click()
+  const add = dialog.locator('.staff-add')
+  await expect(add).toBeInViewport()
+  await expect(add.locator('legend')).toHaveText('Add the standard reviewer')
+  // The role and the tier are the slot's: shown, not asked.
+  await expect(add.locator('[name="role"]')).toBeHidden()
+  await expect(add.locator('[name="memberTier"]')).toBeHidden()
+  await expect(add.locator('[name="memberHarness"]')).toBeFocused()
+  await expect(slotCell(dialog, 'reviewer:standard')).toHaveAttribute('data-picking', 'true')
+  await add.locator('[name="memberHarness"]').selectOption({ label: 'Codex' })
+  await expect(add.locator('[name="memberModel"]')).toBeEnabled()
+  // The model hera runs: a second member all the same, never hera given the role.
+  await add.locator('[name="memberModel"]').selectOption('gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        tier: 'standard',
+        roles: ['reviewer'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@gpt-6-astra joined the staff as Reviewer.')
+  expect(await calls(page, 'member.roles')).toEqual([])
+  await expect(add).toBeHidden()
+  // Opened from the keyboard and cancelled, the keyboard is back on the slot's Add.
+  const light = dialog.getByRole('button', { name: 'Add a light reviewer', exact: true })
+  await light.focus()
+  await page.keyboard.press('Enter')
+  await expect(add.locator('[name="memberHarness"]')).toBeFocused()
+  await add.getByRole('button', { name: 'Cancel' }).click()
+  await expect(add).toBeHidden()
+  await expect(light).toBeFocused()
+  // An image designer's Add asks no model: Codex draws on its own.
+  await dialog.getByRole('button', { name: 'Add an image designer', exact: true }).click()
+  await expect(add.locator('legend')).toHaveText('Add the image designer')
+  await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
+  await expect(add.locator('[name="memberModel"]')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.add')).at(-1))
+    .toEqual({ project: 1, harness: 'codex', roles: ['designer'] })
+})
+
+test('D8 the same model at a second tier makes a second member, in both orders, on both screens', async ({
+  page,
+}) => {
+  const data = staffOf(model(), staffLane(3, 'claude-sonnet-5', ['worker'], 'standard', SONNET))
+  data.lastStaff = []
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  // Above the member's tier, then below it: a new member each time, the first left as it is.
+  for (const tier of ['complex', 'light']) {
+    await addToSlot(settings, `Add a ${tier} worker`, {
+      harness: 'Claude Code',
+      model: 'claude-sonnet-5',
+    })
+    await settings.getByRole('button', { name: 'Add to staff' }).click()
+    await expect(page.locator('#status')).toHaveText('@claude-sonnet-5 joined the staff as Worker.')
+  }
+  expect(await calls(page, 'member.add')).toEqual(
+    ['complex', 'light'].map((tier) => ({
+      project: 1,
+      harness: 'claude-code',
+      model: 'claude-sonnet-5',
+      effort: null,
+      tier,
+      roles: ['worker'],
+    })),
+  )
+  expect(await calls(page, 'member.edit')).toEqual([])
+  expect(await calls(page, 'member.roles')).toEqual([])
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // New project: standard first, then complex above it and light below it, each its own member.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  for (const tier of ['standard', 'complex', 'light']) {
+    await addToSlot(fresh, `Add a ${tier} worker`, {
+      harness: 'Claude Code',
+      model: 'claude-sonnet-5',
+    })
+    await fresh.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(slotCell(fresh, `worker:${tier}`)).toContainText('claude-sonnet-5')
+  }
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await expect(members.locator('tbody tr.staff-group')).toHaveCount(3)
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(staff.map(({ model, tier, roles }) => [model, tier, roles])).toEqual([
+    ['claude-sonnet-5', 'standard', ['worker']],
+    ['claude-sonnet-5', 'complex', ['worker']],
+    ['claude-sonnet-5', 'light', ['worker']],
+  ])
+})
+
+test('D8 give it to a member at that tier, on both screens', async ({ page }) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'hera', ['reviewer'], 'complex'),
+    staffLane(4, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(5, 'diana', ['advisor'], 'standard', LUNA),
+  )
+  data.lastStaff = [lastOf(30, ['reviewer'], 'complex', {})]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  // Only a member at the slot's tier is offered it, and never one that holds it.
+  await expect(slotCell(settings, 'tester:complex')).toContainText('give it to @hera')
+  await expect(
+    slotCell(settings, 'reviewer:complex').getByRole('button', { name: /^Give/ }),
+  ).toHaveCount(0)
+  await expect(slotCell(settings, 'designer').getByRole('button', { name: /^Give/ })).toHaveCount(0)
+  await expect(slotCell(settings, 'worker:standard').getByRole('combobox')).toHaveCount(0)
+  // Several at its tier: one choice of them, each once, a holder of the role never.
+  const choice = settings.getByRole('combobox', { name: 'Give the standard tester slot to' })
+  expect(await offered(choice)).toEqual([
+    ['give it to…', true],
+    ['@zeus', false],
+    ['@diana', false],
+  ])
+  await expect(slotCell(settings, 'advisor:standard').locator('.slot-holder')).toHaveText(/@diana/)
+  await settings.getByRole('button', { name: 'Give the complex tester slot to @hera' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['reviewer', 'tester'] }])
+  await expect(slotCell(settings, 'tester:complex').locator('.slot-holder')).toHaveText(/@hera/)
+  await choice.selectOption('diana')
+  await expect
+    .poll(async () => (await calls(page, 'member.roles')).at(-1))
+    .toEqual({ project: 1, agent: 'diana', roles: ['advisor', 'tester'] })
+  await expect(slotCell(settings, 'tester:standard').locator('.slot-holder')).toHaveText(/@diana/)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // New project gives it the same way, to the draft's member.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  await fresh.getByRole('button', { name: 'Give the complex tester slot to gpt-6-astra' }).click()
+  await expect(slotCell(fresh, 'tester:complex')).toContainText('gpt-6-astra')
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  const [member] = (await calls(page, 'project.open')).at(-1).staff
+  expect([member.tier, member.roles]).toEqual(['complex', ['reviewer', 'tester']])
+})
+
+test('D8 a draft changed twice is drawn again each time', async ({ page }) => {
+  const data = staffOf(model())
+  data.lastStaff = []
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await addToSlot(fresh, 'Add a standard worker', { harness: 'Codex', model: 'gpt-5.6-luna' })
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(slotCell(fresh, 'worker:standard')).toContainText('gpt-5.6-luna')
+  await expect(
+    slotCell(fresh, 'worker:standard').getByRole('button', { name: /^Add/ }),
+  ).toHaveCount(0)
+  // An Edit to another tier moves it: its old slot is empty again, its new one held.
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await members.getByRole('button', { name: 'Edit gpt-5.6-luna' }).click()
+  await fresh.locator('.staff-add [name="memberTier"]').selectOption('complex')
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
+  await expect(slotCell(fresh, 'worker:complex')).toContainText('gpt-5.6-luna')
+  await expect(slotCell(fresh, 'worker:standard')).toContainText('empty')
+  await expect(members.locator('tbody tr.staff-group')).toHaveText([/gpt-5\.6-luna.*complex/])
+})
+
+test('D8 an Add for a held slot is refused in the form, and so is a slot-taken from the ledger after another edit took the slot', async ({
+  page,
+}) => {
+  const data = staffOf(model(), staffLane(3, 'hera', ['reviewer'], 'standard'))
+  data.lastStaff = [lastOf(30, ['reviewer'], 'standard', {})]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await addToSlot(fresh, 'Add a standard worker', { harness: 'Codex', model: 'gpt-5.6-luna' })
+  // Meanwhile the slot is given to the draft's reviewer: the form's Add is refused, in the
+  // ledger's words, and the draft is as it was.
+  await fresh.getByRole('button', { name: 'Give the standard worker slot to gpt-6-astra' }).click()
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(fresh.locator('.staff-add .staff-hint')).toHaveText(
+    "the standard worker slot is gpt-6-astra's: a role and tier holds one member. Pick another tier",
+  )
+  await expect(
+    fresh.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr.staff-group'),
+  ).toHaveCount(1)
+  await fresh.getByRole('button', { name: 'Cancel' }).last().click()
+  // Project settings says the ledger's refusal where the human picked.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await addToSlot(settings, 'Add a standard worker', { harness: 'Codex', model: 'gpt-5.6-luna' })
+  const taken =
+    "the standard worker slot is @zeus's: a role and tier holds one member. Pick another tier"
+  await page.evaluate((words) => {
+    window.__model.memberRefusal = words
+  }, taken)
+  await settings.getByRole('button', { name: 'Add to staff' }).click()
+  await expect(settings.locator('.staff-add .staff-hint')).toHaveText(taken)
+  await expect(settings.locator('.staff-add')).toBeVisible()
+})
+
+test('D8 a slot three hold shows all three and its words, in Project settings and in a New project copied from it, until one is left', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(4, 'diana', ['worker'], 'standard', LUNA),
+    staffLane(5, 'hera', ['worker'], 'standard'),
+  )
+  // zeus has a backup; diana is on Vacation.
+  data.boards[1].lanes.push(staffLane(6, 'ares', ['worker'], 'standard', { backupOf: 3 }))
+  data.boards[1].lanes.find(
+    (lane) => lane.participant.handle === 'diana',
+  ).participant.vacationSince = at(20)
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', SONNET),
+    lastOf(31, ['worker'], 'standard', LUNA, { vacationSince: at(20) }),
+    lastOf(32, ['worker'], 'standard', {}),
+    lastOf(33, ['worker'], 'standard', {}, { backupOf: 30 }),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const cell = slotCell(settings, 'worker:standard')
+  await expect(cell.locator('.slot-holder')).toHaveText([/@zeus/, /@diana/, /@hera/])
+  const words = settings.locator('.slot-words[data-role="worker"]')
+  await expect(words).toHaveText(
+    'The standard worker slot holds three members, @zeus, @diana and @hera: a role and tier holds one. Edit all but one to another tier, or remove the worker role from them; removing a member cancels the tasks it holds. All take work until then.',
+  )
+  // A removal, asked first, leaves two, still with the words.
+  await cell.getByRole('button', { name: 'Remove Worker @hera' }).click()
+  await expect(cell).toContainText('Remove @hera? Its open tasks are cancelled.')
+  await cell.getByRole('button', { name: 'Remove @hera', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'hera' }])
+  await expect(cell.locator('.slot-holder')).toHaveText([/@zeus/, /@diana/])
+  await expect(words).toHaveText(/^The standard worker slot holds two members, @zeus and @diana: /)
+  // Once one is left, the words go.
+  await settings.getByRole('button', { name: 'Edit @diana' }).click()
+  await settings.locator('.staff-add [name="memberTier"]').selectOption('complex')
+  await page.evaluate(() => {
+    window.__model.boards[1].lanes.find(
+      (lane) => lane.participant.handle === 'diana',
+    ).participant.tier = 'complex'
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(cell.locator('.slot-holder')).toHaveText([/@zeus/])
+  await expect(settings.locator('.slot-words')).toHaveCount(0)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  // New project copied from that staff, as it was: all three, the words, and no start.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  const draft = slotCell(fresh, 'worker:standard')
+  await expect(draft.locator('.slot-holder')).toHaveText([
+    /claude-sonnet-5/,
+    /gpt-5\.6-luna/,
+    /gpt-6-astra/,
+  ])
+  const draftWords = fresh.locator('.slot-words[data-role="worker"]')
+  await expect(draftWords).toHaveText(
+    'The standard worker slot holds three members, claude-sonnet-5, gpt-5.6-luna and gpt-6-astra: a role and tier holds one. Edit all but one to another tier, or remove the worker role from them. The project starts once one is left.',
+  )
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect(fresh.locator('.dialog-refusal')).toHaveText(await draftWords.textContent())
+  expect(await calls(page, 'project.open')).toEqual([])
+  // A removal leaves two, still with the words, and still no start.
+  await draft.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await draft.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
+  await expect(draft.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-5\.6-luna/])
+  await expect(draftWords).toHaveText(/^The standard worker slot holds two members, /)
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect(fresh.locator('.dialog-refusal')).toHaveText(
+    /^The standard worker slot holds two members, /,
+  )
+  expect(await calls(page, 'project.open')).toEqual([])
+  // An Edit of one to another tier leaves one: the words go, and the project opens with the
+  // backup and the Vacation as they were.
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await members.getByRole('button', { name: 'Edit gpt-5.6-luna' }).click()
+  await fresh.locator('.staff-add [name="memberTier"]').selectOption('complex')
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
+  await expect(fresh.locator('.slot-words')).toHaveCount(0)
+  await expect(fresh.locator('.dialog-refusal')).toBeHidden()
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(
+    staff.map(({ model, tier, roles, id, backupOf, vacationSince }) => ({
+      model,
+      tier,
+      roles,
+      id,
+      backupOf,
+      vacation: Boolean(vacationSince),
+    })),
+  ).toEqual([
+    {
+      model: 'claude-sonnet-5',
+      tier: 'standard',
+      roles: ['worker'],
+      id: 30,
+      backupOf: undefined,
+      vacation: false,
+    },
+    {
+      model: 'gpt-5.6-luna',
+      tier: 'complex',
+      roles: ['worker'],
+      id: undefined,
+      backupOf: undefined,
+      vacation: true,
+    },
+    {
+      model: 'gpt-6-astra',
+      tier: 'standard',
+      roles: ['worker'],
+      id: 33,
+      backupOf: 30,
+      vacation: false,
+    },
+  ])
+})
+
+test('D8 a member in two slots far apart has one set of its controls and one backup part, on both screens', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'gpt-6-astra-max', ['worker', 'integrator'], 'complex', { effort: 'max' }),
+    staffLane(4, 'swe-2', ['worker'], 'complex', {
+      harness: 'devin',
+      model: 'swe-2',
+      modelName: 'swe-2',
+      backupOf: 3,
+    }),
+  )
+  data.lastStaff = [
+    lastOf(30, ['worker', 'integrator'], 'complex', { effort: 'max' }),
+    lastOf(
+      31,
+      ['worker'],
+      'complex',
+      { harness: 'devin', model: 'swe-2', modelName: 'swe-2' },
+      { backupOf: 30 },
+    ),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  // Both its slots, each with that role's Remove.
+  await expect(slotCell(settings, 'worker:complex').locator('.slot-holder')).toHaveText([
+    /@gpt-6-astra-max/,
+  ])
+  await expect(slotCell(settings, 'integrator:complex').locator('.slot-holder')).toHaveText([
+    /@gpt-6-astra-max/,
+  ])
+  await expect(
+    settings.getByRole('button', { name: /^Remove (Worker|Integrator) @gpt-6-astra-max$/ }),
+  ).toHaveCount(2)
+  // Its own things once: one row, one Edit, one Vacation, one backup part.
+  const table = settings.getByRole('table', { name: 'On the staff' })
+  await expect(table.locator('thead th')).toHaveText(['Member', 'Slots', ''])
+  await expect(table.locator('tr.staff-group[data-handle="gpt-6-astra-max"]')).toHaveCount(1)
+  await expect(
+    table.locator('tr.staff-group[data-handle="gpt-6-astra-max"] .member-slots'),
+  ).toHaveText('Worker · Integrator')
+  await expect(settings.getByRole('button', { name: 'Edit @gpt-6-astra-max' })).toHaveCount(1)
+  await expect(
+    settings.getByRole('button', { name: 'Send @gpt-6-astra-max on Vacation' }),
+  ).toHaveCount(1)
+  await expect(table.locator('tr.backup-slot[data-backup-of="@gpt-6-astra-max"]')).toHaveCount(1)
+  await expect(table.locator('tr.backup-slot')).toHaveCount(1)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await expect(slotCell(fresh, 'worker:complex').locator('.slot-holder')).toHaveText([
+    /gpt-6-astra/,
+  ])
+  await expect(slotCell(fresh, 'integrator:complex').locator('.slot-holder')).toHaveText([
+    /gpt-6-astra/,
+  ])
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await expect(members.locator('tr.staff-group')).toHaveCount(1)
+  await expect(members.locator('tr.staff-group .member-slots')).toHaveText('Worker · Integrator')
+  await expect(members.getByRole('button', { name: /^Edit / })).toHaveCount(1)
+  await expect(members.locator('tr.backup-slot')).toHaveCount(1)
+  await expect(members.locator('tr.backup-slot')).toContainText('swe-2')
+})
+
+test("D8 an image designer's backup shows in its backup part on both screens, with no Add backup offered, and a New project copied from it opens with the backup, its Vacation kept", async ({
+  page,
+}) => {
+  const drawing = { harness: 'codex', model: null, modelName: null, effort: null, designer: true }
+  const data = staffOf(
+    model(),
+    staffLane(3, 'codex-default', ['designer'], 'light', drawing),
+    staffLane(4, 'codex-default-2', ['designer'], 'light', {
+      ...drawing,
+      backupOf: 3,
+      vacationSince: at(10),
+    }),
+  )
+  data.lastStaff = [
+    lastOf(40, ['designer'], 'light', drawing),
+    lastOf(41, ['designer'], 'light', drawing, { backupOf: 40, vacationSince: at(10) }),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(slotCell(settings, 'designer').locator('.slot-holder')).toHaveText([
+    /@codex-default/,
+  ])
+  const table = settings.getByRole('table', { name: 'On the staff' })
+  const part = table.locator('tr.backup-slot[data-backup-of="@codex-default"]')
+  await expect(part).toContainText('@codex-default-2')
+  await expect(part).toContainText('on Vacation')
+  await expect(part.getByRole('button')).toHaveText(['Bring back', 'Remove backup'])
+  await expect(settings.getByRole('button', { name: /^Add backup/ })).toHaveCount(0)
+  // The backup is no second image designer.
+  await expect(settings.locator('.slot-words')).toHaveCount(0)
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Codex', 'gpt-6-astra')
+  await expect(slotCell(fresh, 'designer').locator('.slot-holder')).toHaveCount(1)
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  const draftPart = members.locator('tr.backup-slot')
+  await expect(draftPart).toHaveCount(1)
+  await expect(draftPart).toContainText('on Vacation')
+  await expect(draftPart.getByRole('button')).toHaveText(['Bring back', 'Remove backup'])
+  await expect(fresh.getByRole('button', { name: /^Add backup/ })).toHaveCount(0)
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(2)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  const backup = staff.find((row) => row.backupOf === 40)
+  expect(backup.roles).toEqual(['designer'])
+  expect(backup.vacationSince).toBeTruthy()
+})
+
+test("D8 Edit's tier picker names whose slot is in the way, on both screens", async ({ page }) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'gpt-6-astra-max', ['worker', 'integrator'], 'complex', { effort: 'max' }),
+    staffLane(4, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(5, 'hera', ['integrator'], 'light'),
+  )
+  data.lastStaff = [
+    lastOf(30, ['worker', 'integrator'], 'complex', {}),
+    lastOf(31, ['worker'], 'standard', SONNET),
+    lastOf(32, ['integrator'], 'light', LUNA),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @gpt-6-astra-max' }).click()
+  await expect(settings.locator('[name="memberTier"]')).toBeVisible()
+  expect(await offered(settings.locator('[name="memberTier"]'))).toEqual([
+    ['Pick a tier', true],
+    ['Critical work', false],
+    ['Complex work', false],
+    ["Standard work: the standard worker slot is @zeus's", true],
+    ["Light work: the light integrator slot is @hera's", true],
+  ])
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await members
+    .locator('tr.staff-group')
+    .first()
+    .getByRole('button', { name: /^Edit / })
+    .click()
+  expect(await offered(fresh.locator('[name="memberTier"]'))).toEqual([
+    ['Pick a tier', true],
+    ['Critical work', false],
+    ['Complex work', false],
+    ["Standard work: the standard worker slot is claude-sonnet-5's", true],
+    ["Light work: the light integrator slot is gpt-5.6-luna's", true],
+  ])
+})
+
+// D8, round 2 (T-2272's review, T-2273's run against the daemon).
+
+test("D8 New project asks before a member's last role goes, and keeps it and its backup at Keep", async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', SONNET),
+    lastOf(31, ['worker', 'reviewer'], 'complex', LUNA),
+    lastOf(32, ['worker'], 'standard', {}, { vacationSince: at(20) }),
+    lastOf(33, ['worker'], 'standard', SONNET, { backupOf: 32, vacationSince: at(20) }),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  const cell = slotCell(fresh, 'worker:standard')
+  // A role of a member that holds another goes at once: the member stays.
+  await fresh.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
+  await expect(slotCell(fresh, 'reviewer:complex').locator('.slot-holder')).toHaveCount(0)
+  await expect(members.locator('tr.staff-group')).toHaveCount(3)
+  // Its last role asks first, in the slot, and says its backup goes with it.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await expect(cell).toContainText(
+    "Remove gpt-6-astra and its backup from the new project's staff?",
+  )
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(1)
+  await cell.getByRole('button', { name: 'Keep gpt-6-astra' }).click()
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(1)
+  await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-6-astra/])
+  await expect(members.locator('tr.staff-group')).toHaveCount(3)
+  await expect(members.locator('tr.staff-group', { hasText: 'gpt-6-astra' })).toContainText(
+    'on Vacation',
+  )
+  // Removed once the person says so: the member and its backup leave the draft.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await cell.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
+  await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
+  await expect(members.locator('tr.staff-group')).toHaveCount(2)
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(0)
+  // A member with no backup is asked of alone.
+  await cell.getByRole('button', { name: 'Remove Worker claude-sonnet-5' }).click()
+  await expect(cell).toContainText("Remove claude-sonnet-5 from the new project's staff?")
+})
+
+test('D8 the give choice of New project tells apart two members on the same model', async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', {}),
+    lastOf(31, ['reviewer'], 'standard', {}),
+    lastOf(32, ['advisor'], 'complex', LUNA),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  const choice = fresh.getByRole('combobox', { name: 'Give the standard tester slot to' })
+  expect(await offered(choice)).toEqual([
+    ['give it to…', true],
+    ['gpt-6-astra · Worker', false],
+    ['gpt-6-astra · Reviewer', false],
+  ])
+  // A member whose name no other shares is said by its name alone.
+  await expect(slotCell(fresh, 'tester:complex')).toContainText('give it to gpt-5.6-luna')
+  await expect(slotCell(fresh, 'tester:complex')).not.toContainText('·')
+  await choice.selectOption({ label: 'gpt-6-astra · Reviewer' })
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(staff.map(({ roles }) => roles)).toEqual([['worker'], ['reviewer', 'tester'], ['advisor']])
+})
+
+test("D8 New project's refusal beside Start follows the slot as it is mended", async ({ page }) => {
+  const data = staffOf(model())
+  // Three standard workers, two of them holding another role too: a worker role taken from
+  // either is asked nothing, and the member stays.
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', SONNET),
+    lastOf(31, ['worker', 'reviewer'], 'standard', LUNA),
+    lastOf(32, ['worker', 'tester'], 'standard', {}),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  const refusal = fresh.locator('.dialog-refusal')
+  const cell = slotCell(fresh, 'worker:standard')
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect(refusal).toHaveText(/^The standard worker slot holds three members, /)
+  // One worker role goes: the refusal says the slot as it is now.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await expect(cell.locator('.slot-holder')).toHaveCount(2)
+  await expect(refusal).toHaveText(/^The standard worker slot holds two members, /)
+  // Mended by an Edit to another tier: the refusal goes with the crowd, and Start starts.
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  await members.getByRole('button', { name: 'Edit gpt-6-astra' }).click()
+  await expect(fresh.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  await fresh.locator('.staff-add [name="memberTier"]').selectOption('light')
+  await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
+  await expect(fresh.locator('.slot-words')).toHaveCount(0)
+  await expect(refusal).toBeHidden()
+  expect(await calls(page, 'project.open')).toEqual([])
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
+})
+
+test('D8 a refused give or Remove in Project settings is said under its slot, in the dialog', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'hera', ['reviewer'], 'complex'),
+    staffLane(4, 'zeus', ['worker', 'tester'], 'standard', SONNET),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  // Another writer took the slot first: the ledger's words, where the person gave it.
+  const taken =
+    "the complex tester slot is @cf-test-three's: a role and tier holds one member. Pick another tier"
+  await page.evaluate((words) => {
+    window.__model.rolesRefusal = words
+  }, taken)
+  await settings.getByRole('button', { name: 'Give the complex tester slot to @hera' }).click()
+  const said = settings.locator('.slot-refusal[data-role="tester"]')
+  await expect(said).toHaveText(taken)
+  await expect(said).toBeVisible()
+  await expect(said.getByRole('alert')).toHaveText(taken)
+  // A refused Remove of a role is said under its own slot's row, in place of the last.
+  const refused = 'the ledger is busy: try again'
+  await page.evaluate((words) => {
+    window.__model.rolesRefusal = words
+  }, refused)
+  await settings.getByRole('button', { name: 'Remove Tester @zeus' }).click()
+  await expect(settings.locator('.slot-refusal[data-role="tester"]')).toHaveText(refused)
+  await expect(settings.locator('.slot-refusal')).toHaveCount(1)
+  // The next act that goes through takes the words away.
+  await page.evaluate(() => {
+    delete window.__model.rolesRefusal
+  })
+  await settings.getByRole('button', { name: 'Remove Tester @zeus' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.roles')).at(-1))
+    .toEqual({ project: 1, agent: 'zeus', roles: ['worker'] })
+  await expect(settings.locator('.slot-refusal')).toHaveCount(0)
 })

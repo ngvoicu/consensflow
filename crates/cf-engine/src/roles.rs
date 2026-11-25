@@ -106,7 +106,8 @@ pub enum RoleError {
 }
 
 /// A project's staff as its chief reads it: each member's name, the model it runs on,
-/// its roles and its tier, sessions left out, and a participant on no harness, which no
+/// its roles and its tier, sessions and backups left out (a backup holds no slot: it follows
+/// its member, and is no second holder of one), and a participant on no harness, which no
 /// window could open on.
 pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
     project
@@ -117,6 +118,7 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
                 && member.role != "human"
                 && member.harness.is_some()
                 && member.member_id.is_none()
+                && member.backup_of.is_none()
         })
         .map(|member| StaffRow {
             name: member.handle.clone(),

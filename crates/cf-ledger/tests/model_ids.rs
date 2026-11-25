@@ -136,7 +136,7 @@ fn edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now() {
         tier: "complex".into(),
     };
     let project = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: NewChief {
@@ -184,7 +184,7 @@ fn edit_member_names_a_member_and_its_windows_by_the_model_it_runs_now() {
                 model: Some("claude-fable-5-1".into()),
                 effort: Some("max".into()),
                 model_name: Some("claude-fable-5-1".into()),
-                tier: "critical".into(),
+                tier: "complex".into(),
             },
         )
         .unwrap();
@@ -259,7 +259,7 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
             open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
         // Add member.
         let started = ledger
-            .create_project(&NewProject {
+            .create_project_overflowing(&NewProject {
                 directory: "/work/app".into(),
                 name: "app".into(),
                 chief: chief(),
@@ -299,7 +299,7 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
         let mut other =
             open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
         let project = other
-            .create_project(&NewProject {
+            .create_project_overflowing(&NewProject {
                 directory: "/work/other".into(),
                 name: "other".into(),
                 chief: chief(),
@@ -331,7 +331,7 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("consensflow.db"), Options::default()).unwrap();
     let started = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: chief(),
@@ -356,7 +356,7 @@ fn a_member_on_a_model_whose_id_is_up_to_256_characters_is_added_and_one_of_257_
         .expect_err("a model of 257");
     assert_eq!(refused.code(), Some("invalid-model"));
     let refused = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/other".into(),
             name: "other".into(),
             chief: chief(),

@@ -203,7 +203,7 @@ fn create_plan(
             Failure::refuse(400, "invalid-plan", "each section must be an object")
         })?;
         let name = part.get("name").and_then(Value::as_str).unwrap_or("");
-        let parse = || -> Result<PlanTask, Failure> {
+        let parse = || -> Result<(PlanTask, Value), Failure> {
             let mut part = part.clone();
             part.remove("name");
             let mut named = [Vec::new(), Vec::new()];
@@ -244,7 +244,8 @@ fn create_plan(
                     format!("no task T-{} in this project", js::number_text(number)),
                 ));
             }
-            let task = NewTask::from_json(&given(caller, &part, after)?)?;
+            let asked = given(caller, &part, after)?;
+            let task = NewTask::from_json_for_plan(&asked)?;
             if part.get("self") == Some(&Value::Bool(true))
                 && task.needs.is_empty()
                 && task.before.is_empty()
@@ -256,25 +257,48 @@ fn create_plan(
                     "you are already at it: do it now, or give it --needs",
                 ));
             }
-            Ok(PlanTask {
-                name: name.to_owned(),
-                task,
-                needs: std::mem::take(&mut named[0]),
-                before: std::mem::take(&mut named[1]),
-            })
+            Ok((
+                PlanTask {
+                    name: name.to_owned(),
+                    task,
+                    needs: std::mem::take(&mut named[0]),
+                    before: std::mem::take(&mut named[1]),
+                },
+                asked,
+            ))
         };
         plan.push(parse().map_err(|error| in_section(name, error))?);
     }
+    let (plan, asked): (Vec<PlanTask>, Vec<Value>) = plan.into_iter().unzip();
     // Hash both what the server will create and the optional fingerprint of the
     // source file, so a key cannot silently substitute different task fields.
     let encoded = serde_json::to_vec(&json!({ "plan": sections, "source": body.get("source") }))
         .map_err(|error| Failure::Internal(error.to_string()))?;
     let fingerprint = format!("{:x}", Sha256::digest(encoded));
-    let created =
-        context
-            .ledger
-            .borrow_mut()
-            .create_plan(caller.project.id, &plan, key, &fingerprint)?;
+    // A key already used answers before any rule of now is checked: the same plan replays its
+    // saved tasks (an earlier version's included), a different one is `key-used`.
+    let replayed = match key {
+        Some(key) => {
+            context
+                .ledger
+                .borrow()
+                .replayed_plan(caller.project.id, &plan, key, &fingerprint)?
+        }
+        None => None,
+    };
+    let created = match replayed {
+        Some(replayed) => replayed,
+        None => {
+            for (section, asked) in plan.iter().zip(&asked) {
+                NewTask::check_plan_section(asked)
+                    .map_err(|error| in_section(&section.name, error.into()))?;
+            }
+            context
+                .ledger
+                .borrow_mut()
+                .create_plan(caller.project.id, &plan, key, &fingerprint)?
+        }
+    };
     if !created.repeated {
         (context.kick)();
     }
@@ -286,7 +310,19 @@ fn create_plan(
     let tasks: Vec<Value> = created
         .tasks
         .iter()
-        .map(|(name, number)| json!({ "name": name, "task": { "number": number } }))
+        .map(|section| {
+            let mut one = json!({ "name": section.name, "task": { "number": section.number } });
+            // The tier it went to, kept with the key; where it fell, the tier asked and who
+            // holds the one it went to (a replay says the same).
+            if let Some(tier) = &section.tier {
+                one["tier"] = json!(tier);
+            }
+            if let Some(asked) = &section.asked {
+                one["asked"] = json!(asked);
+                one["heldBy"] = json!(section.held_by);
+            }
+            one
+        })
         .collect();
     let answer = json!({ "tasks": tasks, "gated": gated });
     Ok(if created.repeated {

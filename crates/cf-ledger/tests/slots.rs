@@ -1,0 +1,966 @@
+//! The staff as slots (`architecture/staff-slots.md`): a role at a tier holds one member, and
+//! the image designer's one slot has no tier. The rule on each write, the placement of a task,
+//! Critical's rule by a role's effective slot, a keyed plan's saved answer, and the edit that
+//! carries a member's tier to its backup's windows.
+
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use cf_ledger::{
+    open_ledger, Ledger, MemberEdit, NewChief, NewMember, NewProject, NewTask, Options, PlanTask,
+    ProjectView, TaskEdit, TaskPlaced,
+};
+use serde_json::json;
+
+fn member(model: &str, roles: &[&str], tier: &str) -> NewMember {
+    NewMember {
+        model: None,
+        effort: None,
+        model_name: Some(model.into()),
+        harness: "claude-code".into(),
+        designer: false,
+        roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+        tier: tier.into(),
+    }
+}
+
+fn image(model: &str) -> NewMember {
+    NewMember {
+        harness: "codex".into(),
+        designer: true,
+        ..member(model, &["designer"], "light")
+    }
+}
+
+fn request(staff: Vec<NewMember>) -> NewProject {
+    NewProject {
+        directory: "/work/app".into(),
+        name: "app".into(),
+        chief: NewChief {
+            harness: "claude-code".into(),
+            model: Some("apollo".into()),
+            effort: None,
+            model_name: None,
+        },
+        staff,
+        gate: false,
+        wake_up: None,
+        specs: None,
+        staff_rules: None,
+        compaction: None,
+        advisor_tool: false,
+        prompt_suggestion: false,
+        own_hands: false,
+    }
+}
+
+fn ledger() -> (tempfile::TempDir, Ledger) {
+    let dir = tempfile::tempdir().expect("a home");
+    let ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    (dir, ledger)
+}
+
+fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
+    ledger.create_project(&request(staff)).expect("a project")
+}
+
+/// A staff that seats several members in a slot, as the update leaves one.
+fn overflowing(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
+    ledger
+        .create_project_overflowing(&request(staff))
+        .expect("a project")
+}
+
+fn said(error: cf_ledger::LedgerError) -> (String, String) {
+    match error {
+        cf_ledger::LedgerError::Refused(refusal) => {
+            (refusal.code.to_string(), refusal.message.clone())
+        }
+        other => panic!("not a refusal: {other}"),
+    }
+}
+
+fn id(ledger: &Ledger, project: i64, handle: &str) -> i64 {
+    ledger
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == handle)
+        .unwrap_or_else(|| panic!("no @{handle}"))
+        .id
+}
+
+fn tier_of(ledger: &Ledger, project: i64, handle: &str) -> Option<String> {
+    ledger
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == handle)
+        .and_then(|participant| participant.tier)
+}
+
+fn work(pool: &str, tier: &str, purpose: Option<&str>) -> NewTask {
+    NewTask {
+        from: "chief".into(),
+        pool: Some(pool.into()),
+        tier: Some(tier.into()),
+        purpose: purpose.map(str::to_owned),
+        body: "Do the work".into(),
+        ..NewTask::default()
+    }
+}
+
+#[test]
+fn each_write_is_refused_in_the_words_of_the_rule() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "standard"),
+            member("hera", &["reviewer"], "critical"),
+            image("iris"),
+        ],
+    );
+    // Add: a worker at Critical is a member like any other (the chief picks the tier of any
+    // job); the slot is then its.
+    ledger
+        .add_member(project.id, &member("ares", &["worker"], "critical"))
+        .expect("a critical worker");
+    // Add: a slot another holds.
+    let refused = ledger
+        .add_member(project.id, &member("gaia", &["worker"], "standard"))
+        .unwrap_err();
+    assert_eq!(
+        said(refused),
+        (
+            "slot-taken".to_owned(),
+            "the standard worker slot is @zeus's: a role and tier holds one member. Pick another tier".to_owned()
+        )
+    );
+    // A second image designer.
+    let refused = ledger.add_member(project.id, &image("pallas")).unwrap_err();
+    assert_eq!(
+        said(refused),
+        (
+            "slot-taken".to_owned(),
+            "the image designer slot is @iris's: a project has one".to_owned()
+        )
+    );
+    // A role gained: each at the member's tier.
+    let refused = ledger
+        .set_roles(project.id, "hera", &["reviewer", "worker"])
+        .unwrap_err();
+    assert_eq!(
+        said(refused),
+        (
+            "slot-taken".to_owned(),
+            "the critical worker slot is @ares's: a role and tier holds one member. Pick another tier".to_owned()
+        )
+    );
+    ledger
+        .add_member(project.id, &member("luna", &["worker"], "light"))
+        .expect("a light worker");
+    ledger
+        .set_roles(project.id, "luna", &["worker", "reviewer"])
+        .expect("a light reviewer slot is free");
+    // Edit to another tier: each role at the new tier.
+    let edit = |tier: &str| MemberEdit {
+        harness: "claude-code".into(),
+        model: None,
+        effort: None,
+        model_name: Some("luna".into()),
+        tier: tier.into(),
+    };
+    let refused = ledger
+        .edit_member(project.id, "luna", &edit("standard"))
+        .unwrap_err();
+    assert_eq!(said(refused).0, "slot-taken");
+    let refused = ledger
+        .edit_member(project.id, "luna", &edit("critical"))
+        .unwrap_err();
+    assert_eq!(
+        said(refused).0,
+        "slot-taken",
+        "hera holds the critical reviewer slot"
+    );
+}
+
+#[test]
+fn new_projects_list_is_checked_whole_as_slots() {
+    let (_dir, mut ledger) = ledger();
+    let refused = ledger
+        .create_project(&request(vec![
+            member("zeus", &["worker"], "standard"),
+            member("diana", &["worker"], "standard"),
+        ]))
+        .unwrap_err();
+    let (code, words) = said(refused);
+    assert_eq!(code, "slot-taken");
+    assert_eq!(
+        words,
+        "the staff names two standard workers, zeus and diana: a role and tier holds one member"
+    );
+    // A list that seats a critical worker and architect is taken: every role has a Critical slot.
+    let refused = ledger
+        .create_project(&request(vec![
+            member("zeus", &["worker", "architect"], "critical"),
+            member("diana", &["architect"], "critical"),
+        ]))
+        .unwrap_err();
+    assert_eq!(said(refused).0, "slot-taken");
+    let refused = ledger
+        .create_project(&request(vec![image("iris"), image("pallas")]))
+        .unwrap_err();
+    assert_eq!(said(refused).0, "slot-taken");
+    // A staff that names each slot once, the image designer apart, is made.
+    ledger
+        .create_project(&request(vec![
+            member("zeus", &["worker"], "standard"),
+            member("diana", &["worker"], "light"),
+            member("hera", &["reviewer"], "critical"),
+            image("iris"),
+        ]))
+        .expect("each slot once");
+}
+
+#[test]
+fn a_slot_several_hold_stays_editable_and_every_way_of_meeting_the_rule_is_open() {
+    let (_dir, mut ledger) = ledger();
+    let project = overflowing(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker", "reviewer"], "standard"),
+            member("diana", &["worker"], "standard"),
+            member("hera", &["worker"], "standard"),
+        ],
+    );
+    let edit = |model: &str, tier: &str| MemberEdit {
+        harness: "claude-code".into(),
+        model: None,
+        effort: None,
+        model_name: Some(model.into()),
+        tier: tier.into(),
+    };
+    // A model edit that keeps the tier is no refusal.
+    ledger
+        .edit_member(project.id, "diana", &edit("diana", "standard"))
+        .expect("the tier is kept");
+    // A role removed is none either.
+    ledger
+        .set_roles(project.id, "zeus", &["reviewer"])
+        .expect("the worker role is given up");
+    let holders = |ledger: &Ledger| -> Vec<String> {
+        ledger
+            .project(project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .filter(|p| p.roles.iter().any(|role| role == "worker") && p.left_at.is_none())
+            .map(|p| p.handle)
+            .collect()
+    };
+    assert_eq!(holders(&ledger), ["diana", "hera"]);
+    // The last but one to a free tier ends the overflow.
+    ledger
+        .edit_member(project.id, "hera", &edit("hera", "light"))
+        .expect("a free tier");
+    assert_eq!(
+        tier_of(&ledger, project.id, "hera").as_deref(),
+        Some("light")
+    );
+    // A removal of one of three leaves two.
+    let project = overflowing(
+        &mut ledger,
+        vec![
+            member("a", &["advisor"], "standard"),
+            member("b", &["advisor"], "standard"),
+            member("c", &["advisor"], "standard"),
+        ],
+    );
+    ledger.remove_member(project.id, "b").expect("b leaves");
+    let left: Vec<String> = ledger
+        .project(project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .filter(|p| p.roles.iter().any(|role| role == "advisor") && p.left_at.is_none())
+        .map(|p| p.handle)
+        .collect();
+    assert_eq!(left, ["a", "c"]);
+}
+
+#[test]
+fn a_model_added_at_a_second_tier_is_a_second_member_in_both_orders() {
+    for (first, second) in [("standard", "light"), ("light", "standard")] {
+        let (_dir, mut ledger) = ledger();
+        let project = project(&mut ledger, vec![member("zeus", &["worker"], first)]);
+        let again = ledger
+            .add_member(project.id, &member("zeus", &["worker"], second))
+            .expect("the same model at another tier");
+        let kept = ledger
+            .project(project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .filter(|p| p.role == "worker" && p.member_id.is_none())
+            .map(|p| (p.id, p.tier.unwrap_or_default()))
+            .collect::<Vec<_>>();
+        assert_eq!(kept.len(), 2, "{first} then {second}");
+        assert_ne!(kept[0].0, kept[1].0);
+        assert_eq!(kept[0].1, first, "the first keeps its tier");
+        assert_eq!(again.tier.as_deref(), Some(second));
+    }
+}
+
+#[test]
+fn edit_member_carries_the_new_tier_to_its_backups_open_windows() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let backup = ledger
+        .add_backup(project.id, "zeus", &member("hera", &["worker"], "standard"))
+        .expect("a backup");
+    // The backup has a window open: a session of its own.
+    ledger
+        .sqlite()
+        .execute(
+            "INSERT INTO participant (project_id, handle, role, roles, harness, tier, created_at, member_id)
+             VALUES (?, 'hera-1', 'worker', '[\"worker\"]', 'claude-code', 'standard', 'now', ?)",
+            rusqlite::params![project.id, backup.id],
+        )
+        .unwrap();
+    ledger
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
+                tier: "complex".into(),
+            },
+        )
+        .expect("the tier moves");
+    let tiers: Vec<(String, Option<String>)> = ledger
+        .project(project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .filter(|p| ["zeus", "hera", "hera-1"].contains(&p.handle.as_str()))
+        .map(|p| (p.handle, p.tier))
+        .collect();
+    assert!(
+        tiers
+            .iter()
+            .all(|(_, tier)| tier.as_deref() == Some("complex")),
+        "{tiers:?}"
+    );
+    assert_eq!(tiers.len(), 3);
+}
+
+/// A backup that was replaced, and the window it left closed, are history: Edit on the owner
+/// moves the current backup and its windows, and leaves the departed pair at the tier it had.
+#[test]
+fn edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let old = ledger
+        .add_backup(project.id, "zeus", &member("hera", &["worker"], "standard"))
+        .expect("a backup");
+    fn window(ledger: &cf_ledger::Ledger, project: i64, handle: &str, of: i64) {
+        ledger
+            .sqlite()
+            .execute(
+                "INSERT INTO participant (project_id, handle, role, roles, harness, tier, created_at, member_id)
+                 VALUES (?, ?, 'worker', '[\"worker\"]', 'claude-code', 'standard', 'now', ?)",
+                rusqlite::params![project, handle, of],
+            )
+            .unwrap();
+    }
+    window(&ledger, project.id, "hera-1", old.id);
+    // The backup is replaced: it leaves, and its window stays closed behind it.
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET left_at = '2026-10-20' WHERE id = ? OR member_id = ?",
+            [old.id, old.id],
+        )
+        .unwrap();
+    let current = ledger
+        .add_backup(project.id, "zeus", &member("gaia", &["worker"], "standard"))
+        .expect("the new backup");
+    window(&ledger, project.id, "gaia-1", current.id);
+    // A closed window of the member itself and one of its current backup: history too.
+    window(&ledger, project.id, "zeus-1", zeus_id(&ledger, project.id));
+    window(&ledger, project.id, "gaia-2", current.id);
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET left_at = '2026-11-20' WHERE project_id = ? AND handle IN ('zeus-1', 'gaia-2')",
+            [project.id],
+        )
+        .unwrap();
+    ledger
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
+                tier: "light".into(),
+            },
+        )
+        .expect("the tier moves");
+    let tier = |handle: &str| -> Option<String> {
+        ledger
+            .sqlite()
+            .query_row(
+                "SELECT tier FROM participant WHERE project_id = ? AND handle = ?",
+                rusqlite::params![project.id, handle],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    for moved in ["zeus", "gaia", "gaia-1"] {
+        assert_eq!(tier(moved).as_deref(), Some("light"), "{moved}");
+    }
+    for history in ["hera", "hera-1", "zeus-1", "gaia-2"] {
+        assert_eq!(
+            tier(history).as_deref(),
+            Some("standard"),
+            "{history} left before the edit"
+        );
+    }
+}
+
+fn zeus_id(ledger: &Ledger, project: i64) -> i64 {
+    id(ledger, project, "zeus")
+}
+
+/// A window the human ended keeps the tier it worked at when its member's tier is edited, and
+/// takes the member's tier when it comes back for a follow-up: an open window is at its slot's.
+#[test]
+fn a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let zeus = zeus_id(&ledger, project.id);
+    let number = ledger
+        .create_task(project.id, &work("worker", "standard", None))
+        .expect("a task")
+        .task
+        .number;
+    let assigned = ledger
+        .assign_task(project.id, number, zeus)
+        .expect("assigned");
+    let brief = assigned.message.expect("its brief").id;
+    ledger.begin_delivery(brief).expect("delivery begins");
+    ledger
+        .confirm_delivery(brief, Some(&json!({ "item": "i-1" })))
+        .expect("delivered");
+    ledger
+        .record_result(project.id, number, "Done")
+        .expect("its result");
+    ledger
+        .accept_task(project.id, number, "chief")
+        .expect("accepted");
+    let window: (String, i64) = ledger
+        .sqlite()
+        .query_row(
+            "SELECT handle, id FROM participant WHERE member_id = ?",
+            [zeus],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    ledger
+        .end_session(project.id, &window.0, "human")
+        .expect("the human ends the window");
+    ledger
+        .edit_member(
+            project.id,
+            "zeus",
+            &MemberEdit {
+                harness: "claude-code".into(),
+                model: None,
+                effort: None,
+                model_name: Some("zeus".into()),
+                tier: "complex".into(),
+            },
+        )
+        .expect("the tier moves");
+    let tier = |ledger: &Ledger| -> (Option<String>, Option<String>) {
+        ledger
+            .sqlite()
+            .query_row(
+                "SELECT tier, left_at FROM participant WHERE id = ?",
+                [window.1],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    let (closed, left) = tier(&ledger);
+    assert!(left.is_some(), "the window is closed");
+    assert_eq!(
+        closed.as_deref(),
+        Some("standard"),
+        "a closed window is history"
+    );
+    ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(number),
+                body: "Next".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a follow-up");
+    let (open, left) = tier(&ledger);
+    assert!(left.is_none(), "the window came back for its follow-up");
+    assert_eq!(
+        open.as_deref(),
+        Some("complex"),
+        "an open window is at its member's tier"
+    );
+}
+
+#[test]
+fn a_purpose_is_taken_only_with_critical_at_add_as_at_edit() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
+    let refused = ledger
+        .create_task(project.id, &work("worker", "light", Some("architecture")))
+        .unwrap_err();
+    assert_eq!(
+        said(refused),
+        (
+            "purpose-without-critical".to_owned(),
+            "a purpose comes with --tier critical".to_owned()
+        )
+    );
+    // A worker's task may be critical, with its purpose.
+    ledger
+        .create_task(
+            project.id,
+            &work("worker", "critical", Some("architecture")),
+        )
+        .expect("critical work for a worker");
+    // No tier at all stays an invalid tier.
+    let refused = ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                tier: None,
+                ..work("worker", "light", None)
+            },
+        )
+        .unwrap_err();
+    assert_eq!(said(refused).0, "invalid-tier");
+}
+
+#[test]
+fn critical_goes_by_the_roles_effective_slot_so_an_old_image_designer_keeps_its_drawings() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "standard"),
+            member("hera", &["researcher"], "critical"),
+            member("ares", &["advisor"], "critical"),
+            image("iris"),
+        ],
+    );
+    let backup = ledger
+        .add_backup(project.id, "hera", &member("pan", &["worker"], "light"))
+        .expect("a backup of the researcher");
+    // Alpha.3's Add member took Critical for an image designer: the row says so, and the
+    // image backup inherits that tier.
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET tier = 'critical' WHERE handle = 'iris'",
+            [],
+        )
+        .unwrap();
+    let drawing = ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                from: "chief".into(),
+                pool: Some("designer".into()),
+                body: "A logo".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a drawing")
+        .task
+        .number;
+    let iris = id(&ledger, project.id, "iris");
+    ledger
+        .check_taker(project.id, drawing, iris)
+        .expect("the image designer is no Critical member for its drawings");
+    ledger
+        .assign_task(project.id, drawing, iris)
+        .expect("a fresh drawing reaches the designer");
+    // A held drawing may start on the designer's backup, which inherited the tier.
+    let spare = ledger
+        .add_backup(project.id, "iris", &image("luna"))
+        .expect("an image backup")
+        .id;
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET tier = 'critical' WHERE id = ?",
+            [spare],
+        )
+        .unwrap();
+    ledger
+        .check_taker(project.id, drawing, spare)
+        .expect("its image backup may take the drawing");
+    // A tierless research task, and an advisor's at Critical with no purpose, are still refused.
+    ledger
+        .sqlite()
+        .execute(
+            "INSERT INTO task (project_id, number, title, body, requester_id, state, pool, tier, created_at, updated_at)
+             SELECT ?1, 90, 'Look', 'Look', id, 'open', 'researcher', NULL, 'now', 'now'
+               FROM participant WHERE project_id = ?1 AND role = 'chief'",
+            [project.id],
+        )
+        .unwrap();
+    ledger
+        .sqlite()
+        .execute(
+            "INSERT INTO task (project_id, number, title, body, requester_id, state, pool, tier, created_at, updated_at)
+             SELECT ?1, 91, 'Ask', 'Ask', id, 'open', 'advisor', 'critical', 'now', 'now'
+               FROM participant WHERE project_id = ?1 AND role = 'chief'",
+            [project.id],
+        )
+        .unwrap();
+    let hera = id(&ledger, project.id, "hera");
+    let ares = id(&ledger, project.id, "ares");
+    assert_eq!(
+        said(ledger.check_taker(project.id, 90, hera).unwrap_err()).0,
+        "critical-takes-critical-work"
+    );
+    assert_eq!(
+        said(ledger.check_taker(project.id, 91, ares).unwrap_err()).0,
+        "critical-takes-critical-work"
+    );
+    // And the researcher's backup follows its member's tier.
+    assert_eq!(
+        said(ledger.check_taker(project.id, 90, backup.id).unwrap_err()).0,
+        "critical-takes-critical-work"
+    );
+}
+
+#[test]
+fn a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "light"),
+            member("hera", &["reviewer"], "critical"),
+            member("pan", &["tester"], "standard"),
+        ],
+    );
+    // Its own slot is empty: the nearest held one, the next up before the next down.
+    let made = ledger
+        .create_task(project.id, &work("tester", "complex", None))
+        .unwrap();
+    assert_eq!(
+        (made.task.tier.as_deref(), made.asked.as_deref()),
+        (Some("standard"), Some("complex"))
+    );
+    // A task never falls into Critical: only a reviewer at Critical is held, so it waits.
+    let review = ledger
+        .create_task(project.id, &work("reviewer", "standard", None))
+        .unwrap();
+    assert_eq!(review.task.tier.as_deref(), Some("standard"));
+    assert_eq!(review.asked, None);
+    let placed = ledger
+        .retier_open_task(project.id, review.task.number)
+        .unwrap();
+    assert_eq!(
+        placed,
+        TaskPlaced::Waits {
+            critical: vec!["hera".to_owned()]
+        }
+    );
+    // Critical takes a task added there with its purpose.
+    let critical = ledger
+        .create_task(
+            project.id,
+            &work("reviewer", "critical", Some("critical-review")),
+        )
+        .unwrap();
+    assert_eq!(critical.task.tier.as_deref(), Some("critical"));
+    assert_eq!(
+        ledger
+            .retier_open_task(project.id, critical.task.number)
+            .unwrap(),
+        TaskPlaced::Stays
+    );
+    // With nobody at Critical, it falls to the nearest tier held, keeping its purpose.
+    ledger.remove_member(project.id, "hera").unwrap();
+    let fell = ledger
+        .retier_open_task(project.id, critical.task.number)
+        .unwrap();
+    assert!(
+        matches!(fell, TaskPlaced::Waits { ref critical } if critical.is_empty()),
+        "{fell:?}"
+    );
+    let advice = ledger
+        .create_task(
+            project.id,
+            &work("tester", "critical", Some("hard-problem")),
+        )
+        .unwrap();
+    assert_eq!(advice.task.tier.as_deref(), Some("standard"));
+    assert_eq!(advice.task.purpose.as_deref(), Some("hard-problem"));
+}
+
+fn section(name: &str, task: NewTask) -> PlanTask {
+    PlanTask {
+        name: name.into(),
+        task,
+        needs: Vec::new(),
+        before: Vec::new(),
+    }
+}
+
+#[test]
+fn a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_each_went_to() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "standard"),
+            member("pan", &["tester"], "standard"),
+            member("argus", &["researcher"], "standard"),
+        ],
+    );
+    // Each section's answer carries its effective tier: a Complex request that fell to
+    // Standard reads Standard, with the tier asked and who holds the one it went to.
+    let plan = [section("check", work("tester", "complex", None))];
+    let made = ledger
+        .create_plan(project.id, &plan, Some("k"), "one")
+        .unwrap();
+    let got = &made.tasks[0];
+    assert_eq!(
+        (
+            got.tier.as_deref(),
+            got.asked.as_deref(),
+            got.held_by.clone()
+        ),
+        (Some("standard"), Some("complex"), vec!["pan".to_owned()])
+    );
+    // The holder moves away; the same key replays the answer as it was given.
+    ledger.remove_member(project.id, "pan").unwrap();
+    ledger
+        .add_member(project.id, &member("tess", &["tester"], "light"))
+        .unwrap();
+    let again = ledger
+        .create_plan(project.id, &plan, Some("k"), "one")
+        .unwrap();
+    assert!(again.repeated);
+    assert_eq!(
+        again.tasks, made.tasks,
+        "the original destination, not a recomputed one"
+    );
+    // An answer an earlier version kept (name and number alone) still replays, and a plan
+    // that section had no tier replays instead of being refused.
+    ledger
+        .sqlite()
+        .execute(
+            "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, 'old', 'f', '[[\"lookup\", 7]]')",
+            [project.id],
+        )
+        .unwrap();
+    let legacy = [section(
+        "lookup",
+        NewTask {
+            from: "chief".into(),
+            pool: Some("researcher".into()),
+            tier: None,
+            body: "Look it up".into(),
+            ..NewTask::default()
+        },
+    )];
+    // The fingerprint is the ledger's own: a saved key under its hash replays, whatever the
+    // sections say; a fresh key refuses the file for its tier.
+    let refused = ledger
+        .create_plan(project.id, &legacy, Some("fresh"), "g")
+        .unwrap_err();
+    assert_eq!(said(refused).0, "invalid-tier");
+    let fingerprint = {
+        use sha2::{Digest, Sha256};
+        let encoded = serde_json::to_vec(&(&legacy[..], "g")).unwrap();
+        format!("{:x}", Sha256::digest(encoded))
+    };
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE task_plan_key SET fingerprint = ? WHERE key = 'old'",
+            [fingerprint],
+        )
+        .unwrap();
+    let replayed = ledger
+        .create_plan(project.id, &legacy, Some("old"), "g")
+        .unwrap();
+    assert!(replayed.repeated);
+    assert_eq!(
+        (replayed.tasks[0].name.as_str(), replayed.tasks[0].number),
+        ("lookup", 7)
+    );
+    assert_eq!(replayed.tasks[0].tier, None);
+    // A changed file under the old key is still a different plan.
+    let changed = [section(
+        "lookup",
+        NewTask {
+            body: "Another".into(),
+            ..legacy[0].task.clone()
+        },
+    )];
+    let refused = ledger
+        .create_plan(project.id, &changed, Some("old"), "g")
+        .unwrap_err();
+    assert_eq!(said(refused).0, "key-used");
+    let _ = json!(null);
+}
+
+#[test]
+fn a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief_and_the_window_gets_it(
+) {
+    for gate in [false, true] {
+        let (_dir, mut ledger) = ledger();
+        // Only a standard reviewer: no Critical slot of its role is held.
+        let mut make = request(vec![
+            member("zeus", &["worker"], "standard"),
+            member("hera", &["reviewer"], "standard"),
+        ]);
+        make.gate = gate;
+        let project = ledger.create_project(&make).expect("a project");
+        let task = ledger
+            .create_task(project.id, &work("reviewer", "standard", None))
+            .unwrap()
+            .task
+            .number;
+        let hera = id(&ledger, project.id, "hera");
+        let moved = ledger.assign_task(project.id, task, hera).unwrap();
+        let message = moved.message.expect("its brief").id;
+        let first_line = ledger.message(message).unwrap().unwrap().body;
+        assert!(!first_line.starts_with("Critical work"), "{first_line}");
+        // The task is asked at Critical with its purpose, an edit that only routes: its brief,
+        // not yet in the window, is rewritten, and the window it is for stays.
+        ledger
+            .edit_task_with(
+                project.id,
+                task,
+                "chief",
+                &TaskEdit {
+                    tier: Some("critical".into()),
+                    purpose: Some("critical-review".into()),
+                    ..TaskEdit::default()
+                },
+            )
+            .expect("the edit that only routes");
+        let body = ledger.message(message).unwrap().unwrap();
+        assert_eq!(
+            body.state,
+            if gate { "gated" } else { "queued" },
+            "the brief waits for its window, or for the human's gate"
+        );
+        assert!(
+            body.body.starts_with("Critical work: critical-review."),
+            "{} (gate {gate}, {})",
+            body.body,
+            body.state
+        );
+        // The purpose then changes where the task keeps its tier: the line is rewritten again.
+        ledger
+            .edit_task_with(
+                project.id,
+                task,
+                "chief",
+                &TaskEdit {
+                    tier: Some("critical".into()),
+                    purpose: Some("hard-problem".into()),
+                    ..TaskEdit::default()
+                },
+            )
+            .expect("a purpose, a tier alone: taken");
+        // The brief goes on to its window, through the gate where there is one.
+        if gate {
+            ledger.approve_message(message, "human").expect("passed on");
+        }
+        ledger.begin_delivery(message).expect("on its way");
+        ledger
+            .confirm_delivery(message, Some(&json!({ "item": "i-1" })))
+            .expect("pasted");
+        let delivered = ledger.message(message).unwrap().unwrap();
+        assert_eq!(delivered.state, "delivered", "gate {gate}");
+        assert!(
+            delivered.body.starts_with("Critical work: hard-problem."),
+            "the window got the critical line first (gate {gate}): {}",
+            delivered.body
+        );
+        assert_eq!(
+            ledger
+                .task(project.id, task)
+                .unwrap()
+                .unwrap()
+                .task
+                .assignee
+                .as_deref(),
+            moved.task.assignee.as_deref(),
+            "the original window keeps the task"
+        );
+    }
+}
+
+/// Critical work of a role that writes files (a worker's, the frontend designer's, the
+/// integrator's) is coding included (the owner, 2026-11-22): its brief leads with the purpose and
+/// does not forbid it a file, as a reviewer's, advisor's, researcher's and tester's does.
+#[test]
+fn a_critical_brief_of_a_role_that_writes_files_does_not_forbid_it_a_file() {
+    let (_dir, mut ledger) = ledger();
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "critical"),
+            member("hera", &["reviewer"], "critical"),
+        ],
+    );
+    let brief = |ledger: &mut Ledger, pool: &str, who: &str, purpose: &str| -> String {
+        let task = ledger
+            .create_task(project.id, &work(pool, "critical", Some(purpose)))
+            .unwrap()
+            .task
+            .number;
+        let holder = id(ledger, project.id, who);
+        let moved = ledger.assign_task(project.id, task, holder).unwrap();
+        ledger
+            .message(moved.message.expect("its brief").id)
+            .unwrap()
+            .unwrap()
+            .body
+    };
+    let worker = brief(&mut ledger, "worker", "zeus", "hard-problem");
+    assert_eq!(worker, "Critical work: hard-problem.\n\nDo the work");
+    let review = brief(&mut ledger, "reviewer", "hera", "critical-review");
+    assert!(
+        review.starts_with("Critical work: critical-review. It changes no project file"),
+        "{review}"
+    );
+}

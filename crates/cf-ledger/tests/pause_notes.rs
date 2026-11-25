@@ -35,7 +35,7 @@ fn world() -> World {
         })
         .to_vec();
     let project = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: NewChief {

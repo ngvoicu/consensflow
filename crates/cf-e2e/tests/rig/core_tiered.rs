@@ -243,7 +243,7 @@ fn each_task_runs_in_its_own_worker_session_the_window_closes_with_the_task_the_
 }
 
 #[test]
-fn a_worker_refused_by_its_provider_mid_task_keeps_the_task_in_its_window_though_the_other_worker_of_its_tier_is_free(
+fn a_worker_refused_by_its_provider_mid_task_keeps_the_task_in_its_window_though_a_worker_of_another_tier_is_free(
 ) -> Outcome {
     // A quota wait never gives the work away (dip-agentos, 2026-10-19): only the
     // human or the chief moves a task from the window its work is in.

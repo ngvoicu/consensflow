@@ -4,9 +4,10 @@
 //! so it is ignored unless asked for and is no part of `check` or of CI.
 //!
 //! A real harness is the chief of a project on the native daemon, at its own settle (three
-//! seconds: no variable shortens it); two stand-ins are its workers. The check puts the chief in
-//! a turn of a minute (a command it runs), and while it works the first worker's result comes,
-//! then the second worker's question. Once the turn has ended, the daemon is to hand them over
+//! seconds: no variable shortens it); one stand-in is its worker, which holds each task in a window of
+//! its own (the staff has one member to a slot). The check puts the chief in
+//! a turn of a minute (a command it runs), and while it works the first task's result comes,
+//! then the second task's question. Once the turn has ended, the daemon is to hand them over
 //! one at a time, the question first though it came later, each after the window has rested
 //! the settle since its last turn, each pasted once and on the first attempt, and the chief's
 //! own record to hold each once.
@@ -50,9 +51,6 @@ use evidence::{
 /// The stand-in, the workers' harness.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// The second worker.
-const SECOND: &str = "worker-b";
-
 /// What the folder tells the chief.
 const BRIEF: &str = "This folder is an automated ConsensFlow test. When a ConsensFlow message arrives, reply with exactly one line, SEEN, and run no tools: decide nothing, answer no question with cf, accept nothing. When the human asks you something in this window, do what it asks.\n";
 
@@ -73,16 +71,14 @@ const TICK_SECONDS: u64 = 5;
 /// How long words typed and not sent are held to hold the message.
 const HELD: Duration = Duration::from_secs(15);
 
-/// The project: a real `harness` is the chief, and two stand-ins its workers.
+/// The project: a real `harness` is the chief, and one stand-in its worker, which holds the
+/// tasks one after another in a window of its own each (the staff has one member to a slot).
 fn plan(harness: Harness) -> Plan {
-    let mut second = stand_in_worker();
-    second["id"] = json!(SECOND);
     Plan::new(
         &format!("pacing-{}", harness.name()),
         member_as(harness, "chief"),
     )
     .with(stand_in_worker())
-    .with(second)
     .told(BRIEF)
 }
 
@@ -192,7 +188,6 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
     let who = format!("{} chief", harness.name());
     let mut members = Members::open(&plan(harness), Path::new(FAKE_AGENT), log)?;
     members.add(STAND_IN_WORKER, &[])?;
-    members.add(SECOND, &[])?;
     if !members.chief_is_idle(log)? {
         let checks = vec![Check::failed(
             &who,
@@ -222,7 +217,7 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         &["queued", "delivering", "delivered"],
     )?;
     members.give(
-        SECOND,
+        STAND_IN_WORKER,
         "CF ask :: Which output format do you want, JSON or text?\nReply with exactly: ASKED",
     )?;
     wait_for(
@@ -296,6 +291,21 @@ fn a_real_chief_is_given_one_message_at_a_time_each_once_after_it_rested() -> Re
 
 #[cfg(test)]
 mod tests {
+    /// The staff has one member to a worker's slot, and both tasks go to the stand-in that is
+    /// the project's one worker: a second worker at its tier is refused at its add (`slot-taken`).
+    #[test]
+    fn the_project_has_one_worker_which_holds_the_tasks_one_to_a_window() {
+        for harness in Harness::ALL {
+            let roster = plan(harness).roster;
+            let workers: Vec<&str> = roster
+                .iter()
+                .filter_map(|row| row["id"].as_str())
+                .filter(|id| *id != "chief")
+                .collect();
+            assert_eq!(workers, [STAND_IN_WORKER], "{}", harness.name());
+        }
+    }
+
     use super::*;
 
     fn event(at: &str, kind: &str, data: Value) -> Value {

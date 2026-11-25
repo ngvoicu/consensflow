@@ -97,7 +97,7 @@ fn shares_the_work_of_one_tier_across_harnesses_the_harness_with_the_fewest_task
     let context = Context::new();
     let member = |agent: &str, harness: &str| json!({ "agent": agent, "harness": harness, "role": "worker", "tier": "standard" });
     let project = context
-        .open_project(json!({
+        .open_project_overflowing(json!({
             "directory": "/work/app",
             "name": "app",
             "chief": { "harness": "claude-code", "model": "claude-opus-5" },

@@ -921,6 +921,61 @@ tr[data-session] .row-name { font-weight: 500; }
   .staff .staff-actions > button { flex: none; white-space: nowrap; }
   .staff .staff-actions:has(.staff-hint) { flex-wrap: wrap; }
 }
+/* The slots (D8): a row a role, a column a tier, the image designer's one slot across them all.
+   A held slot is a raised card of its holder, an empty one a dashed well with its Add; a slot
+   several hold is edged in amber, its words under its row; the slot the form is open for is lit
+   violet. Only the slots a role has are drawn: the rest of its row is the panel. */
+.slots { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0 6px; margin: -6px 0 0; }
+.slots thead th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 4px 2px; }
+.slots .slot-role-head { width: 136px; }
+.slots .slot-role { text-align: left; font-size: 13px; font-weight: 500; color: var(--text); padding: 8px 10px 8px 2px; vertical-align: top; overflow-wrap: anywhere; }
+.slots td { padding: 0 3px; vertical-align: top; }
+.slot-empty, .slot-holder { min-height: 52px; border-radius: 8px; padding: 7px 9px; }
+.slot-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; border: 1px dashed var(--line); background: rgba(9, 9, 11, .35); }
+.slot-empty-mark { flex: 1 0 auto; font: 11px var(--mono); color: var(--muted); }
+.slot-empty .slot-add { padding: 3px 10px; font-size: 12px; }
+.slot-gives { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.slot-give { padding: 0; border: 0; background: none; color: var(--accent); font: 11px/1.5 var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.slot-give:hover { color: var(--text); text-decoration: underline; }
+.slot-give:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.slots .slot-give-pick { width: auto; max-width: 100%; margin-left: -4px; padding: 1px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--accent); font: 11px/1.5 var(--mono); cursor: pointer; }
+.slots .slot-give-pick:hover { border-color: var(--line); color: var(--text); }
+.slots .slot-give-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.slots .slot-give-pick option { background: var(--panel-raised); color: var(--text); }
+.slot-holder { display: grid; align-content: start; gap: 2px; border: 1px solid var(--line); background: var(--panel-raised); }
+.slot-holder + .slot-holder { margin-top: 4px; }
+.slot-holder-top { display: flex; align-items: start; justify-content: space-between; gap: 6px; }
+.slot-holder .member-name { font: 600 12px/1.45 var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.slot-holder .member-meta { color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+.slot-holder .slot-remove { flex: none; width: 22px; height: 22px; margin: -3px -5px 0 0; border-color: transparent; border-radius: 5px; }
+.slot-holder .slot-remove .icon { width: 13px; height: 13px; }
+.slot-holder .slot-remove:hover, .slot-holder .slot-remove:focus-visible { color: var(--danger); border-color: rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .08); }
+.slot-holder .slot-remove[data-tip]:is(:hover, :focus-visible)::after { left: auto; right: 0; }
+.slot-mark { justify-self: start; margin-top: 2px; padding: 1px 6px; border-radius: 4px; font: 10px/1.5 var(--mono); }
+.slot-mark[data-tone="rest"] { color: var(--sky); background: rgba(147, 197, 253, .1); }
+.slot-mark[data-tone="out"] { color: var(--danger); background: rgba(248, 113, 113, .1); }
+/* The ask before a last role goes: red-edged, in a slot several hold too. */
+.slots td[data-slot] .slot-holder.slot-confirm { border-color: rgba(248, 113, 113, .55); background: var(--panel-raised); }
+.slot-confirm .member-confirm { margin: 0; font-size: 12px; color: var(--text); }
+.slot-confirm-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.slot-confirm-actions button { padding: 3px 10px; font-size: 12px; }
+.slots td[data-crowded="true"] { padding-top: 0; }
+.slots td[data-crowded="true"] .slot-holder { border-color: rgba(252, 211, 77, .55); background: linear-gradient(rgba(252, 211, 77, .06), rgba(252, 211, 77, .06)), var(--panel-raised); }
+.slots .slot-words td { padding: 0 3px 4px; }
+.slots .slot-words p { margin: 0; padding: 7px 10px; border-left: 3px solid var(--amber); border-radius: 0 6px 6px 0; background: rgba(252, 211, 77, .07); color: var(--amber); font-size: 12px; line-height: 1.45; }
+.slots .slot-words p + p { margin-top: 4px; }
+/* What the daemon refused of a slot the person changed, under its role's row, in the dialog. */
+.slots .slot-refusal td { padding: 7px 10px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: rgba(248, 113, 113, .08); color: var(--danger); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.slots td[data-picking="true"] > :is(.slot-empty, .slot-holder) { border: 1px solid var(--violet); background: rgba(124, 58, 237, .12); box-shadow: 0 0 0 3px rgba(139, 92, 246, .18); }
+.slots td[data-picking="true"] .slot-empty-mark { color: var(--violet); }
+@media (prefers-reduced-motion: no-preference) {
+  .slot-empty, .slot-holder { transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+}
+/* The members, each once, under the slots: its slots in one quiet line beside it. */
+.staff .member-slots-cell { color: var(--text); font-size: 13px; }
+.staff .member-slots { overflow-wrap: anywhere; }
+/* The member form opens under the slots, for a slot's Add, an Edit or a backup. */
+.staff-add[hidden] { display: none; }
 /* Words for a screen reader only: what a mark says to the eye by where it is. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* The chief's pick in New project and Switch chief, and Switch chief's turn choice: boxed as
@@ -931,9 +986,9 @@ tr[data-session] .row-name { font-weight: 500; }
 .project-section { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
 .project-section legend, .staff-add legend, .chief-pick legend, .dialog-form > fieldset:not([class]) legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .project-section > .dialog-help, .project-section > .staff { margin: 0; }
-.staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; }
+.staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; border: 1px solid rgba(167, 139, 250, .45); border-radius: 8px; padding: 10px 12px 12px; background: rgba(124, 58, 237, .05); }
+.staff-add legend { color: var(--violet); }
 .staff-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-.staff-pick .staff-add { border: 0; padding: 0; }
 .board-empty td { padding: 14px 12px; font: 12px var(--mono); color: var(--muted); }
 .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
 .staff-add .member-help { flex-basis: 100%; margin: 0; }
