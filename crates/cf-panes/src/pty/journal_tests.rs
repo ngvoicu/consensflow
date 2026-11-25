@@ -607,3 +607,354 @@ fn subscriptions_that_refuse_do_not_grow_the_room_of_a_window() {
     let _ = table.kill(&key);
     consumer.join().unwrap();
 }
+
+/// T-2275: the flow's count of acknowledged bytes is the journal's offset. Reads are joined into
+/// messages (the consumer is slow) and each message is acknowledged by its number: what the
+/// journal holds as acknowledged is the offset past that message's last byte. Unix only: the
+/// program is python's.
+#[cfg(unix)]
+#[test]
+fn what_is_acknowledged_is_the_offset_past_the_acknowledged_messages_last_byte() {
+    use super::PaneEnvironment;
+    const MIB: usize = 1 << 20;
+    let table = Arc::new(PaneTable::new());
+    table.keep_journals();
+    let hub = Arc::new(OutputHub::new());
+    let key = PaneKey::new("counted", 1);
+    let program =
+        "import os,time\nfor n in range(3000):\n os.write(1,b'x'*(1+n%97))\ntime.sleep(60)\n";
+    let total: usize = (0..3000).map(|n| 1 + n % 97).sum();
+    let pane = table
+        .open_streamed_at_while(
+            &|| true,
+            key.clone(),
+            &std::env::current_dir().unwrap(),
+            &[
+                "/usr/bin/python3".into(),
+                "-I".into(),
+                "-S".into(),
+                "-c".into(),
+                program.into(),
+            ],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize::default(),
+            MIB,
+        )
+        .unwrap();
+    let journal = pane.journal.clone().unwrap();
+    let got: Seen = Arc::new(Mutex::new(Vec::new()));
+    table.attach_page("page", &hub, seeing(&got));
+    let consumer = {
+        let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
+        // Slow enough that reads wait and are joined.
+        std::thread::spawn(move || {
+            forward_journaled(&pane.output, &journal, &hub, |_| {
+                std::thread::sleep(Duration::from_micros(300));
+            });
+        })
+    };
+    wait_for("all of it", || held(&got) == total);
+    let messages = got.lock().unwrap().clone();
+    assert!(
+        messages.len() < 3000,
+        "some reads were joined: {} messages",
+        messages.len()
+    );
+    for (offset, len, seq) in messages {
+        table.ack(&key, seq).unwrap();
+        assert_eq!(
+            journal.acknowledged_to(),
+            offset + len as u64,
+            "acknowledged by message {seq}"
+        );
+    }
+    table.kill(&key).unwrap();
+    consumer.join().unwrap();
+}
+
+/// A window with a journal, its consumer as the app's, and the sink its page has: the program
+/// prints `HEADER`, then, once told, `ESC [ 5 n TAIL`.
+#[cfg(unix)]
+struct Rig {
+    table: Arc<PaneTable>,
+    hub: Arc<OutputHub>,
+    key: PaneKey,
+    journal: Arc<Journal>,
+    consumer: Option<std::thread::JoinHandle<()>>,
+    seen: Seen,
+    live: Live,
+    alive: Arc<AtomicBool>,
+}
+
+#[cfg(unix)]
+const QUESTION: &[u8] = b"\x1b[5nTAIL";
+
+#[cfg(unix)]
+impl Rig {
+    fn start(name: &str, backlog: usize, program: &str) -> Self {
+        use super::PaneEnvironment;
+        let table = Arc::new(PaneTable::new());
+        table.keep_journals();
+        let hub = Arc::new(OutputHub::new());
+        let key = PaneKey::new(name, 1);
+        let pane = table
+            .open_streamed_at_while(
+                &|| true,
+                key.clone(),
+                &std::env::current_dir().unwrap(),
+                &[
+                    "/usr/bin/python3".into(),
+                    "-I".into(),
+                    "-S".into(),
+                    "-c".into(),
+                    program.into(),
+                ],
+                PaneEnvironment::new(&HashMap::new(), &[]),
+                portable_pty::PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+                backlog,
+            )
+            .unwrap();
+        let journal = pane.journal.clone().unwrap();
+        let consumer = {
+            let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
+            std::thread::spawn(move || forward_journaled(&pane.output, &journal, &hub, |_| {}))
+        };
+        Self {
+            table,
+            hub,
+            key,
+            journal,
+            consumer: Some(consumer),
+            seen: Arc::new(Mutex::new(Vec::new())),
+            live: Arc::new(Mutex::new(Vec::new())),
+            alive: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    /// The page `id` subscribes: what it is handed is kept; its boundary for the window.
+    fn subscribe(&mut self, id: &str) -> u64 {
+        self.seen = Arc::new(Mutex::new(Vec::new()));
+        self.live = Arc::new(Mutex::new(Vec::new()));
+        self.alive = Arc::new(AtomicBool::new(true));
+        let (seen, live, alive) = (
+            Arc::clone(&self.seen),
+            Arc::clone(&self.live),
+            Arc::clone(&self.alive),
+        );
+        let boundaries = self.table.attach_page(
+            id,
+            &self.hub,
+            Arc::new(move |message: PaneOutputMessage| {
+                if !alive.load(Ordering::SeqCst) {
+                    return false;
+                }
+                let offset = message.offset.unwrap();
+                seen.lock()
+                    .unwrap()
+                    .push((offset, message.bytes.len(), message.seq()));
+                live.lock().unwrap().push((offset, message.bytes));
+                true
+            }),
+        );
+        boundaries.get(&self.key).copied().unwrap_or(0)
+    }
+
+    /// `count` widths one after another, 81 and 80, each at `at`.
+    fn widths(&self, count: usize, at: u64) {
+        for i in 0..count {
+            let cols = if i % 2 == 0 { 81 } else { 80 };
+            self.table.resize_at(&self.key, 24, cols, Some(at)).unwrap();
+        }
+    }
+
+    fn go(&self) {
+        self.table.write(&self.key, b"go\n").unwrap();
+    }
+
+    fn live_bytes(&self) -> Vec<u8> {
+        self.live
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(_, bytes)| bytes.clone())
+            .collect()
+    }
+
+    fn end(mut self) {
+        let _ = self.table.kill(&self.key);
+        self.consumer.take().unwrap().join().unwrap();
+    }
+}
+
+#[cfg(unix)]
+const ASKING: &str = "import os,sys,time,tty\ntty.setraw(1)\nos.write(1,b'HEADER')\nsys.stdin.buffer.readline()\nos.write(1,b'\\x1b[5nTAIL')\ntime.sleep(60)\n";
+
+/// T-2269, before the next page subscribed: the old page holds 256 sizes, its sink refuses a
+/// message with a question in it, and a size it had already sent completes while it is still the
+/// current page. The next page's history starts at or before its boundary and holds that size,
+/// and the parked bytes come to it live: the journal never starts past what is acknowledged.
+#[cfg(unix)]
+#[test]
+fn a_size_that_completes_after_the_sink_refused_does_not_move_the_history_past_the_boundary() {
+    for sizes in [255, 256] {
+        let mut rig = Rig::start(&format!("refused{sizes}"), 1 << 20, ASKING);
+        rig.subscribe("old");
+        wait_for("HEADER", || held(&rig.seen) == 6);
+        rig.table.ack(&rig.key, last_seq(&rig.seen)).unwrap();
+        rig.widths(sizes, 6);
+        rig.alive.store(false, Ordering::SeqCst);
+        rig.go();
+        let journal = Arc::clone(&rig.journal);
+        wait_for("the question", || journal.published_to() == 14);
+        rig.table.resize_at(&rig.key, 24, 82, Some(6)).unwrap();
+        let boundary = rig.subscribe("new");
+        assert_eq!(boundary, 6);
+        let piece = rig.table.history("new", &rig.key, None).unwrap();
+        assert!(
+            piece.from <= boundary,
+            "{sizes}: the history starts at {} past B {boundary}",
+            piece.from
+        );
+        assert!(
+            piece
+                .resizes
+                .iter()
+                .any(|size| size.cols == 82 && size.at == 6)
+                || piece.size.1 == 82,
+            "{sizes}: the size the old page sent is in the history: {:?}",
+            piece.resizes
+        );
+        assert_eq!(rig.live_bytes(), QUESTION, "{sizes}");
+        rig.end();
+    }
+}
+
+/// T-2269, after the next page subscribed with live bytes handed over: a size the page before
+/// had sent is refused `pane-input-stale-page` (its emulator is gone), the terminal keeps its
+/// size, nothing is journaled, and the history starts at or before the boundary.
+#[cfg(unix)]
+#[test]
+fn a_size_from_a_page_that_has_gone_is_refused_and_changes_nothing() {
+    use crate::arbiter::{EnterTiming, InputArbiter};
+    use crate::input_queue::InputQueue;
+    let mut rig = Rig::start("gone", 1 << 20, ASKING);
+    let inputs = InputQueue::new(
+        Arc::clone(&rig.table),
+        Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+    );
+    inputs.begin_page("old").unwrap();
+    rig.subscribe("old");
+    wait_for("HEADER", || held(&rig.seen) == 6);
+    rig.table.ack(&rig.key, last_seq(&rig.seen)).unwrap();
+    rig.widths(256, 6);
+    inputs.begin_page("new").unwrap();
+    let boundary = rig.subscribe("new");
+    rig.go();
+    wait_for("the question", || held(&rig.seen) == 8);
+    let answer = crate::page::resize(
+        &inputs,
+        &rig.table,
+        Some("old"),
+        "gone",
+        1,
+        (82, 24),
+        Some(6),
+    );
+    assert_eq!(answer["error"], "pane-input-stale-page");
+    assert_eq!(rig.table.terminal_size(&rig.key), Some((24, 80)));
+    let none = crate::page::resize(&inputs, &rig.table, None, "gone", 1, (83, 24), None);
+    assert_eq!(none["error"], "pane-input-stale-page");
+    let piece = rig.table.history("new", &rig.key, None).unwrap();
+    assert!(
+        piece.from <= boundary,
+        "from {} past B {boundary}",
+        piece.from
+    );
+    assert!(
+        piece.resizes.iter().all(|size| size.cols < 82),
+        "{:?}",
+        piece.resizes
+    );
+    rig.end();
+}
+
+/// A `pane.open` that names an 8 MiB room: a flood with no acknowledgement after a subscription
+/// at B cuts the journal for its cap, and not past what is acknowledged.
+#[cfg(unix)]
+#[test]
+fn an_8_mebibyte_room_does_not_cut_the_journal_past_what_is_acknowledged() {
+    const ROOM: usize = 8 << 20;
+    let program = "import os,sys,time,tty\ntty.setraw(1)\ndef out(b):\n v=memoryview(b)\n while v:v=v[os.write(1,v):]\nout(b'H'*80)\nsys.stdin.buffer.readline()\nout(bytes(8<<20))\ntime.sleep(60)\n";
+    let mut rig = Rig::start("big", ROOM, program);
+    rig.subscribe("one");
+    wait_for("the history", || held(&rig.seen) == 80);
+    rig.table.ack(&rig.key, last_seq(&rig.seen)).unwrap();
+    let boundary = rig.subscribe("two");
+    assert_eq!(boundary, 80);
+    rig.go();
+    settled(&rig.journal);
+    let piece = rig.table.history("two", &rig.key, None).unwrap();
+    assert!(
+        piece.from <= boundary,
+        "from {} past B {boundary}",
+        piece.from
+    );
+    rig.end();
+}
+
+/// A window nobody draws takes 4,096 sizes and no more: with 4,096 held and a byte not
+/// acknowledged, the next is refused `pane-sizes-held` before its terminal takes it; once the
+/// output is acknowledged the next is taken.
+#[test]
+fn a_window_nobody_draws_refuses_a_size_past_4096_and_keeps_its_terminals_size() {
+    use super::PaneEnvironment;
+    #[cfg(unix)]
+    let argv: Vec<String> = vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()];
+    #[cfg(windows)]
+    let argv = super::conpty_test::powershell("Start-Sleep 60");
+    let table = Arc::new(PaneTable::new());
+    table.keep_journals();
+    let key = PaneKey::new("sizes", 1);
+    // The window's output is not read: only what the test appends is in the journal.
+    let pane = table
+        .open_streamed_at_while(
+            &|| true,
+            key.clone(),
+            &std::env::current_dir().unwrap(),
+            &argv,
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            1 << 20,
+        )
+        .unwrap();
+    let journal = pane.journal.clone().unwrap();
+    journal.append(b"x");
+    let width = |i: usize| if i % 2 == 0 { 81 } else { 80 };
+    for i in 0..4096 {
+        table.resize_at(&key, 24, width(i), Some(0)).unwrap();
+    }
+    let refused = table.resize_at(&key, 30, 90, Some(0));
+    assert_eq!(
+        refused.map_err(|error| error.to_string()),
+        Err("pane-sizes-held".to_string())
+    );
+    assert_eq!(
+        table.terminal_size(&key),
+        Some((24, 80)),
+        "its terminal keeps its size"
+    );
+    journal.acknowledged(1);
+    table.resize_at(&key, 30, 90, Some(1)).unwrap();
+    assert_eq!(table.terminal_size(&key), Some((30, 90)));
+    table.kill(&key).unwrap();
+}

@@ -338,8 +338,14 @@ impl PaneTable {
     }
 
     /// [`PaneTable::resize`] of a window whose page's emulator took the size once it had
-    /// parsed `at` bytes of the window's output (`None`: the size is not the current page's,
-    /// and takes the journal's end).
+    /// parsed `at` bytes of the window's output (`None`: the journal's end).
+    ///
+    /// A window whose journal holds 4,096 sizes with output unacknowledged takes no more
+    /// ([`PaneError::SizesHeld`]), and its terminal keeps its size. The check, the terminal's
+    /// resize and the record are one: the pane table's lock keeps another size out, and the
+    /// journal's, held across all three, keeps a read from being taken in between. The screen is
+    /// told afterwards, with no journal lock held, since taking a read in locks the screen and
+    /// then the journal.
     pub fn resize_at(
         &self,
         key: &PaneKey,
@@ -351,6 +357,14 @@ impl PaneTable {
         let pane = panes
             .get_mut(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+        let slot = match &pane.journal {
+            Some(journal) => Some(
+                journal
+                    .size_slot()
+                    .ok_or_else(|| PaneError::SizesHeld(key.clone()))?,
+            ),
+            None => None,
+        };
         pane.master
             .resize(PtySize {
                 rows,
@@ -359,15 +373,23 @@ impl PaneTable {
                 pixel_height: 0,
             })
             .map_err(|error| PaneError::Pty(error.to_string()))?;
-        pane.screen.resize(rows, cols);
-        if let Some(journal) = &pane.journal {
-            journal.resize(at, (rows, cols));
+        if let Some(slot) = slot {
+            slot.record(at, (rows, cols));
         }
+        pane.screen.resize(rows, cols);
         *pane
             .last_activity
             .lock()
             .map_err(|_| PaneError::LockPoisoned)? = Instant::now();
         Ok(())
+    }
+
+    /// The window's terminal as it is sized now, rows and columns.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn terminal_size(&self, key: &PaneKey) -> Option<(u16, u16)> {
+        let panes = self.lock_panes().ok()?;
+        let size = panes.get(key)?.master.get_size().ok()?;
+        Some((size.rows, size.cols))
     }
 
     /// The last `max` lines a pane's screen shows (see

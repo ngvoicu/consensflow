@@ -107,8 +107,12 @@ pub fn ack(panes: &PaneTable, id: &str, generation: u64, seq: u64) -> Value {
 }
 
 /// A window takes the size `cols` by `rows`, which the page's emulator took once it had parsed
-/// `at` bytes of the window's output. The offset is the current page's: a size that is not (a
-/// page that has gone, or one that does not say) takes the journal's end.
+/// `at` bytes of the window's output (`None`: the journal's end). Only the current page's size:
+/// one from a page that has gone, or that names none, is refused `pane-input-stale-page` and the
+/// terminal keeps its size (that page's emulator is gone; the page after rebuilds at the journal's
+/// last size, and sends its own where its layout differs). Taken, it would leave the terminal at a
+/// size no emulator has. Held under the page's identity, so that no page replaces this one
+/// between the check and the size.
 pub fn resize(
     inputs: &InputQueue,
     panes: &PaneTable,
@@ -126,10 +130,13 @@ pub fn resize(
         Ok(key) => key,
         Err(error) => return refused(&error),
     };
-    let at = at.filter(|_| page_id.is_some_and(|page| inputs.page_is_current(page).is_ok()));
-    match panes.resize_at(&key, rows, cols, at) {
-        Ok(()) => ok(),
-        Err(error) => refused(&error.to_string()),
+    let Some(page) = page_id else {
+        return refused(crate::input_queue::INPUT_STALE_PAGE);
+    };
+    match inputs.with_current_page(page, || panes.resize_at(&key, rows, cols, at)) {
+        Ok(Ok(())) => ok(),
+        Ok(Err(error)) => refused(&error.to_string()),
+        Err(error) => refused(&error),
     }
 }
 

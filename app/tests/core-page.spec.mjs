@@ -20004,3 +20004,38 @@ test('a hidden window the person asks to see while it waits is drawn again at on
     .poll(async () => (await asked(page, 'pane_history', 'p1-zeus-amber-pine')).length)
     .toBe(1)
 })
+
+test('a status question is answered while its window is on the page, and gets no reply once the lane has left', async ({
+  page,
+}) => {
+  await open(page, { ...model(), realTerminals: true })
+  const replies = () =>
+    page.evaluate(() =>
+      window.__calls.filter(([c, a]) => c === 'pane_reply_enqueue' && a.id === 'p1-zeus').length,
+    )
+  const ask = (seq) =>
+    page.evaluate(
+      (seq) =>
+        window.__output.onmessage({
+          id: 'p1-zeus',
+          generation: 7,
+          seq,
+          bytes: [...new TextEncoder().encode('\x1b[5n')],
+        }),
+      seq,
+    )
+  await ask(1)
+  await expect.poll(replies).toBe(1)
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('#stage [data-handle="zeus"]')).toHaveCount(0)
+  await page.waitForTimeout(2500)
+  await ask(2)
+  // Read, so that the window is never held at the room; answered by nobody, as on main.
+  await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(2)
+  expect(await replies()).toBe(1)
+})

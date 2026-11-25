@@ -101,8 +101,31 @@ export function randomCase(seed) {
     if (g.r() < 0.05) ops.push({ reload: true })
   }
   if (g.r() < 0.6) ops.push({ reload: true })
+  // A size on its way as the page reloads, let go at one of the five points (T-2269).
+  if (g.r() < 0.1) ops.push(...heldSize(g.pick([0, 3, 255, 256]), g.pick(HOLD_POINTS), cols, rows, C + '5n'))
   ops.push({ emit: utf8(g.pick(['X', 'Z\r\n', 'ABCDE', '界', C + '6n', '—'])) })
   return { name: 'random', seed, cols, rows, ops }
+}
+/** The points at which a held size is let go (`gate.mjs`). */
+export const HOLD_POINTS = ['p1', 'p2', 'p3', 'p4', 'p5']
+/**
+ * `count` sizes the journal keeps, then a size held on its way and let go at `point` around a
+ * reload, with `question` printed for the page that goes (p1, p2: before it subscribes anew) or
+ * for the new one (p3 after its subscription and before its first pull, p4 between two pulls, p5
+ * once its history is in).
+ */
+export function heldSize(count, point, cols, rows, question) {
+  const ops = []
+  for (let i = 0; i < count; i++) ops.push({ resize: [i % 2 === 0 ? cols + 1 : cols, rows] })
+  // A history long enough for two pulls.
+  if (point === 'p4') ops.push({ repeat: [0], count: Math.floor(1.2 * (1 << 20)) })
+  ops.push({ hold: [cols + 2, rows], point })
+  const asked = utf8(question + 'TAIL')
+  if (point === 'p1' || point === 'p2') ops.push({ gone: true }, { emit: asked }, { reload: true })
+  else if (point === 'p3') ops.push({ reload: true, after: asked })
+  else if (point === 'p4') ops.push({ reload: true, after: asked }, { emit: asked })
+  else ops.push({ reload: true }, { emit: asked })
+  return ops
 }
 /** A case that goes past the 8 MiB cap, then more: only the tracked state is compared after. */
 export function pastCapCase(seed) {
@@ -174,6 +197,22 @@ export function namedCases() {
     add('margins H past cap: ' + n + ' refused settings, the normal screen', 40, 12, [e(C2 + '2;9r' + refused(n)), filler, { reload: true }, e('X')], true)
     add('margins I past cap: ' + n + ' refused settings, the inactive normal screen', 40, 12, [e(C2 + '2;9r' + refused(n) + C2 + '?1049h'), filler, { reload: true }, e('X')], true)
     add('margins J past cap: ' + n + ' refused settings, the alternate screen', 40, 12, [e(C2 + '?1049h' + C2 + '2;9r' + refused(n)), filler, { reload: true }, e('X')], true)
+  }
+  // T-2269's two orderings, at 255 sizes held and at 256 (the 257th starts the journal again),
+  // and the other points.
+  for (const [name, point] of [
+    ['before subscription', 'p2'],
+    ['after subscription', 'p3'],
+    ['before the sink refuses', 'p1'],
+    ['between two pulls', 'p4'],
+    ['after the history', 'p5'],
+  ]) {
+    for (const count of point === 'p2' || point === 'p3' ? [255, 256] : [256]) {
+      add(`T-2269 a size let go ${name}, ${count} held`, 80, 24, [
+        e('HEADER'),
+        ...heldSize(count, point, 80, 24, '\x1b[5n'),
+      ])
+    }
   }
   // T-2229's finding 7: a region far down a screen as tall as the host accepts, past the cap.
   for (const top of [1024, 2000, 4095]) {

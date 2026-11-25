@@ -303,9 +303,10 @@ export class TerminalLink {
       try {
         await this.#apply(window, piece)
       } catch (cause) {
-        // xterm itself failed on the bytes (it stops drawing, as it does live): the window starts
-        // clean, goes live from the boundary and says its history is cut. The failure does not
-        // stay across reloads. The host is told nothing of the history.
+        // xterm itself failed on the bytes (it stops drawing, as it does live), or the history
+        // starts past the boundary: the window starts clean, goes live from the boundary and says
+        // its history is cut. A failure does not stay across reloads. The host is told nothing of
+        // the history.
         if (this.#retired.has(window.key)) return false
         const { cols, rows } = emulator.size?.() ?? { cols: undefined, rows: undefined }
         emulator.restart?.(cols, rows)
@@ -324,6 +325,10 @@ export class TerminalLink {
   /** Write one piece: the emulator starts clean where the piece says, takes its sizes at their offsets. */
   async #apply(window, piece) {
     const { emulator } = window
+    // A history that starts past the boundary leaves the live bytes between them with no owner:
+    // the host never gives one, and none of it is taken (the window goes on as after a failure).
+    if (piece.reset && piece.from > piece.boundary)
+      throw new Error(`history from ${piece.from} starts past the boundary ${piece.boundary}`)
     if (piece.reset) {
       emulator.restart?.(piece.size.cols, piece.size.rows)
       emulator.mute?.(true)
@@ -413,9 +418,10 @@ export class TerminalLink {
 
   /**
    * The live messages a window holds, written once its history is in: each at the emulator's
-   * next offset. One that ends at or before it is below the history (the journal started again
-   * past the boundary): dropped, and acknowledged. One that straddles it is written from it.
-   * Where the host sent no offsets (no journal) the messages are written as they come.
+   * next offset. One that ends at or before it is already drawn (the offset is past the boundary
+   * only by bytes the emulator has taken): dropped, and acknowledged. One that straddles it is
+   * written from it. Where the host sent no offsets (no journal) the messages are written as they
+   * come.
    */
   #pump(window) {
     if (window.replaying || this.#retired.has(window.key)) return

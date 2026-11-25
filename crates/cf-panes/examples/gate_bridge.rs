@@ -257,6 +257,11 @@ fn main() {
                 ),
                 command["at"].as_u64(),
             )}),
+            "size" => {
+                let window = &windows[&name];
+                let (rows, cols) = panes.terminal_size(&window.key).unwrap();
+                json!({"rows": rows, "cols": cols})
+            }
             "info" => {
                 let window = &windows[&name];
                 json!({"end": window.journal.end()})

@@ -87,9 +87,9 @@ pub struct Piece {
     pub bytes: Vec<u8>,
     /// The page's boundary: every byte from it on comes on the live path.
     pub boundary: u64,
-    /// This piece reaches the boundary (or, after a restart past it, begins there): the page
-    /// has its history. A page that restarted past the boundary drops the live messages it
-    /// holds below `from`.
+    /// This piece reaches the boundary: the page has its history. No piece begins past the
+    /// boundary, since the journal's start never passes what is acknowledged; a page given one
+    /// all the same takes none of it.
     pub done: bool,
 }
 
@@ -111,6 +111,23 @@ struct Inner {
     base_sized_at: Option<u64>,
     /// The boundary of the page now subscribed: a size is not journaled before it.
     floor: u64,
+    /// The offset up to which the window's output has been acknowledged: drawn by a page, let go
+    /// of by one, or settled at a subscription as handed to the page before. It never passes what
+    /// a page was handed, so a page that subscribes gets a boundary at or past it. The journal's
+    /// start never passes it, whatever asks (the cap, the sizes, the window's end): so no byte a
+    /// page has yet to draw is below the start.
+    acknowledged: u64,
+}
+
+/// A size the journal will take ([`Journal::size_slot`]).
+pub(crate) struct SizeSlot<'a>(MutexGuard<'a, Inner>);
+
+impl SizeSlot<'_> {
+    /// The window took `size`, which the page's emulator took at `at` (`None`: the journal's
+    /// end). See [`Journal`]'s sizes.
+    pub(crate) fn record(mut self, at: Option<u64>, size: Size) {
+        self.0.resize(at, size);
+    }
 }
 
 /// One window's journal. Appended to by the window's consumer, read by the page's pulls.
@@ -141,6 +158,7 @@ impl Journal {
                 base_size: size,
                 base_sized_at: None,
                 floor: 0,
+                acknowledged: 0,
             }),
         }
     }
@@ -170,23 +188,32 @@ impl Journal {
     }
 
     /// A message has been taken in whole (the reads joined into it, all appended): a mark is
-    /// taken at its end if one is due, and the journal is cut to its cap. The marks the cap and
-    /// the rest points make are at message ends; one that a size makes (the 257th) is at the
-    /// journal's end, which can fall inside a message on its way to the page, so a page that
-    /// restarts at a mark writes the part of a live message that is past it.
+    /// taken at its end if one is due, and the journal is cut to its cap. Every mark is at a
+    /// message's end: one a size makes is taken at the journal's end only where everything up to
+    /// it is acknowledged, so no message is on its way across it.
     pub(crate) fn settle(&self) {
         self.locked().settle();
     }
 
     /// The window took a size, which the page's emulator took at `at` (the bytes it had
-    /// parsed): `None` where the size is not the current page's, which takes the journal's
-    /// end. One before the last size taken, before the page's boundary or past the journal's
-    /// end takes the end too; one before the journal's start takes the start. A size is
-    /// kept whole: none is folded into another, and the margins a size resets are
-    /// worked out from them in byte order with the program's own settings. The same size as
+    /// parsed): `None` takes the journal's end. One before the last size taken, before the page's
+    /// boundary or past the journal's end takes the end too; one before the journal's start takes
+    /// the start. A size is kept whole: none is folded into another, and the margins a size resets
+    /// are worked out from them in byte order with the program's own settings. The same size as
     /// the last is not kept.
+    #[cfg(test)]
     pub(crate) fn resize(&self, at: Option<u64>, size: Size) {
         self.locked().resize(at, size);
+    }
+
+    /// Room for one more size, held from the check to the record: `None` with 4,096 sizes held
+    /// and output unacknowledged, which no new start may pass. The journal stays locked while the
+    /// slot is held, so no read is taken in between the check and the record, and what the check
+    /// said still holds when the size is written.
+    pub(crate) fn size_slot(&self) -> Option<SizeSlot<'_>> {
+        let inner = self.locked();
+        (inner.resizes.len() < HARD_MAX_RESIZES || inner.acknowledged >= inner.end)
+            .then_some(SizeSlot(inner))
     }
 
     /// A page subscribed with `boundary` bytes already handed to a page (the hub's). Pulls
@@ -194,6 +221,18 @@ impl Journal {
     pub(crate) fn begin_page(&self, boundary: u64) {
         let mut inner = self.locked();
         inner.floor = boundary.min(inner.end);
+    }
+
+    /// The window's output is acknowledged up to `offset`: the start never passes it
+    /// (`Inner::acknowledged`).
+    pub(crate) fn acknowledged(&self, offset: u64) {
+        let mut inner = self.locked();
+        inner.acknowledged = inner.acknowledged.max(offset);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn acknowledged_to(&self) -> u64 {
+        self.locked().acknowledged
     }
 
     /// The program ended and everything it printed is taken in: the journal keeps what a page
@@ -334,9 +373,10 @@ impl Inner {
     }
 
     /// Start the journal at `offset`, a mark: the sizes before it are the size at it, and the
-    /// margins it holds are worked out once, with every size that came before.
+    /// margins it holds are worked out once, with every size that came before. The one place the
+    /// start moves, and never past what is acknowledged.
     fn cut_to(&mut self, offset: u64) {
-        if offset < self.start {
+        if offset < self.start || offset > self.acknowledged {
             return;
         }
         if let Some(mark) = self.marks.iter().find(|mark| mark.offset == offset) {
@@ -387,15 +427,26 @@ impl Inner {
         }
     }
 
-    /// Too many sizes to keep: the journal starts again at a mark at a rest point, the end
-    /// itself where it is at rest, else the last mark. Past the hard bound it starts at the
-    /// end, rest or not.
+    /// Too many sizes to keep: the journal starts again at a mark at a rest point, never past
+    /// what is acknowledged. Where everything is acknowledged that mark is the end, if it is at
+    /// rest (past the hard bound, rest or not); else the last mark at or before what is
+    /// acknowledged, which may be the start: then it keeps its sizes, and the next one tries
+    /// again.
     fn start_again(&mut self) {
-        if self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES {
+        if self.acknowledged >= self.end
+            && (self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES)
+        {
             self.mark_at_end();
             self.cut_to(self.end);
-        } else {
-            self.cut_to(self.last_mark());
+        } else if let Some(offset) = self
+            .marks
+            .iter()
+            .map(|mark| mark.offset)
+            .take_while(|offset| *offset <= self.acknowledged)
+            .last()
+            .filter(|offset| *offset > self.start)
+        {
+            self.cut_to(offset);
         }
     }
 

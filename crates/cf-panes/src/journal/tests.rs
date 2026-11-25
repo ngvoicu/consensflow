@@ -11,6 +11,8 @@ fn journal() -> Journal {
 /// One message: the read appended, then settled, as the consumer does.
 fn take(journal: &Journal, bytes: &[u8]) {
     journal.append(bytes);
+    // A page that keeps up has drawn it.
+    journal.acknowledged(journal.end());
     journal.settle();
 }
 

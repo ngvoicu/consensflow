@@ -337,37 +337,66 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
   }
 })
 
-test('a replay that begins past the boundary drops what is below it and writes the rest of a straddling message', async ({
-  page,
-}) => {
-  await blankPage(page)
-  const result = await page.evaluate(async () => {
-    const host = P5.fakeHost({ cols: 30, rows: 8 })
-    host.print([...new TextEncoder().encode('0123456789')])
-    // The journal started again at 6, past the boundary 0 the page was given: an empty piece.
-    const invoke = async (command, args) => {
-      if (command !== 'pane_history') return host.invoke(command, args)
-      return {
-        ok: true, reset: true, truncated: true, from: 6, size: { rows: 8, cols: 30 }, seed: [],
-        resizes: [], bytes: [], boundary: 0, done: true,
+/**
+ * A history that begins past the boundary, which the host never gives, as the first piece or a
+ * later one: the page takes none of it, starts clean at the boundary, draws the live bytes from
+ * there and answers their question, says its history is cut, and tells the host nothing of the
+ * history (T-2275: taken, it dropped delivered bytes and forgot an ended window's journal).
+ */
+for (const later of [false, true]) {
+  test(`a history that begins past the boundary is not taken, as the ${later ? 'second' : 'first'} piece`, async ({
+    page,
+  }) => {
+    await blankPage(page)
+    const result = await page.evaluate(async (later) => {
+      const text = (value) => [...new TextEncoder().encode(value)]
+      const live = text('\x1b[5nTAIL')
+      const past = {
+        ok: true,
+        reset: true,
+        truncated: true,
+        from: 14,
+        size: { rows: 8, cols: 30 },
+        seed: [],
+        resizes: [],
+        bytes: [],
+        boundary: 6,
+        done: true,
       }
-    }
-    const win = P5.window('past', { cols: 80, rows: 24, invoke, pageId: 'past' })
-    host.subscribe((m) => win.link.output(m, () => win.emulator))
-    // Live messages the host sends it: [0,4) below, [4,10) straddling 6, [10,12) past.
-    win.link.output({ id: 'w', generation: 1, seq: 1, offset: 0, bytes: Uint8Array.from([48, 49, 50, 51]) }, () => win.emulator)
-    win.link.output({ id: 'w', generation: 1, seq: 2, offset: 4, bytes: Uint8Array.from([52, 53, 54, 55, 56, 57]) }, () => win.emulator)
-    win.link.output({ id: 'w', generation: 1, seq: 3, offset: 10, bytes: Uint8Array.from([97, 98]) }, () => win.emulator)
-    win.start()
-    await win.replayed
-    await win.quiet()
-    await P5.sleep(20)
-    return { text: P5.state(win.emulator).text, acks: host.acks.slice(), truncated: win.truncated }
+      const pieces = later
+        ? [
+            { ...past, reset: true, truncated: false, from: 0, bytes: text('HEA'), done: false },
+            past,
+          ]
+        : [past]
+      const win = P5.window('past', {
+        cols: 80,
+        rows: 24,
+        pageId: 'past',
+        invoke: async (command) => {
+          if (command === 'pane_history') return pieces.shift()
+          return { ok: true }
+        },
+      })
+      win.link.output({ id: 'w', generation: 1, seq: 2, offset: 6, bytes: Uint8Array.from(live) }, () => win.emulator)
+      win.start()
+      await win.replayed
+      await win.quiet()
+      await P5.sleep(20)
+      return {
+        text: P5.state(win.emulator).text,
+        answers: win.answers.slice(),
+        truncated: win.truncated,
+        calls: win.calls.slice(),
+      }
+    }, later)
+    expect(result.text).toEqual(['TAIL'])
+    expect(result.answers).toEqual(['\x1b[0n'])
+    expect(result.truncated).toBe(true)
+    expect(result.calls).toContain('pane_ack')
+    expect(result.calls).not.toContain('pane_history_done')
   })
-  expect(result.text).toEqual(['6789ab'])
-  expect(result.acks.at(-1)).toBe(3)
-  expect(result.truncated).toBe(true)
-})
+}
 
 test("the page reads the frame the app's pane_history command writes", async ({ page }) => {
   await blankPage(page)

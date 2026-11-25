@@ -8,7 +8,7 @@
 
 [run]
 page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/terminal-replay.spec.mjs", "--workers=2"]
-board = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pulls no history early|settles every message|drawn again first|asks to see while", "--workers=2"]
+board = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pulls no history early|settles every message|drawn again first|asks to see while|no reply once the lane has left", "--workers=2"]
 
 [[plant]]
 name = "replay page: a replay is not muted"
@@ -144,3 +144,23 @@ runs = ["page"]
 file = "app/ui/terminal-link.js"
 find = "    if (complete) void this.#historyDone(window, window.next)"
 replace = "    void this.#historyDone(window, window.next)"
+
+[[plant]]
+name = "replay page: a history past its boundary is taken"
+meant = "a history that begins past the boundary is not taken, as the first piece"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (piece.reset && piece.from > piece.boundary)\n      throw"
+replace = "    if (false)\n      throw"
+
+[[plant]]
+name = "replay page: a lane that has left answers a question"
+meant = "a status question is answered while its window is on the page, and gets no reply once the lane has left"
+runs = ["board"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (this.#retired.has(key)) return this.#drawn(key, message)\n"
+replace = "    if (this.#retired.has(key)) {\n      void this.reply(message, '\\x1b[0n')\n      this.#retired.delete(key)\n      void this.reply(message, '\\x1b[0n')\n      this.#retired.add(key)\n      return this.#drawn(key, message)\n    }\n"

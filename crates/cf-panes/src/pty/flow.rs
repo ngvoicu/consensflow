@@ -20,6 +20,9 @@ struct OutputFlowState {
     next_seq: u64,
     unacked: VecDeque<(u64, usize)>,
     unacked_bytes: usize,
+    /// The bytes of the reads acknowledged since the window opened: read for read, offsets of
+    /// the window's journal (each read is recorded, then appended).
+    acked_bytes: u64,
     closed: bool,
 }
 
@@ -31,6 +34,7 @@ impl OutputFlow {
                 next_seq: 1,
                 unacked: VecDeque::new(),
                 unacked_bytes: 0,
+                acked_bytes: 0,
                 closed: false,
             }),
             ready: Condvar::new(),
@@ -60,7 +64,8 @@ impl OutputFlow {
         Some(seq)
     }
 
-    fn acknowledge(&self, seq: u64) -> Result<(), u64> {
+    /// Settle the reads up to `seq`: the bytes acknowledged since the window opened.
+    fn acknowledge(&self, seq: u64) -> Result<u64, u64> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let highest_issued = state.next_seq.saturating_sub(1);
         if seq > highest_issued {
@@ -72,9 +77,10 @@ impl OutputFlow {
             }
             state.unacked.pop_front();
             state.unacked_bytes -= byte_count;
+            state.acked_bytes += byte_count as u64;
         }
         self.ready.notify_all();
-        Ok(())
+        Ok(state.acked_bytes)
     }
 
     pub(super) fn close(&self) {
@@ -85,19 +91,30 @@ impl OutputFlow {
 }
 impl PaneTable {
     pub fn ack(&self, key: &PaneKey, seq: u64) -> Result<(), PaneError> {
-        let flow = self
-            .lock_panes()?
-            .get(key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?
-            .output_flow
-            .clone()
-            .ok_or_else(|| PaneError::NoOutputStream(key.clone()))?;
-        flow.acknowledge(seq)
+        let (flow, journal) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            let flow = pane
+                .output_flow
+                .clone()
+                .ok_or_else(|| PaneError::NoOutputStream(key.clone()))?;
+            (flow, pane.journal.clone())
+        };
+        let acked = flow
+            .acknowledge(seq)
             .map_err(|highest_issued| PaneError::FutureAck {
                 key: key.clone(),
                 seq,
                 highest_issued,
-            })
+            })?;
+        // With no lock held but the journal's own. An acknowledgement that races a cut leaves it
+        // lower for a moment, which only holds the cut back.
+        if let Some(journal) = journal {
+            journal.acknowledged(acked);
+        }
+        Ok(())
     }
 
     /// Windows opened from now on keep a journal of their output and resizes

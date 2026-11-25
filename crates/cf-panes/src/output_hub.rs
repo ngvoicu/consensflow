@@ -132,6 +132,27 @@ impl OutputHub {
         handed
     }
 
+    /// A window with no journal has ended and all it printed has been handed on or parked: no
+    /// page needs what was handed of it (no history, and no room left to settle). One with a
+    /// journal keeps its entry for as long as its journal is kept ([`OutputHub::retain_handed`]).
+    pub(crate) fn forget(&self, key: &PaneKey) {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .handed
+            .remove(key);
+    }
+
+    /// How many windows the hub keeps what it handed for.
+    #[cfg(test)]
+    pub(crate) fn handed_windows(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .handed
+            .len()
+    }
+
     /// Forget the windows `keep` does not name: a window that is gone has no boundary.
     pub(crate) fn retain_handed(&self, keep: impl Fn(&PaneKey) -> bool) {
         self.state

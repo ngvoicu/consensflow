@@ -26,7 +26,7 @@ const LOCK_POISONED: &str = "lock-poisoned";
 /// A call numbered at or below what the pane's count has passed: a late
 /// original after its skip, or a repeat. Nothing of it is written.
 const INPUT_SEQUENCE_STALE: &str = "pane-input-sequence-stale";
-const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
+pub(crate) const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
 const INPUT_FAILED: &str = "input-failed";
 
 /// What a pane's worker does, in order: the human's own keys (counted for

@@ -657,6 +657,7 @@ fn stream_to_page(
                 |bytes| took_in(&screen, &printed, bytes),
                 |message| output.publish(message.into()),
             );
+            output.forget(&key);
         }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
@@ -1408,7 +1409,7 @@ mod tests {
             Arc::clone(&panes),
             clock,
             inputs,
-            output,
+            Arc::clone(&output),
         );
 
         let mut reader = BufReader::new(peer);
@@ -1420,6 +1421,12 @@ mod tests {
                 break;
             }
         }
+        // T-2269: a window with no journal leaves nothing of what it was handed behind it.
+        assert_eq!(
+            output.handed_windows(),
+            0,
+            "the hub forgot the ended window"
+        );
         let messages: Vec<_> = received.try_iter().collect();
         let mut bytes = Vec::new();
         let mut sequences = Vec::new();
