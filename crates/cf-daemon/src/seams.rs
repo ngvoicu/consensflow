@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use cf_base::env::{Env, TERMINAL_ENV};
+use cf_base::env::{Env, GUARD_ROOT, PATH_HELPER_ROOT, TERMINAL_ENV};
 use cf_engine::roles::{role_instructions_for, staff_of, ProjectSpecs};
 use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
@@ -24,9 +24,6 @@ use crate::errors::{contain, Errors};
 mod boundary;
 
 pub use boundary::{DaemonRecords, DaemonTime};
-
-/// The variable macOS's `path_helper` reads its files' root from.
-const PATH_HELPER_ROOT: &str = "PATH_HELPER_ROOT";
 
 /// The environment a window's pane starts with before its harness's own (as
 /// Node's daemon gave it): what the app took of a terminal's environment for its
@@ -65,17 +62,24 @@ impl WindowEnv {
             },
             terminal: terminal_of(env),
             cf: None,
-            has_path_helper_root: env.os(PATH_HELPER_ROOT).is_some(),
+            // A root that is the guard's is no one's own: a ConsensFlow started from a
+            // window was given the window's.
+            has_path_helper_root: env
+                .os(PATH_HELPER_ROOT)
+                .is_some_and(|root| env.os(GUARD_ROOT) != Some(root)),
             guard_root: None,
         }
     }
 
     /// What the guard adds to every window's environment besides its PATH: the
-    /// `PATH_HELPER_ROOT` it is given, where it is given one.
+    /// `PATH_HELPER_ROOT` it is given and, naming it as the guard's, [`GUARD_ROOT`], where it
+    /// is given one.
     pub fn guard_env(&self) -> Vec<(String, String)> {
         self.guard_root
             .iter()
-            .map(|root| (PATH_HELPER_ROOT.to_owned(), root.clone()))
+            .flat_map(|root| {
+                [PATH_HELPER_ROOT, GUARD_ROOT].map(|name| (name.to_owned(), root.clone()))
+            })
             .collect()
     }
 
@@ -97,12 +101,7 @@ impl WindowEnv {
     /// their own, which is theirs.
     #[must_use]
     pub fn with_path_helper_root(mut self, root: &std::path::Path) -> Self {
-        let theirs = self.has_path_helper_root
-            || self
-                .terminal
-                .iter()
-                .any(|(name, _)| name == PATH_HELPER_ROOT);
-        if !theirs {
+        if !self.has_path_helper_root {
             self.guard_root = Some(root.to_string_lossy().into_owned());
         }
         self
@@ -151,6 +150,10 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
 impl PaneEnv for WindowEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
         let mut env = self.terminal.clone();
+        // A root the terminal was given that the guard's replaces.
+        if self.guard_root.is_some() {
+            env.retain(|(name, _)| name != PATH_HELPER_ROOT);
+        }
         env.extend([
             ("CONSENSFLOW_URL".to_owned(), self.url.clone()),
             ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),

@@ -163,6 +163,15 @@ fn a_person_with_a_path_helper_root_of_their_own_keeps_it() {
     };
     assert_eq!(given(vec![]), Some("/ours".to_owned()));
     assert_eq!(given(vec![("PATH_HELPER_ROOT", "/theirs")]), None);
+    // A root that is the guard's, as a window gave it to a ConsensFlow started inside it, is
+    // no one's own.
+    assert_eq!(
+        given(vec![
+            ("PATH_HELPER_ROOT", "/other/member-guard-root"),
+            ("CONSENSFLOW_PATH_HELPER_ROOT", "/other/member-guard-root"),
+        ]),
+        Some("/ours".to_owned())
+    );
     // As the app's terminal said it.
     assert_eq!(
         given(vec![

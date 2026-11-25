@@ -938,3 +938,34 @@ fn every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_ove
         None
     );
 }
+
+/// The member guard's root reaches the commands of every thread a Codex window starts, resumes
+/// or forks (T-2213): its environment as the window has it, named for Codex's shell policy as
+/// the supervisor names it (`consensflow_variables`), over what the TUI said of it, so that a
+/// policy of `inherit = "core"` keeps it.
+#[test]
+fn every_start_resume_and_fork_is_given_the_guards_path_helper_root_for_its_commands() {
+    let window = cf_base::env::Env::from_vars([
+        ("CONSENSFLOW_TOKEN", "tok"),
+        ("CONSENSFLOW_PATH_HELPER_ROOT", "/h/member-guard-root"),
+        ("PATH_HELPER_ROOT", "/h/member-guard-root"),
+    ]);
+    let env = crate::arguments::consensflow_variables(&window);
+    let mut selection = Selection::new(false, None, env);
+    selection.ready();
+    let mut requests = Requests::default();
+    let mut says = |message: Value| selection.tui_said(TUI, &mut requests, &message).rewritten;
+    for message in [
+        start(1),
+        json!({ "id": 2, "method": "thread/start", "params": { "ephemeral": true, "config": { "shell_environment_policy.set.PATH_HELPER_ROOT": "/stale" } } }),
+        resume(3, B),
+        json!({ "id": 4, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [], "config": null } }),
+    ] {
+        let sent = says(message.clone()).unwrap();
+        assert_eq!(
+            sent["params"]["config"]["shell_environment_policy.set.PATH_HELPER_ROOT"],
+            "/h/member-guard-root",
+            "{message}"
+        );
+    }
+}

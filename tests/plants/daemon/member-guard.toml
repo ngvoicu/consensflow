@@ -13,6 +13,7 @@
 guard-base = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "member_guard::"]
 guard-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "member_guard::"]
 guard-shells = ["cargo", "test", "--offline", "-p", "cf", "--test", "member_guard_shells"]
+guard-codex = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "guards_path_helper_root"]
 guard-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "member_guard"]
 
 [[plant]]
@@ -64,3 +65,13 @@ runs = ["guard-daemon", "guard-shells"]
 file = "crates/cf-daemon/src/member_guard.rs"
 find = "    paths.push(b'\\n');"
 replace = "    paths.clear();"
+
+[[plant]]
+name = "member-guard: a Codex thread's commands are not given PATH_HELPER_ROOT, so a policy that keeps only core names loses the guard in a login shell"
+meant = "broker::selection::tests::every_start_resume_and_fork_is_given_the_guards_path_helper_root_for_its_commands"
+runs = ["guard-codex"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/arguments.rs"
+find = "        if root == ours {"
+replace = "        if root != ours {"

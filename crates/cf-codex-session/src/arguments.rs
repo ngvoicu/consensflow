@@ -4,7 +4,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use cf_base::env::Env;
+use cf_base::env::{Env, GUARD_ROOT, PATH_HELPER_ROOT};
 use cf_proto::codex::agent_types::AgentType;
 
 /// The flag that opens Codex in full-permission mode.
@@ -104,7 +104,9 @@ pub(crate) fn children(file: &Path, kinds: &[&AgentType]) -> Vec<OsString> {
         .collect()
 }
 
-/// ConsensFlow's own variables, to be set explicitly in Codex's shell policy: a
+/// ConsensFlow's own variables, and the member guard's `PATH_HELPER_ROOT` where the window was
+/// given the guard's (a root the person has of their own is left to their policy), to be set
+/// explicitly in Codex's shell policy: a
 /// user policy of `inherit = "core"` keeps only a handful of names, and a
 /// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_NODE` has a
 /// `cf` that reaches nothing. Everything else stays as the user's policy says.
@@ -122,6 +124,14 @@ pub(crate) fn consensflow_variables(env: &Env) -> Vec<(String, String)> {
         })
         .filter(|(name, _)| is_consensflow_variable(name))
         .collect();
+    if let (Some(root), Some(ours)) = (env.os(PATH_HELPER_ROOT), env.os(GUARD_ROOT)) {
+        if root == ours {
+            named.push((
+                PATH_HELPER_ROOT.to_owned(),
+                root.to_string_lossy().into_owned(),
+            ));
+        }
+    }
     named.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
     named
 }
@@ -362,5 +372,33 @@ mod tests {
             let said_by = split(&args(&["resume", given])).unwrap_err().to_string();
             assert_eq!(said_by, said, "{given}");
         }
+    }
+
+    /// A member's commands keep the guard in a Mac's login shells under a Codex policy that
+    /// keeps only a handful of names (`inherit = "core"`): the root goes with ConsensFlow's own
+    /// variables. A root of the person's own does not: their policy says what of theirs goes.
+    #[test]
+    fn the_guards_path_helper_root_goes_with_consensflows_variables_and_a_persons_own_does_not() {
+        let ours = Env::from_vars([
+            ("CONSENSFLOW_PATH_HELPER_ROOT", "/h/member-guard-root"),
+            ("PATH_HELPER_ROOT", "/h/member-guard-root"),
+            ("PATH", "/h/member-guard:/usr/bin"),
+        ]);
+        assert_eq!(
+            consensflow_variables(&ours),
+            pairs(&[
+                ("CONSENSFLOW_PATH_HELPER_ROOT", "/h/member-guard-root"),
+                ("PATH_HELPER_ROOT", "/h/member-guard-root"),
+            ]),
+            "and never the PATH: Codex adds folders of its own to it"
+        );
+        let theirs = Env::from_vars([("PATH_HELPER_ROOT", "/their/root")]);
+        assert!(consensflow_variables(&theirs).is_empty());
+        // A window given a root of the person's own beside a stale mark of ours.
+        let stale = Env::from_vars([
+            ("CONSENSFLOW_PATH_HELPER_ROOT", "/h/member-guard-root"),
+            ("PATH_HELPER_ROOT", "/their/root"),
+        ]);
+        assert_eq!(consensflow_variables(&stale).len(), 1);
     }
 }
