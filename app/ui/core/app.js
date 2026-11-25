@@ -543,6 +543,8 @@ async function refresh() {
     return refreshing
   }
   refreshing = (async () => {
+    // Whether this read of the board began once the output subscription stood.
+    const sinceSubscribed = terminals.isSubscribed
     try {
       const { projects } = await daemon('projects.list')
       state.projects = projects
@@ -584,6 +586,8 @@ async function refresh() {
       report(cause)
     } finally {
       refreshing = null
+      // Whether it drew a board or not, the windows not shown may now be drawn again.
+      if (sinceSubscribed) terminals.refreshed()
       if (again) {
         again = false
         void refresh()
@@ -1116,7 +1120,9 @@ async function start() {
       terminals.output(message)
     }
     // Once, for the life of the page: a second subscription ends the first.
-    await invoke('subscribe_output', { pageId, onOutput: channel })
+    const subscribed = await invoke('subscribe_output', { pageId, onOutput: channel })
+    // Only now may a window's history be pulled: the subscription fixed where it ends.
+    if (subscribed?.ok === true) terminals.subscribed()
   }
   try {
     await readMissing()

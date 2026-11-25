@@ -1,13 +1,15 @@
-//! The gate's host side (T-2126): the real pane host's API, driven line by line from a browser
-//! page's harness. Copy to `crates/cf-panes/examples/gate_bridge.rs` (untracked) and build:
+//! The gate's host side (T-2126, T-2236): the pane host as the app runs it, driven line by line
+//! from a browser page's harness (`app/tests/p5-gate/`). Build:
 //!   cargo build -p cf-panes --example gate_bridge
 //!
-//! (Moved to the repository by T-2170; the page side is app/tests/p5-gate/.)
-//!
 //! A window is a real pty whose program writes the bytes it is told on a fifo (raw, so the
-//! page's own answers, which the harness keeps in the page, are not echoed). The consumer is
-//! `forward_journaled`, the one the app runs; the hub, the journal, `attach_page`, `history`
-//! and `resize_at` are the host's own. Every message the sink takes is printed as a line.
+//! page's own answers, which the harness keeps, are not echoed), opened with the room the
+//! daemon's `pane.open` gives it. The consumer is `forward_journaled`, the one the app runs.
+//! What the page asks for is answered by the functions the app's commands call
+//! (`cf_panes::page`), under the page identity the app's `InputQueue` keeps: its start
+//! (prepare, activate), its subscription, its pulls, their end, its acknowledgements and its
+//! sizes; a navigation ends the page as the app's does. Every message the sink takes is printed
+//! as a line.
 // A test tool: a failed command stops the run, which is the report.
 #![allow(
     clippy::unwrap_used,
@@ -22,9 +24,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use cf_panes::arbiter::{EnterTiming, InputArbiter};
+use cf_panes::input_queue::InputQueue;
 use cf_panes::journal::Journal;
 use cf_panes::output_hub::{OutputHub, PaneOutputMessage};
-use cf_panes::pane_handlers::forward_journaled;
+use cf_panes::page;
+use cf_panes::pane_handlers::{default_backlog_bytes, forward_journaled};
 use cf_panes::pty::{PaneEnvironment, PaneKey, PaneTable};
 use serde_json::{json, Value};
 
@@ -73,8 +78,11 @@ fn main() {
     panes.keep_journals();
     let hub = Arc::new(OutputHub::new());
     let stdout = Arc::new(Mutex::new(std::io::stdout()));
-    let alive = Arc::new(Mutex::new(Arc::new(AtomicBool::new(true))));
-    let page = Arc::new(Mutex::new(0u64));
+    let inputs = InputQueue::new(
+        Arc::clone(&panes),
+        Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+    );
+    let mut alive = Arc::new(AtomicBool::new(true));
     let mut windows: HashMap<String, Window> = HashMap::new();
     let scratch = std::env::temp_dir().join(format!("cf-gate-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
@@ -119,7 +127,7 @@ fn main() {
                             pixel_width: 0,
                             pixel_height: 0,
                         },
-                        1 << 20,
+                        default_backlog_bytes(),
                     )
                     .unwrap();
                 let journal = program.journal.clone().unwrap();
@@ -131,7 +139,7 @@ fn main() {
                 }
                 let fifo = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
                 windows.insert(name, Window { key, journal, fifo });
-                json!({})
+                json!({"generation": generation})
             }
             "emit" => {
                 let window = windows.get_mut(&name).unwrap();
@@ -169,61 +177,86 @@ fn main() {
                 });
                 continue;
             }
+            "page_prepare" => match inputs.prepare_page(command["page"].as_str().unwrap()) {
+                Ok(()) => json!({"ok":true}),
+                Err(error) => json!({"ok":false,"error":error}),
+            },
+            "page_activate" => match inputs.activate_page(command["page"].as_str().unwrap()) {
+                Ok(()) => json!({"ok":true}),
+                Err(error) => json!({"ok":false,"error":error}),
+            },
+            "navigate" => {
+                inputs.end_page().unwrap();
+                json!({})
+            }
             "subscribe" => {
-                *page.lock().unwrap() += 1;
-                let id = *page.lock().unwrap();
+                let id = command["page"].as_str().unwrap().to_string();
                 let flag = Arc::new(AtomicBool::new(true));
-                *alive.lock().unwrap() = Arc::clone(&flag);
+                alive = Arc::clone(&flag);
                 let sink = {
-                    let (say, flag) = (say.clone(), Arc::clone(&flag));
+                    let say = say.clone();
                     Arc::new(move |message: PaneOutputMessage| {
                         if !flag.load(Ordering::SeqCst) {
                             return false;
                         }
                         let v = serde_json::to_value(&message).unwrap();
                         say(json!({"msg": {
-                            "page": id, "id": v["id"], "seq": v["seq"], "offset": v["offset"],
-                            "hex": hex(message.bytes()),
+                            "page": id, "id": v["id"], "generation": v["generation"],
+                            "seq": v["seq"], "offset": v["offset"], "hex": hex(message.bytes()),
                         }}));
                         true
                     })
                 };
-                let boundaries = panes.attach_page(&hub, sink);
-                let key = &windows[&name].key;
-                json!({"page": id, "boundary": boundaries.get(key).copied().unwrap_or(0)})
+                let answer = page::subscribe(
+                    &inputs,
+                    &panes,
+                    &hub,
+                    command["page"].as_str().unwrap(),
+                    sink,
+                );
+                json!({"answer": answer})
             }
             "gone" => {
-                alive.lock().unwrap().store(false, Ordering::SeqCst);
+                alive.store(false, Ordering::SeqCst);
                 json!({})
             }
             "history" => {
-                let window = &windows[&name];
-                let from = command["from"].as_u64();
-                let piece = panes.history(&window.key, from).unwrap();
-                json!({
-                    "reset": piece.reset, "truncated": piece.truncated, "from": piece.from,
-                    "size": [piece.size.0, piece.size.1], "seed": hex(&piece.seed),
-                    "resizes": piece.resizes.iter().map(|r| json!([r.at, r.rows, r.cols])).collect::<Vec<_>>(),
-                    "hex": hex(&piece.bytes), "boundary": piece.boundary, "done": piece.done,
-                })
+                let frame = page::history(
+                    &inputs,
+                    &panes,
+                    command["page"].as_str().unwrap(),
+                    command["id"].as_str().unwrap(),
+                    command["generation"].as_u64().unwrap(),
+                    command["from"].as_u64(),
+                );
+                json!({"hex": hex(&frame)})
             }
-            "ack" => {
-                let window = &windows[&name];
-                let _ = panes.ack(&window.key, command["seq"].as_u64().unwrap());
-                json!({})
-            }
-            "resize" => {
-                let window = &windows[&name];
-                panes
-                    .resize_at(
-                        &window.key,
-                        command["rows"].as_u64().unwrap() as u16,
-                        command["cols"].as_u64().unwrap() as u16,
-                        command["at"].as_u64(),
-                    )
-                    .unwrap();
-                json!({})
-            }
+            "done" => json!({"answer": page::history_done(
+                &inputs,
+                &panes,
+                command["page"].as_str().unwrap(),
+                command["id"].as_str().unwrap(),
+                command["generation"].as_u64().unwrap(),
+                command["consumed"].as_u64().unwrap(),
+            )}),
+            "ack" => json!({"answer": page::ack(
+                &panes,
+                command["id"].as_str().unwrap(),
+                command["generation"].as_u64().unwrap(),
+                command["seq"].as_u64().unwrap(),
+            )}),
+            "resize" => json!({"answer": page::resize(
+                &inputs,
+                &panes,
+                command["page"].as_str(),
+                command["id"].as_str().unwrap(),
+                command["generation"].as_u64().unwrap(),
+                (
+                    command["cols"].as_u64().unwrap() as u16,
+                    command["rows"].as_u64().unwrap() as u16,
+                ),
+                command["at"].as_u64(),
+            )}),
             "info" => {
                 let window = &windows[&name];
                 json!({"end": window.journal.end()})
@@ -232,7 +265,6 @@ fn main() {
                 if let Some(mut window) = windows.remove(&name) {
                     let _ = writeln!(window.fifo, "q");
                     let _ = panes.kill(&window.key);
-                    panes.forget_ended_journal(&window.key);
                 }
                 json!({})
             }

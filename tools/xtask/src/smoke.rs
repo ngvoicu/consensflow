@@ -41,7 +41,8 @@ const NO_PATH: &str = "--app takes a value (to start one with a dash: --app=-val
 /// The variable that names the cases the smoke leaves out, as the names of their test functions
 /// apart by commas: each is given to the test as `--skip`, which the test program matches by
 /// part of a case's path. A workflow sets it for a case it cannot hold yet, and the line goes
-/// when it can. CI's packaged job and the release's run set none.
+/// when it can (CI's packaged job leaves out the hidden window's, until the host stops waiting on
+/// its page for what a window prints: alpha.5's host-display core). The release's run sets none.
 const SKIP_VARIABLE: &str = "CONSENSFLOW_SMOKE_SKIP";
 
 /// What the command says where there is no bundle to run: the Windows app is held by its own script.

@@ -40,6 +40,8 @@ pub enum PaneError {
     InvalidBacklog,
     InvalidEnvironmentVariableName(String),
     NoOutputStream(PaneKey),
+    /// A pull of history from a page that has not subscribed to the output.
+    NotSubscribed,
     FutureAck {
         key: PaneKey,
         seq: u64,
@@ -115,6 +117,7 @@ impl fmt::Display for PaneError {
                 formatter,
                 "invalid environment variable name in dropEnv: {name:?}"
             ),
+            Self::NotSubscribed => write!(formatter, "pane-not-subscribed"),
             Self::NoOutputStream(key) => write!(
                 formatter,
                 "pane {} generation {} has no output stream",

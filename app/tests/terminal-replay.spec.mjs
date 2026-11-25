@@ -227,22 +227,25 @@ test('the end of a window: its history is pulled once more and let go, a later p
   const result = await page.evaluate(async () => {
     const host = P5.fakeHost({ cols: 30, rows: 8 })
     await P5.history(host, [...new TextEncoder().encode('last words\r\n')])
+    host.ended = true
     const win = P5.window('ended', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'ended' })
     host.subscribe((m) => win.link.output(m, () => win.emulator))
     win.start()
     await win.replayed
     const text = P5.state(win.emulator).text
     const done = host.done
+    const consumed = host.calls.filter(([c]) => c === 'pane_history_done').map(([, a]) => a.consumed)
     // The host keeps no more of it: a page that comes later is told there is none, and goes live.
-    host.gone = true
     const later = P5.window('later', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'later' })
     host.subscribe((m) => later.link.output(m, () => later.emulator))
     later.start()
     await later.replayed
-    return { text, done, laterText: P5.state(later.emulator).text, reports: later.reports }
+    return { text, done, consumed, laterText: P5.state(later.emulator).text, reports: later.reports }
   })
   expect(result.text).toEqual(['last words'])
   expect(result.done).toBe(1)
+  // All of the history: the offset the emulator has taken.
+  expect(result.consumed).toEqual(['last words\r\n'.length])
   expect(result.laterText).toEqual([])
   expect(result.reports).toEqual([])
 })
@@ -313,6 +316,7 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
       await win.quiet()
       out.push({
         ended,
+        done: win.calls.filter((c) => c === 'pane_history_done').length,
         text: P5.state(win.emulator).text,
         truncated: win.truncated,
         muted: win.emulator.terminal.options.disableStdin,
@@ -325,6 +329,8 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
   for (const [at, one] of result.entries()) {
     expect(one.ended).toBe(true)
     expect(one.text.join('')).toContain(`live${at}`)
+    // Nothing of the history is told of a window xterm failed on.
+    expect(one.done).toBe(0)
     expect(one.truncated).toBe(true)
     expect(one.muted).toBe(false)
     expect(one.acked).toBe(true)
@@ -389,4 +395,110 @@ test("the page reads the frame the app's pane_history command writes", async ({ 
     seed: [0x1b, 0x5b],
     bytes: [0x68, 0x69],
   })
+})
+
+/** Two windows whose history is `text`, replaying at once. */
+const kept = '\x1b[?2004hKEPT'
+
+test('an error of the page fails no replay: both windows keep their text and bracketed paste', async ({
+  page,
+}) => {
+  await blankPage(page)
+  const result = await page.evaluate(async (text) => {
+    const data = [...new TextEncoder().encode(text)]
+    const hosts = [P5.fakeHost({ cols: 30, rows: 8 }), P5.fakeHost({ cols: 30, rows: 8 })]
+    for (const host of hosts) await P5.history(host, data)
+    let writes = 0
+    const windows = hosts.map((host, i) => {
+      const win = P5.window(`good${i}`, { cols: 30, rows: 8, invoke: host.invoke, pageId: `good${i}` })
+      host.subscribe((m) => win.link.output(m, () => win.emulator))
+      const original = win.emulator.write.bind(win.emulator)
+      win.emulator.write = (bytes) => {
+        const wrote = original(bytes)
+        // A board's own paint throws while both histories are being written.
+        if (win.emulator.replaying && ++writes === 2)
+          queueMicrotask(() => {
+            throw new Error('unrelated board paint exception')
+          })
+        return wrote
+      }
+      return win
+    })
+    for (const win of windows) win.start()
+    await Promise.all(windows.map((w) => w.replayed))
+    const out = windows.map((win, i) => ({
+      truncated: win.truncated,
+      text: P5.state(win.emulator).text,
+      paste: P5.sends(win.emulator),
+      done: hosts[i].done,
+    }))
+    return { out, raised: P5.errors.slice() }
+  }, kept)
+  expect(result.raised.join()).toContain('unrelated board paint exception')
+  for (const one of result.out) {
+    expect(one.text).toEqual(['KEPT'])
+    expect(one.paste).toBe('\x1b[200~A\rB\x1b[201~')
+    expect(one.truncated).toBe(false)
+  }
+})
+
+test('an xterm that fails leaves a healthy replay beside it as it was', async ({ page }) => {
+  await blankPage(page)
+  const result = await page.evaluate(async () => {
+    const create = (name, history, sizes = 0) => {
+      const data = [...new TextEncoder().encode(history)]
+      // Each size at its offset is a write of its own, one after the other.
+      const resizes = Array.from({ length: sizes }, (_, i) => ({
+        at: Math.floor((data.length * (i + 1)) / (sizes + 1)),
+        cols: 30,
+        rows: 8,
+      }))
+      return P5.window(name, {
+        cols: 30,
+        rows: 8,
+        pageId: name,
+        invoke: async (command) =>
+          command === 'pane_history'
+            ? {
+                ok: true,
+                reset: true,
+                truncated: false,
+                from: 0,
+                size: { cols: 30, rows: 8 },
+                seed: [],
+                resizes,
+                bytes: data,
+                boundary: data.length,
+                done: true,
+              }
+            : { ok: true },
+      })
+    }
+    const bad = create('bad', 'before\x1b[8;30H\x1b[1J')
+    // The healthy one is still writing its history when the check runs, a write always pending:
+    // a hundred writes one after another take far longer than the check waits.
+    const good = create('healthy', `\x1b[?2004h${'\x1b[H'.repeat(100)}KEPT`, 100)
+    bad.start()
+    good.start()
+    await Promise.race([
+      Promise.all([bad.replayed, good.replayed]),
+      P5.sleep(5000).then(() => {
+        throw new Error('replay stuck')
+      }),
+    ])
+    return {
+      bad: { truncated: bad.truncated, calls: bad.calls.filter((c) => c === 'pane_history_done') },
+      good: {
+        truncated: good.truncated,
+        text: P5.state(good.emulator).text,
+        paste: P5.sends(good.emulator),
+      },
+    }
+  })
+  expect(result.bad.truncated).toBe(true)
+  // The failed window says nothing of its history: the host keeps it.
+  expect(result.bad.calls).toEqual([])
+  expect(result.good.truncated).toBe(false)
+  expect(result.good.text).toEqual(['KEPT'])
+  expect(result.good.paste).toBe('\x1b[200~A\rB\x1b[201~')
 })

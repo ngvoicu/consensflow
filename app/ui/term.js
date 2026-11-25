@@ -8,6 +8,9 @@ import { FitAddon, Terminal } from './vendor/xterm.js'
  */
 const SETTLE_MS = 200
 
+/** How long after an error of the page a window's replay is checked for an xterm that stopped. */
+const FAILURE_CHECK_MS = 50
+
 /** The pane host's bounds for a size (`MAX_TERMINAL_DIMENSION`): the page asks for none past it. */
 export const MAX_PANE_DIMENSION = 4096
 
@@ -361,14 +364,27 @@ export class XtermEmulator {
     this.resizeObserver.observe(host)
     /** An unfinished UTF-8 suffix, at most three bytes, for the next output. */
     this.utf8Pending = null
-    /** The replay's writes not yet done: an error of the page while they are fails them. */
+    /** The replay's writes not yet done, by the rejection each would be told as. */
     this.inflight = new Set()
     /** Whether anything was written to this xterm. */
     this.written = false
+    /** The steps xterm has made: each write it has parsed, each of its write loop's passes. */
+    this.steps = 0
+    // An error of the page fails nothing: it starts a check. An xterm that fails leaves its
+    // write loop with the failed chunk in its buffer and schedules nothing ever again; a healthy
+    // one with a write pending has its next step already scheduled, with a shorter delay than
+    // the check's, so it has made it by then.
     this.failureWatch = (event) => {
-      const failed = new Error(`xterm failed while a window's history was written: ${event.message}`)
-      for (const fail of [...this.inflight]) fail(failed)
-      this.inflight.clear()
+      if (this.inflight.size === 0) return
+      const { steps, terminal } = this
+      setTimeout(() => {
+        if (this.steps !== steps || this.terminal !== terminal) return
+        const failed = new Error(
+          `xterm failed while a window's history was written: ${event.message}`,
+        )
+        for (const fail of this.inflight) fail(failed)
+        this.inflight.clear()
+      }, FAILURE_CHECK_MS)
     }
   }
 
@@ -446,6 +462,9 @@ export class XtermEmulator {
       } else {
         this.callbacks.onReply(data)
       }
+    })
+    this.parsedSubscription = this.terminal.onWriteParsed(() => {
+      this.steps += 1
     })
     this.resizeSubscription = this.terminal.onResize(({ cols, rows }) => {
       // The sizes a replay takes are the journal's own: the pane host has them.
@@ -525,10 +544,11 @@ export class XtermEmulator {
     return new Promise((resolve, reject) => {
       // Even an empty prefix must be queued behind earlier writes: callers can
       // acknowledge this message only once those earlier bytes have been parsed.
-      // While a replay is written, a write xterm fails on never calls back: it is told as
-      // the failure it is (`mute`), where live it stays as it was.
+      // While a replay is written, a write xterm fails on never calls back: the check an error
+      // starts (`failureWatch`) tells it as the failure it is, where live it stays as it was.
       if (this.replaying) this.inflight.add(reject)
       this.terminal.write(payload, () => {
+        this.steps += 1
         this.inflight.delete(reject)
         resolve()
       })
@@ -551,7 +571,8 @@ export class XtermEmulator {
    * report and a focus report, measured in Chromium and WebKit; the switch goes on before the
    * first write because xterm reports its focus by itself once a program sets 1004), takes no
    * fit, and tells nobody of the sizes it is given; a write xterm fails on is told as a
-   * rejection. Over, it fits as a new window does.
+   * rejection, once an error and a check after it show it is the one that failed. Over, it fits
+   * as a new window does.
    */
   mute(on) {
     if (on === this.replaying) return
@@ -672,6 +693,7 @@ export class XtermEmulator {
     this.terminal.textarea?.removeEventListener('blur', this.clearPaste)
     this.userInputSubscription.dispose()
     this.dataSubscription.dispose()
+    this.parsedSubscription.dispose()
     this.resizeSubscription.dispose()
     // An xterm that failed on a write may not take down cleanly: it is left to go.
     try {

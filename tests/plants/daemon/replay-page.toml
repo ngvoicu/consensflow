@@ -1,14 +1,14 @@
 # Plants in D4's P5-C: the page that replays a window's journal muted and then takes everything
-# from the boundary live (app/ui/terminal-link.js, app/ui/term.js), the app's commands
-# (app/src-tauri/src/commands.rs) and the room of a window (crates/cf-panes/src/pane_handlers.rs).
-# A replay that answers the program, a live byte written twice or not at all, a failed replay that
-# stays stuck, a room left at 1 MiB and a pull answered to a page that is not current are
-# silent: the screen still shows something. The page's tests are app/tests/terminal-replay.spec.mjs.
+# from the boundary live (app/ui/terminal-link.js, app/ui/term.js, app/ui/core). A replay that
+# answers the program, a live byte written twice or not at all, a replay left stuck, a history
+# pulled before its subscription or let go of before the page took it, and a window left owing its
+# room are silent: the screen still shows something. The page's tests are
+# app/tests/terminal-replay.spec.mjs and, with the shipped board, app/tests/core-page.spec.mjs.
+# The host's rules are in replay-journal.toml.
 
 [run]
 page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/terminal-replay.spec.mjs", "--workers=2"]
-room = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "a_hidden_pages_slow"]
-pull = ["cargo", "test", "--offline", "-p", "app", "--", "a_pull_from_a_page_that_is_no_longer_current_is_refused"]
+board = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "pulls no history early|settles every message|drawn again first|asks to see while", "--workers=2"]
 
 [[plant]]
 name = "replay page: a replay is not muted"
@@ -57,8 +57,8 @@ runs = ["page"]
 
 [[plant.edit]]
 file = "app/ui/terminal-link.js"
-find = "      await pause(retryDelay(failures))\n    }\n  }\n\n  /** The window's history is in"
-replace = "      return null\n    }\n  }\n\n  /** The window's history is in"
+find = "      await pause(retryDelay(failures))\n      window.retrying = false"
+replace = "      return null"
 
 [[plant]]
 name = "replay page: the page's own size is journaled at the end, not where its emulator took it"
@@ -71,21 +71,76 @@ find = "      ...(window?.parsed == null ? {} : { at: window.parsed }),"
 replace = ""
 
 [[plant]]
-name = "replay page: the room is left at 1 MiB"
-meant = "a_hidden_pages_slow_acknowledgements_hold_no_program_that_prints_under_eight_mebibytes"
-runs = ["room"]
+name = "replay page: a history is pulled before the page has subscribed"
+meant = "a board that is drawn before subscribe_output has answered pulls no history early, and keeps what was there"
+runs = ["board"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = "const JOURNAL_BACKLOG_BYTES: usize = 8 * 1024 * 1024;"
-replace = "const JOURNAL_BACKLOG_BYTES: usize = 1024 * 1024;"
+file = "app/ui/terminal-link.js"
+find = "    if (!this.#subscribed) return\n"
+replace = ""
 
 [[plant]]
-name = "replay page: a pull from a page that is no longer current is answered"
-meant = "a_pull_from_a_page_that_is_no_longer_current_is_refused"
-runs = ["pull"]
+name = "replay page: a window let go of settles none of what it holds"
+meant = "a lane that leaves while its history is on its way settles every message it holds, and lets no history go"
+runs = ["board"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/commands.rs"
-find = "    match inputs.with_current_page(page_id, || panes.history(&key, from)) {\n        Err(error) => history_refusal(&error),\n        Ok(Err(PaneError::NotFound(_)))"
-replace = "    match Ok::<_, String>(panes.history(&key, from)) {\n        Err(error) => history_refusal(&error),\n        Ok(Err(PaneError::NotFound(_)))"
+file = "app/ui/terminal-link.js"
+find = "      if (window.last !== null) this.#drawn(key, window.last)\n"
+replace = ""
+
+[[plant]]
+name = "replay page: a window the person does not see is drawn again with the shown ones"
+meant = "the windows the person sees are drawn again first, a hidden one after them, one it is shown at once"
+runs = ["board"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "      if (!window.started && this.#shown(window.pane)) this.#start(window)"
+replace = "      if (!window.started) this.#start(window)"
+
+[[plant]]
+name = "replay page: a window waiting to be drawn again sends its size"
+meant = "a board that is drawn before pane_page_activate has answered pulls no history early, and keeps what was there"
+runs = ["board"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (window?.replaying) return\n"
+replace = ""
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    this.#windows.set(key, window)\n    emulator.mute?.(true)"
+replace = "    this.#windows.set(key, window)"
+
+[[plant]]
+name = "replay page: an error of the page fails the writes in flight"
+meant = "an error of the page fails no replay: both windows keep their text and bracketed paste"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "      if (this.inflight.size === 0) return\n"
+replace = "      for (const fail of this.inflight) fail(new Error('failed'))\n      if (this.inflight.size === 0) return\n"
+
+[[plant]]
+name = "replay page: an xterm that made a step is failed with the one that did not"
+meant = "an xterm that fails leaves a healthy replay beside it as it was"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "        if (this.steps !== steps || this.terminal !== terminal) return\n"
+replace = "        if (this.terminal !== terminal) return\n"
+
+[[plant]]
+name = "replay page: a window xterm fails on says its history is done"
+meant = "a window that xterm fails on is drawn clean from the boundary, marked truncated, every time"
+runs = ["page"]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = "    if (complete) void this.#historyDone(window, window.next)"
+replace = "    void this.#historyDone(window, window.next)"

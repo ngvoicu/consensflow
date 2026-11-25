@@ -41,13 +41,12 @@ impl PaneOutputMessage {
         }
     }
 
-    fn handed_to(&self) -> Option<(PaneKey, u64)> {
-        self.offset.map(|offset| {
-            (
-                PaneKey::new(&self.id, self.generation),
-                offset + self.bytes.len() as u64,
-            )
-        })
+    fn taken(&self) -> (PaneKey, Taken) {
+        let taken = Taken {
+            seq: self.seq,
+            end: self.offset.map(|offset| offset + self.bytes.len() as u64),
+        };
+        (PaneKey::new(&self.id, self.generation), taken)
     }
 }
 
@@ -66,10 +65,20 @@ impl From<PaneOutput> for PaneOutputMessage {
 struct OutputHubState {
     sink: Option<OutputSink>,
     pending: VecDeque<PaneOutputMessage>,
-    /// For each window that keeps a journal, how far its bytes have been handed to a sink that
-    /// took them: the offset a new page's history ends at ([`OutputHub::attach_page`]). Set
-    /// under the lock the sink is called under, so a byte is handed to a page or it is not.
-    handed: HashMap<PaneKey, u64>,
+    /// For each window, the last message a sink took: what a new subscription settles the room
+    /// up to, and, where the window keeps a journal, the offset its history ends at
+    /// ([`OutputHub::attach_page`]). Set under the lock the sink is called under, so a byte is
+    /// handed to a page or it is not.
+    handed: HashMap<PaneKey, Taken>,
+}
+
+/// How far a window's output has been handed to a sink that took it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Taken {
+    /// The sequence of the last message taken.
+    pub(crate) seq: u64,
+    /// The offset past its last byte, where the window keeps a journal.
+    pub(crate) end: Option<u64>,
 }
 
 /// Where one pane's bytes go. `false` means the destination is gone, and the
@@ -108,19 +117,19 @@ impl OutputHub {
         self.attach_page(sink);
     }
 
-    /// [`OutputHub::register_sink`], and what had been handed to a page for each window that
-    /// keeps a journal, read in the one hold of the lock that swaps the sink and before what
-    /// was parked is delivered to the new one: the new page's history ends there, and what
-    /// was parked is the first of its live messages.
-    pub(crate) fn attach_page(&self, sink: OutputSink) -> HashMap<PaneKey, u64> {
+    /// [`OutputHub::register_sink`], and what had been handed to a page for each window, read
+    /// in the one hold of the lock that swaps the sink and before what was parked is delivered
+    /// to the new one: the new page's history ends there, what was parked is the first of its
+    /// live messages, and the room is settled up to there and no further.
+    pub(crate) fn attach_page(&self, sink: OutputSink) -> HashMap<PaneKey, Taken> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let boundaries = state.handed.clone();
+        let handed = state.handed.clone();
         state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
-        boundaries
+        handed
     }
 
     /// Forget the windows `keep` does not name: a window that is gone has no boundary.
@@ -138,9 +147,8 @@ impl OutputHub {
             .as_ref()
             .is_some_and(|sink| sink(message.clone()))
         {
-            if let Some((key, end)) = message.handed_to() {
-                state.handed.insert(key, end);
-            }
+            let (key, taken) = message.taken();
+            state.handed.insert(key, taken);
             return;
         }
         state.sink = None;

@@ -175,6 +175,16 @@ export function namedCases() {
     add('margins I past cap: ' + n + ' refused settings, the inactive normal screen', 40, 12, [e(C2 + '2;9r' + refused(n) + C2 + '?1049h'), filler, { reload: true }, e('X')], true)
     add('margins J past cap: ' + n + ' refused settings, the alternate screen', 40, 12, [e(C2 + '?1049h' + C2 + '2;9r' + refused(n)), filler, { reload: true }, e('X')], true)
   }
+  // T-2229's finding 7: a region far down a screen as tall as the host accepts, past the cap.
+  for (const top of [1024, 2000, 4095]) {
+    add(
+      'tall screen past cap: a region from row ' + top,
+      8,
+      4096,
+      [e(C2 + top + ';4096r'), { repeat: [0], count: 9 * MIB + 1 }, { reload: true }, e('X')],
+      true,
+    )
+  }
   return cs
 }
 export function reviewCases(cases) {

@@ -6,6 +6,7 @@
 [run]
 journal = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "journal::"]
 host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "--test-threads", "2", "pty::journal_tests"]
+page = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "page::tests"]
 
 [[plant]]
 name = "journal: a byte is in the history and on the live path"
@@ -14,13 +15,13 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = """        let boundaries = state.handed.clone();
+find = """        let handed = state.handed.clone();
         state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
-        boundaries"""
+        handed"""
 replace = """        state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
@@ -35,8 +36,8 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = "                state.handed.insert(key, end);"
-replace = "                state.handed.insert(key, end.saturating_sub(1));"
+find = "            state.handed.insert(key, taken);"
+replace = "            state.handed.insert(key, Taken { end: taken.end.map(|end| end.saturating_sub(1)), ..taken });"
 
 [[plant]]
 name = "journal: the boundary is read outside the step that swaps the sink"
@@ -45,9 +46,9 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = """        let boundaries = state.handed.clone();
+find = """        let handed = state.handed.clone();
         state.sink = Some(sink);"""
-replace = """        let boundaries = state.handed.clone();
+replace = """        let handed = state.handed.clone();
         drop(state);
         std::thread::sleep(std::time::Duration::from_millis(1));
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -55,15 +56,58 @@ replace = """        let boundaries = state.handed.clone();
 
 [[plant]]
 name = "journal: a subscription does not settle the room the old page left"
-meant = "a_program_stops_at_one_mebibyte_and_a_subscription_settles_the_room_the_old_page_left"
+meant = "a_program_stops_at_one_mebibyte_and_a_subscription_settles_what_the_page_before_was_handed"
 runs = ["host"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/flow.rs"
-find = """        self.ack_all();
-        boundaries"""
-replace = """        boundaries"""
+find = """        for (key, taken) in &handed {
+            // A window that has gone takes no acknowledgement, and none is owed it.
+            let _ = self.ack(key, taken.seq);
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "journal: a subscription settles everything issued"
+meant = "subscriptions_that_refuse_do_not_grow_the_room_of_a_window"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """        for (key, taken) in &handed {
+            // A window that has gone takes no acknowledgement, and none is owed it.
+            let _ = self.ack(key, taken.seq);
+        }
+"""
+replace = """        let keys: Vec<PaneKey> = self.panes.lock().unwrap().keys().cloned().collect();
+        for key in keys {
+            let _ = self.ack(&key, u64::MAX);
+        }
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """        let highest_issued = state.next_seq.saturating_sub(1);
+        if seq > highest_issued {"""
+replace = """        let highest_issued = state.next_seq.saturating_sub(1);
+        let seq = seq.min(highest_issued);
+        if seq > highest_issued {"""
+
+[[plant]]
+name = "journal: a window's room is past what the journal keeps for a page that has not pulled"
+meant = "a_flood_before_the_first_pull_keeps_the_boundary_in_the_journal_and_the_first_question_live"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """pub fn default_backlog_bytes() -> usize {
+    DEFAULT_BACKLOG_BYTES"""
+replace = """pub fn default_backlog_bytes() -> usize {
+    8 * DEFAULT_BACKLOG_BYTES"""
 
 [[plant]]
 name = "journal: a message's offset drifts from its bytes"
@@ -162,8 +206,8 @@ runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal/tracker.rs"
-find = "            if top < bottom && top < MAX_TOP {"
-replace = "            if top < MAX_TOP {"
+find = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION) {"
+replace = "            if top < usize::from(MAX_TERMINAL_DIMENSION) {"
 
 [[plant]]
 name = "journal: a resize flood starts the journal again inside a sequence"
@@ -285,3 +329,43 @@ runs = ["host"]
 file = "crates/cf-panes/src/pty.rs"
 find = "const ENDED_JOURNALS_KEPT: usize = 16;"
 replace = "const ENDED_JOURNALS_KEPT: usize = 64;"
+
+[[plant]]
+name = "journal: the tracker keeps no region from row 1,024 on"
+meant = "a_region_far_down_the_tallest_screen_is_restored_past_the_cap"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION) {"
+replace = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION / 4) {"
+
+[[plant]]
+name = "page: a pull from a page that has not subscribed is answered"
+meant = "a_pull_is_answered_only_to_the_page_that_subscribed"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "        if self.lock_subscribed().as_deref() != Some(page_id) {"
+replace = "        if self.lock_subscribed().is_none() && page_id.is_empty() {"
+
+[[plant]]
+name = "page: an ended window's history is forgotten short of its end"
+meant = "an_ended_windows_history_is_forgotten_only_where_the_page_took_all_of_it"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "        kept.retain(|(held, journal)| held != key || journal.end() != consumed);"
+replace = "        kept.retain(|(held, journal)| held != key || journal.end() > consumed + 1);"
+
+[[plant]]
+name = "page: a pull from a page that is no longer current is answered"
+meant = "a_pull_is_answered_only_to_the_page_that_subscribed"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = "    match inputs.with_current_page(page_id, || panes.history(page_id, &key, from)) {"
+replace = "    match Ok::<_, String>(panes.history(page_id, &key, from)) {"

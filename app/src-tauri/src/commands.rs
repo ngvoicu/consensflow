@@ -11,12 +11,10 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputQueue, InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, PageInputCompletion};
 use cf_panes::output_hub::PaneOutputMessage;
-use cf_panes::pty::{PaneError, PaneTable};
-use cf_panes::validation::{
-    decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
-};
+use cf_panes::page;
+use cf_panes::validation::{decode_page_bytes, pane_key, validate_text};
 
 pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
@@ -264,6 +262,8 @@ pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, page_id: String, ticket:
 }
 
 #[tauri::command]
+// A command's parameters are its arguments, so it takes as many as the page sends.
+#[allow(clippy::too_many_arguments)]
 pub async fn pane_resize<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -274,29 +274,20 @@ pub async fn pane_resize<R: Runtime>(
     at: Option<u64>,
 ) -> Value {
     crate::panics::settled("pane_resize", async move {
-        if let Err(error) = validate_size(cols, rows) {
-            return json!({"ok":false,"error":error});
-        }
-        let key = match pane_key(&id, generation) {
-            Ok(key) => key,
-            Err(error) => return json!({"ok":false,"error":error}),
-        };
         let (panes, inputs) = {
             let state = app.state::<AppRuntime>();
             (Arc::clone(&state.panes), Arc::clone(&state.inputs))
         };
-        // The offset is the current page's: a size that is not (a page that has gone, or one
-        // that does not say) takes the journal's end.
-        let at = at.filter(|_| {
-            page_id
-                .as_deref()
-                .is_some_and(|page| inputs.page_is_current(page).is_ok())
-        });
         run_blocking("pane_resize", move || {
-            match panes.resize_at(&key, rows, cols, at) {
-                Ok(()) => json!({"ok":true}),
-                Err(error) => json!({"ok":false,"error":error.to_string()}),
-            }
+            page::resize(
+                &inputs,
+                &panes,
+                page_id.as_deref(),
+                &id,
+                generation,
+                (cols, rows),
+                at,
+            )
         })
         .await
     })
@@ -304,11 +295,7 @@ pub async fn pane_resize<R: Runtime>(
 }
 
 /// A window's history for the page now subscribed, from `from` (none: the page has nothing):
-/// one piece of at most 1 MiB, never past the boundary the page's subscription fixed
-/// ([`cf_panes::pty::PaneTable::history`]). The answer is raw bytes, not a list of numbers:
-/// four bytes (little endian) for the length of a header of JSON, the header, the seed's
-/// bytes, then the journal's. A refusal is a header alone with `ok` false: a page that is not
-/// the current one gets `pane-input-stale-page`.
+/// raw bytes, not a list of numbers ([`cf_panes::page::history`]).
 #[tauri::command]
 pub async fn pane_history<R: Runtime>(
     app: AppHandle<R>,
@@ -322,91 +309,28 @@ pub async fn pane_history<R: Runtime>(
         (Arc::clone(&state.panes), Arc::clone(&state.inputs))
     };
     let frame = tauri::async_runtime::spawn_blocking(move || {
-        history_answer(&inputs, &panes, &page_id, &id, generation, from)
+        page::history(&inputs, &panes, &page_id, &id, generation, from)
     })
     .await
-    .unwrap_or_else(|_| history_refusal(&crate::panics::failed("pane_history")));
+    .unwrap_or_else(|_| page::history_refusal(&crate::panics::failed("pane_history")));
     tauri::ipc::Response::new(frame)
 }
 
-/// What `pane_history` answers: the frame of one piece, or of the refusal.
-fn history_answer(
-    inputs: &InputQueue,
-    panes: &PaneTable,
-    page_id: &str,
-    id: &str,
-    generation: u64,
-    from: Option<u64>,
-) -> Vec<u8> {
-    let key = match pane_key(id, generation) {
-        Ok(key) => key,
-        Err(error) => return history_refusal(&error),
-    };
-    // Under the page's identity: a page that is not the current one, or that a new one is
-    // replacing, is answered no piece.
-    match inputs.with_current_page(page_id, || panes.history(&key, from)) {
-        Err(error) => history_refusal(&error),
-        Ok(Err(PaneError::NotFound(_))) => history_refusal("pane-not-found"),
-        Ok(Err(error)) => history_refusal(&error.to_string()),
-        Ok(Ok(piece)) => history_frame(&piece),
-    }
-}
-
-/// `header` as JSON, framed with `seed` and `bytes` ([`pane_history`]).
-fn history_frame_of(header: &Value, seed: &[u8], bytes: &[u8]) -> Vec<u8> {
-    let header = header.to_string();
-    let mut frame = Vec::with_capacity(4 + header.len() + seed.len() + bytes.len());
-    frame.extend_from_slice(&(header.len() as u32).to_le_bytes());
-    frame.extend_from_slice(header.as_bytes());
-    frame.extend_from_slice(seed);
-    frame.extend_from_slice(bytes);
-    frame
-}
-
-fn history_refusal(error: &str) -> Vec<u8> {
-    history_frame_of(&json!({"ok":false,"error":error}), &[], &[])
-}
-
-fn history_frame(piece: &cf_panes::journal::Piece) -> Vec<u8> {
-    let header = json!({
-        "ok": true,
-        "reset": piece.reset,
-        "truncated": piece.truncated,
-        "from": piece.from,
-        "size": {"rows": piece.size.0, "cols": piece.size.1},
-        "seedLength": piece.seed.len(),
-        "resizes": piece.resizes.iter()
-            .map(|size| json!({"at": size.at, "rows": size.rows, "cols": size.cols}))
-            .collect::<Vec<_>>(),
-        "boundary": piece.boundary,
-        "done": piece.done,
-    });
-    history_frame_of(&header, &piece.seed, &piece.bytes)
-}
-
-/// The page has what it needs of a window's history (a window that has ended keeps its
-/// journal for it until then) or has retired the window: the journal of an ended window is
-/// forgotten.
+/// The page's emulator has taken all of the history it pulled ([`cf_panes::page::history_done`]).
 #[tauri::command]
 pub async fn pane_history_done<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
     id: String,
     generation: u64,
+    consumed: u64,
 ) -> Value {
     crate::panics::settled("pane_history_done", async move {
-        let key = match pane_key(&id, generation) {
-            Ok(key) => key,
-            Err(error) => return json!({"ok":false,"error":error}),
-        };
         let (panes, inputs) = {
             let state = app.state::<AppRuntime>();
             (Arc::clone(&state.panes), Arc::clone(&state.inputs))
         };
-        match inputs.with_current_page(&page_id, || panes.forget_ended_journal(&key)) {
-            Ok(()) => json!({"ok":true}),
-            Err(error) => json!({"ok":false,"error":error}),
-        }
+        page::history_done(&inputs, &panes, &page_id, &id, generation, consumed)
     })
     .await
 }
@@ -419,26 +343,11 @@ pub async fn pane_ack<R: Runtime>(
     seq: u64,
 ) -> Value {
     crate::panics::settled("pane_ack", async move {
-        if let Err(error) = validate_seq(seq) {
-            return json!({"ok":false,"error":error});
-        }
-        let key = match pane_key(&id, generation) {
-            Ok(key) => key,
-            Err(error) => return json!({"ok":false,"error":error}),
-        };
         let panes = {
             let state = app.state::<AppRuntime>();
             Arc::clone(&state.panes)
         };
-        match panes.ack(&key, seq) {
-            Ok(()) => json!({"ok":true}),
-            // `gone`: the window is not there to acknowledge; any other refusal is tried again.
-            Err(error) => json!({
-                "ok":false,
-                "error":error.to_string(),
-                "gone":matches!(error, PaneError::NotFound(_) | PaneError::NoOutputStream(_)),
-            }),
-        }
+        page::ack(&panes, &id, generation, seq)
     })
     .await
 }
@@ -558,7 +467,8 @@ pub async fn daemon_request<R: Runtime>(
 /// page acknowledges; sends to a page that has gone still succeed (a
 /// channel's send is a script the webview runs), so those bytes stayed owed,
 /// and a pane printing faster than the page drew at the reload never printed
-/// again, its harness waiting on its terminal for good.
+/// again, its harness waiting on its terminal for good. Only what the page
+/// before was handed is settled: what waits for this page stays charged.
 ///
 /// And it is when a new page hears where the daemon stands: what was told
 /// before it listened (a first start that failed while the page loaded) is
@@ -579,19 +489,20 @@ pub async fn subscribe_output<R: Runtime>(
                 Arc::clone(&state.daemon),
             )
         };
-        if let Err(error) = inputs.with_current_page(&page_id, || {
-            // Once the new page listens: everything sent before it went to the old. The pane
-            // table swaps the sink and settles the room in one step, and tells the journals of
-            // windows that keep them where the new page's history ends.
-            panes.attach_page(
-                &output,
-                Arc::new(move |message| on_output.send(message).is_ok()),
-            );
-        }) {
-            return json!({"ok":false,"error":error});
+        // Once the new page listens: everything sent before it went to the old. The pane table
+        // swaps the sink and settles what the page before was handed in one step, and tells the
+        // journals of windows that keep them where the new page's history ends.
+        let answer = page::subscribe(
+            &inputs,
+            &panes,
+            &output,
+            &page_id,
+            Arc::new(move |message| on_output.send(message).is_ok()),
+        );
+        if answer["ok"] == true {
+            daemon.tell_again();
         }
-        daemon.tell_again();
-        json!({"ok":true})
+        answer
     })
     .await
 }
@@ -638,66 +549,53 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 mod tests {
     use super::*;
 
-    /// A frame's header, its seed and its bytes, as the page reads one.
-    fn read_frame(frame: &[u8]) -> (Value, Vec<u8>, Vec<u8>) {
-        let length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
-        let header: Value = serde_json::from_slice(&frame[4..4 + length]).unwrap();
-        let seed_end = 4 + length + header["seedLength"].as_u64().unwrap_or(0) as usize;
-        (
-            header,
-            frame[4 + length..seed_end].to_vec(),
-            frame[seed_end..].to_vec(),
-        )
-    }
-
-    /// The frame the page reads (`historyFrame` in terminal-link.js, which the page suite holds
-    /// to these same bytes).
+    /// The three commands of a reload as the page calls them, over the app's own state: a pull
+    /// before the page has subscribed is refused, one after it is answered, and the history is
+    /// asked to be let go only with the whole of it taken.
     #[test]
-    fn a_piece_of_history_is_framed_as_the_page_reads_it() {
-        let piece = cf_panes::journal::Piece {
-            reset: true,
-            truncated: false,
-            from: 5,
-            size: (8, 30),
-            seed: vec![0x1b, 0x5b],
-            resizes: vec![cf_panes::journal::Resize {
-                at: 6,
-                rows: 9,
-                cols: 31,
-            }],
-            bytes: vec![b'h', b'i'],
-            boundary: 7,
-            done: true,
-        };
-        let frame = history_frame(&piece);
-        let (header, seed, bytes) = read_frame(&frame);
-        // The same header, bytes and seed the page suite's frame holds.
-        assert_eq!(
-            header,
-            json!({"ok":true,"reset":true,"truncated":false,"from":5,"size":{"rows":8,"cols":30},
-                   "seedLength":2,"resizes":[{"at":6,"rows":9,"cols":31}],"boundary":7,"done":true})
-        );
-        assert_eq!(seed, [0x1b, 0x5b]);
-        assert_eq!(bytes, b"hi");
-    }
-
-    /// A pull from a page that is not the current one is refused (a page that reloaded, or one
-    /// a new page is replacing): no piece of any window goes to it.
-    #[test]
-    fn a_pull_from_a_page_that_is_no_longer_current_is_refused() {
+    fn a_reloading_pages_commands_subscribe_pull_and_settle_the_history() {
         let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(cf_panes::arbiter::InputArbiter::new(
-            cf_panes::arbiter::EnterTiming::fixed(0),
-        ));
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
-        inputs.begin_page("old").unwrap();
-        let (header, _, _) = read_frame(&history_answer(&inputs, &panes, "other", "w", 1, None));
-        assert_eq!(header["ok"], false);
-        assert_eq!(header["error"], "pane-input-stale-page");
-        // The current page, asking for a window the table does not hold, is told so.
-        let (header, _, _) = read_frame(&history_answer(&inputs, &panes, "old", "w", 1, None));
-        assert_eq!(header["ok"], false);
-        assert_eq!(header["error"], "pane-not-found");
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+        inputs.begin_page("page").unwrap();
+        let pulled = || {
+            let response = tauri::async_runtime::block_on(pane_history(
+                handle.clone(),
+                "page".into(),
+                "w".into(),
+                1,
+                None,
+            ));
+            let body = tauri::ipc::IpcResponse::body(response).unwrap();
+            let tauri::ipc::InvokeResponseBody::Raw(frame) = body else {
+                panic!("pane_history answers raw bytes");
+            };
+            let length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
+            serde_json::from_slice::<Value>(&frame[4..4 + length]).unwrap()
+        };
+        assert_eq!(pulled()["error"], "pane-not-subscribed");
+        let subscribed = tauri::async_runtime::block_on(subscribe_output(
+            handle.clone(),
+            "page".into(),
+            Channel::new(|_| Ok(())),
+        ));
+        assert_eq!(subscribed, json!({"ok":true}));
+        assert_eq!(pulled()["error"], "pane-not-found");
+        let done = tauri::async_runtime::block_on(pane_history_done(
+            handle.clone(),
+            "page".into(),
+            "w".into(),
+            1,
+            0,
+        ));
+        assert_eq!(done, json!({"ok":false}), "there is no journal to forget");
+        drop(app);
     }
 
     /// A page call as the page makes it: the command's JSON arguments, with the
@@ -1573,7 +1471,7 @@ mod tests {
 
     /// A reloaded page finds every pane still printing. A pane stops reading
     /// once a window of its output is unacknowledged, and what the page
-    /// before was sent and never drew is never acknowledged: a pane that had
+    /// before was handed and never drew is never acknowledged: a pane that had
     /// filled its window printed nothing more, its harness waiting on its
     /// terminal for good.
     #[cfg(unix)]
@@ -1582,6 +1480,7 @@ mod tests {
         const BACKLOG_BYTES: usize = 1024;
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
+        panes.keep_journals();
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let streamed = panes
@@ -1599,49 +1498,51 @@ mod tests {
                 BACKLOG_BYTES,
             )
             .expect("open a pane that never stops printing");
-        // The page that reloaded was sent a window's worth and drew none of it.
-        let mut sent = 0;
-        while sent < BACKLOG_BYTES {
-            sent += streamed
-                .output
-                .recv_timeout(Duration::from_secs(5))
-                .expect("output up to the window")
-                .bytes
-                .len();
-        }
-        assert!(
-            matches!(
-                streamed.output.recv_timeout(Duration::from_millis(150)),
-                Err(mpsc::RecvTimeoutError::Timeout)
-            ),
-            "the pane waits for its window to be read"
-        );
-
         let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
-        assert_eq!(
-            pane_page_prepare(app.handle().clone(), "new-page".into()),
-            json!({"ok":true})
-        );
-        assert_eq!(
-            pane_page_activate(app.handle().clone(), "new-page".into()),
-            json!({"ok":true})
-        );
-        let subscribed = tauri::async_runtime::block_on(subscribe_output(
-            app.handle().clone(),
-            "new-page".to_string(),
-            Channel::new(|_| Ok(())),
-        ));
-        assert_eq!(subscribed["ok"], true);
-        streamed
-            .output
-            .recv_timeout(Duration::from_secs(5))
+        let hub = Arc::clone(&app.state::<AppRuntime>().output);
+        // The app's own consumer of the window's output.
+        let journal = streamed.journal.clone().expect("a journal");
+        let output = streamed.output;
+        let consumer = thread::spawn(move || {
+            cf_panes::pane_handlers::forward_journaled(&output, &journal, &hub, |_| {});
+        });
+        // A page subscribes and is handed a window's worth; it draws none of it.
+        let page = |page: &str| {
+            let (sender, taken) = mpsc::channel();
+            assert_eq!(
+                pane_page_prepare(app.handle().clone(), page.into()),
+                json!({"ok":true})
+            );
+            assert_eq!(
+                pane_page_activate(app.handle().clone(), page.into()),
+                json!({"ok":true})
+            );
+            let subscribed = tauri::async_runtime::block_on(subscribe_output(
+                app.handle().clone(),
+                page.to_string(),
+                Channel::new(move |_| {
+                    let _ = sender.send(());
+                    Ok(())
+                }),
+            ));
+            assert_eq!(subscribed["ok"], true);
+            taken
+        };
+        let old = page("old-page");
+        old.recv_timeout(Duration::from_secs(5))
+            .expect("output up to the window");
+        // What more there is of the window is taken until it waits on the old page.
+        while old.recv_timeout(Duration::from_millis(300)).is_ok() {}
+        let new = page("new-page");
+        new.recv_timeout(Duration::from_secs(5))
             .expect("the pane prints again for the new page");
 
         panes.kill(&streamed.key).expect("kill the pane");
+        consumer.join().expect("the consumer");
         drop(app);
     }
 

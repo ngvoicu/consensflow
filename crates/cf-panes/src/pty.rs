@@ -194,8 +194,11 @@ pub struct PaneTable {
     close_grace: Duration,
     /// Whether windows opened from now on keep a journal.
     journals: AtomicBool,
+    /// The page that subscribed last ([`PaneTable::attach_page`]): the only one a pull of
+    /// history answers.
+    subscribed: Mutex<Option<String>>,
     /// The journals of windows that have ended, the last [`ENDED_JOURNALS_KEPT`], until their
-    /// page forgets them ([`PaneTable::forget_ended_journal`]).
+    /// page forgets them ([`PaneTable::forget_consumed_journal`]).
     ended_journals: Mutex<VecDeque<(PaneKey, Arc<Journal>)>>,
     /// A test's hold on the opens that reach the table ([`PaneTable::hold_opens`]).
     #[cfg(any(test, feature = "test-support"))]
@@ -252,6 +255,7 @@ impl PaneTable {
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
             journals: AtomicBool::new(false),
+            subscribed: Mutex::new(None),
             ended_journals: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             open_hold: Mutex::new(None),

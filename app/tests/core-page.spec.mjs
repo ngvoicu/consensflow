@@ -904,6 +904,12 @@ async function open(page, given = model()) {
         window.__answered.push(args.operation)
         return result
       }
+      // The pane host's commands as a case gives them (`__paneHost`): the page's start,
+      // its subscription and its pulls of history; undefined leaves them as they are below.
+      if (window.__paneHost) {
+        const answered = window.__paneHost(command, args)
+        if (answered !== undefined) return answered
+      }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
         return { ok: true }
@@ -19791,4 +19797,208 @@ test('UTF-8 cut random malformed streams match an uncut xterm', async ({ page })
   })
   expect(result.runs).toBe(400)
   expect(result.failures).toEqual([])
+})
+
+/**
+ * P5-C against the shipped board with the app's own order of start (T-2229's probes): a stand-in
+ * pane host that says what the real one says to a page's pull and keeps what was asked of it
+ * (`__asked`). `plan` says how it answers: `history` (text kept before the reload, by pane id),
+ * `refreshAt` (the command at which the board changes once, before it answers: a refresh that
+ * draws lanes early), `holdPull` (pane ids whose pull waits for `__release[id]`) and
+ * `parked` (messages printed at the subscription, by pane id).
+ */
+const paneHost = async (page, plan) =>
+  page.addInitScript((plan) => {
+    window.__asked = []
+    window.__pull = {}
+    let active = false
+    let subscribed = false
+    let changed = false
+    const frame = (header, text = '') => {
+      const head = new TextEncoder().encode(JSON.stringify(header))
+      const bytes = new TextEncoder().encode(text)
+      const out = new Uint8Array(4 + head.length + bytes.length)
+      new DataView(out.buffer).setUint32(0, head.length, true)
+      out.set(head, 4)
+      out.set(bytes, 4 + head.length)
+      return out.buffer
+    }
+    const piece = (text) =>
+      frame(
+        {
+          ok: true,
+          reset: true,
+          truncated: false,
+          from: 0,
+          size: { rows: 24, cols: 80 },
+          resizes: [],
+          boundary: text.length,
+          done: true,
+          seedLength: 0,
+        },
+        text,
+      )
+    /** The board changes now, and the page's 50 ms refresh has drawn it, before this answers. */
+    const redrawn = async () => {
+      window.__listeners.get('state-changed')({ payload: { reason: 'task' } })
+      await new Promise((done) => setTimeout(done, 300))
+    }
+    window.__paneHost = (command, args) => {
+      if (command.startsWith('pane_input') || command === 'pane_reply_enqueue') return undefined
+      window.__asked.push([command, args?.id, args?.consumed])
+      if (command === 'pane_page_prepare' || command === 'pane_page_activate') {
+        return (async () => {
+          if (plan.refreshAt === command && !changed) {
+            changed = true
+            await redrawn()
+          }
+          if (command === 'pane_page_activate') active = true
+          return { ok: true }
+        })()
+      }
+      if (command === 'subscribe_output') {
+        window.__output = args.onOutput
+        return (async () => {
+          if (plan.refreshAt === command && !changed) {
+            changed = true
+            await redrawn()
+          }
+          subscribed = true
+          window.__asked.push(['subscribed'])
+          for (const [id, generation] of plan.parked ?? []) {
+            args.onOutput.onmessage({ id, generation, seq: 1, offset: 0, bytes: [88] })
+          }
+          return { ok: true }
+        })()
+      }
+      if (command === 'pane_history') {
+        if (!active) return frame({ ok: false, error: 'pane-input-stale-page' })
+        if (!subscribed) return frame({ ok: false, error: 'pane-not-subscribed' })
+        const text = plan.history?.[args.id] ?? ''
+        if (!(plan.holdPull ?? []).includes(args.id)) return piece(text)
+        return new Promise((done) => {
+          window.__pull[args.id] = () => done(piece(text))
+        })
+      }
+      if (command === 'pane_history_done') return { ok: false }
+      return undefined
+    }
+  }, plan)
+
+const asked = (page, command, id) =>
+  page.evaluate(
+    ([command, id]) =>
+      window.__asked.filter(([c, i]) => c === command && (id === undefined || i === id)),
+    [command, id],
+  )
+
+for (const refreshAt of ['pane_page_activate', 'subscribe_output']) {
+  test(`a board that is drawn before ${refreshAt} has answered pulls no history early, and keeps what was there`, async ({
+    page,
+  }) => {
+    await paneHost(page, { refreshAt, history: { 'p1-chief': 'KEPT_BEFORE_RELOAD' } })
+    await open(page, { ...model(), realTerminals: true })
+    await page.evaluate(() =>
+      window.__output.onmessage({
+        id: 'p1-chief',
+        generation: 5,
+        seq: 8,
+        offset: 'KEPT_BEFORE_RELOAD'.length,
+        bytes: [...new TextEncoder().encode('|AFTER_B|')],
+      }),
+    )
+    const rows = page.locator('#stage [data-handle="chief"] .xterm-rows')
+    await expect(rows).toContainText('KEPT_BEFORE_RELOAD|AFTER_B|')
+    // No pull, and no size, before the subscription stood and the history was in.
+    const order = await page.evaluate(() => window.__asked.map(([command, id]) => [command, id]))
+    const at = (command, id) => order.findIndex(([c, i]) => c === command && (!id || i === id))
+    expect(at('pane_history', 'p1-chief')).toBeGreaterThan(at('subscribed'))
+    const resized = at('pane_resize', 'p1-chief')
+    if (resized >= 0) expect(resized).toBeGreaterThan(at('pane_history', 'p1-chief'))
+  })
+}
+
+test('a lane that leaves while its history is on its way settles every message it holds, and lets no history go', async ({
+  page,
+}) => {
+  await paneHost(page, { holdPull: ['p1-zeus'] })
+  await open(page, { ...model(), realTerminals: true })
+  await expect.poll(() => page.evaluate(() => window.__pull['p1-zeus'] !== undefined)).toBe(true)
+  await page.evaluate(() => {
+    const bytes = new Uint8Array(64 * 1024)
+    for (let seq = 1; seq <= 128; seq += 1) {
+      window.__output.onmessage({
+        id: 'p1-zeus',
+        generation: 7,
+        seq,
+        offset: (seq - 1) * bytes.length,
+        bytes,
+      })
+    }
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+    lane.pane = null
+    lane.activity = { state: 'closed' }
+    window.__listeners.get('state-changed')()
+  })
+  // Every message it was handed, though none of it is drawn: the host's room is theirs.
+  await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(128)
+  await page.evaluate(() => window.__pull['p1-zeus']())
+  await page.evaluate(() =>
+    window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 129, offset: 8 << 20, bytes: [65] }),
+  )
+  await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(129)
+  expect(await asked(page, 'pane_history_done', 'p1-zeus')).toEqual([])
+})
+
+/** The board with a session of zeus whose terminal the human has not asked to see. */
+const hiddenSession = () => {
+  const data = model()
+  const zeus = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus').participant
+  data.boards[1].lanes.push({
+    participant: session(20, zeus, 'amber-pine'),
+    tasks: [],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  return data
+}
+
+test('the windows the person sees are drawn again first, a hidden one after them, one it is shown at once', async ({
+  page,
+}) => {
+  await paneHost(page, {
+    parked: [['p1-zeus-amber-pine', 9]],
+    holdPull: ['p1-chief', 'p1-zeus'],
+  })
+  await open(page, { ...hiddenSession(), realTerminals: true })
+  await expect.poll(() => page.evaluate(() => Object.keys(window.__pull).sort())).toEqual([
+    'p1-chief',
+    'p1-zeus',
+  ])
+  await page.waitForTimeout(150)
+  expect(await asked(page, 'pane_history', 'p1-zeus-amber-pine'), 'a hidden window waits').toEqual(
+    [],
+  )
+  await page.evaluate(() => window.__pull['p1-chief']())
+  await page.waitForTimeout(150)
+  expect(
+    await asked(page, 'pane_history', 'p1-zeus-amber-pine'),
+    'and while one of the shown is still being drawn',
+  ).toEqual([])
+  await page.evaluate(() => window.__pull['p1-zeus']())
+  await expect
+    .poll(async () => (await asked(page, 'pane_history', 'p1-zeus-amber-pine')).length)
+    .toBe(1)
+})
+
+test('a hidden window the person asks to see while it waits is drawn again at once', async ({
+  page,
+}) => {
+  await paneHost(page, { parked: [['p1-zeus-amber-pine', 9]], holdPull: ['p1-chief', 'p1-zeus'] })
+  await open(page, { ...hiddenSession(), realTerminals: true })
+  await unfold(page)
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect
+    .poll(async () => (await asked(page, 'pane_history', 'p1-zeus-amber-pine')).length)
+    .toBe(1)
 })

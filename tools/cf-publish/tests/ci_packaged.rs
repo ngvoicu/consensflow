@@ -31,9 +31,9 @@ const BUILT: &str = "app/src-tauri/target/release/bundle/macos/ConsensFlow.app";
 /// The variable `cargo xtask smoke` reads the cases to leave out from (tools/xtask/src/smoke.rs).
 const SKIP: &str = "CONSENSFLOW_SMOKE_SKIP";
 
-/// The app hidden while a window's agent floods it, held to read the flood in time: the job runs
-/// it (P5-C: a window's room is the journal's 8 MiB). The name of the case's function in
-/// crates/cf-e2e/tests/smoke/hidden.rs.
+/// The case the job leaves out: the app hidden while a window's agent floods it, held to read the
+/// flood in time where the host does not wait on its page for each message (alpha.5's host-display
+/// core, A5-04). The name of the case's function in crates/cf-e2e/tests/smoke/hidden.rs.
 const HIDDEN: &str = "the_built_app_reads_its_windows_while_it_is_hidden";
 
 /// The names of the smoke's cases, the ones its test ignores for there being no built app to give
@@ -152,17 +152,33 @@ mod the_packaged_job_of_ci {
     }
 
     #[test]
-    fn leaves_no_case_of_the_smoke_out_the_hidden_windows_among_them() {
+    fn leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page() {
         let (_, smoke) = running("cargo xtask smoke");
-        // The command reads CONSENSFLOW_SMOKE_SKIP for the cases it leaves out; the job sets none.
-        assert!(smoke.env().is_empty(), "{}", smoke.text());
-        assert!(!read("ci.yml").contains(SKIP), "the job names a case it leaves out");
-        // The hidden window's case is a case there is, and runs with the rest (P5-C: a window's
-        // room is the journal's 8 MiB, so a hidden page's slow acknowledgements hold no flood).
+        // One variable, the one the command reads, with the one case in it. The command has no
+        // option for it, so the script stays as the test above holds it.
+        assert_eq!(
+            smoke.env(),
+            [(SKIP.to_string(), HIDDEN.to_string())],
+            "{}",
+            smoke.text()
+        );
+        // It names a case there is, which the test program matches by part of a path: one that
+        // is no case's name leaves nothing out, and one that is part of another's leaves that out
+        // too.
         let cases = smoke_cases();
+        assert_eq!(
+            cases.iter().filter(|case| case.contains(HIDDEN)).count(),
+            1,
+            "{cases:?}"
+        );
         assert!(cases.iter().any(|case| case == HIDDEN), "{cases:?}");
         // The cases that stay are the pane case and the app's answer to a command that panics.
         assert!(cases.len() >= 3, "{cases:?}");
+        // And the line says what it waits for, in words the next person who reads it finds
+        // (comments are left out of the job's text above, so the whole file is read).
+        let ci = read("ci.yml");
+        let said = ci.lines().filter(|line| line.contains("A5-04")).count();
+        assert!(said >= 1, "ci.yml does not say what the case waits for");
     }
 
     #[test]

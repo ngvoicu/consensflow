@@ -153,6 +153,12 @@ function inputChunks(data) {
  * the program nothing and takes no typing), and then takes the live messages from the boundary
  * the host fixed for this page, each exactly once, in the order of their offsets. What the
  * window printed before the journal begins is not shown, and the card says so.
+ *
+ * No history is pulled before the page's subscription stands (the boundary is the
+ * subscription's). Windows the person sees are drawn again first; the others, one at a time,
+ * once the page has read its board and none of the shown ones is being drawn. A window is muted
+ * from its making: one that waits its turn takes no key and tells nobody of a size, and what it
+ * is sent waits, unacknowledged, for it.
  */
 export class TerminalLink {
   #invoke
@@ -169,18 +175,73 @@ export class TerminalLink {
   /** By pane: where its emulator stands in the window's output (`#begin`). */
   #windows = new Map()
   #onTruncated
+  /** Whether the pane `id:generation` is one the person sees now. */
+  #shown
+  /** The page's output subscription stands: a history may be pulled. */
+  #subscribed = false
+  /** The page has read its board since the subscription: the windows not shown may begin. */
+  #refreshed = false
 
-  constructor({ invoke, registry, report, pageId = crypto.randomUUID(), onTruncated = () => {} }) {
+  constructor({
+    invoke,
+    registry,
+    report,
+    pageId = crypto.randomUUID(),
+    onTruncated = () => {},
+    shown = () => true,
+  }) {
     this.#invoke = invoke
     this.#registry = registry
     this.#report = report
     this.#pageId = pageId
     this.#onTruncated = onTruncated
+    this.#shown = shown
+  }
+
+  /** The page's subscription to the output has answered: the shown windows are drawn again now. */
+  subscribed() {
+    this.#subscribed = true
+    this.schedule()
+  }
+
+  /** The page has read its board since its subscription: a window not shown may now begin. */
+  refreshed() {
+    this.#refreshed = true
+    this.schedule()
+  }
+
+  /** Whether the page's subscription stands. */
+  get isSubscribed() {
+    return this.#subscribed
   }
 
   /**
-   * A pane's emulator is made: it gets the window's history before anything live, and the
-   * messages that come meanwhile wait. Once for a pane.
+   * Begin the replays that may begin now: every window the person sees, at once; then, once the
+   * board has been read, one of the others, where none is being drawn (one that waits to try a
+   * pull again holds nobody back). Called whenever any of that may have changed.
+   */
+  schedule() {
+    if (!this.#subscribed) return
+    for (const window of this.#windows.values()) {
+      if (!window.started && this.#shown(window.pane)) this.#start(window)
+    }
+    if (!this.#refreshed) return
+    const drawing = [...this.#windows.values()].some(
+      (window) => window.started && window.replaying && !window.retrying,
+    )
+    if (drawing) return
+    const next = [...this.#windows.values()].find((window) => !window.started)
+    if (next !== undefined) this.#start(next)
+  }
+
+  #start(window) {
+    window.started = true
+    void this.#replay(window)
+  }
+
+  /**
+   * A pane's emulator is made: it is muted from now, it gets the window's history before
+   * anything live, and the messages that come meanwhile wait. Once for a pane.
    */
   begin(pane, emulator = this.#registry.get(pane)) {
     const key = paneKey(pane)
@@ -192,6 +253,11 @@ export class TerminalLink {
       emulator,
       /** Until the history is in, live messages wait. */
       replaying: true,
+      /** Whether its replay has begun, and whether it waits to try a pull again. */
+      started: false,
+      retrying: false,
+      /** The last message the page was sent for it: what a window let go of is settled up to. */
+      last: null,
       /** The offset of the next byte the emulator is handed; null until the history or the first message says. */
       next: null,
       /** The offset the emulator has parsed, not counting a character it holds back. */
@@ -202,51 +268,55 @@ export class TerminalLink {
       truncated: false,
     }
     this.#windows.set(key, window)
-    void this.#replay(window)
+    emulator.mute?.(true)
   }
 
   /** Pull the window's pieces, write them muted, and go live from the boundary. */
   async #replay(window) {
     const { emulator } = window
-    emulator.mute?.(true)
+    let complete = false
     try {
-      await this.#rebuild(window)
+      complete = await this.#rebuild(window)
     } catch (cause) {
       this.#report(cause)
-    } finally {
-      // Whatever happened, the window is not left muted and held: it goes on live.
-      window.replaying = false
-      emulator.mute?.(false)
-      this.#pump(window)
-      if (!this.#retired.has(window.key)) void this.#historyDone(window)
     }
+    // Let go of meanwhile: it is settled, and its emulator is gone.
+    if (this.#retired.has(window.key)) return
+    // Whatever happened, the window is not left muted and held: it goes on live.
+    window.replaying = false
+    emulator.mute?.(false)
+    // Asked only with the whole of its history taken, and the offset it took: the host keeps an
+    // ended window's journal unless that is its end.
+    if (complete) void this.#historyDone(window, window.next)
+    this.#pump(window)
+    this.schedule()
   }
 
+  /** Whether the whole history was written. */
   async #rebuild(window) {
     const { emulator } = window
     let from = null
     for (;;) {
       const piece = await this.#pull(window, from)
-      if (piece === null) return
+      if (piece === null) return false
       window.boundary = piece.boundary
-      let drawn
       try {
-        drawn = await this.#apply(window, piece)
+        await this.#apply(window, piece)
       } catch (cause) {
         // xterm itself failed on the bytes (it stops drawing, as it does live): the window starts
         // clean, goes live from the boundary and says its history is cut. The failure does not
-        // stay across reloads.
-        if (this.#retired.has(window.key)) return
+        // stay across reloads. The host is told nothing of the history.
+        if (this.#retired.has(window.key)) return false
         const { cols, rows } = emulator.size?.() ?? { cols: undefined, rows: undefined }
         emulator.restart?.(cols, rows)
         emulator.mute?.(true)
         window.next = window.boundary
         window.parsed = window.boundary
         this.#truncated(window)
-        return
+        return false
       }
-      if (drawn === false) return
-      if (piece.done) return
+      if (this.#retired.has(window.key)) return false
+      if (piece.done) return true
       from = window.next
     }
   }
@@ -276,7 +346,6 @@ export class TerminalLink {
     if (at < bytes.length) await emulator.write(bytes.subarray(at))
     window.next = piece.from + bytes.length
     window.parsed = window.next - (emulator.held ?? 0)
-    return true
   }
 
   #truncated(window) {
@@ -286,10 +355,11 @@ export class TerminalLink {
   }
 
   /**
-   * One piece of the window's history from `from`, tried again where the call fails or is
-   * refused, 250 ms then 500 ms then each second, from the same offset. Null where there is
-   * none to be had: this page is no longer the current one, or the host keeps no journal of
-   * the window.
+   * One piece of the window's history from `from`. A call that fails and a refusal (the page's
+   * subscription does not stand yet, `pane-not-subscribed`, among them) are tried again, 250 ms
+   * then 500 ms then each second, from the same offset. Null where there is none to be had: this
+   * page is no longer the current one (another has taken over, so it pulls nothing more), the
+   * host keeps no journal of the window, the app keeps none at all, or the window was let go of.
    */
   async #pull(window, from) {
     for (let failures = 0; ; failures += 1) {
@@ -300,6 +370,8 @@ export class TerminalLink {
           ...window.pane,
           from,
         })
+        // What was on its way to a window let go of is dropped.
+        if (this.#retired.has(window.key)) return null
         const frame = historyFrame(answer)
         if (frame === undefined) return null
         if (frame.ok === true) return frame
@@ -307,14 +379,17 @@ export class TerminalLink {
       } catch (cause) {
         if (failures === 0) this.#report(cause)
       }
+      window.retrying = true
+      this.schedule()
       await pause(retryDelay(failures))
+      window.retrying = false
     }
   }
 
-  /** The window's history is in: an ended window's journal is let go, once. */
-  async #historyDone(window) {
+  /** The whole history is in, up to `consumed`: an ended window's journal is let go, once. */
+  async #historyDone(window, consumed) {
     try {
-      await this.#invoke('pane_history_done', { pageId: this.#pageId, ...window.pane })
+      await this.#invoke('pane_history_done', { pageId: this.#pageId, ...window.pane, consumed })
     } catch {}
   }
 
@@ -330,8 +405,10 @@ export class TerminalLink {
     if (!this.#windows.has(key)) this.begin(message, emulator)
     const window = this.#windows.get(key)
     if (window === undefined) return
+    window.last = { id: message.id, generation: message.generation, seq: message.seq }
     window.inbox.push(message)
     this.#pump(window)
+    this.schedule()
   }
 
   /**
@@ -453,12 +530,17 @@ export class TerminalLink {
     void this.#syncSize(key)
   }
 
-  /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
+  /**
+   * A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes
+   * for it. Every message the page was sent is settled now, drawn or not (the host cannot know
+   * which delivered bytes a page will never draw), and each later one as it comes. It tells the
+   * host nothing of the history: an ended window let go of keeps its journal.
+   */
   retire(key) {
     const window = this.#windows.get(key)
     if (window !== undefined) {
       this.#windows.delete(key)
-      void this.#historyDone(window)
+      if (window.last !== null) this.#drawn(key, window.last)
     }
     this.#retired.add(key)
     this.#inputs.delete(key)
@@ -466,6 +548,7 @@ export class TerminalLink {
     this.#sizes.delete(key)
     this.#failedInputs.delete(key)
     this.#registry.retire(key)
+    this.schedule()
   }
 
   /** Whether a pane is gone for good: it gets no emulator again. */

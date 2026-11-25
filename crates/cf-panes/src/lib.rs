@@ -30,6 +30,7 @@ pub mod input_queue;
 mod job_object;
 pub mod journal;
 pub mod output_hub;
+pub mod page;
 pub mod pane_handlers;
 pub mod privacy;
 #[cfg(target_os = "macos")]

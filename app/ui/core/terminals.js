@@ -123,6 +123,8 @@ export class TerminalsView {
       report,
       pageId,
       onTruncated: (pane) => this.#truncated(pane),
+      // A window the person sees is one whose card is in the dock.
+      shown: (pane) => this.#cards.get(paneKey(pane))?.card.parentElement === this.#stage,
     })
     this.#invoke = invoke
     this.#report = report
@@ -143,6 +145,21 @@ export class TerminalsView {
     } catch (cause) {
       this.#report(cause)
     }
+  }
+
+  /** The page's output subscription stands: the windows may be drawn again from their history. */
+  subscribed() {
+    this.#link.subscribed()
+  }
+
+  /** The page has read its board since its subscription: the windows not shown may follow. */
+  refreshed() {
+    this.#link.refreshed()
+  }
+
+  /** Whether the page's output subscription stands. */
+  get isSubscribed() {
+    return this.#link.isSubscribed
   }
 
   /** Bytes from the pane host; a pane the board has not drawn yet still gets them. */
@@ -305,6 +322,12 @@ export class TerminalsView {
    * nothing.
    */
   render(board, { focused }) {
+    this.#draw(board, focused)
+    // A card that came into the dock is drawn from its history at once.
+    this.#link.schedule()
+  }
+
+  #draw(board, focused) {
     const project = board?.project.id ?? null
     const ordered = board?.project.state === 'open' ? laneOrder(board.lanes) : []
     for (const lane of ordered) {

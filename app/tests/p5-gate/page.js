@@ -188,8 +188,8 @@
 
   /**
    * One page's window, as the app makes it: the real emulator and the real link, the app's
-   * answers from `invoke`. `replayed` settles once the link has the window's history in and has
-   * gone live (it tells the host with `pane_history_done`).
+   * answers from `invoke`. `replayed` settles once the link has gone live (it unmutes the
+   * emulator then, whether it wrote all of the history or none).
    */
   P5.window = (name, { cols, rows, invoke, pageId = `page-${name}`, pane = { id: 'w', generation: 1 } }) => {
     const host = document.body.appendChild(document.createElement('div'))
@@ -209,7 +209,6 @@
     win.replayed = new Promise((done) => {
       markReplayed = done
     }).then(() => win.quiet())
-    win.markReplayed = () => markReplayed()
     win.emulator = new P5.XtermEmulator(host, {
       onReply: (data) => {
         win.answers.push(data)
@@ -222,6 +221,11 @@
     // No layout here: the size is the one the journal gives (a test that fits asks for it).
     win.emulator.fit = () => {}
     win.emulator.resizeTo(cols, rows)
+    const mute = win.emulator.mute.bind(win.emulator)
+    win.emulator.mute = (on) => {
+      mute(on)
+      if (!on) markReplayed()
+    }
     const write = win.emulator.write.bind(win.emulator)
     win.emulator.write = (bytes) => {
       win.writing += 1
@@ -237,9 +241,7 @@
       }
       const promise = Promise.resolve(invoke(command, args))
       if (command === 'pane_resize') win.resizing.push(promise)
-      const answer = await promise
-      if (command === 'pane_history_done') win.markReplayed()
-      return answer
+      return await promise
     }
     win.link = new P5.TerminalLink({
       invoke: app,
@@ -250,7 +252,11 @@
         win.truncated = true
       },
     })
-    win.start = () => win.link.begin(pane, win.emulator)
+    // The page's subscription stands before a window's history is asked for.
+    win.start = () => {
+      win.link.begin(pane, win.emulator)
+      win.link.subscribed()
+    }
     /** Every write handed to the emulator is parsed. */
     win.quiet = async () => {
       while (win.writing > 0) await sleep(1)
@@ -354,7 +360,7 @@
 
   /**
    * A stand-in for the pane host and the app's commands, in the page, for one window: what the
-   * program printed (`print`), the sizes the page's emulator took, the pages that subscribed and
+   * program printed (`print`), whether it has `ended`, the sizes the page's emulator took, the pages that subscribed and
    * the boundary each was given, and `pane_history`'s pieces from that. It keeps the whole
    * journal (no cap), so it answers what the real host answers while the journal reaches the
    * window's start; the real host's rules are the randomized gate's. `pieceBytes` makes pieces
@@ -434,7 +440,9 @@
       }
       if (command === 'pane_history_done') {
         host.done += 1
-        return { ok: true }
+        // An ended window's journal is let go only where the page took all of it.
+        if (host.ended && args.consumed === host.printed.length) host.gone = true
+        return { ok: host.gone === true }
       }
       if (command === 'pane_history') {
         if (host.stale.has(args.pageId)) return { ok: false, error: 'pane-input-stale-page' }

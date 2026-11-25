@@ -111,7 +111,10 @@ impl Window {
     /// is what the page is given, the rest comes on the sink.
     fn subscribe(&self, page: &Page) -> (u64, Vec<u8>) {
         let boundaries = self.hub.attach_page(page.sink());
-        let boundary = boundaries.get(&self.key).copied().unwrap_or(0);
+        let boundary = boundaries
+            .get(&self.key)
+            .and_then(|taken| taken.end)
+            .unwrap_or(0);
         self.journal.begin_page(boundary);
         let mut history = Vec::new();
         let mut from = None;
@@ -124,6 +127,47 @@ impl Window {
             }
         }
     }
+}
+
+/// A sink that takes every message and notes its offset, length and sequence.
+fn seeing(seen: &Seen) -> crate::output_hub::OutputSink {
+    let seen = Arc::clone(seen);
+    Arc::new(move |message: PaneOutputMessage| {
+        seen.lock().unwrap().push((
+            message.offset.expect("a journaled message has its offset"),
+            message.bytes.len(),
+            message.seq(),
+        ));
+        true
+    })
+}
+
+fn held(seen: &Seen) -> usize {
+    seen.lock().unwrap().iter().map(|(_, len, _)| len).sum()
+}
+
+fn last_seq(seen: &Seen) -> u64 {
+    seen.lock().unwrap().last().expect("a message").2
+}
+
+/// The journal's published bytes once they have held still for 600 ms.
+fn settled(journal: &Journal) -> usize {
+    let deadline = std::time::Instant::now() + Duration::from_secs(40);
+    let mut last = journal.published_to();
+    let mut still = std::time::Instant::now();
+    while still.elapsed() < Duration::from_millis(600) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the window never settled"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+        let now = journal.published_to();
+        if now != last {
+            last = now;
+            still = std::time::Instant::now();
+        }
+    }
+    last as usize
 }
 
 fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
@@ -183,7 +227,10 @@ fn each_of_many_subscriptions_against_a_running_consumer_has_the_stream_exactly_
             while !done.load(Ordering::SeqCst) {
                 let page = Page::new();
                 let boundaries = hub.attach_page(page.sink());
-                let boundary = boundaries.get(&key).copied().unwrap_or(0);
+                let boundary = boundaries
+                    .get(&key)
+                    .and_then(|taken| taken.end)
+                    .unwrap_or(0);
                 journal.begin_page(boundary);
                 let mut history = Vec::new();
                 let mut from = None;
@@ -263,6 +310,7 @@ fn a_window_that_has_not_been_handed_a_byte_has_boundary_zero_and_all_of_it_is_l
 #[test]
 fn the_journals_of_ended_windows_are_sixteen_and_a_page_forgets_one_by_asking() {
     let table = PaneTable::new();
+    table.attach_page("page", &OutputHub::new(), Arc::new(|_| true));
     for generation in 1..=20 {
         let journal = Arc::new(Journal::new((24, 80)));
         journal.append(&[b'a'; 100]);
@@ -270,32 +318,36 @@ fn the_journals_of_ended_windows_are_sixteen_and_a_page_forgets_one_by_asking() 
         table.keep_ended_journal(PaneKey::new("p1-chief", generation), journal);
     }
     assert_eq!(table.ended_journals_held(), 16);
-    assert!(table.history(&PaneKey::new("p1-chief", 4), None).is_err());
-    assert!(table.history(&PaneKey::new("p1-chief", 5), None).is_ok());
+    assert!(table
+        .history("page", &PaneKey::new("p1-chief", 4), None)
+        .is_err());
+    assert!(table
+        .history("page", &PaneKey::new("p1-chief", 5), None)
+        .is_ok());
     // Asked twice, the same bytes: a page that reloaded before it took the last piece asks again.
     let key = PaneKey::new("p1-chief", 20);
-    let first = table.history(&key, None).unwrap();
-    assert_eq!(first, table.history(&key, None).unwrap());
-    table.forget_ended_journal(&key);
-    assert!(table.history(&key, None).is_err());
+    let first = table.history("page", &key, None).unwrap();
+    assert_eq!(first, table.history("page", &key, None).unwrap());
+    assert!(table.forget_consumed_journal(&key, 100));
+    assert!(table.history("page", &key, None).is_err());
     assert_eq!(table.ended_journals_held(), 15);
 }
 
-/// Credit (T-2121, `four-credit.log`): without a subscription the program stops at 1 MiB of
-/// output not acknowledged; a subscription settles what the old page was owed and the program
-/// goes on, up to the next MiB, until the new page acknowledges. Unix only: the program is
-/// python's.
+/// Credit (T-2121, `four-credit.log`): without an acknowledgement the program stops at 1 MiB
+/// handed to its page; a new page's subscription settles what the page before was handed and the
+/// program goes on, up to the next MiB, until the new page acknowledges. Unix only: the program
+/// is python's.
 #[cfg(unix)]
 #[test]
-fn a_program_stops_at_one_mebibyte_and_a_subscription_settles_the_room_the_old_page_left() {
+fn a_program_stops_at_one_mebibyte_and_a_subscription_settles_what_the_page_before_was_handed() {
     use super::PaneEnvironment;
-    use std::sync::mpsc::RecvTimeoutError;
     const MIB: usize = 1 << 20;
     let table = Arc::new(PaneTable::new());
     table.keep_journals();
-    let hub = OutputHub::new();
+    let hub = Arc::new(OutputHub::new());
     let key = PaneKey::new("credit", 1);
-    let program = "import os\nfor c,n in [(b'A',1<<20),(b'B',1<<20),(b'Z',1)]:\n v=memoryview(c*n)\n while v:v=v[os.write(1,v):]\n";
+    // It stays up after its last byte: a program that ends with output unread loses it.
+    let program = "import os,time\nfor c,n in [(b'A',1<<20),(b'B',1<<20),(b'Z',1)]:\n v=memoryview(c*n)\n while v:v=v[os.write(1,v):]\ntime.sleep(60)\n";
     let pane = table
         .open_streamed_at_while(
             &|| true,
@@ -310,41 +362,28 @@ fn a_program_stops_at_one_mebibyte_and_a_subscription_settles_the_room_the_old_p
             ],
             PaneEnvironment::new(&HashMap::new(), &[]),
             portable_pty::PtySize::default(),
-            MIB,
+            crate::pane_handlers::default_backlog_bytes(),
         )
         .unwrap();
     assert!(pane.journal.is_some());
-    let take = |want: u8| {
-        let mut bytes = 0;
-        let mut last = 0;
-        while bytes < MIB {
-            let got = pane.output.recv_timeout(Duration::from_secs(10)).unwrap();
-            assert!(got.bytes.iter().all(|byte| *byte == want));
-            assert!(got.seq > last);
-            last = got.seq;
-            bytes += got.bytes.len();
-        }
-        assert_eq!(bytes, MIB);
-        assert_eq!(
-            pane.output
-                .recv_timeout(Duration::from_millis(250))
-                .unwrap_err(),
-            RecvTimeoutError::Timeout,
-            "the program waits on its page's room: no read after 1 MiB"
-        );
-        last
+    let journal = pane.journal.clone().unwrap();
+    let first: Seen = Arc::new(Mutex::new(Vec::new()));
+    table.attach_page("one", &hub, seeing(&first));
+    let consumer = {
+        let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
+        std::thread::spawn(move || forward_journaled(&pane.output, &journal, &hub, |_| {}))
     };
-    take(b'A');
-    table.attach_page(&hub, Arc::new(|_| true));
-    let second = take(b'B');
-    table.ack(&key, second).unwrap();
-    let last = pane.output.recv_timeout(Duration::from_secs(10)).unwrap();
-    assert_eq!(last.bytes, b"Z");
-    table.ack(&key, last.seq).unwrap();
-    let end = table
-        .wait_ended(&key, &pane.ended, Duration::from_secs(10))
-        .unwrap();
-    assert_eq!(end.code, 0);
+    wait_for("the first MiB", || held(&first) == MIB);
+    assert_eq!(settled(&journal), MIB, "no read after 1 MiB unacknowledged");
+    let second: Seen = Arc::new(Mutex::new(Vec::new()));
+    table.attach_page("two", &hub, seeing(&second));
+    wait_for("the second MiB", || held(&second) == MIB);
+    assert_eq!(settled(&journal), 2 * MIB);
+    table.ack(&key, last_seq(&second)).unwrap();
+    wait_for("the last byte", || held(&second) == MIB + 1);
+    table.ack(&key, last_seq(&second)).unwrap();
+    table.kill(&key).unwrap();
+    consumer.join().unwrap();
 }
 
 /// No page is let go, and no timer: a page that does not acknowledge holds its window at the
@@ -381,7 +420,7 @@ fn a_page_that_does_not_acknowledge_is_waited_for_and_never_let_go() {
     let journal = pane.journal.clone().unwrap();
     let got: Seen = Arc::new(Mutex::new(Vec::new()));
     let refused = Arc::new(AtomicBool::new(false));
-    table.attach_page(&hub, {
+    table.attach_page("page", &hub, {
         let (got, refused) = (Arc::clone(&got), Arc::clone(&refused));
         Arc::new(move |message: PaneOutputMessage| {
             if refused.load(Ordering::SeqCst) {
@@ -429,26 +468,38 @@ fn a_page_that_does_not_acknowledge_is_waited_for_and_never_let_go() {
     assert_eq!(journal.published_to(), at);
 }
 
-/// The room (T-2191, the owner's decision on T-2127): a window of a table that keeps journals,
-/// opened as the app opens one (no room named), may have 8 MiB handed to a page and not
-/// acknowledged, because the journal keeps those bytes anyway. A hidden page that acknowledges
-/// a few messages a second then holds no program that prints a burst under 8 MiB. Past it the
-/// program waits. Unix only: the program is python's.
+/// T-2229 finding 2: until the page acknowledges a live message the host reads at most one room
+/// past the boundary its subscription fixed, so the journal's start can't pass that boundary and
+/// the first live question is the page's. Unix only: the program is python's.
 #[cfg(unix)]
 #[test]
-fn a_hidden_pages_slow_acknowledgements_hold_no_program_that_prints_under_eight_mebibytes() {
+fn a_flood_before_the_first_pull_keeps_the_boundary_in_the_journal_and_the_first_question_live() {
     use super::PaneEnvironment;
-    use std::sync::mpsc::RecvTimeoutError;
-    const MIB: usize = 1 << 20;
     let table = Arc::new(PaneTable::new());
     table.keep_journals();
-    let key = PaneKey::new("room", 1);
-    // 7 MiB, then one byte more past 8 MiB in all: 8 MiB + 1 is where the program must wait.
-    let program = "import os\nfor n in [7<<20,(1<<20)+1]:\n v=memoryview(b'x'*n)\n while v:v=v[os.write(1,v):]\n";
+    let hub = Arc::new(OutputHub::new());
+    let key = PaneKey::new("flood", 1);
+    // 80 bytes of history, then a question and 8 MiB, which a page that has not pulled cannot
+    // have drawn.
+    let program = "import os,sys,tty\ntty.setraw(1)\ndef out(b):\n v=memoryview(b)\n while v:v=v[os.write(1,v):]\nout(b'H'*80)\nsys.stdin.buffer.readline()\nout(b'\\x1b[5n'+bytes(8<<20)+b'TAIL')\n";
+    let live: Live = Arc::new(Mutex::new(Vec::new()));
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = || -> crate::output_hub::OutputSink {
+        let (live, seen) = (Arc::clone(&live), Arc::clone(&seen));
+        Arc::new(move |message: PaneOutputMessage| {
+            let offset = message.offset.unwrap();
+            seen.lock()
+                .unwrap()
+                .push((offset, message.bytes.len(), message.seq()));
+            live.lock().unwrap().push((offset, message.bytes));
+            true
+        })
+    };
+    table.attach_page("one", &hub, sink());
     let pane = table
         .open_streamed_at_while(
             &|| true,
-            key,
+            key.clone(),
             &std::env::current_dir().unwrap(),
             &[
                 "/usr/bin/python3".into(),
@@ -459,26 +510,100 @@ fn a_hidden_pages_slow_acknowledgements_hold_no_program_that_prints_under_eight_
             ],
             PaneEnvironment::new(&HashMap::new(), &[]),
             portable_pty::PtySize::default(),
-            crate::pane_handlers::backlog_for(table.journals_kept(), None),
+            crate::pane_handlers::default_backlog_bytes(),
         )
         .unwrap();
-    // Nothing is acknowledged: a page that draws a message every few seconds.
-    let mut bytes = 0;
-    while bytes < 8 * MIB {
-        match pane.output.recv_timeout(Duration::from_secs(10)) {
-            Ok(got) => bytes += got.bytes.len(),
-            Err(RecvTimeoutError::Timeout) => panic!("the program waited at {bytes} bytes"),
-            Err(error) => panic!("{error}"),
-        }
-    }
-    assert_eq!(
-        bytes,
-        8 * MIB,
-        "everything under the room came unacknowledged"
+    let journal = pane.journal.clone().unwrap();
+    let consumer = {
+        let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
+        std::thread::spawn(move || forward_journaled(&pane.output, &journal, &hub, |_| {}))
+    };
+    wait_for("the history", || journal.published_to() == 80);
+    table
+        .ack(&key, seen.lock().unwrap().last().unwrap().2)
+        .unwrap();
+    // The new page subscribes at 80 and has not pulled; its program floods.
+    seen.lock().unwrap().clear();
+    live.lock().unwrap().clear();
+    let boundary = table.attach_page("two", &hub, sink())[&key];
+    assert_eq!(boundary, 80);
+    table.write(&key, b"go\n").unwrap();
+    // The flood stops at the room, with no acknowledgement.
+    settled(&journal);
+    let piece = table.history("two", &key, None).unwrap();
+    assert!(
+        piece.from <= boundary,
+        "the history starts at or before the boundary: from {} past B {boundary}",
+        piece.from
     );
-    // The one byte past the room waits for an acknowledgement.
-    assert!(matches!(
-        pane.output.recv_timeout(Duration::from_millis(500)),
-        Err(RecvTimeoutError::Timeout)
-    ));
+    // The first live question is the first live bytes, once.
+    let got: Vec<u8> = live
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|(_, b)| b.clone())
+        .collect();
+    assert!(got.starts_with(b"\x1b[5n"));
+    assert_eq!(live.lock().unwrap()[0].0, boundary);
+    let _ = table.kill(&key);
+    consumer.join().unwrap();
+}
+
+/// T-2229 finding 4: a subscription settles the room only up to what the page before was handed.
+/// What was parked stays charged until the page that gets it acknowledges it, so two
+/// subscriptions whose sinks refuse leave at most 1 MiB waiting, and the page that works gets at
+/// most 1 MiB with no acknowledgement. Unix only: the program is python's.
+#[cfg(unix)]
+#[test]
+fn subscriptions_that_refuse_do_not_grow_the_room_of_a_window() {
+    use super::PaneEnvironment;
+    const MIB: usize = 1 << 20;
+    let table = Arc::new(PaneTable::new());
+    table.keep_journals();
+    let hub = Arc::new(OutputHub::new());
+    let key = PaneKey::new("refused", 1);
+    let program = "import os\nv=memoryview(b'A'*(8<<20))\nwhile v:v=v[os.write(1,v):]\n";
+    let pane = table
+        .open_streamed_at_while(
+            &|| true,
+            key.clone(),
+            &std::env::current_dir().unwrap(),
+            &[
+                "/usr/bin/python3".into(),
+                "-I".into(),
+                "-S".into(),
+                "-c".into(),
+                program.into(),
+            ],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize::default(),
+            crate::pane_handlers::default_backlog_bytes(),
+        )
+        .unwrap();
+    let journal = pane.journal.clone().unwrap();
+    let consumer = {
+        let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
+        std::thread::spawn(move || forward_journaled(&pane.output, &journal, &hub, |_| {}))
+    };
+    // No page yet: everything is parked, and the program stops at the room.
+    assert_eq!(settled(&journal), MIB);
+    for _ in 0..2 {
+        table.attach_page("refusing", &hub, Arc::new(|_| false));
+        assert_eq!(
+            settled(&journal),
+            MIB,
+            "a subscription that refused settled nothing"
+        );
+    }
+    let got: Seen = Arc::new(Mutex::new(Vec::new()));
+    table.attach_page("working", &hub, seeing(&got));
+    assert_eq!(settled(&journal), MIB, "what was parked is still charged");
+    let handed: usize = got.lock().unwrap().iter().map(|(_, len, _)| len).sum();
+    assert_eq!(handed, MIB, "at most 1 MiB is handed over unacknowledged");
+    // The page that works acknowledges, and the program goes on.
+    let seq = got.lock().unwrap().last().unwrap().2;
+    table.ack(&key, seq).unwrap();
+    assert_eq!(settled(&journal), 2 * MIB);
+    let _ = table.kill(&key);
+    consumer.join().unwrap();
 }

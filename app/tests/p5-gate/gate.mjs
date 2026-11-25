@@ -1,22 +1,28 @@
-// T-2126's gate: a randomized comparison of a reloaded page with a continuous xterm, in one
-// browser, through the real host API (gate_bridge.rs), with a page that does what P5-C will do:
-// replay the history muted, then take everything after on the live path.
+// P5's gate: a randomized comparison of a reloaded page with a continuous xterm, in one browser.
+// The page under test is the shipped app page (app/ui: its own start, board view, terminals and
+// link), loaded and reloaded as the app does it; only the app's bridge to it is stood in
+// (`window.__TAURI__`): the daemon's board is one project with one chief's window, and the pane
+// host's commands go to gate_bridge.rs, which answers them with the functions the app's own
+// commands call (`cf_panes::page`) over a real pty, with the daemon's room. The continuous xterm
+// is in a page of its own.
 //   node gate.mjs <webkit|chromium> <random cases> <first seed> [past-cap cases] [out.jsonl]
-import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { writeFileSync, appendFileSync } from 'node:fs'
+import { writeFileSync, appendFileSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { open, tree } from './lib.mjs'
+import { open, pageScript, tree } from './lib.mjs'
 import { randomCase, pastCapCase, namedCases, reviewCases } from './gen.mjs'
 import { cases as review51 } from './cases51.mjs'
 
-const [browserName = 'chromium', randomCount = '50', firstSeed = '1', pastCount = '0', out = ''] = process.argv.slice(2)
+const [browserName = 'chromium', randomCount = '50', firstSeed = '1', pastCount = '0', out = ''] =
+  process.argv.slice(2)
 const hex = (bytes) => Buffer.from(bytes).toString('hex')
-const unhex = (s) => [...Buffer.from(s, 'hex')]
+const ROLES = JSON.parse(readFileSync(resolve(tree, 'app/tests/fixtures/roles.json'), 'utf8'))
 
 function bridge() {
-  const child = spawn(resolve(tree, 'app/src-tauri/target/debug/examples/gate_bridge'), [], { stdio: ['pipe', 'pipe', 'inherit'] })
+  const child = spawn(resolve(tree, 'app/src-tauri/target/debug/examples/gate_bridge'), [], {
+    stdio: ['pipe', 'pipe', 'inherit'],
+  })
   const waiting = new Map()
   let next = 0
   let onMessage = () => {}
@@ -26,8 +32,16 @@ function bridge() {
     waiting.get(v.re)?.(v)
     waiting.delete(v.re)
   })
+  child.on('exit', (code) => {
+    if (code) {
+      console.error(`gate_bridge ended with ${code}`)
+      process.exit(1)
+    }
+  })
   return {
-    set onMessage(f) { onMessage = f },
+    set onMessage(f) {
+      onMessage = f
+    },
     call(cmd, window, args = {}) {
       const re = ++next
       return new Promise((done) => {
@@ -35,135 +49,339 @@ function bridge() {
         child.stdin.write(JSON.stringify({ cmd, window, re, ...args }) + '\n')
       })
     },
-    send(cmd, window, args = {}) { child.stdin.write(JSON.stringify({ cmd, window, re: ++next, ...args }) + '\n') },
-    async close() { await this.call('quit', ''); child.stdin.end() },
+    send(cmd, window, args = {}) {
+      child.stdin.write(JSON.stringify({ cmd, window, re: ++next, ...args }) + '\n')
+    },
+    async close() {
+      await this.call('quit', '')
+      child.stdin.end()
+    },
   }
 }
 
-const { browser, page, ui } = await open(browserName)
+const { browser, page: refPage, ui } = await open(browserName)
 const host = bridge()
-const E = (fn, ...a) => page.evaluate(fn, ...a)
+const R = (fn, ...a) => refPage.evaluate(fn, ...a)
 let windowNo = 0
-const results = { cases: 0, failed: 0, compared: 0, reloads: 0, past: 0, answers: 0, truncated: 0, leaks: 0 }
+const results = {
+  cases: 0,
+  failed: 0,
+  compared: 0,
+  reloads: 0,
+  answers: 0,
+  truncated: 0,
+  pulls: 0,
+  done: 0,
+  forgotten: 0,
+}
 const failures = []
-// What the page asks of the app, answered by the real host (the bridge) as the app's commands do.
-let appWindow = ''
-await page.exposeFunction('hostCall', async (command, args) => {
-  if (command === 'pane_history') return host.call('history', appWindow, { from: args.from })
-  if (command === 'pane_ack') host.send('ack', appWindow, { seq: args.seq })
-  else if (command === 'pane_resize')
-    host.send('resize', appWindow, { rows: args.rows, cols: args.cols, at: args.at ?? null })
+
+// ---- the app page -------------------------------------------------------------------------
+
+/** What the app's `window.__TAURI__` is, in the page: the board stood in, the rest asked of node. */
+function standIn() {
+  // The blank page between two cases is none of the app's.
+  if (!location.protocol.startsWith('http')) return
+  window.__pending = 0
+  window.__pulled = 0
+  window.__errors = []
+  window.addEventListener('error', (event) => window.__errors.push(event.message))
+  window.addEventListener('unhandledrejection', (event) =>
+    window.__errors.push(String(event.reason)),
+  )
+  // Neither xterm here holds the keyboard, as the continuous one does not: a focus report is then
+  // the program's setting alone (the board focuses the chief's terminal, and a program that asked
+  // for focus reports would hear it from one of them only). The page suite holds that a muted
+  // xterm reports none.
+  const focus = HTMLTextAreaElement.prototype.focus
+  HTMLTextAreaElement.prototype.focus = function (...args) {
+    if (!this.classList.contains('xterm-helper-textarea')) focus.apply(this, args)
+  }
+  // The product's fit asks the box for a size; here it asks for the size the xterm has, so the
+  // sizes are the case's (a drag is the case's own resize of the xterm) and the fit's own paths
+  // run unchanged.
+  import('/vendor/xterm.js').then(({ FitAddon }) => {
+    FitAddon.prototype.proposeDimensions = function () {
+      return { cols: this._terminal.cols, rows: this._terminal.rows }
+    }
+  })
+  import('/term.js').then(({ XtermEmulator }) => {
+    window.__XtermEmulator = XtermEmulator
+  })
+  const decode = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0))
+  const ask = async (command, args) => {
+    window.__pending += 1
+    try {
+      return await window.gateCall(command, args)
+    } finally {
+      window.__pending -= 1
+    }
+  }
+  const invoke = async (command, args) => {
+    if (command === 'daemon_request') return window.gateBoard(args.operation)
+    if (command === 'subscribe_output') {
+      window.__output = args.onOutput
+      return ask(command, { pageId: args.pageId })
+    }
+    if (command.startsWith('update_')) return { ok: false, error: 'not in the gate' }
+    if (command === 'pane_history') {
+      window.__pulled += 1
+      const frame = await ask(command, args)
+      return Uint8Array.from({ length: frame.length >> 1 }, (_, i) =>
+        parseInt(frame.substr(i * 2, 2), 16),
+      ).buffer
+    }
+    if (command === 'pane_reply_enqueue') {
+      const text = new TextDecoder().decode(decode(args.bytes))
+      return ask(command, { pageId: args.pageId, text })
+    }
+    if (command === 'pane_input_enqueue') return { ok: true, ticket: 't' }
+    if (command.startsWith('pane_')) return ask(command, args)
+    return { ok: true }
+  }
+  class Channel {
+    onmessage = null
+  }
+  window.__TAURI__ = {
+    core: { invoke, Channel },
+    event: { listen: async () => () => {} },
+    test: {
+      createEmulator: (hostElement, callbacks) => {
+        const emulator = new window.__XtermEmulator(hostElement, callbacks)
+        window.__writing = 0
+        const write = emulator.write.bind(emulator)
+        emulator.write = (bytes) => {
+          window.__writing += 1
+          return write(bytes).finally(() => {
+            window.__writing -= 1
+          })
+        }
+        window.__emu = emulator
+        return emulator
+      },
+    },
+  }
+  window.__quiet = () =>
+    new Promise((done) => {
+      let still = 0
+      const tick = () => {
+        still = window.__writing === 0 && window.__pending === 0 ? still + 1 : 0
+        if (still >= 3) done()
+        else setTimeout(tick, 1)
+      }
+      tick()
+    })
+}
+
+const app = await browser.newPage()
+app.on('pageerror', (e) => console.error('PAGE ERROR', e.message))
+await app.addInitScript({ path: pageScript })
+await app.addInitScript(standIn)
+
+/** The case's window, as the page under test and the host see it. */
+let current = null
+await app.exposeFunction('gateBoard', (operation) => {
+  const project = { id: 1, name: 'gate', directory: '/gate', state: 'open' }
+  const lane = (id, handle, role, pane) => ({
+    participant: {
+      id,
+      projectId: 1,
+      handle,
+      role,
+      roles: [role],
+      harness: role === 'human' ? null : 'claude-code',
+      agent: null,
+      designer: false,
+      tier: null,
+      outUntil: null,
+      memberId: null,
+      member: null,
+      session: null,
+    },
+    tasks: [],
+    activity: { state: pane ? 'working' : 'closed' },
+    pane,
+  })
+  const pane = { id: current.win, generation: current.generation }
+  if (operation === 'projects.list') return { ok: true, projects: [project] }
+  if (operation === 'board.get')
+    return {
+      ok: true,
+      roles: ROLES,
+      board: {
+        project,
+        open: [],
+        lanes: [lane(1, 'human', 'human', null), lane(2, 'chief', 'chief', pane)],
+      },
+    }
+  if (operation === 'inbox.get') return { ok: true, messages: [], total: 0, shown: 0 }
+  if (operation === 'harnesses.missing') return { ok: true, missing: [], roles: ROLES }
+  if (operation === 'specs.get')
+    return {
+      ok: true,
+      app: { on: false },
+      applied: { folder: '.specs', variant: 'core' },
+      specmint: { version: '3.0.0', variants: [] },
+    }
   return { ok: true }
 })
-const pageInvoke = () => async (command, args) => {
-  const answer = await window.hostCall(command, args)
-  if (command !== 'pane_history') return answer
-  const fromHex = (hex) => Array.from({ length: hex.length >> 1 }, (_, i) => parseInt(hex.substr(i * 2, 2), 16))
-  return {
-    ok: true,
-    reset: answer.reset,
-    truncated: answer.truncated,
-    from: answer.from,
-    size: { rows: answer.size[0], cols: answer.size[1] },
-    seed: fromHex(answer.seed),
-    resizes: answer.resizes.map(([at, rows, cols]) => ({ at, rows, cols })),
-    bytes: fromHex(answer.hex),
-    boundary: answer.boundary,
-    done: answer.done,
+await app.exposeFunction('gateCall', async (command, args) => {
+  const here = current
+  if (command === 'pane_page_prepare')
+    return (await host.call('page_prepare', '', { page: args.pageId }))
+  if (command === 'pane_page_activate')
+    return (await host.call('page_activate', '', { page: args.pageId }))
+  if (command === 'subscribe_output') {
+    here.page = args.pageId
+    return (await host.call('subscribe', here.win, { page: args.pageId })).answer
   }
-}
+  if (command === 'pane_history') {
+    results.pulls++
+    const { hex: frame } = await host.call('history', here.win, {
+      page: args.pageId,
+      id: args.id,
+      generation: args.generation,
+      from: args.from,
+    })
+    return frame
+  }
+  if (command === 'pane_history_done') {
+    results.done++
+    const { answer } = await host.call('done', here.win, {
+      page: args.pageId,
+      id: args.id,
+      generation: args.generation,
+      consumed: args.consumed,
+    })
+    if (answer.ok) results.forgotten++
+    return answer
+  }
+  if (command === 'pane_ack')
+    return (await host.call('ack', here.win, {
+      id: args.id,
+      generation: args.generation,
+      seq: args.seq,
+    })).answer
+  if (command === 'pane_resize')
+    return (await host.call('resize', here.win, {
+      page: args.pageId,
+      id: args.id,
+      generation: args.generation,
+      cols: args.cols,
+      rows: args.rows,
+      at: args.at ?? null,
+    })).answer
+  if (command === 'pane_reply_enqueue') {
+    here.answers.push(args.text)
+    return { ok: true, ticket: 't' }
+  }
+  return { ok: true }
+})
+
+/** The app page's replay of the window is over: it has pulled, and the emulator takes typing. */
+const replayed = () =>
+  app.waitForFunction(
+    () => window.__emu && window.__pulled > 0 && !window.__emu.replaying,
+    null,
+    { timeout: 120_000 },
+  )
 
 async function runCase(c) {
   const win = 'w' + ++windowNo
-  appWindow = win
-  const fail = (what) => { throw Object.assign(new Error(what), { gate: true }) }
-  await E(([c]) => { for (const n of Object.keys(P5.windows)) { try { P5.windows[n].dispose() } catch {} delete P5.windows[n] } P5.ref?.emulator.dispose(); P5.ref?.host.remove(); P5.ref = P5.reference('ref', c.cols, c.rows) }, [c])
-  await host.call('open', win, { rows: c.rows, cols: c.cols })
+  await R(([c]) => {
+    P5.ref?.emulator.dispose()
+    P5.ref?.host.remove()
+    P5.ref = P5.reference('ref', c.cols, c.rows)
+  }, [c])
+  const { generation } = await host.call('open', win, { rows: c.rows, cols: c.cols })
+  const mine = { win, generation, page: null, answers: [], held: false, gone: false }
+  current = mine
   let total = 0 // the bytes the program has printed
-  // the page: one window at a time, made when it subscribes, with the app's invoke
-  let cur = null
-  const pages = new Map()
-  const early = new Map() // messages the host printed while it answered the subscription, before its reply named the page
   let chain = Promise.resolve()
-  const deliver = (p, m) => {
+  host.onMessage = (m) => {
+    // A page that has left is handed nothing; one that is about to leave keeps what it is sent.
     chain = chain.then(async () => {
-      await p.created
-      if (p.gone || p.held) return
-      await E(([name, m]) => {
-        const win = P5.windows[name]
-        const fromHex = (hex) => Uint8Array.from({ length: hex.length >> 1 }, (_, i) => parseInt(hex.substr(i * 2, 2), 16))
-        win.link.output({ id: win.pane.id, generation: win.pane.generation, seq: m.seq, offset: m.offset, bytes: fromHex(m.hex) }, () => win.emulator)
-      }, [p.name, m])
+      if (m.page !== mine.page || mine.held || m.id !== win) return
+      await app.evaluate((m) => {
+        const bytes = Uint8Array.from({ length: m.hex.length >> 1 }, (_, i) =>
+          parseInt(m.hex.substr(i * 2, 2), 16),
+        )
+        window.__output.onmessage({
+          id: m.id,
+          generation: m.generation,
+          seq: m.seq,
+          offset: m.offset,
+          bytes,
+        })
+      }, m)
     })
   }
-  host.onMessage = (m) => {
-    const p = pages.get(m.page)
-    if (!p) { if (!early.has(m.page)) early.set(m.page, []); early.get(m.page).push(m); return }
-    deliver(p, m)
-  }
-  const subscribe = async () => {
-    const r = await host.call('subscribe', win)
-    const p = { id: r.page, name: 'p' + r.page, boundary: r.boundary, gone: false, held: false }
-    pages.set(r.page, p)
-    // The page's window, as the app makes one, and its first act: ask for its history.
-    p.created = E(([name]) => {
-      const w = P5.window(name, { cols: 80, rows: 24, invoke: (command, args) => window.__pageInvoke(command, args) })
-      w.start()
-    }, [p.name])
-    for (const m of early.get(r.page) ?? []) deliver(p, m)
-    early.delete(r.page)
-    return p
-  }
-  await E(`window.__pageInvoke = ${pageInvoke().toString()}`)
-  cur = await subscribe()
-  await cur.created
-  await E(([name]) => P5.windows[name].replayed, [cur.name])
-  const lostAnswers = new Set()
-  const compare = async (label, p, past) => {
-    results.compared++
-    const [a, b, d] = await E(([name, past]) => {
-      const w = P5.windows[name]
-      const read = past ? P5.reliable : P5.state
-      const a = read(P5.ref.emulator), b = read(w.emulator)
-      const d = P5.diff(a, b)
-      const sa = P5.sends(P5.ref.emulator), sb = P5.sends(w.emulator)
-      if (sa !== sb) d.push(`paste: ${JSON.stringify(sa)} | ${JSON.stringify(sb)}`)
-      return [a, b, d]
-    }, [p.name, past])
-    void a; void b
-    return d
-  }
   const differences = []
-  const pageAnswers = []
+  const lostAnswers = new Set()
   const settle = async () => {
     await chain
-    if (cur && !cur.gone && !cur.held) await E(([name]) => P5.windows[name].quiet(), [cur.name])
+    if (!mine.held && !mine.gone) {
+      await app.evaluate(() => window.__quiet())
+      await chain
+      await app.evaluate(() => window.__quiet())
+    }
   }
-  const retire = async (p) => {
-    const taken = await E(([name]) => {
-      const w = P5.windows[name]
-      const out = { answers: w.answers.slice(), leaks: w.leaks, reports: w.reports.slice() }
-      w.dispose()
-      delete P5.windows[name]
-      return out
-    }, [p.name])
-    pageAnswers.push(...taken.answers)
-    if (taken.leaks) differences.push(`${c.name}: ${taken.leaks} answers made while muted`)
-    if (taken.reports.length) differences.push(`${c.name}: the page reported ${JSON.stringify(taken.reports)}`)
-    results.leaks += taken.leaks
+  /** What the departing page leaves: its errors, and what the human would read in its status line. */
+  const retire = async () => {
+    const left = await app.evaluate(() => ({
+      errors: window.__errors.slice(),
+      status: document.querySelector('#status')?.textContent ?? '',
+    }))
+    if (left.errors.length) differences.push(`the page raised ${JSON.stringify(left.errors)}`)
+    if (left.status) differences.push(`the page said ${JSON.stringify(left.status)}`)
   }
+  const isTruncated = () =>
+    app.evaluate(() => document.querySelector('#stage .terminal-host')?.dataset.truncated === 'true')
+  const load = async (reload) => {
+    mine.held = false
+    mine.gone = false
+    await host.call('navigate', '')
+    mine.page = null
+    if (reload) await app.reload()
+    else await app.goto(`${ui.origin}/index.html`)
+    await replayed()
+    await settle()
+  }
+  const compare = async (label, past) => {
+    results.compared++
+    // The state of the page's xterm in its own page, and of the reference's in its.
+    const readOf = (read) => {
+      const emulator = window.__emu ?? P5.ref.emulator
+      return { state: P5[read](emulator), sends: P5.sends(emulator) }
+    }
+    const read = past ? 'reliable' : 'state'
+    const a = await refPage.evaluate(readOf, read)
+    const b = await app.evaluate(readOf, read)
+    const d = []
+    for (const k of Object.keys(a.state)) {
+      const x = JSON.stringify(a.state[k])
+      const y = JSON.stringify(b.state[k])
+      if (x !== y) d.push(k === 'text' ? 'text' : `${k}: ${x} | ${y}`)
+    }
+    if (a.sends !== b.sends)
+      d.push(`paste: ${JSON.stringify(a.sends)} | ${JSON.stringify(b.sends)}`)
+    return d
+  }
+  await load(false)
   for (const op of c.ops) {
     if (op.emit || op.repeat) {
       const bytes = op.emit ?? op.repeat
       const count = op.repeat ? op.count : 1
       const len = bytes.length * count
-      const before = await E(() => P5.ref.answers.length)
-      await E(async ([b, n]) => {
+      const before = await R(() => P5.ref.answers.length)
+      await R(async ([b, n]) => {
         const emulator = P5.ref.emulator
         let left = n
         const per = Math.max(1, Math.floor(60000 / b.length))
         // xterm that fails on a write never calls back: the stream is the reference's failure, not the page's.
-        const failed = new Promise((_, no) => { P5.ref.fail = (e) => no(new Error('xterm failed: ' + e.message)); })
+        const failed = new Promise((_, no) => {
+          P5.ref.fail = (e) => no(new Error('xterm failed: ' + e.message))
+        })
         const listener = (e) => P5.ref.fail(e)
         window.addEventListener('error', listener)
         try {
@@ -174,50 +392,65 @@ async function runCase(c) {
             await Promise.race([emulator.write(chunk), failed])
             left -= k
           }
-        } finally { window.removeEventListener('error', listener) }
+        } finally {
+          window.removeEventListener('error', listener)
+        }
       }, [bytes, count])
-      const after = await E(() => P5.ref.answers.length)
+      const after = await R(() => P5.ref.answers.length)
       total += len
       if (op.repeat) host.send('repeat', win, { hex: hex(bytes), count })
       else host.send('emit', win, { hex: hex(bytes) })
       await host.call('sync', win, { n: total })
       await settle()
-      if (cur.held) for (let i = before; i < after; i++) lostAnswers.add(i) // handed to a page that left before it parsed them: main's limit 4
+      // Handed to a page that left before it parsed them: main's limit 4.
+      if (mine.held) for (let i = before; i < after; i++) lostAnswers.add(i)
     } else if (op.resize) {
-      await E(([s]) => P5.ref.emulator.terminal.resize(s[0], s[1]), [op.resize])
-      if (cur && !cur.gone) {
-        await E(([n, s]) => P5.windows[n].resize(s[0], s[1]), [cur.name, op.resize])
-      } else host.send('resize', win, { rows: op.resize[1], cols: op.resize[0], at: null })
+      await R(([s]) => P5.ref.emulator.terminal.resize(s[0], s[1]), [op.resize])
+      if (!mine.gone && !mine.held) {
+        await app.evaluate(([cols, rows]) => window.__emu.terminal.resize(cols, rows), op.resize)
+        await app.evaluate(() => window.__quiet())
+      } else
+        await host.call('resize', win, {
+          page: null,
+          id: win,
+          generation: mine.generation,
+          cols: op.resize[0],
+          rows: op.resize[1],
+          at: null,
+        })
     } else if (op.gone) {
       await host.call('gone', win)
-      cur.gone = true
+      mine.gone = true
     } else if (op.depart) {
-      cur.held = true
+      mine.held = true
     } else if (op.reload) {
       results.reloads++
-      const old = cur
-      if (old) await retire(old)
-      cur = await subscribe()
-      await cur.created
-      await E(([name]) => P5.windows[name].replayed, [cur.name])
-      await settle()
-      const truncated = await E(([name]) => P5.windows[name].truncated, [cur.name])
-      const d = await compare('reload', cur, c.past || truncated)
+      await retire()
+      await load(true)
+      const truncated = await isTruncated()
+      const d = await compare('reload', c.past || truncated)
       if (truncated) results.truncated++
-      if (d.length) differences.push(`after reload ${results.reloads}${truncated ? ' (past the cap)' : ''}: ${d.join(' ; ')}`)
+      if (d.length)
+        differences.push(
+          `after reload ${results.reloads}${truncated ? ' (past the cap)' : ''}: ${d.join(' ; ')}`,
+        )
     }
   }
   // the end: the page's state against the continuous xterm's, and the answers once each
   await settle()
-  const truncatedEnd = await E(([name]) => P5.windows[name].truncated, [cur.name])
-  const final = await compare('end', cur, c.past || truncatedEnd)
-  if (final.length) differences.push(`at the end${truncatedEnd ? ' (past the cap)' : ''}: ${final.join(' ; ')}`)
-  await retire(cur)
-  const refAnswers = await E(() => P5.ref.answers.slice())
+  const truncatedEnd = await isTruncated()
+  const final = await compare('end', c.past || truncatedEnd)
+  if (final.length)
+    differences.push(`at the end${truncatedEnd ? ' (past the cap)' : ''}: ${final.join(' ; ')}`)
+  await retire()
+  const refAnswers = await R(() => P5.ref.answers.slice())
   const expected = refAnswers.filter((_, i) => !lostAnswers.has(i))
-  if (JSON.stringify(expected) !== JSON.stringify(pageAnswers))
-    differences.push(`answers: expected ${JSON.stringify(expected)} got ${JSON.stringify(pageAnswers)}`)
-  results.answers += pageAnswers.length
+  if (JSON.stringify(expected) !== JSON.stringify(mine.answers))
+    differences.push(
+      `answers: expected ${JSON.stringify(expected)} got ${JSON.stringify(mine.answers)}`,
+    )
+  results.answers += mine.answers.length
+  await app.goto('about:blank')
   await host.call('close', win)
   return differences
 }
@@ -233,7 +466,7 @@ const started = Date.now()
 /** The stream through one xterm alone, no host: where xterm itself fails on a stream, that is not the host's difference. */
 async function refAlone(c) {
   try {
-    return await E(async ([c]) => {
+    return await R(async ([c]) => {
       const solo = P5.reference('solo', c.cols, c.rows)
       const errors = []
       const listener = (e) => errors.push(e.message)
@@ -258,8 +491,8 @@ for (const c of all) {
   let differences
   try { differences = await runCase(c) } catch (error) {
     differences = [`ERROR ${error.message}`]
-    await host.call('close', 'w' + windowNo).catch?.(() => {})
-    await E(() => { for (const n of Object.keys(P5.windows)) { try { P5.windows[n].dispose() } catch {} delete P5.windows[n] } })
+    await app.goto('about:blank')
+    await host.call('close', 'w' + windowNo)
     const alone = await refAlone(c)
     if (alone) { results.xtermFailed = (results.xtermFailed ?? 0) + 1; differences = []; console.log(`XTERM FAILS ALONE ${c.name} seed ${c.seed}: ${alone.slice(0, 200)}`); if (out) appendFileSync(out + '.xterm', JSON.stringify({ name: c.name, seed: c.seed, alone }) + '\n') }
   }
