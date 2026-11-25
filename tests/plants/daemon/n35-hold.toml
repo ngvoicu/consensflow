@@ -389,8 +389,8 @@ runs = ["n35-model"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0045.sql"
-find = "NEW.state IN ('delivered', 'read', 'cancelled', 'failed')"
-replace = "NEW.state IN ('delivered', 'read')"
+find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
+replace = "NEW.state IN ('failed') AND OLD.state != NEW.state"
 
 [[plant]]
 name = "n35 hold: the time is not written at a delivery"
@@ -399,8 +399,8 @@ runs = ["n35-model"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0045.sql"
-find = "NEW.state IN ('delivered', 'read', 'cancelled', 'failed')"
-replace = "NEW.state IN ('cancelled', 'failed')"
+find = "NEW.state IN ('delivered', 'read'))"
+replace = "NEW.state IN ('read'))"
 
 [[plant]]
 name = "n35 hold: a withdrawal's mark is never settled to its time"
