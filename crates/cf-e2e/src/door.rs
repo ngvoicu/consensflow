@@ -59,7 +59,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::live::members::{
-    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, Ended, Identity,
+    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, unproved_under, Ended,
+    Identity,
     Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
@@ -425,9 +426,9 @@ impl Door {
             for (process, ground) in chosen.each() {
                 self.say("end", &said_process(process), &ground.to_string());
             }
-            return said_only(chosen);
+            return left_running(said_only(chosen), chosen);
         }
-        end_chosen(&chosen.processes())
+        left_running(end_chosen(&chosen.processes()), chosen)
     }
 
     /// Stops each process of `chosen` where it is, or lets it go on, while it is still the
@@ -441,9 +442,9 @@ impl Door {
             for (process, ground) in chosen.each() {
                 self.say(act, &said_process(process), &ground.to_string());
             }
-            return said_only(chosen);
+            return left_running(said_only(chosen), chosen);
         }
-        pause_chosen(&chosen.processes(), pause)
+        left_running(pause_chosen(&chosen.processes(), pause), chosen)
     }
 
     /// Kills `child`, a program this process started and holds (`name` says which): whether
@@ -696,6 +697,18 @@ fn said_only(chosen: &Grounded) -> Ended {
         said: chosen.processes(),
         ..Ended::default()
     }
+}
+
+/// `ended`, with what the window's tree named and did not prove said as left running: a process
+/// no link proves is not ended, and its leaving is a problem of the case that read it.
+fn left_running(mut ended: Ended, chosen: &Grounded) -> Ended {
+    for (process, why) in chosen.unproved() {
+        ended.failed.push((
+            process.clone(),
+            format!("it is not proved to be the window's, so it was left running: {why}"),
+        ));
+    }
+    ended
 }
 
 /// A process as the door says it: its number, when it began, and its command line, whole.
@@ -1577,6 +1590,9 @@ impl fmt::Display for Ground {
 pub struct Grounded {
     processes: Vec<Running>,
     grounds: Vec<Ground>,
+    /// What the window's tree names as made by one of its processes and does not prove, with why:
+    /// never ended, and said as left running where the set is ended ([`Grounded::unproved`]).
+    unproved: Vec<(Running, String)>,
 }
 
 impl std::ops::Deref for Grounded {
@@ -1603,6 +1619,8 @@ impl Grounded {
 
     fn push(&mut self, process: Running, ground: Ground) {
         if !self.contains(process.identity) {
+            // Chosen now: no longer a process the kit could only name.
+            self.unproved.retain(|(seen, _)| seen.identity != process.identity);
             self.processes.push(process);
             self.grounds.push(ground);
         }
@@ -1613,9 +1631,36 @@ impl Grounded {
         self.processes.iter().zip(&self.grounds)
     }
 
-    /// What descends from `root` among `all` ([`descending_from`]).
+    /// What descends from `root` among `all` ([`descending_from`]); what the tree names and does not
+    /// prove is kept apart ([`Grounded::unproved`]).
     pub fn descending_from(all: &[Running], root: Identity) -> Grounded {
-        Grounded::of(descending_from(all, root), &Ground::Descends(root))
+        let mut grounded = Grounded::of(descending_from(all, root), &Ground::Descends(root));
+        grounded.unproved = unproved_under(all, root);
+        grounded
+    }
+
+    /// What the window's tree named and did not prove, with why: the kit leaves it running and says
+    /// so ([`Door::end`]).
+    pub fn unproved(&self) -> &[(Running, String)] {
+        &self.unproved
+    }
+
+    /// Whatever is under a process chosen and is not proved, whatever its command says: the kit
+    /// ends the command and what it proved under it, and says the rest as left running.
+    fn keep_unproved_under_chosen(&mut self, all: &[Running]) {
+        for chosen in self.processes.clone() {
+            self.keep_unproved(unproved_under(all, chosen.identity));
+        }
+    }
+
+    fn keep_unproved(&mut self, more: Vec<(Running, String)>) {
+        for (process, why) in more {
+            if !self.contains(process.identity)
+                && !self.unproved.iter().any(|(seen, _)| seen.identity == process.identity)
+            {
+                self.unproved.push((process, why));
+            }
+        }
     }
 
     /// The process `root` and what descends from it: none where it is not among `all`.
@@ -1631,10 +1676,18 @@ impl Grounded {
     /// What descends from `window` among `all` and holds `text`, with what it started
     /// ([`holding`]).
     pub fn holding(all: &[Running], window: Identity, text: &str) -> Grounded {
-        Grounded::of(
+        let mut grounded = Grounded::of(
             holding(all, window, text),
             &Ground::Holding(window, text.to_owned()),
-        )
+        );
+        grounded.keep_unproved(
+            unproved_under(all, window)
+                .into_iter()
+                .filter(|(process, _)| process.command.contains(text))
+                .collect(),
+        );
+        grounded.keep_unproved_under_chosen(all);
+        grounded
     }
 
     /// What descends from `window` among `all` whose command line `runs` says is the one
@@ -1656,6 +1709,13 @@ impl Grounded {
                 grounded.push(one, ground.clone());
             }
         }
+        grounded.keep_unproved(
+            unproved_under(all, window)
+                .into_iter()
+                .filter(|(process, _)| runs(&process.command))
+                .collect(),
+        );
+        grounded.keep_unproved_under_chosen(all);
         grounded
     }
 
@@ -1702,6 +1762,7 @@ impl Grounded {
 
     /// Adds what `other` holds, each process once.
     pub fn add(&mut self, other: Grounded) {
+        self.keep_unproved(other.unproved);
         for (process, ground) in other.processes.into_iter().zip(other.grounds) {
             self.push(process, ground);
         }
@@ -1717,6 +1778,7 @@ impl Grounded {
         for (process, ground) in kept {
             self.push(process, ground);
         }
+        self.unproved.retain(|(process, _)| keep(process));
     }
 
     /// The processes, in the order chosen.

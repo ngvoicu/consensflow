@@ -11,6 +11,7 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: crate::live::members::Link::Number,
     }
 }
 

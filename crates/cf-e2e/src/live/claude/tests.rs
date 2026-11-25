@@ -281,6 +281,7 @@ fn the_processes_of_a_machines_table_that_hold_a_word_are_the_ones_whose_command
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: crate::live::members::Link::Number,
     };
     let table = vec![
         running(

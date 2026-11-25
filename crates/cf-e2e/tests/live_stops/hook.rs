@@ -429,6 +429,7 @@ mod tests {
             ppid,
             command: command.to_owned(),
             exe: None,
+            link: cf_e2e::live::members::Link::Number,
         }
     }
 
