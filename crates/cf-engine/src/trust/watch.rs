@@ -82,8 +82,7 @@ impl<'a> Watch<'a> {
         participant: &'a ParticipantView,
         pane: &'a Pane,
         window: &'a Rc<dyn Window>,
-        trusts: Trusts,
-        chosen: Option<ServersChosen>,
+        (trusts, chosen): (Trusts, Option<ServersChosen>),
     ) -> Self {
         let Trusts {
             folder,

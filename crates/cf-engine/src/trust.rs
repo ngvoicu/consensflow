@@ -396,8 +396,7 @@ impl Dispatcher {
             participant,
             pane,
             window,
-            trusts,
-            chosen,
+            (trusts, chosen),
         );
         let ended = loop {
             // A window no longer the record's ends the watch as any other: what it was

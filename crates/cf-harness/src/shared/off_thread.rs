@@ -23,19 +23,19 @@ use tokio::sync::oneshot;
 use crate::contract::{Agent, Launch, LaunchId, Skill, Specs};
 
 /// How long a step of a plan is waited for.
-pub const DEADLINE: Duration = Duration::from_secs(60);
+const DEADLINE: Duration = Duration::from_secs(60);
 
 /// The variable that sets how long, in milliseconds: a test of a step that does not end would
 /// otherwise wait a minute; nothing in a person's environment sets it.
 const DEADLINE_VARIABLE: &str = "CONSENSFLOW_PLAN_DEADLINE_MS";
 
 /// The steps of a launch's plan, as a note names the one that did not end.
-pub mod step {
-    pub const CLAUDE: &str = "reading the project's folder and writing the launch's files";
-    pub const FILES: &str = "writing the launch's files";
-    pub const PROGRAM: &str = "finding the harness's program";
-    pub const CONFIGURATION: &str = "reading the harness's configuration";
-    pub const SETTINGS: &str = "reading the project's settings";
+pub(crate) mod step {
+    pub(crate) const CLAUDE: &str = "reading the project's folder and writing the launch's files";
+    pub(crate) const FILES: &str = "writing the launch's files";
+    pub(crate) const PROGRAM: &str = "finding the harness's program";
+    pub(crate) const CONFIGURATION: &str = "reading the harness's configuration";
+    pub(crate) const SETTINGS: &str = "reading the project's settings";
 }
 
 const STEPS: [&str; 5] = [
@@ -69,6 +69,7 @@ thread_local! {
 
 /// Whether a call this thread asked for is still being made: a test that polls a plan by hand
 /// waits for its wake only while one is.
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn outstanding() -> bool {
     OUTSTANDING.with(|count| count.load(Ordering::SeqCst) > 0)
 }
