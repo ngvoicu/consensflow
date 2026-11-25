@@ -88,6 +88,9 @@ enum Step {
     /// The clock moves on to the failure's side of the 30 minutes after the last numbered retry:
     /// a few milliseconds either way of the boundary.
     Boundary,
+    /// The wall clock is put back to 31 minutes before the last numbered retry (where no word
+    /// was pasted since): the failure that follows reads a time earlier than the retry's.
+    Behind,
     /// The clock moves on by this many milliseconds (both clocks).
     Wait(i64),
     /// The wall clock is put back by this many milliseconds.
@@ -233,6 +236,12 @@ impl<'a> Model<'a> {
         }
         if matches!(self.phase, Phase::Working | Phase::Held { .. }) {
             steps.push(Back);
+            if self
+                .last
+                .is_some_and(|last| last - 31 * 60_000 > self.floor.max(self.pasted))
+            {
+                steps.extend([Behind, Behind]);
+            }
         }
         match self.phase {
             Phase::Working => {
@@ -269,7 +278,12 @@ impl<'a> Model<'a> {
             .push(format!("{step:?} at {} ({:?})", self.now(), self.phase));
         if !matches!(
             step,
-            Step::Forward | Step::Back | Step::Boundary | Step::Wait(_) | Step::Rewind(_)
+            Step::Forward
+                | Step::Back
+                | Step::Behind
+                | Step::Boundary
+                | Step::Wait(_)
+                | Step::Rewind(_)
         ) {
             self.fresh = matches!(
                 step,
@@ -305,6 +319,11 @@ impl<'a> Model<'a> {
                 if at > self.now() {
                     self.c.advance(at - self.now());
                 }
+            }
+            Step::Behind => {
+                let last = self.last.expect("a numbered retry happened");
+                let to = last - 31 * 60_000;
+                self.c.step_wall(to - self.now());
             }
             Step::Wait(by) => self.c.advance(by),
             Step::Rewind(by) => self.c.step_wall(-by),
@@ -908,4 +927,19 @@ fn t_2280_finding_9_a_first_turn_failing_after_a_word_with_a_count_of_zero_stamp
         (Phase::Failed, 2),
         "two charged since the word, no third"
     );
+}
+
+#[test]
+fn a_clock_read_well_before_the_last_numbered_retry_never_renews_the_count() {
+    // The failure's clock reads 31 minutes before the retry that was withdrawn: no renewal,
+    // the count of 1 stands and the next hold is for the second retry.
+    let (_c, phase, count) = script(&[
+        Fail,
+        Wait(40 * MIN),
+        DueQueued,
+        Withdraw,
+        Rewind(31 * MIN),
+        Fail,
+    ]);
+    assert_eq!((held(phase), count), (true, 1));
 }
