@@ -57,25 +57,32 @@ fn flush_folder_of(folder: &Path) -> io::Result<()> {
         .sync_all()
 }
 
-/// The one `unsafe` call of this crate: Windows has no safe wrapper of a move
-/// that is written through to the disk, and `std::fs::rename` is not one.
+#[cfg(windows)]
+fn rename_through(from: &Path, to: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    move_with(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+}
+
+/// `from` moved to `to` where nothing has that name: with no leave to replace, the system
+/// refuses a name that is taken (`ERROR_ALREADY_EXISTS`).
+#[cfg(windows)]
+pub(super) fn move_where_free(from: &Path, to: &Path) -> io::Result<()> {
+    move_with(from, to, 0)
+}
+
+/// The one `unsafe` call of this crate: Windows has no safe wrapper of a move that is written
+/// through to the disk, or of one that may not replace, and `std::fs::rename` is neither.
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn rename_through(from: &Path, to: &Path) -> io::Result<()> {
+fn move_with(from: &Path, to: &Path, flags: u32) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
     let wide = |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain([0]).collect() };
     let (from, to) = (wide(from), wide(to));
     // SAFETY: both names are NUL-terminated and outlive the call, which keeps no pointer.
-    let moved = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
+    let moved = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), flags) };
     if moved == 0 {
         return Err(io::Error::last_os_error());
     }

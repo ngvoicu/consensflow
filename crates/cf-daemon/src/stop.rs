@@ -14,9 +14,11 @@
 //!   to finish. What is open at the deadline is dropped. The app ends the
 //!   daemon 2 s after asking it to stop, and its own exit hooks must run
 //!   first.
-//! - **The tail** waits for one thing only, the thread that writes the trace, a quarter
-//!   of a second at most, and lets the home go (the ledger is closed) only once it
-//!   has: past that it exits with the ledger still held, so that the writer ends with the
+//! - **The tail** waits for the thread that writes the trace, a quarter of a second at most,
+//!   and for the log's, last: what is left of the stop's deadline, a quarter of a second at
+//!   least, so that the log holds what it was given, then the count of what it dropped, then
+//!   the stop's line and the exit's (T-2263). It lets the home go (the ledger is closed)
+//!   only once the trace is written: past that it exits with the ledger still held, so that the writer ends with the
 //!   process and no daemon that takes the home meanwhile has lines written behind it.
 //!   The children are forced to end without
 //!   waiting (each group looked at once more, at once, for what it started as
@@ -29,7 +31,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_bridge::local::Ended;
 use cf_ledger::Ledger;
@@ -103,10 +105,11 @@ pub struct Stopping {
 impl Stopping {
     /// The stop, for `why`: ends with the process's exit.
     pub async fn run(&self, why: &str) {
+        let began = Instant::now();
         let size = rss().map_or(0, megabytes);
         self.errors
             .log()
-            .info(&format!("stop: {why}; rss {size} MB"));
+            .keep(&format!("stop: {why}; rss {size} MB"));
         let waiting = async {
             let passes = async {
                 if let Some(passes) = self.passes.get() {
@@ -121,12 +124,17 @@ impl Stopping {
             // settled at the next start.
             self.api.drop_connections();
         }
-        self.tail();
+        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));
     }
 
     /// What is left to do, with no wait in it. Each step is its own: one that
     /// fails or panics leaves the rest, and the process ends.
     pub(crate) fn tail(&self) {
+        self.tail_within(SETTLE);
+    }
+
+    /// [`Stopping::tail`], waiting `log_within` at most for the log.
+    fn tail_within(&self, log_within: Duration) {
         if let Err(panicked) = contain_now(|| (self.ends_children)()) {
             self.errors.caught("the children did not end", &panicked);
         }
@@ -151,7 +159,9 @@ impl Stopping {
                 None,
             );
         }
-        self.errors.log().info("exit 0");
+        self.errors.log().keep("exit 0");
+        // What was said is written before the process goes, if the log's file lets it in time.
+        let _ = self.errors.log().written(log_within);
         (self.exit)(0);
     }
 }

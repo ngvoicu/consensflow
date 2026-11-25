@@ -820,6 +820,9 @@ impl Dispatcher {
                 return self.launch_failed(record, project, participant, failing, &said);
             }
         };
+        // The stops the plan read as it began its first message, which a failed plan tells a
+        // later pause by: none where it failed before that.
+        let mut asked_before = None;
         // Boxed, so that the work of an operation that launches stays small
         // (`dispatcher::tests`): the plan asks the harness and prepares the window,
         // and what it comes to is held on the heap through the waits after it.
@@ -833,6 +836,7 @@ impl Dispatcher {
             delivering.as_ref(),
             role,
             prelude,
+            &mut asked_before,
         ))
         .await
         {
@@ -844,6 +848,8 @@ impl Dispatcher {
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
+                } else if let Some((step, seconds)) = cf_harness::late_step(&cause.to_string()) {
+                    Why::Late(step, seconds)
                 } else {
                     Why::Unsaid
                 };
@@ -852,6 +858,19 @@ impl Dispatcher {
                     Startup::new(Stage::Prepare, why),
                     &cause.to_string(),
                 );
+                // A pause or a withdrawal while the plan was made ends the launch with no
+                // failure, as where the plan was made (T-2263); a project closed meanwhile
+                // is `launch_failed`'s to see.
+                if self.in_open_project(project.id)?
+                    && self.over_though_failed(
+                        record,
+                        participant,
+                        failing.as_ref(),
+                        asked_before,
+                    )?
+                {
+                    return Ok(());
+                }
                 return self.launch_failed(record, project, participant, failing, &said);
             }
         };
@@ -1199,7 +1218,7 @@ impl Dispatcher {
         // A Claude window where Claude Code's computer use is on, while ConsensFlow lacks
         // a permission it needs: the human is told once (`computer_use`). What fails to be
         // written down is the log's, not the launch's.
-        if let Err(cause) = self.tell_computer_use_once(project, participant) {
+        if let Err(cause) = self.tell_computer_use_once(project, participant).await {
             self.write_down(&cause);
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
@@ -1274,6 +1293,7 @@ impl Dispatcher {
         delivering: Option<&Delivering>,
         role: Option<RoleText>,
         prelude: Option<Prelude>,
+        asked_before: &mut Option<Option<Stop>>,
     ) -> Result<Option<Planned>, EngineError> {
         // A member the update could not run on what it ran on (T-1202) opens no window on
         // its harness's default: its work goes back to the board, and the human hears why.
@@ -1306,6 +1326,7 @@ impl Dispatcher {
         // owed. Read in this turn, with the first message begun: the window
         // works on the task that message is about.
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        *asked_before = Some(stop);
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
         // as one that comes while the window is prepared is, and the launch is over.
@@ -1495,7 +1516,13 @@ impl Dispatcher {
         };
         // An `async` function: its answer, or its failure, reaches this
         // step a turn after it was made, though Pi's never waits.
-        let prepared = returning(adapter.prepare(&launch))
+        // Its steps made off the thread ask between them whether it is still wanted, so that
+        // a Close waits for one of them at most (T-2263).
+        let wanted = {
+            let (this, held, id) = (Rc::clone(self), Rc::clone(record), project.id);
+            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))
+        };
+        let prepared = cf_harness::while_wanted(wanted, returning(adapter.prepare(&launch)))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
         if participant.role == "chief" {
@@ -1648,6 +1675,32 @@ impl Dispatcher {
         Ok(true)
     }
 
+    /// [`Dispatcher::launch_over`] for a launch whose plan failed in an open project, asked
+    /// before the failure is settled: its record forgotten, or, for a member, its message
+    /// withdrawn or a pause asked since `captured` was read (none where the plan failed before
+    /// it read them, with nothing begun). `failing` is still queued where the window was to be
+    /// told its role first, and fails all the same unless the launch is over.
+    fn over_though_failed(
+        &self,
+        record: &Rc<Record>,
+        participant: &ParticipantView,
+        failing: Option<&Delivering>,
+        captured: Option<Option<Stop>>,
+    ) -> Result<bool, EngineError> {
+        let mut displaced = false;
+        if let Some(failing) = failing {
+            let message = self.seams.ledger.borrow().message(failing.message)?;
+            displaced = message.is_some_and(|message| message.state == "queued");
+        }
+        self.launch_over(
+            record,
+            participant,
+            failing.filter(|_| !displaced && captured.is_some()),
+            captured.flatten(),
+            "a pause came while its window was prepared",
+        )
+    }
+
     /// What a window's first message reads, which `begin_delivery` told: a
     /// member's fresh session starts from nothing, so the brief its task's
     /// window received goes in first ([`Dispatcher::brief_given_first`]). A
@@ -1747,6 +1800,11 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
+        // A launch that ends after its project closed, whatever step ended it, fails nothing
+        // and tells nobody: what it was to deliver waits for the Resume (T-2274).
+        if !self.in_open_project(participant.project_id)? {
+            return self.ended_closed(record, participant, delivering);
+        }
         if participant.role != "chief" {
             if record.window.borrow().coming.is_some() {
                 if let Some(delivering) = delivering {
@@ -1821,6 +1879,33 @@ impl Dispatcher {
                     body: format!("The chief could not start: {because}. {retry}"),
                 },
             )?;
+        }
+        self.changed();
+        Ok(())
+    }
+
+    /// A launch that ended after its project closed: its message goes back to its queue with
+    /// its attempt, where it was on its way. What a member's window was to be told of its role
+    /// first was written for that window, and goes with it.
+    fn ended_closed(
+        &self,
+        record: &Record,
+        participant: &ParticipantView,
+        delivering: Option<Delivering>,
+    ) -> Result<(), EngineError> {
+        if let Some(delivering) = delivering {
+            self.give_back(
+                delivering.message,
+                "its project was closed before its window was up",
+            )?;
+            self.seams
+                .ledger
+                .borrow_mut()
+                .launch_called_off(delivering.message)?;
+        }
+        if participant.role != "chief" {
+            self.withdraw_replacements(participant)?;
+            record.window.borrow_mut().coming = None;
         }
         self.changed();
         Ok(())
