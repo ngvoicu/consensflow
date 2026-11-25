@@ -245,7 +245,14 @@ runs = ["epoch-g3"]
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
 find = '''        for (key, _) in places {
-            self.lost_with(&key, Flags { dropped: true, ..Flags::default() }, events);
+            self.lost_with(
+                &key,
+                Flags {
+                    dropped: true,
+                    ..Flags::default()
+                },
+                events,
+            );
         }'''
 replace = '''        for (_key, _) in places {}'''
 
@@ -475,7 +482,14 @@ runs = ["epoch-g3"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                self.lost_with(key, Flags { dropped: true, ..Flags::default() }, events);'''
+find = '''                self.lost_with(
+                    key,
+                    Flags {
+                        dropped: true,
+                        ..Flags::default()
+                    },
+                    events,
+                );'''
 replace = '''                self.lost_with(key, Flags::default(), events);'''
 
 [[plant]]

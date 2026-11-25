@@ -2058,5 +2058,5 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = "hdiutil attach -nobrowse -readonly"
-replace = "hdiutil attach -readonly -nobrowse"
+find = "\"$hdiutil\" attach -nobrowse -readonly"
+replace = "\"$hdiutil\" attach -readonly -nobrowse"
