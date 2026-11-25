@@ -11,11 +11,7 @@ use super::{Ended, Trusting};
 
 impl Dispatcher {
     /// The watch of a window that is past the question, or no longer the record's, ends.
-    pub(super) async fn settle_trust(
-        &self,
-        watch: Watch<'_>,
-        ended: Ended,
-    ) -> Result<(), EngineError> {
+    pub(super) fn settle_trust(&self, watch: Watch<'_>, ended: Ended) -> Result<(), EngineError> {
         let Watch {
             record,
             project,
@@ -57,14 +53,8 @@ impl Dispatcher {
         // A server the window's folder left out while only ConsensFlow pressed into the
         // dialog: a key that answered what it was not pressed for (T-415). No later window
         // asks of it, so the human is told.
-        // Read off the engine's thread: a project's folder that stops answering holds no
-        // other window (T-2232). One that gave no answer, now or as the watch began, says
-        // nothing of what changed.
-        let now = window.servers_chosen().await;
-        let (refused, used) = match (&chosen, now) {
-            (Some(before), Some(now)) => servers_changed(before, now),
-            _ => (Vec::new(), false),
-        };
+        let now = window.servers_chosen();
+        let (refused, used) = servers_changed(&chosen, now);
         if into_servers && !servers && !refused.is_empty() {
             self.tell_left_out(project, &folder, participant, &refused)?;
         }

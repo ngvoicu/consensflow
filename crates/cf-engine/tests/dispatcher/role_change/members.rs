@@ -795,26 +795,3 @@ fn a_session_whose_launch_cannot_say_its_role_and_whose_kill_is_never_answered_i
     held.open();
     context.settle();
 }
-
-/// The same launch, with a pause that comes while its window is prepared: the brief the role
-/// went ahead of went back to its queue, and the plan that then fails fails no paused task
-/// (T-2263, finding 10).
-#[test]
-fn a_pause_while_a_launch_that_says_the_role_first_is_prepared_is_not_undone_by_its_failure() {
-    let context = codex();
-    let (project, _session, _member) = finished_session(&context);
-    context.roles.rewritten.replace(" (rewritten)".to_owned());
-    let preparing = context
-        .codex
-        .prepare_holds
-        .hold_instead(|_| true, "no Codex".to_owned());
-    follow_up(&context, &project, "Now the lexer");
-    context.pass().unwrap();
-    context.settle();
-    context.pause_task(project.id, 2);
-    preparing.open();
-    context.settle();
-
-    assert_eq!(context.task(project.id, 2).task.state, "paused");
-    context.close();
-}

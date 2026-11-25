@@ -17,7 +17,7 @@ use cf_ledger::{NewNote, ParticipantView, ProjectView};
 
 use crate::dispatcher::Dispatcher;
 use crate::seams::EngineError;
-use crate::seams::{ScreenPermissions, Waited};
+use crate::seams::ScreenPermissions;
 
 /// The harness a note is for.
 const CLAUDE: &str = "claude-code";
@@ -59,7 +59,7 @@ pub fn note_for(missing: ScreenPermissions) -> String {
 impl Dispatcher {
     /// Tells the human once when a Claude window of `participant` starts where
     /// Claude Code's computer use is on and ConsensFlow lacks a permission it needs.
-    pub(crate) async fn tell_computer_use_once(
+    pub(crate) fn tell_computer_use_once(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
@@ -67,13 +67,8 @@ impl Dispatcher {
         if participant.harness.as_deref() != Some(CLAUDE) {
             return Ok(());
         }
-        let granted = match self.seams.computer_use.permissions().await {
-            Ok(Some(granted)) => granted,
-            Ok(None) => return Ok(()),
-            Err(Waited(limit)) => {
-                self.went_on_without_the_note(participant, "macOS's privacy service", limit);
-                return Ok(());
-            }
+        let Some(granted) = self.seams.computer_use.permissions() else {
+            return Ok(());
         };
         if granted.all() {
             // Mended: a state lost again is said again.
@@ -84,13 +79,8 @@ impl Dispatcher {
             self.computer_use.mended.borrow_mut().insert(project.id);
             return Ok(());
         }
-        match self.seams.computer_use.claude(&project.directory).await {
-            Ok(claude) if claude.on => {}
-            Ok(_) => return Ok(()),
-            Err(Waited(limit)) => {
-                self.went_on_without_the_note(participant, "Claude Code's configuration", limit);
-                return Ok(());
-            }
+        if !self.seams.computer_use.claude(&project.directory).on {
+            return Ok(());
         }
         let missing = ScreenPermissions {
             accessibility: !granted.accessibility,
@@ -121,22 +111,6 @@ impl Dispatcher {
         )?;
         self.changed();
         Ok(())
-    }
-
-    /// Says in the log that a launch went on without its note of computer use because the
-    /// system gave no answer in its limit: the window and what was asked, never a path or a
-    /// value.
-    fn went_on_without_the_note(
-        &self,
-        participant: &ParticipantView,
-        asked: &str,
-        limit: std::time::Duration,
-    ) {
-        self.seams.log.warn(&format!(
-            "the launch of @{} went on without the computer-use note: {asked} gave no answer in {} s",
-            participant.handle,
-            limit.as_secs(),
-        ));
     }
 
     /// What the project's last note of computer use said to the human: ConsensFlow's

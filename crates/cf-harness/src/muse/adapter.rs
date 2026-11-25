@@ -153,29 +153,18 @@ impl Adapter for MuseAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let env = self.env();
-            // The program is found and the launch's files written on the plan's own thread:
-            // each can wait, and the engine's thread must not (T-2203).
-            let (executable, role) = crate::shared::off_thread::plan(
+            let executable = executable(Harness::Muse, env)?;
+            let role = write_role(
+                Harness::Muse,
+                launch.role,
                 env,
-                launch,
-                crate::shared::off_thread::step::FILES,
-                |env, launch| {
-                    let executable = executable(Harness::Muse, env)?;
-                    let role = write_role(
-                        Harness::Muse,
-                        launch.role,
-                        env,
-                        launch.id,
-                        launch.instructions,
-                    )?;
-                    // A chief given specs reads its Specmint skill by the path its role text
-                    // names: where Muse has none of its own, ConsensFlow's is written where it
-                    // is kept for every launch.
-                    specmint::write_own(Harness::Muse, env, launch)?;
-                    Ok::<_, String>((executable, role))
-                },
-            )
-            .await??;
+                launch.id,
+                launch.instructions,
+            )?;
+            // A chief given specs reads its Specmint skill by the path its role text
+            // names: where Muse has none of its own, ConsensFlow's is written where it
+            // is kept for every launch.
+            specmint::write_own(Harness::Muse, env, launch)?;
             // A hook may say 16,384 bytes and a role is longer: a hook for each part
             // (T-1246), and past them a hook that writes a filler over each block an older
             // role may have left, up to the most a role may have: whatever conversation

@@ -200,24 +200,15 @@ impl ScreenPermissions {
 /// configuration, never written).
 pub trait ComputerUse {
     /// ConsensFlow's permissions; none on a system where no harness's computer
-    /// use runs (Claude Code has none outside macOS). Asked of the system, which can
-    /// wait for good: a call that never holds the engine's thread, and that says
-    /// [`Waited`] where the system gave no answer in its limit (T-2203).
-    fn permissions(&self) -> Work<'_, Result<Option<ScreenPermissions>, Waited>>;
+    /// use runs (Claude Code has none outside macOS).
+    fn permissions(&self) -> Option<ScreenPermissions>;
     /// Whether Claude Code's computer use is on for a window opened in
     /// `directory`, and the folder it is kept under.
-    fn claude<'a>(
-        &'a self,
-        directory: &'a str,
-    ) -> Work<'a, Result<cf_harness::claude::computer_use::ComputerUse, Waited>>;
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse;
     /// Whether Codex's computer use is set up on the machine (the ChatGPT app's
     /// plugin, for every folder; its grants are its own app's).
-    fn codex(&self) -> Work<'_, Result<cf_harness::codex::computer_use::ComputerUse, Waited>>;
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse;
 }
-
-/// A call of the system that gave no answer in the time it was given.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Waited(pub std::time::Duration);
 
 /// The adapter for a harness's windows, by the word the ledger names the
 /// harness with: none for one this build opens no windows of.

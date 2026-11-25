@@ -23,9 +23,6 @@ import { element, redraw } from '../dom.js'
  * there is no project yet, for the folder picked: Claude Code keeps its switch by folder.
  */
 
-/** What a check the system gave no answer to says: neither on nor off. */
-const CANT_TELL = "Can't tell right now"
-
 /**
  * Each harness's block, by the harness's word, in the order they are shown: `ours` where it
  * works through ConsensFlow's permissions, and `own` the app whose permissions it works
@@ -42,7 +39,6 @@ const PARTS = {
     show(said, system) {
       if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
       if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
-      if (said.on === null) return { status: CANT_TELL, state: 'none' }
       if (said.on) {
         return {
           status: 'On for this project',
@@ -63,7 +59,6 @@ const PARTS = {
     show(said, system) {
       if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
       if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
-      if (said.setUp === null) return { status: CANT_TELL, state: 'none' }
       if (said.setUp) {
         return {
           status: 'Set up',
@@ -230,7 +225,7 @@ export class ComputerUseSection {
     this.#mend.hidden =
       permissions === null ||
       !apps.some(({ name }) => name === 'ConsensFlow') ||
-      GRANTS.every(({ key }) => permissions[key] !== false)
+      GRANTS.every(({ key }) => permissions[key] === true)
     // The columns: the permission, each app's status, and the button's, which has no heading.
     redraw(this.#apps, [
       element('th', null, 'Permission'),

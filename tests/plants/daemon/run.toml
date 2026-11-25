@@ -255,9 +255,8 @@ find = '''
     if started.is_err() {
         log.info("exit 1");
     }
-'''
-replace = '''
-'''
+    started'''
+replace = "    started"
 
 # Only a process has signals of its own: the daemon of a test is told to stop.
 [[plant]]

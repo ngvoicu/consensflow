@@ -29,110 +29,12 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
     {
         make_folder(folder, 0o777, Mkdir::Sync)?;
     }
-    write_in_place(path, bytes, 0o666)
-}
-
-/// [`write_whole`] for a file whose folder is there and which is made with `mode`: written
-/// beside to `<file>.<pid>.tmp` and renamed into place, so a write that is stopped half way
-/// (the daemon ending, a call that never ends) leaves the file as it was or not there, never
-/// half of it.
-pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    let temporary = beside(path);
-    write_file(&temporary, bytes, mode)
-        .and_then(|()| rename(&temporary, path))
-        .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
-}
-
-/// [`write_in_place`] for a file that must be made new: written beside, then given its name only
-/// where the name is free, so that one another writer put there meanwhile stays as it is (an
-/// `EEXIST` of `open`, as `writeFile` with the flag `wx` says it). Nothing is renamed over a name
-/// another has: where a volume makes no link (Unix), the name is claimed by a file of its own,
-/// made new, and the finished one is renamed over that claim alone. A write stopped between the
-/// two leaves that empty file and the whole one beside it, in the launch's own folder, which a
-/// start sweeps; no later launch writes there.
-pub fn write_new_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    #[cfg(unix)]
-    let linked = write_new_with(path, bytes, mode, |from, to| fs::hard_link(from, to));
-    #[cfg(windows)]
-    let linked = write_new_by(path, bytes, mode, publish_new);
-    linked
-}
-
-/// How a file written beside is given its name on Unix.
-#[cfg(unix)]
-type Link = fn(&Path, &Path) -> io::Result<()>;
-
-/// [`write_new_in_place`] with the link a volume makes, which a test stands in for.
-#[cfg(unix)]
-fn write_new_with(path: &Path, bytes: &[u8], mode: u32, link: Link) -> Result<(), FileError> {
-    write_new_by(path, bytes, mode, |from, to| match link(from, to) {
-        Err(error) if makes_no_link(&error) => claim_and_rename(from, to, mode),
-        linked => linked.map_err(|error| publish_failed(error, from, to)),
-    })
-}
-
-/// Whether a link failed because the volume makes none: exFAT and FAT, and the network shares
-/// that keep no second name for a file.
-#[cfg(unix)]
-fn makes_no_link(error: &io::Error) -> bool {
-    let none = [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS, libc::EPERM];
-    error
-        .raw_os_error()
-        .is_some_and(|code| none.contains(&code))
-}
-
-/// Takes the name `to` with a file made new, which the system refuses where the name is taken,
-/// and renames `from` over it. A rename that fails leaves the name as free as it was.
-#[cfg(unix)]
-fn claim_and_rename(from: &Path, to: &Path, mode: u32) -> Result<(), FileError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
-    drop(
-        options
-            .open(to)
-            .map_err(|error| publish_failed(error, from, to))?,
-    );
-    rename(from, to).map_err(|failure| remove(to).err().unwrap_or(failure))
-}
-
-/// The file written beside, given its name by `publish`.
-fn write_new_by(
-    path: &Path,
-    bytes: &[u8],
-    mode: u32,
-    publish: impl FnOnce(&Path, &Path) -> Result<(), FileError>,
-) -> Result<(), FileError> {
-    let temporary = beside(path);
-    let published = write_file(&temporary, bytes, mode).and_then(|()| publish(&temporary, path));
-    // Unix leaves the file beside as a second name of the one published.
-    let removed = remove(&temporary);
-    match published {
-        Ok(()) => removed,
-        Err(failure) => Err(removed.err().unwrap_or(failure)),
-    }
-}
-
-/// The temporary a file is written to beside `path`: `<file>.<pid>.tmp`.
-fn beside(path: &Path) -> PathBuf {
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
-    PathBuf::from(temporary)
-}
-
-/// Gives `from` the name `to` where nothing has it: a move with no leave to replace.
-#[cfg(windows)]
-fn publish_new(from: &Path, to: &Path) -> Result<(), FileError> {
-    super::durable::move_where_free(from, to).map_err(|error| publish_failed(error, from, to))
-}
-
-/// A name that is taken is `open`'s failure for a file that must be new; another is the call's.
-fn publish_failed(error: io::Error, from: &Path, to: &Path) -> FileError {
-    if error.kind() == io::ErrorKind::AlreadyExists {
-        return FileError::call(error, "open", Some(to));
-    }
-    let call = if cfg!(windows) { "rename" } else { "link" };
-    FileError::call_to(error, call, from, to)
+    let temporary = PathBuf::from(temporary);
+    write_file(&temporary, bytes, 0o666)
+        .and_then(|()| rename(&temporary, path))
+        .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
 /// Which of Node's recursive `mkdir` calls a folder is made as. Both walk

@@ -386,9 +386,6 @@ impl Dispatcher {
         let Some(trusts) = window.trusts().cloned() else {
             return Ok(());
         };
-        // What the folder says before any key goes into the dialog, read off the engine's
-        // thread (T-2232).
-        let chosen = window.servers_chosen().await;
         let mut watch = Watch::new(
             self.now(),
             record,
@@ -396,7 +393,7 @@ impl Dispatcher {
             participant,
             pane,
             window,
-            (trusts, chosen),
+            trusts,
         );
         let ended = loop {
             // A window no longer the record's ends the watch as any other: what it was
@@ -409,7 +406,7 @@ impl Dispatcher {
             }
             self.seams.time.sleep(LOOK).await;
         };
-        self.settle_trust(watch, ended).await
+        self.settle_trust(watch, ended)
     }
 
     /// Whether `pane` is still the record's window.

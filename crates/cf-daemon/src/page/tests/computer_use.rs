@@ -202,32 +202,3 @@ async fn open_opens_only_the_two_named_panes() {
         })
         .await;
 }
-
-/// A check the system did not answer is unknown (null), never off (T-2232, finding 6).
-#[tokio::test]
-async fn a_check_the_system_did_not_answer_is_unknown_and_never_off() {
-    LocalSet::new()
-        .run_until(async {
-            let (_daemon, app, rig) = held();
-            let project = rig.kit.with_staff(&["zeus"]).id;
-            rig.kit
-                .computer_use
-                .on_in
-                .borrow_mut()
-                .insert("/work/app".to_owned());
-            rig.kit.computer_use.codex_set_up.set(true);
-            rig.kit.computer_use.silent();
-            let answer = ask(&app, "computer_use.get", json!({ "project": project })).await;
-            assert_eq!(answer["ok"], true, "{answer}");
-            assert_eq!(
-                answer["permissions"],
-                json!({ "accessibility": null, "screenRecording": null })
-            );
-            assert_eq!(
-                answer["harnesses"]["claude-code"],
-                json!({ "on": null, "folder": "/work/app" })
-            );
-            assert_eq!(answer["harnesses"]["codex"], json!({ "setUp": null }));
-        })
-        .await;
-}

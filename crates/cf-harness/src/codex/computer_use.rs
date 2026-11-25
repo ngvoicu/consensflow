@@ -42,7 +42,7 @@ const SERVER: &str = "cua_repl";
 const SERVICE_APP: [&str; 2] = ["computer-use", "Codex Computer Use.app"];
 
 /// What Codex's configuration says of its computer use.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputerUse {
     /// Whether the plugin is on, an installed version of it names a program
     /// that is there, and the service's app is in place.

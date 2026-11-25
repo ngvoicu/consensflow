@@ -441,25 +441,3 @@ fn a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
-
-/// A launch whose plan did not end in its time says so to the human, naming the step it was in,
-/// and nothing of the adapter's other words (T-2232).
-#[test]
-fn a_launch_whose_plan_was_late_says_which_step_took_too_long() {
-    let context = with_codex();
-    let project = spoken(&context);
-    *context.codex.prepare.borrow_mut() = Some(Rc::new(move |_| {
-        Err("writing the launch's files took more than 60 s".to_owned())
-    }));
-    context
-        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
-        .unwrap();
-    for _ in 0..4 {
-        context.pass().unwrap();
-    }
-    assert_match(
-        &to_human(&context, project.id)[0],
-        "could not start: the launch failed: writing the launch's files took more than 60 s\\. What comes",
-    );
-    context.close();
-}

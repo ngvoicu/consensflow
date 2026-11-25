@@ -33,9 +33,5 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Network
 [dev-dependencies]
 tempfile.workspace = true
 
-# A named pipe stands for a file that is slow to be written.
-[target.'cfg(unix)'.dev-dependencies]
-nix = { workspace = true, features = ["fs"] }
-
 [lints]
 workspace = true

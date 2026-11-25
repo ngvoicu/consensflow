@@ -96,81 +96,28 @@ pub struct FakeComputerUse {
     pub codex_set_up: Cell<bool>,
     /// How often each was asked of, permissions first.
     pub asked: Cell<(u32, u32)>,
-    gate: RefCell<Option<super::executor::Gate>>,
-    silent: Cell<bool>,
 }
 
 impl crate::seams::ComputerUse for FakeComputerUse {
-    fn permissions(
-        &self,
-    ) -> cf_harness::contract::Work<
-        '_,
-        Result<Option<crate::seams::ScreenPermissions>, crate::seams::Waited>,
-    > {
+    fn permissions(&self) -> Option<crate::seams::ScreenPermissions> {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions + 1, claude));
-        Box::pin(async move {
-            self.held().await?;
-            Ok(self.permissions.get())
-        })
+        self.permissions.get()
     }
 
-    fn claude<'a>(
-        &'a self,
-        directory: &'a str,
-    ) -> cf_harness::contract::Work<
-        'a,
-        Result<cf_harness::claude::computer_use::ComputerUse, crate::seams::Waited>,
-    > {
+    fn claude(&self, directory: &str) -> cf_harness::claude::computer_use::ComputerUse {
         let (permissions, claude) = self.asked.get();
         self.asked.set((permissions, claude + 1));
-        Box::pin(async move {
-            self.held().await?;
-            Ok(cf_harness::claude::computer_use::ComputerUse {
-                folder: directory.to_owned(),
-                on: self.on_in.borrow().contains(directory),
-            })
-        })
-    }
-
-    fn codex(
-        &self,
-    ) -> cf_harness::contract::Work<
-        '_,
-        Result<cf_harness::codex::computer_use::ComputerUse, crate::seams::Waited>,
-    > {
-        Box::pin(async move {
-            self.held().await?;
-            Ok(cf_harness::codex::computer_use::ComputerUse {
-                set_up: self.codex_set_up.get(),
-            })
-        })
-    }
-}
-
-impl FakeComputerUse {
-    /// Holds each ask of the system until the gate this answers opens, as a system
-    /// that waits does: the ask is pending, and no thread is held.
-    pub fn hold(&self) -> super::executor::Gate {
-        let gate = super::executor::Gate::default();
-        *self.gate.borrow_mut() = Some(gate.clone());
-        gate
-    }
-
-    /// The system gives no answer in the limit it was given: every ask says so.
-    pub fn silent(&self) {
-        self.silent.set(true);
-    }
-
-    async fn held(&self) -> Result<(), crate::seams::Waited> {
-        let gate = self.gate.borrow().clone();
-        if let Some(gate) = gate {
-            gate.wait().await;
+        cf_harness::claude::computer_use::ComputerUse {
+            folder: directory.to_owned(),
+            on: self.on_in.borrow().contains(directory),
         }
-        if self.silent.get() {
-            return Err(crate::seams::Waited(std::time::Duration::from_secs(5)));
+    }
+
+    fn codex(&self) -> cf_harness::codex::computer_use::ComputerUse {
+        cf_harness::codex::computer_use::ComputerUse {
+            set_up: self.codex_set_up.get(),
         }
-        Ok(())
     }
 }
 

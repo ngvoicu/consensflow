@@ -39,8 +39,6 @@ mod moves;
 #[cfg(unix)]
 mod off_thread;
 mod outside;
-#[cfg(unix)]
-mod plan_off_thread;
 mod private_folders;
 mod prompt_suggestion_off;
 mod relaunched;

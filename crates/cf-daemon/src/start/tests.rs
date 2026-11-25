@@ -27,7 +27,6 @@ mod held;
 mod input;
 mod restart;
 mod screens;
-mod stop_log;
 mod trace;
 
 const UI_TOKEN_DIGITS: usize = 48;
