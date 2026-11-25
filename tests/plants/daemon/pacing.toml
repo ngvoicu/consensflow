@@ -657,7 +657,9 @@ runs = ["pacing-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/box_keys.rs"
-find = """self.seams.host.request("pane.snapshot", pane_body_drawn(pane))"""
+find = """self.seams
+                .host
+                .request("pane.snapshot", pane_body_drawn(pane))"""
 replace = """self.seams.host.request("pane.snapshot", serde_json::json!({ "id": pane.id, "generation": pane.generation }))"""
 
 [[plant]]

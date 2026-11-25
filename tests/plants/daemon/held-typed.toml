@@ -121,11 +121,11 @@ runs = ["held-typed-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                note(
+find = """                note(
                     &requester,
-                    format!("{}. The human is told.", said(&counted)),
-                )?;'''
-replace = '''                let _ = requester;'''
+                    format!("{}. The human is told.", said("the human", &counted)),
+                )?;"""
+replace = """                let _ = requester;"""
 
 # --- what the box shows ---
 
@@ -192,8 +192,8 @@ runs = ["held-typed-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''said(&counted)'''
-replace = '''said(&masked)'''
+find = """said("the human", &counted)"""
+replace = """said("the human", &masked)"""
 
 # --- one clock per head message, whatever holds it (the merge of main into chief-meeting, T-883) ---
 
@@ -268,8 +268,8 @@ runs = ["held-typed-ring"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = '''                classes: read.classes,
-            });'''
+find = """                    classes: read.classes,
+                });"""
 replace = '''                classes: read.classes,
             });
             if !read.keyed {

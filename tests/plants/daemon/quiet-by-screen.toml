@@ -207,13 +207,3 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = "            let activity = self.fallback_lane(record, activity).await;"
 replace = "            let activity = returning(self.fallback_lane(record, activity)).await;"
 
-[[plant]]
-name = "quiet by screen: a box reader asks the screen whether the last key was answered"
-meant = "a_key_the_window_answered_with_no_change_shown_lets_its_box_be_read"
-runs = ["qs-harness"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = """self.output_quiet_ms.is_some_and(|printed| printed < typed)"""
-replace = """self.screen_quiet_ms.is_some_and(|printed| printed < typed)"""
-

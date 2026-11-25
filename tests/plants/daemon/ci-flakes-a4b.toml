@@ -57,7 +57,12 @@ runs = ["a4b-blocked-write"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
+find = """        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;"""
 replace = '''        static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _every_pane = EVERY_PANE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''

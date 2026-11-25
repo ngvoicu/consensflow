@@ -342,8 +342,8 @@ runs = ["paste-enter-console"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "                self.enter.for_delivery(state.silent_paste, &body),"
-replace = "                self.enter,"
+find = """self.enter.for_delivery(state.silent_paste, body),"""
+replace = """self.enter,"""
 
 [[plant]]
 name = "paste enter: the pane host forgets a paste between the writes it comes in"
@@ -463,8 +463,8 @@ runs = ["paste-enter-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter.rs"
-find = "            let read = keys_of(state.unsent, bytes, &fed.segments);"
-replace = "            let read = keys_of(state.unsent, bytes, &[Segment::Typed(0..bytes.len())]);"
+find = """let read = keys_of(before, bytes, &fed.segments);"""
+replace = """let read = keys_of(before, bytes, &[Segment::Typed(0..bytes.len())]);"""
 
 [[plant]]
 name = "paste enter: the end of an opening marker a write cuts is typed"

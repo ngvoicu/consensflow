@@ -545,7 +545,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
+find = """let outcome =
+            match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
 replace = """let outcome = match returning(window.deliver_on(&*self.seams.host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]
@@ -591,7 +592,8 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = """let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
+find = """let outcome =
+            match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
 replace = """let outcome = match returning(window.deliver_on(&*self.seams.host, &pane, &text, licence.as_ref())).await {"""
 
 [[plant]]

@@ -380,7 +380,8 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let outcome = match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {'''
+find = """        let outcome =
+            match returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await {"""
 replace = '''
         if begun.message.kind == "result" {
             let _ = returning(window.deliver_on(&admitting, &pane, &text, licence.as_ref())).await;

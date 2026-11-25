@@ -99,8 +99,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''        if drawn && due {'''
-replace = '''        if due {'''
+find = """Found::Empty(licence) if drawn && due => {"""
+replace = """Found::Empty(licence) if due => {"""
 
 [[plant]]
 name = "devin resume: /bypass is never pasted again while the wire says the normal mode"
@@ -122,8 +122,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if switch.pasted.is_some() && switch.entered.is_none() {'''
-replace = '''            if false {'''
+find = """Found::Command if drawn && due => {"""
+replace = """Found::Command if false => {"""
 
 [[plant]]
 name = "devin resume: an Enter the host did not take counts as pressed"
@@ -433,9 +433,9 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                        session.as_deref(),
-                        channel::Guard::Configured,
-                        BYPASS,'''
+find = """                    session.as_deref(),
+                    channel::Guard::Configured,
+                    BYPASS,"""
 replace = '''                        session.as_deref().filter(|_| false),
                         channel::Guard::Configured,
                         BYPASS,'''
@@ -749,8 +749,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''        if now - since >= BYPASS_WITHIN_MS {'''
-replace = '''        if false && now - since >= BYPASS_WITHIN_MS {'''
+find = """if switch.ran >= BYPASS_WITHIN_MS {"""
+replace = """if false && switch.ran >= BYPASS_WITHIN_MS {"""
 
 [[plant]]
 name = "devin resume: the mode of a conversation's configuration is not read"

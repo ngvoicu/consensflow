@@ -224,7 +224,12 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
+find = """        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;"""
 replace = '''        let _table = self.lock_panes().map_err(Gated::Pane)?;
         write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
 

@@ -31,12 +31,12 @@ meant = "a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_i
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = """if state.unsent > 0
-                    && (paste.read_empty != Some(at.typed)
-                        || !state.output.counts().caught_up())
-                {"""
-replace = """if state.unsent > 0 {"""
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        false
+            && typed == self.typed
+            && match by {"""
 
 [[plant]]
 name = "escape-unsent: Escape clears the count, though the box may keep the words"
@@ -111,8 +111,8 @@ runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """    if over_count && !look.read_empty_over_count(harness) {"""
-replace = """    if over_count {"""
+find = """        let Some(evidence) = look.evidence(harness) else {"""
+replace = """        let Some(evidence) = None::<Evidence> else {"""
 
 [[plant]]
 name = "escape-unsent: Claude's paste says nothing of the box it read empty"
@@ -121,28 +121,10 @@ runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """        read_empty: over_count,"""
-replace = """        read_empty: false,"""
-
-[[plant]]
-name = "escape-unsent: a key the window has printed nothing since reads as drawn, as round 1 had it"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = """typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"""
-replace = """typed >= SETTLED_MS"""
-
-[[plant]]
-name = "escape-unsent: a key the window draws nothing for holds the box for good"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = """typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"""
-replace = """typed >= SETTLED_MS && drawn"""
+find = """        read_empty,
+        clear_first,"""
+replace = """        read_empty: None,
+        clear_first,"""
 
 [[plant]]
 name = "escape-unsent: Claude's reader takes no word of the cursor, and its suggestion holds"
@@ -249,9 +231,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '        answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {'
-replace = '        answer["cursor"] = drawn.cursor.filter(|_| false).map_or(Value::Null, |cursor| {'
-
+find = """        answer["cursor"] = cursor_answer(&drawn);"""
+replace = """        answer["cursor"] = Value::Null;"""
 
 [[plant]]
 name = "escape-unsent rig: the chief's window is held by the count, its box empty, and is never handed its worker's result"
@@ -261,8 +242,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """    if over_count && !look.read_empty_over_count(harness) {"""
-replace = """    if over_count {"""
+find = """        let Some(evidence) = look.evidence(harness) else {"""
+replace = """        let Some(evidence) = None::<Evidence> else {"""
 
 [[plant]]
 name = "escape-unsent rig: Escape clears the count, and the result is pasted into the words left in the box"
