@@ -177,6 +177,18 @@ fn fail(failed: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// Devin's input box holding `words`, as it draws it between its rules, its hint where the box
+/// holds none.
+fn boxed(words: &str) -> String {
+    let rule = "\u{2500}".repeat(40);
+    let words = if words.is_empty() {
+        "Ask Devin to build features, fix bugs, or work on your code"
+    } else {
+        words
+    };
+    format!("{rule} (normal) \u{2500}\n\u{276d} {words}\n{rule}\n")
+}
+
 /// Writes `text` to the window's screen.
 fn say(text: &str) -> io::Result<()> {
     let mut out = io::stdout().lock();
@@ -240,6 +252,12 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     }
     signals::leave_on(signals, || leave(0));
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
+    // A window in the normal mode draws its box, which ConsensFlow reads before it gives the
+    // window `/bypass` (N17): nothing goes into a screen that shows no box.
+    let draws_box = permission.mode() == "normal";
+    if draws_box {
+        say(&boxed("")).map_err(said)?;
+    }
 
     let stop = Arc::new(Stop::default());
     let pace = Pace::of(
@@ -311,6 +329,10 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 Event::Submit(text) if dropping.meets(&text) => {}
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
+                    // What was sent leaves the box, which it draws again empty.
+                    if draws_box {
+                        say(&boxed("")).map_err(said)?;
+                    }
                     if permission.answer(Answer::Approved) {
                     } else if text.trim() == NEW {
                         opened += 1;
@@ -330,7 +352,13 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
-                    let _ = say(&format!("[pasted, {characters} characters]\n"));
+                    // `/bypass`, which a window in the normal mode is given, is drawn in its box.
+                    let drawn = if permission.mode() == "normal" && characters == "/bypass".len() {
+                        boxed("/bypass")
+                    } else {
+                        format!("[pasted, {characters} characters]\n")
+                    };
+                    let _ = say(&drawn);
                 }
                 // Escape at a dialog leaves it; anywhere else, two stop a turn.
                 Event::Escape => {
