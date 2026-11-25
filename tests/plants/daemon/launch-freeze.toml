@@ -16,7 +16,7 @@ lf-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatche
 lf-steps = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::off_thread::tests::a_launch_that_is_over_begins_no_further_step"]
 lf-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::stop_log::a_stop_writes_what_it_holds"]
 lf-new = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_taken_while_a_new_file"]
-lf-open = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_s_open_that_ends_after_its_project_closed", "--", "--test-threads=2"]
+lf-open = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_chief_s_open_that_ends_after_its_project_closed", "--", "--test-threads=2"]
 lf-nolink = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_new_file_is_written_where_the_volume_makes_no_link"]
 lf-claim = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_that_is_taken_is_refused_where_the_volume_makes_no_link"]
 lf-gaveup = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_window_given_up_after_its_project_closed", "--", "--test-threads=2"]
@@ -288,7 +288,7 @@ replace = """    options.write(true).create(true);"""
 
 [[plant]]
 name = 'launch-freeze: a launch that ends after a Close is settled as a failure'
-meant = "a_member_s_open_that_ends_after_its_project_closed_leaves_its_task_for_the_resume"
+meant = "a_chief_s_open_that_ends_after_its_project_closed_says_nothing_of_it"
 runs = ["lf-open"]
 
 [[plant.edit]]
