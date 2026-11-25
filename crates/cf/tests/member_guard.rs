@@ -236,11 +236,11 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
             goes_through,
             "Git Bash {line}: {said}"
         );
-        assert_eq!(
-            ran.status.code() == Some(0),
-            goes_through,
-            "Git Bash {line}: {said}"
-        );
+        // A call that goes through exits as the program standing for the real one does with
+        // these arguments, which is its own affair; a refused one exits 1.
+        if !goes_through {
+            assert_eq!(ran.status.code(), Some(1), "Git Bash {line}: {said}");
+        }
         eprintln!(
             "SHELL git-bash {line}: {}",
             if goes_through { "through" } else { "refused" }
