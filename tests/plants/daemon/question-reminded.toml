@@ -195,8 +195,9 @@ meant = "a_reminder_given_back_during_a_close_is_kept"
 runs = ["question-reminded-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND id NOT IN (SELECT message_id FROM question_reminder_sent) RETURNING body",'''
-replace = ''' RETURNING body",'''
+find = '''         AND id NOT IN (SELECT message_id FROM question_reminder_sent)
+'''
+replace = ''''''
 
 [[plant]]
 name = "question reminded: a cancelled or failed reminder is shown"
