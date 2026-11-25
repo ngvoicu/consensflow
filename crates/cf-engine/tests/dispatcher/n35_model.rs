@@ -67,6 +67,8 @@ enum Phase {
         until: i64,
         busy: bool,
     },
+    /// A numbered retry's delivery was given up for good: the task is paused, held by nothing.
+    Paused,
     Failed,
     Done,
 }
@@ -78,6 +80,8 @@ enum Step {
     DueDelivered,
     Deliver,
     Withdraw,
+    /// The window cannot take the queued Resume at all: its delivery is given up.
+    GiveUp,
     ChiefWord,
     PersonResume,
     Result,
@@ -241,7 +245,7 @@ impl<'a> Model<'a> {
             steps.push(Back);
             if self
                 .last
-                .is_some_and(|last| last - 31 * 60_000 > self.floor.max(self.pasted))
+                .is_some_and(|last| last - 31 * 60_000 > self.floor)
             {
                 steps.extend([Behind, Behind]);
             }
@@ -269,7 +273,15 @@ impl<'a> Model<'a> {
                     steps.extend([ChiefWord, PersonResume, Restart]);
                 }
             }
-            Phase::Queued => steps.extend([Deliver, Withdraw, Withdraw]),
+            Phase::Queued => {
+                steps.extend([Deliver, Withdraw, Withdraw]);
+                if self.numbered().is_some_and(|(_, state)| state == "queued") {
+                    steps.push(GiveUp);
+                }
+            }
+            Phase::Paused => {
+                steps.extend([PersonResume, PersonResume]);
+            }
             Phase::Quota { .. } => steps.extend([QuotaEnd]),
             Phase::Failed | Phase::Done => steps.extend([Reopen, Reopen]),
         }
@@ -331,9 +343,12 @@ impl<'a> Model<'a> {
             Step::Wait(by) => self.c.advance(by),
             Step::Rewind(by) => self.c.step_wall(-by),
             Step::Back => {
-                let by = [1_000, 60_000, 300_000, 1_800_000, 1_860_000, 2_700_000]
-                    [rng.below(6) as usize];
-                if self.now() - by > self.floor.max(self.pasted) {
+                // From a millisecond to an hour, below the last paste too.
+                let by = [
+                    1, 999, 1_000, 1_001, 5_000, 60_000, 300_000, 1_800_000, 1_860_000, 2_700_000,
+                    3_600_000,
+                ][rng.below(11) as usize];
+                if self.now() - by > self.floor {
                     self.c.step_wall(-by);
                 }
             }
@@ -343,6 +358,7 @@ impl<'a> Model<'a> {
             Step::DueDelivered => self.due(true),
             Step::Deliver => self.deliver(),
             Step::Withdraw => self.withdraw(),
+            Step::GiveUp => self.give_up(),
             Step::ChiefWord => self.chief_word(),
             Step::PersonResume => self.person_resume(),
             Step::Result => self.result(),
@@ -533,6 +549,26 @@ impl<'a> Model<'a> {
         self.observe();
     }
 
+    /// The window cannot take the queued Resume: its delivery is begun and given up for good, the
+    /// message fails and the task is paused, held by nothing.
+    fn give_up(&mut self) {
+        let c = self.c;
+        let (id, _) = self.numbered().expect("a numbered Resume");
+        c.advance(1_000);
+        c.ledger.borrow_mut().begin_delivery(id).unwrap();
+        let (message, decision) = c
+            .ledger
+            .borrow_mut()
+            .give_up_delivery(id, "the stand-in could not accept the words")
+            .unwrap();
+        assert_eq!(message.state, "failed");
+        assert_eq!(decision, cf_ledger::GivenUp::Paused);
+        let window = self.window.clone();
+        c.adapter.with(&window, |agent| agent.settled = true);
+        self.touched();
+        self.phase = Phase::Paused;
+    }
+
     /// The chief's word to the task's window: an action on the task.
     fn chief_word(&mut self) {
         let c = self.c;
@@ -717,6 +753,16 @@ impl<'a> Model<'a> {
              withdrawn: {stored:?} {:#?}",
             self.log
         );
+        // A task fails exactly where the model says its two numbered retries are charged and the
+        // next failure came: never at any other step, whatever the step.
+        let state = self.state();
+        assert_eq!(
+            state == "failed",
+            self.phase == Phase::Failed,
+            "the task's state is {state}, the model's phase {:?}: {:#?}",
+            self.phase,
+            self.log
+        );
         let in_a_row = self.facts_with_message() - self.baseline;
         assert!(
             in_a_row <= 2,
@@ -886,8 +932,10 @@ fn t_2246_finding_6_a_word_in_a_hold_begins_the_count_and_the_next_charge_is_the
 
 #[test]
 fn t_2262_finding_8_one_delivery_renews_the_count_once() {
-    // The delivery renewed the count at 30 minutes; the fresh pair's first retry was queued and
-    // withdrawn; the next failures must find two numbered retries, no more.
+    // A failure 30 minutes after the delivery renews the count; the fresh pair's first retry was
+    // queued and withdrawn; the next failures must find two numbered retries, no more. (The
+    // withdrawal is the last moment anything happened to a numbered retry: a later failure is
+    // judged from it, never from the delivery before.)
     let (_c, phase, count) = script(&[
         Fail,
         DueDelivered,
@@ -945,4 +993,110 @@ fn a_clock_read_well_before_the_last_numbered_retry_never_renews_the_count() {
         Fail,
     ]);
     assert_eq!((held(phase), count), (true, 1));
+}
+
+#[test]
+fn t_2305_finding_11_a_failed_turn_is_seen_after_the_clock_steps_back_a_millisecond_past_a_retry_s_confirmation(
+) {
+    // A retry's delivery was confirmed at 31.001; after a restart the clock is corrected back
+    // 1,001 ms and a person's Resume is confirmed at 31.000. The last paste is the one the
+    // ledger confirmed last, never the one a clock dates last: its failure is seen and held.
+    let (_c, phase, count) = script(&[
+        Fail,
+        DueDelivered,
+        Fail,
+        Restart,
+        Rewind(1_001),
+        PersonResume,
+        Fail,
+    ]);
+    assert_eq!((held(phase), count), (true, 0));
+}
+
+#[test]
+fn t_2305_finding_11_the_same_after_a_conversation_switch_with_no_restart() {
+    let c = retrying();
+    c.adapter.resumes_records.set(true);
+    c.adapter.rereads_failures.set(true);
+    let mut model = Model::new(&c);
+    let mut rng = Rng(0);
+    for step in [Fail, DueDelivered, Fail] {
+        model.run(step, &mut rng);
+        model.check();
+    }
+    c.adapter
+        .switch_to(&model.window, "a-second-native-conversation");
+    model.passes(2);
+    for step in [Rewind(1_001), PersonResume, Fail] {
+        model.run(step, &mut rng);
+        model.check();
+    }
+    assert_eq!((held(model.phase), model.count), (true, 0));
+}
+
+#[test]
+fn t_2305_finding_13_a_delivery_given_up_for_good_dates_the_withdrawal() {
+    let (_c, phase, count) = script(&[Fail, DueQueued, GiveUp, PersonResume, Fail]);
+    assert_eq!((held(phase), count), (true, 0));
+}
+
+#[test]
+fn t_2305_finding_12_a_delivered_retry_cancelled_at_its_carrier_s_take_back_dates_it() {
+    let c = retrying();
+    let mut m = Model::new(&c);
+    let mut rng = Rng(0);
+    for step in [Fail, DueDelivered] {
+        m.run(step, &mut rng);
+        m.check();
+    }
+    let (id, _) = m.numbered().unwrap();
+    let project = m.t.project.id;
+    c.advance(1_300);
+    c.ledger
+        .borrow_mut()
+        .pause_task(project, 1, Some("chief"), Some("hold the window"))
+        .unwrap();
+    let carrier = c
+        .ledger
+        .borrow_mut()
+        .resume_task(
+            project,
+            1,
+            Some("chief"),
+            "Continue with the revised brief.",
+        )
+        .unwrap()
+        .message
+        .unwrap()
+        .id;
+    c.ledger
+        .borrow_mut()
+        .take_back(id, "the first paste was taken back")
+        .unwrap();
+    let begun = c.ledger.borrow_mut().begin_delivery(carrier).unwrap();
+    let ids: Vec<i64> = begun.carried.into_iter().map(|m| m.id).collect();
+    assert!(ids.contains(&id));
+    c.ledger.borrow_mut().admit(carrier, &ids).unwrap();
+    c.advance(3_210);
+    c.ledger
+        .borrow_mut()
+        .cancel_message(id, "withdrawn after handover")
+        .unwrap();
+    c.advance(5_432);
+    c.ledger
+        .borrow_mut()
+        .confirm_delivery(carrier, None)
+        .unwrap();
+    assert_eq!(c.message(id).state, "delivered");
+    c.advance(1_700_000);
+    c.ledger
+        .borrow_mut()
+        .take_back(carrier, "its window removed the carrier")
+        .unwrap();
+    assert_eq!(c.message(id).state, "cancelled");
+    assert_eq!(
+        m.stored_time().as_deref().map(ms),
+        Some(m.now()),
+        "the final withdrawal is the last moment, not the delivery's"
+    );
 }

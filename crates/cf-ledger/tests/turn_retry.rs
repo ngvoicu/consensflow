@@ -462,10 +462,15 @@ fn a_charged_try_never_delivered_renews_30_minutes_after_its_charge_and_not_befo
 }
 
 #[test]
-fn the_30_minutes_run_from_the_last_delivered_resume_not_from_a_later_one_not_delivered() {
-    // T-2246 finding 4: a second Resume queued and never delivered never hides the first.
+fn a_charged_try_never_delivered_dates_the_30_minutes_not_the_delivery_before_it() {
+    // The two rules told apart: the first try was delivered at D; the second is charged 10
+    // minutes later and never delivered. By the moment of the last charge, delivery or
+    // withdrawal (`turn_retry_at`) the 30 minutes run from D + 10 minutes: at D + 30 the count
+    // stands, at D + 40 it begins again. By the delivery alone it would begin at D + 30.
     let (_dir, mut ledger, project, session, _, clock) = working_at();
     failed_and_tried(&mut ledger, &project, session, &clock);
+    let delivered = clock.get();
+    clock.set(delivered + 10 * 60_000);
     held(hold(&mut ledger, &project, session));
     ledger
         .resume_held_task(project.id, 1, RESUME_WORDS)
@@ -475,7 +480,12 @@ fn the_30_minutes_run_from_the_last_delivered_resume_not_from_a_later_one_not_de
         .sqlite()
         .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
         .expect("working");
-    clock.set(clock.get() + 30 * 60_000);
+    clock.set(delivered + 30 * 60_000);
+    assert!(
+        matches!(hold(&mut ledger, &project, session), RetryHold::Spent),
+        "30 minutes after the delivery, 20 after the charge: the count stands"
+    );
+    clock.set(delivered + 40 * 60_000);
     assert_eq!(held(hold(&mut ledger, &project, session)), 1);
     assert_eq!(tries(&ledger), 0);
 }

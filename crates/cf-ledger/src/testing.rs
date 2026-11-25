@@ -106,7 +106,8 @@ pub use staff_rules::undo_migration_0026;
 /// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0045.
 pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "DROP TRIGGER turn_retry_message_moved;
+        "DROP INDEX event_confirmed_index;
+         DROP TRIGGER turn_retry_message_moved;
          ALTER TABLE task DROP COLUMN turn_retry_at;
          ALTER TABLE task DROP COLUMN retry_hold;
          ALTER TABLE task DROP COLUMN turn_retries;
@@ -340,6 +341,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "turn_retry_by_task"
             && entry["name"] != "turn_retry_by_message"
             && entry["name"] != "turn_retry_message_moved"
+            && entry["name"] != "event_confirmed_index"
             && entry["name"] != "message_questions_for_chief"
             && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"

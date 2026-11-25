@@ -260,6 +260,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
                     "turn_retry_by_task",
                     "turn_retry_by_message",
                     "turn_retry_message_moved",
+                    "event_confirmed_index",
                     "question_binding_wait",
                     "message_questions_for_chief",
                     "message_answers_by_question",

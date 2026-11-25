@@ -512,3 +512,32 @@ file = "crates/cf-ledger/src/queue.rs"
 find = "        if given {"
 replace = "        if false {"
 
+[[plant]]
+name = "n35 hold: the last paste is the one a clock dates last (T-2305 finding 11)"
+meant = "t_2305_finding_11_a_failed_turn_is_seen_after_the_clock_steps_back_a_millisecond_past_a_retry_s_confirmation"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "ORDER BY COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'"
+replace = "ORDER BY m.delivered_at DESC, COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'"
+
+[[plant]]
+name = "n35 hold: a delivery given up for good does not date the withdrawal (T-2305 finding 13)"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
+replace = "NEW.state IN ('cancelled') AND OLD.state != NEW.state"
+
+[[plant]]
+name = "n35 hold: a delivered retry cancelled at its carrier's take-back does not date it (T-2305 finding 12)"
+meant = "t_2305_finding_12_a_delivered_retry_cancelled_at_its_carrier_s_take_back_dates_it"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "AND OLD.state != NEW.state)"
+replace = "AND OLD.state NOT IN ('delivered', 'read') AND OLD.state != NEW.state)"

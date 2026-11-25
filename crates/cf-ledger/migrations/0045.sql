@@ -26,14 +26,18 @@ ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_
 -- It names the hold itself; no time says which hold a Resume belongs to.
 ALTER TABLE task ADD COLUMN retry_hold INTEGER;
 -- The last moment anything happened to a numbered retry of the task: one was charged (queued),
--- delivered or withdrawn. Written in the same write as its cause, and by nothing else: the
+-- delivered or withdrawn (a message of it changed into cancelled or failed, from any state). Written in the same write as its cause, and by nothing else: the
 -- charge writes it in the ledger's code, a delivery of the message that carries a numbered Resume
 -- writes it through the trigger below with the time of its delivery, and a withdrawal with an
 -- empty mark, settled to the write's own time when the write ends, whichever path moves the message.
 ALTER TABLE task ADD COLUMN turn_retry_at TEXT;
 CREATE TRIGGER turn_retry_message_moved AFTER UPDATE OF state ON message
-WHEN OLD.state NOT IN ('delivered', 'read') AND NEW.state IN ('delivered', 'read', 'cancelled', 'failed')
+WHEN (OLD.state NOT IN ('delivered', 'read') AND NEW.state IN ('delivered', 'read'))
+  OR (NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state)
 BEGIN
   UPDATE task SET turn_retry_at = CASE WHEN NEW.state IN ('delivered', 'read') THEN COALESCE(NEW.delivered_at, '') ELSE '' END
    WHERE id IN (SELECT task_id FROM turn_retry WHERE message_id = NEW.id);
 END;
+-- The order the ledger confirmed deliveries in is its own sequence of events, never a clock:
+-- the last paste into a window is found by the latest `delivery.confirmed` event of a message.
+CREATE INDEX event_confirmed_index ON event (CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END) WHERE kind = 'delivery.confirmed';
