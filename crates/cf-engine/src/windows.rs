@@ -849,20 +849,13 @@ impl Dispatcher {
                 // daemon's stop) failed nothing: no failure is written or told, no back-off
                 // is counted, and what it was to deliver waits for the next ask.
                 if cf_harness::called_off(&cause.to_string()) {
-                    if self.forgotten(record) {
-                        return Ok(());
-                    }
-                    if self.in_open_project(project.id)?
-                        && self.over_though_failed(
-                            record,
-                            participant,
-                            failing.as_ref(),
-                            asked_before,
-                        )?
-                    {
-                        return Ok(());
-                    }
-                    return self.ended_closed(record, participant, failing);
+                    return self.ended_called_off(
+                        record,
+                        project,
+                        participant,
+                        failing,
+                        asked_before,
+                    );
                 }
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
@@ -1901,6 +1894,28 @@ impl Dispatcher {
         }
         self.changed();
         Ok(())
+    }
+
+    /// A launch whose plan found it called off: over, as a pause or a withdrawal that came while
+    /// the plan was made ends it ([`Dispatcher::over_though_failed`]), else as a project's Close
+    /// does ([`Dispatcher::ended_closed`]), whatever the project's state is by now.
+    fn ended_called_off(
+        &self,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        failing: Option<Delivering>,
+        asked_before: Option<Option<Stop>>,
+    ) -> Result<(), EngineError> {
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.in_open_project(project.id)?
+            && self.over_though_failed(record, participant, failing.as_ref(), asked_before)?
+        {
+            return Ok(());
+        }
+        self.ended_closed(record, participant, failing)
     }
 
     /// A launch that ended after its project closed: its message goes back to its queue with
