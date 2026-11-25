@@ -92,7 +92,7 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         // The count of a task's tries in a row (0045) is not in the ledger this one is made to be.
         .filter(|column: &String| {
             table != "task"
-                || !["turn_retries", "retry_hold", "turn_renewed_at"].contains(&column.as_str())
+                || !["turn_retries", "retry_hold", "turn_retry_at"].contains(&column.as_str())
         })
         .collect();
     let quoted = columns
@@ -279,7 +279,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
                         "",
                     )
                     .replace(", retry_hold INTEGER", "")
-                    .replace(", turn_renewed_at TEXT", ""),
+                    .replace(", turn_retry_at TEXT", ""),
             )
         })
         .collect();

@@ -384,20 +384,79 @@ fn the_last_numbered_resume_is_the_last_by_the_ledger_s_order_not_by_its_wall_cl
     assert_eq!(tries(&ledger), 0);
 }
 
-#[test]
-fn a_count_with_no_delivered_resume_is_no_time_to_renew_from() {
-    let (_dir, mut ledger, project, session, _, clock) = working_at();
-    held(hold(&mut ledger, &project, session));
+fn retry_at(ledger: &Ledger) -> Option<String> {
     ledger
+        .sqlite()
+        .query_row("SELECT turn_retry_at FROM task WHERE number = 1", [], |row| {
+            row.get(0)
+        })
+        .expect("the time")
+}
+
+/// A hold, main's Resume of it queued, and the task at work again; the Resume's message.
+fn held_and_queued(ledger: &mut Ledger, project: &ProjectView, session: i64) -> i64 {
+    held(hold(ledger, project, session));
+    let message = ledger
         .resume_held_task(project.id, 1, RESUME_WORDS)
-        .expect("resumed");
+        .expect("resumed")
+        .message
+        .expect("main's words")
+        .id;
     ledger
         .sqlite()
         .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
         .expect("working");
-    clock.set(clock.get() + 3 * 3_600_000);
-    assert_eq!(held(hold(&mut ledger, &project, session)), 2);
-    assert_eq!(tries(&ledger), 1, "the count stands");
+    message
+}
+
+#[test]
+fn a_charge_at_a_count_of_zero_writes_the_time_with_it() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    assert_eq!(retry_at(&ledger), None, "no retry yet, no time");
+    held_and_queued(&mut ledger, &project, session);
+    assert_eq!(
+        retry_at(&ledger),
+        Some(cf_base::time::iso(clock.get())),
+        "the charge is the moment"
+    );
+    assert_eq!(tries(&ledger), 1);
+}
+
+#[test]
+fn a_withdrawal_writes_the_time_with_it_whichever_write_withdraws() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    let message = held_and_queued(&mut ledger, &project, session);
+    clock.set(clock.get() + 7 * 60_000);
+    ledger
+        .cancel_message(message, "the harness went on by itself")
+        .expect("withdrawn");
+    assert_eq!(retry_at(&ledger), Some(cf_base::time::iso(clock.get())));
+    assert_eq!(tries(&ledger), 1, "withdrawn, and still charged");
+}
+
+#[test]
+fn a_delivery_writes_the_time_it_was_delivered() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    let message = held_and_queued(&mut ledger, &project, session);
+    clock.set(clock.get() + 5_000);
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE message SET state = 'delivered', delivered_at = ?1 WHERE id = ?2",
+            rusqlite::params![cf_base::time::iso(clock.get()), message],
+        )
+        .expect("delivered");
+    assert_eq!(retry_at(&ledger), Some(cf_base::time::iso(clock.get())));
+}
+
+#[test]
+fn a_charged_try_never_delivered_renews_30_minutes_after_its_charge_and_not_before() {
+    for (after, which) in [(30 * 60_000 - 1, 2), (30 * 60_000, 1)] {
+        let (_dir, mut ledger, project, session, _, clock) = working_at();
+        held_and_queued(&mut ledger, &project, session);
+        clock.set(clock.get() + after);
+        assert_eq!(held(hold(&mut ledger, &project, session)), which);
+    }
 }
 
 #[test]
@@ -683,7 +742,7 @@ fn dump(raw: &rusqlite::Connection) -> Vec<(String, Vec<String>)> {
         .filter(|table| table != "turn_retry")
         .map(|table| {
             let columns: Vec<String> = raw
-                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold', 'turn_renewed_at') ORDER BY cid"))
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold', 'turn_retry_at') ORDER BY cid"))
                 .expect("columns")
                 .query_map([], |row| row.get(0))
                 .expect("names")

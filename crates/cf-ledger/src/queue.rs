@@ -116,7 +116,7 @@ pub(crate) fn queue(
                 |row| row.get(0),
             )?;
             if assigned {
-                crate::tasks::start_tries_again(store, task, &at)?;
+                crate::tasks::start_tries_again(store, task)?;
             }
         }
     }

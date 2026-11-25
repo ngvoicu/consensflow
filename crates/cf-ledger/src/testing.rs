@@ -106,7 +106,8 @@ pub use staff_rules::undo_migration_0026;
 /// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0045.
 pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
-        "ALTER TABLE task DROP COLUMN turn_renewed_at;
+        "DROP TRIGGER turn_retry_message_moved;
+         ALTER TABLE task DROP COLUMN turn_retry_at;
          ALTER TABLE task DROP COLUMN retry_hold;
          ALTER TABLE task DROP COLUMN turn_retries;
          DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
@@ -244,7 +245,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "out_kind"),
             ("task", "turn_retries"),
             ("task", "retry_hold"),
-            ("task", "turn_renewed_at"),
+            ("task", "turn_retry_at"),
         ])
     {
         take_column_out(tables, table, column);
@@ -338,6 +339,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "turn_retry"
             && entry["name"] != "turn_retry_by_task"
             && entry["name"] != "turn_retry_by_message"
+            && entry["name"] != "turn_retry_message_moved"
             && entry["name"] != "message_questions_for_chief"
             && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"
@@ -372,7 +374,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                         "",
                     )
                     .replace(", retry_hold INTEGER", "")
-                    .replace(", turn_renewed_at TEXT", "");
+                    .replace(", turn_retry_at TEXT", "");
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the

@@ -1,7 +1,7 @@
 # D3's N35 (T-2108): a turn that fails is tried again twice before its task fails, each try a hold
 # of the task and main's own Resume. The count is a number stored on the task (`task.turn_retries`),
-# raised by the write that queues a numbered Resume and reset by an action, a result or 30 minutes
-# (T-2215); the fact of a hold is written once with the hold; the Resume's words go into no window
+# raised by the write that queues a numbered Resume and reset by an action, a result or a failure 30 minutes after `turn_retry_at`, the last moment anything happened to
+# a numbered retry (T-2288); the fact of a hold is written once with the hold; the Resume's words go into no window
 # whose question is open; the exit's look reads what a pass's look reads.
 #
 # Not planted, since each is equivalent to what the code does anyway:
@@ -13,6 +13,7 @@
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
 
 [run]
+n35-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model"]
 n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold"]
 n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
 n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
@@ -49,8 +50,8 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "\"UPDATE task SET turn_retries = turn_retries + 1 WHERE id = ?\","
-replace = "\"UPDATE task SET turn_retries = turn_retries + 0 WHERE id = ?\","
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 0, turn_retry_at = ?1 WHERE id = ?2"
 
 [[plant]]
 name = "n35 hold: a quota's own Resume resets the count"
@@ -61,16 +62,6 @@ runs = ["n35-dispatcher", "n35-ledger"]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
 find = "    let Some(hold) = hold else {\n        return Ok(());"
 replace = "    let Some(hold) = hold else {\n        start_again(store, task, \"2026-01-01T00:00:00.000Z\")?;\n        return Ok(());"
-
-[[plant]]
-name = "n35 hold: the last numbered Resume taken by its wall-clock time"
-meant = "the_last_numbered_resume_is_the_last_by_the_ledger_s_order_not_by_its_wall_clock_time"
-runs = ["n35-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1\","
-replace = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY m.delivered_at DESC LIMIT 1\","
 
 [[plant]]
 name = "n35 hold: a tell to the window does not reset the count"
@@ -93,24 +84,14 @@ find = "        if to == \"done\" {"
 replace = "        if false {"
 
 [[plant]]
-name = "n35 hold: one delivery renews the count twice"
-meant = "one_delivery_renews_the_count_once_though_the_fresh_pair_s_first_try_is_withdrawn"
-runs = ["n35-dispatcher", "n35-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = " && renewed.as_deref().is_none_or(long_ago)"
-replace = ""
-
-[[plant]]
 name = "n35 hold: a person's Resume back to the board keeps the count"
 meant = "a_persons_resume_that_sends_the_task_back_to_the_board_begins_the_count_again"
 runs = ["n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = "        if by.is_some() && super::turn_retry::tried(store, task.id)? {\n            let at = store.at();\n            super::turn_retry::start_again(store, task.id, &at)?;"
-replace = "        if false {\n            let at = store.at();\n            super::turn_retry::start_again(store, task.id, &at)?;"
+find = "        if by.is_some() {\n            super::turn_retry::start_again(store, task.id)?;"
+replace = "        if false {\n            super::turn_retry::start_again(store, task.id)?;"
 
 [[plant]]
 name = "n35 hold: a person's Resume linked as a retry"
@@ -131,16 +112,6 @@ runs = ["n35-dispatcher", "n35-ledger"]
 file = "crates/cf-ledger/src/store.rs"
 find = "paused_with_project = 0,\n             retry_hold = NULL WHERE id = ?"
 replace = "paused_with_project = 0\n             WHERE id = ?"
-
-[[plant]]
-name = "n35 hold: a later Resume never delivered hides the last delivery"
-meant = "a_withdrawn_second_try_never_hides_the_first_delivery_30_minutes_later"
-runs = ["n35-dispatcher", "n35-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1\","
-replace = "WHERE r.task_id = ? ORDER BY r.id DESC LIMIT 1\","
 
 [[plant]]
 name = "n35 hold: the column lets a third try be stored"
@@ -391,3 +362,153 @@ runs = ["n35-card-follows"]
 file = "app/ui/core/board.js"
 find = "        const why = this.#retryWhy(held.dataset.assignee || null, now)"
 replace = "        const why = (held.dataset.firstWhy ??= this.#retryWhy(held.dataset.assignee || null, now))"
+[[plant]]
+name = "n35 hold: the time is not written at a charge when the count was zero (T-2280 finding 9's shape)"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 1, turn_retry_at = CASE WHEN turn_retries > 0 THEN ?1 ELSE turn_retry_at END WHERE id = ?2"
+
+[[plant]]
+name = "n35 hold: the time is not written at a charge at all"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 1, turn_retry_at = turn_retry_at WHERE id = ?2 AND ?1 != 'x'"
+
+[[plant]]
+name = "n35 hold: the time is not written at a withdrawal"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "NEW.state IN ('delivered', 'read', 'cancelled', 'failed')"
+replace = "NEW.state IN ('delivered', 'read')"
+
+[[plant]]
+name = "n35 hold: the time is not written at a delivery"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "NEW.state IN ('delivered', 'read', 'cancelled', 'failed')"
+replace = "NEW.state IN ('cancelled', 'failed')"
+
+[[plant]]
+name = "n35 hold: a withdrawal's mark is never settled to its time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if marked {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: the count renews on a delivered retry's time alone"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"SELECT turn_retries, turn_retry_at FROM task WHERE id = ?\""
+replace = "\"SELECT turn_retries, (SELECT max(m.delivered_at) FROM turn_retry r JOIN message m ON m.id = r.message_id WHERE r.task_id = task.id) FROM task WHERE id = ?\""
+
+[[plant]]
+name = "n35 hold: a clock that reads earlier than the time renews too"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "(now - at).abs() >= renew_after_ms)"
+
+[[plant]]
+name = "n35 hold: the count renews before the 30 minutes"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "now - at >= renew_after_ms - 1_000)"
+
+[[plant]]
+name = "n35 hold: the count never renews by time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "false)"
+
+[[plant]]
+name = "n35 hold: an action on the task writes the time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries != 0\""
+replace = "\"UPDATE task SET turn_retries = 0, turn_retry_at = NULL WHERE id = ? AND turn_retries != 0\""
+
+[[plant]]
+name = "n35 hold: an action on the task does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries != 0\""
+replace = "\"UPDATE task SET turn_retries = turn_retries WHERE id = ? AND turn_retries != 0\""
+
+[[plant]]
+name = "n35 hold: a third retry is charged"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if used >= TRIES {"
+replace = "        if used > TRIES {"
+
+[[plant]]
+name = "n35 hold: a task fails with a retry left"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if used >= TRIES {"
+replace = "        if used >= TRIES - 1 {"
+
+[[plant]]
+name = "n35 hold: a result does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if to == \"done\" {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: a word does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "        if given {"
+replace = "        if false {"
+

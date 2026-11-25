@@ -536,7 +536,7 @@ pub(crate) fn hold_task(
 /// A hold of a working task whose turn failed, with the fact of the retry it is for, in one
 /// write (D3's N35): the same hold, and main's own Resume at its time is the retry. Which try
 /// it is comes from the count on the task, which this write reads at its own moment (a count
-/// 30 minutes past its last numbered Resume is zero first); where the two tries are used,
+/// 30 minutes past `turn_retry_at` is zero first); where the two tries are used,
 /// nothing is written and the answer says so.
 pub(crate) fn hold_task_for_retry(
     store: &mut Store,
@@ -1237,9 +1237,8 @@ pub(crate) fn resume_task(
         require_task_state(&task, &["paused"], "resume")?;
         // A person's or the chief's Resume starts the failed turns' tries again, whichever way
         // it goes on from here (D3's N35); a refusal below writes nothing.
-        if by.is_some() && super::turn_retry::tried(store, task.id)? {
-            let at = store.at();
-            super::turn_retry::start_again(store, task.id, &at)?;
+        if by.is_some() {
+            super::turn_retry::start_again(store, task.id)?;
         }
         // A refusal below writes nothing, this withdrawal with it.
         leave_pause_notes(store, &task, "resumed", Afterwards::MovesOn)?;

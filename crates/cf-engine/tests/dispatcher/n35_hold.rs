@@ -11,21 +11,21 @@ use cf_harness::seams::Time;
 
 const RESUMED: &str = "Resumed: Go on where you stopped.";
 
-fn retrying() -> Context {
+pub(super) fn retrying() -> Context {
     Context::made(Made {
         turn_retry_ms: 30_000,
         ..Made::default()
     })
 }
 
-fn passes(c: &Context, n: usize) {
+pub(super) fn passes(c: &Context, n: usize) {
     for _ in 0..n {
         c.pass().unwrap();
     }
 }
 
 /// zeus at work on T-1 in its one window.
-fn working(c: &Context) -> (Tiers<'_>, String) {
+pub(super) fn working(c: &Context) -> (Tiers<'_>, String) {
     let t = Tiers::new(c, &["zeus"]);
     t.open();
     passes(c, 3);
@@ -34,7 +34,7 @@ fn working(c: &Context) -> (Tiers<'_>, String) {
     (t, window)
 }
 
-fn fail(c: &Context, window: &str) {
+pub(super) fn fail(c: &Context, window: &str) {
     c.adapter.with(window, |agent| {
         agent.failed = true;
         agent.settled = true;
@@ -43,7 +43,7 @@ fn fail(c: &Context, window: &str) {
 }
 
 /// The times the window was given main's Resume.
-fn resumes(c: &Context, handle: &str) -> usize {
+pub(super) fn resumes(c: &Context, handle: &str) -> usize {
     given(c, handle)
         .iter()
         .filter(|text| text.contains(RESUMED))
@@ -51,7 +51,7 @@ fn resumes(c: &Context, handle: &str) -> usize {
 }
 
 /// Passes until the window has been given the Resume `want` times.
-fn until_resumed(c: &Context, handle: &str, want: usize) {
+pub(super) fn until_resumed(c: &Context, handle: &str, want: usize) {
     for _ in 0..8 {
         c.pass().unwrap();
         if resumes(c, handle) >= want {
@@ -64,7 +64,7 @@ fn until_resumed(c: &Context, handle: &str, want: usize) {
 /// The harness's next turn opens on the Resume's words: the failed end before it is out of
 /// view, as every reader takes it out once a later paste is in the record, and the turn is at
 /// work.
-fn next_turn_opens(c: &Context, window: &str) {
+pub(super) fn next_turn_opens(c: &Context, window: &str) {
     c.adapter.with(window, |agent| {
         agent.failed = false;
         agent.failure = None;
@@ -1311,13 +1311,13 @@ fn two_tries_used(c: &Context, window: &str) {
 }
 
 /// The turn at work fails again: whether the task is held for another try.
-fn fails_again_held(c: &Context, t: &Tiers<'_>, window: &str) -> Option<i64> {
+pub(super) fn fails_again_held(c: &Context, t: &Tiers<'_>, window: &str) -> Option<i64> {
     fail(c, window);
     passes(c, 3);
     t.task(1).task.retry.map(|retry| retry.which)
 }
 
-fn refused_for_two_minutes(c: &Context, window: &str, busy: bool) {
+pub(super) fn refused_for_two_minutes(c: &Context, window: &str, busy: bool) {
     c.advance(1_000);
     let at = Some(super::fixtures::now(c));
     let refusal = if busy {
@@ -1568,7 +1568,8 @@ fn a_task_a_person_reassigns_is_a_fresh_run_with_two_tries_of_its_own() {
 }
 
 /// T-2246 finding 4: try 1 was delivered, try 2 was queued and withdrawn when the window went on
-/// by itself with a job still running; the next turn fails `delay` after try 1's delivery.
+/// by itself with a job still running; the next turn fails `delay` after the withdrawal, the
+/// last moment anything happened to a numbered try.
 fn a_withdrawn_second_try_then_a_failure_after(delay: i64) -> Option<i64> {
     let c = retrying();
     let (t, window) = working(&c);
@@ -1576,7 +1577,6 @@ fn a_withdrawn_second_try_then_a_failure_after(delay: i64) -> Option<i64> {
     passes(&c, 3);
     c.advance(31_000);
     until_resumed(&c, "zeus", 1);
-    let delivered = c.time.wall_ms();
     next_turn_opens(&c, &window);
     passes(&c, 2);
     fail(&c, &window);
@@ -1603,7 +1603,7 @@ fn a_withdrawn_second_try_then_a_failure_after(delay: i64) -> Option<i64> {
         .answer_leaving_a_job(&window, "One other background step is still running.");
     passes(&c, 3);
     assert_eq!(c.message(queued.id).state, "cancelled", "withdrawn");
-    c.advance(delivered + delay - c.time.wall_ms());
+    c.advance(retry_at_ms(&c) + delay - c.time.wall_ms());
     c.adapter.wake(
         &window,
         "<task-notification>The last background step finished.</task-notification>",
@@ -1611,8 +1611,21 @@ fn a_withdrawn_second_try_then_a_failure_after(delay: i64) -> Option<i64> {
     fails_again_held(&c, &t, &window)
 }
 
+/// `task.turn_retry_at`: the last moment anything happened to a numbered try, in ms.
+pub(super) fn retry_at_ms(c: &Context) -> i64 {
+    let at: String = c
+        .ledger
+        .borrow()
+        .sqlite()
+        .query_row("SELECT turn_retry_at FROM task WHERE number = 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    cf_base::time::parse(&at).expect("the time is written, never an empty mark")
+}
+
 #[test]
-fn a_withdrawn_second_try_never_hides_the_first_delivery_30_minutes_later() {
+fn a_failure_30_minutes_after_a_withdrawn_try_begins_again() {
     assert_eq!(
         a_withdrawn_second_try_then_a_failure_after(30 * 60_000),
         Some(1)
@@ -1620,14 +1633,14 @@ fn a_withdrawn_second_try_never_hides_the_first_delivery_30_minutes_later() {
 }
 
 #[test]
-fn a_withdrawn_second_try_still_counts_one_millisecond_before_the_30_minutes() {
+fn a_failure_one_millisecond_short_of_30_minutes_after_a_withdrawn_try_fails_the_task() {
     assert_eq!(
         a_withdrawn_second_try_then_a_failure_after(30 * 60_000 - 1),
         None
     );
 }
 
-fn stored_tries(c: &Context) -> i64 {
+pub(super) fn stored_tries(c: &Context) -> i64 {
     c.ledger
         .borrow()
         .sqlite()
@@ -1807,20 +1820,19 @@ fn one_delivery_renews_the_count_once_though_the_fresh_pair_s_first_try_is_withd
 }
 
 #[test]
-fn a_fresh_pair_withdrawn_whole_renews_again_31_minutes_after_the_renewal() {
+fn a_fresh_pair_withdrawn_whole_renews_again_31_minutes_after_its_last_withdrawal() {
     let c = retrying();
     let (t, window) = working(&c);
     renewed_after_30_minutes(&c, &t, &window);
-    let renewed = c.time.wall_ms();
     a_try_queued_and_withdrawn(&c, &t, &window);
     assert_eq!(woken_and_failed(&c, &t, &window), Some(2));
     a_try_queued_and_withdrawn(&c, &t, &window);
     assert_eq!(stored_tries(&c), 2);
-    c.advance(renewed + 31 * 60_000 - c.time.wall_ms());
+    c.advance(retry_at_ms(&c) + 31 * 60_000 - c.time.wall_ms());
     assert_eq!(
         woken_and_failed(&c, &t, &window),
         Some(1),
-        "nothing was sent since the renewal, 31 minutes ago"
+        "nothing happened to a numbered try for 31 minutes"
     );
     assert_eq!(stored_tries(&c), 0);
 }

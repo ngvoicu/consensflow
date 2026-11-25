@@ -2,10 +2,9 @@
 -- own Resume tries it again. One row for each such hold, written with the hold and never
 -- changed but for the message that carried its Resume, once. The tries a task has used in a
 -- row are a number on the task, `turn_retries`: it goes up by one in the write that queues a
--- numbered Resume and back to zero in the write of a person's or the chief's action on the
--- task, of its result, or of the first failure 30 minutes after the last numbered Resume that
--- was delivered, and 30 minutes after the count last started again (`turn_renewed_at`). Every
--- task that exists reads zero.
+-- numbered Resume and back to zero on exactly three things: a person's or the chief's action
+-- on the task, its result, and a failure 30 minutes or more after `turn_retry_at`, the last
+-- moment anything happened to a numbered retry of the task. Every task that exists reads zero.
 CREATE TABLE turn_retry (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
@@ -26,7 +25,15 @@ ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_
 -- The retry hold the task is in now: the `turn_retry.id` written with it, none once it ends.
 -- It names the hold itself; no time says which hold a Resume belongs to.
 ALTER TABLE task ADD COLUMN retry_hold INTEGER;
--- When the count last started again for a task that has had a retry: by time, or by an action
--- or a result. Time renews the count at most once in 30 minutes, so one delivery cannot renew
--- it twice.
-ALTER TABLE task ADD COLUMN turn_renewed_at TEXT;
+-- The last moment anything happened to a numbered retry of the task: one was charged (queued),
+-- delivered or withdrawn. Written in the same write as its cause, and by nothing else: the
+-- charge writes it in the ledger's code, a delivery of the message that carries a numbered Resume
+-- writes it through the trigger below with the time of its delivery, and a withdrawal with an
+-- empty mark, settled to the write's own time when the write ends, whichever path moves the message.
+ALTER TABLE task ADD COLUMN turn_retry_at TEXT;
+CREATE TRIGGER turn_retry_message_moved AFTER UPDATE OF state ON message
+WHEN OLD.state NOT IN ('delivered', 'read') AND NEW.state IN ('delivered', 'read', 'cancelled', 'failed')
+BEGIN
+  UPDATE task SET turn_retry_at = CASE WHEN NEW.state IN ('delivered', 'read') THEN COALESCE(NEW.delivered_at, '') ELSE '' END
+   WHERE id IN (SELECT task_id FROM turn_retry WHERE message_id = NEW.id);
+END;

@@ -2,11 +2,14 @@
 //! own Resume tries it again; nothing of the retry is pending anywhere else. The only thing kept
 //! is this row, written with the hold, and its message once, when main's Resume of that hold is
 //! queued. The tries a task has used in a row are a number on the task, `turn_retries`: it goes
-//! up by one in the write that queues a numbered Resume ([`link`]) and back to zero in the
-//! write of a person's or the chief's action on the task, of its result, or of the first
-//! failure 30 minutes after the last numbered Resume was delivered ([`standing`]).
+//! up by one in the write that queues a numbered Resume ([`link`]) and goes back to zero on
+//! exactly three things: a person's or the chief's action on the task, its result, and a failure
+//! 30 minutes or more after `turn_retry_at` ([`standing`]), the last moment anything happened
+//! to a numbered retry of the task. That time is written by the charge ([`link`]) and by the
+//! delivery or withdrawal of the message that carries a numbered Resume (a trigger on the
+//! message, whichever path moves it), in the same write, and by nothing else.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 use crate::model::LedgerError;
 use crate::store::Store;
@@ -56,7 +59,7 @@ pub(crate) fn active(store: &Store, task: i64) -> Result<Option<i64>, LedgerErro
 /// `message`: where that is a retry's hold, its fact names the message that carries it, and the
 /// try is used in this write. Any other hold, a quota's or a busy model's, links nothing.
 pub(crate) fn link(
-    store: &Store,
+    store: &mut Store,
     task: i64,
     hold: Option<i64>,
     message: i64,
@@ -71,9 +74,10 @@ pub(crate) fn link(
     if linked > 0 {
         // The numbered Resume is queued: the try is used, in this same write. The column
         // refuses a third.
+        let at = cf_base::time::iso(store.recent_ms());
         store.db.execute(
-            "UPDATE task SET turn_retries = turn_retries + 1 WHERE id = ?",
-            [task],
+            "UPDATE task SET turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2",
+            params![at, task],
         )?;
     }
     Ok(())
@@ -97,67 +101,39 @@ pub struct RetryPlan {
     pub renew_after_ms: i64,
 }
 
-/// The tries a task has used in a row at this moment. Where the task's last numbered Resume that
-/// was delivered (a later one queued and never delivered hides none) was `renew_after_ms` or more before `now`, they are over, and the count goes back to
-/// zero in this write. The comparison is of two times and orders nothing by the clock: a clock
-/// put back makes the time since smaller, so it can only delay the end. A Resume not yet
-/// delivered is no time to renew from.
-///
-/// One delivery renews once: time renews the count only when it also is `renew_after_ms` or more
-/// since the count last started again (`turn_renewed_at`: a renewal, or an action or result), so
-/// a try of the fresh pair queued and never delivered is not forgiven by the old delivery. A
-/// time that cannot be read, or a clock put back, renews nothing.
+/// The tries a task has used in a row at this moment. Where `turn_retry_at` (the last moment
+/// anything happened to a numbered retry of the task) is `renew_after_ms` or more before `now`,
+/// they are over, and the count goes back to zero in this write. The comparison is of two times:
+/// a clock put back makes the time since smaller, so it can only delay the end. A time that
+/// cannot be read (a mark of this very write) renews nothing.
 pub(crate) fn standing(
     store: &Store,
     task: i64,
     now: i64,
     renew_after_ms: i64,
 ) -> Result<i64, LedgerError> {
-    let (used, renewed): (i64, Option<String>) = store.db.query_row(
-        "SELECT turn_retries, turn_renewed_at FROM task WHERE id = ?",
+    let (used, at): (i64, Option<String>) = store.db.query_row(
+        "SELECT turn_retries, turn_retry_at FROM task WHERE id = ?",
         [task],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if used == 0 {
-        return Ok(0);
-    }
-    let delivered: Option<String> = store
-        .db
-        .query_row(
-            "SELECT m.delivered_at FROM turn_retry r JOIN message m ON m.id = r.message_id
-              WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1",
-            [task],
-            |row| row.get(0),
-        )
-        .optional()?
-        .flatten();
-    let long_ago = |at: &str| cf_base::time::parse(at).is_some_and(|at| now - at >= renew_after_ms);
-    let over =
-        delivered.as_deref().is_some_and(long_ago) && renewed.as_deref().is_none_or(long_ago);
-    if over {
-        start_again(store, task, &cf_base::time::iso(now))?;
+    let over = at
+        .as_deref()
+        .and_then(cf_base::time::parse)
+        .is_some_and(|at| now - at >= renew_after_ms);
+    if used > 0 && over {
+        start_again(store, task)?;
         return Ok(0);
     }
     Ok(used)
 }
 
-/// Whether the task has had a retry: only then is there a time to keep, or a clock to read.
-pub(crate) fn tried(store: &Store, task: i64) -> Result<bool, LedgerError> {
-    Ok(store.db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM turn_retry WHERE task_id = ?)",
-        [task],
-        |row| row.get(0),
-    )?)
-}
-
-/// The task's tries in a row start again at `at`: a renewal by time, a person's or the chief's
-/// action on it, its result. The time is kept for a task that has had a retry (one that never
-/// had has no delivery a renewal could come from, and its row is not touched).
-pub(crate) fn start_again(store: &Store, task: i64, at: &str) -> Result<(), LedgerError> {
+/// The task's tries in a row start again: a person's or the chief's action on it, its result,
+/// or a failure 30 minutes after `turn_retry_at`. The time itself is not written here.
+pub(crate) fn start_again(store: &Store, task: i64) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE task SET turn_retries = 0, turn_renewed_at = ?1
-          WHERE id = ?2 AND EXISTS (SELECT 1 FROM turn_retry WHERE task_id = ?2)",
-        params![at, task],
+        "UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries != 0",
+        [task],
     )?;
     Ok(())
 }

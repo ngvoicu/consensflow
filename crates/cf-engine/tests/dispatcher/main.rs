@@ -99,6 +99,7 @@ mod meeting;
 mod meeting_main;
 mod moved_models;
 mod n35_hold;
+mod n35_model;
 mod named_by_model;
 mod new_roles;
 mod no_adapter;
