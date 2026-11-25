@@ -210,3 +210,31 @@ fn macos_path_helper_reads_path_helper_root_and_answers_as_the_system_with_the_g
     assert_eq!(manpath, system_manpath);
     std::fs::remove_dir_all(&home).unwrap();
 }
+
+/// An update replaces `cf.exe` and leaves the old hard link on the old file, which may have the
+/// new one's size and time: the content is what says it is stale.
+#[cfg(windows)]
+#[test]
+fn a_stand_in_of_cfs_size_and_time_and_other_content_is_made_again() {
+    let home = tempfile_dir("stale");
+    let cf = home.join("cf.exe");
+    std::fs::write(&cf, b"ONE").unwrap();
+    let folder = install(&home, &cf).unwrap();
+    let stamp = std::fs::metadata(&cf).unwrap().modified().unwrap();
+    // Replaced, as an update does it: a new file at the name, the links on the old one.
+    let new = home.join("cf.new");
+    std::fs::write(&new, b"TWO").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&new)
+        .unwrap()
+        .set_modified(stamp)
+        .unwrap();
+    std::fs::rename(&new, &cf).unwrap();
+    assert_eq!(std::fs::read(folder.join("taskkill.exe")).unwrap(), b"ONE");
+    install(&home, &cf).unwrap();
+    for name in ["taskkill.exe", "tskill.exe"] {
+        assert_eq!(std::fs::read(folder.join(name)).unwrap(), b"TWO", "{name}");
+    }
+    std::fs::remove_dir_all(&home).unwrap();
+}
