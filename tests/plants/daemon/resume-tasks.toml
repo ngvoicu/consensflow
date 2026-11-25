@@ -1611,8 +1611,8 @@ runs = ["ledger-handed"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''(handed_at IS NOT NULL OR claimed_at IS NOT NULL)'''
-replace = '''(handed_at IS NOT NULL)'''
+find = '''({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)'''
+replace = '''({alias}.handed_at IS NOT NULL)'''
 
 [[plant]]
 name = "resume tasks: a reader of a closed project reads a delivery only begun, as round 7 did"
