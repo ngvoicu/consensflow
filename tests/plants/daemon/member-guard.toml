@@ -53,8 +53,8 @@ runs = ["guard-shells"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
-find = "            .map(|root| (PATH_HELPER_ROOT.to_owned(), root.clone()))"
-replace = "            .map(|root| (String::from(\"UNUSED\"), root.clone()))"
+find = "                [PATH_HELPER_ROOT, GUARD_ROOT].map(|name| (name.to_owned(), root.clone()))"
+replace = "                [GUARD_ROOT].map(|name| (name.to_owned(), root.clone()))"
 
 [[plant]]
 name = "member-guard: the root's paths file leaves the guard's folder out, so path_helper puts the system's first"
