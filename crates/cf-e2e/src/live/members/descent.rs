@@ -669,4 +669,6 @@ fn table_of(listing: &str) -> Result<Vec<Running>> {
 }
 
 #[cfg(test)]
+mod ownership;
+#[cfg(test)]
 mod tests;
