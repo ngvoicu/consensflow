@@ -300,6 +300,15 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
     pass.await.expect("a pass");
     rig.quiet().await;
     rig.passes(1).await;
+    // The launch's steps after the pane's open are made on threads of their own (T-2232): on a
+    // slow machine the task is at work a few turns later than the open's answer.
+    for _ in 0..400 {
+        if rig.task_state(project.id, 1) == "working" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        rig.passes(1).await;
+    }
     assert_eq!(rig.task_state(project.id, 1), "working");
     rig.mark();
     let zeus = rig
