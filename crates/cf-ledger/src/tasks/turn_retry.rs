@@ -10,7 +10,6 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::model::LedgerError;
 use crate::store::Store;
-use crate::views::TaskRow;
 
 /// What a hold made for a retry keeps of the turn that failed.
 #[derive(Debug, Clone, Copy)]
@@ -24,7 +23,7 @@ pub struct RetryFact<'a> {
     pub cause: &'a str,
 }
 
-/// The fact of the hold the task has just been put in (its `paused_at` names that hold).
+/// The fact of the hold the task has just been put in, and the task named as in it.
 pub(crate) fn write(
     store: &Store,
     task: i64,
@@ -32,32 +31,49 @@ pub(crate) fn write(
     fact: &RetryFact<'_>,
 ) -> Result<(), LedgerError> {
     store.db.execute(
-        "INSERT INTO turn_retry (task_id, session_id, kind, try, said, cause, paused_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT paused_at FROM task WHERE id = ?1))",
+        "INSERT INTO turn_retry (task_id, session_id, kind, try, said, cause)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![task, fact.session, fact.kind, which, fact.said, fact.cause],
+    )?;
+    store.db.execute(
+        "UPDATE task SET retry_hold = ?1 WHERE id = ?2",
+        params![store.db.last_insert_rowid(), task],
     )?;
     Ok(())
 }
 
-/// main's Resume of the hold `task` is in, queued as `message`: the fact of that hold, if it
-/// is one made for a retry, names the message that carries it. A Resume of a person's, or of
-/// any other hold, links nothing: the pause the fact names is the one the task is in.
-pub(crate) fn link(store: &Store, task: &TaskRow, message: i64) -> Result<(), LedgerError> {
-    let Some(paused_at) = &task.paused_at else {
+/// The retry hold the task is in, by the ledger's own identity: none for any other hold, and
+/// none once that hold has ended. Read before the move that ends it.
+pub(crate) fn active(store: &Store, task: i64) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row("SELECT retry_hold FROM task WHERE id = ?", [task], |row| {
+            row.get(0)
+        })?)
+}
+
+/// main's Resume of the hold `task` was in (`hold`, [`active`] before the move), queued as
+/// `message`: where that is a retry's hold, its fact names the message that carries it, and the
+/// try is used in this write. Any other hold, a quota's or a busy model's, links nothing.
+pub(crate) fn link(
+    store: &Store,
+    task: i64,
+    hold: Option<i64>,
+    message: i64,
+) -> Result<(), LedgerError> {
+    let Some(hold) = hold else {
         return Ok(());
     };
     let linked = store.db.execute(
-        "UPDATE turn_retry SET message_id = ?1
-          WHERE id = (SELECT id FROM turn_retry
-                       WHERE task_id = ?2 AND paused_at = ?3 AND message_id IS NULL
-                       ORDER BY id DESC LIMIT 1)",
-        params![message, task.id, paused_at],
+        "UPDATE turn_retry SET message_id = ?1 WHERE id = ?2 AND message_id IS NULL",
+        params![message, hold],
     )?;
     if linked > 0 {
-        // The numbered Resume is queued: the try is used, in this same write.
+        // The numbered Resume is queued: the try is used, in this same write. The column
+        // refuses a third.
         store.db.execute(
             "UPDATE task SET turn_retries = turn_retries + 1 WHERE id = ?",
-            [task.id],
+            [task],
         )?;
     }
     Ok(())
@@ -81,8 +97,8 @@ pub struct RetryPlan {
     pub renew_after_ms: i64,
 }
 
-/// The tries a task has used in a row at this moment. Where the task's last numbered Resume was
-/// delivered `renew_after_ms` or more before `now`, they are over, and the count goes back to
+/// The tries a task has used in a row at this moment. Where the task's last numbered Resume that
+/// was delivered (a later one queued and never delivered hides none) was `renew_after_ms` or more before `now`, they are over, and the count goes back to
 /// zero in this write. The comparison is of two times and orders nothing by the clock: a clock
 /// put back makes the time since smaller, so it can only delay the end. A Resume not yet
 /// delivered is no time to renew from.
@@ -104,7 +120,7 @@ pub(crate) fn standing(
         .db
         .query_row(
             "SELECT m.delivered_at FROM turn_retry r JOIN message m ON m.id = r.message_id
-              WHERE r.task_id = ? ORDER BY r.id DESC LIMIT 1",
+              WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1",
             [task],
             |row| row.get(0),
         )

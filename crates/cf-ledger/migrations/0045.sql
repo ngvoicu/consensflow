@@ -16,11 +16,12 @@ CREATE TABLE turn_retry (
   -- What the turn said and why it failed, as the engine read it.
   said TEXT NOT NULL,
   cause TEXT NOT NULL,
-  -- The hold it belongs to: the task's pause time (`task.paused_at`) the hold wrote.
-  paused_at TEXT NOT NULL,
   -- The message that carried its Resume, once main's pass resumed the task.
   message_id INTEGER REFERENCES message(id) ON DELETE SET NULL
 );
 CREATE INDEX turn_retry_by_task ON turn_retry (task_id, id);
 CREATE INDEX turn_retry_by_message ON turn_retry (message_id);
-ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries >= 0);
+ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2);
+-- The retry hold the task is in now: the `turn_retry.id` written with it, none once it ends.
+-- It names the hold itself; no time says which hold a Resume belongs to.
+ALTER TABLE task ADD COLUMN retry_hold INTEGER;

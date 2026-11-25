@@ -665,7 +665,7 @@ pub(crate) fn clear_hold(
         require_task_state(&task, &["paused"], "clear the hold of")?;
         let at = store.at();
         store.db.execute(
-            "UPDATE task SET held_until = NULL, updated_at = ? WHERE id = ?",
+            "UPDATE task SET held_until = NULL, retry_hold = NULL, updated_at = ? WHERE id = ?",
             params![at, task.id],
         )?;
         // What its line said of the hold no longer holds.
@@ -1277,7 +1277,7 @@ pub(crate) fn resume_task(
             // it had with that session holds no more.
             store.db.execute(
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             paused_with_project = 0, held_until = NULL
+             paused_with_project = 0, held_until = NULL, retry_hold = NULL
            WHERE id = ?",
                 params![
                     format!(
@@ -1337,15 +1337,16 @@ pub(crate) fn resume_task(
             },
         )?;
         fold(store, &task, assignee.id, message_id)?;
+        // main's own Resume of a hold made for a retry carries that retry (D3's N35): which
+        // hold it ends is read before the move that ends it.
+        let retry_hold = super::turn_retry::active(store, task.id)?;
         store.move_task(
             &task,
             "queued",
             json!({ "by": by, "message": message_id }),
         )?;
-        // main's own Resume of a hold made for a retry carries that retry (D3's N35): the try
-        // is used in this write.
         if by.is_none() {
-            super::turn_retry::link(store, &task, message_id)?;
+            super::turn_retry::link(store, task.id, retry_hold, message_id)?;
         }
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,

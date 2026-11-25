@@ -32,11 +32,14 @@ pub(crate) const TASK_SELECT: &str = "
              AND json_extract(s.receipt, '$.shown') IS NOT NULL
              AND json_extract(s.receipt, '$.over') IS NULL
            ORDER BY s.id DESC LIMIT 1) AS aside,
-         (SELECT json_object('kind', r.kind, 'which', r.try, 'of', 2,
+         (SELECT json_object('kind', r.kind,
+                  'which', CASE WHEN t.state = 'paused' THEN t.turn_retries + 1
+                                ELSE max(t.turn_retries, 1) END,
+                  'of', 2,
                   'dueAt', CASE WHEN t.state = 'paused' THEN t.held_until END)
             FROM turn_retry r
            WHERE r.task_id = t.id
-             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.paused_at = t.paused_at)
+             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold)
                OR (r.message_id IS NOT NULL AND t.state IN ('queued', 'working', 'waiting')
                    AND EXISTS (SELECT 1 FROM message w WHERE w.id = r.message_id
                                 AND w.state IN ('queued', 'delivering'))))
@@ -47,8 +50,7 @@ pub(crate) const TASK_SELECT: &str = "
              AND h.state IN ('queued', 'delivering', 'delivered', 'read')
              AND NOT (json_valid(h.receipt) AND json_extract(h.receipt, '$.shown') IS NOT NULL)
              AND h.body LIKE 'T-' || t.number || ' waits with @%'
-             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id
-                              AND r.paused_at = t.paused_at)
+             AND t.retry_hold IS NULL
              AND h.id > coalesce((SELECT max(s.id) FROM message s
                    WHERE s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
                      AND s.kind = 'note' AND json_valid(s.receipt)

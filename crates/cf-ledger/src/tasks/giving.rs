@@ -630,6 +630,8 @@ pub(crate) fn assign_task(
             "UPDATE task SET assignee_id = ?, updated_at = ? WHERE id = ?",
             params![session.id, at, task.id],
         )?;
+        // The new window is a fresh run (D3's N35): the brief queued to it, from whoever
+        // asked for the task, begins its count of automatic Resumes at zero (`queue`).
         let body = delivery_body(&task_row_by_id(store, task.id)?);
         let message_id = queue(
             store,
@@ -799,7 +801,7 @@ fn release_told(
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL, retry_hold = NULL
          WHERE id = ?",
             params![
                 body,

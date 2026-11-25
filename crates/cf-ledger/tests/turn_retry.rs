@@ -385,23 +385,52 @@ fn the_last_numbered_resume_is_the_last_by_the_ledger_s_order_not_by_its_wall_cl
 }
 
 #[test]
-fn a_resume_not_yet_delivered_is_no_time_to_renew_from() {
+fn a_count_with_no_delivered_resume_is_no_time_to_renew_from() {
+    let (_dir, mut ledger, project, session, _, clock) = working_at();
+    held(hold(&mut ledger, &project, session));
+    ledger
+        .resume_held_task(project.id, 1, RESUME_WORDS)
+        .expect("resumed");
+    ledger
+        .sqlite()
+        .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
+        .expect("working");
+    clock.set(clock.get() + 3 * 3_600_000);
+    assert_eq!(held(hold(&mut ledger, &project, session)), 2);
+    assert_eq!(tries(&ledger), 1, "the count stands");
+}
+
+#[test]
+fn the_30_minutes_run_from_the_last_delivered_resume_not_from_a_later_one_not_delivered() {
+    // T-2246 finding 4: a second Resume queued and never delivered never hides the first.
     let (_dir, mut ledger, project, session, _, clock) = working_at();
     failed_and_tried(&mut ledger, &project, session, &clock);
     held(hold(&mut ledger, &project, session));
     ledger
         .resume_held_task(project.id, 1, RESUME_WORDS)
         .expect("resumed");
-    assert_eq!(tries(&ledger), 2);
+    assert_eq!(tries(&ledger), 2, "the queued Resume still counts");
     ledger
         .sqlite()
         .execute("UPDATE task SET state = 'working' WHERE number = 1", [])
         .expect("working");
-    clock.set(clock.get() + 3 * 3_600_000);
-    assert!(matches!(
-        hold(&mut ledger, &project, session),
-        RetryHold::Spent
-    ));
+    clock.set(clock.get() + 30 * 60_000);
+    assert_eq!(held(hold(&mut ledger, &project, session)), 1);
+    assert_eq!(tries(&ledger), 0);
+}
+
+#[test]
+fn the_write_itself_refuses_a_count_past_two() {
+    let (_dir, ledger, _, _, _) = working();
+    let set = |count: i64| {
+        ledger
+            .sqlite()
+            .execute("UPDATE task SET turn_retries = ?", [count])
+    };
+    set(2).expect("two tries");
+    let refused = set(3).expect_err("a third is refused");
+    assert!(refused.to_string().contains("CHECK"), "{refused}");
+    assert_eq!(tries(&ledger), 2);
 }
 
 /// Two tries used, then what the test does; the count after it.
@@ -579,7 +608,7 @@ fn dump(raw: &rusqlite::Connection) -> Vec<(String, Vec<String>)> {
         .filter(|table| table != "turn_retry")
         .map(|table| {
             let columns: Vec<String> = raw
-                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name <> 'turn_retries' ORDER BY cid"))
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold') ORDER BY cid"))
                 .expect("columns")
                 .query_map([], |row| row.get(0))
                 .expect("names")

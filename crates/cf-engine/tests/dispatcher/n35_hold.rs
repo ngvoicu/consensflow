@@ -7,6 +7,7 @@
 use super::fixtures::{given, Tiers};
 use cf_engine::testing::{Context, Made};
 use cf_harness::records::{Level, Quota, Role};
+use cf_harness::seams::Time;
 
 const RESUMED: &str = "Resumed: Go on where you stopped.";
 
@@ -1483,5 +1484,244 @@ fn a_restart_between_the_first_try_and_the_next_failure_keeps_the_count() {
         t.task(1).task.retry.expect("held again").which,
         2,
         "the count stored before the restart is the one read after it"
+    );
+}
+
+/// zeus has a backup of its own, and each window failed twice and was tried twice.
+fn backed_up(c: &Context, t: &Tiers<'_>) {
+    c.ledger
+        .borrow_mut()
+        .add_backup(
+            t.project.id,
+            "zeus",
+            &cf_ledger::NewMember {
+                harness: "claude-code".into(),
+                model: Some("gaia".into()),
+                effort: None,
+                model_name: None,
+                designer: false,
+                roles: vec!["worker".into()],
+                tier: "standard".into(),
+            },
+        )
+        .expect("a backup");
+}
+
+/// The task's window failed twice and was tried twice, then fails a third time or is moved: the
+/// tries of the window it is in now. Which try each of its next two failures is held for.
+fn tries_of(c: &Context, t: &Tiers<'_>, handle: &str) -> Vec<i64> {
+    let mut seen = Vec::new();
+    for n in 1..=3 {
+        let Some(which) = fails_again_held(c, t, handle) else {
+            break;
+        };
+        seen.push(which);
+        let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+        c.advance(due - c.time.wall_ms() + 1);
+        until_resumed(c, handle, n);
+        next_turn_opens(c, handle);
+        passes(c, 2);
+    }
+    seen
+}
+
+#[test]
+fn a_task_given_to_its_member_s_backup_is_a_fresh_run_with_two_tries_of_its_own() {
+    // T-2246 finding 3, decided: each window gets at most two automatic Resumes in a row. The
+    // daemon's hand-off to a backup begins the count again at the new window.
+    let c = retrying();
+    let (t, window) = working(&c);
+    backed_up(&c, &t);
+    two_tries_used(&c, &window);
+    c.advance(1_000);
+    c.adapter.refuse(
+        &window,
+        super::fixtures::exhausted(
+            Some(&super::fixtures::now(&c)),
+            Some(&super::fixtures::after(&c, 20 * 60_000)),
+        ),
+    );
+    passes(&c, 6);
+    let backup = t.assignee(1);
+    assert_ne!(backup, window, "the backup took it");
+    assert_eq!(t.task(1).task.state, "working");
+    next_turn_opens(&c, &backup);
+    passes(&c, 2);
+    assert_eq!(tries_of(&c, &t, &backup), vec![1, 2]);
+    assert_eq!(t.task(1).task.state, "failed", "and no third at the backup");
+    assert_eq!(resumes(&c, &window), 2, "two at the first window");
+    assert_eq!(resumes(&c, &backup), 2, "two at the backup's");
+}
+
+#[test]
+fn a_task_a_person_reassigns_is_a_fresh_run_with_two_tries_of_its_own() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    two_tries_used(&c, &window);
+    c.reassign_task(t.project.id, 1).expect("reassigned");
+    passes(&c, 8);
+    let next = t.assignee(1);
+    assert_ne!(next, window, "another window");
+    next_turn_opens(&c, &next);
+    passes(&c, 2);
+    assert_eq!(fails_again_held(&c, &t, &next), Some(1));
+}
+
+/// T-2246 finding 4: try 1 was delivered, try 2 was queued and withdrawn when the window went on
+/// by itself with a job still running; the next turn fails `delay` after try 1's delivery.
+fn a_withdrawn_second_try_then_a_failure_after(delay: i64) -> Option<i64> {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    let delivered = c.time.wall_ms();
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 3);
+    let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+    c.advance(due - c.time.wall_ms() + 1);
+    c.adapter.with(&window, |agent| agent.settled = false);
+    passes(&c, 2);
+    let queued = t
+        .task(1)
+        .messages
+        .into_iter()
+        .find(|m| m.kind == "task" && m.state == "queued" && m.sender.is_none())
+        .expect("the second try waits for the window");
+    c.adapter.wake(
+        &window,
+        "<task-notification>A background step finished.</task-notification>",
+    );
+    c.adapter.with(&window, |agent| {
+        agent.failed = false;
+        agent.failure = None;
+    });
+    c.adapter
+        .answer_leaving_a_job(&window, "One other background step is still running.");
+    passes(&c, 3);
+    assert_eq!(c.message(queued.id).state, "cancelled", "withdrawn");
+    c.advance(delivered + delay - c.time.wall_ms());
+    c.adapter.wake(
+        &window,
+        "<task-notification>The last background step finished.</task-notification>",
+    );
+    fails_again_held(&c, &t, &window)
+}
+
+#[test]
+fn a_withdrawn_second_try_never_hides_the_first_delivery_30_minutes_later() {
+    assert_eq!(
+        a_withdrawn_second_try_then_a_failure_after(30 * 60_000),
+        Some(1)
+    );
+}
+
+#[test]
+fn a_withdrawn_second_try_still_counts_one_millisecond_before_the_30_minutes() {
+    assert_eq!(
+        a_withdrawn_second_try_then_a_failure_after(30 * 60_000 - 1),
+        None
+    );
+}
+
+fn stored_tries(c: &Context) -> i64 {
+    c.ledger
+        .borrow()
+        .sqlite()
+        .query_row("SELECT turn_retries FROM task WHERE number = 1", [], |r| {
+            r.get(0)
+        })
+        .expect("the count")
+}
+
+/// T-2246 finding 5: an unlinked retry hold (the chief resumed it), then `fresh` numbered
+/// tries; the clock goes back to that old hold's instant as the window is refused for quota.
+fn a_quota_hold_at_an_old_retry_hold_s_instant(fresh: usize) {
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    let old = c.time.wall_ms();
+    c.advance(1_000);
+    c.resume_task(t.project.id, 1, "Continue with the revised task");
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.adapter.with(&window, |agent| agent.settled = true);
+    passes(&c, 6);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.advance(5_000);
+    for n in 1..=fresh {
+        fail(&c, &window);
+        passes(&c, 3);
+        let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+        c.advance(due - c.time.wall_ms() + 1);
+        until_resumed(&c, "zeus", n);
+        next_turn_opens(&c, &window);
+        passes(&c, 2);
+    }
+    assert_eq!(stored_tries(&c), fresh as i64);
+    c.step_wall(old - c.time.wall_ms());
+    c.adapter.refuse(
+        &window,
+        super::fixtures::exhausted(
+            Some(&super::fixtures::now(&c)),
+            Some(&super::fixtures::after(&c, 2 * 60_000)),
+        ),
+    );
+    passes(&c, 4);
+    assert_eq!(t.task(1).task.state, "paused");
+    let shown = t.task(1).task.retry.map(|retry| retry.which);
+    let due = cf_base::time::parse(t.task(1).task.held_until.as_deref().unwrap()).unwrap();
+    c.advance(due - c.time.wall_ms() + 1);
+    passes(&c, 6);
+    c.adapter.with(&window, |agent| agent.quota = None);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    assert_eq!(
+        stored_tries(&c),
+        fresh as i64,
+        "the quota's own Resume used no try"
+    );
+    assert_eq!(shown, None, "and its hold is shown as no retry");
+}
+
+#[test]
+fn a_quota_s_own_resume_is_never_a_try_at_the_instant_of_an_old_hold_after_two() {
+    a_quota_hold_at_an_old_retry_hold_s_instant(2);
+}
+
+#[test]
+fn a_quota_s_own_resume_is_never_a_try_at_the_instant_of_an_old_hold_after_one() {
+    a_quota_hold_at_an_old_retry_hold_s_instant(1);
+}
+
+#[test]
+fn the_card_shows_the_try_the_next_resume_will_use_after_a_tell_in_the_hold() {
+    // T-2246 finding 6: the count was reset by the chief's tell while try 2 was held.
+    let c = retrying();
+    let (t, window) = working(&c);
+    fail(&c, &window);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail(&c, &window);
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.retry.expect("held").which, 2);
+    c.advance(1_000);
+    c.ledger
+        .borrow_mut()
+        .tell_queued(t.project.id, 1, "chief", "Use the other file")
+        .unwrap();
+    assert_eq!(stored_tries(&c), 0);
+    assert_eq!(
+        t.task(1).task.retry.expect("still held").which,
+        1,
+        "the next Resume is the first of two again"
     );
 }

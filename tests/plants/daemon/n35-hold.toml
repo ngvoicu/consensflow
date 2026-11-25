@@ -60,7 +60,7 @@ runs = ["n35-dispatcher", "n35-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
 find = "    if linked > 0 {"
-replace = "    if linked == 0 {\n        reset(store, task.id)?;\n    }\n    if linked > 0 {"
+replace = "    if linked == 0 {\n        reset(store, task)?;\n    }\n    if linked > 0 {"
 
 [[plant]]
 name = "n35 hold: the last numbered Resume taken by its wall-clock time"
@@ -69,8 +69,8 @@ runs = ["n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "WHERE r.task_id = ? ORDER BY r.id DESC LIMIT 1\","
-replace = "WHERE r.task_id = ? ORDER BY m.delivered_at DESC LIMIT 1\","
+find = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1\","
+replace = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY m.delivered_at DESC LIMIT 1\","
 
 [[plant]]
 name = "n35 hold: a tell to the window does not reset the count"
@@ -109,18 +109,58 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = "        if by.is_none() {\n            super::turn_retry::link(store, &task, message_id)?;"
-replace = "        if true {\n            super::turn_retry::link(store, &task, message_id)?;"
+find = "        if by.is_none() {\n            super::turn_retry::link(store, task.id, retry_hold, message_id)?;"
+replace = "        if true {\n            super::turn_retry::link(store, task.id, retry_hold, message_id)?;"
 
 [[plant]]
-name = "n35 hold: a Resume linked to a hold it does not belong to"
-meant = "a_resume_of_another_hold_than_the_fact_s_links_nothing"
-runs = ["n35-ledger"]
+name = "n35 hold: a hold's identity kept past its end"
+meant = "a_quota_s_own_resume_is_never_a_try_at_the_instant_of_an_old_hold_after_two"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "paused_with_project = 0,\n             retry_hold = NULL WHERE id = ?"
+replace = "paused_with_project = 0\n             WHERE id = ?"
+
+[[plant]]
+name = "n35 hold: a later Resume never delivered hides the last delivery"
+meant = "a_withdrawn_second_try_never_hides_the_first_delivery_30_minutes_later"
+runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "WHERE task_id = ?2 AND paused_at = ?3 AND message_id IS NULL"
-replace = "WHERE task_id = ?2 AND ?3 IS NOT NULL AND message_id IS NULL"
+find = "WHERE r.task_id = ? AND m.delivered_at IS NOT NULL ORDER BY r.id DESC LIMIT 1\","
+replace = "WHERE r.task_id = ? ORDER BY r.id DESC LIMIT 1\","
+
+[[plant]]
+name = "n35 hold: the column lets a third try be stored"
+meant = "the_write_itself_refuses_a_count_past_two"
+runs = ["n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = "CHECK (turn_retries BETWEEN 0 AND 2)"
+replace = "CHECK (turn_retries >= 0)"
+
+[[plant]]
+name = "n35 hold: the card shows the hold's fixed try after a reset"
+meant = "the_card_shows_the_try_the_next_resume_will_use_after_a_tell_in_the_hold"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "'which', CASE WHEN t.state = 'paused' THEN t.turn_retries + 1"
+replace = "'which', CASE WHEN t.state = 'paused' THEN r.try"
+
+[[plant]]
+name = "n35 hold: a task given to another window keeps its count"
+meant = "a_task_given_to_its_member_s_backup_is_a_fresh_run_with_two_tries_of_its_own"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "message.from.is_some_and(|from| from != message.to);"
+replace = "message.from.is_some_and(|from| from != message.to && message.kind != \"task\");"
 
 [[plant]]
 name = "n35 hold: a second note at the second try"
@@ -239,8 +279,8 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/views.rs"
-find = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.paused_at = t.paused_at)"
-replace = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.paused_at IS NOT NULL AND 0)"
+find = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold)"
+replace = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold AND 0)"
 
 [[plant]]
 name = "n35 hold: Devin's error end before any answer text not read as failed"
@@ -269,7 +309,7 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/views.rs"
-find = "             AND NOT EXISTS (SELECT 1 FROM turn_retry r WHERE r.task_id = t.id\n                              AND r.paused_at = t.paused_at)\n"
+find = "             AND t.retry_hold IS NULL\n"
 replace = ""
 
 [[plant]]

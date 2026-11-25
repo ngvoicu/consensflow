@@ -8,8 +8,12 @@
 //! a row are a number on the task (`task.turn_retries`), raised by the ledger in the write that
 //! queues a numbered Resume and put back to zero in the write of a person's or the chief's
 //! action on the task (a Resume or reopen, a tell, an answer), of its result, or of the first
-//! failure 30 minutes or more after the last numbered Resume was delivered. A quota's or a busy
-//! model's own Resume is neither: the count stands across it. Nothing is ordered by a wall-clock
+//! failure 30 minutes or more after the last numbered Resume that was delivered (one queued and
+//! withdrawn counts toward the two, and hides no delivery). A task given to another window, by
+//! the daemon to its member's backup or by a person's Reassign, is a fresh run and begins at
+//! zero: each window gets at most two automatic Resumes in a row. A quota's or a busy model's
+//! own Resume is neither: the count stands across it, and the same window coming back from such a
+//! hold begins nothing again. Nothing is ordered by a wall-clock
 //! time, and no harness's reading of a turn's end resets it. The daemon alone can never try
 //! more than twice in a row; if the computer's clock jumps forward, the 30 minutes can end early.
 //!
@@ -111,7 +115,7 @@ impl Dispatcher {
             // One note, at the first try, to whoever gave the task: shown on the board where
             // that is the chief (it costs no turn), typed to anyone else.
             let words = format!(
-                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, or a failure 30 minutes after its last automatic try. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
+                "T-{n}'s turn failed: {said}. ConsensFlow tries it again in its window in {first}, and once more {second} after a second failure. If it fails a third time in a row, T-{n} fails; its count of tries starts again with a word to it from you or the chief, a result, another window (its member's backup, or a Reassign), or a failure 30 minutes after the last automatic try that reached it. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-{n} \"…\"",
                 n = task.number,
                 first = spoken(unit),
                 second = spoken(SECOND_TRY_UNITS * unit),

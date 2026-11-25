@@ -323,8 +323,8 @@ impl Store {
     ) -> Result<(), LedgerError> {
         let at = self.at();
         self.db.execute(
-            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL, paused_with_project = 0
-             WHERE id = ?",
+            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL, paused_with_project = 0,
+             retry_hold = NULL WHERE id = ?",
             params![to, at, task.id],
         )?;
         // A result starts the task's failed turns' tries again (D3's N35); a reopen does so
