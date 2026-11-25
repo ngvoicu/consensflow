@@ -212,14 +212,14 @@ file = "crates/cf-engine/src/windows.rs"
 find = """        self.launch_over(
             record,
             participant,
-            failing.filter(|_| !displaced),"""
+            failing.filter(|_| !displaced && captured.is_some()),"""
 replace = """        if participant.role == "chief" {
             return Ok(false);
         }
         self.launch_over(
             record,
             participant,
-            failing.filter(|_| !displaced),"""
+            failing.filter(|_| !displaced && captured.is_some()),"""
 
 [[plant]]
 name = 'launch-freeze: a pause during a failed plan is not seen'
@@ -229,7 +229,7 @@ runs = ["lf-pause"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = """failing.as_ref(), asked_before)? {"""
-replace = """failing.as_ref(), self.seams.ledger.borrow().stop_of(participant.id)?)? {"""
+replace = """failing.as_ref(), Some(self.seams.ledger.borrow().stop_of(participant.id)?))? {"""
 
 [[plant]]
 name = 'launch-freeze: a launch is never told it is over'

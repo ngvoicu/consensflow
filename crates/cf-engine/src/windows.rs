@@ -820,9 +820,9 @@ impl Dispatcher {
                 return self.launch_failed(record, project, participant, failing, &said);
             }
         };
-        // What a pause that comes while the plan is made is told apart by, where the plan
-        // fails: read in the turn the plan begins its first message in.
-        let asked_before = self.seams.ledger.borrow().stop_of(participant.id)?;
+        // The stops the plan read as it began its first message, which a failed plan tells a
+        // later pause by: none where it failed before that.
+        let mut asked_before = None;
         // Boxed, so that the work of an operation that launches stays small
         // (`dispatcher::tests`): the plan asks the harness and prepares the window,
         // and what it comes to is held on the heap through the waits after it.
@@ -836,6 +836,7 @@ impl Dispatcher {
             delivering.as_ref(),
             role,
             prelude,
+            &mut asked_before,
         ))
         .await
         {
@@ -1284,6 +1285,7 @@ impl Dispatcher {
         delivering: Option<&Delivering>,
         role: Option<RoleText>,
         prelude: Option<Prelude>,
+        asked_before: &mut Option<Option<Stop>>,
     ) -> Result<Option<Planned>, EngineError> {
         // A member the update could not run on what it ran on (T-1202) opens no window on
         // its harness's default: its work goes back to the board, and the human hears why.
@@ -1316,6 +1318,7 @@ impl Dispatcher {
         // owed. Read in this turn, with the first message begun: the window
         // works on the task that message is about.
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        *asked_before = Some(stop);
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
         // as one that comes while the window is prepared is, and the launch is over.
@@ -1666,32 +1669,32 @@ impl Dispatcher {
 
     /// [`Dispatcher::launch_over`] for a launch whose plan failed, asked before the failure is
     /// settled: its project closed or its record forgotten while the plan was made, or, for a
-    /// member, its message withdrawn or a pause asked since `captured` was read. `failing` is
-    /// still queued where the window was to be told its role first, and fails all the same
-    /// unless the launch is over.
+    /// member, its message withdrawn or a pause asked since `captured` was read (none where the
+    /// plan failed before it read them, with nothing begun). `failing` is still queued where
+    /// the window was to be told its role first, and fails all the same unless the launch is
+    /// over.
     fn over_though_failed(
         &self,
         record: &Rc<Record>,
         participant: &ParticipantView,
         failing: Option<&Delivering>,
-        captured: Option<Stop>,
+        captured: Option<Option<Stop>>,
     ) -> Result<bool, EngineError> {
         let mut displaced = false;
         if let Some(failing) = failing {
             let message = self.seams.ledger.borrow().message(failing.message)?;
             displaced = message.is_some_and(|message| message.state == "queued");
         }
-        if displaced
-            && participant.role != "chief"
-            && self.seams.ledger.borrow().stop_of(participant.id)? != captured
-        {
-            return Ok(true);
+        if let Some(captured) = captured.filter(|_| displaced && participant.role != "chief") {
+            if self.seams.ledger.borrow().stop_of(participant.id)? != captured {
+                return Ok(true);
+            }
         }
         self.launch_over(
             record,
             participant,
-            failing.filter(|_| !displaced),
-            captured,
+            failing.filter(|_| !displaced && captured.is_some()),
+            captured.flatten(),
             "a pause came while its window was prepared",
         )
     }
