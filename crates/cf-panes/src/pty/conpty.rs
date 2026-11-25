@@ -44,7 +44,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use portable_pty::{
@@ -221,8 +220,9 @@ fn pipe() -> io::Result<(File, File)> {
     Ok(unsafe { (File::from_raw_handle(read), File::from_raw_handle(write)) })
 }
 
-/// How much the console may have written that the window has not read yet, as `CreatePipe`
-/// gives a pipe by default.
+/// How much the console may have written that the window has not read yet: what `CreatePipe`
+/// gives a pipe by default, each way (measured on Windows 11 26200, N17), so a program waits
+/// on its terminal where it did.
 const OUTPUT_PIPE_BYTES: u32 = 4096;
 
 /// The pipe the console writes its output to: its end of it as any pipe's, and the window's
@@ -231,12 +231,22 @@ const OUTPUT_PIPE_BYTES: u32 = 4096;
 /// `CreatePipe`, whose handles are synchronous, every call on it waits for the one before:
 /// `PeekNamedPipe` waited 2 s for a read that was waiting for the program, even on a duplicate
 /// of the handle (probed on Windows 11 26200, N17).
+///
+/// The pipe is the window's alone, for what it holds is what the person types and reads: a
+/// name no other process can guess, made as its first instance with one instance at the most,
+/// remote clients refused, and its other end opened at once.
+///
+/// Nothing reads the window's end but [`read_overlapped`], each call with its own `OVERLAPPED`
+/// and event, which it waits on: no `File::read`, and no wait on the handle, which two
+/// operations on it would end at whichever ended first. A read it starts it waits to the end of,
+/// so none outlives its `OVERLAPPED`.
 fn output_pipe() -> io::Result<(File, File)> {
-    static PIPES: AtomicU64 = AtomicU64::new(0);
+    let mut unguessable = [0u8; 16];
+    getrandom::fill(&mut unguessable).map_err(|error| io::Error::other(error.to_string()))?;
     let name = wide(OsStr::new(&format!(
-        r"\\.\pipe\consensflow-conpty-{}-{}",
+        r"\\.\pipe\consensflow-conpty-{}-{:032x}",
         std::process::id(),
-        PIPES.fetch_add(1, Ordering::Relaxed),
+        u128::from_le_bytes(unguessable),
     )));
     // SAFETY: a NUL-terminated name; no attributes, so the end is not inheritable. The
     // first instance of its name, and only for this machine: a name held already fails.

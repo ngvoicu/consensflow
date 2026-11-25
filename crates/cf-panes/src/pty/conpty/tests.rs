@@ -539,6 +539,8 @@ fn a_form_with_no_envs_is_not_read() {
 fn a_windows_output_pipe_is_waited_on_without_taking_and_asked_while_it_waits() {
     use std::io::Write;
 
+    // Which console host this run's windows open through, for the record.
+    println!("console host: {:?}", super::host_library());
     let (read, mut write) = super::output_pipe().expect("a pipe");
     let watch = super::Watch {
         event: super::event().expect("an event"),
