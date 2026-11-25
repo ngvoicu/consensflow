@@ -22,6 +22,9 @@
 //! `CF_N35_SEEDS` is how many schedules the one model test runs (2,000 by default),
 //! `CF_N35_FIRST_SEED` where its seeds begin.
 
+// A model run is told its seeds by the environment, and tells its seed and its schedule on stderr.
+#![allow(clippy::print_stderr, clippy::disallowed_methods)]
+
 use super::fixtures::{given, Tiers};
 use super::n35_hold::{fail, next_turn_opens, resumes, retrying, working};
 use cf_engine::testing::{Context, Restarted};
