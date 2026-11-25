@@ -111,7 +111,7 @@ replace = """        Seen(self.shows)"""
 
 [[plant]]
 name = "output clock: a look is taken of a screen that lacks bytes the host has read"
-meant = "t2132_a_split_echo_is_no_look"
+meant = "a_snapshot_at_6_over_5_is_no_look_and_one_with_no_seen_or_not_ok_is_none_either"
 runs = ["oc-model", "oc-walks", "oc-harness"]
 
 [[plant.edit]]

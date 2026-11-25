@@ -13,7 +13,7 @@
 # escape-unsent` runs them all.
 
 [run]
-escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::a_paste_read_empty", "arbiter::tests::a_paste_read_empty"]
+escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::a_paste_read_empty", "arbiter::tests::a_paste_over_the_count"]
 escape-unsent-screen = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "screen::tests::the_bottom"]
 escape-unsent-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "input_box"]
 escape-unsent-adapters = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "input_box"]
@@ -40,7 +40,7 @@ replace = """        false
 
 [[plant]]
 name = "escape-unsent: Escape clears the count, though the box may keep the words"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
+meant = "a_paste_over_the_count_names_evidence_the_host_holds_or_is_held"
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
@@ -197,7 +197,7 @@ runs = ["escape-unsent-paste"]
 file = "crates/cf-harness/src/shared/pane.rs"
 find = '''    if !host.admits() {
         return not_admitted();'''
-replace = '''    if *read_empty && !host.admits() {
+replace = '''    if read_empty.is_some() && !host.admits() {
         return not_admitted();'''
 
 [[plant]]
@@ -245,18 +245,3 @@ file = "crates/cf-harness/src/shared/look.rs"
 find = """        let Some(evidence) = look.evidence(harness) else {"""
 replace = """        let Some(evidence) = None::<Evidence> else {"""
 
-[[plant]]
-name = "escape-unsent rig: Escape clears the count, and the result is pasted into the words left in the box"
-meant = "words_left_in_the_box_at_escape_hold_the_result_until_the_human_clears_them"
-runs = ["escape-unsent-rig"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/keys.rs"
-find = '''            0x1b => {
-                classes.with("escape");
-                at += match rest.get(1) {'''
-replace = '''            0x1b => {
-                classes.with("escape");
-                unsent = 0;
-                at += match rest.get(1) {'''

@@ -596,7 +596,7 @@ replace = "        Some(cap.saturating_sub(cap).saturating_add(PASTE_DEADLINE))"
 
 [[plant]]
 name = "paste enter: a paste's time past the host's cap has no margin"
-meant = "a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_the_hosts_cap"
+meant = "a_paste_into_a_window_that_declared_its_read_waits_five_seconds_past_what_the_host_holds"
 runs = ["paste-enter-host"]
 
 [[plant.edit]]
