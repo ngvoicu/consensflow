@@ -453,3 +453,35 @@ fn a_fresh_conversation_is_given_its_windows_first_message_whole() {
     let plain = ledger.first_received(8, 1).unwrap().expect("its brief");
     assert_eq!(plain.message.id, 1);
 }
+
+/// The same member with the tier nobody chose (`light`), which the update would settle: its role
+/// list is not read, so the ledger still opens and the member is kept as it is.
+#[test]
+fn a_role_list_that_is_no_json_on_a_member_the_update_would_settle_stops_nothing() {
+    let (_, gz) = ledgers()
+        .into_iter()
+        .find(|(n, _)| n.ends_with("t2175-release-roles.db.gz"))
+        .unwrap();
+    let (_dir, file) = unpack(&gz);
+    let db = Connection::open(&file).unwrap();
+    assert_eq!(
+        db.execute(
+            "UPDATE participant SET tier = 'light' WHERE handle = 'zeus'",
+            []
+        )
+        .unwrap(),
+        1
+    );
+    drop(db);
+    let ledger = open_ledger(&file, options()).expect("it opens");
+    let tier: String = ledger
+        .sqlite()
+        .query_row(
+            "SELECT tier FROM participant WHERE handle = 'zeus'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(tier, "light", "kept as it is");
+    assert_eq!(events(&ledger, "member.unsettled").len(), 1);
+}

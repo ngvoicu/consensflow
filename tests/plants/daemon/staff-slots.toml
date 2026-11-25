@@ -522,7 +522,7 @@ replace = '''
 
 [[plant]]
 name = "staff slots: a role list that is no JSON stops the update"
-meant = "a_role_list_that_is_no_json_opens_and_is_logged_once"
+meant = "a_role_list_that_is_no_json_on_a_member_the_update_would_settle_stops_nothing"
 runs = ["ss-ledger-messages"]
 
 [[plant.edit]]
