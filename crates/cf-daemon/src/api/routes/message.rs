@@ -36,9 +36,15 @@ pub(super) async fn handle(
             && (Some(message.recipient.as_str()) == handle || message.sender.as_deref() == handle)
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
     });
-    // A reminder withheld from its recipient is shown to none.
+    // A reminder that is nobody's to read is shown to none. One a meeting holds is
+    // told to wait, below, as any message it holds is.
     let visible = match visible {
-        Some(message) if context.ledger.borrow().reminder_withheld(message.id)? => None,
+        Some(message)
+            if context.ledger.borrow().reminder_withheld(message.id)?
+                == Some(cf_ledger::Withheld::Gone) =>
+        {
+            None
+        }
         other => other,
     };
     let until = match &visible {

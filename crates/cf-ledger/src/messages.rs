@@ -779,7 +779,7 @@ pub(crate) fn readable_inbox(
         if shown.len() == limit {
             break;
         }
-        if !crate::waiting_questions::withheld(store, id)? {
+        if crate::waiting_questions::withheld(store, id)?.is_none() {
             shown.push(known_message(store, id)?);
         }
     }

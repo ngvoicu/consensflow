@@ -134,15 +134,6 @@ find = "REFERENCES message(id) ON DELETE CASCADE,"
 replace = "REFERENCES message(id),"
 
 [[plant]]
-name = "question reminded: the inbox lists a withheld reminder"
-meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
-runs = ["question-reminded-daemon"]
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages.rs"
-find = '''        if !crate::waiting_questions::withheld(store, id)? {'''
-replace = '''        if true {'''
-
-[[plant]]
 name = "question reminded: the inbox counts withheld reminders in its limit"
 meant = "q2_a_hundred_withdrawn_reminders_hide_no_eligible_one"
 runs = ["question-reminded-daemon"]
@@ -152,33 +143,6 @@ find = '''    for id in ids {
         if shown.len() == limit {'''
 replace = '''    for id in ids.into_iter().take(limit) {
         if shown.len() == limit {'''
-
-[[plant]]
-name = "question reminded: a withheld reminder is served whole"
-meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
-runs = ["question-reminded-daemon"]
-[[plant.edit]]
-file = "crates/cf-daemon/src/api/routes/message.rs"
-find = '''Some(message) if context.ledger.borrow().reminder_withheld(message.id)? => None,'''
-replace = '''Some(message) if false => None,'''
-
-[[plant]]
-name = "question reminded: a receipt is taken of a withheld reminder"
-meant = "a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted"
-runs = ["question-reminded-ledger"]
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            if crate::waiting_questions::withheld(store, message.id)? {'''
-replace = '''            if false {'''
-
-[[plant]]
-name = "question reminded: a reminder a Close holds is shown"
-meant = "q2_a_look_while_the_project_is_closed_consumes_no_reminder"
-runs = ["question-reminded-daemon"]
-[[plant.edit]]
-file = "crates/cf-ledger/src/waiting_questions.rs"
-find = '''"queued" | "delivering" => !handed && (!open || stale_reminder(store, message)?),'''
-replace = '''"queued" | "delivering" => !handed && stale_reminder(store, message)?,'''
 
 [[plant]]
 name = "question reminded: a reminder given back during a Close is withdrawn"
@@ -198,19 +162,6 @@ file = "crates/cf-ledger/src/messages/pauses.rs"
 find = '''         AND id NOT IN (SELECT message_id FROM question_reminder_sent)
 '''
 replace = ''''''
-
-[[plant]]
-name = "question reminded: a cancelled or failed reminder is shown"
-meant = "a_reminder_that_failed_and_was_replaced_is_not_listed"
-runs = ["question-reminded-ledger"]
-[[plant.edit]]
-file = "crates/cf-ledger/src/waiting_questions.rs"
-find = '''        _ => true,
-    })
-}'''
-replace = '''        _ => false,
-    })
-}'''
 
 [[plant]]
 name = "question reminded: a reminder is not recorded as one"
@@ -249,3 +200,118 @@ runs = ["question-reminded-ledger"]
 file = "crates/cf-ledger/migrations/0046.sql"
 find = '''SELECT question_id, question_id, note,'''
 replace = '''SELECT question_id, (SELECT COALESCE(MAX(id), 0) FROM message), note,'''
+
+[[plant]]
+name = "question reminded: the inbox lists a withheld reminder"
+meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''        if crate::waiting_questions::withheld(store, id)?.is_none() {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "question reminded: a withheld reminder is served whole"
+meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = '''                == Some(cf_ledger::Withheld::Gone) =>'''
+replace = '''                == Some(cf_ledger::Withheld::Gone)
+                && false =>'''
+
+[[plant]]
+name = "question reminded: a meeting-held reminder is told as gone, not as waiting"
+meant = "q2_a_meeting_holds_reminders_from_the_inbox"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = '''                == Some(cf_ledger::Withheld::Gone) =>'''
+replace = '''                .is_some() =>'''
+
+[[plant]]
+name = "question reminded: a receipt is taken of a withheld reminder"
+meant = "a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?'''
+replace = '''            if crate::meeting::is_held(store, message.id)?'''
+
+[[plant]]
+name = "question reminded: a reminder a Close holds is shown"
+meant = "q2_a_look_while_the_project_is_closed_consumes_no_reminder"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            if !open || stale_reminder(store, message)? {'''
+replace = '''            if stale_reminder(store, message)? {'''
+
+[[plant]]
+name = "question reminded: a cancelled or failed reminder is shown"
+meant = "a_reminder_that_failed_and_was_replaced_is_not_listed"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''        _ => Some(Withheld::Gone),
+    })'''
+replace = '''        _ => None,
+    })'''
+
+[[plant]]
+name = "question reminded: a reminder the chief had is hidden when its task ends"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''    if had || matches!(state.as_str(), "delivered" | "read") {'''
+replace = '''    let _ = had;
+    if matches!(state.as_str(), "delivered" | "read") {'''
+
+[[plant]]
+name = "question reminded: a reminder read early does not count as had"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''                      OR COALESCE(json_extract(m.receipt, '$.readEarly'), '') != '','''
+replace = '''                      ,'''
+
+[[plant]]
+name = "question reminded: a reminder handed to its window does not count as had"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''                    m.handed_at IS NOT NULL OR m.delivered_at IS NOT NULL'''
+replace = '''                    m.delivered_at IS NOT NULL'''
+
+[[plant]]
+name = "question reminded: a meeting does not hold a reminder"
+meant = "a_reminder_a_meeting_holds_is_not_listed_and_takes_no_receipt"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            } else if in_meeting {'''
+replace = '''            } else if false {'''
+
+[[plant]]
+name = "question reminded: a read of a note a meeting holds is taken"
+meant = "an_ordinary_note_a_hold_keeps_takes_no_receipt"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?'''
+replace = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || false'''
+
+[[plant]]
+name = "question reminded: a read of a note a Close holds is taken"
+meant = "an_ordinary_note_a_hold_keeps_takes_no_receipt"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''closed.state != 'open')))",'''
+replace = '''closed.state = 'gone')))",'''

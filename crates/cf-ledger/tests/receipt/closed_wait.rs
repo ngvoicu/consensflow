@@ -842,7 +842,7 @@ fn the_inbox_shows_no_stale_reminder_and_takes_no_receipt_of_it() {
         }
         let before = w.message(reminder.id);
         assert!(
-            w.ledger.reminder_withheld(reminder.id).unwrap(),
+            w.ledger.reminder_withheld(reminder.id).unwrap().is_some(),
             "{end}, in progress {in_progress}"
         );
         assert!(!listed(&w, reminder.id), "{end}, in progress {in_progress}");
@@ -947,7 +947,7 @@ fn a_reminder_that_still_stands_is_read_in_the_inbox_as_before() {
         .unwrap()
         .unwrap();
     let chief = w.id("chief");
-    assert!(!w.ledger.reminder_withheld(reminder.id).unwrap());
+    assert!(w.ledger.reminder_withheld(reminder.id).unwrap().is_none());
     let read = w
         .ledger
         .receive_read(
@@ -997,5 +997,271 @@ fn a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted() {
             "in progress {in_progress}: a read changes nothing"
         );
         assert!(after.receipt.get("readEarly").is_none());
+    }
+}
+
+/// The reminder `closed_and_reminded` makes: a restart's closed question, its note
+/// had by the chief, and the closed question's reminder written.
+fn reminded(w: &mut World) -> (i64, i64) {
+    let (task, _session, question) = asked(w);
+    restart(w);
+    w.deliver(close_note(w, question));
+    let reminder = w
+        .ledger
+        .remind_question(w.project, question, None, &reminder_note(task, "It closed"))
+        .unwrap()
+        .unwrap();
+    (task, reminder.id)
+}
+
+/// What takes a reminder's wait from it, as each is done to the task.
+fn end_the_wait(w: &mut World, task: i64, end: &str) {
+    match end {
+        "a tell" => {
+            w.ledger
+                .tell_queued(w.project, task, "chief", "New words")
+                .unwrap();
+        }
+        "a cancel" => {
+            w.ledger.cancel_task(w.project, task, "human").unwrap();
+        }
+        "a deletion" => {
+            w.ledger.cancel_task(w.project, task, "human").unwrap();
+            w.ledger.delete_tasks(w.project, &[task]).unwrap();
+        }
+        other => panic!("{other}"),
+    }
+}
+
+/// Round 4 (review T-2276, 1): a reminder the chief has had stays the chief's to
+/// look at again, whatever then happens to its task. Only one it has not had is
+/// hidden.
+#[test]
+fn a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends() {
+    for end in ["a tell", "a cancel", "a deletion"] {
+        for had in [
+            "read while its paste was on its way",
+            "handed to its window",
+            "delivered",
+            "read in the inbox",
+        ] {
+            let mut w = world();
+            let (task, reminder) = reminded(&mut w);
+            match had {
+                "read while its paste was on its way" => {
+                    w.begin(reminder);
+                    read_in_the_inbox(&mut w, reminder);
+                }
+                "handed to its window" => {
+                    w.begin(reminder);
+                    assert_eq!(w.ledger.admit(reminder, &[]).unwrap(), HandOver::Admitted);
+                }
+                "delivered" => {
+                    w.deliver(reminder);
+                }
+                _ => read_in_the_inbox(&mut w, reminder),
+            }
+            end_the_wait(&mut w, task, end);
+            // Transport's next look at it withdraws what the window has not had.
+            if w.message(reminder).state == "delivering" {
+                let _ = w.ledger.admit(reminder, &[]);
+            }
+            assert!(
+                w.ledger.reminder_withheld(reminder).unwrap().is_none(),
+                "{end}, {had}: m-{reminder} is {:?}",
+                w.message(reminder).state
+            );
+            assert!(listed(&w, reminder), "{end}, {had}: listed");
+        }
+    }
+}
+
+/// What ends a meeting with the chief: the project's meeting on, held reminders.
+fn meeting_on(w: &mut World) {
+    w.ledger.set_meeting(w.project, true).unwrap();
+}
+
+/// Round 4 (review T-2276, 3): a reminder a chief's meeting holds is not
+/// deliverable now: not listed, no place in the page, no receipt, and once the
+/// meeting ends, listed and delivered once.
+#[test]
+fn a_reminder_a_meeting_holds_is_not_listed_and_takes_no_receipt() {
+    let mut w = world();
+    let (_task, reminder) = reminded(&mut w);
+    let chief = w.id("chief");
+    meeting_on(&mut w);
+    assert!(
+        w.ledger
+            .next_delivery_of(chief, reminder)
+            .unwrap()
+            .is_none(),
+        "transport holds it"
+    );
+    assert_eq!(
+        w.ledger.reminder_withheld(reminder).unwrap(),
+        Some(cf_ledger::Withheld::Meeting),
+        "held"
+    );
+    assert!(!listed(&w, reminder));
+    let before = w.message(reminder);
+    read_in_the_inbox(&mut w, reminder);
+    let after = w.message(reminder);
+    assert_eq!(
+        after.state, before.state,
+        "a read of a held reminder changes nothing"
+    );
+    assert!(after.receipt.get("readEarly").is_none());
+    w.ledger.set_meeting(w.project, false).unwrap();
+    assert!(
+        w.ledger.reminder_withheld(reminder).unwrap().is_none(),
+        "back with the meeting's end"
+    );
+    assert!(listed(&w, reminder));
+    let next = w.ledger.next_delivery_of(chief, reminder).unwrap();
+    assert_eq!(next.map(|m| m.id), Some(reminder), "and delivered");
+    w.deliver(reminder);
+    assert_eq!(w.message(reminder).state, "delivered", "once");
+}
+
+/// Round 4 (review T-2276, 3): a hundred held reminders take no place in the
+/// inbox's page, and so hide no note that can be delivered.
+#[test]
+fn a_hundred_held_reminders_hide_no_note_that_can_be_delivered() {
+    let mut w = world();
+    let task = w.open("Review fixture").task.number;
+    let given = w.assign(task, "zeus");
+    let zeus = given.task.assignee.clone().unwrap();
+    w.deliver(given.message.unwrap().id);
+    let questions: Vec<i64> = (0..100)
+        .map(|n| {
+            let question = w.ask(&zeus, task, &format!("Question {n}?")).id;
+            w.deliver(question);
+            question
+        })
+        .collect();
+    restart(&mut w);
+    let notices: Vec<i64> = w
+        .ledger
+        .sqlite()
+        .prepare("SELECT id FROM message WHERE kind='note' AND instr(body,'closed when')>0 AND state='queued'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    for notice in notices {
+        w.deliver(notice);
+    }
+    let older = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: None,
+                body: "An older note".into(),
+            },
+        )
+        .unwrap()
+        .id;
+    w.deliver(older);
+    meeting_on(&mut w);
+    for question in &questions {
+        w.ledger
+            .remind_question(
+                w.project,
+                *question,
+                None,
+                &reminder_note(task, "It closed"),
+            )
+            .unwrap();
+    }
+    assert!(
+        listed(&w, older),
+        "the older note is in the page of {} it is not displaced from",
+        100
+    );
+}
+
+/// Review T-2276, 3: the other holds take no receipt of a reminder either: a
+/// project's Close, a pause, and a reminder no one has yet approved.
+#[test]
+fn the_other_holds_take_no_receipt_of_a_reminder_either() {
+    for hold in ["a close", "a pause"] {
+        let mut w = world();
+        let (task, reminder) = reminded(&mut w);
+        match hold {
+            "a close" => {
+                w.ledger.set_project_state(w.project, "suspended").unwrap();
+                w.ledger
+                    .pause_with_project(w.project, task, "the project closed")
+                    .unwrap();
+            }
+            _ => {
+                w.ledger
+                    .pause_task(w.project, task, Some("human"), None)
+                    .unwrap();
+            }
+        }
+        let before = w.message(reminder);
+        assert_eq!(
+            w.ledger.reminder_withheld(reminder).unwrap(),
+            Some(cf_ledger::Withheld::Gone),
+            "{hold}"
+        );
+        assert!(!listed(&w, reminder), "{hold}");
+        read_in_the_inbox(&mut w, reminder);
+        let after = w.message(reminder);
+        assert_eq!(after.state, before.state, "{hold}: a read changes nothing");
+        assert!(after.receipt.get("readEarly").is_none(), "{hold}");
+    }
+}
+
+/// Review T-2276, 3: what a hold keeps from the chief is not received by a read of
+/// it, whatever its kind: an ordinary note a meeting holds, and one a closed
+/// project holds, are as they were after the receipt.
+#[test]
+fn an_ordinary_note_a_hold_keeps_takes_no_receipt() {
+    for hold in ["a meeting", "a close"] {
+        let mut w = world();
+        let chief = w.id("chief");
+        match hold {
+            "a meeting" => meeting_on(&mut w),
+            _ => {
+                w.ledger.set_project_state(w.project, "suspended").unwrap();
+            }
+        }
+        let note = w
+            .ledger
+            .note(
+                w.project,
+                &NewNote {
+                    from: None,
+                    to: "chief".into(),
+                    task: None,
+                    body: "A note".into(),
+                },
+            )
+            .unwrap()
+            .id;
+        read_in_the_inbox(&mut w, note);
+        assert_eq!(
+            w.message(note).state,
+            "queued",
+            "{hold}: a read of what it holds changes nothing"
+        );
+        match hold {
+            "a meeting" => {
+                w.ledger.set_meeting(w.project, false).unwrap();
+            }
+            _ => {
+                w.ledger.set_project_state(w.project, "open").unwrap();
+            }
+        }
+        assert!(
+            w.ledger.next_delivery_of(chief, note).unwrap().is_some(),
+            "{hold}: then it goes"
+        );
     }
 }

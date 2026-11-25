@@ -397,30 +397,59 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
         .exists([reminder])?)
 }
 
+/// Why a reminder is not shown to its recipient now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Withheld {
+    /// A chief's meeting holds it: it is deliverable once the meeting ends, and a
+    /// reader is told it waits.
+    Meeting,
+    /// It no longer applies or is held otherwise (a Close, its wait ended, it was
+    /// withdrawn or failed): it is nobody's to read.
+    Gone,
+}
+
 /// Whether `message` is a reminder its recipient is not to be shown now: listed,
-/// served or received, it is one transport would hand over this moment, or one it
-/// already has. A reminder that was delivered or read is the recipient's. One on
-/// its way is the recipient's once handed; before that, only while the project is
-/// open and its wait stands. One cancelled or failed is nobody's. Any other
-/// message is shown. Nothing is changed by asking.
-pub(crate) fn withheld(store: &Store, message: i64) -> Result<bool, LedgerError> {
-    let found: Option<(String, bool, bool)> = store
+/// served or received, it is one transport would hand over this moment, or one the
+/// recipient has had. A reminder the recipient has had stays its own whatever
+/// happens to its wait: delivered or read, handed to its window, or read whole
+/// while its paste was on its way. One it has not had is shown only while the
+/// project is open, its wait stands and no meeting holds it; one cancelled or
+/// failed before the recipient had it is nobody's. Any other message is shown.
+/// Nothing is changed by asking.
+pub(crate) fn withheld(store: &Store, message: i64) -> Result<Option<Withheld>, LedgerError> {
+    let found: Option<(String, bool, bool, bool)> = store
         .db
         .query_row(
-            "SELECT m.state, m.handed_at IS NOT NULL, p.state='open'
+            "SELECT m.state,
+                    m.handed_at IS NOT NULL OR m.delivered_at IS NOT NULL
+                      OR COALESCE(json_extract(m.receipt, '$.readEarly'), '') != '',
+                    p.state='open',
+                    EXISTS (SELECT 1 FROM message held WHERE held.id = m.id AND {held})
              FROM question_reminder_sent sent JOIN message m ON m.id=sent.message_id
-             JOIN project p ON p.id=m.project_id WHERE sent.message_id=?",
+             JOIN project p ON p.id=m.project_id WHERE sent.message_id=?"
+                .replace("{held}", &crate::meeting::held_by_meeting("held"))
+                .as_str(),
             [message],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()?;
-    let Some((state, handed, open)) = found else {
-        return Ok(false);
+    let Some((state, had, open, in_meeting)) = found else {
+        return Ok(None);
     };
+    if had || matches!(state.as_str(), "delivered" | "read") {
+        return Ok(None);
+    }
     Ok(match state.as_str() {
-        "delivered" | "read" => false,
-        "queued" | "delivering" => !handed && (!open || stale_reminder(store, message)?),
-        _ => true,
+        "queued" | "delivering" => {
+            if !open || stale_reminder(store, message)? {
+                Some(Withheld::Gone)
+            } else if in_meeting {
+                Some(Withheld::Meeting)
+            } else {
+                None
+            }
+        }
+        _ => Some(Withheld::Gone),
     })
 }
 

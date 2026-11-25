@@ -545,8 +545,11 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
-            // A reminder its recipient is not shown is not received either.
-            if crate::waiting_questions::withheld(store, message.id)? {
+            // What a hold keeps from its recipient is not received by a read of it: a
+            // reminder it is not shown, a message a meeting or a Close holds. A read changes nothing.
+            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?
+            {
                 continue;
             }
             let role = says_a_role(store, message.id)?;

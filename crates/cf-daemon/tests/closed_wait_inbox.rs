@@ -403,3 +403,134 @@ async fn q2_a_hundred_withdrawn_reminders_hide_no_eligible_one() {
         ids.len()
     );
 }
+
+/// Round 4 (review T-2276, 1): a reminder the chief read in the inbox while its
+/// paste was on its way stays readable when its task is cancelled or told.
+#[tokio::test]
+async fn q2_a_reminder_the_chief_read_stays_readable() {
+    for end in ["a cancel", "a tell"] {
+        let mut w = world();
+        let (task, _session, _question, reminder) = closed_and_reminded(&mut w);
+        w.begin(reminder);
+        let (c, _dir, auth, project) = chief_window(w);
+        let (status, body) = post(
+            &c,
+            req(
+                "/api/answers/read",
+                &auth,
+                json!({"answers":[reminder],"via":"inbox"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            c.ledger
+                .borrow()
+                .message(reminder)
+                .unwrap()
+                .unwrap()
+                .receipt["readEarly"],
+            "inbox"
+        );
+        if end == "a cancel" {
+            c.ledger
+                .borrow_mut()
+                .cancel_task(project, task, "human")
+                .unwrap();
+        } else {
+            c.ledger
+                .borrow_mut()
+                .tell_queued(project, task, "chief", "New words")
+                .unwrap();
+        }
+        let (code, body) = got(&c, &format!("/api/inbox/{reminder}"), &auth).await;
+        assert_eq!(code, 200, "{end}: the chief looks again: {body}");
+        assert!(listed(&c, &auth).await.contains(&reminder), "{end}");
+    }
+}
+
+/// Round 4 (review T-2276, 3): a chief's meeting holds reminders: none is listed,
+/// none takes a place in the page, a receipt of one changes nothing, a direct read
+/// is refused as before (409, it waits), and the meeting's end gives each back.
+#[tokio::test]
+async fn q2_a_meeting_holds_reminders_from_the_inbox() {
+    let mut w = world();
+    let task = w.open("Review fixture").task.number;
+    let given = w.assign(task, "zeus");
+    let zeus = given.task.assignee.clone().unwrap();
+    w.deliver(given.message.unwrap().id);
+    let questions: Vec<i64> = (0..100)
+        .map(|n| {
+            let question = w.ask(&zeus, task, &format!("Question {n}?")).id;
+            w.deliver(question);
+            question
+        })
+        .collect();
+    w.ledger.begin_question_engine();
+    w.ledger.close_questions_of_ended_engine().unwrap();
+    let notices: Vec<i64> = w
+        .ledger
+        .sqlite()
+        .prepare("SELECT id FROM message WHERE kind='note' AND instr(body,'closed when')>0 AND state='queued'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    for notice in notices {
+        w.deliver(notice);
+    }
+    let older = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                task: None,
+                body: "An older note".into(),
+            },
+        )
+        .unwrap()
+        .id;
+    w.deliver(older);
+    w.ledger.set_meeting(w.project, true).unwrap();
+    let held: Vec<i64> = questions
+        .iter()
+        .map(|q| remind(&mut w, task, *q, "It closed"))
+        .collect();
+    let (c, _dir, auth, project) = chief_window(w);
+    let ids = listed(&c, &auth).await;
+    assert!(ids.contains(&older), "the older note is in the page");
+    assert!(
+        held.iter().all(|id| !ids.contains(id)),
+        "no held reminder is listed"
+    );
+    let first = held[0];
+    let (code, body) = got(&c, &format!("/api/inbox/{first}"), &auth).await;
+    assert_eq!(code, 409, "{body}");
+    let (status, _) = post(
+        &c,
+        req(
+            "/api/answers/read",
+            &auth,
+            json!({"answers":[first],"via":"inbox"}),
+        ),
+    )
+    .await;
+    assert!(status == 200 || status == 404, "{status}");
+    let after = c.ledger.borrow().message(first).unwrap().unwrap();
+    assert_eq!(
+        after.state, "queued",
+        "a receipt of a held reminder changes nothing"
+    );
+    assert!(after.receipt.get("readEarly").is_none());
+    c.ledger.borrow_mut().set_meeting(project, false).unwrap();
+    let ids = listed(&c, &auth).await;
+    assert!(
+        held.iter().all(|id| ids.contains(id)),
+        "the meeting's end gives them back"
+    );
+    let (code, body) = got(&c, &format!("/api/inbox/{first}"), &auth).await;
+    assert_eq!(code, 200, "{body}");
+}

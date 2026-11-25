@@ -321,10 +321,11 @@ impl Ledger {
         crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
     }
 
-    /// Whether `message` is a reminder its recipient is not shown now: not listed,
+    /// Why `message`, a reminder, is not shown to its recipient now: not listed,
     /// served or received ([`Ledger::readable_inbox`], [`Ledger::receive_read`]).
-    /// Asking changes nothing.
-    pub fn reminder_withheld(&self, message: i64) -> Result<bool, LedgerError> {
+    /// None for a reminder it is shown, and for any other message. Asking changes
+    /// nothing.
+    pub fn reminder_withheld(&self, message: i64) -> Result<Option<crate::Withheld>, LedgerError> {
         crate::waiting_questions::withheld(&self.store, message)
     }
 
