@@ -982,7 +982,8 @@ fn the_seal_refuses_a_callers_roots_variables_and_one_profile_half_alone() {
         super::account::PROTECTED_DIGEST,
     ] {
         let mut given = env.clone();
-        given.push((name.into(), "/owner/roots".into()));
+        // A value that names no store: only the check of the door's own variables refuses it.
+        given.push((name.into(), "/kit/run/roots.json".into()));
         let refused = spawn::seal(given, &judges).unwrap_err();
         assert!(refused.contains(name), "{name}: {refused}");
     }

@@ -1044,3 +1044,17 @@ fn the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them()
     without_unnamed_profile_halves(&mut env, &[(OsString::from("LANG"), OsString::from("C"))]);
     assert_eq!(env.len(), 1);
 }
+
+/// A start of the kit's that inherits nothing is given none of the test process's own variables:
+/// cargo's, which every test process has, is in no program's environment.
+#[cfg(unix)]
+#[test]
+fn a_run_that_inherits_nothing_holds_no_variable_of_the_test_process() {
+    assert!(own_var("CARGO_MANIFEST_DIR").is_some(), "cargo gives the test process this");
+    let ran = Run::new("/usr/bin/env").run().unwrap();
+    assert!(
+        !ran.stdout.lines().any(|line| line.starts_with("CARGO_MANIFEST_DIR=")),
+        "{}",
+        ran.stdout
+    );
+}

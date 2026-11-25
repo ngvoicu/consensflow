@@ -64,6 +64,7 @@ replace = '''    if false && last_is_link && !matches!(act, Act::Remove | Act::R
 name = "K3 part 3: a name below a file is a place"
 meant = "a_name_below_a_file_is_no_place"
 runs = ["kd3-lib-door"]
+platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
@@ -287,9 +288,8 @@ runs = ["kd3-lib-process"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
-find = '''        "WINDIR",
-'''
-replace = ''''''
+find = '''        "WINDIR",'''
+replace = '''        "WINDIR_",'''
 
 [[plant]]
 name = "K3 part 3: the renewal is given no account variable"
@@ -314,7 +314,7 @@ replace = '''"inheriting_env" | "inheriting_window_env" | "env_clear" | "env_rem
 
 [[plant]]
 name = "K3 part 3: a run is given the whole environment of the test, not the machine's"
-meant = "a_machine_environment_holds_the_machine_and_nothing_of_the_account"
+meant = "a_run_that_inherits_nothing_holds_no_variable_of_the_test_process"
 runs = ["kd3-lib-process"]
 
 [[plant.edit]]
