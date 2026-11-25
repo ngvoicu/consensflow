@@ -340,6 +340,18 @@ impl Run {
         run
     }
 
+    /// A command line a stand-in runs by `/bin/sh -c` as its harness would (a hook's): where it
+    /// can be read as one program with words it is judged by that program, as every start is
+    /// (the product's own `cf hook claude` is a start of `cf`), and where it cannot, it is a
+    /// fixture's script ([`Run::fixture_script`]). The audit holds this to its callers too.
+    pub fn shell_line(command: impl AsRef<str>) -> Self {
+        let words = ["-c".to_owned(), command.as_ref().to_owned()];
+        match crate::door::shells::told(crate::door::shells::Shell::Posix, &words) {
+            Ok(_) => Self::new("/bin/sh").args(words),
+            Err(_) => Self::fixture_script(command),
+        }
+    }
+
     /// An offline fixture's own script, run by `/bin/sh -c`: the one start through a shell whose
     /// command the door does not read (the door refuses any other, where it cannot read the
     /// command, T-2219). A script with a word that names a harness's program, cargo or the

@@ -917,7 +917,7 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
             format!("{}(…) (a door's operation, made outside the files that make them)", segments.join("::")),
         ));
     }
-    if before == Some("Run") && matches!(last, "fixture_script" | "script_in") {
+    if before == Some("Run") && matches!(last, "fixture_script" | "script_in" | "shell_line") {
         return Some((
             Class::Operation,
             "Run::fixture_script(…) (the one start through a shell whose command is not read, made outside the files that call it)".into(),

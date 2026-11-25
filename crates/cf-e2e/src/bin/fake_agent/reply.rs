@@ -292,7 +292,7 @@ fn ask_through_hook(window: &Window, questions: &Value) -> Result<String, String
 /// A command line run by the platform's shell.
 #[cfg(unix)]
 fn shell(command: &str) -> Run {
-    Run::fixture_script(command)
+    Run::shell_line(command)
 }
 
 /// A hook's command line run as Claude Code runs one on Windows: by Git Bash's `bash -c`
