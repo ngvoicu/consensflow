@@ -110,11 +110,12 @@ meant = "kit_round3_muse_fingerprint_does_not_follow_links_out"
 runs = ["round3-muse-reads"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
-file = "crates/cf-e2e/tests/live_muse_reads.rs"
-find = '''if kind.is_symlink() {
-                continue;
-            } else if kind.is_dir() {'''
-replace = '''if kind.is_dir() {'''
+file = "crates/cf-e2e/src/door/source.rs"
+find = '''                let kind = entry.lstat()?.file_type();
+                if kind.is_symlink() {
+                    continue;
+                }'''
+replace = '''                let kind = entry.lstat()?.file_type();'''
 
 [[plant]]
 name = "kit round3: Devin compaction lists foreign folders"

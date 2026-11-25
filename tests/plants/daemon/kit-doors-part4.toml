@@ -128,10 +128,8 @@ runs = ["kd4-cargo-homes"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/account.rs"
-find = '''            home.map(|home| home.join(below))
-                .filter(|dir| dir.is_dir())'''
-replace = '''            home.map(|home| home.join(below))
-                .filter(|dir| !dir.is_dir())'''
+find = '''.or_else(|| home.map(|home| home.join(below)).filter(|dir| dir.is_dir()));'''
+replace = '''.or_else(|| home.map(|home| home.join(below)).filter(|dir| !dir.is_dir()));'''
 
 [[plant]]
 name = "K3 part 4: the say-only child is not told the cargo and rustup folders"
