@@ -556,9 +556,8 @@ runs = ["ki-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''                identity::of_path(real).is_ok_and(|now| now == *identity)
-                    && identity::of_path(&made.real).is_ok_and(|now| now == *identity)'''
-replace = '''                identity::of_path(real).is_ok() && identity::of_path(&made.real).is_ok()'''
+find = '''                    && identity::of_path(real).is_ok_and(|now| now == *identity)'''
+replace = '''                    && identity::of_path(real).is_ok()'''
 
 [[plant]]
 name = "K3 doors: the roots' file is no root"
@@ -790,15 +789,6 @@ find = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound =>
             Err(failed) => return Err(unresolved(&at, &failed)),'''
 replace = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
             Err(_) => {}'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/place.rs"
-find = '''            Err(failed) => return Err(unresolved(&at, &failed)),
-        }
-        if deepest_only'''
-replace = '''            Err(_) => {}
-        }
-        if deepest_only'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"

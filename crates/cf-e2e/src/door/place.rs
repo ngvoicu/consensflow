@@ -286,15 +286,48 @@ fn begins_with(ours: &[OsString], theirs: &[OsString], any_case: bool) -> bool {
 /// The identity of every part of `path` that is there, from the deepest to the root, each with
 /// the names below it (K3, N7): the file system's own word for a place, which two spellings of
 /// one folder share (`/Users/Shared` and `/System/Volumes/Data/Users/Shared`; an admin share or a
-/// `subst` drive of a folder on Windows). The first link is the deepest part there is, so a
-/// `path` that is not there yet is judged by its nearest ancestor that is. An error where an
-/// identity cannot be read for any reason but absence, or where a name is `..`.
+/// mapped network drive on Windows). The first link is the deepest part that can be reached, so a
+/// `path` that is not there yet is judged by its nearest ancestor that is, and a part that
+/// cannot be reached (a drive that is not there, a folder the account cannot enter, a server's
+/// bare name) is passed over as an absent one is: it has no identity to add, and the text of
+/// the path is judged without it. `NotFound` where no part can be reached at all; an error where a
+/// name is `..`, or where a part above one that was reached cannot be read.
 pub fn chain(path: &Path) -> io::Result<Vec<Link>> {
-    climb(path, false)
+    climb(path, false, None)
 }
 
-/// [`chain`], or only its first link where `deepest_only`.
-fn climb(path: &Path, deepest_only: bool) -> io::Result<Vec<Link>> {
+/// What a protected root stands for: the identity of its deepest part that is there, and the
+/// names after it; none where no part of it can be reached (a store that is not there, or whose
+/// drive is not there, has no other spelling to guard: it is judged by its text alone). Refused,
+/// in its own words, where the store is there and cannot be read. It stops at that part: the
+/// parts above it are the place's to be asked of, never the root's.
+pub fn key_of(root: &Path) -> io::Result<Option<Link>> {
+    Ok(store_chain(root, true)?.and_then(|links| links.into_iter().next()))
+}
+
+/// [`chain`] of a protected root, with [`key_of`]'s words and rule for what cannot be reached.
+fn store_chain(root: &Path, deepest_only: bool) -> io::Result<Option<Vec<Link>>> {
+    match climb(root, deepest_only, Some(root)) {
+        Ok(links) => Ok(Some(links)),
+        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(failed) => Err(failed),
+    }
+}
+
+/// Whether `kind` says a name is not there, or cannot be one on this file system.
+fn is_absence(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::NotFound
+            | io::ErrorKind::NotADirectory
+            | io::ErrorKind::InvalidFilename
+            | io::ErrorKind::InvalidInput
+    )
+}
+
+/// [`chain`], or only its first link where `deepest_only`; `store` is the protected root it is
+/// the chain of, where it is one, whose part that cannot be read refuses.
+fn climb(path: &Path, deepest_only: bool, store: Option<&Path>) -> io::Result<Vec<Link>> {
     let path = std::path::absolute(path)?;
     let mut links = Vec::new();
     let mut tail: Vec<OsString> = Vec::new();
@@ -305,18 +338,18 @@ fn climb(path: &Path, deepest_only: bool) -> io::Result<Vec<Link>> {
                 id,
                 tail: tail.iter().rev().cloned().collect(),
             }),
-            Err(failed)
-                if links.is_empty()
-                    && matches!(
-                        failed.kind(),
-                        // A name the file system cannot hold (Windows' `:` in a name, a name too
-                        // long) is no part that is there, as an absent one is.
-                        io::ErrorKind::NotFound
-                            | io::ErrorKind::NotADirectory
-                            | io::ErrorKind::InvalidFilename
-                            | io::ErrorKind::InvalidInput
-                    ) => {}
-            Err(failed) => return Err(unresolved(&at, &failed)),
+            Err(failed) if links.is_empty() && is_absence(failed.kind()) => {}
+            // A part of a place that cannot be reached is passed over, as an absent one.
+            Err(_) if links.is_empty() && store.is_none() => {}
+            Err(failed) => {
+                return Err(match store {
+                    Some(store) => refused(format!(
+                        "the store {} is there and cannot be read ({failed}), so nothing can be judged against it",
+                        store.display()
+                    )),
+                    None => unresolved(&at, &failed),
+                })
+            }
         }
         if deepest_only && !links.is_empty() {
             break;
@@ -337,10 +370,10 @@ fn climb(path: &Path, deepest_only: bool) -> io::Result<Vec<Link>> {
         }
     }
     if links.is_empty() {
-        return Err(refused(format!(
-            "{} has no part that is there",
-            path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} has no part that can be reached", path.display()),
+        ));
     }
     Ok(links)
 }
@@ -352,16 +385,6 @@ pub fn inside_by_identity(chain: &[Link], outer: &Link, any_case: bool) -> bool 
     chain
         .iter()
         .any(|link| link.id == outer.id && begins_with(&link.tail, &outer.tail, any_case))
-}
-
-/// What a protected root stands for: the identity of its deepest part that is there, and the
-/// names after it. Refused where it cannot be read. It stops at that part: the parts above it
-/// are the place's to be asked of, never the root's.
-pub fn key_of(root: &Path) -> io::Result<Link> {
-    climb(root, true)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| refused(format!("{} has no part that is there", root.display())))
 }
 
 /// What the run made, as the judge asks it: a folder, or a file and its identity.
@@ -388,36 +411,46 @@ fn resolved_roots(protected: &[PathBuf]) -> Vec<PathBuf> {
     roots
 }
 
-/// What each of `roots` stands for by identity (the same order): refused where one cannot be read.
-fn root_keys(roots: &[PathBuf]) -> io::Result<Vec<Link>> {
+/// What each of `roots` stands for by identity (the same order; none for one that is not there):
+/// refused where a store that is there cannot be read.
+fn root_keys(roots: &[PathBuf]) -> io::Result<Vec<Option<Link>>> {
     roots.iter().map(|root| key_of(root)).collect()
 }
 
 /// The root `place` is, or is inside, by its text or by identity (N7: another spelling of a
-/// store is the store): refused where the place's identity cannot be read.
+/// store is the store).
 pub(crate) fn inside_root<'a>(
     place: &Path,
     roots: &'a [PathBuf],
-    keys: &[Link],
+    keys: &[Option<Link>],
     any_case: bool,
 ) -> io::Result<Option<&'a PathBuf>> {
     let parts = chain(place)?;
     Ok(roots.iter().zip(keys).find_map(|(root, key)| {
-        (within(place, root, any_case) || inside_by_identity(&parts, key, any_case)).then_some(root)
+        (within(place, root, any_case)
+            || key
+                .as_ref()
+                .is_some_and(|key| inside_by_identity(&parts, key, any_case)))
+        .then_some(root)
     }))
 }
 
-/// The root that is `place`, or is inside it, by its text or by identity: refused where a root's
-/// identity cannot be read.
+/// The root that is `place`, or is inside it, by its text or by identity: refused where a store
+/// that is there cannot be read.
 fn holds_root<'a>(
     place: &Path,
     roots: &'a [PathBuf],
     any_case: bool,
 ) -> io::Result<Option<&'a PathBuf>> {
-    let key = key_of(place)?;
+    let key = chain(place)?.into_iter().next();
     for root in roots {
-        if within(root, place, any_case) || inside_by_identity(&chain(root)?, &key, any_case) {
+        if within(root, place, any_case) {
             return Ok(Some(root));
+        }
+        if let (Some(key), Some(parts)) = (&key, store_chain(root, false)?) {
+            if inside_by_identity(&parts, key, any_case) {
+                return Ok(Some(root));
+            }
         }
     }
     Ok(None)

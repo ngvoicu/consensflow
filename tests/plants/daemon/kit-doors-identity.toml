@@ -1,56 +1,65 @@
-# The plants of K3's doors judged by identity (N7, T-2222): a place is inside a store, or below a
-# folder this run made, by the file system's identity for it, not by the text of its path. A
-# folder that has two real spellings is one place to the judge, the seal and the run's registry.
+# The plants of K3's doors judged by identity (N7, T-2222, and T-2319's round): a place is inside a
+# store by the text of its path or by the file system's identity for it; what the run made is the
+# run's by its text and by the identity it had when it was registered; an absence is no refusal;
+# the recursive copy asks the door of every child. Each plant names the systems it bites on.
 [run]
-kdi-addition = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::an_addition_inside_a_store_through_its_other_spelling_is_refused"]
+kdi-ident = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::an_addition_inside_a_store_through_its_other_spelling_is_refused"]
 kdi-unreadable = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_store_whose_identity_cannot_be_read_refuses_every_act"]
 kdi-holds = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_place_that_holds_a_store_is_not_taken_or_moved_through_its_other_spelling"]
 kdi-seal = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::the_seal_takes_a_variable_that_names_a_store_through_its_other_spelling"]
 kdi-seal-unreadable = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_store_whose_identity_cannot_be_read_refuses_every_act"]
-kdi-made = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_folder_this_run_made_is_the_runs_through_its_other_spelling_and_a_persons_is_not"]
+kdi-made-id = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_folder_the_run_made_that_is_a_link_now_gives_no_ground_where_it_leads"]
+kdi-absence = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it"]
+kdi-absence-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_store_that_is_not_there_or_whose_drive_is_not_there_is_judged_by_its_text_alone"]
+kdi-copy-dir = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"]
+kdi-copy-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"]
 
 [[plant]]
 name = "K3 identity: the judge puts a place inside a store by the text of its path again"
 meant = "an_addition_inside_a_store_through_its_other_spelling_is_refused"
-runs = ["kdi-addition"]
+runs = ["kdi-ident"]
+platforms = ["macos", "windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''        (within(place, root, any_case) || inside_by_identity(&parts, key, any_case)).then_some(root)'''
+find = '''        (within(place, root, any_case)
+            || key
+                .as_ref()
+                .is_some_and(|key| inside_by_identity(&parts, key, any_case)))
+        .then_some(root)'''
 replace = '''        within(place, root, any_case).then_some(root)'''
 
 [[plant]]
-name = "K3 identity: a store whose identity cannot be read is no store to the judge"
+name = "K3 identity: a store that is there and cannot be read is no store to the judge"
 meant = "a_store_whose_identity_cannot_be_read_refuses_every_act"
 runs = ["kdi-unreadable"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
 find = '''    roots.iter().map(|root| key_of(root)).collect()'''
-replace = '''    roots
-        .iter()
-        .map(|root| {
-            Ok(key_of(root).unwrap_or_else(|_| Link {
-                id: String::new(),
-                tail: Vec::new(),
-            }))
-        })
-        .collect()'''
+replace = '''    roots.iter().map(|root| Ok(key_of(root).unwrap_or(None))).collect()'''
 
 [[plant]]
 name = "K3 identity: a place that holds a store is judged by the text of the store's path again"
 meant = "a_place_that_holds_a_store_is_not_taken_or_moved_through_its_other_spelling"
 runs = ["kdi-holds"]
+platforms = ["macos", "windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
-find = '''        if within(root, place, any_case) || inside_by_identity(&chain(root)?, &key, any_case) {'''
-replace = '''        if within(root, place, any_case) {'''
+find = '''        if let (Some(key), Some(parts)) = (&key, store_chain(root, false)?) {
+            if inside_by_identity(&parts, key, any_case) {
+                return Ok(Some(root));
+            }
+        }'''
+replace = ''''''
 
 [[plant]]
 name = "K3 identity: the seal judges a variable by the text of its path again"
 meant = "the_seal_takes_a_variable_that_names_a_store_through_its_other_spelling"
 runs = ["kdi-seal"]
+platforms = ["macos", "windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
@@ -58,9 +67,10 @@ find = '''        let by_identity = ways.iter().any(|way| {'''
 replace = '''        let by_identity = false && ways.iter().any(|way| {'''
 
 [[plant]]
-name = "K3 identity: the seal lets a path through where a store's identity cannot be read"
+name = "K3 identity: the seal lets a path through where a store cannot be read"
 meant = "a_store_whose_identity_cannot_be_read_refuses_every_act"
 runs = ["kdi-seal-unreadable"]
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
@@ -72,11 +82,79 @@ replace = '''        let Ok(keys) = &self.keys else {
         };'''
 
 [[plant]]
-name = "K3 identity: a place below a folder this run made is told by the text of its path again"
-meant = "a_folder_this_run_made_is_the_runs_through_its_other_spelling_and_a_persons_is_not"
-runs = ["kdi-made"]
+name = "K3 identity: a folder the run made counts without the identity it had when it was registered"
+meant = "a_folder_the_run_made_that_is_a_link_now_gives_no_ground_where_it_leads"
+runs = ["kdi-made-id"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''                .any(|part| part.id == id && !part.tail.is_empty())'''
-replace = '''                .any(|part| part.id == id && !part.tail.is_empty() && !real.starts_with("/System") && !real.starts_with(r"\\localhost"))'''
+find = '''                .is_some_and(|then| identity::of_path(&self.real).is_ok_and(|now| now == *then))'''
+replace = '''                .is_some_and(|_| true)'''
+
+[[plant]]
+name = "K3 identity: a place no part of which can be reached is refused again"
+meant = "a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it"
+runs = ["kdi-absence"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(_) if links.is_empty() && store.is_none() => {}
+'''
+replace = '''            Err(failed) if links.is_empty() && store.is_none() => {
+                return Err(unresolved(&at, &failed));
+            }
+'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            place::chain(way).is_ok_and(|parts| {
+                keys.iter()
+                    .any(|key| place::inside_by_identity(&parts, key, any_case))
+            })'''
+replace = '''            place::chain(way).map_or(true, |parts| {
+                keys.iter()
+                    .any(|key| place::inside_by_identity(&parts, key, any_case))
+            })'''
+
+[[plant]]
+name = "K3 identity: a store that is not there is refused again"
+meant = "a_store_that_is_not_there_or_whose_drive_is_not_there_is_judged_by_its_text_alone"
+runs = ["kdi-absence-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(failed) => Err(failed),'''
+replace = '''        Err(failed) => Err(failed),'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) if links.is_empty() && is_absence(failed.kind()) => {}
+'''
+replace = '''            Err(failed) if links.is_empty() && is_absence(failed.kind()) && store.is_none() => {}
+'''
+
+[[plant]]
+name = "K3 identity: the recursive copy does not ask the door of a folder it enters"
+meant = "a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"
+runs = ["kdi-copy-dir"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''        } else if kind.is_dir() {
+            if let Some(roots) = asks {'''
+replace = '''        } else if kind.is_dir() {
+            if let Some(roots) = asks.filter(|_| false) {'''
+
+[[plant]]
+name = "K3 identity: the recursive copy does not ask the door of a file it copies"
+meant = "a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"
+runs = ["kdi-copy-file"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''        } else if kind.is_file() {
+            if let Some(roots) = asks {'''
+replace = '''        } else if kind.is_file() {
+            if let Some(roots) = asks.filter(|_| false) {'''

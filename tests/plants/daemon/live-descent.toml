@@ -165,7 +165,8 @@ runs = ["ld-later"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''            self.unproved.retain(|(seen, _)| seen.identity != process.identity);'''
+find = '''            self.unproved
+                .retain(|(seen, _)| seen.identity != process.identity);'''
 replace = ''''''
 
 [[plant]]
@@ -186,9 +187,7 @@ runs = ["ld-recorded"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''            Ok(None) => {
-                return Outcome::Failed(
-                    "its unique identifier could not be read again".to_owned(),
-                )
+                return Outcome::Failed("its unique identifier could not be read again".to_owned())
             }'''
 replace = '''            Ok(None) => {}'''
 

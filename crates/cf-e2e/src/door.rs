@@ -60,8 +60,7 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::live::members::{
     descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, unproved_under, Ended,
-    Identity,
-    Machine, Pause, RunFolder, Running, ThisMachine,
+    Identity, Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
 pub mod account;
@@ -623,9 +622,11 @@ impl Door {
             return Removed::Absent(path.to_path_buf());
         }
         let judged = judge(path, place::Act::Remove);
-        let under = judged
-            .as_ref()
-            .is_ok_and(|real| place::Registry::is_below_made(&*registry(), real, true));
+        let under = judged.as_ref().is_ok_and(|real| {
+            registry().iter().any(|made| {
+                real.starts_with(&made.real) && *real != made.real && made.is_still_its_folder()
+            })
+        });
         if !under {
             let why = match judged {
                 Err(refused) => refused.to_string(),
@@ -828,12 +829,40 @@ pub fn own_stem(stem: &str) -> String {
 /// process of a run cannot tell a person's value from its parent's).
 pub const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
 
-/// What the run made: a folder, or a file with the identity it had when it was made (a file put
-/// at that path since is another, and none of the run's: T-2002 finding 5).
+/// What the run made: a folder with the identity it had when it was registered, or a file with
+/// the identity it had when it was made (a folder or a file put at that path since, a link
+/// among them, is another, and none of the run's: T-2002 finding 5, T-2319 finding 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Entry {
     real: PathBuf,
     file: Option<String>,
+    /// A folder's identity when it was registered; none for a file, and for a folder whose
+    /// identity could not be read, which then grounds nothing.
+    folder: Option<String>,
+}
+
+impl Entry {
+    /// The folder `real`, with the identity it has now.
+    fn folder(real: PathBuf) -> Entry {
+        let folder = identity::of_path(&real).ok();
+        Entry {
+            real,
+            file: None,
+            folder,
+        }
+    }
+
+    /// Whether this is a folder the run made that is still itself: the identity it had when it
+    /// was registered is the identity of what its path leads to now, so that a link put at the
+    /// path, or at a folder above it, grounds nothing of where it leads.
+    fn is_still_its_folder(&self) -> bool {
+        self.file.is_none()
+            && self.real.is_dir()
+            && self
+                .folder
+                .as_ref()
+                .is_some_and(|then| identity::of_path(&self.real).is_ok_and(|now| now == *then))
+    }
 }
 
 /// The folders and files this process made through the door, by their real paths, and those its
@@ -845,7 +874,7 @@ fn registry() -> std::sync::MutexGuard<'static, Vec<Entry>> {
         Mutex::new(
             roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())
                 .into_iter()
-                .map(|real| Entry { real, file: None })
+                .map(Entry::folder)
                 .collect(),
         )
     })
@@ -853,46 +882,33 @@ fn registry() -> std::sync::MutexGuard<'static, Vec<Entry>> {
     .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The identity of a folder the run made, as it is now: none where it is no longer a folder.
-fn made_folder_identity(made: &Entry) -> Option<String> {
-    if made.file.is_some() || !made.real.is_dir() {
-        return None;
-    }
-    identity::of_path(&made.real).ok()
-}
-
-/// What the run made is judged by the file system's identity, not by the text of a path (N7): a
-/// place is a folder the run made, or below one, where it or one of its ancestors is that folder
-/// itself, whatever way the path to it is spelled. A place whose identity cannot be read is the
-/// run's by no folder.
+/// What the run made is the run's by the text of its real path and by its identity, both: a place
+/// is below a folder the run made only where the real path says so and that folder is still the
+/// folder it was when the run registered it (T-2319 finding 1). Another spelling of such a folder
+/// is not the run's: nobody in the kit names one, and refusing it is the safe side.
 impl place::Registry for Vec<Entry> {
-    fn is_made_folder(&self, real: &Path, _any_case: bool) -> bool {
-        let Ok(parts) = place::chain(real) else {
-            return false;
-        };
-        self.iter().filter_map(made_folder_identity).any(|id| {
-            parts
-                .first()
-                .is_some_and(|here| here.tail.is_empty() && here.id == id)
+    fn is_made_folder(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            place::within(real, &made.real, any_case)
+                && place::within(&made.real, real, any_case)
+                && made.is_still_its_folder()
         })
     }
 
-    fn is_below_made(&self, real: &Path, _any_case: bool) -> bool {
-        let Ok(parts) = place::chain(real) else {
-            return false;
-        };
-        self.iter().filter_map(made_folder_identity).any(|id| {
-            parts
-                .iter()
-                .any(|part| part.id == id && !part.tail.is_empty())
+    fn is_below_made(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            place::within(real, &made.real, any_case)
+                && !place::within(&made.real, real, any_case)
+                && made.is_still_its_folder()
         })
     }
 
-    fn is_made_file(&self, real: &Path, _any_case: bool) -> bool {
+    fn is_made_file(&self, real: &Path, any_case: bool) -> bool {
         self.iter().any(|made| {
             made.file.as_ref().is_some_and(|identity| {
-                identity::of_path(real).is_ok_and(|now| now == *identity)
-                    && identity::of_path(&made.real).is_ok_and(|now| now == *identity)
+                place::within(real, &made.real, any_case)
+                    && place::within(&made.real, real, any_case)
+                    && identity::of_path(real).is_ok_and(|now| now == *identity)
             })
         })
     }
@@ -910,9 +926,9 @@ pub fn judge(path: &Path, act: place::Act) -> io::Result<PathBuf> {
 /// filter that asks of many paths ([`Roots::holds`]), never kept between calls.
 pub struct Roots {
     roots: Vec<PathBuf>,
-    /// What each stands for by identity (N7), or why it cannot be read: a store whose identity
-    /// cannot be read leaves nothing safe to say of any path, and the seal refuses.
-    keys: Result<Vec<place::Link>, ()>,
+    /// What each that is there stands for by identity (N7), or why a store could not be read: a
+    /// store that is there and cannot be read leaves nothing safe to say of any path.
+    keys: Result<Vec<place::Link>, String>,
 }
 
 impl Roots {
@@ -928,35 +944,41 @@ impl Roots {
         Roots::of(roots)
     }
 
-    /// `roots`, as spelled and resolved, with what each stands for by identity.
+    /// `roots`, as spelled and resolved, with what each stands for by identity. A store that is
+    /// not there, or whose drive is not there, has no other spelling to guard: it is judged by
+    /// its text alone, as it was before identity.
     fn of(roots: Vec<PathBuf>) -> Roots {
         let keys = roots
             .iter()
-            .map(|root| place::key_of(root).ok())
-            .collect::<Option<Vec<_>>>()
-            .ok_or(());
+            .filter_map(|root| place::key_of(root).transpose())
+            .collect::<io::Result<Vec<_>>>()
+            .map_err(|failed| failed.to_string());
         Roots { roots, keys }
     }
 
+    /// Why no path can be judged against these roots: a store that is there cannot be read. Said
+    /// in the store's own words, never as a path being inside a store.
+    pub fn cannot_be_read(&self) -> Option<&str> {
+        self.keys.as_ref().err().map(String::as_str)
+    }
+
     /// Whether `path` resolves inside one of them, by any way it resolves or by identity, or is
-    /// spelled inside one. A path or a root whose identity cannot be read is held.
+    /// spelled inside one. By identity only where some part of the path can be reached: a value
+    /// no part of which can be (a drive that is not there, a server's bare name, a folder the
+    /// account cannot enter) is judged by its text alone. Where a store cannot be read nothing
+    /// is judged, and every path is held ([`Roots::cannot_be_read`] says why).
     pub fn holds(&self, path: &Path) -> bool {
         let Ok(keys) = &self.keys else {
             return true;
         };
         let ways = match place::resolve(path) {
             Ok(ways) => ways.iter().map(place::Resolved::whole).collect::<Vec<_>>(),
-            // A value that is no path at all (a list of them, a word) is judged as it is
-            // spelled, where its identity can still be asked; a path that is refused or cannot
-            // be read is held.
-            Err(_) => match place::chain(path) {
-                Ok(_) => vec![path.to_path_buf()],
-                Err(_) => return true,
-            },
+            // A value that is no path at all, or that cannot be resolved, is judged as spelled.
+            Err(_) => vec![path.to_path_buf()],
         };
         let any_case = cfg!(any(windows, target_os = "macos"));
         let by_identity = ways.iter().any(|way| {
-            place::chain(way).map_or(true, |parts| {
+            place::chain(way).is_ok_and(|parts| {
                 keys.iter()
                     .any(|key| place::inside_by_identity(&parts, key, any_case))
             })
@@ -984,6 +1006,9 @@ pub fn sealed(
     windows: bool,
 ) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
     let roots = Roots::now();
+    if let Some(why) = roots.cannot_be_read() {
+        return Err(why.to_owned());
+    }
     spawn::seal(
         env,
         &spawn::Judges {
@@ -1321,7 +1346,7 @@ pub fn handed_down() -> Vec<(String, String)> {
 fn register_folder(path: &Path) {
     let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
     let mut made = registry();
-    let entry = Entry { real, file: None };
+    let entry = Entry::folder(real);
     if !made.contains(&entry) {
         made.push(entry);
     }
@@ -1334,6 +1359,7 @@ fn register_file(path: &Path, file: &fs::File) -> io::Result<()> {
     registry().push(Entry {
         real,
         file: Some(identity),
+        folder: None,
     });
     Ok(())
 }
@@ -1346,16 +1372,20 @@ fn forget_made(path: &Path) {
 
 /// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
 pub fn is_made(path: &Path) -> bool {
-    canonical(path).is_some_and(|real| place::Registry::is_made_folder(&*registry(), &real, true))
+    canonical(path).is_some_and(|real| {
+        registry()
+            .iter()
+            .any(|made| made.real == real && made.is_still_its_folder())
+    })
 }
 
 /// Whether `path` is a folder this process made through the door, or is below one, by real paths
 /// (a file this run made counts as below the folder it is in only where that folder is the run's).
 pub fn is_made_or_below(path: &Path) -> bool {
     real_beneath(path).is_some_and(|real| {
-        let made = registry();
-        place::Registry::is_made_folder(&*made, &real, true)
-            || place::Registry::is_below_made(&*made, &real, true)
+        registry()
+            .iter()
+            .any(|made| real.starts_with(&made.real) && made.is_still_its_folder())
     })
 }
 
@@ -1620,7 +1650,8 @@ impl Grounded {
     fn push(&mut self, process: Running, ground: Ground) {
         if !self.contains(process.identity) {
             // Chosen now: no longer a process the kit could only name.
-            self.unproved.retain(|(seen, _)| seen.identity != process.identity);
+            self.unproved
+                .retain(|(seen, _)| seen.identity != process.identity);
             self.processes.push(process);
             self.grounds.push(ground);
         }
@@ -1656,7 +1687,10 @@ impl Grounded {
     fn keep_unproved(&mut self, more: Vec<(Running, String)>) {
         for (process, why) in more {
             if !self.contains(process.identity)
-                && !self.unproved.iter().any(|(seen, _)| seen.identity == process.identity)
+                && !self
+                    .unproved
+                    .iter()
+                    .any(|(seen, _)| seen.identity == process.identity)
             {
                 self.unproved.push((process, why));
             }
@@ -1794,6 +1828,8 @@ impl Grounded {
     }
 }
 
+#[cfg(test)]
+mod identity_reds;
 #[cfg(test)]
 mod identity_tests;
 #[cfg(test)]

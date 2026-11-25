@@ -346,7 +346,7 @@ pub fn copy_tree(
 ) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
     super::reads::admitted(from).map_err(Error::file("read", from))?;
-    tree(from, to, skip)
+    tree(from, to, skip, Some(&super::Roots::now()))
 }
 
 /// [`copy_tree`] of a folder of the account's, read as a [`super::source::Source`]; `skip` is asked
@@ -356,12 +356,23 @@ pub fn copy_tree_from(
     to: impl AsRef<Path>,
     skip: &dyn Fn(&super::source::Source) -> bool,
 ) -> Result {
-    tree(from.path_for_door(), to.as_ref(), &|entry| {
-        skip(&from.of_walk(entry))
-    })
+    tree(
+        from.path_for_door(),
+        to.as_ref(),
+        &|entry| skip(&from.of_walk(entry)),
+        None,
+    )
 }
 
-fn tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result {
+/// `asks`: the door is asked of every child the walk meets (a store below the starting folder,
+/// or a hard link to a store's file, is refused as a direct copy of it would be), where the walk
+/// is of the account's own files, which no door stands before.
+fn tree(
+    from: &Path,
+    to: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+    asks: Option<&super::Roots>,
+) -> Result {
     if fs::symlink_metadata(from)
         .map_err(Error::file("read", from))?
         .file_type()
@@ -372,7 +383,7 @@ fn tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result {
     make_dir_private(to)?;
     let source_root = fs::canonicalize(from).map_err(Error::file("read", from))?;
     let target_root = fs::canonicalize(to).map_err(Error::file("read", to))?;
-    copy_tree_inside(from, to, &source_root, &target_root, skip)
+    copy_tree_inside(from, to, &source_root, &target_root, skip, asks)
 }
 
 fn copy_tree_inside(
@@ -381,6 +392,7 @@ fn copy_tree_inside(
     source_root: &Path,
     target_root: &Path,
     skip: &dyn Fn(&Path) -> bool,
+    asks: Option<&super::Roots>,
 ) -> Result {
     for entry in fs::read_dir(from)
         .map_err(Error::file("read", from))?
@@ -402,9 +414,15 @@ fn copy_tree_inside(
             let destination = target_root.join(relative);
             copied_link(&destination, &target, real.is_dir())?;
         } else if kind.is_dir() {
+            if let Some(roots) = asks {
+                super::reads::admitted_by(roots, &source).map_err(Error::file("read", &source))?;
+            }
             make_dir_private(&target)?;
-            copy_tree_inside(&source, &target, source_root, target_root, skip)?;
+            copy_tree_inside(&source, &target, source_root, target_root, skip, asks)?;
         } else if kind.is_file() {
+            if let Some(roots) = asks {
+                super::reads::admitted_by(roots, &source).map_err(Error::file("read", &source))?;
+            }
             keep_mode(&source, &target)?;
         }
     }

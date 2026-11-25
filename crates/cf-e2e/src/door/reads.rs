@@ -14,7 +14,18 @@ use super::Roots;
 
 /// `path`, where it is no place a store's row protects: why not, where it is.
 pub(super) fn admitted(path: &Path) -> io::Result<()> {
-    if Roots::now().holds(path) {
+    admitted_by(&Roots::now(), path)
+}
+
+/// [`admitted`] by `roots`, resolved once for a walk that asks of many paths.
+pub(super) fn admitted_by(roots: &Roots, path: &Path) -> io::Result<()> {
+    if let Some(why) = roots.cannot_be_read() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} is not read: {why}", path.display()),
+        ));
+    }
+    if roots.holds(path) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!(

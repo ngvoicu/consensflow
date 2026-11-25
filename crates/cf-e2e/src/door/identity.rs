@@ -8,7 +8,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// The identity of `file`, an open file, as text.
+/// The identity of `file`, an open file, as text: the device and file number on Unix, the
+/// volume serial and the file's whole 128-bit id on Windows (its 64-bit index only where the
+/// system gives no 128-bit one, which ReFS needs and NTFS has).
 pub fn of_file(file: &fs::File) -> io::Result<String> {
     #[cfg(unix)]
     {
@@ -20,11 +22,34 @@ pub fn of_file(file: &fs::File) -> io::Result<String> {
     {
         use std::os::windows::io::AsRawHandle as _;
         use windows_sys::Win32::Storage::FileSystem::{
-            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+            FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
+            BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO,
         };
+        let handle = file.as_raw_handle();
+        // The file's whole id with its volume's serial, where the system gives it (T-2319 finding
+        // 4): ReFS does not keep the 64-bit index unique.
+        let mut whole: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle is the open file's own, and the structure is ours to fill.
+        let given = unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileIdInfo,
+                std::ptr::from_mut(&mut whole).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        };
+        if given != 0 {
+            let id = whole.FileId.Identifier;
+            // An id of nothing or of all ones is no id: the file system could not give one.
+            if id.iter().all(|byte| *byte == 0) || id.iter().all(|byte| *byte == 0xff) {
+                return Err(io::Error::other("the file system gave no id for the file"));
+            }
+            let text: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+            return Ok(format!("{}:{text}", whole.VolumeSerialNumber));
+        }
         let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
         // SAFETY: the handle is the open file's own, and the structure is ours to fill.
-        let read = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) };
+        let read = unsafe { GetFileInformationByHandle(handle, &mut information) };
         if read == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -85,5 +110,21 @@ mod tests {
         fs::write(&file, "second").unwrap();
         assert_ne!(of_path(&file).unwrap(), first);
         drop(held);
+    }
+
+    /// Windows' id is the file's whole one: a volume serial and 32 hex digits, where the system
+    /// gives it (NTFS and ReFS both do), and no folder and file of one volume share it.
+    #[cfg(windows)]
+    #[test]
+    fn a_files_identity_on_windows_is_its_whole_128_bit_id() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("report.txt");
+        fs::write(&file, "x").unwrap();
+        let (one, other) = (of_path(&file).unwrap(), of_path(folder.path()).unwrap());
+        let (serial, id) = one.split_once(':').unwrap();
+        assert!(serial.parse::<u64>().is_ok(), "{one}");
+        assert_eq!(id.len(), 32, "{one}");
+        assert!(id.chars().all(|digit| digit.is_ascii_hexdigit()), "{one}");
+        assert_ne!(one, other);
     }
 }

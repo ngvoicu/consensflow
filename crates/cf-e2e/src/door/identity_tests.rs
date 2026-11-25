@@ -39,10 +39,26 @@ fn other_spelling(real: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The second spelling of `folder`, which must lead to the same file.
-fn second(folder: &Path) -> Option<PathBuf> {
-    let spelled = other_spelling(folder)?;
-    eprintln!("second spelling: {} of {}", spelled.display(), folder.display());
+/// The second spelling of `folder`, which must lead to the same file. A machine that has none to
+/// try fails the test: a case that finds no second spelling shows nothing, and never passes.
+#[cfg(any(target_os = "macos", windows))]
+pub(super) fn second_of(folder: &Path) -> PathBuf {
+    second(folder)
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn second(folder: &Path) -> PathBuf {
+    let spelled = other_spelling(folder).unwrap_or_else(|| {
+        panic!(
+            "NOT RUN: this machine has no second spelling of {} to try (an admin share that cannot be reached?)",
+            folder.display()
+        )
+    });
+    eprintln!(
+        "second spelling: {} of {}",
+        spelled.display(),
+        folder.display()
+    );
     assert_eq!(
         super::identity::of_path(folder).unwrap(),
         super::identity::of_path(&spelled).unwrap(),
@@ -55,18 +71,17 @@ fn second(folder: &Path) -> Option<PathBuf> {
         folder.canonicalize().unwrap(),
         "the system resolves both spellings to one: the case proves nothing here"
     );
-    Some(spelled)
+    spelled
 }
 
+#[cfg(any(target_os = "macos", windows))]
 #[test]
 fn an_addition_inside_a_store_through_its_other_spelling_is_refused() {
     let root = made("k3-identity-").unwrap();
     let store = root.path().join("owner").join(".codex");
     super::make_dir(&store).unwrap();
     let _held = TestRoot::add(&store);
-    let Some(spelled) = second(&store) else {
-        return;
-    };
+    let spelled = second(&store);
     // Both spellings are the store: nothing is made new in it by either.
     for way in [&store, &spelled] {
         assert!(
@@ -86,6 +101,7 @@ fn an_addition_inside_a_store_through_its_other_spelling_is_refused() {
     );
 }
 
+#[cfg(any(target_os = "macos", windows))]
 #[test]
 fn a_store_that_is_not_there_yet_is_the_store_through_its_other_spelling() {
     let root = made("k3-identity-absent-").unwrap();
@@ -93,23 +109,20 @@ fn a_store_that_is_not_there_yet_is_the_store_through_its_other_spelling() {
     super::make_dir(&owner).unwrap();
     let store = owner.join(".gemini");
     let _held = TestRoot::add(&store);
-    let Some(spelled) = second(&owner) else {
-        return;
-    };
+    let spelled = second(&owner);
     assert!(super::made_in(&spelled.join(".gemini").join("tmp"), "h-").is_err());
     assert!(judge(&spelled.join(".gemini"), Act::Name).is_err());
     assert!(!store.exists(), "the absent store was made");
 }
 
+#[cfg(any(target_os = "macos", windows))]
 #[test]
 fn a_place_that_holds_a_store_is_not_taken_or_moved_through_its_other_spelling() {
     let root = made("k3-identity-tree-").unwrap();
     let tree = root.path().join("tree");
     let inner = tree.join("inner");
     super::make_dir(&inner).unwrap();
-    let Some(spelled) = second(&tree) else {
-        return;
-    };
+    let spelled = second(&tree);
     // The account's store is spelled the second way; the tree it is in is named the first.
     let _held = TestRoot::add(&spelled.join("inner"));
     assert!(judge(&tree, Act::Remove).is_err());
@@ -118,46 +131,38 @@ fn a_place_that_holds_a_store_is_not_taken_or_moved_through_its_other_spelling()
     assert!(inner.is_dir());
 }
 
+#[cfg(any(target_os = "macos", windows))]
 #[test]
 fn the_seal_takes_a_variable_that_names_a_store_through_its_other_spelling() {
     let root = made("k3-identity-seal-").unwrap();
     let store = root.path().join("owner").join("appdata");
     super::make_dir(&store).unwrap();
     let _held = TestRoot::add(&store);
-    let Some(spelled) = second(&store) else {
-        return;
-    };
+    let spelled = second(&store);
     assert!(inside_protected(&store.join("x")));
     assert!(inside_protected(&spelled));
     assert!(inside_protected(&spelled.join("x").join("y")));
     // Another folder of the same parent is no store.
     let beside = root.path().join("owner").join("beside");
     super::make_dir(&beside).unwrap();
-    assert!(!inside_protected(&second(&beside).unwrap()));
+    assert!(!inside_protected(&second(&beside)));
 }
 
+#[cfg(any(target_os = "macos", windows))]
 #[test]
-fn a_folder_this_run_made_is_the_runs_through_its_other_spelling_and_a_persons_is_not() {
+fn a_folder_this_run_made_is_the_runs_by_its_own_spelling_only() {
     let mine = made("k3-identity-mine-").unwrap();
-    let Some(spelled) = second(mine.path()) else {
-        return;
-    };
-    let file = spelled.join("sub").join("note.txt");
-    assert!(
-        judge(&file, Act::Write).is_ok(),
-        "the run's own folder, spelled the other way"
-    );
-    assert!(judge(&spelled, Act::Remove).is_ok());
-    assert!(super::is_made_or_below(&spelled));
-    assert!(super::is_made_or_below(&spelled.join("sub")));
-    super::write(&file, "mine").unwrap();
-    assert_eq!(
-        fs::read_to_string(mine.path().join("sub").join("note.txt")).unwrap(),
-        "mine"
-    );
+    let spelled = second(mine.path());
+    // Nobody in the kit names a folder of the run's by another spelling, and refusing it is the
+    // safe side: what the run made is the run's by its text and by its identity, both.
+    assert!(judge(&mine.path().join("sub").join("note.txt"), Act::Write).is_ok());
+    assert!(judge(&spelled.join("sub").join("note.txt"), Act::Write).is_err());
+    assert!(judge(&spelled, Act::Remove).is_err());
+    assert!(!super::is_made_or_below(&spelled));
+    assert!(super::is_made_or_below(&mine.path().join("sub")));
     // A person's folder is the run's by neither spelling.
-    let (theirs, _kept) = (crate::standin_process::unowned_tempdir(), ());
-    let their_spelled = second(theirs.path()).unwrap();
+    let theirs = crate::standin_process::unowned_tempdir();
+    let their_spelled = second(theirs.path());
     assert!(judge(&their_spelled.join("new.txt"), Act::Write).is_err());
     assert!(!super::is_made_or_below(&their_spelled));
 }
@@ -175,10 +180,7 @@ fn a_store_whose_identity_cannot_be_read_refuses_every_act() {
     // The roots are this test's own, never the global list the other tests add to.
     let roots = vec![store];
     fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
-    let made = vec![super::Entry {
-        real: root.path().canonicalize().unwrap(),
-        file: None,
-    }];
+    let made = vec![super::Entry::folder(root.path().canonicalize().unwrap())];
     let outcome = super::place::judge_with(
         &root.path().join("elsewhere.txt"),
         Act::Write,
@@ -186,15 +188,24 @@ fn a_store_whose_identity_cannot_be_read_refuses_every_act() {
         &made,
     );
     let named = super::place::judge_with(&root.path().join("new"), Act::Name, &roots, &made);
-    let seal = super::Roots::of(roots.clone()).holds(&root.path().join("elsewhere"));
+    let held = super::Roots::of(roots.clone());
+    let seal = held.holds(&root.path().join("elsewhere"));
+    let unreadable = held.cannot_be_read().map(str::to_owned);
     fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
     assert!(
         outcome.is_err(),
         "a root that cannot be read admitted a write"
+    );
+    // It says which store it could not read, and that it could not: never "inside a store".
+    let said = outcome.unwrap_err().to_string();
+    assert!(
+        said.contains("blocked") && said.contains("cannot be read") && !said.contains("inside"),
+        "{said}"
     );
     assert!(named.is_err(), "a root that cannot be read admitted a name");
     assert!(
         seal,
         "a root that cannot be read let a path through the seal"
     );
+    assert!(unreadable.is_some_and(|why| why.contains("cannot be read")));
 }

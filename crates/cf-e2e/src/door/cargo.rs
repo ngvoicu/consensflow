@@ -152,6 +152,9 @@ fn cargo_in(cwd: &Path) -> Result<Run> {
     #[allow(clippy::disallowed_methods)] // The door reads the test's environment for cargo.
     let all = std::env::vars_os();
     let roots = crate::door::Roots::now();
+    if let Some(why) = roots.cannot_be_read() {
+        return Err(Error::Build(why.to_owned()));
+    }
     let env = environment_of(
         all,
         crate::door::account::project_home().as_deref(),

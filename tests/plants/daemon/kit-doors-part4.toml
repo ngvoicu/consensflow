@@ -22,10 +22,11 @@ runs = ["kd4-reads"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/reads.rs"
-find = '''pub(super) fn admitted(path: &Path) -> io::Result<()> {
-    if Roots::now().holds(path) {'''
-replace = '''pub(super) fn admitted(path: &Path) -> io::Result<()> {
-    if false && Roots::now().holds(path) {'''
+find = '''pub(super) fn admitted_by(roots: &Roots, path: &Path) -> io::Result<()> {'''
+replace = '''pub(super) fn admitted_by(roots: &Roots, path: &Path) -> io::Result<()> {
+    if true {
+        return Ok(());
+    }'''
 
 [[plant]]
 name = "K3 part 4: a shell's command is not judged by the program it starts"
