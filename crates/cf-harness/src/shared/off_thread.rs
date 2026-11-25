@@ -10,8 +10,11 @@
 //! itself. A write is made beside and renamed into place (`cf_base::file::write_whole`), so one
 //! left behind half way leaves no half a file.
 
+use std::cell::{Cell, RefCell};
+use std::future::{poll_fn, Future};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,29 +65,51 @@ pub fn late_step(said: &str) -> Option<(&'static str, u64)> {
     Some((step, seconds.parse().ok()?))
 }
 
-/// Whether the launch being prepared is still wanted.
-pub fn launch_wanted() -> bool {
-    true
-}
+/// What a step says where the launch it belongs to is over: nothing of it is told to anybody,
+/// as whoever prepared the launch finds it over too.
+const OVER: &str = "the launch was called off before its window opened";
 
-/// Prepares a launch that is wanted for as long as `wanted` says so.
-pub async fn while_wanted<T>(
-    _wanted: std::rc::Rc<dyn Fn() -> bool>,
-    work: impl std::future::Future<Output = T>,
-) -> T {
-    work.await
-}
+/// Whether a launch is still wanted, as its preparer says it.
+type Wanted = Rc<dyn Fn() -> bool>;
 
 thread_local! {
-    /// The calls made off this thread that have not ended.
-    static OUTSTANDING: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    /// What says whether the launch being polled on this thread is wanted.
+    static WANTED: RefCell<Option<Wanted>> = const { RefCell::new(None) };
+    /// Whether a poll on this thread found a call made off it still unanswered.
+    static AWAITING: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Whether a call this thread asked for is still being made: a test that polls a plan by hand
-/// waits for its wake only while one is.
+/// Whether the launch being prepared is still wanted: true outside [`while_wanted`].
+pub fn launch_wanted() -> bool {
+    let wanted = WANTED.with(|wanted| wanted.borrow().clone());
+    wanted.is_none_or(|wanted| wanted())
+}
+
+/// Prepares a launch that is wanted for as long as `wanted` says so: no step of it made off the
+/// thread is begun, and none is gone on from, once it says no, so that whoever waits for the
+/// launch (a project's Close) waits for one step at most (T-2263).
+pub async fn while_wanted<T>(wanted: Wanted, work: impl Future<Output = T>) -> T {
+    /// Puts back what was said before, however the poll ends.
+    struct Back(Option<Wanted>);
+    impl Drop for Back {
+        fn drop(&mut self) {
+            WANTED.with(|wanted| *wanted.borrow_mut() = self.0.take());
+        }
+    }
+    let mut work = std::pin::pin!(work);
+    poll_fn(move |context| {
+        let _back = Back(WANTED.with(|said| said.borrow_mut().replace(Rc::clone(&wanted))));
+        work.as_mut().poll(context)
+    })
+    .await
+}
+
+/// Whether a poll since the last time this was asked found a call made off this thread still
+/// unanswered, which will wake it: a test that polls a plan by hand waits for that wake only
+/// then. It is what the polls of one driver waited on, and no other's.
 #[cfg(any(test, feature = "test-support"))]
-pub(crate) fn outstanding() -> bool {
-    OUTSTANDING.with(|count| count.load(Ordering::SeqCst) > 0)
+pub(crate) fn took_awaiting() -> bool {
+    AWAITING.with(|awaiting| awaiting.replace(false))
 }
 
 /// The answer's way back: the call's, or that it was late, whichever comes first.
@@ -98,11 +123,15 @@ fn answered<T>(to: &Answer<T>, answer: Option<T>) {
 }
 
 /// What `call` makes, made on a thread of its own and waited for no longer than the deadline.
+/// A launch that is over ([`while_wanted`]) begins none, and goes on from none.
 async fn apart<T: Send + 'static>(
     env: &Env,
     step: &'static str,
     call: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
+    if !launch_wanted() {
+        return Err(OVER.to_owned());
+    }
     let deadline = env
         .text(DEADLINE_VARIABLE)
         .and_then(|ms| ms.parse().ok())
@@ -110,9 +139,7 @@ async fn apart<T: Send + 'static>(
     let (answer, answer_of) = oneshot::channel::<Option<T>>();
     let answer: Answer<T> = Arc::new(Mutex::new(Some(answer)));
     let (ended, ending) = channel::<()>();
-    let outstanding = OUTSTANDING.with(Arc::clone);
-    outstanding.fetch_add(1, Ordering::SeqCst);
-    let (made, counted) = (Arc::clone(&answer), Arc::clone(&outstanding));
+    let made = Arc::clone(&answer);
     let spawned = std::thread::Builder::new()
         .name("launch-plan".to_owned())
         .spawn(move || {
@@ -122,10 +149,8 @@ async fn apart<T: Send + 'static>(
             // A call that panicked: its sender is let go, which says so.
             drop(made);
             let _ = ended.send(());
-            counted.fetch_sub(1, Ordering::SeqCst);
         });
     if spawned.is_err() {
-        outstanding.fetch_sub(1, Ordering::SeqCst);
         return Err("the launch's files could not be made: no thread to make them".to_owned());
     }
     let watched = std::thread::Builder::new()
@@ -138,7 +163,17 @@ async fn apart<T: Send + 'static>(
     if watched.is_err() {
         return Err("the launch's files could not be made: no thread to time them".to_owned());
     }
-    match answer_of.await {
+    let mut answer_of = answer_of;
+    let answered = poll_fn(|context| {
+        let polled = Pin::new(&mut answer_of).poll(context);
+        if polled.is_pending() {
+            AWAITING.with(|awaiting| awaiting.set(true));
+        }
+        polled
+    })
+    .await;
+    match answered {
+        Ok(Some(_)) if !launch_wanted() => Err(OVER.to_owned()),
         Ok(Some(value)) => Ok(value),
         Ok(None) => Err(late(step, deadline)),
         Err(_) => Err("the launch's files could not be made: their worker failed".to_owned()),
@@ -264,10 +299,7 @@ pub(crate) async fn work<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-    use std::future::Future as _;
-    use std::rc::Rc;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Waker};
 
     use super::*;
@@ -292,7 +324,10 @@ mod tests {
             // The Close comes while the first step is made.
             closes.set(true);
             first.await?;
-            work(&env, step::FILES, move |_| ran.store(true, Ordering::SeqCst)).await
+            work(&env, step::FILES, move |_| {
+                ran.store(true, Ordering::SeqCst)
+            })
+            .await
         })));
         assert!(answer.is_err(), "the launch went on: {answer:?}");
         assert!(!second.load(Ordering::SeqCst), "the second step was made");
@@ -306,7 +341,10 @@ mod tests {
         let made = Arc::new(AtomicBool::new(false));
         let ran = Arc::clone(&made);
         let answer = finished(Box::pin(while_wanted(Rc::new(|| false), async move {
-            work(&env, step::FILES, move |_| ran.store(true, Ordering::SeqCst)).await
+            work(&env, step::FILES, move |_| {
+                ran.store(true, Ordering::SeqCst)
+            })
+            .await
         })));
         assert!(answer.is_err());
         assert!(!made.load(Ordering::SeqCst));

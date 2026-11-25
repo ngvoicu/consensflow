@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use cf_base::file::append_rotating;
@@ -26,12 +26,13 @@ pub struct Log {
     clock: RefCell<Box<dyn Clock + Send>>,
     /// The thread that appends the lines, where whoever says them must not wait for the file:
     /// another process's lock on it or a slow disk holds that thread alone. None: the line is
-    /// appended where it is said.
+    /// appended where it is said, which is also where the thread cannot be made.
     writer: Option<Writer>,
 }
 
-/// How many lines wait for the writer: past that a line is dropped and counted, and the next
-/// one that is written says how many were.
+/// How many lines wait for the writer, beyond those it is appending (at most as many again,
+/// taken at once): past that a line is dropped and counted, and the next one that is written
+/// says how many were.
 const QUEUE: usize = 1024;
 
 /// The queue to the writer's thread, and how many lines it dropped.
@@ -39,13 +40,25 @@ const QUEUE: usize = 1024;
 struct Writer {
     lines: SyncSender<Job>,
     dropped: Arc<AtomicU64>,
+    /// Lines that are never dropped ([`Log::keep`]) and found the queue full: written once
+    /// what the queue held is, after the count of the dropped.
+    kept: Arc<Mutex<String>>,
 }
 
 /// A piece of the writer's work.
 enum Job {
     Line(String),
-    /// Who waits to hear that everything before it is written.
-    Written(std::sync::mpsc::Sender<()>),
+    /// Who waits to hear that everything said so far is written, and when it asked: the
+    /// count of the dropped lines and the lines kept are written first.
+    Written {
+        at: String,
+        heard: std::sync::mpsc::Sender<()>,
+    },
+}
+
+/// The line that says how many lines found no room.
+fn dropped_line(at: &str, dropped: u64) -> String {
+    format!("{at} warn {dropped} lines of the log were dropped: its file was held\n")
 }
 
 impl Log {
@@ -72,37 +85,66 @@ impl Log {
         let mut log = Self::new(home);
         let (lines, queued) = sync_channel::<Job>(QUEUE);
         let (file, limit) = (log.file.clone(), log.limit);
+        let dropped = Arc::new(AtomicU64::new(0));
+        let kept = Arc::new(Mutex::new(String::new()));
+        let (counted, held) = (Arc::clone(&dropped), Arc::clone(&kept));
         // A thread that cannot be made leaves the lines to be appended where they are said.
         let spawned = std::thread::Builder::new()
             .name("daemon-log".to_owned())
             .spawn(move || {
-                for job in queued {
-                    match job {
-                        Job::Line(line) => {
-                            // The home may be read-only or gone mid-run.
-                            let _ = append_rotating(&file, &line, limit);
+                while let Ok(first) = queued.recv() {
+                    // What waits is appended at once: a file that was held gets all of it as
+                    // soon as it is free, within the little time a stop has.
+                    let mut text = String::new();
+                    let mut waiting = None;
+                    let mut next = Some(first);
+                    while let Some(job) = next {
+                        match job {
+                            Job::Line(line) => text.push_str(&line),
+                            Job::Written { at, heard } => {
+                                let dropped = counted.swap(0, Ordering::SeqCst);
+                                if dropped > 0 {
+                                    text.push_str(&dropped_line(&at, dropped));
+                                }
+                                let mut kept = held.lock().unwrap_or_else(PoisonError::into_inner);
+                                text.push_str(&std::mem::take(&mut *kept));
+                                waiting = Some(heard);
+                                break;
+                            }
                         }
-                        Job::Written(heard) => drop(heard.send(())),
+                        next = queued.try_recv().ok();
+                    }
+                    if !text.is_empty() {
+                        // The home may be read-only or gone mid-run.
+                        let _ = append_rotating(&file, &text, limit);
+                    }
+                    if let Some(heard) = waiting {
+                        let _ = heard.send(());
                     }
                 }
             });
         if spawned.is_ok() {
             log.writer = Some(Writer {
                 lines,
-                dropped: Arc::new(AtomicU64::new(0)),
+                dropped,
+                kept,
             });
         }
         log
     }
 
-    /// Waits for every line said so far to be written, `within` at most: whether they were.
+    /// Waits for every line said so far to be written, the count of those dropped after them
+    /// and the lines kept after that, `within` at most: whether they were.
     pub fn written(&self, within: Duration) -> bool {
         let Some(writer) = &self.writer else {
             return true;
         };
         let (heard, hear) = std::sync::mpsc::channel();
         let began = Instant::now();
-        let mut job = Job::Written(heard);
+        let mut job = Job::Written {
+            at: iso(self.clock.borrow_mut().now_ms()),
+            heard,
+        };
         loop {
             match writer.lines.try_send(job) {
                 Ok(()) => break,
@@ -125,6 +167,32 @@ impl Log {
     /// A thing worth knowing.
     pub fn info(&self, message: &str) {
         self.write("info", message, None);
+    }
+
+    /// A thing worth knowing that is never dropped (a stop's own lines): one the writer has no
+    /// room for is written once it has written what it holds ([`Log::written`]), after the
+    /// count of the lines dropped, and every such line after it follows it there.
+    pub fn keep(&self, message: &str) {
+        let Some(writer) = &self.writer else {
+            self.info(message);
+            return;
+        };
+        let at = iso(self.clock.borrow_mut().now_ms());
+        let line = format!("{at} info {message}\n");
+        let mut kept = writer.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        if kept.is_empty() {
+            let dropped = writer.dropped.swap(0, Ordering::SeqCst);
+            let text = if dropped == 0 {
+                line.clone()
+            } else {
+                format!("{}{line}", dropped_line(&at, dropped))
+            };
+            if writer.lines.try_send(Job::Line(text)).is_ok() {
+                return;
+            }
+            writer.dropped.fetch_add(dropped, Ordering::SeqCst);
+        }
+        kept.push_str(&line);
     }
 
     /// Something that went wrong and was gone past, with what is known of why.
@@ -154,7 +222,7 @@ impl Log {
         let text = if dropped == 0 {
             text
         } else {
-            format!("{at} warn {dropped} lines of the log were dropped: its file was held\n{text}")
+            format!("{}{text}", dropped_line(&at, dropped))
         };
         if writer.lines.try_send(Job::Line(text)).is_err() {
             writer.dropped.fetch_add(dropped + 1, Ordering::SeqCst);
@@ -337,8 +405,9 @@ mod tests {
             .open(cf_base::file::lock_beside(log.file()))
             .unwrap();
         beside.lock().unwrap();
-        // One line is in the writer's hands and the queue is full: the rest are dropped.
-        for line in 0..QUEUE + 11 {
+        // The writer holds at most two queues' worth: more is dropped.
+        let said = 4 * QUEUE;
+        for line in 0..said {
             log.info(&format!("line {line}"));
         }
         beside.unlock().unwrap();
@@ -346,17 +415,23 @@ mod tests {
         log.info("after");
         assert!(log.written(std::time::Duration::from_secs(20)));
         let text = std::fs::read_to_string(log.file()).unwrap();
-        let said = text
+        let written = text
             .lines()
-            .find(|line| line.contains("lines of the log were dropped"))
-            .expect("the dropped lines are counted");
-        let count: usize = said
-            .split("warn ")
-            .nth(1)
-            .and_then(|rest| rest.split(' ').next())
-            .and_then(|count| count.parse().ok())
-            .unwrap();
-        assert!((10..=11).contains(&count), "{said}");
+            .filter(|line| line.contains(" info line "))
+            .count();
+        let counted: usize = text
+            .lines()
+            .filter(|line| line.contains("lines of the log were dropped"))
+            .map(|line| {
+                line.split(" warn ")
+                    .nth(1)
+                    .and_then(|rest| rest.split(' ').next())
+                    .and_then(|count| count.parse::<usize>().ok())
+                    .unwrap()
+            })
+            .sum();
+        assert!(counted > 0, "some were dropped: {written} written");
+        assert_eq!(written + counted, said, "every line is written or counted");
         assert!(text.ends_with("info after\n"));
     }
 }

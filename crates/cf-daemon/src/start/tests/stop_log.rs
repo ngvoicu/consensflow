@@ -7,8 +7,9 @@ use std::time::Instant;
 
 use super::*;
 
-/// How many lines the daemon says while the file is held: more than the writer's queue takes.
-const BURST: usize = 1600;
+/// How many lines the daemon says while the file is held: more than the writer's queue and
+/// what it is appending take together.
+const BURST: usize = 4000;
 
 /// Runs a daemon, holds its log's file for `held`, says [`BURST`] lines, and stops it: what the
 /// log holds at the moment the process would exit, and how long the stop took.
@@ -68,8 +69,14 @@ async fn a_stop_writes_what_it_holds_then_the_count_of_what_it_dropped_then_the_
         .run_until(async {
             for held in [60, 600] {
                 let (text, _) = stopped_while_held(Duration::from_millis(held)).await;
-                let written = text.lines().filter(|l| l.contains(" info end-burst ")).count();
-                assert!(written > 0 && written < BURST, "{held} ms: {written} written");
+                let written = text
+                    .lines()
+                    .filter(|l| l.contains(" info end-burst "))
+                    .count();
+                assert!(
+                    written > 0 && written < BURST,
+                    "{held} ms: {written} written"
+                );
                 let count = dropped_in(&text)
                     .unwrap_or_else(|| panic!("{held} ms: no count of the dropped lines"));
                 assert!(
@@ -78,8 +85,14 @@ async fn a_stop_writes_what_it_holds_then_the_count_of_what_it_dropped_then_the_
                 );
                 let lines: Vec<&str> = text.lines().map(said_of).collect();
                 let ends = &lines[lines.len() - 3..];
-                assert!(ends[0].contains("lines of the log were dropped"), "{ends:?}");
-                assert!(ends[1].starts_with("info stop: test stop; rss "), "{ends:?}");
+                assert!(
+                    ends[0].contains("lines of the log were dropped"),
+                    "{ends:?}"
+                );
+                assert!(
+                    ends[1].starts_with("info stop: test stop; rss "),
+                    "{ends:?}"
+                );
                 assert_eq!(ends[2], "info exit 0", "{held} ms");
             }
         })

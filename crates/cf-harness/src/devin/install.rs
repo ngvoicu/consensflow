@@ -22,10 +22,9 @@ mod version;
 pub(crate) use config::native as native_config;
 pub(crate) use version::{at_least, minimum as minimum_version};
 
-use std::fs;
 use std::path::Path;
 
-use cf_base::file::{make_folder, write_in_place, FileError, Mkdir};
+use cf_base::file::{make_folder, write_new_in_place, Mkdir};
 use cf_base::home::config_root;
 use cf_base::{js, path};
 use serde_json::{json, Map, Value};
@@ -72,21 +71,6 @@ fn said(unanswered: Unanswered) -> String {
         Unanswered::Unread(sentence) => sentence,
         Unanswered::Failed(failed) => failed.message,
     }
-}
-
-/// `writeFile(file, bytes, { mode, flag: 'wx' })`: one already there is the
-/// failure, in Node's words. Otherwise the file is written beside and renamed
-/// into place (`write_in_place`), whole or not there.
-fn write_new(file: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    if file.symlink_metadata().is_ok() {
-        // The system says so itself, in its own words.
-        fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(file)
-            .map_err(|error| FileError::call(error, "open", Some(file)))?;
-    }
-    write_in_place(file, bytes, mode)
 }
 
 /// Adds `entry`, when there is one, to the hooks Devin runs for `event`,
@@ -221,7 +205,7 @@ pub(super) async fn integration(
             configuration.insert("auto_update".to_owned(), Value::Bool(false));
             let file = path::join(&[&root, "config.json"]);
             let text = js::stringify(&Value::Object(configuration));
-            write_new(Path::new(&file), text.as_bytes(), 0o600)
+            write_new_in_place(Path::new(&file), text.as_bytes(), 0o600)
                 .map_err(|error| error.to_string())?;
             let wire = path::join(&[&root, "wire.jsonl"]);
             Ok(Integration {
@@ -247,7 +231,8 @@ pub(super) fn prepare_prompt(
         return Ok(invocation);
     };
     let file = path::join(&[&integration.root, "prompt.txt"]);
-    write_new(Path::new(&file), prompt.as_bytes(), 0o600).map_err(|error| error.to_string())?;
+    write_new_in_place(Path::new(&file), prompt.as_bytes(), 0o600)
+        .map_err(|error| error.to_string())?;
     let mut args = invocation.args;
     args.extend(["--prompt-file".to_owned(), file]);
     Ok(Invocation {

@@ -5,9 +5,19 @@
 # waited for with a timeout. Round 2: the launch's plan finds the program, reads the project's
 # folders and writes the launch's files on the plan's worker (crates/cf-harness/src/shared/
 # off_thread.rs), waited for as long as it takes, and a launch the system gave no answer to says
-# so in the log (crates/cf-engine/src/computer_use.rs, `went_on_without_the_note`).
+# so in the log (crates/cf-engine/src/computer_use.rs, `went_on_without_the_note`). The second
+# review's findings (T-2274): a launch that fails once it is over fails nothing
+# (cf-engine/src/windows.rs), a launch begins no step once it is over, a stop's log holds what it
+# was given and what it dropped, and a file that must be new takes no name that is taken.
 
 [run]
+lf-closed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_launch_that_fails_after_its_project_closed", "--", "--test-threads=2"]
+lf-chief = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_chief_launch_that_fails_after_its_project_closed", "--", "--test-threads=2"]
+lf-pause = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_launch_that_fails_after_a_pause", "--", "--test-threads=2"]
+lf-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_launch_is_told_it_is_over", "--", "--test-threads=2"]
+lf-steps = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::off_thread::tests::a_launch_that_is_over_begins_no_further_step"]
+lf-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::stop_log::a_stop_writes_what_it_holds"]
+lf-new = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "a_name_taken_while_a_new_file"]
 lf-late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_whose_plan_was_late", "--", "--test-threads=2"]
 lf-nowait = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_line_said_while_the_log_is_held"]
 lf-drop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "lines_the_writer_is_too_far_behind"]
@@ -50,8 +60,11 @@ runs = ["lf-never"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
-find = """        self.within = within;"""
-replace = """        let _ = within;"""
+find = """        tokio::time::timeout(self.within, answered)
+            .await
+            .map_err(|_| silent)?
+            .map_err(|_| silent)"""
+replace = """        answered.await.map_err(|_| silent)"""
 
 [[plant]]
 name = 'launch-freeze: the plan makes its files on the engine thread again'
@@ -73,7 +86,7 @@ runs = ["lf-log"]
 file = "crates/cf-engine/src/computer_use.rs"
 find = """        self.seams.log.warn(&format!(
             "the launch of @{} went on without"""
-replace = """        self.seams.log.info(&format!(
+replace = """        let _unsaid = (format!(
             "the launch of @{} went on without"""
 
 [[plant]]
@@ -178,3 +191,102 @@ runs = ["lf-page"]
 file = "crates/cf-daemon/src/page/computer_use.rs"
 find = """    let codex_set_up = codex.ok().map(|codex| codex.set_up);"""
 replace = """    let codex_set_up = Some(codex.unwrap_or_default().set_up);"""
+
+[[plant]]
+name = 'launch-freeze: a launch that fails after a Close is settled as a failure'
+meant = "a_member_launch_that_fails_after_its_project_closed_leaves_its_task_for_the_resume"
+runs = ["lf-closed"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {"""
+replace = """                if false && self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {"""
+
+[[plant]]
+name = 'launch-freeze: a closed chief is told of a chief that could not start'
+meant = "a_chief_launch_that_fails_after_its_project_closed_says_nothing_of_it"
+runs = ["lf-chief"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """        self.launch_over(
+            record,
+            participant,
+            failing.filter(|_| !displaced),"""
+replace = """        if participant.role == "chief" {
+            return Ok(false);
+        }
+        self.launch_over(
+            record,
+            participant,
+            failing.filter(|_| !displaced),"""
+
+[[plant]]
+name = 'launch-freeze: a pause during a failed plan is not seen'
+meant = "a_member_launch_that_fails_after_a_pause_leaves_the_paused_task_as_it_is"
+runs = ["lf-pause"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """failing.as_ref(), asked_before)? {"""
+replace = """failing.as_ref(), self.seams.ledger.borrow().stop_of(participant.id)?)? {"""
+
+[[plant]]
+name = 'launch-freeze: a launch is never told it is over'
+meant = "a_launch_is_told_it_is_over_once_its_project_closes"
+runs = ["lf-told"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))"""
+replace = """            let _ = (this, held, id);
+            Rc::new(|| true)"""
+
+[[plant]]
+name = 'launch-freeze: a launch that is over goes on to its next step'
+meant = "a_launch_that_is_over_begins_no_further_step"
+runs = ["lf-steps"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """) -> Result<T, String> {
+    if !launch_wanted() {
+        return Err(OVER.to_owned());
+    }"""
+replace = """) -> Result<T, String> {"""
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """        Ok(Some(_)) if !launch_wanted() => Err(OVER.to_owned()),
+"""
+replace = ""
+
+[[plant]]
+name = 'launch-freeze: the stop writes no count of what the log dropped'
+meant = "a_stop_writes_what_it_holds_then_the_count_of_what_it_dropped_then_the_stop_and_the_exit"
+runs = ["lf-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = """                                    text.push_str(&dropped_line(&at, dropped));"""
+replace = """                                    let _ = &at;"""
+
+[[plant]]
+name = 'launch-freeze: a line of the stop the log has no room for is lost'
+meant = "a_stop_writes_what_it_holds_then_the_count_of_what_it_dropped_then_the_stop_and_the_exit"
+runs = ["lf-stop"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = """        kept.push_str(&line);"""
+replace = """        let _ = &mut kept;"""
+
+[[plant]]
+name = 'launch-freeze: a new file takes over a name taken meanwhile'
+meant = "a_name_taken_while_a_new_file_is_written_beside_is_not_taken_over"
+runs = ["lf-new"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file/write.rs"
+find = """    fs::hard_link(from, to).map_err(|error| publish_failed(error, from, to))"""
+replace = """    fs::rename(from, to).map_err(|error| publish_failed(error, from, to))"""

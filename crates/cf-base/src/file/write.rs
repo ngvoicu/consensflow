@@ -37,17 +37,54 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), FileError> {
 /// (the daemon ending, a call that never ends) leaves the file as it was or not there, never
 /// half of it.
 pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    let mut temporary = OsString::from(path.as_os_str());
-    temporary.push(format!(".{}.tmp", std::process::id()));
-    let temporary = PathBuf::from(temporary);
+    let temporary = beside(path);
     write_file(&temporary, bytes, mode)
         .and_then(|()| rename(&temporary, path))
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
-/// [`write_in_place`] for a file that must be made new.
+/// [`write_in_place`] for a file that must be made new: written beside, then given its name only
+/// where the name is free, so that one another writer put there meanwhile stays as it is (an
+/// `EEXIST` of `open`, as `writeFile` with the flag `wx` says it). Nothing is renamed over a name.
 pub fn write_new_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
-    write_in_place(path, bytes, mode)
+    let temporary = beside(path);
+    let published =
+        write_file(&temporary, bytes, mode).and_then(|()| publish_new(&temporary, path));
+    // Unix leaves the file beside as a second name of the one published.
+    let removed = remove(&temporary);
+    match published {
+        Ok(()) => removed,
+        Err(failure) => Err(removed.err().unwrap_or(failure)),
+    }
+}
+
+/// The temporary a file is written to beside `path`: `<file>.<pid>.tmp`.
+fn beside(path: &Path) -> PathBuf {
+    let mut temporary = OsString::from(path.as_os_str());
+    temporary.push(format!(".{}.tmp", std::process::id()));
+    PathBuf::from(temporary)
+}
+
+/// Gives `from` the name `to` where nothing has it: a second name for the file (`link`), which
+/// the system refuses where the name is taken.
+#[cfg(unix)]
+fn publish_new(from: &Path, to: &Path) -> Result<(), FileError> {
+    fs::hard_link(from, to).map_err(|error| publish_failed(error, from, to))
+}
+
+/// Gives `from` the name `to` where nothing has it: a move with no leave to replace.
+#[cfg(windows)]
+fn publish_new(from: &Path, to: &Path) -> Result<(), FileError> {
+    super::durable::move_where_free(from, to).map_err(|error| publish_failed(error, from, to))
+}
+
+/// A name that is taken is `open`'s failure for a file that must be new; another is the call's.
+fn publish_failed(error: io::Error, from: &Path, to: &Path) -> FileError {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        return FileError::call(error, "open", Some(to));
+    }
+    let call = if cfg!(windows) { "rename" } else { "link" };
+    FileError::call_to(error, call, from, to)
 }
 
 /// Which of Node's recursive `mkdir` calls a folder is made as. Both walk

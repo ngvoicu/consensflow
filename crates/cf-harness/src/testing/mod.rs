@@ -704,17 +704,21 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
 /// `work`, done: it must not wait on anything a test did not give it, and a test that gave it
 /// something to wait on uses a [`Driver`]. What a launch's plan makes on a thread of its own
 /// (`shared::off_thread`) is waited for, as the engine's thread waits for it: the work is polled
-/// again only once it was woken, and one that is pending with nothing outstanding and no wake
-/// fails at once.
+/// again only once it was woken, and one that is pending with no call of its own outstanding and
+/// no wake fails at once.
 pub fn finished<T>(mut work: Work<'_, T>) -> T {
     let woken = std::sync::Arc::new(Woken::new());
     let waker = Waker::from(std::sync::Arc::clone(&woken));
     let mut context = Context::from_waker(&waker);
     loop {
+        crate::shared::off_thread::took_awaiting();
         if let Poll::Ready(value) = work.as_mut().poll(&mut context) {
             return value;
         }
-        assert!(woken.wait(), "work that waited on nothing it was given");
+        assert!(
+            woken.wait(crate::shared::off_thread::took_awaiting()),
+            "work that waited on nothing it was given"
+        );
     }
 }
 
@@ -740,18 +744,17 @@ impl Woken {
         self.woken.swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Waits for the next wake, one already there is taken: whether one came. None where
-    /// nothing is being made off this thread, which a wake could come from; a call that does
-    /// not end in [`WOKEN_WITHIN`] fails the test.
-    fn wait(&self) -> bool {
+    /// Waits for the next wake, one already there is taken: whether one came. None is waited
+    /// for where the polls found no call of theirs outstanding (`awaiting`), which a wake could
+    /// come from; a call that does not end in [`WOKEN_WITHIN`] fails the test.
+    fn wait(&self, awaiting: bool) -> bool {
         let began = std::time::Instant::now();
         loop {
             if self.took() {
                 return true;
             }
-            // Looked at again after: a call ends once its wake was given.
-            if !crate::shared::off_thread::outstanding() {
-                return self.took();
+            if !awaiting {
+                return false;
             }
             assert!(
                 began.elapsed() < WOKEN_WITHIN,
@@ -826,6 +829,7 @@ impl<T> Driver<T> {
         loop {
             let mut moved = false;
             let mut index = 0;
+            crate::shared::off_thread::took_awaiting();
             while index < self.begun.len() {
                 POLLING.with(|polling| polling.set(Some(self.begun[index].0)));
                 let polled = self.begun[index].1.as_mut().poll(&mut context);
@@ -838,19 +842,14 @@ impl<T> Driver<T> {
                     index += 1;
                 }
             }
+            let awaiting = crate::shared::off_thread::took_awaiting();
             if moved || woken.took() {
                 continue;
             }
-            if self.begun.is_empty() || !crate::shared::off_thread::outstanding() {
-                // A wake between the two looks is taken by one more round.
-                if woken.took() {
-                    continue;
-                }
+            // What was polled waits on no call of its own: nothing here will wake it.
+            if !woken.wait(awaiting) {
                 return settled;
             }
-            // A call whose answer nobody waits for any more (a future given up) ends with
-            // no wake: the next round finds nothing moving and nothing outstanding.
-            let _ = woken.wait();
         }
     }
 

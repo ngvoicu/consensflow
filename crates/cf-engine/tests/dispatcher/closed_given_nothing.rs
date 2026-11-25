@@ -1580,7 +1580,11 @@ const LATE: &str = "writing the launch's files took more than 60 s";
 /// The bodies of what the chief was sent.
 fn to_the_chief(context: &Context, project: i64) -> Vec<String> {
     let chief = context.id(project, "chief");
-    let inbox = context.ledger.borrow().inbox(chief, 100).expect("its inbox");
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(chief, 100)
+        .expect("its inbox");
     inbox.into_iter().map(|message| message.body).collect()
 }
 
@@ -1612,7 +1616,10 @@ fn a_member_launch_that_fails_after_its_project_closed_leaves_its_task_for_the_r
         ("queued", 0),
         "the brief waits for the Resume"
     );
-    assert_ne!(context.task(project, created.task.number).task.state, "failed");
+    assert_ne!(
+        context.task(project, created.task.number).task.state,
+        "failed"
+    );
     let told: Vec<String> = to_the_chief(&context, project)
         .into_iter()
         .chain(to_human(&context, project))
@@ -1670,7 +1677,10 @@ fn a_member_launch_that_fails_after_a_pause_leaves_the_paused_task_as_it_is() {
     preparing.open();
     context.settle();
 
-    assert_ne!(context.task(project, created.task.number).task.state, "failed");
+    assert_ne!(
+        context.task(project, created.task.number).task.state,
+        "failed"
+    );
     assert_ne!(context.message(brief).state, "failed");
     context.close();
 }

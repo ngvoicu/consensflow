@@ -82,7 +82,10 @@ fn a_permission_query_that_never_ends_is_given_up_and_the_thread_goes_on() {
     .waiting(Duration::from_millis(400));
     let ((asked, took), still) = beside_a_ticker(async move {
         let began = Instant::now();
-        let asked = call::permissions(&machine).await;
+        // A wait with no limit of the machine's own fails here and does not hang the test.
+        let asked = tokio::time::timeout(Duration::from_secs(10), call::permissions(&machine))
+            .await
+            .expect("the system was waited for with no limit");
         (asked, began.elapsed())
     });
     drop(release);

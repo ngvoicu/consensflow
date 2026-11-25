@@ -7,7 +7,8 @@
 //! its other end. A plan that waits on it on its own thread keeps every timer of the engine
 //! late by that much; a plan that waits for it off the thread keeps them.
 
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::time::{Duration, Instant};
 
 use tokio::task::LocalSet;
@@ -224,9 +225,29 @@ fn a_launch_of_another_project_is_planned_while_one_waits_on_its_folder() {
     on_one_thread(async {
         let first = launch_of(&id, &project, "role");
         let second = launch_of(&id, &other_project, "role");
-        let waiting = held_adapter.prepare(&first);
+        let mut waiting = held_adapter.prepare(&first);
+        // The first plan's worker is at the held file before the second begins: the pipe
+        // takes a writer only once something reads it.
+        let began = Instant::now();
+        let mut held_open = loop {
+            tokio::select! {
+                biased;
+                _ = &mut waiting => panic!("the held launch ended"),
+                () = tokio::time::sleep(Duration::from_millis(5)) => {}
+            }
+            let opened = fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(nix::fcntl::OFlag::O_NONBLOCK.bits())
+                .open(&gate);
+            if let Ok(opened) = opened {
+                break opened;
+            }
+            assert!(
+                began.elapsed() < Duration::from_secs(10),
+                "no plan read the folder"
+            );
+        };
         let planned = other_adapter.prepare(&second);
-        tokio::pin!(waiting);
         let planned = tokio::time::timeout(Duration::from_secs(5), async {
             tokio::select! {
                 biased;
@@ -236,7 +257,8 @@ fn a_launch_of_another_project_is_planned_while_one_waits_on_its_folder() {
         })
         .await;
         // Let the held launch end whatever the other came to.
-        std::thread::spawn(move || fs::write(gate, "{}").unwrap());
+        held_open.write_all(b"{}").unwrap();
+        drop(held_open);
         planned
             .expect("the other project's launch waited behind the held one")
             .unwrap();

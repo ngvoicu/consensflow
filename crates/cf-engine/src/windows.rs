@@ -820,6 +820,9 @@ impl Dispatcher {
                 return self.launch_failed(record, project, participant, failing, &said);
             }
         };
+        // What a pause that comes while the plan is made is told apart by, where the plan
+        // fails: read in the turn the plan begins its first message in.
+        let asked_before = self.seams.ledger.borrow().stop_of(participant.id)?;
         // Boxed, so that the work of an operation that launches stays small
         // (`dispatcher::tests`): the plan asks the harness and prepares the window,
         // and what it comes to is held on the heap through the waits after it.
@@ -841,6 +844,11 @@ impl Dispatcher {
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
                 self.seams.launch_files.forget(&launch_id);
+                // A launch that is over fails nothing: what it was to deliver waits, as
+                // where its plan was made (T-2263).
+                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {
+                    return Ok(());
+                }
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
@@ -1497,7 +1505,13 @@ impl Dispatcher {
         };
         // An `async` function: its answer, or its failure, reaches this
         // step a turn after it was made, though Pi's never waits.
-        let prepared = returning(adapter.prepare(&launch))
+        // Its steps made off the thread ask between them whether it is still wanted, so that
+        // a Close waits for one of them at most (T-2263).
+        let wanted = {
+            let (this, held, id) = (Rc::clone(self), Rc::clone(record), project.id);
+            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))
+        };
+        let prepared = cf_harness::while_wanted(wanted, returning(adapter.prepare(&launch)))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
         if participant.role == "chief" {
@@ -1648,6 +1662,38 @@ impl Dispatcher {
             .borrow_mut()
             .launch_called_off(delivering.message)?;
         Ok(true)
+    }
+
+    /// [`Dispatcher::launch_over`] for a launch whose plan failed, asked before the failure is
+    /// settled: its project closed or its record forgotten while the plan was made, or, for a
+    /// member, its message withdrawn or a pause asked since `captured` was read. `failing` is
+    /// still queued where the window was to be told its role first, and fails all the same
+    /// unless the launch is over.
+    fn over_though_failed(
+        &self,
+        record: &Rc<Record>,
+        participant: &ParticipantView,
+        failing: Option<&Delivering>,
+        captured: Option<Stop>,
+    ) -> Result<bool, EngineError> {
+        let mut displaced = false;
+        if let Some(failing) = failing {
+            let message = self.seams.ledger.borrow().message(failing.message)?;
+            displaced = message.is_some_and(|message| message.state == "queued");
+        }
+        if displaced
+            && participant.role != "chief"
+            && self.seams.ledger.borrow().stop_of(participant.id)? != captured
+        {
+            return Ok(true);
+        }
+        self.launch_over(
+            record,
+            participant,
+            failing.filter(|_| !displaced),
+            captured,
+            "a pause came while its window was prepared",
+        )
     }
 
     /// What a window's first message reads, which `begin_delivery` told: a

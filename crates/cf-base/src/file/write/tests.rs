@@ -469,7 +469,10 @@ fn a_name_taken_while_a_new_file_is_written_beside_is_not_taken_over() {
     fs::write(&path, b"already published").unwrap();
     let mut drained = Vec::new();
     reading.read_to_end(&mut drained).unwrap();
-    let refused = writer.join().unwrap().expect_err("the late writer was not refused");
+    let refused = writer
+        .join()
+        .unwrap()
+        .expect_err("the late writer was not refused");
     assert!(refused.to_string().starts_with("EEXIST"), "{refused}");
     assert_eq!(fs::read(&path).unwrap(), b"already published");
     assert_eq!(left_in(dir.path()), ["config.json"]);
