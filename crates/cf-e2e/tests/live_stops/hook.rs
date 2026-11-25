@@ -469,7 +469,10 @@ mod tests {
     fn a_hook_of_another_run_on_the_machine_is_not_the_hook_the_case_waits_for() {
         use cf_e2e::live::claude::processes_with;
 
-        let mut decoy = cf_e2e::process::Run::fixture_script("read line; : hook claude")
+        // Its command line says `hook claude`: the words are the script's name and argument,
+        // which the shell does nothing with.
+        let mut decoy = cf_e2e::process::Run::new("/bin/sh")
+            .args(["-c", "read line", "hook", "claude"])
             .spawn()
             .unwrap();
         let pid = decoy.id();

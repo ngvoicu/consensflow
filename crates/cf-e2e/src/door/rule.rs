@@ -613,12 +613,6 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "an offline fixture's own script, started through `Run::fixture_script`",
     ),
     (
-        "tests/live_stops/hook.rs",
-        "a_hook_of_another_run_on_the_machine_is_not_the_hook_the_case_waits_for",
-        Class::Operation,
-        "an offline fixture's own script, started through `Run::fixture_script`",
-    ),
-    (
         "tests/live_stops/slow.rs",
         "a_process_of_another_run_that_holds_the_hooks_old_word_is_not_the_hook_the_case_looks_for",
         Class::Operation,

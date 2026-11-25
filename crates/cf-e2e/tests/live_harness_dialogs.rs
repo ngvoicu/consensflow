@@ -429,13 +429,13 @@ mod tests {
         let mut layout = Layout::new().unwrap();
         let home = owners_home(&mut layout);
         // A caller's config folder, with files in it, that no run made: a person's own.
-        let callers = cf_e2e::door::made("t-").unwrap();
+        let callers = cf_e2e::standin_process::unowned_tempdir();
         let (settings, record) = (
             callers.path().join("settings.json"),
             callers.path().join(".claude.json"),
         );
-        cf_e2e::door::write(&settings, "{\"theme\":\"dark\"}").unwrap();
-        cf_e2e::door::write(&record, "{\"projects\":{}}").unwrap();
+        cf_e2e::standin_process::foreign_write(&settings, "{\"theme\":\"dark\"}");
+        cf_e2e::standin_process::foreign_write(&record, "{\"projects\":{}}");
         let refused = seed_marketplace_from(&home, callers.path());
         assert!(refused.is_err(), "a caller's config folder was written in");
         assert!(!callers.path().join("plugins").exists());

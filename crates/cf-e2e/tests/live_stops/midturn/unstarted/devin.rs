@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn the_store_diagnostic_does_not_look_in_the_persons_home() {
         let run = cf_e2e::door::made("devin-store-diagnostic-").unwrap();
-        let person = cf_e2e::door::made("t-").unwrap();
+        let person = cf_e2e::standin_process::unowned_tempdir();
         let data = run.path().join("data");
         let at = |path: &Path| path.to_string_lossy().into_owned();
         let env = vec![
@@ -309,7 +309,7 @@ mod tests {
         #[cfg(unix)]
         {
             let other = person.path().join("sessions.db");
-            cf_e2e::door::write(&other, b"foreign").unwrap();
+            cf_e2e::standin_process::foreign_write(&other, b"foreign");
             let link = data.join("devin/cli/sessions.db");
             cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();
             cf_e2e::door::symlink(other, link).unwrap();

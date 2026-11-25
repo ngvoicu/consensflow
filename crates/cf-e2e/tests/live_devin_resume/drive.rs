@@ -449,8 +449,8 @@ mod tests {
             assert!(kept.join(cf_e2e::door::KEPT).is_file(), "{kept:?}");
         }
         // What this run did not make is never taken, held or not.
-        let theirs = cf_e2e::door::made("t-").unwrap();
-        cf_e2e::door::write(theirs.path().join("mine.txt"), "a person's").unwrap();
+        let theirs = cf_e2e::standin_process::unowned_tempdir();
+        cf_e2e::standin_process::foreign_write(theirs.path().join("mine.txt"), "a person's");
         assert_eq!(settle(theirs.path(), true, false), Settled::Kept);
         assert!(theirs.path().join("mine.txt").is_file());
     }

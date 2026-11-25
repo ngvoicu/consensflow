@@ -718,9 +718,11 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 }
 
 /// A synthetic foreign folder must be outside every root handed to this test
-/// process, including the parent's root when the test runs again under audit.
-#[cfg(test)]
-pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
+/// process, including the parent's root when the test runs again under audit. The suites
+/// ask for it too (`test-support`): what a guard must refuse is never what this run made.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn unowned_tempdir() -> tempfile::TempDir {
     let temp = std::env::temp_dir();
     let parent = temp
         .ancestors()
@@ -736,7 +738,7 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 
 /// A fixture writes only below a decoy folder ([`unowned_tempdir`]) that the door refuses: any other
 /// path is a mistake of the fixture, and is not written.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn is_in_the_decoy(path: &Path) {
     assert!(
         path.ancestors().any(|part| part
@@ -754,16 +756,18 @@ fn is_in_the_decoy(path: &Path) {
 
 /// A file of a synthetic foreign folder ([`unowned_tempdir`]), made as the foreign party made it:
 /// the door refuses a write there, so the fixture is not written through it.
-#[cfg(test)]
-pub(crate) fn foreign_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn foreign_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
     let path = path.as_ref();
     is_in_the_decoy(path);
     std::fs::write(path, contents).expect("write a file of a synthetic foreign folder");
 }
 
 /// A folder of a synthetic foreign folder, made as [`foreign_write`] makes a file.
-#[cfg(test)]
-pub(crate) fn foreign_dir(path: impl AsRef<Path>) {
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn foreign_dir(path: impl AsRef<Path>) {
     let path = path.as_ref();
     is_in_the_decoy(path);
     std::fs::create_dir(path).expect("make a folder of a synthetic foreign folder");

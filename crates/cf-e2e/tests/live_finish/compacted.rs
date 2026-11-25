@@ -310,7 +310,7 @@ mod tests {
                 found.starts_with(root.path()),
                 "Devin's store is outside the run's home"
             );
-            let foreign = cf_e2e::door::made("t-").unwrap();
+            let foreign = cf_e2e::standin_process::unowned_tempdir();
             let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
             let mut outside = env.to_vec();
             outside.push((
@@ -354,9 +354,9 @@ mod tests {
         );
         #[cfg(unix)]
         {
-            let foreign = cf_e2e::door::made("t-").unwrap();
+            let foreign = cf_e2e::standin_process::unowned_tempdir();
             let other = foreign.path().join("sessions.db");
-            cf_e2e::door::write(&other, b"not this run's store").unwrap();
+            cf_e2e::standin_process::foreign_write(&other, b"not this run's store");
             let linked_data = root.path().join("linked-data");
             let link = linked_data.join("devin/cli/sessions.db");
             cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();

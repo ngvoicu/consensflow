@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_folders_refuse_a_foreign_home() {
-        let foreign = cf_e2e::door::made("t-").unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
         let env = vec![(
             "XDG_DATA_HOME".to_owned(),
             foreign.path().display().to_string(),
@@ -594,11 +594,14 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_compaction_store_refuses_a_foreign_database() {
-        let foreign = cf_e2e::door::made("t-").unwrap();
-        let store = foreign.path().join("sessions.db");
-        let db = cf_e2e::door::database::write(&store).unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        let mine = cf_e2e::door::made("t-").unwrap();
+        let made = mine.path().join("sessions.db");
+        let db = cf_e2e::door::database::write(&made).unwrap();
         db.execute_batch("CREATE TABLE message_nodes (metadata TEXT, chat_message TEXT, row_id INTEGER); INSERT INTO message_nodes VALUES ('{\"summarized_from\":1}', '{}', 1);").unwrap();
         drop(db);
+        let store = foreign.path().join("sessions.db");
+        cf_e2e::standin_process::foreign_write(&store, std::fs::read(&made).unwrap());
         assert!(
             devin_summaries_and_notes(&store).is_err(),
             "a foreign Devin store was opened"
@@ -607,13 +610,12 @@ mod tests {
 
     #[test]
     fn kit_disclosure_pi_compaction_refuses_foreign_session_root() {
-        let foreign = cf_e2e::door::made("t-").unwrap();
-        cf_e2e::door::make_dir(foreign.path().join("sessions")).unwrap();
-        cf_e2e::door::write(
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        cf_e2e::standin_process::foreign_dir(foreign.path().join("sessions"));
+        cf_e2e::standin_process::foreign_write(
             foreign.path().join("sessions/s.jsonl"),
             "{\"type\":\"compaction\",\"tokensBefore\":42}\n",
-        )
-        .unwrap();
+        );
         assert!(
             pi_compactions(foreign.path()).is_err(),
             "a foreign Pi session was accepted"

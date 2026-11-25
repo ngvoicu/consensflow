@@ -903,9 +903,9 @@ mod tests {
     #[test]
     fn kit_round4_kept_wal_does_not_copy_linked_shm() {
         let run = cf_e2e::door::made("cf-subagent-kept-").unwrap();
-        let foreign = cf_e2e::door::made("t-").unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
         let secret = foreign.path().join("secret");
-        cf_e2e::door::write(&secret, "fabricated foreign record").unwrap();
+        cf_e2e::standin_process::foreign_write(&secret, "fabricated foreign record");
         let store = run.path().join("sessions.db");
         let wal = run.path().join("sessions.db-wal");
         cf_e2e::door::write(&store, "fabricated store").unwrap();
@@ -926,9 +926,9 @@ mod tests {
 
     #[test]
     fn kit_round3_subagent_parent_record_refuses_a_foreign_file() {
-        let foreign = cf_e2e::door::made("t-").unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
         let file = foreign.path().join("record.jsonl");
-        cf_e2e::door::write(&file, "fabricated parent record").unwrap();
+        cf_e2e::standin_process::foreign_write(&file, "fabricated parent record");
         assert!(
             read_run_record(&file).is_empty(),
             "a foreign parent record was read"
@@ -940,8 +940,11 @@ mod tests {
     fn kit_round3_subagent_refuses_linked_out_sqlite_sidecars() {
         for suffix in ["-shm", "-wal"] {
             let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
-            let foreign = cf_e2e::door::made("t-").unwrap();
-            cf_e2e::door::write(foreign.path().join("secret"), "fabricated record").unwrap();
+            let foreign = cf_e2e::standin_process::unowned_tempdir();
+            cf_e2e::standin_process::foreign_write(
+                foreign.path().join("secret"),
+                "fabricated record",
+            );
             let store = run.path().join("sessions.db");
             cf_e2e::door::write(&store, "fabricated store").unwrap();
             let name = format!("sessions.db{suffix}");

@@ -1471,7 +1471,7 @@ mod tests {
 
     #[test]
     fn the_trust_reader_refuses_an_owners_config() {
-        let owner = cf_e2e::door::made("t-").unwrap();
+        let owner = cf_e2e::standin_process::unowned_tempdir();
         assert!(
             config_path(None).is_err(),
             "a missing run config must be refused"
@@ -1557,11 +1557,14 @@ mod tests {
         // A Claude config folder a caller named (`--claude-config`), with files in it, that no
         // run made: a person's own. Neither the yes a person said once nor a folder's grants
         // reach it, and every file of it is as it was.
-        let callers = cf_e2e::door::made("t-").unwrap();
+        let callers = cf_e2e::standin_process::unowned_tempdir();
         let record = callers.path().join(".claude.json");
         let kept = r#"{"projects":{"/mine":{"hasTrustDialogAccepted":false}}}"#;
-        cf_e2e::door::write(&record, kept).unwrap();
-        cf_e2e::door::write(callers.path().join("settings.json"), "{\"theme\":\"dark\"}").unwrap();
+        cf_e2e::standin_process::foreign_write(&record, kept);
+        cf_e2e::standin_process::foreign_write(
+            callers.path().join("settings.json"),
+            "{\"theme\":\"dark\"}",
+        );
         assert!(said_yes_once(&record, callers.path()).is_err());
         assert_eq!(fs::read_to_string(&record).unwrap(), kept);
         assert!(pre_approve(callers.path()).is_err());
