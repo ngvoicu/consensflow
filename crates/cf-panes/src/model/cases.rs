@@ -231,8 +231,7 @@ fn t2132_the_cap_goes_on_a_feed_that_does_not_end() {
 fn t2132_a_split_echo_is_no_look() {
     each_harness(|harness| {
         let looked = kept();
-        let (answer, world) = (Arc::clone(&looked), ());
-        let _ = world;
+        let answer = Arc::clone(&looked);
         let case = Case::new(harness, move |world| {
             world.echo_as([Echo::Split]);
             world.type_keys(b"X");

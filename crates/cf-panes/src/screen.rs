@@ -216,10 +216,14 @@ pub(crate) enum FeedStage {
     Snapshot,
 }
 
+/// What a test is called with at each [`FeedStage`].
+#[cfg(test)]
+type Hold = std::sync::Arc<dyn Fn(FeedStage) + Send + Sync>;
+
 /// A test's hold on [`FeedStage`]s: called at each, on the feeding thread.
 #[cfg(test)]
 #[derive(Default)]
-pub(crate) struct FeedHook(Mutex<Option<std::sync::Arc<dyn Fn(FeedStage) + Send + Sync>>>);
+pub(crate) struct FeedHook(Mutex<Option<Hold>>);
 
 #[cfg(test)]
 impl FeedHook {

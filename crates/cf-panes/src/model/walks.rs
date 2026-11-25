@@ -3,6 +3,9 @@
 //! schedule replays from its seed. `CF_MODEL_WALKS` raises the count (2,000 a harness by default),
 //! `CF_MODEL_FROM` moves where the seeds begin, and `CF_MODEL_SEED` replays one.
 
+// A test of the model: its seeds and counts are read from the environment it is run in.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;

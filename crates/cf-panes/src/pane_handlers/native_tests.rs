@@ -3,6 +3,10 @@
 //! the cases of T-2132's review). The child is a Python program that records its input, and
 //! prints on the test's word.
 
+// Compiled for Unix tests alone, which clippy does not take for test code: a failure here is
+// the test's answer.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -660,8 +664,8 @@ fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
         .paste(
             window.key.clone(),
             b"DELIVERY".to_vec(),
-            Some(at.clone()),
-            Some(over(at.clone())),
+            Some(at),
+            Some(over(at)),
             None,
         )
         .and_then(wait_for_input_blocking);

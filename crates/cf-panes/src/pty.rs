@@ -441,6 +441,8 @@ impl PaneTable {
 
     /// The pane's writer, for a test that holds it as a slow write would.
     #[cfg(all(test, unix))]
+    // A test's own reach into the table.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
     pub(crate) fn writer_of(&self, key: &PaneKey) -> Arc<Mutex<Box<dyn Write + Send>>> {
         let panes = self.lock_panes().unwrap();
         Arc::clone(&panes.get(key).expect("the pane").writer)

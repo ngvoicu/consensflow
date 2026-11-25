@@ -281,7 +281,7 @@ impl Program {
     pub(crate) fn scroll(&self) {
         let mut bytes = format!("\x1b[{ROWS};1H\n").into_bytes();
         bytes.extend(self.frame());
-        bytes.extend(format!("\x1b[1;1H\x1b[2Kscrolled").into_bytes());
+        bytes.extend(b"\x1b[1;1H\x1b[2Kscrolled");
         bytes.extend(format!("\x1b[{BOX};{}H", self.cursor()).into_bytes());
         self.emit(bytes);
     }
