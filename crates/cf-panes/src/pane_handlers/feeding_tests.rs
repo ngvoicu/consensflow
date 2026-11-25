@@ -756,32 +756,44 @@ fn a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it() {
     assert_eq!(window.pasted(), 2);
 }
 
-/// The host keeps a screen before the write that added a character, with whether it was the
-/// first, and one before the first write since that added none; it forgets both when the count
-/// is zero.
+/// The host keeps a screen before each write that added a character, the same screen once, and
+/// one before the first write since that added none; it forgets them when the count is zero
+/// (T-2255).
 #[test]
 fn the_screens_kept_at_the_persons_keys_are_as_the_table_says() {
     let window = Boxed::new();
     window.type_key("a");
     let at = window.unsent_at().expect("a count above zero");
-    assert_eq!(at["typedInto"]["first"], true);
-    assert_eq!(at["typedInto"]["current"], true);
+    assert_eq!(at["typedAt"].as_array().unwrap().len(), 1);
+    assert_eq!(at["typedMore"], false);
+    assert_eq!(at["typedAt"][0]["current"], true);
     assert!(at.get("pressedOver").is_none());
     assert_eq!(
-        at["typedInto"]["bottom"][1], "❯",
+        at["typedAt"][0]["bottom"][1], "❯",
         "the screen as it stood before the key"
     );
-    // The window draws what it was given, then a second character: not the first.
+    // The window draws what it was given, then a second character: a screen of its own.
     window.print("\x1b[2;3Hab\x1b[2;5H");
     window.type_key("b");
     let at = window.unsent_at().unwrap();
-    assert_eq!(at["typedInto"]["first"], false);
-    assert_eq!(at["typedInto"]["bottom"][1], "❯ ab");
-    // A key that adds none keeps the screen before it, once.
+    assert_eq!(at["typedAt"].as_array().unwrap().len(), 2);
+    assert_eq!(at["typedAt"][1]["bottom"][1], "❯ ab");
+    // The same screen again is not kept twice: it takes the newer one's `current`.
+    window.printed.counts().took(1);
+    window.type_key("c");
+    let at = window.unsent_at().unwrap();
+    assert_eq!(at["typedAt"].as_array().unwrap().len(), 2);
+    assert_eq!(at["typedAt"][1]["current"], false);
+    window.printed.counts().took(3);
+    window
+        .screen
+        .feed_noting(b"\x1b[0m", &window.printed, |_| {});
+    // A key that adds none keeps the screen before it, once, and takes no screen away.
     window.type_key("\x17");
     window.print("\x1b[2;3H\x1b[K");
-    window.type_key("\x1b[D");
+    window.type_key("\x7f");
     let at = window.unsent_at().unwrap();
+    assert_eq!(at["typedAt"].as_array().unwrap().len(), 2);
     assert_eq!(
         at["pressedOver"]["bottom"][1], "❯ ab",
         "the first such write's"
@@ -789,63 +801,94 @@ fn the_screens_kept_at_the_persons_keys_are_as_the_table_says() {
     // A character forgets it.
     window.type_key("c");
     assert!(window.unsent_at().unwrap().get("pressedOver").is_none());
-    // A write that leaves the count at zero forgets both.
+    // A write that leaves the count at zero forgets every screen.
     window.type_key("\x15");
     assert_eq!(window.unsent_at(), None);
     // A write that holds a character and other keys counts as one that adds.
     window.type_key("\x1b[Dd");
     let at = window.unsent_at().unwrap();
-    assert_eq!(at["typedInto"]["first"], true);
+    assert_eq!(at["typedAt"].as_array().unwrap().len(), 1);
     assert!(at.get("pressedOver").is_none());
     // What the terminal reports of itself moves nothing.
     window.type_key("\x1b[I");
     assert!(window.unsent_at().unwrap().get("pressedOver").is_none());
+    // 32 screens at the most: one more says so and is not kept.
+    window.type_key("\x15");
+    for key in 0..33 {
+        window.print(&format!("\x1b[2;3H{key:02}"));
+        window.type_key("z");
+        let at = window.unsent_at().unwrap();
+        assert_eq!(at["typedAt"].as_array().unwrap().len(), (key + 1).min(32));
+        assert_eq!(at["typedMore"], key >= 32, "{key}");
+    }
+    window.type_key("\x15");
+    window.type_key("a");
+    assert_eq!(window.unsent_at().unwrap()["typedMore"], false);
 }
 
-/// A screen kept while the pane was behind is marked so, and admits nothing; nor does
-/// "elsewhere" a screen before a key that was not the first.
+/// A screen kept while the pane was behind is marked so, and admits nothing by itself:
+/// "erased" asks the screen over the key, "elsewhere" the last screen or that one (T-2255).
 #[test]
 fn the_host_admits_evidence_only_where_it_holds_that_screen_current() {
-    let window = Boxed::new();
-    window.printed.counts().took(1);
-    window.type_key("X");
-    assert_eq!(window.unsent_at().unwrap()["typedInto"]["current"], false);
-    window.printed.counts().took(3);
-    window
-        .screen
-        .feed_noting(b"\x1b[0m", &window.printed, |_| {});
-    let at = window.look();
-    for by in [Evidence::Elsewhere, Evidence::Erased] {
+    let behind = |window: &Boxed, key: &str| {
+        window.printed.counts().took(1);
+        window.type_key(key);
+        window.printed.counts().took(3);
+        window
+            .screen
+            .feed_noting(b"\x1b[0m", &window.printed, |_| {});
+    };
+    let refused = |window: &Boxed, by: Evidence| {
+        let at = window.look();
         assert!(
             matches!(window.paste_by(at, by), Err(ArbiterError::Unsent)),
             "{by:?}"
         );
-    }
-    // The same for a screen kept over a key that added none.
+        assert_eq!(window.pasted(), 0);
+    };
+    // The only character's screen was behind.
+    let window = Boxed::new();
+    behind(&window, "X");
+    assert_eq!(window.unsent_at().unwrap()["typedAt"][0]["current"], false);
+    refused(&window, Evidence::Elsewhere);
+    refused(&window, Evidence::Erased);
+    // The screen over a key that added none was behind.
     window.type_key("\r");
-    window.type_key("Y");
-    window.printed.counts().took(1);
-    window.type_key("\x17");
+    behind(&window, "Y");
+    behind(&window, "\x17");
     assert_eq!(window.unsent_at().unwrap()["pressedOver"]["current"], false);
-    window.printed.counts().took(3);
-    window
-        .screen
-        .feed_noting(b"\x1b[0m", &window.printed, |_| {});
-    let at = window.look();
-    assert!(matches!(
-        window.paste_by(at, Evidence::Erased),
-        Err(ArbiterError::Unsent)
-    ));
-    // A second character: its screen is not the first's.
+    refused(&window, Evidence::Erased);
+    refused(&window, Evidence::Elsewhere);
+    // The last of two screens was behind, the first current.
     window.type_key("\r");
+    window.type_key("a");
+    window.print("\x1b[2;3Ha");
+    behind(&window, "b");
+    refused(&window, Evidence::Elsewhere);
+    // More characters than screens are kept of.
+    window.type_key("\r");
+    for key in 0..33 {
+        window.print(&format!("\x1b[2;3H{key:02}"));
+        window.type_key("z");
+    }
+    refused(&window, Evidence::Elsewhere);
+    // The screen at the next key, current, stands for a last screen that was behind.
+    window.type_key("\r");
+    behind(&window, "v");
+    window.type_key("\x1b");
+    let at = window.look();
+    window
+        .paste_by(at, Evidence::Elsewhere)
+        .expect("the screen at Escape was current");
+    assert_eq!(window.pasted(), 1);
+    // Two characters, each on a current screen.
     window.type_key("a");
     window.type_key("b");
     let at = window.look();
-    assert!(matches!(
-        window.paste_by(at, Evidence::Elsewhere),
-        Err(ArbiterError::Unsent)
-    ));
-    assert_eq!(window.pasted(), 0);
+    window
+        .paste_by(at, Evidence::Elsewhere)
+        .expect("a screen for each key");
+    assert_eq!(window.pasted(), 2);
 }
 
 /// Main's journal and N17's counts meet in one step (T-2198 note 7): a window that keeps a journal

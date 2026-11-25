@@ -167,39 +167,113 @@ fn a_box_read_empty_after_a_key_over_a_box_that_held_text_was_erased() {
     );
 }
 
-/// Typed elsewhere: every character the count holds came in one write, into a screen that showed
-/// a dialog and not the box.
+/// The screens kept at the person's characters (`typedAt`), and what stands for the last.
+fn typed_at(screens: &[(&[&str], bool)], more: bool, over: Option<(&[&str], bool)>) -> Look {
+    let screens: Vec<Value> = screens
+        .iter()
+        .map(|(lines, current)| kept(lines, *current))
+        .collect();
+    let mut at = json!({ "typedAt": screens, "typedMore": more });
+    if let Some((lines, current)) = over {
+        at["pressedOver"] = kept(lines, current);
+    }
+    over_count(at)
+}
+
+/// Typed elsewhere (T-2255): every screen kept at a character shows a dialog and not the box,
+/// and the last of them, or the screen kept at the first key after it, was current.
 #[test]
 fn keys_typed_into_a_dialog_and_nowhere_else_set_the_count_aside() {
-    let into = |lines: &[&str], first: bool, current: bool| {
-        let mut screen = kept(lines, current);
-        screen["first"] = json!(first);
-        over_count(json!({ "typedInto": screen }))
-    };
+    let here = Some(Evidence::Elsewhere);
+    assert_eq!(goes_on(&typed_at(&[(DIALOG, true)], false, None)), here);
     assert_eq!(
-        goes_on(&into(DIALOG, true, true)),
-        Some(Evidence::Elsewhere)
+        goes_on(&typed_at(&[(DIALOG, false), (DIALOG, true)], false, None)),
+        here,
+        "an earlier screen need not be current"
     );
-    assert_eq!(goes_on(&into(DIALOG, false, true)), None, "not the first");
     assert_eq!(
-        goes_on(&into(DIALOG, true, false)),
+        goes_on(&typed_at(&[(DIALOG, false)], false, Some((DIALOG, true)))),
+        here,
+        "the screen at the next key stands for the last"
+    );
+    assert_eq!(
+        goes_on(&typed_at(&[(DIALOG, true), (DIALOG, false)], false, None)),
         None,
-        "behind at the key"
+        "behind at the last key"
     );
+    assert_eq!(
+        goes_on(&typed_at(&[(DIALOG, false)], false, Some((DIALOG, false)))),
+        None,
+        "behind at the next key too"
+    );
+    assert_eq!(
+        goes_on(&typed_at(&[(DIALOG, true)], true, None)),
+        None,
+        "more keys than the host keeps screens of"
+    );
+    assert_eq!(goes_on(&typed_at(&[], false, Some((DIALOG, true)))), None);
     let held = boxed("");
     let held: Vec<&str> = held.iter().map(String::as_str).collect();
-    assert_eq!(goes_on(&into(&held, true, true)), None, "the box took it");
+    assert_eq!(
+        goes_on(&typed_at(&[(&held, true)], false, None)),
+        None,
+        "the box took it"
+    );
+    assert_eq!(
+        goes_on(&typed_at(
+            &[(DIALOG, true), (&held, true), (DIALOG, true)],
+            false,
+            None
+        )),
+        None,
+        "one of the characters went into the box"
+    );
+    assert_eq!(
+        goes_on(&typed_at(&[(DIALOG, false)], false, Some((&held, true)))),
+        None,
+        "the dialog had ended by the next key"
+    );
     // A conversation that quotes a list is drawn over the box, which took the key.
     let mut quoted = DIALOG.to_vec();
     quoted.extend(held.iter().copied());
     assert_eq!(
-        goes_on(&into(&quoted, true, true)),
+        goes_on(&typed_at(&[(&quoted, true)], false, None)),
         None,
         "the box is shown"
     );
 }
 
-/// The count holds while the box holds text or cannot be read, whatever was kept.
+/// A window draws a dialog's end and the keys typed ahead of it in two frames: a paste that
+/// sets the count aside waits for a screen that has not changed for a second (T-2255).
+#[test]
+fn a_paste_over_the_count_waits_for_a_second_of_a_still_screen() {
+    let quiet = |ms: Value| {
+        let mut answer = snapshot("", true, Some(2_000));
+        answer["unsentAt"] = json!({ "typedAt": [kept(DIALOG, true)], "typedMore": false });
+        answer["screenQuietMs"] = ms;
+        paste_on(&look(&answer))
+    };
+    assert_eq!(quiet(json!(999)), PasteLicence::Wait(Held::Unproven));
+    assert_eq!(quiet(Value::Null), PasteLicence::Wait(Held::Unproven));
+    assert!(matches!(
+        quiet(json!(1_000)),
+        PasteLicence::Go {
+            read_empty: Some(Evidence::Elsewhere),
+            ..
+        }
+    ));
+    // With nothing unsent no still screen is asked: the box is the window's own word.
+    let mut answer = snapshot("", false, Some(2_000));
+    answer["screenQuietMs"] = json!(0);
+    assert!(matches!(
+        paste_on(&look(&answer)),
+        PasteLicence::Go {
+            read_empty: None,
+            ..
+        }
+    ));
+}
+
 #[test]
 fn a_box_that_holds_text_or_is_not_read_holds_as_the_persons_words() {
     let lines = boxed("ab");

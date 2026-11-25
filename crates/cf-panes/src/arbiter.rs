@@ -86,19 +86,18 @@ pub struct Kept {
     pub current: bool,
 }
 
-/// The screen as it stood before the write that added the last of the person's characters.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypedInto {
-    pub screen: Arc<Kept>,
-    /// Whether nothing was unsent before that write.
-    pub first: bool,
-}
+/// How many screens the host keeps of the writes that added a character (`typedAt`).
+pub const TYPED_AT_MOST: usize = 32;
 
-/// The two screens a pane keeps while it counts the person's keys as unsent (N17): the
-/// evidence a box read empty may set the count aside on.
+/// The screens a pane keeps while it counts the person's keys as unsent (N17): the evidence a
+/// box read empty may set the count aside on.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UnsentAt {
-    pub typed_into: Option<TypedInto>,
+    /// The screen as it stood before each write that added a character, in order, the same
+    /// screen once; [`TYPED_AT_MOST`] at the most.
+    pub typed_at: Vec<Arc<Kept>>,
+    /// Whether a write that added a character has no screen in [`Self::typed_at`].
+    pub typed_more: bool,
     /// The screen as it stood before the first write that added no character and left the
     /// count above zero (Backspace, any other control key or escape sequence), since the last
     /// character.
@@ -541,7 +540,7 @@ impl InputArbiter {
                     current: state.output.counts().current(),
                 })
             });
-            state.keep_screens(before, read.unsent, read.added, kept);
+            state.keep_screens(read.unsent, read.added, kept);
             state.typed += 1;
             state.typed_at = Some(self.clock.now());
         }

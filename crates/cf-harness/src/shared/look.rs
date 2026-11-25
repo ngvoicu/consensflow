@@ -91,13 +91,16 @@ impl Kept {
     }
 }
 
-/// The two screens a look carries while the count is above zero (`unsentAt`).
+/// The screens a look carries while the count is above zero (`unsentAt`).
 #[derive(Debug, Clone, Default)]
 struct UnsentAt {
-    /// The screen before the write that added the last character, and whether nothing was
-    /// unsent before that write.
-    typed_into: Option<(Kept, bool)>,
-    /// The screen before the first write since that added none and left the count above zero.
+    /// The screen before each of the person's writes that added a character, in order.
+    typed_at: Vec<Kept>,
+    /// Whether a screen the count's characters need is missing from [`Self::typed_at`]: more
+    /// writes than the host keeps screens of, or one this look cannot read.
+    typed_more: bool,
+    /// The screen before the first write since the last character that added none and left the
+    /// count above zero.
     pressed_over: Option<Kept>,
 }
 
@@ -106,11 +109,12 @@ impl UnsentAt {
         let Some(value) = value else {
             return Self::default();
         };
+        let sent = value.get("typedAt").and_then(Value::as_array);
+        let typed_at: Vec<Kept> = sent.into_iter().flatten().filter_map(Kept::of).collect();
         Self {
-            typed_into: value.get("typedInto").and_then(|kept| {
-                let first = kept.get("first").and_then(Value::as_bool) == Some(true);
-                Some((Kept::of(kept)?, first))
-            }),
+            typed_more: value.get("typedMore") != Some(&Value::Bool(false))
+                || sent.is_none_or(|sent| sent.len() != typed_at.len()),
+            typed_at,
             pressed_over: value.get("pressedOver").and_then(Kept::of),
         }
     }
@@ -214,13 +218,15 @@ impl Look {
     /// host's count of them aside; none where there is none and the count holds:
     /// - **erased**: at the first key the count cannot follow after their last character, the
     ///   screen was current and `harness`'s reader reads its box on it as holding text;
-    /// - **typed elsewhere**: every character the count holds came in one write, and the
-    ///   screen before that write was current and showed a dialog or a picker and no box.
+    /// - **typed elsewhere**: the screen before every write that added a character showed a
+    ///   dialog or a picker and no box, and the last of them was current, or the screen at the
+    ///   first key after it was current and showed one too.
     ///
     /// The caller still asks that the box reads empty now.
     pub fn evidence(&self, harness: Harness) -> Option<Evidence> {
         let UnsentAt {
-            typed_into,
+            typed_at,
+            typed_more,
             pressed_over,
         } = &self.unsent_at;
         let erased = pressed_over.as_ref().is_some_and(|kept| {
@@ -230,9 +236,16 @@ impl Look {
         if erased {
             return Some(Evidence::Erased);
         }
-        let elsewhere = typed_into
-            .as_ref()
-            .is_some_and(|(kept, first)| *first && kept.current && shows_a_dialog(harness, kept));
+        let elsewhere = !typed_more
+            && typed_at.iter().all(|kept| shows_a_dialog(harness, kept))
+            && typed_at.last().is_some_and(|last| {
+                // A screen that was not current may have had the dialog's end on its way; a
+                // later one that was current and still shows a dialog says it had not.
+                last.current
+                    || pressed_over
+                        .as_ref()
+                        .is_some_and(|over| over.current && shows_a_dialog(harness, over))
+            });
         elsewhere.then_some(Evidence::Elsewhere)
     }
 
@@ -330,6 +343,15 @@ pub fn licence_paste(
         let Some(evidence) = look.evidence(harness) else {
             return PasteLicence::Wait(Held::Unproven);
         };
+        // A window draws a dialog's end and the keys typed ahead of it in two frames, a moment
+        // apart, and a look between them reads the box empty. A screen that never holds still
+        // keeps the words that say what to press.
+        if look
+            .screen_quiet_ms()
+            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Unproven);
+        }
         Some(evidence)
     } else {
         None

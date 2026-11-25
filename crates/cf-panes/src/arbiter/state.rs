@@ -9,7 +9,7 @@ use crate::pty::{PaneError, PaneKey};
 use super::keys::Classes;
 use super::paste::PasteWatch;
 use super::timing::{millis_since, Clock, EnterTiming, OutputClock, OutputCount};
-use super::{ArbiterError, ArbiterSnapshot, HumanWrite, Kept, TypedInto, UnsentAt};
+use super::{ArbiterError, ArbiterSnapshot, HumanWrite, Kept, UnsentAt, TYPED_AT_MOST};
 
 /// How many of the human's last writes a pane keeps.
 pub(super) const HUMAN_WRITES: usize = 8;
@@ -118,48 +118,44 @@ impl PaneInputState {
 }
 
 impl PaneInputState {
-    /// A write of the person's that holds a key, `before` and `after` what it leaves unsent,
-    /// `added` whether it added a character, `kept` the screen as it stood before it: the
-    /// evidence of where the keys the count holds went (the design's table).
-    pub(super) fn keep_screens(
-        &mut self,
-        before: usize,
-        after: usize,
-        added: bool,
-        kept: Option<Arc<Kept>>,
-    ) {
+    /// A write of the person's that holds a key: `after` what it leaves unsent, `added`
+    /// whether it added a character, `kept` the screen as it stood before it: the evidence of
+    /// where the keys the count holds went (the design's table).
+    pub(super) fn keep_screens(&mut self, after: usize, added: bool, kept: Option<Arc<Kept>>) {
+        let at = &mut self.unsent_at;
         if after == 0 {
-            self.unsent_at = UnsentAt::default();
+            *at = UnsentAt::default();
         } else if added {
-            self.unsent_at.typed_into = kept.map(|screen| TypedInto {
-                screen,
-                first: before == 0,
-            });
-            self.unsent_at.pressed_over = None;
-        } else if self.unsent_at.pressed_over.is_none() {
-            self.unsent_at.pressed_over = kept;
+            at.pressed_over = None;
+            let room = at.typed_at.len() < TYPED_AT_MOST;
+            match (kept, at.typed_at.last_mut()) {
+                // The same screen twice is kept once, with what the newer one says of itself.
+                (Some(kept), Some(last)) if last.drawn == kept.drawn => *last = kept,
+                (Some(kept), _) if room => at.typed_at.push(kept),
+                _ => at.typed_more = true,
+            }
+        } else if at.pressed_over.is_none() {
+            at.pressed_over = kept;
         }
     }
 
     /// Whether the paste that says `read_empty` may go over the count: the host holds the
-    /// screen it names, which was current, and for [`Evidence::Elsewhere`] it was the first of
-    /// the keys the count holds. The host cannot check the reader's reading of it.
+    /// screens it names. For [`Evidence::Erased`] the screen over the key was current; for
+    /// [`Evidence::Elsewhere`] every character has its screen, and the last of them or the
+    /// screen over the next key was current. The host cannot check the reader's reading of
+    /// them.
     pub(super) fn admits_over_count(&self, read_empty: Option<ReadEmpty>) -> bool {
         let Some(ReadEmpty { typed, by }) = read_empty else {
             return false;
         };
+        let at = &self.unsent_at;
+        let over = at.pressed_over.as_ref().is_some_and(|over| over.current);
         typed == self.typed
             && match by {
-                Evidence::Erased => self
-                    .unsent_at
-                    .pressed_over
-                    .as_ref()
-                    .is_some_and(|screen| screen.current),
-                Evidence::Elsewhere => self
-                    .unsent_at
-                    .typed_into
-                    .as_ref()
-                    .is_some_and(|into| into.first && into.screen.current),
+                Evidence::Erased => over,
+                Evidence::Elsewhere => {
+                    !at.typed_more && at.typed_at.last().is_some_and(|last| last.current || over)
+                }
             }
     }
 }

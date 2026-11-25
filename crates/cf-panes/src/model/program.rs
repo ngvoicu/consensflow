@@ -105,6 +105,9 @@ pub(crate) struct Program {
     echoes: VecDeque<Echo>,
     /// A dialog of the window's own waits for a key, in the box's place.
     pub(crate) dialog: bool,
+    /// A picker of the window's own, in the box's place, with the filter typed into it: it
+    /// takes keys until Escape or a digit, and draws each.
+    picker: Option<String>,
     /// A window that has fallen behind on its input: what it has not taken waits here, in the
     /// order it came, and is all taken together when it goes on (the checks' assumption).
     stalled: Option<Vec<u8>>,
@@ -125,6 +128,7 @@ impl Program {
             pasting: None,
             echoes: VecDeque::new(),
             dialog: false,
+            picker: None,
             stalled: None,
         }
     }
@@ -171,6 +175,12 @@ impl Program {
         self.emit(self.frame());
     }
 
+    /// A picker of the window's own is shown in the box's place.
+    pub(crate) fn show_picker(&mut self) {
+        self.picker = Some(String::new());
+        self.emit(self.frame());
+    }
+
     /// The styles the next keys are echoed in.
     pub(crate) fn echo_as(&mut self, styles: impl IntoIterator<Item = Echo>) {
         self.echoes.extend(styles);
@@ -205,7 +215,10 @@ impl Program {
             ),
         };
         let mut bytes = b"\x1b[2J\x1b[1;1H\x1b[2K".to_vec();
-        if self.dialog {
+        if let Some(filter) = &self.picker {
+            bytes.extend(format!("\x1b[{};1HFilter: {filter}", BOX - 4).as_bytes());
+        }
+        if self.dialog || self.picker.is_some() {
             bytes.extend(
                 format!(
                     "\x1b[1;1HThe conversation\x1b[{};1HDo you want to proceed?\x1b[{};1H❯ 1. Yes\x1b[{};1H  2. No\x1b[{};1HEsc to cancel · Tab to amend",
@@ -324,6 +337,17 @@ impl Program {
             if bytes[at..].starts_with(b"\x1b[200~") {
                 self.pasting = Some(Vec::new());
                 at += 6;
+                continue;
+            }
+            if let Some(filter) = self.picker.as_mut() {
+                match bytes[at] {
+                    0x1b if bytes.get(at + 1) == Some(&b'[') => at += 2,
+                    0x1b | b'0'..=b'9' => self.picker = None,
+                    byte if byte >= 0x20 => filter.push(char::from(byte)),
+                    _ => {}
+                }
+                self.emit(self.frame());
+                at += 1;
                 continue;
             }
             // A dialog takes the first key that comes and closes; nothing of it is typed.

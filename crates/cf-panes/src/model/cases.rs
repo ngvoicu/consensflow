@@ -879,17 +879,157 @@ fn t2233_a_dialog_answered_the_message_is_taken() {
     });
 }
 
+// ---- Typed elsewhere, a screen for each key (T-2255) --------------------------------------------
+
+/// Types `keys` one at a time into a picker, each drawn before the next.
+fn filters(world: &World, keys: &[u8]) {
+    for key in keys {
+        types(world, &[*key]);
+        settled(world);
+    }
+}
+
 #[test]
-fn t2233_two_keys_at_a_dialog_hold() {
+fn t2255_a_picker_filtered_key_by_key_and_left_with_escape_the_message_is_taken() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_picker();
+            settled(&world);
+            filters(&world, b"zqv");
+            filters(&world, b"\x1b");
+            a_while(&world);
+            world.pass(false);
+        });
+        assert_eq!(
+            case.taken(),
+            [1],
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+#[test]
+fn t2255_a_key_at_the_box_after_a_dialog_holds() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            types(&world, b"2");
+            settled(&world);
+            // The `x` goes into the box and is not drawn.
+            world.echo_as([Echo::Silent]);
+            types(&world, b"x");
+            a_while(&world);
+            world.pass(false);
+        });
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+/// `z` into a picker, then `after` typed while the picker's frame of the `z` waits at the
+/// terminal; the case then runs `then`.
+fn keys_with_the_pickers_frame_at_the_terminal(
+    harness: Harness,
+    after: &'static [u8],
+    then: impl FnOnce(&World) + Send + 'static,
+) -> Case {
+    let case = Case::new(harness, move |world| {
+        world.program.lock().unwrap().show_picker();
+        settled(&world);
+        sched::at("case.shown");
+        types(&world, b"z");
+        types(&world, after);
+        sched::at("case.typed");
+        settled(&world);
+        then(&world);
+        settled(&world);
+        a_while(&world);
+        world.pass(false);
+    });
+    case.until_script("case.shown");
+    case.run(&[case.reader], |case| {
+        matches!(case.sched.stands(case.script), Stands::At("case.typed"))
+    });
+    case.finish();
+    case
+}
+
+#[test]
+fn t2255_a_last_key_typed_with_the_pickers_frame_at_the_terminal_holds() {
+    each_harness(|harness| {
+        // The digit takes a choice and ends the picker; no key follows it.
+        let case = keys_with_the_pickers_frame_at_the_terminal(harness, b"1", |_| {});
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+#[test]
+fn t2255_the_screen_at_the_next_key_stands_for_a_last_one_that_was_behind() {
+    each_harness(|harness| {
+        let case = keys_with_the_pickers_frame_at_the_terminal(harness, b"v", |world| {
+            types(world, b"\x1b");
+        });
+        assert_eq!(
+            case.taken(),
+            [1],
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+#[test]
+fn t2255_more_keys_than_screens_are_kept_of_holds() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_picker();
+            settled(&world);
+            filters(&world, &[b'z'; 33]);
+            filters(&world, b"\x1b");
+            a_while(&world);
+            world.pass(false);
+        });
+        case.rules();
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}"
+        );
+        case.end();
+    });
+}
+
+/// A window that draws a dialog's end, and the key typed ahead of it a moment later: a look
+/// between the two reads the box empty.
+#[test]
+fn t2255_a_dialogs_end_and_the_key_typed_ahead_drawn_in_two_frames_holds() {
     each_harness(|harness| {
         let case = run_script(harness, |world| {
             world.program.lock().unwrap().show_dialog();
             settled(&world);
             world.program.lock().unwrap().stall();
             types(&world, b"2");
-            // The `x` is not drawn.
-            world.echo_as([Echo::Silent]);
             types(&world, b"x");
+            a_while(&world);
+            // The `2` is taken and the dialog's end drawn; the `x` follows.
+            world.program.lock().unwrap().resume_taking(1);
+            settled(&world);
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(20));
+            world.pass(false);
             world.program.lock().unwrap().resume();
             settled(&world);
             a_while(&world);
@@ -943,25 +1083,26 @@ fn t2233_a_screen_behind_at_the_key_is_no_evidence() {
 #[test]
 fn t2233_a_paste_naming_evidence_the_host_lacks_is_refused() {
     each_harness(|harness| {
-        // A character alone keeps no screen over a key that added none, and two characters
-        // leave "typed elsewhere" no first.
-        const ONE: &[&[u8]] = &[b"X"];
-        const TWO: &[&[u8]] = &[b"X", b"Y"];
-        for (keys, by) in [
-            (ONE, cf_proto::panes::Evidence::Erased),
-            (TWO, cf_proto::panes::Evidence::Elsewhere),
+        // A character alone keeps no screen over a key that added none, and a character more
+        // than the screens kept leaves "typed elsewhere" one without a screen.
+        for by in [
+            cf_proto::panes::Evidence::Erased,
+            cf_proto::panes::Evidence::Elsewhere,
         ] {
             let answer = kept();
             let kept_answer = Arc::clone(&answer);
             let case = run_script(harness, move |world| {
-                world.program.lock().unwrap().stall();
-                for key in keys {
-                    types(&world, key);
+                if by == cf_proto::panes::Evidence::Erased {
+                    types(&world, b"X");
+                } else {
+                    world.program.lock().unwrap().show_picker();
+                    settled(&world);
+                    filters(&world, &[b'z'; 33]);
                 }
+                settled(&world);
                 a_while(&world);
                 let look = world.look().expect("a look");
                 *kept_answer.lock().unwrap() = Some(world.paste_saying(&look, by));
-                world.program.lock().unwrap().resume();
             });
             let outcome = answer.lock().unwrap().take().expect("asked");
             assert!(
@@ -1106,6 +1247,33 @@ fn the_limit_a_character_typed_before_the_dialogs_end_was_drawn() {
             a_while(&world);
             world.pass(false);
             world.program.lock().unwrap().resume();
+        });
+        assert!(
+            case.world.check().is_err(),
+            "{harness:?}: the limit is closed: take it out of the design and the limit list"
+        );
+        case.end();
+    });
+}
+
+/// A dialog answered with a digit and one character typed while the window is stalled on it,
+/// the character then never drawn: the paste goes over it (T-2255: a picker that ignores keys
+/// shows the same screens). The test pins the limit.
+#[test]
+fn the_limit_two_keys_typed_into_a_stalled_dialog() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            world.program.lock().unwrap().stall();
+            types(&world, b"2");
+            // The `x` is not drawn.
+            world.echo_as([Echo::Silent]);
+            types(&world, b"x");
+            world.program.lock().unwrap().resume();
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
         });
         assert!(
             case.world.check().is_err(),

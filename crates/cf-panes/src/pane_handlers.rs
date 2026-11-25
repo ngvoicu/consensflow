@@ -554,14 +554,14 @@ fn kept_answer(kept: &Kept) -> Value {
     })
 }
 
-/// `unsentAt`: the screens kept while the count is above zero, each only where held.
+/// `unsentAt`: the screens kept while the count is above zero.
 fn unsent_at_answer(unsent_at: &UnsentAt) -> Value {
-    let mut answer = json!({});
-    if let Some(into) = &unsent_at.typed_into {
-        let mut kept = kept_answer(&into.screen);
-        kept["first"] = json!(into.first);
-        answer["typedInto"] = kept;
-    }
+    let typed_at: Vec<Value> = unsent_at
+        .typed_at
+        .iter()
+        .map(|kept| kept_answer(kept))
+        .collect();
+    let mut answer = json!({ "typedAt": typed_at, "typedMore": unsent_at.typed_more });
     if let Some(over) = &unsent_at.pressed_over {
         answer["pressedOver"] = kept_answer(over);
     }
