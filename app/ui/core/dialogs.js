@@ -1098,6 +1098,10 @@ export class NewProjectDialog {
   #nextId = 1
   /** Whether a start is on its way: a second ask waits for its answer, as the daemon's. */
   #starting = false
+  /** The draft's member whose last role is asked about before it goes: `{ key, role }`, or none. */
+  #removing = null
+  /** Whether the words beside Start are a crowded slot's: they follow the slot as it is mended. */
+  #crowdSaid = false
 
   /**
    * `page.onStart(project)` is told of the project the daemon opened. `page.daemon` asks the
@@ -1161,6 +1165,7 @@ export class NewProjectDialog {
     readEveryHarness(this.#lists, missing)
     this.#chief.fill(missing)
     this.#member.reset(missing)
+    this.#removing = null
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
@@ -1178,10 +1183,14 @@ export class NewProjectDialog {
     this.#sections.computerUse.draw(new Set(kinds.filter(Boolean)))
   }
 
-  /** What is said above the buttons: the daemon's refusal of the start, until the next try or the next opening. */
+  /**
+   * What is said above the buttons: the daemon's refusal of the start, until the next try or the
+   * next opening; a crowded slot's words, until the slot is mended (`#draw`).
+   */
   #say(words) {
     this.#refusal.textContent = words
     this.#refusal.hidden = words === ''
+    this.#crowdSaid = false
   }
 
   /**
@@ -1198,6 +1207,7 @@ export class NewProjectDialog {
     const crowd = this.#crowded()
     if (crowd !== null) {
       this.#say(crowd)
+      this.#crowdSaid = true
       return
     }
     // A section holding what no project can start with says so, as its Save does in Project settings.
@@ -1358,7 +1368,8 @@ export class NewProjectDialog {
       )
     }
     this.#member.reset(this.#missing)
-    this.#say('')
+    // A refusal of the start goes with the change; a crowded slot's words follow the slot (`#draw`).
+    if (!this.#crowdSaid) this.#say('')
     this.#draw()
   }
 
@@ -1366,13 +1377,30 @@ export class NewProjectDialog {
   #removeRole(key, role) {
     const member = this.#memberOf(key)
     if (!member) return
-    member.roles = member.roles.filter((held) => held !== role)
-    if (member.roles.length === 0) {
-      this.#draft = this.#draft.filter(
-        (kept) => kept._id !== member._id && kept.backupOf !== member._id,
-      )
+    // Its last role takes the member and its backup out of the draft: asked first, in the slot,
+    // as Project settings asks.
+    if (member.roles.length === 1 && member.roles[0] === role) {
+      this.#removing = { key, role }
+      this.#draw()
+      return
     }
+    member.roles = member.roles.filter((held) => held !== role)
     this.#draw()
+  }
+
+  /** The draft's member `key` out, its backup with it, once the person said so. */
+  #removeMember(key) {
+    this.#removing = null
+    this.#draft = this.#draft.filter((kept) => kept._id !== key && kept.backupOf !== key)
+    this.#draw()
+  }
+
+  /** What the ask before a draft member's last role says: that its backup goes with it, where it has one. */
+  #removeWords(holder) {
+    const backup = this.#draft.some((member) => member.backupOf === holder.key)
+    return backup
+      ? `Remove ${holder.name} and its backup from the new project's staff?`
+      : `Remove ${holder.name} from the new project's staff?`
   }
 
   #draw() {
@@ -1395,8 +1423,21 @@ export class NewProjectDialog {
           this.#draw()
         },
         remove: (role, holder) => this.#removeRole(holder.key, role),
+        confirming: this.#removing,
+        keep: () => {
+          this.#removing = null
+          this.#draw()
+        },
+        confirm: (holder) => this.#removeMember(holder.key),
+        confirmWords: (holder) => this.#removeWords(holder),
       }),
     )
+    // A crowded slot's words beside Start follow the slot: the slot as it is now, or none.
+    if (this.#crowdSaid) {
+      const crowd = this.#crowded()
+      this.#say(crowd ?? '')
+      this.#crowdSaid = crowd !== null
+    }
     const backups = new Map(
       this.#draft
         .filter((member) => member.backupOf != null)
@@ -1638,6 +1679,12 @@ export class ProjectSettingsDialog {
    * its handle and that role's slot (`{ key, role }`).
    */
   #removing = null
+  /**
+   * What the daemon refused of a slot the person changed (a give, a Remove), said under its
+   * role's row until the next change of a slot (`{ role, words }`): the status line is behind
+   * the dialog.
+   */
+  #slotRefusal = null
   /** Refusals beside the member whose Vacation button was pressed. */
   #vacationErrors = new Map()
   /** Each harness's models, read once while the dialog is open (T-1143). */
@@ -1813,6 +1860,7 @@ export class ProjectSettingsDialog {
     this.#project = project
     this.#board = board
     this.#removing = null
+    this.#slotRefusal = null
     this.#vacationErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
@@ -1907,6 +1955,7 @@ export class ProjectSettingsDialog {
         picking:
           slot === null ? null : slot.tier === null ? slot.role : `${slot.role}:${slot.tier}`,
         confirming: this.#removing,
+        refusal: this.#slotRefusal,
         add: (role, tier) => {
           this.#member.forSlot(role, tier)
           this.#draw()
@@ -1917,7 +1966,7 @@ export class ProjectSettingsDialog {
           this.#removing = null
           this.#draw()
         },
-        confirm: (holder) => this.#removeMember(holder.key),
+        confirm: (holder) => this.#removeMember(holder.key, this.#removing?.role),
       }),
     )
     const rows = shaded(
@@ -1978,7 +2027,7 @@ export class ProjectSettingsDialog {
   #give(role, handle) {
     const page = this.#page
     const { roles } = this.#memberNow({ handle })
-    void page.act(async () => {
+    void this.#slotAct(role, async () => {
       await page.daemon('member.roles', {
         project: this.#project,
         agent: handle,
@@ -1997,7 +2046,7 @@ export class ProjectSettingsDialog {
       this.#draw()
       return
     }
-    void page.act(async () => {
+    void this.#slotAct(role, async () => {
       await page.daemon('member.roles', {
         project: this.#project,
         agent: handle,
@@ -2007,12 +2056,33 @@ export class ProjectSettingsDialog {
   }
 
   /** The member off the staff, once the human said yes: its open tasks are cancelled. */
-  #removeMember(handle) {
+  #removeMember(handle, role) {
     const page = this.#page
-    return page.act(async () => {
+    return this.#slotAct(role, async () => {
       await page.daemon('member.remove', { project: this.#project, agent: handle })
       this.#removing = null
       page.note(`@${handle} left the staff.`)
+    })
+  }
+
+  /**
+   * A change of a slot (a give, a Remove), run as `page.act` runs it, the status line saying a
+   * refusal; the dialog says it too, under the role's row, where the person acted, while it is
+   * still open for the same project.
+   */
+  #slotAct(role, work) {
+    const project = this.#project
+    this.#slotRefusal = null
+    return this.#page.act(async () => {
+      try {
+        await work()
+      } catch (refused) {
+        if (this.#dialog.open && this.#project === project) {
+          const words = refused instanceof Error ? refused.message : String(refused)
+          this.#slotRefusal = { role, words }
+        }
+        throw refused
+      }
     })
   }
 

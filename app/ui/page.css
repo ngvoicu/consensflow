@@ -910,6 +910,8 @@ tr[data-session] .row-name { font-weight: 500; }
 .slots .slot-words td { padding: 0 3px 4px; }
 .slots .slot-words p { margin: 0; padding: 7px 10px; border-left: 3px solid var(--amber); border-radius: 0 6px 6px 0; background: rgba(252, 211, 77, .07); color: var(--amber); font-size: 12px; line-height: 1.45; }
 .slots .slot-words p + p { margin-top: 4px; }
+/* What the daemon refused of a slot the person changed, under its role's row, in the dialog. */
+.slots .slot-refusal td { padding: 7px 10px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: rgba(248, 113, 113, .08); color: var(--danger); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .slots td[data-picking="true"] > :is(.slot-empty, .slot-holder) { border: 1px solid var(--violet); background: rgba(124, 58, 237, .12); box-shadow: 0 0 0 3px rgba(139, 92, 246, .18); }
 .slots td[data-picking="true"] .slot-empty-mark { color: var(--violet); }
 @media (prefers-reduced-motion: no-preference) {

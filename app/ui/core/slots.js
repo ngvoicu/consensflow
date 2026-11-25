@@ -111,6 +111,26 @@ const takers = (members, role, tier) =>
           (tier === null || member.tier === tier),
       )
 
+/** A member's roles in the daemon's order, as their labels say them: "Worker, Reviewer". */
+const rolesSaid = (member) =>
+  roleIds()
+    .filter((role) => member.roles.includes(role))
+    .map(roleLabel)
+    .join(', ')
+
+/**
+ * What a give offers a member as: its name, and where another member of the staff goes by the
+ * same name (a draft's members are named by their model), the roles it holds, and then what it
+ * runs on, so that two members the person can tell apart are never offered alike.
+ */
+function takerName(member, members) {
+  const twins = members.filter((other) => other.key !== member.key && other.name === member.name)
+  if (twins.length === 0) return member.name
+  const held = `${member.name} · ${rolesSaid(member)}`
+  const alike = twins.some((other) => `${other.name} · ${rolesSaid(other)}` === held)
+  return alike && member.runs ? `${held} · ${member.runs}` : held
+}
+
 const CROSS = ['M6 6l12 12', 'M18 6 6 18']
 
 /** The head of the slots: a column for the roles, then one a tier, most critical first. */
@@ -131,7 +151,9 @@ export function slotHead() {
  * empty with its Add. `hooks` acts on them: `add(role, tier)` opens the form for an empty slot,
  * `give(role, member)` gives one to a member at its tier, `remove(role, member)` takes the role
  * from a holder; `confirming` is the `{ key, role }` whose removal asks first, with its `keep()`
- * and `confirm(member)`; `picking` is the slot the form is open for; `draft` says the words a
+ * and `confirm(member)` and the ask's words (`confirmWords(member)`, a staff's own where none is
+ * given); `refusal` is the `{ role, words }` of what the daemon refused of a slot of a role, said
+ * under that role's row; `picking` is the slot the form is open for; `draft` says the words a
  * draft says.
  */
 export function slotRows(members, hooks) {
@@ -181,6 +203,16 @@ export function slotRows(members, hooks) {
       words.append(cell)
       rows.push(words)
     }
+    if (hooks.refusal?.role === role) {
+      // Said where the person acted, in the dialog: not behind it on the board's status line.
+      const refused = element('tr', 'slot-refusal')
+      refused.dataset.role = role
+      const cell = element('td', null, hooks.refusal.words)
+      cell.colSpan = columns.length + 1
+      cell.setAttribute('role', 'alert')
+      refused.append(cell)
+      rows.push(refused)
+    }
   }
   return rows
 }
@@ -208,13 +240,14 @@ function slotCell(members, role, tier, hooks) {
     if (given.length === 1) {
       // One member could take it: a link that says whom.
       const [member] = given
+      const name = takerName(member, members)
       const gives = element('div', 'slot-gives')
       gives.append(
         button(
-          `give it to ${member.name}`,
+          `give it to ${name}`,
           'slot-give',
           () => hooks.give(role, member),
-          `Give the ${slotName(role, tier)} slot to ${member.name}`,
+          `Give the ${slotName(role, tier)} slot to ${name}`,
         ),
       )
       empty.append(gives)
@@ -225,7 +258,10 @@ function slotCell(members, role, tier, hooks) {
       pick.setAttribute('aria-label', `Give the ${slotName(role, tier)} slot to`)
       const ask = new Option('give it to…', '')
       ask.disabled = true
-      pick.append(ask, ...given.map((member) => new Option(member.name, String(member.key))))
+      pick.append(
+        ask,
+        ...given.map((member) => new Option(takerName(member, members), String(member.key))),
+      )
       pick.value = ''
       pick.addEventListener('change', () => {
         const member = given.find((one) => String(one.key) === pick.value)
@@ -248,7 +284,11 @@ function holderPart(member, role, hooks) {
   if (hooks.confirming?.key === member.key && hooks.confirming.role === role) {
     part.classList.add('slot-confirm')
     part.append(
-      element('p', 'member-confirm', `Remove ${member.name}? Its open tasks are cancelled.`),
+      element(
+        'p',
+        'member-confirm',
+        hooks.confirmWords?.(member) ?? `Remove ${member.name}? Its open tasks are cancelled.`,
+      ),
     )
     const actions = element('div', 'slot-confirm-actions')
     actions.append(

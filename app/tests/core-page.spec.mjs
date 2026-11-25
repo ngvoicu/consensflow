@@ -574,6 +574,8 @@ async function open(page, given = model()) {
         return answer({})
       },
       'member.roles': ({ project, agent, roles }) => {
+        // A refusal a test names, as the ledger's when another write took the slot first.
+        if (data.rolesRefusal !== undefined) return { ok: false, error: data.rolesRefusal }
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
         lane.participant.roles = roles
         return answer({ member: lane.participant })
@@ -9177,8 +9179,9 @@ test("New project: computer use is read for the folder picked, shown while the c
     .getByRole('button', { name: 'Open System Settings for Screen & System Audio Recording' })
     .click()
   await expect.poll(() => calls(page, 'computer_use.open')).toEqual([{ pane: 'screen-recording' }])
-  // The member leaves: Codex's block goes with it.
+  // The member leaves, once the person says so: Codex's block goes with it.
   await made.dialog.getByRole('button', { name: /^Remove Worker/ }).click()
+  await made.dialog.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
   expect((await computerUse(made.dialog)).map(({ block }) => block)).toEqual([
     'claude-code',
     'permissions',
@@ -13755,6 +13758,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   await expect(drawing.locator('.member-name')).toHaveText('Codex default')
   await expect(drawing.locator('.member-meta')).toHaveText('Codex')
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await dialog.getByRole('button', { name: 'Remove gpt-5.6-luna', exact: true }).click()
   await expect(table.locator('tbody tr.staff-group')).toHaveCount(4)
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
@@ -13847,15 +13851,13 @@ test('New project asks no tier of a role whose one slot has none, and a member t
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
-      opened([
-        { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
-        zeus,
-      ]),
+      opened([{ harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] }, zeus]),
     ])
   // Again, the scout's one slot empty: its Add asks no tier.
   await page.getByRole('button', { name: 'New project' }).click()
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
   await dialog.getByRole('button', { name: 'Remove Field scout gpt-6-astra' }).click()
+  await dialog.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
   await expect(scouts).toHaveCount(0)
   await openSlot(dialog, 'scout')
   await expect(dialog.locator('.staff-add legend')).toHaveText('Add the field scout')
@@ -13870,6 +13872,27 @@ test('New project asks no tier of a role whose one slot has none, and a member t
   await expect
     .poll(async () => (await calls(page, 'project.open')).at(-1))
     .toEqual(opened([{ ...zeus, roles: ['worker', 'scout'] }]))
+  // A last staff whose member already scouts and works is copied as it is: the scout said with
+  // no tier of its own, the member keeping its tier for its work, and started with it.
+  await page.evaluate(
+    (mixed) => {
+      window.__model.lastStaff = [mixed]
+    },
+    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+  )
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  await expect(table.locator('tbody tr.staff-group')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker · Field scout/,
+  ])
+  await expect(slotCell(dialog, 'scout').locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
+  await expect(slotCell(dialog, 'worker:complex').locator('.slot-holder')).toHaveText([
+    /claude-sonnet-5/,
+  ])
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'project.open')).at(-1))
+    .toEqual(opened([{ ...zeus, roles: ['scout', 'worker'] }]))
 })
 
 test('New project keeps an image designer a member of its own beside a worker, in either order', async ({
@@ -19296,6 +19319,7 @@ test('T-1855 New project shades each member in turn, odd and even, its roles and
   // A member taken off shifts the turns on: the next member takes its shade.
   await dialog.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
+  await dialog.getByRole('button', { name: 'Remove gpt-5.6-luna', exact: true }).click()
   const after = await staffShades(table)
   expect(after.map(({ rows }) => rows)).toEqual([
     ['worker tester', 'backup'],
@@ -20337,6 +20361,7 @@ test('D8 a slot three hold shows all three and its words, in Project settings an
   expect(await calls(page, 'project.open')).toEqual([])
   // A removal leaves two, still with the words, and still no start.
   await draft.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await draft.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
   await expect(draft.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-5\.6-luna/])
   await expect(draftWords).toHaveText(/^The standard worker slot holds two members, /)
   await fresh.getByRole('button', { name: 'Start project' }).click()
@@ -20548,4 +20573,152 @@ test("D8 Edit's tier picker names whose slot is in the way, on both screens", as
     ["Standard work: the standard worker slot is claude-sonnet-5's", true],
     ["Light work: the light integrator slot is gpt-5.6-luna's", true],
   ])
+})
+
+// D8, round 2 (T-2272's review, T-2273's run against the daemon).
+
+test("D8 New project asks before a member's last role goes, and keeps it and its backup at Keep", async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', SONNET),
+    lastOf(31, ['worker', 'reviewer'], 'complex', LUNA),
+    lastOf(32, ['worker'], 'standard', {}, { vacationSince: at(20) }),
+    lastOf(33, ['worker'], 'standard', SONNET, { backupOf: 32, vacationSince: at(20) }),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  const cell = slotCell(fresh, 'worker:standard')
+  // A role of a member that holds another goes at once: the member stays.
+  await fresh.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
+  await expect(slotCell(fresh, 'reviewer:complex').locator('.slot-holder')).toHaveCount(0)
+  await expect(members.locator('tr.staff-group')).toHaveCount(3)
+  // Its last role asks first, in the slot, and says its backup goes with it.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await expect(cell).toContainText(
+    "Remove gpt-6-astra and its backup from the new project's staff?",
+  )
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(1)
+  await cell.getByRole('button', { name: 'Keep gpt-6-astra' }).click()
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(1)
+  await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-6-astra/])
+  await expect(members.locator('tr.staff-group')).toHaveCount(3)
+  await expect(members.locator('tr.staff-group', { hasText: 'gpt-6-astra' })).toContainText(
+    'on Vacation',
+  )
+  // Removed once the person says so: the member and its backup leave the draft.
+  await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await cell.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
+  await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
+  await expect(members.locator('tr.staff-group')).toHaveCount(2)
+  await expect(fresh.getByText('backup of gpt-6-astra')).toHaveCount(0)
+  // A member with no backup is asked of alone.
+  await cell.getByRole('button', { name: 'Remove Worker claude-sonnet-5' }).click()
+  await expect(cell).toContainText("Remove claude-sonnet-5 from the new project's staff?")
+})
+
+test('D8 the give choice of New project tells apart two members on the same model', async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', {}),
+    lastOf(31, ['reviewer'], 'standard', {}),
+    lastOf(32, ['advisor'], 'complex', LUNA),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  const choice = fresh.getByRole('combobox', { name: 'Give the standard tester slot to' })
+  expect(await offered(choice)).toEqual([
+    ['give it to…', true],
+    ['gpt-6-astra · Worker', false],
+    ['gpt-6-astra · Reviewer', false],
+  ])
+  // A member whose name no other shares is said by its name alone.
+  await expect(slotCell(fresh, 'tester:complex')).toContainText('give it to gpt-5.6-luna')
+  await expect(slotCell(fresh, 'tester:complex')).not.toContainText('·')
+  await choice.selectOption({ label: 'gpt-6-astra · Reviewer' })
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(staff.map(({ roles }) => roles)).toEqual([['worker'], ['reviewer', 'tester'], ['advisor']])
+})
+
+test("D8 New project's refusal beside Start follows the slot as it is mended", async ({ page }) => {
+  const data = staffOf(model())
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', SONNET),
+    lastOf(31, ['worker'], 'standard', LUNA),
+    lastOf(32, ['worker'], 'standard', {}),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  const refusal = fresh.locator('.dialog-refusal')
+  const members = fresh.getByRole('table', { name: 'Members for the staff' })
+  const moveTo = async (name, tier) => {
+    await members.getByRole('button', { name: `Edit ${name}` }).click()
+    await expect(fresh.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+    await fresh.locator('.staff-add [name="memberTier"]').selectOption(tier)
+    await fresh.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
+  }
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect(refusal).toHaveText(/^The standard worker slot holds three members, /)
+  // One moves to another tier: the refusal says the slot as it is now.
+  await moveTo('gpt-6-astra', 'complex')
+  await expect(refusal).toHaveText(/^The standard worker slot holds two members, /)
+  // Mended: the refusal goes with the crowd, and Start starts.
+  await moveTo('gpt-5.6-luna', 'light')
+  await expect(fresh.locator('.slot-words')).toHaveCount(0)
+  await expect(refusal).toBeHidden()
+  expect(await calls(page, 'project.open')).toEqual([])
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
+})
+
+test('D8 a refused give or Remove in Project settings is said under its slot, in the dialog', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'hera', ['reviewer'], 'complex'),
+    staffLane(4, 'zeus', ['worker', 'tester'], 'standard', SONNET),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  // Another writer took the slot first: the ledger's words, where the person gave it.
+  const taken =
+    "the complex tester slot is @cf-test-three's: a role and tier holds one member. Pick another tier"
+  await page.evaluate((words) => {
+    window.__model.rolesRefusal = words
+  }, taken)
+  await settings.getByRole('button', { name: 'Give the complex tester slot to @hera' }).click()
+  const said = settings.locator('.slot-refusal[data-role="tester"]')
+  await expect(said).toHaveText(taken)
+  await expect(said).toBeVisible()
+  await expect(said.getByRole('alert')).toHaveText(taken)
+  // A refused Remove of a role is said under its own slot's row, in place of the last.
+  const refused = 'the ledger is busy: try again'
+  await page.evaluate((words) => {
+    window.__model.rolesRefusal = words
+  }, refused)
+  await settings.getByRole('button', { name: 'Remove Tester @zeus' }).click()
+  await expect(settings.locator('.slot-refusal[data-role="tester"]')).toHaveText(refused)
+  await expect(settings.locator('.slot-refusal')).toHaveCount(1)
+  // The next act that goes through takes the words away.
+  await page.evaluate(() => {
+    delete window.__model.rolesRefusal
+  })
+  await settings.getByRole('button', { name: 'Remove Tester @zeus' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.roles')).at(-1))
+    .toEqual({ project: 1, agent: 'zeus', roles: ['worker'] })
+  await expect(settings.locator('.slot-refusal')).toHaveCount(0)
 })
