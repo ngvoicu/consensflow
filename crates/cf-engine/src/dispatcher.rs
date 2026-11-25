@@ -63,6 +63,16 @@ pub enum SwitchWhen {
     Turn,
 }
 
+/// A move of a task that waits for its holder's step: counted for as long as it does.
+struct Moved(Rc<Record>);
+
+impl Drop for Moved {
+    fn drop(&mut self) {
+        let mut window = self.0.window.borrow_mut();
+        window.moving = window.moving.saturating_sub(1);
+    }
+}
+
 /// A closed project starts and changes no work, whatever asks: it is resumed first.
 pub fn require_open(project: &ProjectView) -> Result<(), EngineError> {
     if project.state == "open" {
@@ -700,8 +710,13 @@ impl Dispatcher {
             return self.release(project, number);
         };
         let record = self.record_of(holder.id);
+        // The move is asked for now: a launch of the holder's that is under way is called off
+        // by it, and a window it opened meanwhile ends with nothing failed (T-2307).
+        record.window.borrow_mut().moving += 1;
+        let asked = Moved(Rc::clone(&record));
         let (this, held) = (Rc::clone(self), Rc::clone(&record));
         let work = async move {
+            let _asked = asked;
             let pinned = std::mem::replace(&mut held.window.borrow_mut().pinned, false);
             let open = held.window.borrow().pane.is_some();
             if open && !this.retire(&held).await? {
@@ -1202,7 +1217,11 @@ impl Dispatcher {
                 // T-523 left out: the alpha.1 release check T-1068 saw its brief and task
                 // fail at a Close, T-1076). One whose window ended by itself in an open
                 // project fails, as a launch that did not come up does.
-                let closed_with_project = project.state != "open" || resume_member_failed;
+                // A move of its task to another member ends the window the same way: the
+                // task goes on with the new member, and fails nothing (T-2307).
+                let closed_with_project = project.state != "open"
+                    || resume_member_failed
+                    || record.window.borrow().moving > 0;
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 let settled = self

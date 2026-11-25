@@ -307,6 +307,10 @@ pub(crate) struct WindowPart {
     /// Whether its last look said its turn settled.
     pub(crate) settled: bool,
     pub(crate) relaunch: Option<Relaunch>,
+    /// How many moves of its task to another member wait for this participant's step: a launch
+    /// in progress is called off by one, and a window it ends gives back what it was handed
+    /// instead of failing it (T-2307).
+    pub(crate) moving: u32,
     /// The model a chief's launch asked for, which its harness said it no longer has: the
     /// next launch starts on the harness's default (CHF-06).
     pub(crate) gone: Option<String>,
@@ -437,6 +441,7 @@ impl Default for WindowPart {
             hidden: false,
             settled: false,
             relaunch: None,
+            moving: 0,
             gone: None,
             starts_given_up: 0,
             took: false,
@@ -1532,7 +1537,11 @@ impl Dispatcher {
         // a Close waits for one of them at most (T-2263).
         let wanted = {
             let (this, held, id) = (Rc::clone(self), Rc::clone(record), project.id);
-            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))
+            Rc::new(move || {
+                !this.forgotten(&held)
+                    && held.window.borrow().moving == 0
+                    && this.in_open_project(id).unwrap_or(true)
+            })
         };
         let prepared = cf_harness::while_wanted(wanted, returning(adapter.prepare(&launch)))
             .await

@@ -14,13 +14,11 @@ use std::rc::Rc;
 
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
+use cf_harness::contract::FirstMessage;
 
 use crate::chiefs::{to, to_human, with_codex};
 use crate::fixtures::Tiers;
 use crate::resume::{opened, quit_and_start};
-
-/// What a step of a launch's plan says where the launch was called off.
-const CALLED_OFF: &str = "the launch was called off before its window opened";
 
 /// A hold that takes the first call only: the launch that was called off, not the ones after it.
 fn first_only() -> impl Fn(&serde_json::Value) -> bool + 'static {
@@ -78,21 +76,19 @@ fn told_of_a_failure(context: &Context, project: i64) -> Vec<String> {
 /// went wrong, if anything.
 fn member_cell(calls: Calls, when: When) -> Option<String> {
     let context = Context::new();
+    context.adapter.honors_call_off.set(true);
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     let project = tiers.project.id;
     context.pass().unwrap();
     context.settle();
-    let plan = matches!(when, When::Plan).then(|| {
-        context
-            .adapter
-            .prepare_holds
-            .hold_instead(first_of_a_member(), CALLED_OFF.to_owned())
-    });
+    let plan =
+        matches!(when, When::Plan).then(|| context.adapter.prepare_holds.hold(first_of_a_member()));
     let open = matches!(when, When::Open).then(|| context.host.open_holds.hold(|_| true));
     let number = tiers.open().number;
     context.pass().unwrap();
     context.pass().unwrap();
     context.settle();
+    let first_holder = tiers.task(number).task.assignee.clone();
     let mut closing = None;
     let mut moving = None;
     let mut restarted = None;
@@ -139,6 +135,10 @@ fn member_cell(calls: Calls, when: When) -> Option<String> {
     if context.task(project, number).task.state == "failed" {
         wrong.push("the task failed".to_owned());
     }
+    let warned = context.log.warnings.borrow().clone();
+    if !warned.is_empty() {
+        wrong.push(format!("warned: {warned:?}"));
+    }
     // The next ask, at once: no time passes, so no back-off is out.
     let asked = match calls {
         Calls::Close | Calls::Stop => {
@@ -161,19 +161,27 @@ fn member_cell(calls: Calls, when: When) -> Option<String> {
         }
         context.settle();
     }
-    let state = context
-        .task(project, asked)
-        .messages
-        .last()
-        .map(|message| message.state.clone());
-    if !state.is_some_and(|state| ["delivering", "delivered"].contains(&state.as_str())) {
+    let thread = context.task(project, asked);
+    let reached = thread.messages.last().filter(|message| {
+        ["delivering", "delivered"].contains(&message.state.as_str())
+            && Some(&message.recipient) == thread.task.assignee.as_ref()
+    });
+    if reached.is_none() {
         wrong.push(format!(
-            "the next ask was not served at once: T-{asked} {:?}",
-            context
-                .task(project, asked)
+            "the next ask did not reach its member at once: T-{asked} held by {:?}: {:?}",
+            thread.task.assignee,
+            thread
                 .messages
                 .last()
-                .map(|m| (m.state.clone(), m.attempts))
+                .map(|m| (m.state.clone(), m.recipient.clone(), m.attempts))
+        ));
+    }
+    if matches!(calls, Calls::Close | Calls::Stop | Calls::Pause)
+        && thread.task.assignee.as_deref() != first_holder.as_deref()
+    {
+        wrong.push(format!(
+            "the task went to {:?}, not to {first_holder:?}",
+            thread.task.assignee
         ));
     }
     (!wrong.is_empty()).then(|| wrong.join("; "))
@@ -190,10 +198,10 @@ fn a_member_launch_called_off_is_no_failure_and_the_next_ask_opens_its_window_at
         Calls::Stop,
     ] {
         for when in WHEN {
-            // A pause or a move that comes while the host opens the window is met by the
-            // window after it opened, not by the launch: filed as an open issue
-            // (issues/pause-or-move-during-a-members-window-open.md).
-            if matches!((calls, when), (Calls::Pause | Calls::Move, When::Open)) {
+            // A pause that comes while the host opens the window is met by the window after it
+            // opened, not by the launch: filed as an open issue (the Resume waits for the
+            // window's turn).
+            if matches!((calls, when), (Calls::Pause, When::Open)) {
                 continue;
             }
             if let Some(wrong) = member_cell(calls, when) {
@@ -208,16 +216,13 @@ fn a_member_launch_called_off_is_no_failure_and_the_next_ask_opens_its_window_at
 /// chief: what went wrong, if anything.
 fn chief_cell(calls: Calls, when: When) -> Option<String> {
     let context = with_codex();
-    let plan = matches!(when, When::Plan).then(|| {
-        context
-            .adapter
-            .prepare_holds
-            .hold_instead(first_only(), CALLED_OFF.to_owned())
-    });
+    context.adapter.honors_call_off.set(true);
+    let plan = matches!(when, When::Plan).then(|| context.adapter.prepare_holds.hold(first_only()));
     let open = matches!(when, When::Open).then(|| context.host.open_holds.hold(|_| true));
     let project = context.with_staff(&["zeus"]).id;
     context.pass().unwrap();
     context.settle();
+    let started = opened(&context).len();
     let mut closing = None;
     let mut moving = None;
     let mut restarted = None;
@@ -254,7 +259,12 @@ fn chief_cell(calls: Calls, when: When) -> Option<String> {
     if !told.is_empty() {
         wrong.push(format!("told of a failure: {told:?}"));
     }
-    let before = opened(&context).len();
+    // A switch has opened the new chief's window by now: it is counted from before it.
+    let before = if matches!(calls, Calls::Move) {
+        started
+    } else {
+        opened(&context).len()
+    };
     match (&restarted, calls) {
         (Some(after), _) => {
             after.resume_project(project).unwrap();
@@ -276,8 +286,18 @@ fn chief_cell(calls: Calls, when: When) -> Option<String> {
         Some(after) => after.pane(chief),
         None => context.dispatcher.pane(chief),
     };
-    if opened(&context).len() == before && pane.is_none() {
-        wrong.push("the next ask opened no window".to_owned());
+    // A window of the chief that was opened since the call-off and is its own now: one the
+    // Resume or the switch asked for, not one left from before.
+    if opened(&context).len() <= before || pane.is_none() {
+        wrong.push(format!(
+            "the next ask opened no window: {} opened before, {} now, pane {pane:?}",
+            before,
+            opened(&context).len()
+        ));
+    }
+    let warned = context.log.warnings.borrow().clone();
+    if !warned.is_empty() {
+        wrong.push(format!("warned: {warned:?}"));
     }
     (!wrong.is_empty()).then(|| wrong.join("; "))
 }
@@ -289,6 +309,103 @@ fn a_chief_launch_called_off_is_no_failure_and_the_next_ask_opens_its_window_at_
         for when in WHEN {
             if let Some(wrong) = chief_cell(calls, when) {
                 failed.push(format!("{calls:?} {when:?}: {wrong}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The reviewer's four cases (T-2313, finding 1), through the adapter's real decision and no
+/// answer of the test's own: a task is moved to another member while the first member's launch
+/// prepares its window or the host opens it, by each of the two ways a first message goes in.
+/// The move says it moved, the task is with the new member once with its brief, the first
+/// member's window does not stay, and nobody is told of a failure.
+#[test]
+fn a_move_asked_at_any_moment_of_a_launch_is_a_move() {
+    let mut failed = Vec::new();
+    for when in WHEN {
+        for first in [FirstMessage::Opened, FirstMessage::Delivered] {
+            let seeds = format!("{when:?} {first:?}");
+            let context = Context::new();
+            context.adapter.first.set(first);
+            context.adapter.honors_call_off.set(true);
+            let tiers = Tiers::new(&context, &["zeus", "diana"]);
+            let project = tiers.project.id;
+            context.pass().unwrap();
+            context.settle();
+            let plan = matches!(when, When::Plan)
+                .then(|| context.adapter.prepare_holds.hold(first_of_a_member()));
+            let open = matches!(when, When::Open).then(|| context.host.open_holds.hold(|_| true));
+            let number = tiers.open().number;
+            context.pass().unwrap();
+            context.pass().unwrap();
+            context.settle();
+            let first_holder = tiers.task(number).task.assignee.clone();
+            let (engine, moved) = (Rc::clone(&context.dispatcher), number);
+            let moving = context
+                .executor
+                .start_now(async move { engine.reassign_task(project, moved).await });
+            context.settle();
+            if let Some(gate) = plan.as_ref().or(open.as_ref()) {
+                gate.open();
+            }
+            let said = context.finish(moving);
+            context.settle();
+            if let Err(cause) = said {
+                failed.push(format!("{seeds}: the move was refused: {cause}"));
+                continue;
+            }
+            for _ in 0..4 {
+                context.pass().unwrap();
+                context.settle();
+            }
+            let thread = tiers.task(number);
+            let holder = thread.task.assignee.clone();
+            if holder == first_holder || holder.is_none() {
+                failed.push(format!("{seeds}: not with a new member: {holder:?}"));
+            }
+            // The brief of the old member that went in with its window's open was handed to it
+            // before the move, as one of a task moved at work was; the new member has its own.
+            let briefs: Vec<_> = thread
+                .messages
+                .iter()
+                .filter(|m| {
+                    m.kind == "task"
+                        && ["delivering", "delivered"].contains(&m.state.as_str())
+                        && Some(&m.recipient) == holder.as_ref()
+                })
+                .collect();
+            let stuck = thread.messages.iter().any(|m| {
+                m.kind == "task"
+                    && ["queued", "delivering"].contains(&m.state.as_str())
+                    && Some(&m.recipient) == first_holder.as_ref()
+            });
+            if stuck {
+                failed.push(format!("{seeds}: a brief still waits for the old member"));
+            }
+            if briefs.len() != 1 {
+                failed.push(format!(
+                    "{seeds}: {} briefs with a window: {:?}",
+                    briefs.len(),
+                    thread
+                        .messages
+                        .iter()
+                        .map(|m| (m.kind.clone(), m.state.clone(), m.recipient.clone()))
+                        .collect::<Vec<_>>()
+                ));
+            }
+            if let Some(old) = &first_holder {
+                if context.dispatcher.pane(tiers.id(old)).is_some() {
+                    failed.push(format!("{seeds}: the old member's window stays"));
+                }
+            }
+            let told = told_of_a_failure(&context, project);
+            if !told.is_empty() {
+                failed.push(format!("{seeds}: told of a failure: {told:?}"));
+            }
+            let warned = context.log.warnings.borrow().clone();
+            if !warned.is_empty() {
+                failed.push(format!("{seeds}: warned: {warned:?}"));
             }
         }
     }

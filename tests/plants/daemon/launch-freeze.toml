@@ -316,3 +316,13 @@ runs = ["lf-off"]
 file = "crates/cf-engine/src/windows.rs"
 find = """                if cf_harness::called_off(&cause.to_string()) {"""
 replace = """                if false && cf_harness::called_off(&cause.to_string()) {"""
+
+[[plant]]
+name = 'launch-freeze: a move asked during a launch is not told to the launch'
+meant = "a_move_asked_at_any_moment_of_a_launch_is_a_move"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """        record.window.borrow_mut().moving += 1;"""
+replace = """        record.window.borrow_mut().moving += 0;"""

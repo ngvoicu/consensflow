@@ -107,10 +107,14 @@ async fn a_stop_with_the_log_held_past_its_bound_ends_anyway() {
         .await;
 }
 
-/// A burst the file's release came in the middle of: the writer's count of what it dropped is
-/// said in more than one line (the first line said after a release carries the count so far),
-/// and every line is in the written ones or in the sum of the counts (T-2307: a hosted Mac whose
-/// burst outlasted the hold read 884 of 1296 dropped, from the first count alone).
+/// The writer's count of what it dropped can be said in more than one line, and every line is
+/// in the written ones or in the sum of the counts. The release of the file comes after all the
+/// lines were said (`stopped_while_held`), so it splits nothing: the writer takes a batch off
+/// the queue while the burst is still filling it, the room that frees lets later lines in, and
+/// the lines dropped on either side of them are counted apart. The text here has the shape of
+/// a hosted Mac's failure: 884 counted and 2,704 written, where the 412 missing were in a
+/// second count that the test did not read (the CI output recorded only the first; the 412
+/// is what the 4,000 lines leave).
 #[test]
 fn the_dropped_are_the_sum_of_every_count_in_the_log() {
     let mut text = String::new();
