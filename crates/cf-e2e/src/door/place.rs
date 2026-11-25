@@ -309,7 +309,12 @@ fn climb(path: &Path, deepest_only: bool) -> io::Result<Vec<Link>> {
                 if links.is_empty()
                     && matches!(
                         failed.kind(),
-                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                        // A name the file system cannot hold (Windows' `:` in a name, a name too
+                        // long) is no part that is there, as an absent one is.
+                        io::ErrorKind::NotFound
+                            | io::ErrorKind::NotADirectory
+                            | io::ErrorKind::InvalidFilename
+                            | io::ErrorKind::InvalidInput
                     ) => {}
             Err(failed) => return Err(unresolved(&at, &failed)),
         }
