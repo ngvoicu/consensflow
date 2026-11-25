@@ -258,10 +258,9 @@ pub(super) fn toolchain_homes_of(
 ) -> Vec<(String, String)> {
     let mut vars = Vec::new();
     for (name, below) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-        let held = own(name).map(PathBuf::from).or_else(|| {
-            home.map(|home| home.join(below))
-                .filter(|dir| dir.is_dir())
-        });
+        let held = own(name)
+            .map(PathBuf::from)
+            .or_else(|| home.map(|home| home.join(below)).filter(|dir| dir.is_dir()));
         if let Some(held) = held {
             vars.push((name.to_owned(), held.to_string_lossy().into_owned()));
         }

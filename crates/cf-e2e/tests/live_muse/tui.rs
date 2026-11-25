@@ -5,17 +5,17 @@
 //! time, and the record read for a model Muse moved to by itself.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::source::Source;
 use cf_e2e::live::{agents, machine, Log};
 use cf_e2e::process::Run;
 use serde_json::Value;
 
 /// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
-fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+fn owned(path: impl AsRef<std::path::Path>) -> Source {
     cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
 }
 
@@ -100,21 +100,33 @@ pub fn ran(
 
 /// The binary the owner's launcher runs.
 pub fn binary() -> Result<PathBuf, String> {
-    let bin = home().join(".local").join("bin");
-    let version = fs::read_to_string(bin.join(".muse-version"))
+    binary_in(&owned(home()).join(".local/bin"))
+}
+
+/// The binary the launcher in `bin` (the owner's `~/.local/bin`) runs.
+fn binary_in(bin: &Source) -> Result<PathBuf, String> {
+    let version = bin
+        .join(".muse-version")
+        .read_to_string()
         .map_err(|error| format!("no Muse here (.muse-version: {error})"))?;
-    let binary = bin.join(format!("muse-bin-{}", version.trim()));
-    if binary.is_file() {
-        Ok(binary)
+    let binary = bin.join(&format!("muse-bin-{}", version.trim()));
+    if binary.is_a_file() {
+        // A program the launcher runs, started by its name.
+        Ok(PathBuf::from(binary.to_argument()))
     } else {
-        Err(format!("{} is not there", binary.display()))
+        Err(format!("{binary} is not there"))
     }
 }
 
 /// The owner's files a run must leave as they were, each by a fingerprint.
 pub fn owner_files() -> BTreeMap<String, u64> {
-    let config = home().join(".config").join("muse");
-    let bin = home().join(".local").join("bin");
+    fingerprints(&owned(home()))
+}
+
+/// The fingerprints of the files of the owner `owner` (a home) a run must leave as they were.
+fn fingerprints(owner: &Source) -> BTreeMap<String, u64> {
+    let config = owner.join(".config/muse");
+    let bin = owner.join(".local/bin");
     [
         config.join("settings.json"),
         config.join("trust.json"),
@@ -123,8 +135,8 @@ pub fn owner_files() -> BTreeMap<String, u64> {
     ]
     .into_iter()
     .map(|file| {
-        let print = fs::read(&file).map_or(0, |bytes| fingerprint(&bytes));
-        (file.display().to_string(), print)
+        let print = file.read().map_or(0, |bytes| fingerprint(&bytes));
+        (file.name(), print)
     })
     .collect()
 }
@@ -275,14 +287,14 @@ pub fn set_up(root: &Path) -> Outcome {
         &root.join("config/muse/settings.json"),
         r#"{"schema_version":1,"context":{"foreign_personal_rules":false,"foreign_personal_skills":false}}"#,
     )?;
-    let gates = owner.join(".local/share/muse/feature-config");
+    let gates = owned(&owner).join(".local/share/muse/feature-config");
     copy_feature_config(&gates, &root.join("data/muse/feature-config"))?;
-    let catalog = owner.join(".local/share/muse/model-catalog");
+    let catalog = owned(&owner).join(".local/share/muse/model-catalog");
     copy_feature_config(&catalog, &root.join("data/muse/model-catalog"))?;
     write(&root.join("work/README.md"), "A throwaway project.\n")?;
     let git = ["/opt/homebrew/bin/git", "/usr/bin/git"]
         .into_iter()
-        .find(|git| Path::new(git).is_file())
+        .find(|git| cf_e2e::door::reads::is_file(git))
         .ok_or("no git")?;
     ran(
         Path::new(git),
@@ -293,14 +305,39 @@ pub fn set_up(root: &Path) -> Outcome {
     .map(|_| ())
 }
 
-fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
-    if fs::symlink_metadata(gates).is_ok_and(|meta| meta.file_type().is_symlink()) {
+fn copy_feature_config(gates: &Source, into: &Path) -> Outcome {
+    if gates.is_a_link() {
         return Ok(());
     }
-    if gates.is_dir() {
-        cf_e2e::door::copy_tree(gates, into, &|_| false).map_err(|error| error.to_string())?;
+    if gates.is_a_folder() {
+        gates
+            .copy_tree_into(into, &|_| false)
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// The owner's launcher, version file and settings are read through sources: on a decoy owner the
+/// binary is found by the version file, and a changed file changes its fingerprint.
+#[cfg(test)]
+#[test]
+fn the_owners_muse_files_are_found_and_fingerprinted_through_sources() {
+    let root = cf_e2e::door::made("cf-muse-tui-owner-").unwrap();
+    let bin = root.path().join(".local/bin");
+    cf_e2e::door::make_dir(&bin).unwrap();
+    let owner = owned(root.path());
+    assert!(binary_in(&owner.join(".local/bin")).is_err());
+    cf_e2e::door::write(bin.join(".muse-version"), "1.4.14\n").unwrap();
+    assert!(binary_in(&owner.join(".local/bin")).is_err());
+    cf_e2e::door::write(bin.join("muse-bin-1.4.14"), "decoy").unwrap();
+    assert_eq!(
+        binary_in(&owner.join(".local/bin")).unwrap(),
+        bin.join("muse-bin-1.4.14")
+    );
+    let before = fingerprints(&owner);
+    assert_eq!(before.len(), 4);
+    cf_e2e::door::write(bin.join(".muse-version"), "1.4.15\n").unwrap();
+    assert_ne!(before, fingerprints(&owner));
 }
 
 #[cfg(test)]
@@ -314,7 +351,7 @@ fn kit_round3_muse_feature_config_skips_links_out() {
     cf_e2e::door::make_dir(&source).unwrap();
     cf_e2e::door::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
     let target = root.path().join("copy");
-    copy_feature_config(&source, &target).unwrap();
+    copy_feature_config(&owned(&source), &target).unwrap();
     assert!(
         !target.join("leak").exists(),
         "a linked-out feature file was copied"
@@ -363,12 +400,13 @@ pub fn session_log(root: &Path) -> Option<(String, PathBuf)> {
     let mut found = Vec::new();
     let mut folders = vec![root.join("data/muse/sessions")];
     while let Some(folder) = folders.pop() {
-        let Ok(entries) = fs::read_dir(&folder) else {
+        let Ok(entries) = cf_e2e::door::reads::read_dir(&folder) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.file_name().is_some_and(|name| name != "subagent") {
+        for path in entries {
+            if cf_e2e::door::reads::is_dir(&path)
+                && path.file_name().is_some_and(|name| name != "subagent")
+            {
                 folders.push(path);
             } else if path.file_name().is_some_and(|name| name == "session.jsonl") {
                 found.push(path);

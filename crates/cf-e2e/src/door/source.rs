@@ -62,12 +62,12 @@ impl fmt::Display for Source {
 
 /// The account that started the run, as the kit asks it for files to read.
 #[derive(Debug, Clone, Copy)]
-pub struct Account;
+pub struct Account(());
 
 impl Account {
     /// The account of this process.
     pub fn this() -> Account {
-        Account
+        Account(())
     }
 
     /// The place `row` is at on this account, as the harness itself would find it: the folder its
@@ -335,6 +335,14 @@ impl Source {
         crate::door::copy_keeping_mode_from(self, to)
     }
 
+    /// The file it is, cloned to `to` where the system makes a clone (a Claude Code's program is
+    /// three hundred megabytes), copied where it does not.
+    pub fn clone_into(&self, to: impl AsRef<Path>) -> crate::Result {
+        self.place()
+            .map_err(crate::Error::file("read", &self.path))?;
+        crate::door::copy_cloning_from(self, to)
+    }
+
     /// The folder it is, copied into `to` (made private), links that leave it skipped, a link inside
     /// it made to point into the copy; `skip` names what is left out.
     pub fn copy_tree_into(
@@ -417,20 +425,20 @@ impl From<&Source> for Source {
 #[cfg(test)]
 impl From<&Path> for Source {
     fn from(path: &Path) -> Source {
-        Account.named(path, Purpose::Guard)
+        Account::this().named(path, Purpose::Guard)
     }
 }
 
 #[cfg(test)]
 impl From<&PathBuf> for Source {
     fn from(path: &PathBuf) -> Source {
-        Account.named(path, Purpose::Guard)
+        Account::this().named(path, Purpose::Guard)
     }
 }
 
 #[cfg(test)]
 impl From<PathBuf> for Source {
     fn from(path: PathBuf) -> Source {
-        Account.named(path, Purpose::Guard)
+        Account::this().named(path, Purpose::Guard)
     }
 }

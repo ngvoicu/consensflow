@@ -34,10 +34,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cf_e2e::door::source::Source;
 use cf_e2e::live::guard::{copy_muse_into, login_in_keychain, Scratch};
 use cf_e2e::live::{ask, machine, Log};
 use cf_e2e::process::own_var;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
 /// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
@@ -45,65 +46,74 @@ fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
     cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
 }
 
-/// Compare every non-directory entry by metadata only, without following links.
-fn tree(root: &Path) -> Result<BTreeMap<PathBuf, cf_base::file::Stat>> {
-    let mut found = BTreeMap::new();
-    let mut folders = vec![root.to_owned()];
-    while let Some(folder) = folders.pop() {
-        let meta = std::fs::symlink_metadata(&folder).map_err(|source| Error::File {
-            action: "stat",
-            path: folder.clone(),
-            source,
-        })?;
-        if meta.file_type().is_symlink() {
-            return Err(Error::File {
-                action: "list",
-                path: folder,
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "folder is a symbolic link",
-                ),
-            });
-        }
-        let entries = std::fs::read_dir(&folder).map_err(|source| Error::File {
+/// Compare every non-directory entry by metadata only, without following links: a source of the
+/// owner's is walked and each entry of it stated, nothing opened.
+fn tree(root: &Source) -> Result<BTreeMap<Source, cf_base::file::Stat>> {
+    let at = |source: &Source| PathBuf::from(source.name());
+    let meta = root.lstat().map_err(|source| Error::File {
+        action: "stat",
+        path: at(root),
+        source,
+    })?;
+    if meta.file_type().is_symlink() {
+        return Err(Error::File {
             action: "list",
-            path: folder.clone(),
+            path: at(root),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "folder is a symbolic link",
+            ),
+        });
+    }
+    let mut found = BTreeMap::new();
+    let entries = root.walk().map_err(|source| Error::File {
+        action: "list",
+        path: at(root),
+        source,
+    })?;
+    for entry in entries {
+        if entry.lstat().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let stat = entry.stat().map_err(|source| Error::File {
+            action: "stat",
+            path: at(&entry),
             source,
         })?;
-        for entry in entries {
-            let entry = entry.map_err(|source| Error::File {
-                action: "list",
-                path: folder.clone(),
-                source,
-            })?;
-            let path = entry.path();
-            let kind = entry.file_type().map_err(|source| Error::File {
-                action: "read",
-                path: path.clone(),
-                source,
-            })?;
-            if kind.is_symlink() {
-                continue;
-            } else if kind.is_dir() {
-                folders.push(path);
-            } else {
-                let stat = cf_base::file::stat(&path).map_err(|source| Error::File {
-                    action: "stat",
-                    path: path.clone(),
-                    source,
-                })?;
-                found.insert(path, stat);
-            }
-        }
+        found.insert(entry, stat);
     }
     Ok(found)
 }
 
-/// What Muse is given to run in: the run's own home, shell and search path, and its folders
+/// The text of Muse's `auth.json` in `config`, read through its source and held in memory only.
+fn login_text(config: &Source) -> Result<String> {
+    let auth = config.join("auth.json");
+    auth.read_to_string().map_err(|source| Error::File {
+        action: "read",
+        path: PathBuf::from(auth.name()),
+        source,
+    })
+}
+
+/// The paths that are not as they were between two looks, by name alone: never a content.
+fn changed_paths(
+    before: &BTreeMap<Source, cf_base::file::Stat>,
+    after: &BTreeMap<Source, cf_base::file::Stat>,
+) -> Vec<String> {
+    before
+        .keys()
+        .chain(after.keys())
+        .filter(|path| before.get(*path) != after.get(*path))
+        .map(Source::name)
+        .collect()
+}
+
+/// What Muse is given to run in: a home of the run's own, the shell and search path, and its folders
 /// (config, data, cache, state) those of `scratch`. No key of an account's is passed.
-fn env(scratch: &Path) -> Value {
+fn env(scratch: &Path, home: &Path) -> Value {
     let mut vars = serde_json::Map::new();
-    for name in ["HOME", "PATH", "USER", "LANG", "TMPDIR", "SHELL"] {
+    vars.insert("HOME".to_owned(), json!(home));
+    for name in ["PATH", "USER", "LANG", "TMPDIR", "SHELL"] {
         if let Some(value) = own_var(name) {
             vars.insert(name.to_owned(), Value::String(value));
         }
@@ -126,10 +136,11 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
     let log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
     ask::prepare()?;
     let home = machine::home()?;
-    let config = home.join(".config/muse");
+    // The owner's Muse folder is a source: listed, stated and read through it, never by a path.
+    let config = owned(&home).join(".config/muse");
     let before = tree(&config)?;
     // Where the login is kept decides whether a copy of the config is safe to make.
-    let auth = files::read_string(&config.join("auth.json"))?;
+    let auth = login_text(&config)?;
     login_in_keychain(&auth).map_err(Error::Daemon)?;
     let scratch = Scratch::made("muse-reads-").map_err(|source| Error::File {
         action: "make a folder in",
@@ -148,7 +159,11 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         path: home.join(".config/muse"),
         source,
     })?;
-    let env = env(scratch.path());
+    // The question's homes are the run's, as every start's are: the home is a folder below the
+    // scratch, and never the caller's own.
+    let run_home = scratch.path().join("home");
+    cf_e2e::door::make_dir(&run_home)?;
+    let env = env(scratch.path(), &run_home);
 
     let listed = ask::question(&json!({ "op": "muse_models", "env": env }))?;
     assert_eq!(
@@ -203,11 +218,7 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 
     drop(scratch);
     let after = tree(&config)?;
-    let changed: Vec<&PathBuf> = before
-        .keys()
-        .chain(after.keys())
-        .filter(|path| before.get(*path) != after.get(*path))
-        .collect();
+    let changed = changed_paths(&before, &after);
     assert!(
         changed.is_empty(),
         "a read changed ~/.config/muse (compared by size, modification time and file identity only): {changed:?}"
@@ -220,14 +231,43 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 mod tests {
     use super::*;
 
+    /// The case's reads of the owner's folder, on a decoy owner: the folder is listed and stated,
+    /// its login read, and a change is named by its path and never by what it holds.
+    #[test]
+    fn the_case_reads_the_owners_muse_folder_through_a_source_and_names_a_change_by_its_path() {
+        let root = cf_e2e::door::made("t-").unwrap();
+        let config = root.path().join(".config/muse");
+        cf_e2e::door::make_dir(&config).unwrap();
+        cf_e2e::door::write(config.join("auth.json"), "decoy login words").unwrap();
+        cf_e2e::door::write(config.join("settings.json"), "one").unwrap();
+        let source = owned(root.path()).join(".config/muse");
+        assert_eq!(login_text(&source).unwrap(), "decoy login words");
+        let before = tree(&source).unwrap();
+        assert_eq!(before.len(), 2);
+        assert!(changed_paths(&before, &tree(&source).unwrap()).is_empty());
+        cf_e2e::door::write(config.join("settings.json"), "changed, and longer").unwrap();
+        let after = tree(&source).unwrap();
+        let named = changed_paths(&before, &after);
+        assert!(
+            named.iter().all(|name| name.ends_with("settings.json")),
+            "{named:?}"
+        );
+        assert!(!named.is_empty());
+        assert!(!format!("{named:?}").contains("longer"));
+        assert!(login_text(&owned(root.path().join("none"))).is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn t1744_review_muse_tree_sees_a_fifo_without_opening_it() {
         let root = cf_e2e::door::made("t-").unwrap();
         let fifo = root.path().join("unrecognized-login");
         nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
-        let seen = tree(root.path()).expect("a FIFO can be stated without being opened");
-        assert!(seen.contains_key(&fifo), "the FIFO was not compared");
+        let seen = tree(&owned(root.path())).expect("a FIFO can be stated without being opened");
+        assert!(
+            seen.contains_key(&owned(&fifo)),
+            "the FIFO was not compared"
+        );
     }
 
     #[cfg(unix)]
@@ -240,7 +280,7 @@ mod tests {
         cf_e2e::door::make_dir(&nested).unwrap();
         cf_e2e::door::write(nested.join("unknown"), "synthetic").unwrap();
         cf_e2e::door::set_permissions(&nested, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let seen = tree(root.path());
+        let seen = tree(&owned(root.path()));
         cf_e2e::door::set_permissions(&nested, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(seen.is_err(), "an unreadable folder was silently skipped");
     }
@@ -255,7 +295,7 @@ mod tests {
         cf_e2e::door::write(actual.join("unknown"), "synthetic").unwrap();
         cf_e2e::door::symlink(&actual, &linked).unwrap();
         assert!(
-            tree(&linked).is_err(),
+            tree(&owned(&linked)).is_err(),
             "a linked root looked like an empty tree"
         );
     }
@@ -274,9 +314,10 @@ mod tests {
             cf_e2e::door::write(file, "synthetic").unwrap();
             cf_e2e::door::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let seen = tree(root.path()).expect("metadata does not need to open an unknown file");
-        assert!(seen.contains_key(&unknown));
-        assert!(seen.contains_key(&nested_unknown));
+        let seen =
+            tree(&owned(root.path())).expect("metadata does not need to open an unknown file");
+        assert!(seen.contains_key(&owned(&unknown)));
+        assert!(seen.contains_key(&owned(&nested_unknown)));
     }
 
     #[test]
@@ -285,10 +326,10 @@ mod tests {
         for name in ["auth.json", "auth.json.bak", "settings.json"] {
             cf_e2e::door::write(root.path().join(name), "synthetic").unwrap();
         }
-        let observed = tree(root.path()).unwrap();
+        let observed = tree(&owned(root.path())).unwrap();
         for name in ["auth.json", "auth.json.bak", "settings.json"] {
             assert_eq!(
-                observed.get(&root.path().join(name)),
+                observed.get(&owned(root.path().join(name))),
                 Some(&cf_base::file::stat(&root.path().join(name)).unwrap())
             );
         }
@@ -301,9 +342,9 @@ mod tests {
         let foreign = cf_e2e::door::made("t-").unwrap();
         cf_e2e::door::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
         cf_e2e::door::symlink(foreign.path().join("login"), root.path().join("leak")).unwrap();
-        let found = tree(root.path()).unwrap();
+        let found = tree(&owned(root.path())).unwrap();
         assert!(
-            !found.contains_key(&root.path().join("leak")),
+            !found.contains_key(&owned(root.path().join("leak"))),
             "a linked-out login was fingerprinted"
         );
     }

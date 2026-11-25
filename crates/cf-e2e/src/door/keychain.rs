@@ -477,7 +477,13 @@ mod control_tests {
             (Path::new("/bin/sh"), vec!["-c", "echo no"]),
         ] {
             let refused = control
-                .start_claude(program, &args, named(&config), run.path(), Duration::from_secs(20))
+                .start_claude(
+                    program,
+                    &args,
+                    named(&config),
+                    run.path(),
+                    Duration::from_secs(20),
+                )
                 .unwrap_err();
             assert!(
                 refused.to_string().contains("Keychain control"),

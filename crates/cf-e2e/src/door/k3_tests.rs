@@ -1306,7 +1306,10 @@ fn the_starts_that_run_cargo_are_told_the_cargo_and_rustup_folders() {
         ]
     );
     let own = told(&[("CARGO_HOME", "/elsewhere/cargo")]);
-    assert_eq!(own[0], ("CARGO_HOME".to_owned(), "/elsewhere/cargo".to_owned()));
+    assert_eq!(
+        own[0],
+        ("CARGO_HOME".to_owned(), "/elsewhere/cargo".to_owned())
+    );
     // The door's cargo names them from the account's home as well.
     let scratch = root.path().join("scratch");
     fs::create_dir_all(&scratch).unwrap();
@@ -1387,7 +1390,10 @@ fn a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy() {
     refused("read_to_string", reads::read_to_string(&inside).map(drop));
     refused("open", reads::open(&inside).map(drop));
     refused("metadata", reads::metadata(&inside).map(drop));
-    refused("symlink_metadata", reads::symlink_metadata(&inside).map(drop));
+    refused(
+        "symlink_metadata",
+        reads::symlink_metadata(&inside).map(drop),
+    );
     refused("canonicalize", reads::canonicalize(&inside).map(drop));
     refused("read_link", reads::read_link(&inside).map(drop));
     refused("read_dir", reads::read_dir(&store).map(drop));
@@ -1395,11 +1401,15 @@ fn a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy() {
     assert!(!reads::is_symlink(&inside));
     refused(
         "files::read",
-        crate::files::read(&inside).map(drop).map_err(std::io::Error::other),
+        crate::files::read(&inside)
+            .map(drop)
+            .map_err(std::io::Error::other),
     );
     refused(
         "files::read_string",
-        crate::files::read_string(&inside).map(drop).map_err(std::io::Error::other),
+        crate::files::read_string(&inside)
+            .map(drop)
+            .map_err(std::io::Error::other),
     );
     // The door's copies refuse the source side, and make nothing.
     let into = |name: &str| root.path().join("copies").join(name);
@@ -1423,6 +1433,18 @@ fn a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy() {
     }
     assert!(!into("copy").exists() && !into("keeping").exists());
     assert!(!into("cloning").exists() && !into("tree").exists());
+    // A source of the account is the one way a protected path is read, copied and cloned.
+    let source = super::source::Account::this().named(&inside, super::source::Purpose::Seed);
+    assert_eq!(source.read_to_string().unwrap(), "made up");
+    source.clone_into(into("source-clone")).unwrap();
+    source.copy_into(into("source-copy")).unwrap();
+    super::source::Account::this()
+        .named(&store, super::source::Purpose::Seed)
+        .copy_tree_into(into("source-tree"), &|_| false)
+        .unwrap();
+    assert_eq!(fs::read_to_string(into("source-clone")).unwrap(), "made up");
+    assert_eq!(fs::read_to_string(into("source-copy")).unwrap(), "made up");
+    assert!(into("source-tree").join("inner").join("a.txt").is_file());
     // The same files below a folder of the run's are read and copied.
     assert_eq!(reads::read_to_string(&outside).unwrap(), "made up");
     assert_eq!(reads::read(&outside).unwrap(), b"made up");

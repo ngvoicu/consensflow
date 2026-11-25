@@ -150,7 +150,14 @@ const READS_HELD: &[&str] = &[
     "src/rig/homes.rs",
     "src/matrix/evidence.rs",
     "tests/live_harness_dialogs.rs",
+    "tests/live_muse_reads.rs",
+    "tests/live_launcher.rs",
+    "tests/live_muse/tui.rs",
 ];
+
+/// The functions and methods that give a source of the owner's home with no account named: held to
+/// the files that may ask the account ([`OWNER_FILES`]) as `Account::this()` is.
+const OWNER_CALLS: &[&str] = &["owner", "owner_home"];
 
 /// The files that ask the account for a source of the owner's files ([`crate::door::source`]):
 /// each reads for one of its three purposes (the seed of a run's home, a marketplace or package it
@@ -200,6 +207,10 @@ const OWNER_FILES: &[(&str, &str)] = &[
     (
         "tests/live_keychain.rs",
         "the guard of the owner's launchers the Keychain control runs under",
+    ),
+    (
+        "tests/live_harnesses.rs",
+        "the guard of the owner's launchers the harnesses' look runs under",
     ),
     (
         "tests/live_launcher.rs",
@@ -533,6 +544,12 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "a_plain_start_through_a_shell_is_judged_by_the_program_the_shell_is_told_to_run",
         Class::Operation,
         "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
+    (
+        "src/door/k3_tests.rs",
+        "a_script_entry_starts_a_shell_and_no_other_program",
+        Class::Operation,
+        "a script entry refused where its program is no shell: the decoys it is given are the run's own",
     ),
     (
         "src/live/codex.rs",
@@ -1013,6 +1030,12 @@ fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
             format!(".{name}(…) (a program started outside the spawn door)"),
         ));
     }
+    if args == 0 && OWNER_CALLS.contains(&name) {
+        return Some((
+            Class::Owner,
+            format!(".{name}() (the owner's home as a source, asked for outside the files named for it)"),
+        ));
+    }
     if name == "start_claude" && args == 5 {
         return Some((
             Class::Operation,
@@ -1071,12 +1094,12 @@ impl Reader {
         {
             return;
         }
-        // The unit tests of a file read and name what they made.
-        if class == Class::Owner && (self.asks_account || self.in_test > 0) {
+        // The unit tests of a file (code only a test builds) read and name what they made; a live
+        // case, a `#[test]` function of a suite, is read for both as it is for an ending.
+        if class == Class::Owner && (self.asks_account || self.in_cfg_test > 0) {
             return;
         }
-        // The unit tests of a held file read the folders they made.
-        if class == Class::Read && (!self.holds_reads || self.in_test > 0) {
+        if class == Class::Read && (!self.holds_reads || self.in_cfg_test > 0) {
             return;
         }
         self.found.push(Found {
@@ -1351,6 +1374,15 @@ impl<'ast> Visit<'ast> for Reader {
                 ),
             );
         }
+        if named.len() >= 2 && named.last().is_some_and(|last| last == "owner_home") {
+            self.flag(
+                Class::Owner,
+                format!(
+                    "{} (the owner's home as a source, asked for outside the files named for it)",
+                    named.join("::")
+                ),
+            );
+        }
         if named.len() >= 2
             && named[named.len() - 1] == "this"
             && named[named.len() - 2] == "Account"
@@ -1413,6 +1445,15 @@ impl<'ast> Visit<'ast> for Reader {
                     Class::Start,
                     format!(
                         "use {} (a program xtask's live run names itself)",
+                        imported.join("::")
+                    ),
+                );
+            }
+            if imported.len() >= 2 && imported.last().is_some_and(|last| last == "owner_home") {
+                self.flag(
+                    Class::Owner,
+                    format!(
+                        "use {} (the owner's home as a source, asked for outside the files named for it)",
                         imported.join("::")
                     ),
                 );
@@ -2077,6 +2118,89 @@ fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_it
             !asks,
             "{name}: {imported:?}"
         );
+    }
+    // The three live cases that read the owner's files do it through a source: a read by path put
+    // back into any of them is found, and the file is held.
+    for name in [
+        "tests/live_muse_reads.rs",
+        "tests/live_launcher.rs",
+        "tests/live_muse/tui.rs",
+    ] {
+        assert!(
+            READS_HELD.iter().any(|held| name.starts_with(held)),
+            "{name}"
+        );
+        for text in [
+            "fn f() { let _ = std::fs::read_to_string(p); }",
+            "fn f() { let _ = std::fs::read_link(p); }",
+            "fn f() { let _ = std::fs::canonicalize(p); }",
+            "fn f() { if p.is_file() {} }",
+            "fn f() { let _ = std::fs::read_dir(p); }",
+            "#[test]\n#[ignore]\nfn a_live_case() { let _ = std::fs::read(p); }",
+        ] {
+            let found = read_as(name, text, false, &[], false);
+            assert!(
+                found.iter().any(|found| found.class == Class::Read),
+                "{name}: {text} is not found: {found:?}"
+            );
+        }
+    }
+    // A live case, a `#[test]` function of a suite, is read for a read and for the owner's files as
+    // it is for an ending; the unit tests of a held file (code only a test builds) are not.
+    for (text, class) in [
+        (
+            "#[test]\n#[ignore]\nfn a_live_case() { let _ = std::fs::read(p); }",
+            Class::Read,
+        ),
+        (
+            "#[test]\nfn a_live_case() { let _ = p.exists(); }",
+            Class::Read,
+        ),
+        (
+            "#[test]\nfn a_live_case() { let _ = Account::this().home(Purpose::Guard); }",
+            Class::Owner,
+        ),
+    ] {
+        let live = read_as("tests/live_harness_dialogs.rs", text, false, &[], false);
+        let found = live.iter().any(|found| found.class == class);
+        // The dialog case's file holds reads, and names the account itself.
+        assert_eq!(found, class == Class::Read, "{text}: {live:?}");
+        let other = read_as("tests/live_x.rs", text, false, &[], false);
+        assert_eq!(
+            other.iter().any(|found| found.class == class),
+            class == Class::Owner,
+            "{text}: {other:?}"
+        );
+    }
+    for text in [
+        "#[cfg(test)]\nmod tests {\n#[test]\nfn t() { let _ = Account::this().home(Purpose::Guard); }\n}",
+        "#[cfg(test)]\nfn t() { let _ = Account::this(); }",
+    ] {
+        let found = read_as("tests/live_x.rs", text, false, &[], false);
+        assert!(found.iter().all(|found| found.class != Class::Owner), "{text}: {found:?}");
+    }
+    // The three functions that give a source of the owner's home with no account named are the
+    // owner's too: found outside the files named for the account, and in them not.
+    for text in [
+        "fn f() { let _ = installed.owner(); }",
+        "fn f() { let _ = isolation.owner_home(); }",
+        "fn f() { let _ = machine::owner_home(); }",
+        "fn f() { let _ = super::machine::owner_home().unwrap(); }",
+        "use crate::live::machine::owner_home;",
+    ] {
+        for (name, asks) in [
+            ("tests/live_x.rs", false),
+            ("src/live/machine.rs", true),
+            ("src/live/isolation.rs", true),
+            ("tests/live_harnesses.rs", true),
+        ] {
+            let found = read_as(name, text, false, &[], false);
+            assert_eq!(
+                found.iter().any(|found| found.class == Class::Owner),
+                !asks,
+                "{name}: {text}: {found:?}"
+            );
+        }
     }
     // A case's own `Account` (the members' tally of a case) is no account of the owner's.
     let tally = read_as(

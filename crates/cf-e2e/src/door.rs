@@ -83,10 +83,10 @@ pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
 pub use writes::{
-    append, copy, copy_cloning, copy_keeping_mode, copy_keeping_mode_from, copy_tree,
-    copy_tree_from, create, create_new, create_new_private, made_dir, made_file, make_dir,
-    make_dir_private, remove, rename, say_its_process, set_modified, set_permissions, write,
-    write_executable, write_whole,
+    append, copy, copy_cloning, copy_cloning_from, copy_keeping_mode, copy_keeping_mode_from,
+    copy_tree, copy_tree_from, create, create_new, create_new_private, made_dir, made_file,
+    make_dir, make_dir_private, remove, rename, say_its_process, set_modified, set_permissions,
+    write, write_executable, write_whole,
 };
 #[cfg(windows)]
 pub use writes::{symlink_dir, symlink_file};

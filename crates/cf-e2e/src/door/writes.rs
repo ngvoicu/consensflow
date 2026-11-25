@@ -124,11 +124,21 @@ fn keep_mode(from: &Path, to: &Path) -> Result {
 
 /// [`copy_keeping_mode`] that makes a clone where the system makes one (`cp -c` on a Mac's APFS:
 /// a Claude Code's program is three hundred megabytes), and a copy where it does not.
-// The system's own `cp` makes the clone; the target was asked of the door first.
-#[allow(clippy::disallowed_methods)]
 pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
     super::reads::admitted(from).map_err(Error::file("read", from))?;
+    clone_of(from, to)
+}
+
+/// [`copy_cloning`] of a program of the account's (the machine's Claude Code, which sits in its
+/// installer's store), read as a [`super::source::Source`].
+pub fn copy_cloning_from(from: &super::source::Source, to: impl AsRef<Path>) -> Result {
+    clone_of(from.path_for_door(), to.as_ref())
+}
+
+// The system's own `cp` makes the clone; the target was asked of the door first.
+#[allow(clippy::disallowed_methods)]
+fn clone_of(from: &Path, to: &Path) -> Result {
     allowed("copy to", to, false)?;
     folder_of(to)?;
     #[cfg(target_os = "macos")]
