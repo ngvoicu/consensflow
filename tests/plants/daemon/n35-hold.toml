@@ -13,7 +13,7 @@
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
 
 [run]
-n35-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model"]
+n35-model = ["env", "CF_N35_SEEDS=400", "cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::no_schedule"]
 n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold"]
 n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
 n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
