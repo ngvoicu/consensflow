@@ -50,7 +50,7 @@ use crate::app_settings::{settings_path, SettingsFile};
 use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
-use crate::files::{Log, Trace};
+use crate::files::{Log, Trace, SETTLE};
 use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
 use crate::machine;
 use crate::models::ModelLists;
@@ -207,6 +207,9 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     if started.is_err() {
         log.info("exit 1");
     }
+    // What the start said is in the log before the start is over, if the file lets it in time:
+    // a start that failed ends the process.
+    let _ = log.written(SETTLE);
     started
 }
 
