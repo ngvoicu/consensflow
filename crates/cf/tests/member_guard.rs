@@ -5,7 +5,7 @@
 //! the PATH; no test here starts the real command by its name.
 
 // The tests start programs themselves.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used)]
+#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
