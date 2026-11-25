@@ -155,6 +155,7 @@ pub(crate) struct Parts {
     pub(crate) api_kick: Rc<dyn Fn()>,
     pub(crate) home: std::path::PathBuf,
     pub(crate) spawn: Rc<DaemonSpawn>,
+    pub(crate) log: Rc<Log>,
 }
 
 impl Daemon {
@@ -533,6 +534,7 @@ async fn run(
             api_kick: Rc::clone(&context.kick),
             home,
             spawn,
+            log,
         },
     })
 }

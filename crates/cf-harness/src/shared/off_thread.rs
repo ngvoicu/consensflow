@@ -62,6 +62,19 @@ pub fn late_step(said: &str) -> Option<(&'static str, u64)> {
     Some((step, seconds.parse().ok()?))
 }
 
+/// Whether the launch being prepared is still wanted.
+pub fn launch_wanted() -> bool {
+    true
+}
+
+/// Prepares a launch that is wanted for as long as `wanted` says so.
+pub async fn while_wanted<T>(
+    _wanted: std::rc::Rc<dyn Fn() -> bool>,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    work.await
+}
+
 thread_local! {
     /// The calls made off this thread that have not ended.
     static OUTSTANDING: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
@@ -247,4 +260,90 @@ pub(crate) async fn work<T: Send + 'static>(
 ) -> Result<T, String> {
     let own = env.clone();
     apart(env, step, move || work(&own)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::future::Future as _;
+    use std::rc::Rc;
+    use std::sync::atomic::AtomicBool;
+    use std::task::{Context, Waker};
+
+    use super::*;
+    use crate::testing::{finished, Driver};
+    use crate::{launch_wanted, while_wanted};
+
+    /// A launch that is over between two of its steps ends at the end of the first: the second
+    /// is never begun (T-2263, finding 12).
+    #[test]
+    fn a_launch_that_is_over_begins_no_further_step() {
+        let env = Env::from_vars(std::iter::empty::<(String, String)>());
+        let over = Rc::new(Cell::new(false));
+        let wanted = {
+            let over = Rc::clone(&over);
+            Rc::new(move || !over.get())
+        };
+        let second = Arc::new(AtomicBool::new(false));
+        let ran = Arc::clone(&second);
+        let closes = Rc::clone(&over);
+        let answer = finished(Box::pin(while_wanted(wanted, async move {
+            let first = work(&env, step::FILES, |_| ());
+            // The Close comes while the first step is made.
+            closes.set(true);
+            first.await?;
+            work(&env, step::FILES, move |_| ran.store(true, Ordering::SeqCst)).await
+        })));
+        assert!(answer.is_err(), "the launch went on: {answer:?}");
+        assert!(!second.load(Ordering::SeqCst), "the second step was made");
+        assert!(launch_wanted(), "outside a launch, everything is wanted");
+    }
+
+    /// A step whose launch was over before it began is not made.
+    #[test]
+    fn a_step_of_a_launch_already_over_is_not_made() {
+        let env = Env::from_vars(std::iter::empty::<(String, String)>());
+        let made = Arc::new(AtomicBool::new(false));
+        let ran = Arc::clone(&made);
+        let answer = finished(Box::pin(while_wanted(Rc::new(|| false), async move {
+            work(&env, step::FILES, move |_| ran.store(true, Ordering::SeqCst)).await
+        })));
+        assert!(answer.is_err());
+        assert!(!made.load(Ordering::SeqCst));
+    }
+
+    /// A driver waits for its own work's calls, never for another call outstanding on the same
+    /// thread (T-2263, finding 8).
+    #[test]
+    fn a_driver_does_not_wait_for_a_call_that_is_not_its_own() {
+        let env = Env::from_vars(std::iter::empty::<(String, String)>());
+        let (release, held) = channel::<()>();
+        let mut long = Box::pin(async move {
+            work(&env, step::FILES, move |_| {
+                let _ = held.recv_timeout(Duration::from_secs(30));
+            })
+            .await
+        });
+        // Begins the call, and leaves it outstanding on this thread.
+        assert!(long
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending());
+        let releasing = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            let _ = release.send(());
+        });
+        let mut unrelated: Driver<()> = Driver::default();
+        unrelated.begin(2, std::future::pending());
+        let began = std::time::Instant::now();
+        let settled = unrelated.run();
+        let took = began.elapsed();
+        assert!(settled.is_empty());
+        assert!(
+            took < Duration::from_secs(2),
+            "the driver waited for a call that is not its own: {took:?}"
+        );
+        assert!(finished(long).is_ok(), "the call's own wait waits for it");
+        releasing.join().unwrap();
+    }
 }

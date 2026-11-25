@@ -432,3 +432,45 @@ fn a_folder_in_the_way_of_a_file_written_is_eisdir_on_open() {
         )
     );
 }
+
+/// A file that must be made new takes a name only while it is free: one there is left as it was,
+/// and nothing is left beside it (T-2263, finding 13).
+#[test]
+fn a_file_made_new_never_takes_the_place_of_one_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    write_new_in_place(&path, b"first", 0o600).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"first");
+    let refused = write_new_in_place(&path, b"second", 0o600).unwrap_err();
+    assert!(refused.to_string().starts_with("EEXIST"), "{refused}");
+    assert_eq!(fs::read(&path).unwrap(), b"first");
+    assert_eq!(left_in(dir.path()), ["config.json"]);
+}
+
+/// Another writer takes the name while the new file is still being written beside: its file
+/// stays, and the writer that came late is refused.
+#[cfg(unix)]
+#[test]
+fn a_name_taken_while_a_new_file_is_written_beside_is_not_taken_over() {
+    use std::io::Read as _;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    // The file written beside is a named pipe: its writer waits for the test to read it.
+    let beside = temporary_of(&path);
+    nix::unistd::mkfifo(&beside, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
+    // More than a pipe holds, so the write is still going on once the pipe is opened.
+    let writer = {
+        let path = path.clone();
+        std::thread::spawn(move || write_new_in_place(&path, &vec![b'n'; 1 << 20], 0o600))
+    };
+    let mut reading = File::open(&beside).unwrap();
+    assert!(!path.exists());
+    fs::write(&path, b"already published").unwrap();
+    let mut drained = Vec::new();
+    reading.read_to_end(&mut drained).unwrap();
+    let refused = writer.join().unwrap().expect_err("the late writer was not refused");
+    assert!(refused.to_string().starts_with("EEXIST"), "{refused}");
+    assert_eq!(fs::read(&path).unwrap(), b"already published");
+    assert_eq!(left_in(dir.path()), ["config.json"]);
+}

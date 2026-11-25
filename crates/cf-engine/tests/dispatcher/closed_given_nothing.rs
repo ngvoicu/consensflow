@@ -20,7 +20,7 @@ use cf_harness::records::Role;
 use cf_ledger::{continuation, LedgerError, MessageView, NewNote};
 use serde_json::json;
 
-use crate::chiefs::{handoffs_of, to, with_codex};
+use crate::chiefs::{handoffs_of, to, to_human, with_codex};
 use crate::deliveries::enters;
 use crate::fixtures::{given, native_of};
 use crate::resume::{at_work, cut_notes, opened, quit_and_start};
@@ -1572,4 +1572,135 @@ fn a_pause_note_cancelled_on_its_way_and_given_all_the_same_is_not_said_again() 
         .iter()
         .any(|text| text.contains(SURVIVOR)));
     assert!(said_again(&context, project).is_empty());
+}
+
+/// What an adapter says of a step of a launch's plan that did not end in its time.
+const LATE: &str = "writing the launch's files took more than 60 s";
+
+/// The bodies of what the chief was sent.
+fn to_the_chief(context: &Context, project: i64) -> Vec<String> {
+    let chief = context.id(project, "chief");
+    let inbox = context.ledger.borrow().inbox(chief, 100).expect("its inbox");
+    inbox.into_iter().map(|message| message.body).collect()
+}
+
+/// A Close that comes while a member's first launch is prepared, and a plan that then fails
+/// (a step that did not end in its time): the task waits for the Resume, as a Close leaves
+/// every undelivered task, and nobody is told of a failure (T-2263, finding 10).
+#[test]
+fn a_member_launch_that_fails_after_its_project_closed_leaves_its_task_for_the_resume() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold_instead(|_| true, LATE.to_owned());
+    let created = context.give(project, "zeus", "Parser");
+    let brief = created.message.expect("its brief").id;
+    context.pass().unwrap();
+    context.settle();
+    let windows = opened(&context).len();
+    let closing = context.begin_close_project(project);
+    context.settle();
+    preparing.open();
+    context.finish(closing).unwrap();
+
+    assert_eq!(opened(&context).len(), windows, "no window opens");
+    let waiting = context.message(brief);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.attempts),
+        ("queued", 0),
+        "the brief waits for the Resume"
+    );
+    assert_ne!(context.task(project, created.task.number).task.state, "failed");
+    let told: Vec<String> = to_the_chief(&context, project)
+        .into_iter()
+        .chain(to_human(&context, project))
+        .filter(|body| body.contains("failed") || body.contains("could not start"))
+        .collect();
+    assert!(told.is_empty(), "nobody is told of a failure: {told:?}");
+    context.close();
+}
+
+/// The chief's: closed while its window is prepared and its plan then fails, it is told
+/// nothing of a chief that could not start or is tried again, and its handoff waits.
+#[test]
+fn a_chief_launch_that_fails_after_its_project_closed_says_nothing_of_it() {
+    let context = with_codex();
+    let project = chief_at_rest(&context);
+    let preparing = context
+        .codex
+        .prepare_holds
+        .hold_instead(|_| true, LATE.to_owned());
+    context
+        .switch_chief(project, to("codex", "astraeus"), SwitchWhen::Now, false)
+        .unwrap();
+    let windows = opened(&context).len();
+    let closing = context.begin_close_project(project);
+    context.settle();
+    preparing.open();
+    context.finish(closing).unwrap();
+
+    assert_eq!(opened(&context).len(), windows, "no window opens");
+    let waiting = handoff(&context, project);
+    assert_eq!((waiting.state.as_str(), waiting.attempts), ("queued", 0));
+    let told: Vec<String> = to_human(&context, project)
+        .into_iter()
+        .filter(|body| body.contains("could not start") || body.contains("tries again"))
+        .collect();
+    assert!(told.is_empty(), "a closed chief is told nothing: {told:?}");
+    context.close();
+}
+
+/// A pause that comes while a member's window is prepared and a plan that then fails: the
+/// pause wins, as it does where the plan succeeds, and the task is not failed.
+#[test]
+fn a_member_launch_that_fails_after_a_pause_leaves_the_paused_task_as_it_is() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold_instead(|_| true, LATE.to_owned());
+    let created = context.give(project, "zeus", "Parser");
+    let brief = created.message.expect("its brief").id;
+    context.pass().unwrap();
+    context.settle();
+    context.pause_task(project, created.task.number);
+    preparing.open();
+    context.settle();
+
+    assert_ne!(context.task(project, created.task.number).task.state, "failed");
+    assert_ne!(context.message(brief).state, "failed");
+    context.close();
+}
+
+/// A Close waits for one step of a launch at most: the adapter is told, between its steps,
+/// that the launch is over (T-2263, finding 12).
+#[test]
+fn a_launch_is_told_it_is_over_once_its_project_closes() {
+    for closes in [false, true] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]).id;
+        let wanted = Rc::new(Cell::new(None));
+        let seen = Rc::clone(&wanted);
+        *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |_: &str| {
+            seen.set(Some(cf_harness::launch_wanted()));
+        }));
+        let preparing = context.adapter.prepare_holds.hold(|_| true);
+        context.give(project, "zeus", "Parser");
+        context.pass().unwrap();
+        context.settle();
+        let closing = closes.then(|| context.begin_close_project(project));
+        context.settle();
+        preparing.open();
+        match closing {
+            Some(closing) => {
+                context.finish(closing).unwrap();
+            }
+            None => context.settle(),
+        }
+        assert_eq!(wanted.get(), Some(!closes), "closes: {closes}");
+        context.close();
+    }
 }

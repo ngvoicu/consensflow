@@ -45,6 +45,11 @@ pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileEr
         .map_err(|failure| remove(&temporary).err().unwrap_or(failure))
 }
 
+/// [`write_in_place`] for a file that must be made new.
+pub fn write_new_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
+    write_in_place(path, bytes, mode)
+}
+
 /// Which of Node's recursive `mkdir` calls a folder is made as. Both walk
 /// the same levels and fail with the same codes (`MKDirpSync` and
 /// `MKDirpAsync`, `src/node_file.cc` of Node v26.8.1); a failure names the
