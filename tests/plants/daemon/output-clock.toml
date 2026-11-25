@@ -433,15 +433,11 @@ replace = """        } = &self.unsent_at;
 file = "crates/cf-panes/src/arbiter/state.rs"
 find = """        typed == self.typed
             && match by {"""
-replace = """        typed == self.typed
-            && (by == Evidence::Erased || match by {"""
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/state.rs"
-find = """                    .is_some_and(|into| into.first && into.screen.current),
-            }"""
-replace = """                    .is_some_and(|into| into.first && into.screen.current),
-            })"""
+replace = """        if by == Evidence::Erased {
+            return true;
+        }
+        typed == self.typed
+            && match by {"""
 
 [[plant]]
 name = "output clock: five seconds since the last key set the count aside"
@@ -460,15 +456,11 @@ replace = """        } = &self.unsent_at;
 file = "crates/cf-panes/src/arbiter/state.rs"
 find = """        typed == self.typed
             && match by {"""
-replace = """        typed == self.typed
-            && (by == Evidence::Erased || match by {"""
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/state.rs"
-find = """                    .is_some_and(|into| into.first && into.screen.current),
-            }"""
-replace = """                    .is_some_and(|into| into.first && into.screen.current),
-            })"""
+replace = """        if by == Evidence::Erased {
+            return true;
+        }
+        typed == self.typed
+            && match by {"""
 
 [[plant]]
 name = "output clock: the licence ignores the screen kept over a key that added nothing"
@@ -489,12 +481,12 @@ runs = ["oc-model", "oc-feed"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/state.rs"
-find = """            self.unsent_at.pressed_over = None;
+find = """            at.pressed_over = None;
 """
 replace = """"""
 
 [[plant]]
-name = "output clock: the licence ignores the screen the keys were typed into"
+name = "output clock: the licence ignores the screens the keys were typed into"
 meant = "t2233_a_dialog_answered_the_message_is_taken"
 runs = ["oc-model", "oc-harness"]
 
@@ -505,34 +497,102 @@ replace = """        let _ = elsewhere;
         None"""
 
 [[plant]]
-name = "output clock: the first key is not asked of a screen typed into"
-meant = "t2233_two_keys_at_a_dialog_hold"
-runs = ["oc-model", "oc-feed", "oc-harness"]
+name = "output clock: only one write may be evidence of typing elsewhere"
+meant = "t2255_a_picker_filtered_key_by_key_and_left_with_escape_the_message_is_taken"
+runs = ["oc-model", "oc-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """.is_some_and(|(kept, first)| *first && kept.current && shows_a_dialog(harness, kept));"""
-replace = """.is_some_and(|(kept, first)| (*first || true) && kept.current && shows_a_dialog(harness, kept));"""
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/state.rs"
-find = """.is_some_and(|into| into.first && into.screen.current),"""
-replace = """.is_some_and(|into| into.screen.current),"""
+find = """        let elsewhere = !typed_more
+"""
+replace = """        let elsewhere = !typed_more
+            && typed_at.len() == 1
+"""
 
 [[plant]]
-name = "output clock: a kept screen's current is not asked"
-meant = "t2233_a_screen_behind_at_the_key_is_no_evidence"
+name = "output clock: only the first screen typed into is asked"
+meant = "t2255_a_key_at_the_box_after_a_dialog_holds"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """typed_at.iter().all("""
+replace = """typed_at.iter().take(1).all("""
+
+[[plant]]
+name = "output clock: only the first and the last screen typed into are asked"
+meant = "keys_typed_into_a_dialog_and_nowhere_else_set_the_count_aside"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """typed_at.iter().all("""
+replace = """typed_at.first().into_iter().chain(typed_at.last()).all("""
+
+[[plant]]
+name = "output clock: the last screen's current is not asked"
+meant = "t2255_a_last_key_typed_with_the_pickers_frame_at_the_terminal_holds"
 runs = ["oc-model", "oc-feed", "oc-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """.is_some_and(|(kept, first)| *first && kept.current && shows_a_dialog(harness, kept));"""
-replace = """.is_some_and(|(kept, first)| *first && shows_a_dialog(harness, kept));"""
+find = """                last.current
+                    ||"""
+replace = """                true || last.current
+                    ||"""
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/state.rs"
-find = """.is_some_and(|into| into.first && into.screen.current),"""
-replace = """.is_some_and(|into| into.first),"""
+find = """last.current || over)"""
+replace = """true || last.current || over)"""
+
+[[plant]]
+name = "output clock: the screen at the next key does not stand for the last"
+meant = "t2255_the_screen_at_the_next_key_stands_for_a_last_one_that_was_behind"
+runs = ["oc-model", "oc-feed", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """                    || pressed_over
+"""
+replace = """                    || false && pressed_over
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """last.current || over)"""
+replace = """last.current || false && over)"""
+
+[[plant]]
+name = "output clock: keys past the screens kept are not asked about"
+meant = "t2255_more_keys_than_screens_are_kept_of_holds"
+runs = ["oc-model", "oc-feed", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        let elsewhere = !typed_more
+"""
+replace = """        let elsewhere = (true || !typed_more)
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """!at.typed_more && """
+replace = """(true || !at.typed_more) && """
+
+[[plant]]
+name = "output clock: a paste over the count does not wait for a still screen"
+meant = "t2255_a_dialogs_end_and_the_key_typed_ahead_drawn_in_two_frames_holds"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Unproven);"""
+replace = """            .is_none_or(|quiet| quiet < SETTLED_MS && false)
+        {
+            return PasteLicence::Wait(Held::Unproven);"""
 
 [[plant]]
 name = "output clock: the host admits readEmpty on the daemon's word"
