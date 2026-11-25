@@ -335,7 +335,7 @@ function groupsOpen(data) {
   }
 }
 
-async function open(page, given = model()) {
+async function open(page, given = model(), { ready = true } = {}) {
   const data = { roles: ROLES, ...given }
   await page.addInitScript(groupsOpen, data)
   await page.addInitScript((data) => {
@@ -929,6 +929,38 @@ async function open(page, given = model()) {
       if (command === 'pane_input_skip') {
         return window.__paneSkipHook ? window.__paneSkipHook(args) : { ok: true }
       }
+      // The page's own start: the host answers a preparation with its epoch and the
+      // document's nonce, and an activation of that pair with what it owes the person. A host
+      // that outlives the page (`epochHost`) answers them itself.
+      if (command === 'pane_page_prepare') {
+        return window.__panePrepareHook
+          ? window.__panePrepareHook(args)
+          : { ok: true, epoch: 1, nonce: args.nonce }
+      }
+      if (command === 'pane_page_activate') {
+        return window.__paneActivateHook
+          ? window.__paneActivateHook(args)
+          : { ok: true, epoch: args.epoch, notices: [] }
+      }
+      if (command === 'pane_input_release') {
+        return window.__paneReleaseHook ? window.__paneReleaseHook(args) : { ok: true }
+      }
+      if (command === 'pane_input_place') {
+        return window.__panePlaceHook ? window.__panePlaceHook(args) : { ok: true }
+      }
+      if (command === 'pane_window_name') {
+        return window.__paneNameHook ? window.__paneNameHook(args) : { ok: true }
+      }
+      if (command === 'pane_lost_pull') {
+        return window.__paneLostPullHook
+          ? window.__paneLostPullHook(args)
+          : { ok: true, notices: [] }
+      }
+      if (command === 'pane_lost_dismiss') {
+        return window.__paneLostDismissHook
+          ? window.__paneLostDismissHook(args)
+          : { ok: true, removed: true }
+      }
       if (command === 'pane_input_wait' && window.__paneWaitHook) {
         return window.__paneWaitHook(args)
       }
@@ -942,6 +974,15 @@ async function open(page, given = model()) {
       // them (`shortNames`, by a path's long name: `{ short }`, or `{ error }` in the app's
       // words), or none; held as a daemon operation is. As the app does, only for the paths of
       // that drop, and only for a drop it keeps.
+      // The app's window comes in front after a drop, held by a test as a slow reply is.
+      if (command === 'focus_after_drop') {
+        const heldFocus = window.__hold.focus_after_drop
+        if (heldFocus !== undefined) {
+          delete window.__hold.focus_after_drop
+          await heldFocus
+        }
+        return { ok: true }
+      }
       if (command === 'short_paths') {
         const held = window.__hold.short_paths
         if (held !== undefined) {
@@ -1028,7 +1069,7 @@ async function open(page, given = model()) {
     }
   }, data)
   await page.goto(`${ui.origin}/index.html`)
-  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  if (ready) await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
 /** Buttons as the human reads them: an icon button by its tip, any other by its text. */
@@ -4721,20 +4762,41 @@ test('says how many earlier notes one frame did not hold, and counts them all', 
 // below it is stale and writes nothing, a skip moves it past a call, and a call is
 // never sent again once its fate is unknown. The first call may be delayed, fail before
 // arrival, or arrive but lose its answer or never answer.
+// The host's rule for one window and one page, in the page: a call that comes before the
+// ones ahead of it waits for them, and a skipped number is passed. (The bound and the pages
+// that follow are `orderedHost`'s, which outlives a reload.)
 const hostWithCount = () => {
-  let last = 0
+  let passed = 0
+  const parked = new Map()
+  const skipped = new Set()
   window.__paneReceived = ''
   window.__paneSkips = []
+  const release = () => {
+    for (;;) {
+      const next = passed + 1
+      if (skipped.has(next)) {
+        passed = next
+        continue
+      }
+      const call = parked.get(next)
+      if (call === undefined) return
+      parked.delete(next)
+      passed = next
+      window.__paneReceived += String.fromCharCode(...call.bytes)
+    }
+  }
   window.__paneSkipHook = (args) => {
     window.__paneSkips.push(args)
-    last = Math.max(last, args.sequence)
+    if (args.sequence > passed && !parked.has(args.sequence)) skipped.add(args.sequence)
+    release()
     return { ok: true }
   }
   return (args) => {
-    if (args.sequence <= last) return { ok: false, error: 'pane-input-sequence-stale' }
-    last = args.sequence
-    window.__paneReceived += String.fromCharCode(...args.bytes)
-    return { ok: true, ticket: `ticket-${last}` }
+    if (args.sequence <= passed || parked.has(args.sequence) || skipped.has(args.sequence))
+      return { ok: false, error: 'pane-input-sequence-stale' }
+    parked.set(args.sequence, args)
+    release()
+    return { ok: true, ticket: `ticket-${args.sequence}` }
   }
 }
 
@@ -4776,12 +4838,14 @@ for (const [failure, typed, lost] of [
         .map(([, args]) => args.sequence),
     )
     expect(enqueues, 'no call is sent again').toEqual([1, 2, 3])
-    const skips = await page.evaluate(() => window.__paneSkips.map((args) => args.sequence))
-    expect(skips).toEqual(lost ? [1] : [])
-    if (lost)
-      await expect(page.locator('#status')).toHaveText(
-        'Some of your typing may not have reached this window. Check what appeared.',
-      )
+    // Nothing waits for the call without an answer: its skip comes at the page's bound.
+    await expect
+      .poll(() => page.evaluate(() => window.__paneSkips.map((args) => args.sequence)), {
+        timeout: 4000,
+      })
+      .toEqual(lost ? [1] : [])
+    // The page's skip tells the host; the row is the host's list's to draw, not the skip's.
+    await expect(notices(page)).toHaveCount(0)
   })
 }
 
@@ -4818,7 +4882,9 @@ test('an original arriving after its skip is refused and typed nowhere', async (
   expect(await page.evaluate(() => window.__paneReceived)).toBe('BC')
 })
 
-test('keys and a terminal reply go in one order, one admission at a time', async ({ page }) => {
+test('keys and a terminal reply are handed over as typed, numbered in one order, none waiting', async ({
+  page,
+}) => {
   await open(page)
   await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
@@ -4839,7 +4905,784 @@ test('keys and a terminal reply go in one order, one admission at a time', async
   })
   await expect.poll(() => page.evaluate(() => window.__order.length), { timeout: 3000 }).toBe(3)
   expect(await page.evaluate(() => window.__order)).toEqual(['key1', 'reply2', 'key3'])
-  expect(await page.evaluate(() => window.__overlap)).toBe(false)
+  // All three were in flight together: none of them waited for the answer of the one before.
+  expect(await page.evaluate(() => window.__overlap)).toBe(true)
+})
+
+test('what is typed while a call is unanswered is handed over at once, numbered', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__names = []
+    window.__paneInputHook = (_command, args) => {
+      // The number is in window.name before the call that carries it is made.
+      window.__names.push([args.sequence, window.name])
+      return args.sequence === 1
+        ? new Promise(() => {})
+        : { ok: true, ticket: `t-${args.sequence}` }
+    }
+    for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+  })
+  // The first call's answer is held, and the other two were made all the same.
+  await expect
+    .poll(() => page.evaluate(() => window.__names.map(([sequence]) => sequence)))
+    .toEqual([1, 2, 3])
+  // Nothing of the numbers is kept in the page's name: the host keeps the order, and a page
+  // that follows hands nothing over.
+  for (const [, name] of await page.evaluate(() => window.__names))
+    expect(name).toMatch(/^consensflow-page-v1:[0-9a-f-]{36}:1$/)
+})
+
+test('a full window refuses a key once, with its words, and the typing after it goes in', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      if (args.sequence === 1) return { ok: false, error: "the pane's input queue is full" }
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('BC')
+  // The refusal draws no row: what the host recorded of it is the host's list's to say.
+  await expect(notices(page)).toHaveCount(0)
+  // Once: A was not sent again.
+  expect(
+    await page.evaluate(
+      () => window.__calls.filter(([name]) => name === 'pane_input_enqueue').length,
+    ),
+  ).toBe(3)
+})
+
+// The host's side of P4-B by epoch, outside the page so that it outlives a reload: each
+// navigation moves its epoch, a page is current once it echoes the pair its preparation was
+// answered, calls of any other epoch are refused and recorded as a loss for their window, and
+// every loss is a notice with an id, kept until a page dismisses that exact id. A notice is
+// never edited: a change is a new notice under a new id. The native tests
+// (`input_queue::boundary`) hold the rules; here the page's own part is under test: what it
+// sends and when, what it draws, and what it dismisses.
+function epochHost({
+  holdActivation = null,
+  holdPrepare = null,
+  holdDismiss = false,
+  decideDrops = true,
+} = {}) {
+  const st = {
+    epoch: 0,
+    current: null,
+    pending: new Map(),
+    notices: new Map(),
+    nextId: 0,
+    received: '',
+    sent: [],
+    dismissals: [],
+    pulls: 0,
+    failPulls: 0,
+    skipsRetry: 0,
+    skips: [],
+    activations: 0,
+    activated: [],
+    names: new Map(),
+    places: [],
+    releases: [],
+    dismissCalls: 0,
+    // With `holdDismiss` no dismissal is heard (its call never answers) until `hearDismissals`.
+    hears: !holdDismiss,
+  }
+  const split = (key) => ({
+    id: key.slice(0, key.lastIndexOf(':')),
+    generation: Number(key.slice(key.lastIndexOf(':') + 1)),
+  })
+  const keyOf = (args) => `${args.id}:${args.generation}`
+  /** A loss, as the host records it: the window's notice of that kind is replaced by a new one. */
+  const lose = (key, { closed = false, failed = false, dropped = false } = {}) => {
+    const before = [...st.notices.values()].find(
+      (each) => each.kind === 'window' && each.key === key && each.dropped === dropped,
+    )
+    if (before) st.notices.delete(before.id)
+    st.nextId += 1
+    const { id, generation } = split(key)
+    st.notices.set(st.nextId, {
+      id: st.nextId,
+      kind: 'window',
+      key,
+      window: id,
+      generation,
+      name: st.names.get(key) ?? null,
+      closed: closed || before?.closed === true,
+      failed: failed || before?.failed === true,
+      dropped,
+    })
+    return st.nextId
+  }
+  const owed = () => ({
+    notices: [...st.notices.values()].map(({ key, ...each }) => each),
+  })
+  // The earlier head's page sends no epoch or nonce: where one is absent, the page alone is
+  // the identity, and `the page echoes ...` below says so on its own.
+  const admits = (args) =>
+    st.current === args.pageId && (args.epoch === undefined || st.epoch === args.epoch)
+  const host = {
+    get received() {
+      return st.received
+    },
+    get sent() {
+      return st.sent
+    },
+    get pulls() {
+      return st.pulls
+    },
+    /** The ids the host holds, oldest first. */
+    get outstanding() {
+      return [...st.notices.keys()]
+    },
+    get dismissals() {
+      return st.dismissals
+    },
+    get dismissCalls() {
+      return st.dismissCalls
+    },
+    get epoch() {
+      return st.epoch
+    },
+    get skips() {
+      return st.skips
+    },
+    get names() {
+      return st.names
+    },
+    get activations() {
+      return st.activations
+    },
+    get activated() {
+      return st.activated
+    },
+    get places() {
+      return st.places
+    },
+    get releases() {
+      return st.releases
+    },
+    hearDismissals: () => {
+      st.hears = true
+    },
+    /** A loss the host recorded by itself (a writer that failed, a window that closed). */
+    lose: (key, flags) => lose(key, flags),
+    /** The row for the oldest notices past the host's cap. */
+    fold: (count) => {
+      for (const each of [...st.notices.values()].filter((one) => one.kind === 'folded'))
+        st.notices.delete(each.id)
+      st.nextId += 1
+      st.notices.set(st.nextId, { id: st.nextId, kind: 'folded', count })
+      return st.nextId
+    },
+    failNextPulls: (count) => {
+      st.failPulls = count
+    },
+    retryNextSkips: (count) => {
+      st.skipsRetry = count
+    },
+    /** A new main document begins: the epoch moves, and the page that was current is not. */
+    endPage: () => {
+      st.epoch += 1
+      st.current = null
+      st.pending.clear()
+      // The host alone decides what became of a dropped file's path: a place no call used
+      // is a numbered loss with its notice.
+      if (decideDrops) for (const place of st.places) lose(place.key, { dropped: true })
+      st.places = []
+    },
+    handle: async (command, args) => {
+      if (command === 'pane_window_name') {
+        st.names.set(keyOf(args), args.name)
+        return { ok: true }
+      }
+      if (command === 'pane_page_prepare') {
+        if (holdPrepare !== null) await holdPrepare.promise
+        st.pending.set(args.pageId, { nonce: args.nonce, epoch: st.epoch })
+        return { ok: true, epoch: st.epoch, nonce: args.nonce }
+      }
+      if (command === 'pane_page_activate') {
+        st.activations += 1
+        if (holdActivation !== null && st.activations === 1) await holdActivation.promise
+        st.activated.push(args)
+        const prepared = st.pending.get(args.pageId)
+        const retry = st.current === args.pageId && args.epoch === st.epoch
+        const echoed =
+          args.nonce === undefined
+            ? prepared !== undefined
+            : prepared?.nonce === args.nonce &&
+              prepared.epoch === args.epoch &&
+              args.epoch === st.epoch
+        if (!retry && !echoed) return { ok: false, error: 'pane-input-stale-page' }
+        st.pending.delete(args.pageId)
+        st.current = args.pageId
+        return { ok: true, epoch: st.epoch, ...owed() }
+      }
+      if (command === 'pane_lost_pull') {
+        st.pulls += 1
+        if (st.failPulls > 0) {
+          st.failPulls -= 1
+          throw new Error('test: the pull failed')
+        }
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        return { ok: true, ...owed() }
+      }
+      if (command === 'pane_lost_dismiss') {
+        st.dismissCalls += 1
+        if (!st.hears) return new Promise(() => {})
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        st.dismissals.push(args.id)
+        return { ok: true, removed: st.notices.delete(args.id) }
+      }
+      if (command === 'pane_input_place') {
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        st.places.push({ key: keyOf(args), sequence: args.sequence, epoch: args.epoch })
+        return { ok: true }
+      }
+      if (command === 'pane_input_release') {
+        st.releases.push(args)
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        st.places = st.places.filter(
+          (place) => !(place.key === keyOf(args) && place.sequence === args.sequence),
+        )
+        return { ok: true }
+      }
+      if (command === 'pane_input_skip') {
+        st.skips.push(args)
+        if (st.skipsRetry > 0) {
+          st.skipsRetry -= 1
+          return { ok: false, error: 'pane-input-skip-pending', retry: true }
+        }
+        if (!admits(args)) return { ok: false, error: 'pane-input-stale-page' }
+        return { ok: true, loss: lose(keyOf(args)) }
+      }
+      // pane_input_enqueue / pane_reply_enqueue
+      st.sent.push(args)
+      if (!admits(args)) {
+        lose(keyOf(args))
+        return { ok: false, error: 'pane-input-stale-page' }
+      }
+      // The call takes the number a dropped file held for it.
+      st.places = st.places.filter(
+        (place) => !(place.key === keyOf(args) && place.sequence === args.sequence),
+      )
+      st.received += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.pageId}-${args.sequence}` }
+    },
+  }
+  return host
+}
+
+/** A page whose calls to the host go to `host`; the page's own navigation moves the host's epoch. */
+async function openWithHost(page, host, { ready = true, data = model() } = {}) {
+  await page.exposeFunction('__host', (command, args) => host.handle(command, args))
+  await page.addInitScript(() => {
+    window.__paneInputHook = (command, args) => window.__host(command, args)
+    window.__paneSkipHook = (args) => window.__host('pane_input_skip', args)
+    window.__panePrepareHook = (args) => window.__host('pane_page_prepare', args)
+    window.__paneActivateHook = (args) => window.__host('pane_page_activate', args)
+    window.__paneLostDismissHook = (args) => window.__host('pane_lost_dismiss', args)
+    window.__paneReleaseHook = (args) => window.__host('pane_input_release', args)
+    window.__panePlaceHook = (args) => window.__host('pane_input_place', args)
+    window.__paneLostPullHook = (args) => window.__host('pane_lost_pull', args)
+    window.__paneNameHook = (args) => window.__host('pane_window_name', args)
+  })
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) host.endPage()
+  })
+  host.endPage()
+  await open(page, data, { ready })
+  if (ready && !data.realTerminals)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+}
+
+const LOST_TYPING_WORDS =
+  'Some of your typing may not have reached this window. Check what appeared.'
+const RESTART_WORDS =
+  'Check whether your last typing appeared, then restart the project before typing again.'
+const notices = (page) => page.locator('.input-notices .input-notice')
+
+/** A notice of the host's list, as the host's pull words it. */
+const windowNotice = (id, pane, extra = {}) => ({
+  id,
+  kind: 'window',
+  window: pane.id,
+  generation: pane.generation,
+  name: null,
+  closed: false,
+  failed: false,
+  dropped: false,
+  ...extra,
+})
+const paneOf = (page) =>
+  page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return { id: lane.pane.id, generation: lane.pane.generation }
+  })
+/** The host's list holds these, as a pull brings them: for a test with no host stand-in. */
+async function owes(page, list) {
+  await page.evaluate((list) => {
+    window.__paneLostPullHook = () => ({ ok: true, notices: list })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, list)
+}
+
+/** A promise a test settles by hand, for a call held in transit. */
+function held() {
+  let release
+  const promise = new Promise((resolve) => {
+    release = resolve
+  })
+  return { promise, release }
+}
+
+const reloaded = async (page) => {
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+}
+const typeKeys = (page, keys) =>
+  page.evaluate((keys) => {
+    for (const key of keys) window.__emulators[0].type(key)
+  }, keys)
+
+test('R3: until the document is acknowledged nothing typed, pasted or answered is sent, the board reads, and the terminals say they are read-only', async ({
+  page,
+}) => {
+  const activation = held()
+  const host = epochHost({ holdActivation: activation })
+  await openWithHost(page, host, { ready: false })
+  // The daemon's state changes before the activation is answered: the board is read, and a
+  // terminal is drawn and takes input in the emulator.
+  await expect.poll(() => host.activations).toBe(1)
+  await page.evaluate(() => window.__listeners.get('state-changed')?.({ payload: { project: 1 } }))
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  const stage = page.locator('#stage')
+  await expect(stage).toHaveAttribute('data-input', 'closed')
+  await expect(stage).toHaveAttribute('data-reconnecting', /Reconnecting/)
+  await page.evaluate(() => {
+    window.__emulators[0].type('k')
+    window.__emulators[0].type('\x1b[200~pasted\x1b[201~')
+    window.__emulators[0].reply('\x1b[1;1R')
+  })
+  await expect(page.locator('#status')).toContainText('reconnecting')
+  expect(host.sent, 'zero input is enqueued before the acknowledgement').toEqual([])
+  activation.release()
+  await expect(stage).toHaveAttribute('data-input', 'open')
+  await typeKeys(page, ['D'])
+  await expect.poll(() => host.received).toBe('D')
+  expect(host.sent.map((call) => [call.sequence, call.epoch])).toEqual([[1, host.epoch]])
+})
+
+test("the page echoes the host's epoch and its own nonce to activate, and the epoch on every call", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  const [activation] = host.activated
+  expect(Number.isSafeInteger(activation.epoch), 'the activation echoes an epoch').toBe(true)
+  expect(typeof activation.nonce, 'and the nonce of its own').toBe('string')
+  expect(host.sent.every((call) => call.epoch === host.epoch)).toBe(true)
+})
+
+test('R3: a lost activation answer is asked again and the first key then goes in as number 1', async ({
+  page,
+}) => {
+  const activation = held()
+  const host = epochHost({ holdActivation: activation })
+  await openWithHost(page, host, { ready: false })
+  await expect.poll(() => host.activations).toBe(1)
+  // The answer never comes; the page asks again and is answered the same.
+  activation.release()
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  expect(host.sent[0].sequence).toBe(1)
+})
+
+test('a reload moves the page to its own epoch: its first key is number 1 of that epoch, and what was parked before is told once', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const first = host.epoch
+  await typeKeys(page, ['A'])
+  await expect.poll(() => host.received).toBe('A')
+  await reloaded(page)
+  expect(host.epoch).toBeGreaterThan(first)
+  await typeKeys(page, ['D'])
+  await expect.poll(() => host.received).toBe('AD')
+  const calls = host.sent.map((call) => [call.sequence, call.epoch])
+  expect(calls).toEqual([
+    [1, first],
+    [1, host.epoch],
+  ])
+})
+
+const pullNow = (page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+/** The page's own chief window, as a host's notice names it. */
+const chiefKey = (page) =>
+  page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return `${lane.pane.id}:${lane.pane.generation}`
+  })
+
+test('R10: an idle page recovers a notice whose event was lost and whose first pull failed, and draws each window apart, once', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.failNextPulls(1)
+  host.lose('chief-a:1')
+  host.lose('chief-b:1')
+  // No event reaches the page, and nobody types: its own timer asks, the first pull fails,
+  // the next one is answered.
+  await expect(notices(page)).toHaveCount(2, { timeout: 12_000 })
+  await expect(notices(page).nth(0)).toContainText('Some of your typing may not have reached')
+  // Being seen confirms nothing: both stay on the host, and on the page, until dismissed.
+  expect(host.outstanding).toHaveLength(2)
+  expect(host.pulls).toBeGreaterThan(1)
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(2)
+  expect(host.dismissals).toEqual([])
+})
+
+test('R10: an event is a hint to ask: the same notice through the event, a focus and a pull is one row, and a later loss of the window replaces its row', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  const hint = () =>
+    page.evaluate(() =>
+      window.__listeners.get('pane-input-lost')?.({
+        payload: { id: 'chief-a', generation: 1, loss: 1 },
+      }),
+    )
+  await hint()
+  await expect(notices(page)).toHaveCount(1)
+  await hint()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(notices(page)).toHaveCount(1)
+  const first = await notices(page).first().getAttribute('data-notice')
+  // A later loss of the same window is a new notice under a new id: its row replaces the old.
+  host.lose('chief-a:1')
+  await hint()
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page).first()).not.toHaveAttribute('data-notice', first)
+})
+
+test('R10: the page comes into view and asks again for what the host owes', async ({ page }) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const before = host.pulls
+  host.lose('chief-a:1')
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  expect(host.pulls).toBeGreaterThan(before)
+})
+
+test('R7: a window that has closed is named in its notice on the current page, with its generation', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('gone-window:5', { closed: true })
+  await pullNow(page)
+  const row = notices(page).first()
+  await expect(row).toContainText('gone-window')
+  await expect(row).toContainText('(window 5) has closed')
+  await expect(row).not.toContainText('this window')
+})
+
+test('R7: a notice for generation 5 is never worded as this window beside a card of generation 6', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const chief = await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return { id: lane.pane.id, generation: lane.pane.generation }
+  })
+  host.lose(`${chief.id}:${chief.generation + 5}`, { closed: true })
+  await pullNow(page)
+  const row = notices(page).first()
+  await expect(row).toContainText(`${chief.id}`)
+  await expect(row).toContainText(`(window ${chief.generation + 5}) has closed`)
+})
+
+test("R7: a closed window's dropped-file notice speaks of the file, not of typing", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('gone-window:5', { closed: true, dropped: true })
+  await pullNow(page)
+  const row = notices(page).first()
+  await expect(row).toContainText(
+    'gone-window has closed. A file you dropped into it just before may not have arrived.',
+  )
+  await expect(row).not.toContainText('Typing')
+})
+
+test("the notices past the host's cap are one row of their own, replaced under a new id when its count changes", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const first = host.fold(3)
+  await pullNow(page)
+  const row = page.locator('.input-notice[data-notice]')
+  await expect(row).toHaveCount(1)
+  await expect(row).toContainText('Input was also lost in 3 more places')
+  host.fold(4)
+  await pullNow(page)
+  await expect(row).toHaveCount(1)
+  await expect(row).toContainText('4 more places')
+  await expect(row).not.toHaveAttribute('data-notice', String(first))
+  host.fold(1)
+  await pullNow(page)
+  await expect(row).toContainText('1 more place.')
+})
+
+// Round 3: what the page draws, and what it dismisses.
+
+test('a quiet board with a held prepare reads, with no daemon event to start it', async ({
+  page,
+}) => {
+  const prepare = held()
+  const host = epochHost({ holdPrepare: prepare })
+  await openWithHost(page, host, { ready: false })
+  await expect(page.locator('#project-title')).not.toHaveText('No project', { timeout: 4000 })
+  prepare.release()
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+})
+
+test('a notice is on the page until it is dismissed: under a dialog, out of view, across pulls', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  await page.evaluate(() => document.querySelector('dialog').showModal())
+  host.lose('chief-a:1')
+  await pullNow(page)
+  await expect.poll(() => host.pulls).toBeGreaterThan(1)
+  await page.evaluate(() => document.querySelector('dialog').close())
+  await expect(notices(page)).toHaveCount(1)
+  for (let pull = 0; pull < 3; pull += 1) await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  expect(host.outstanding, 'seeing it confirmed nothing').toHaveLength(1)
+})
+
+test('Dismiss is reachable with the pointer in a crowd of rows, and the row stays dismissed after the next pull', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  const host = epochHost()
+  await openWithHost(page, host)
+  for (let index = 0; index < 60; index += 1) host.lose(`crowd-${index}:1`)
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(60, { timeout: 8000 })
+  // A row scrolled into view later is dismissed at the pointer, by its own id.
+  const row = notices(page).nth(55)
+  const id = Number(await row.getAttribute('data-notice'))
+  await row.scrollIntoViewIfNeeded()
+  await row.locator('.input-notice-dismiss').click({ timeout: 3000 })
+  await expect(notices(page)).toHaveCount(59)
+  await expect.poll(() => host.dismissals).toEqual([id])
+  // Pulls after it, on a timer and by focus, never bring it back.
+  await pullNow(page)
+  await page.waitForTimeout(600)
+  await expect(notices(page)).toHaveCount(59)
+  expect(host.outstanding).not.toContain(id)
+})
+
+test('Dismiss is reachable with the dock folded away and with it open, under the dock head', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  for (const name of ['a', 'b', 'c']) host.lose(`chief-${name}:1`)
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(3)
+  const dock = page.locator('#toggle-dock')
+  await dock.click()
+  await notices(page).first().locator('.input-notice-dismiss').click({ timeout: 3000 })
+  await expect(notices(page)).toHaveCount(2)
+  await dock.click()
+  await notices(page).first().locator('.input-notice-dismiss').click({ timeout: 3000 })
+  await expect(notices(page)).toHaveCount(1)
+  await expect.poll(() => host.dismissals.length).toBe(2)
+  await pullNow(page)
+  await page.waitForTimeout(400)
+  await expect(notices(page)).toHaveCount(1)
+})
+
+test('Dismiss works from the keyboard', async ({ page }) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  host.lose('chief-b:1')
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(2)
+  const first = Number(await notices(page).first().getAttribute('data-notice'))
+  await notices(page).first().locator('.input-notice-dismiss').focus()
+  await page.keyboard.press('Enter')
+  await expect(notices(page)).toHaveCount(1)
+  await expect.poll(() => host.dismissals).toEqual([first])
+})
+
+test('a dismissed id is not drawn again, even when the host has not heard the dismissal', async ({
+  page,
+}) => {
+  const host = epochHost({ holdDismiss: true })
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  await notices(page).first().locator('.input-notice-dismiss').click()
+  await expect(notices(page)).toHaveCount(0)
+  await expect.poll(() => host.dismissCalls).toBe(1)
+  // The host still holds it (no call of the page's was heard): a pull lists it, and the page
+  // does not draw it.
+  expect(host.outstanding).toHaveLength(1)
+  const before = host.pulls
+  await pullNow(page)
+  await expect.poll(() => host.pulls, { timeout: 8000 }).toBeGreaterThan(before)
+  await page.waitForTimeout(400)
+  await expect(notices(page)).toHaveCount(0)
+  // Once the host hears, the next pull's dismissal clears it there too.
+  host.hearDismissals()
+  await pullNow(page)
+  await expect.poll(() => host.outstanding, { timeout: 8000 }).toEqual([])
+  await expect(notices(page)).toHaveCount(0)
+})
+
+test('a replaced notice is a new row: dismissing the old id clears nothing of the new', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.lose('chief-a:1')
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  const old = Number(await notices(page).first().getAttribute('data-notice'))
+  // The host replaces it (a new loss) before the click reaches it.
+  const fresh = host.lose('chief-a:1')
+  await notices(page).first().locator('.input-notice-dismiss').click()
+  await expect.poll(() => host.dismissals.length + host.dismissCalls).toBeGreaterThan(0)
+  expect(host.outstanding, 'the dismissal of the old id removed nothing of the new notice').toEqual(
+    [fresh],
+  )
+  void old
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page).first()).toHaveAttribute('data-notice', String(fresh))
+})
+
+test("a refusal, a failed wait and a skip draw nothing: only the host's list draws a row", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  await page.evaluate(() => {
+    window.__paneInputHook = () => ({
+      ok: false,
+      error: 'x',
+      loss: 1,
+    })
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => host.pulls).toBeGreaterThan(0)
+  await page.waitForTimeout(600)
+  await expect(notices(page)).toHaveCount(0)
+  // The same refusal is on the host's list: now a row.
+  host.lose(await chiefKey(page))
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  // A later refusal or wait reply neither adds nor removes one.
+  await page.evaluate(() => {
+    window.__paneInputHook = () => ({ ok: false, error: 'y', loss: 2 })
+    window.__emulators[0].type('B')
+  })
+  await page.waitForTimeout(600)
+  await expect(notices(page)).toHaveCount(1)
+})
+
+test('a closed window keeps its name and its generation, so two generations are two different rows', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  const chief = await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((each) => each.participant.handle === 'chief')
+    return { id: lane.pane.id, generation: lane.pane.generation }
+  })
+  await expect.poll(() => host.names.size).toBeGreaterThan(0)
+  host.lose(`${chief.id}:${chief.generation}`, { closed: true })
+  host.lose(`${chief.id}:${chief.generation - 1}`, { closed: true })
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(2)
+  const texts = await notices(page).allTextContents()
+  expect(new Set(texts).size, 'two generations, two different rows').toBe(2)
+  expect(texts.join(' ')).toContain('chief')
+  expect(texts.join(' ')).toContain(String(chief.generation))
+})
+
+test('a refusal whose number the host could not keep is skipped until the host has spent it', async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.retryNextSkips(2)
+  await page.evaluate(() => {
+    const hook = window.__paneInputHook
+    let first = true
+    window.__paneInputHook = (command, args) => {
+      if (first) {
+        first = false
+        return { ok: false, error: 'a decode error', spent: false, loss: undefined }
+      }
+      return hook(command, args)
+    }
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => host.skips.length, { timeout: 8000 }).toBe(3)
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+})
+
+test("a skip the host cannot make final stays pending: the page asks again until it is, and the host's notice then draws", async ({
+  page,
+}) => {
+  const host = epochHost()
+  await openWithHost(page, host)
+  host.retryNextSkips(3)
+  await page.evaluate(() => {
+    let first = true
+    const hook = window.__paneInputHook
+    window.__paneInputHook = (command, args) => {
+      if (first) {
+        first = false
+        return new Promise(() => {})
+      }
+      return hook(command, args)
+    }
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => host.skips.length, { timeout: 8000 }).toBe(4)
+  await pullNow(page)
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page).first()).toContainText('may not have reached')
 })
 
 // A paste is one call with both of its markers: whole, or not at all.
@@ -4865,17 +5708,26 @@ test('a paste goes in as one call, whole with both markers, however long', async
       text: new TextDecoder().decode(new Uint8Array(args.bytes)),
     }
   })
-  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'])
+  expect(call.keys).toEqual(['pageId', 'epoch', 'id', 'generation', 'sequence', 'length', 'bytes'])
   expect(call.sequence).toBe(1)
   expect(call.text).toBe(paste)
   expect(call.length).toBe(new TextEncoder().encode(paste).length)
 })
 
-for (const lost of ['before it arrives', 'with its answer lost']) {
-  test(`a paste lost ${lost} is whole or not there at all, never in part`, async ({ page }) => {
+for (const [lost, bracketed] of [
+  ['before it arrives', true],
+  ['with its answer lost', true],
+  ['before it arrives', false],
+  ['with its answer lost', false],
+]) {
+  test(`a ${bracketed ? 'bracketed' : 'plain'} paste lost ${lost} is whole or not there at all, never in part`, async ({
+    page,
+  }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-    const paste = `\x1b[200~echo PASTE_ONLY\r${'p'.repeat(70 * 1024)}\x1b[201~`
+    // The plain one is 71,680 bytes: 32,768 + 32,768 + 6,144 under the old cut.
+    const body = `echo PASTE_ONLY\r${'p'.repeat(71680 - 'echo PASTE_ONLY\r'.length)}`
+    const paste = bracketed ? `\x1b[200~${body}\x1b[201~` : body
     await page.evaluate(
       ({ lost, hostSource, paste }) => {
         const admit = new Function(`return (${hostSource})()`)()
@@ -4901,11 +5753,10 @@ for (const lost of ['before it arrives', 'with its answer lost']) {
       sent: window.__sent,
       skips: window.__paneSkips.map((args) => args.sequence),
     }))
+    if (!bracketed) expect(new TextEncoder().encode(paste).length).toBe(71680)
     expect(result.sent, 'one call for the paste, never sent again').toEqual([1, 2])
     expect(result.skips).toEqual([1])
-    await expect(page.locator('#status')).toHaveText(
-      'Some of your typing may not have reached this window. Check what appeared.',
-    )
+    await expect(notices(page)).toHaveCount(0)
   })
 }
 
@@ -4928,6 +5779,27 @@ test('a paste over the cap is refused before anything is sent, and typing goes o
   expect(await page.evaluate(() => window.__sent)).toEqual([])
   await page.evaluate(() => window.__emulators[0].type('Z'))
   await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([[1, 1]])
+})
+
+test('a plain paste of exactly 4 MiB is one call, and one byte more is refused whole', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__sent = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__sent.push([args.sequence, args.length])
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('p'.repeat(4 * 1024 * 1024 + 1))
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This paste is too large to send (over 4 MiB). Paste less of it.',
+  )
+  expect(await page.evaluate(() => window.__sent)).toEqual([])
+  await page.evaluate(() => window.__emulators[0].type('p'.repeat(4 * 1024 * 1024)))
+  await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([[1, 4 * 1024 * 1024]])
 })
 
 test('each page uses a new identity on all its pane input calls', async ({ page }) => {
@@ -5021,49 +5893,7 @@ test('a delayed input in one pane does not hold typing in another', async ({ pag
   await expect.poll(() => page.evaluate(() => window.__panesReceived)).toEqual(['B', 'A'])
 })
 
-test('a full input queue retries the refused key before later typing', async ({ page }) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(() => {
-    let expected = 1
-    let full = true
-    window.__paneReceived = ''
-    window.__paneInputHook = async (_command, args) => {
-      if (args.sequence !== expected) return { ok: false, error: 'pane-input-sequence-stale' }
-      if (full) {
-        full = false
-        return { ok: false, error: "the pane's input queue is full" }
-      }
-      expected += 1
-      window.__paneReceived += String.fromCharCode(...args.bytes)
-      return { ok: true, ticket: `ticket-${args.sequence}` }
-    }
-    for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
-  })
-  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('ABC')
-})
-
-test('a paste still being written at the terminal pace never says to restart', async ({ page }) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(() => {
-    let refusals = 0
-    window.__paneReceived = ''
-    window.__paneInputHook = async (_command, args) => {
-      // The queue holds the whole paste until it is written: every try is refused
-      // for far longer than the page once waited before it spoke.
-      refusals += 1
-      if (refusals <= 40) return { ok: false, error: "the pane's input queue is full" }
-      window.__paneReceived += String.fromCharCode(...args.bytes)
-      return { ok: true, ticket: `ticket-${args.sequence}` }
-    }
-    window.__emulators[0].type('A')
-  })
-  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 8000 }).toBe('A')
-  await expect(page.locator('#status')).toHaveText('')
-})
-
-test('a write the host refuses says some typing may be missing, not to restart', async ({
+test("a write the host refuses draws no row of its own; the host's list says some typing may be missing", async ({
   page,
 }) => {
   await open(page)
@@ -5083,16 +5913,18 @@ test('a write the host refuses says some typing may be missing, not to restart',
     window.__emulators[0].type('B')
   })
   await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('B')
-  await expect(page.locator('#status')).toHaveText(
-    'Some of your typing may not have reached this window. Check what appeared.',
-  )
+  await expect(notices(page)).toHaveCount(0)
+  await owes(page, [windowNotice(1, await paneOf(page))])
+  await expect(notices(page).last()).toContainText(LOST_TYPING_WORDS)
 })
 
 for (const [error, written, uncertain] of [
   ['PTY I/O error: the terminal write failed', 'A', true],
   ['pane input is failed until restart', '', false],
 ]) {
-  test(`a failed pane input says how to resume typing: ${error}`, async ({ page }) => {
+  test(`a failed pane input draws no row from its wait; the host's notice carries the restart advice: ${error}`, async ({
+    page,
+  }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
     await page.evaluate(
@@ -5113,120 +5945,44 @@ for (const [error, written, uncertain] of [
       { error, written, uncertain },
     )
     await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe(written)
-    await expect(page.locator('#status')).toHaveText(
-      'Check whether your last typing appeared, then restart the project before typing again.',
-    )
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+      )
+      .toBe(1)
+    await expect(notices(page)).toHaveCount(0)
+    const pane = await paneOf(page)
+    await owes(page, [windowNotice(4, pane, { failed: true })])
+    await expect(notices(page).last()).toContainText(RESTART_WORDS)
   })
 }
 
-test('a late pane refusal cannot replace restart advice with a generic notice', async ({
+test('a later wait reply neither replaces nor removes a row: the notice stays as the host made it', async ({
   page,
 }) => {
   await open(page)
   await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  const pane = await paneOf(page)
+  await owes(page, [windowNotice(4, pane, { failed: true })])
+  await expect(notices(page).first()).toContainText(RESTART_WORDS)
   await page.evaluate(() => {
     window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: `t-${args.sequence}` })
-    window.__paneWaitHook = ({ ticket }) =>
-      ticket === 't-1'
-        ? new Promise((resolve) => {
-            window.__releaseFirstInput = resolve
-          })
-        : {
-            ok: false,
-            error: 'pane input is failed until restart',
-            uncertain: false,
-            failedUntilRestart: true,
-          }
-    window.__emulators[0].type('A')
-    window.__emulators[0].type('B')
-  })
-  const restart =
-    'Check whether your last typing appeared, then restart the project before typing again.'
-  await expect(page.locator('#status')).toHaveText(restart)
-  await expect.poll(() => page.evaluate(() => typeof window.__releaseFirstInput)).toBe('function')
-  await page.evaluate(() =>
-    window.__releaseFirstInput({
+    window.__paneWaitHook = async () => ({
       ok: false,
       error: 'earlier refusal',
       uncertain: false,
       failedUntilRestart: false,
-    }),
-  )
-  await expect
-    .poll(() =>
-      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
-    )
-    .toBe(2)
-  await expect(page.locator('#status')).toHaveText(restart)
-})
-
-test('a lost pane admission answer is followed by restart advice from the failed pane', async ({
-  page,
-}) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(() => {
-    window.__paneInputHook = async (_command, args) => {
-      if (args.sequence === 1) throw new Error('the admission answer was lost')
-      return { ok: true, ticket: `t-${args.sequence}` }
-    }
-    window.__paneWaitHook = async () => ({
-      ok: false,
-      error: 'pane input is failed until restart',
-      uncertain: false,
-      failedUntilRestart: true,
     })
-    window.__emulators[0].type('A')
     window.__emulators[0].type('B')
   })
-  await expect(page.locator('#status')).toHaveText(
-    'Check whether your last typing appeared, then restart the project before typing again.',
-  )
-})
-
-test('another pane cannot replace failed pane restart advice with a generic notice', async ({
-  page,
-}) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(1)
-  await page.evaluate(() => {
-    window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: args.id })
-    window.__paneWaitHook = async ({ ticket }) => {
-      const first = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
-      return ticket === first
-        ? {
-            ok: false,
-            error: 'pane input is failed until restart',
-            uncertain: false,
-            failedUntilRestart: true,
-          }
-        : { ok: false, error: 'ordinary refusal', uncertain: false, failedUntilRestart: false }
-    }
-    window.__emulators[0].type('A')
-  })
-  const restart =
-    'Check whether your last typing appeared, then restart the project before typing again.'
-  await expect(page.locator('#status')).toHaveText(restart)
-  await page.evaluate(() => window.__emulators[1].type('B'))
   await expect
     .poll(() =>
       page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
     )
-    .toBe(2)
-  await expect(page.locator('#status')).toHaveText(restart)
-
-  // Once the failed generation leaves, a different pane's refusal is no
-  // longer described as needing a project restart.
-  await page.evaluate(() => {
-    const failedId = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
-    window.__model.boards[1].lanes.find((lane) => lane.pane?.id === failedId).pane = null
-    window.__listeners.get('state-changed')()
-  })
-  await expect.poll(() => page.evaluate(() => window.__emulators[0].disposed)).toBe(true)
-  await page.evaluate(() => window.__emulators[1].type('C'))
-  await expect(page.locator('#status')).toHaveText(
-    'Some of your typing may not have reached this window. Check what appeared.',
-  )
+    .toBe(1)
+  await expect(notices(page)).toHaveCount(1)
+  await expect(notices(page).first()).toContainText(RESTART_WORDS)
+  await expect(notices(page).first()).toHaveAttribute('data-notice', '4')
 })
 
 for (const boundary of ['UTF-8 character', 'closing paste marker']) {
@@ -5345,14 +6101,13 @@ test('a terminal reply follows the paste admissions without waiting for completi
           .map(([, args]) => args.bytes.length),
       ),
     )
-    .toEqual([32768, 1024, 1])
+    .toEqual([33 * 1024, 1])
   const admissions = await page.evaluate(() =>
     window.__calls.filter(
       ([name]) => name === 'pane_input_enqueue' || name === 'pane_reply_enqueue',
     ),
   )
   expect(admissions.map(([name]) => name)).toEqual([
-    'pane_input_enqueue',
     'pane_input_enqueue',
     'pane_input_enqueue',
     'pane_reply_enqueue',
@@ -5384,7 +6139,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     .toEqual(
       ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
         start,
-        ['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'],
+        ['pageId', 'epoch', 'id', 'generation', 'sequence', 'length', 'bytes'],
       ]),
     )
 })
@@ -16133,7 +16888,10 @@ const sentSince = (page, from) =>
       window.__calls
         .slice(from)
         .map(([command]) => command)
-        .filter((command) => command !== 'pane_resize' && command !== 'pane_ack'),
+        .filter(
+          (command) =>
+            command !== 'pane_resize' && command !== 'pane_ack' && command !== 'pane_lost_pull',
+        ),
     from,
   )
 
@@ -16480,7 +17238,7 @@ test.describe('file drop on a Mac', () => {
     // the app's window is left where a Mac puts it.
     await expect
       .poll(() => sentSince(page, before))
-      .toEqual(['pane_input_enqueue', 'pane_input_wait', 'pane_input_forget'])
+      .toEqual(['pane_input_place', 'pane_input_enqueue', 'pane_input_wait', 'pane_input_forget'])
     // The human's paste of the same words gives the same bytes.
     await humanPaste(page, 'chief', WORDS)
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
@@ -16799,7 +17557,13 @@ test.describe('file drop on Windows', () => {
     // The app's window comes in front, so the keys pressed next go to it and not to Explorer.
     await expect
       .poll(async () => (await sentSince(page, before)).sort())
-      .toEqual(['focus_after_drop', 'pane_input_enqueue', 'pane_input_forget', 'pane_input_wait'])
+      .toEqual([
+        'focus_after_drop',
+        'pane_input_enqueue',
+        'pane_input_forget',
+        'pane_input_place',
+        'pane_input_wait',
+      ])
     await humanPaste(page, 'chief', WORDS)
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
     const [dropped, pasted] = await typedInto(page, 'p1-chief')
@@ -16887,6 +17651,127 @@ test.describe('file drop on Windows', () => {
     // A human paste into it goes as it was typed (T-548).
     await humanPaste(page, 'chief', 'a — b')
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a — b')
+  })
+
+  // A drop is a gesture like a key (T-2134): it keeps its place among what is typed, or is
+  // refused with the reconnect advice, and one the reload took is told.
+  const dropOn = async (page) =>
+    dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+  const enqueued = (page) =>
+    page.evaluate(() =>
+      window.__calls
+        .filter(([name]) => name === 'pane_input_enqueue')
+        .map(([, args]) => [args.sequence, new TextDecoder().decode(new Uint8Array(args.bytes))]),
+    )
+
+  test('a drop made before the document is acknowledged is refused with the reconnect advice, and sends nothing', async ({
+    page,
+  }) => {
+    const activation = held()
+    const host = epochHost({ holdActivation: activation })
+    await page.setViewportSize({ width: 1600, height: 900 })
+    // A Codex window and a path with a character it drops: the lookup of its short name is
+    // the asynchronous path a real drop takes.
+    await openWithHost(page, host, {
+      ready: false,
+      data: { ...chiefOn('codex', ALIASED), realTerminals: true },
+    })
+    await expect(page.locator('#stage .terminal-card[data-handle="chief"]')).toBeVisible()
+    await dropOn(page)
+    await expect(page.locator('#status')).toContainText('reconnecting')
+    activation.release()
+    await expect(page.locator('#stage')).toHaveAttribute('data-input', 'open')
+    expect(await enqueued(page), 'the refused drop is not typed later').toEqual([])
+    expect(host.places, 'and holds no place').toEqual([])
+    await typeIntoChief(page, 'D')
+    await expect.poll(async () => (await enqueued(page)).map(([sequence]) => sequence)).toEqual([1])
+  })
+
+  /** Types `keys` into the chief's window, as the human does. */
+  const typeIntoChief = async (page, keys) => {
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await page.keyboard.type(keys)
+  }
+
+  test('a drop whose short-name lookup is pending keeps its place before a key typed after it, and the host holds the number from the gesture', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    await page.evaluate(() => {
+      window.__hold.short_paths = new Promise((resolve) => (window.__releaseLookup = resolve))
+    })
+    await dropOn(page)
+    // The number was taken at the gesture, before the lookup, and the host recorded it.
+    await expect.poll(() => host.places.map((place) => place.sequence)).toEqual([1])
+    await typeIntoChief(page, 'D')
+    await expect.poll(async () => (await enqueued(page)).length).toBe(1)
+    await page.evaluate(() => window.__releaseLookup())
+    await expect.poll(async () => (await enqueued(page)).length).toBe(2)
+    const calls = await enqueued(page)
+    const drop = calls.find(([, text]) => text.includes('A-B~1'))
+    const key = calls.find(([, text]) => text === 'D')
+    expect(drop[0], 'the drop was numbered where it was dropped').toBeLessThan(key[0])
+    expect(host.places, 'the call took the place').toEqual([])
+  })
+
+  test('a drop whose lookup is pending when the page reloads is told on the next page, by the host', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    await page.evaluate(() => {
+      window.__hold.short_paths = new Promise(() => {})
+    })
+    await dropOn(page)
+    await expect.poll(() => host.places.length).toBe(1)
+    await page.reload()
+    await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+    await expect(page.locator('.input-notices')).toContainText('A file you dropped')
+    expect(await page.evaluate(() => sessionStorage.length), 'the page keeps no marker').toBe(0)
+  })
+
+  test('a drop typed before the reload is not told as lost, however late the focus reply comes', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    await hold(page, 'focus_after_drop')
+    await dropOn(page)
+    // The path went in (the host's writer has it) and the focus reply is still on its way.
+    await expect.poll(() => host.received).toContain('A-B~1')
+    await page.reload()
+    await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+    await page.waitForTimeout(500)
+    await expect(page.locator('.input-notices .input-notice')).toHaveCount(0)
+    expect(host.outstanding).toEqual([])
+  })
+
+  test('a drop told as lost stays told across a modal and a second reload, until it is dismissed', async ({
+    page,
+  }) => {
+    const host = epochHost()
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await openWithHost(page, host, { data: { ...chiefOn('codex', ALIASED), realTerminals: true } })
+    await page.evaluate(() => {
+      window.__hold.short_paths = new Promise(() => {})
+    })
+    await dropOn(page)
+    await expect.poll(() => host.places.length).toBe(1)
+    await page.reload()
+    // A modal covers the page as it starts, and the page reloads again before it is dismissed.
+    await page.evaluate(() => document.querySelector('dialog')?.showModal())
+    await page.reload()
+    await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+    const notice = page.locator('.input-notices .input-notice')
+    await expect(notice).toHaveCount(1)
+    await expect(notice).toContainText('A file you dropped')
+    await notice.locator('.input-notice-dismiss').click()
+    await expect(notice).toHaveCount(0)
+    await expect.poll(() => host.outstanding).toEqual([])
   })
 
   // What a drop may carry is the harness the window was launched with, which the daemon says with
@@ -17082,6 +17967,7 @@ test('hears each event of the app with one listener, as the app keeps every one 
   expect(listeners).toEqual({
     'state-changed': 1,
     'daemon-status': 1,
+    'pane-input-lost': 1,
     'tauri://drag-enter': 1,
     'tauri://drag-over': 1,
     'tauri://drag-leave': 1,
@@ -18607,7 +19493,9 @@ test('BKV05 a task held in an out member window keeps its quota hold with a back
   await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
 })
 
-test('pane input keeps a long control sequence whole across chunks', async ({ page }) => {
+test('a long control sequence in typed input goes in the one call of its emission', async ({
+  page,
+}) => {
   await open(page)
   await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
@@ -18618,32 +19506,17 @@ test('pane input keeps a long control sequence whole across chunks', async ({ pa
     }
     window.__controlInput = `${'p'.repeat(32760)}\x1b]0;${'q'.repeat(40000)}\x07z`
     window.__emulators[0].type(window.__controlInput)
+    window.__emulators[0].type(`\x1b]0;${'q'.repeat(100 * 1024)}\x07`)
   })
-  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(3)
+  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(2)
   const result = await page.evaluate(() => ({
     lengths: window.__paneChunks.map((bytes) => bytes.length),
-    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks.flat())),
+    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks[0])),
     expected: window.__controlInput,
   }))
-  expect(result.lengths).toEqual([32760, 40005, 1])
+  expect(result.lengths).toEqual([72766, 100 * 1024 + 5])
   expect(result.text).toBe(result.expected)
-})
-
-test('an oversized control sequence is refused before any pane input is sent', async ({ page }) => {
-  await open(page)
-  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-  await page.evaluate(() => {
-    window.__paneChunks = []
-    window.__paneInputHook = async (_command, args) => {
-      window.__paneChunks.push(args.bytes)
-      return { ok: true, ticket: `ticket-${args.sequence}` }
-    }
-    window.__emulators[0].type(`\x1b]0;${'q'.repeat(65536)}\x07`)
-  })
-  await expect(page.locator('#status')).toHaveText(
-    'This input contains a control sequence too long to send. Remove that sequence and paste again.',
-  )
-  expect(await page.evaluate(() => window.__paneChunks.length)).toBe(0)
+  await expect(page.locator('#status')).not.toContainText('control sequence')
 })
 
 // T-1789: edit one member alongside another on the same model, with idle and working sessions.
