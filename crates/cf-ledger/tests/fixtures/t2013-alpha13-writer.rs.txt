@@ -1,0 +1,203 @@
+//! T-2013: writes an alpha.13 ledger with the state D8's update must carry. Run once by hand:
+//! T2013_OUT=/path/file.db cargo test -p cf-ledger --test t2013_fixture -- --ignored
+
+#![allow(clippy::expect_used, clippy::unwrap_used)]
+
+use cf_ledger::{
+    open_ledger, Ledger, NewChief, NewMember, NewProject, NewQuestion, NewTask, Options,
+};
+use serde_json::json;
+
+fn options() -> Options {
+    let mut names = [
+        "amber", "birch", "cedar", "dune", "elm", "fern", "glen", "heath", "iris", "jade",
+        "kelp", "lark", "moss", "nook", "oak", "pine",
+    ]
+    .into_iter()
+    .cycle();
+    Options {
+        names: Box::new(move || names.next().unwrap_or_default().to_owned()),
+        ..Options::default()
+    }
+}
+
+fn member(name: &str, roles: &[&str], tier: &str) -> NewMember {
+    NewMember {
+        model: None,
+        effort: None,
+        model_name: Some(name.into()),
+        harness: "claude-code".into(),
+        designer: false,
+        roles: roles.iter().map(|r| (*r).to_owned()).collect(),
+        tier: tier.into(),
+    }
+}
+
+fn project(ledger: &mut Ledger, dir: &str, gate: bool, staff: Vec<NewMember>) -> i64 {
+    ledger
+        .create_project(&NewProject {
+            directory: dir.into(),
+            name: dir.trim_start_matches("/work/").into(),
+            chief: NewChief {
+                harness: "claude-code".into(),
+                model: Some("apollo".into()),
+                effort: None,
+                model_name: None,
+            },
+            staff,
+            gate,
+            wake_up: None,
+            specs: None,
+            staff_rules: None,
+            compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
+            own_hands: false,
+        })
+        .expect("a project")
+        .id
+}
+
+fn id(ledger: &Ledger, project: i64, handle: &str) -> i64 {
+    ledger
+        .project(project)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|p| p.handle == handle)
+        .unwrap_or_else(|| panic!("no @{handle}"))
+        .id
+}
+
+fn task(ledger: &mut Ledger, project: i64, pool: &str, tier: Option<&str>, purpose: Option<&str>, body: &str) -> i64 {
+    ledger
+        .create_task(
+            project,
+            &NewTask {
+                from: "chief".into(),
+                pool: Some(pool.into()),
+                tier: tier.map(str::to_owned),
+                purpose: purpose.map(str::to_owned),
+                body: body.into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("a task")
+        .task
+        .number
+}
+
+/// Assign T-`number` to `member`; return its brief's id.
+fn assign(ledger: &mut Ledger, project: i64, number: i64, member: &str) -> i64 {
+    let member = id(ledger, project, member);
+    ledger
+        .assign_task(project, number, member)
+        .expect("assigned")
+        .message
+        .expect("its brief")
+        .id
+}
+
+fn deliver(ledger: &mut Ledger, brief: i64) {
+    ledger.begin_delivery(brief).expect("begins");
+    ledger
+        .confirm_delivery(brief, Some(&json!({ "item": "i-1" })))
+        .expect("delivered");
+}
+
+fn window_of(ledger: &Ledger, project: i64, number: i64) -> String {
+    ledger.task(project, number).unwrap().unwrap().task.assignee.expect("a window")
+}
+
+#[test]
+#[ignore = "writes the T-2013 fixture"]
+fn write_the_alpha_13_fixture() {
+    let out = std::env::var("T2013_OUT").expect("T2013_OUT");
+    let _ = std::fs::remove_file(&out);
+    let mut ledger = open_ledger(std::path::Path::new(&out), options()).expect("a ledger");
+    // Project 1: a frontend designer (no tier in alpha.13) with a current backup, and a
+    // Critical worker.
+    let board = project(
+        &mut ledger,
+        "/work/board",
+        false,
+        vec![member("iris", &["frontend"], "light"), member("zeus", &["worker"], "critical")],
+    );
+    ledger
+        .add_backup(board, "iris", &member("irene", &["frontend"], "light"))
+        .expect("a backup");
+    // T-1: in the backup's window, delivered; the window asks the chief, unanswered.
+    let t1 = task(&mut ledger, board, "frontend", None, None, "Draw the page");
+    let brief = assign(&mut ledger, board, t1, "irene");
+    deliver(&mut ledger, brief);
+    let window = window_of(&ledger, board, t1);
+    ledger
+        .ask(
+            board,
+            &NewQuestion {
+                from: Some(window.clone()),
+                to: "chief".into(),
+                body: Some("Which format?".into()),
+                task: Some(t1),
+                ..NewQuestion::default()
+            },
+        )
+        .expect("the window asks");
+    // T-2: a follow-up of T-1, bound to its window, waiting for T-1's acceptance.
+    ledger
+        .create_task(
+            board,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(t1),
+                body: "Follow up".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("the follow-up");
+    // T-3 in the member's window and T-4 in the backup's: done, accepted, the windows ended by
+    // the human: closed windows.
+    for (number_body, holder) in [("Old page", "iris"), ("Old form", "irene")] {
+        let number = task(&mut ledger, board, "frontend", None, None, number_body);
+        let brief = assign(&mut ledger, board, number, holder);
+        deliver(&mut ledger, brief);
+        ledger.record_result(board, number, "Done").expect("result");
+        ledger.accept_task(board, number, "chief").expect("accepted");
+        let window = window_of(&ledger, board, number);
+        ledger.end_session(board, &window, "human").expect("ended");
+    }
+    // T-5: Critical work for the worker, delivered: history.
+    let t5 = task(&mut ledger, board, "worker", Some("critical"), Some("hard-problem"), "Old work");
+    let brief = assign(&mut ledger, board, t5, "zeus");
+    deliver(&mut ledger, brief);
+    // T-6: Critical work for the worker, its brief queued for the window.
+    let t6 = task(&mut ledger, board, "worker", Some("critical"), Some("hard-problem"), "Modify a project file");
+    assign(&mut ledger, board, t6, "zeus");
+    // T-7: Critical work for the worker, open on the board.
+    task(&mut ledger, board, "worker", Some("critical"), Some("hard-problem"), "Modify another file");
+    // T-8: Critical work for a reviewer, open: its line says it changes no file, as before.
+    let gated = project(
+        &mut ledger,
+        "/work/gated",
+        true,
+        vec![member("ares", &["worker"], "critical"), member("hera", &["reviewer"], "critical")],
+    );
+    // The gated project: Critical work for the worker and for the reviewer, briefs gated.
+    let g1 = task(&mut ledger, gated, "worker", Some("critical"), Some("hard-problem"), "Modify a project file");
+    assign(&mut ledger, gated, g1, "ares");
+    let g2 = task(&mut ledger, gated, "reviewer", Some("critical"), Some("critical-review"), "Review it");
+    assign(&mut ledger, gated, g2, "hera");
+    ledger.close_in_place().expect("closed");
+}
+
+#[test]
+#[ignore = "answers the fixture's question on alpha.13"]
+fn answer_on_alpha_13() {
+    let out = std::env::var("T2013_COPY").expect("T2013_COPY");
+    let mut ledger = open_ledger(std::path::Path::new(&out), Options::default()).expect("a ledger");
+    ledger.begin_delivery(2).expect("begins");
+    ledger.confirm_delivery(2, Some(&json!({ "item": "i-q" }))).expect("delivered");
+    let said = ledger.answer(2, 2, Some(&json!("JSON")), None);
+    println!("ANSWER: {said:?}");
+}

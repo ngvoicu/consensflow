@@ -218,16 +218,14 @@ replace = "        if stop.load(Ordering::SeqCst) && false {"
 
 [[plant]]
 name = "privacy prompts: the reader's error stream is not in its output, so a refusal is not read"
-meant = "the_log_is_asked_for_the_dialogs_and_for_the_requests_in_the_apps_name_alone"
+meant = "a_refused_log_says_why_and_ends"
 runs = ["pv-tcc"]
 platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/tcc/real.rs"
-find = '''
-        "exec \"$@\" 2>&1",'''
-replace = '''
-        "exec \"$@\"",'''
+find = '''"$@" </dev/null 2>&1 &'''
+replace = '''"$@" </dev/null &'''
 
 [[plant]]
 name = "privacy prompts: the log is asked for the requests of every app"
@@ -252,13 +250,37 @@ platforms = ["macos"]
 file = "crates/cf-panes/src/tcc/real.rs"
 find = '''
                 _ = &mut ended => {
-                    child.terminate(Ending::Asked);
+                    child.end();
                     break;
                 }'''
 replace = '''
                 _ = &mut ended => {
                     break;
                 }'''
+
+[[plant]]
+name = "privacy watcher: the shell execs the log"
+meant = "a_quiet_log_ends_when_its_host_is_killed"
+runs = ["pv-tcc"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/tcc/real.rs"
+find = '''"$@" </dev/null 2>&1 &'''
+replace = '''exec "$@" </dev/null 2>&1'''
+
+[[plant]]
+name = "privacy watcher: the host input pipe is not passed"
+meant = "a_quiet_log_ends_when_its_host_is_killed"
+runs = ["pv-tcc"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''        Streams::Lines => command
+            .stdin(Stdio::piped())'''
+replace = '''        Streams::Lines => command
+            .stdin(Stdio::null())'''
 
 [[plant]]
 name = "privacy prompts: a window holds no process, though its program runs"

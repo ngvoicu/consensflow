@@ -27,8 +27,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "Each task gets a new window of a member of that role and tier on this\n"
-replace = "ConsensFlow gives the task to a free member of that role and tier on this\n"
+find = "A role at a tier is a slot, held by one member, and each task gets a\nnew window of that member;"
+replace = "A role at a tier is a slot, held by one member, and ConsensFlow gives the task to a free member of it;"
 
 [[plant]]
 name = "chief parallel: a member is said to be busy with its task, and takes no other"
@@ -47,8 +47,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "Each task gets a new window of a member of that role and tier on this\n"
-replace = "Each task goes to a member of that role and tier on this\n"
+find = "A role at a tier is a slot, held by one member, and each task gets a\nnew window of that member;"
+replace = "A role at a tier is a slot, held by one member, and each task goes to a\nmember of it;"
 
 [[plant]]
 name = "chief parallel: the staff is not told a member runs any number of tasks at once"

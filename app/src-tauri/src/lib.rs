@@ -8,6 +8,8 @@
 //! reason (clippy.toml); the lints that refuse an HTTPS client are allowed only by the one
 //! constructor (update_page.rs) and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 
@@ -289,6 +291,11 @@ pub(crate) fn page_commands<R: Runtime>(
         commands::daemon_request,
         commands::pane_page_prepare,
         commands::pane_page_activate,
+        commands::pane_lost_dismiss,
+        commands::pane_lost_pull,
+        commands::pane_window_name,
+        commands::pane_input_place,
+        commands::pane_input_release,
         commands::pane_input_enqueue,
         commands::pane_reply_enqueue,
         commands::pane_input_skip,
@@ -441,6 +448,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Read before the runtime starts the daemon, which makes the ledger it looks for.
     let earlier_run = updates::earlier_run(app);
     app.manage(AppRuntime::start(app.handle()));
+    app.state::<AppRuntime>()
+        .inputs
+        .set_observer(Arc::new(commands::PageInputObserver(app.handle().clone())));
     // The terminal's command names this bundle's `cf`, whichever build wrote it.
     launcher::repair_in_background(app.handle());
     updates::setup(app, earlier_run)?;

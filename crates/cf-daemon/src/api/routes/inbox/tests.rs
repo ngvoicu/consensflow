@@ -232,6 +232,9 @@ async fn the_chiefs_list_holds_nothing_of_the_answer_it_wrote_and_receives_nothi
 /// A shown note that still holds says no `over` (RS-25, T-1556).
 #[tokio::test]
 async fn a_shown_note_whose_line_a_take_over_ended_is_said_over_in_the_list() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     use cf_ledger::{NewMember, NewTask};
     let scene = scene();
     let project = scene.project.id;

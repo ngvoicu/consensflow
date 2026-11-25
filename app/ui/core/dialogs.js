@@ -12,7 +12,16 @@ import {
 import { harnessesOf } from './computer-use.js'
 import { modelOptionText } from './model-option.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
-import { isImageAgentRole, readRoles, roleIds, roleLabel, takesNoTier, untiered } from './roles.js'
+import {
+  isImageAgentRole,
+  readRoles,
+  roleIds,
+  roleLabel,
+  takesNoTier,
+  tierColumns,
+  tiersOf,
+} from './roles.js'
+import { crowded, holdersOf, inTheWay, slotHead, slotName, slotRows, takenWords } from './slots.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -26,20 +35,19 @@ import { isImageAgentRole, readRoles, roleIds, roleLabel, takesNoTier, untiered 
  * throwing, as the daemon's refusals do.
  */
 
-/** The work tiers, most critical first. */
-const TIER_LABEL = {
-  critical: 'Critical work',
-  complex: 'Complex work',
-  standard: 'Standard work',
-  light: 'Light work',
-}
-const TIERS = Object.keys(TIER_LABEL)
+/** How a picker says a tier, one of the daemon's: "Critical work". */
+const tierLabel = (tier) => `${tier.charAt(0).toUpperCase()}${tier.slice(1)} work`
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
-/** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
+/** A staff reads by role, in the daemon's order of them, then by tier, the most critical first, then by name. */
 const byRoleAndTier = (a, b) =>
   rank(roleIds(), a.role) - rank(roleIds(), b.role) ||
-  rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
+  rank(tierColumns(), a.tier) - rank(tierColumns(), b.tier) ||
   a.name.localeCompare(b.name)
+/** The tiers a member of `roles` can be in: each tier every one of its roles with tiers has a slot at. */
+const tiersFor = (roles) =>
+  tierColumns().filter((tier) =>
+    roles.every((role) => tiersOf(role).length === 0 || tiersOf(role).includes(tier)),
+  )
 /**
  * What a staff table says under a member's name: its tier and its harness, and what it runs on
  * (its model's id and its effort) only where its name does not say it (HMD-12); a pick of New
@@ -75,27 +83,18 @@ function toolsCell(tools) {
 }
 
 /**
- * A member's rows in a staff table, the same in both staff dialogs: one a role, each with that
- * role's Remove beside it, and the member's cell and its own tools once, beside them all. The
- * member's backup slot follows them (`backupSlot`): together they are the member's group, as the
- * board draws a member and its backup as one team (the owner, 2026-11-19).
+ * A member's row in a staff table, the same in both staff dialogs: its cell, the slots it holds
+ * (each slot's Remove is the slot's own, above), and its own tools, said once however many slots
+ * it holds. The member's backup slot follows it (`backupSlot`): together they are the member's
+ * group, as the board draws a member and its backup as one team (the owner, 2026-11-19).
  */
-function memberGroup(who, roles, tools) {
-  return roles.map(({ role, remove }, at) => {
-    const row = element('tr', at === 0 ? 'staff-group' : 'staff-group-more')
-    row.dataset.role = role
-    const removing = element('td', 'staff-role-remove')
-    removing.append(remove)
-    if (at === 0) who.rowSpan = roles.length
-    if (at === 0) row.append(who)
-    row.append(element('td', null, roleLabel(role)), removing)
-    if (at === 0) {
-      const cell = toolsCell(tools)
-      cell.rowSpan = roles.length
-      row.append(cell)
-    }
-    return row
-  })
+function memberRow(who, roles, tools) {
+  const row = element('tr', 'staff-group')
+  row.dataset.roles = inRoleOrder(roles).join(' ')
+  const slots = element('td', 'member-slots-cell')
+  slots.append(element('span', 'member-slots', inRoleOrder(roles).map(roleLabel).join(' · ')))
+  row.append(who, slots, toolsCell(tools))
+  return row
 }
 
 /**
@@ -112,13 +111,14 @@ const shaded = (groups) =>
 /**
  * The last row of a member's group, alike under every member that may have a backup, in both
  * staff dialogs: its backup (`who`, a staff cell, with Change backup, its Vacation and Remove
- * backup) or none (null, with Add backup). An image designer has no slot: it has no backup.
+ * backup) or none (null, with Add backup). An image designer is offered no backup, and shows
+ * the one it has (an earlier version's) with its Vacation and Remove backup.
  */
 function backupSlot(owner, who, tools) {
   const row = element('tr', 'staff-group-more backup-slot')
   row.dataset.backupOf = owner
   const cell = element('td')
-  cell.colSpan = 3
+  cell.colSpan = 2
   const part = element('div', who === null ? 'backup-part backup-none' : 'backup-part')
   // Said to a screen reader as "backup of @zeus …", or "backup for @zeus: none".
   part.append(
@@ -190,11 +190,11 @@ function needsEditCell(name, runs, agent) {
   return cell
 }
 
-/** A staff table with nobody in it says so, and what to do, across its four columns. */
+/** A staff table with nobody in it says so, and what to do, across its three columns. */
 function nobodyRow(text) {
   const row = element('tr', 'staff-empty')
   const cell = element('td', null, text)
-  cell.colSpan = 4
+  cell.colSpan = 3
   row.append(cell)
   return row
 }
@@ -659,18 +659,15 @@ class ChiefPicker {
   }
 }
 
-/** The tiers a member's tier select offers, the most critical first, as the page names them. */
-const TIER_PICK = Object.entries(TIER_LABEL)
-
 /**
- * Add member and Edit member (T-1143): a role, a harness installed here, a model that
- * harness lists of itself, an effort it lists for that model and the tier the human
- * chooses, on the [`ModelPicker`] the chief's picker shares. The tier starts empty: the
- * human picks it, and nothing is saved without one (no bundled list says one,
- * harness-models). An image designer draws on Codex. Edit member moves a member to another harness,
- * model, effort or tier from its next window; its handle and roles stay. Refresh reads the
- * picked harness's models again, and says what the staff's members run that it no longer
- * lists.
+ * Add member and Edit member (T-1143), on the [`ModelPicker`] the chief's picker shares: a
+ * harness installed here, a model that harness lists of itself and an effort it lists for that
+ * model. The form is shut until a slot's Add, an Edit or a backup opens it, in sight, its harness
+ * picked first. A slot's Add adds a member in that slot: its role and tier are the slot's, shown
+ * in the form's name and not asked (D8), and an image designer draws on Codex. Edit member moves
+ * a member to another harness, model, effort or tier from its next window; its handle and roles
+ * stay, and its tier picker says of each tier whose slot is in the way. Refresh reads the picked
+ * harness's models again, and says what the staff's members run that it no longer lists.
  */
 class MemberPicker {
   #fieldset
@@ -689,6 +686,10 @@ class MemberPicker {
   editing = null
   /** The owner and whether this form is replacing its backup; null for a member. */
   backup = null
+  /** The slot the form adds a member in, `{ role, tier }`: none while it edits or is shut. */
+  slot = null
+  /** The name of the button that opened the form with the keyboard on it: it has the keyboard back at a Cancel. */
+  #opener = null
   /** The harnesses installed here, as `harnesses.missing` said them last. */
   #missing = []
   /** Told of a refresh of `harness` (its kind): the staff's marks of gone models are drawn again. */
@@ -748,11 +749,6 @@ class MemberPicker {
     this.#refreshed = refreshed
     this.#lists = lists
     this.#adds = this.#submit.textContent
-    if (this.#tier.options.length === 0) {
-      const ask = new Option('Pick a tier', '')
-      ask.disabled = true
-      this.#tier.append(ask, ...TIER_PICK.map(([tier, label]) => new Option(label, tier)))
-    }
     this.#picker = new ModelPicker({
       harness: form.elements.memberHarness,
       model: form.elements.memberModel,
@@ -777,23 +773,76 @@ class MemberPicker {
     }
   }
 
-  /** The form as it adds a member: the harnesses installed here, nothing picked. */
+  /** Whether a slot's Add, an Edit or a backup has the form open. */
+  get open() {
+    return !this.#fieldset.hidden
+  }
+
+  /**
+   * After a Cancel, the form shut: the keyboard back on the button that opened it, as the
+   * dialog draws it now, where it had the keyboard when it did.
+   */
+  refocus(root) {
+    const name = this.#opener
+    this.#opener = null
+    if (name === null) return
+    const again = [...root.querySelectorAll('button')].find(
+      (node) => (node.getAttribute('aria-label') ?? node.textContent) === name,
+    )
+    again?.focus()
+  }
+
+  /** The form shut, as it is until a slot's Add, an Edit or a backup opens it: nothing picked. */
   reset(missing) {
     this.#fillRoles()
     this.#missing = missing
     this.editing = null
     this.backup = null
+    this.slot = null
     this.#editedRoles = null
     this.#legend.textContent = 'Add a member'
     this.#role.disabled = false
-    this.#role.closest('label').hidden = false
     this.#submit.textContent = this.#adds
-    this.#cancel.hidden = true
-    this.#tier.value = ''
+    this.#fillTiers([])
     this.#current = null
     this.#origin = null
     this.say('')
     this.#fillHarnesses()
+    this.#fieldset.hidden = true
+  }
+
+  /**
+   * The form as a slot's Add opens it (D8): a new member in that slot, its role and tier the
+   * slot's, shown in the form's name and not asked.
+   */
+  forSlot(role, tier) {
+    this.reset(this.#missing)
+    this.slot = { role, tier }
+    this.#role.value = role
+    this.#fillTiers(tier === null ? [] : [tier])
+    this.#tier.value = tier ?? ''
+    this.#legend.textContent = `Add the ${slotName(role, tier)}`
+    this.#fillHarnesses()
+    this.#reveal()
+  }
+
+  /**
+   * The tiers the tier select offers, as the daemon's roles say them, most critical first; each
+   * `blocked` names whose slot is in its way, and cannot be picked.
+   */
+  #fillTiers(tiers, blocked = new Map()) {
+    const ask = new Option('Pick a tier', '')
+    ask.disabled = true
+    this.#tier.replaceChildren(
+      ask,
+      ...tiers.map((tier) => {
+        const words = blocked.get(tier)
+        const option = new Option(words ? `${tierLabel(tier)}: ${words}` : tierLabel(tier), tier)
+        option.disabled = Boolean(words)
+        return option
+      }),
+    )
+    this.#tier.value = ''
   }
 
   /** Reuse the member's harness, model and effort picker for its backup. */
@@ -807,7 +856,6 @@ class MemberPicker {
       this.#fillHarnesses(null)
     }
     this.#legend.textContent = `${current ? 'Change' : 'Add'} backup for ${owner.label}`
-    this.#role.closest('label').hidden = true
     this.#tier.closest('label').hidden = true
     this.#submit.textContent = current ? 'Save backup' : 'Add backup'
     this.#cancel.hidden = false
@@ -819,22 +867,33 @@ class MemberPicker {
    * the staff above it can be longer than the dialog, and the form below would change unseen.
    */
   #reveal() {
+    // What opened the form, by its name: a redraw may draw it anew while the form is open.
+    const by = document.activeElement
+    if (by instanceof HTMLButtonElement && !this.#fieldset.contains(by)) {
+      this.#opener = by.getAttribute('aria-label') ?? by.textContent
+    }
+    this.#fieldset.hidden = false
+    this.#cancel.hidden = false
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches
     this.#fieldset.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' })
     this.#harness.focus({ preventScroll: true })
   }
 
   /**
-   * The form as it edits `member` (a lane's participant): its harness's models read, its
-   * model, effort and tier picked where its harness still lists them.
+   * The form as it edits `member` (a lane's participant, or a draft's member named by `label`):
+   * its harness's models read, its model, effort and tier picked where its harness still lists
+   * them. The tiers `blocked` names are offered with whose slot is in their way, and cannot be
+   * picked.
    */
-  async edit(member) {
+  async edit(member, blocked = new Map()) {
     this.#fillRoles()
     this.editing = member.handle
+    this.slot = null
     this.#editedRoles = member.roles
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
     this.#origin = null
-    this.#legend.textContent = `Edit @${member.handle}`
+    this.#fillTiers(tiersFor(member.roles), blocked)
+    this.#legend.textContent = `Edit ${member.label ?? `@${member.handle}`}`
     this.#role.disabled = true
     this.#submit.textContent = 'Save member'
     this.#cancel.hidden = false
@@ -975,8 +1034,8 @@ class MemberPicker {
   #fillHarnesses(only = isImageAgentRole(this.#role.value) ? ['codex'] : null) {
     const designer = this.#designer
     for (const control of this.#modelControls) control.hidden = designer
-    // A member whose roles have no tier is asked none.
-    this.#tier.closest('label').hidden = designer || this.#untiered
+    // A member whose roles have no tier is asked none, and a slot's Add none: its tier is the slot's.
+    this.#tier.closest('label').hidden = designer || this.#untiered || this.slot !== null
     this.#picker.reads = !designer
     try {
       this.#picker.fill(this.#missing, only)
@@ -1008,13 +1067,17 @@ class MemberPicker {
  * New project, on the folder the human picked: its chief's harness, model and effort, and
  * the project's settings, the sections Project settings has (`ProjectSections`): the staff
  * (the last project's members, on the harnesses installed here, to start with), human
- * approval, wake-up calls and specs. A member of the staff is picked as Add member picks one
- * (`MemberPicker`): a role, a harness, a model it lists, an effort and a tier. The project
- * starts with them all, in one request.
+ * approval, wake-up calls and specs. The staff is drawn as Project settings draws it (D8):
+ * every slot, from the draft, again after each Add, slot given, Remove or Edit, and each member
+ * once with its own things. A slot's Add picks a new member as Add member picks one
+ * (`MemberPicker`): a harness, a model it lists and an effort, in the slot's role and tier. The
+ * project starts with them all, in one request, once no slot holds several.
  */
 export class NewProjectDialog {
   #dialog
   #form
+  #slots
+  #slotHead
   #staff
   #refusal
   #sections
@@ -1026,13 +1089,19 @@ export class NewProjectDialog {
   /** The harnesses not installed here, as the dialog last read them. */
   #missing = []
   /**
-   * The members picked for the new project, one row per role: each `{harness, model, effort,
-   * tier, modelName, role}`, the last staff's to start with.
+   * The draft: the members the new project starts with, the last staff's to start with, in the
+   * order they came. Each is `{ _id, harness, model, effort, modelName, tier, roles, read,
+   * designer, backupOf, vacationSince }`; a backup names its member's `_id` in `backupOf`, and
+   * holds no slot: it takes its member's roles and tier.
    */
-  #picked = []
+  #draft = []
   #nextId = 1
   /** Whether a start is on its way: a second ask waits for its answer, as the daemon's. */
   #starting = false
+  /** The draft's member whose last role is asked about before it goes: `{ key, role }`, or none. */
+  #removing = null
+  /** Whether the words beside Start are a crowded slot's: they follow the slot as it is mended. */
+  #crowdSaid = false
 
   /**
    * `page.onStart(project)` is told of the project the daemon opened. `page.daemon` asks the
@@ -1045,6 +1114,8 @@ export class NewProjectDialog {
     this.#form = dialog.querySelector('form')
     // Start is the button's: Enter in no field of the dialog starts the project.
     holdEnter(this.#form)
+    this.#slots = dialog.querySelector('#new-project-slots')
+    this.#slotHead = dialog.querySelector('table.slots thead')
     this.#staff = dialog.querySelector('#new-project-staff')
     this.#refusal = dialog.querySelector('.dialog-refusal')
     this.#sections = new ProjectSections(
@@ -1067,56 +1138,12 @@ export class NewProjectDialog {
     this.#member = new MemberPicker(this.#form, lists, () => {})
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
-    this.#form.elements.memberAdd.addEventListener('click', () => {
-      const picked = this.#member.values()
-      if (picked === null) return
-      const backup = this.#member.backup
-      if (backup !== null) {
-        const ownerRows = this.#picked.filter(
-          (pick) => pick._id === backup.owner.key && pick.backupOf == null,
-        )
-        // A tierless role may be first; use the owner's tiered row when it has one.
-        const owner = ownerRows.find((pick) => pick.tier !== undefined) ?? ownerRows[0]
-        if (!owner) return
-        const old = this.#picked.find((pick) => pick.backupOf === owner._id)
-        this.#picked = this.#picked.filter((pick) => pick.backupOf !== owner._id)
-        this.#picked.push({
-          ...picked,
-          _id: old?._id ?? this.#nextId++,
-          backupOf: owner._id,
-          role: owner.role,
-          tier: owner.tier,
-        })
-        this.#member.reset(this.#missing)
-        this.#draw()
-        return
-      }
-      const role = this.#member.role
-      const same = (pick) =>
-        pick.backupOf == null &&
-        pick.harness === picked.harness &&
-        pick.model === picked.model &&
-        pick.effort === picked.effort
-      if (this.#picked.some((pick) => same(pick) && pick.role === role)) {
-        this.#member.say(`${modelShown(picked)} is on the staff as ${roleLabel(role)} already.`)
-        return
-      }
-      // One member holds each of its roles in one tier: the tier picked now is the member's. A
-      // role with no tier is picked with none, and leaves the member's as it is.
-      if (picked.tier !== undefined) {
-        const owners = new Set(this.#picked.filter(same).map((pick) => pick._id))
-        for (const pick of this.#picked) {
-          if (same(pick) || owners.has(pick.backupOf)) pick.tier = picked.tier
-        }
-      }
-      const existing = this.#picked.find(same)
-      this.#picked.push({ ...picked, role, _id: existing?._id ?? this.#nextId++ })
+    this.#form.elements.memberAdd.addEventListener('click', () => this.#picked())
+    this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
       this.#draw()
+      this.#member.refocus(dialog)
     })
-    this.#form.elements.memberCancel.addEventListener('click', () =>
-      this.#member.reset(this.#missing),
-    )
     this.#form.addEventListener('submit', (event) => {
       event.preventDefault()
       void this.#start()
@@ -1138,6 +1165,7 @@ export class NewProjectDialog {
     readEveryHarness(this.#lists, missing)
     this.#chief.fill(missing)
     this.#member.reset(missing)
+    this.#removing = null
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
@@ -1150,27 +1178,38 @@ export class NewProjectDialog {
   #drawComputerUse() {
     const kinds = [
       this.#form.elements.chiefHarness.value,
-      ...this.#picked.map((pick) => pick.harness),
+      ...this.#draft.map((member) => member.harness),
     ]
     this.#sections.computerUse.draw(new Set(kinds.filter(Boolean)))
   }
 
-  /** What is said above the buttons: the daemon's refusal of the start, until the next try or the next opening. */
+  /**
+   * What is said above the buttons: the daemon's refusal of the start, until the next try or the
+   * next opening; a crowded slot's words, until the slot is mended (`#draw`).
+   */
   #say(words) {
     this.#refusal.textContent = words
     this.#refusal.hidden = words === ''
+    this.#crowdSaid = false
   }
 
   /**
    * Starts the project as the dialog says it, in one request: its chief, staff
    * and approval, and the calls and specs unless they are as the dialog opened.
-   * The dialog stays until the daemon has opened the project. One it refuses (a
+   * The dialog stays until the daemon has opened the project. A slot the draft names
+   * several members for holds the start back, in its words (D8). One the daemon refuses (a
    * specs folder outside the project, an interval under a minute) is said here
    * in the daemon's own words, as the settings of a project say them, with
    * what the human chose still in the dialog, and no project is made.
    */
   async #start() {
     if (this.#starting || !this.#chief.picked()) return
+    const crowd = this.#crowded()
+    if (crowd !== null) {
+      this.#say(crowd)
+      this.#crowdSaid = true
+      return
+    }
     // A section holding what no project can start with says so, as its Save does in Project settings.
     const blocked = this.#sections.blocked()
     if (blocked !== null) {
@@ -1218,10 +1257,17 @@ export class NewProjectDialog {
     if (refused !== null) this.#say(refused)
   }
 
+  /** The words of the slots the draft names several members for, or none. */
+  #crowded() {
+    const words = crowded(this.#members(), true).map((slot) => slot.words)
+    return words.length === 0 ? null : words.join(' ')
+  }
+
   /**
-   * The last project's staff, picked: its members on a harness installed here, in their
-   * roles; an image designer runs on its harness's own model at no effort and in no tier,
-   * and is picked as it is.
+   * The last project's staff, as the draft: its members on a harness installed here, each with
+   * its roles, and its backup with its own id, its link and its Vacation; an image designer runs
+   * on its harness's own model at no effort and in no tier, and is picked as it is, its backup
+   * too.
    */
   #pickLast(lastStaff) {
     this.#nextId = Math.max(0, ...lastStaff.map((member) => member.id ?? 0)) + 1
@@ -1232,114 +1278,253 @@ export class NewProjectDialog {
     const owners = new Set(
       available.filter((member) => member.backupOf == null).map((member) => member.id),
     )
-    this.#picked = available
+    this.#draft = available
       .filter((member) => member.backupOf == null || owners.has(member.backupOf))
-      .flatMap((member) => {
-        const id = member.id ?? this.#nextId++
-        const roles = member.backupOf == null ? member.roles : member.roles.slice(0, 1)
-        return roles.map((role) =>
-          member.designer
-            ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              { harness: member.harness, role, _id: id, vacationSince: member.vacationSince }
-            : {
-                harness: member.harness,
-                // The model as its harness's list names it (`modelName`): what the daemon takes for
-                // a pick. Devin's `model` is the launch id for the effort, which no list holds.
-                model: member.modelName || member.model,
-                effort: member.effort,
-                // A role with no tier is picked with none: the member's tier is its work's.
-                ...(untiered(role) ? {} : { tier: member.tier }),
-                modelName: member.modelName,
-                role,
-                _id: id,
-                backupOf: member.backupOf,
-                vacationSince: member.vacationSince,
-              },
-        )
+      .map((member) => {
+        const drawn = {
+          _id: member.id ?? this.#nextId++,
+          harness: member.harness,
+          roles: member.backupOf == null ? [...member.roles] : member.roles.slice(0, 1),
+          designer: Boolean(member.designer),
+          backupOf: member.backupOf,
+          vacationSince: member.vacationSince,
+        }
+        // An image designer runs on its harness's own model, at no effort and in no tier.
+        if (member.designer) return drawn
+        return {
+          ...drawn,
+          // The model as its harness's list names it (`modelName`): what the daemon takes for
+          // a pick. Devin's `model` is the launch id for the effort, which no list holds.
+          model: member.modelName || member.model,
+          effort: member.effort,
+          // A member whose roles have no tier is picked with none.
+          ...(takesNoTier(member.roles) ? {} : { tier: member.tier }),
+          modelName: member.modelName,
+        }
       })
     this.#draw()
   }
 
+  /** The draft's member of number `id` that is no backup. */
+  #memberOf(id) {
+    return this.#draft.find((member) => member._id === id && member.backupOf == null)
+  }
+
+  /** The draft's members that hold slots, as the slots read them. */
+  #members() {
+    return this.#draft
+      .filter((member) => member.backupOf == null)
+      .map((member) => ({
+        key: member._id,
+        name: modelShown(member),
+        runs: [member.harness && harnessLabel(member), member.effort].filter(Boolean).join(' · '),
+        roles: member.roles,
+        tier: member.tier ?? null,
+        designer: member.designer || member.roles.some(isImageAgentRole),
+        marks: member.vacationSince ? [{ text: 'on Vacation', tone: 'rest' }] : [],
+      }))
+  }
+
+  /**
+   * What the form picked, put in the draft: a backup for its member, a member's own edit, or a
+   * new member in the slot the form is for, refused in the ledger's words where the draft holds
+   * that slot by now.
+   */
+  #picked() {
+    const picked = this.#member.values()
+    if (picked === null) return
+    const { backup, editing, slot } = this.#member
+    if (backup !== null) {
+      const owner = this.#memberOf(backup.owner.key)
+      if (owner) {
+        const old = this.#draft.find((member) => member.backupOf === owner._id)
+        this.#draft = this.#draft.filter((member) => member.backupOf !== owner._id)
+        this.#draft.push({
+          ...picked,
+          _id: old?._id ?? this.#nextId++,
+          backupOf: owner._id,
+          roles: owner.roles.slice(0, 1),
+          designer: false,
+        })
+      }
+    } else if (editing !== null) {
+      const member = this.#memberOf(Number(editing))
+      if (member) {
+        const { tier, unchanged, ...runs } = picked
+        Object.assign(member, runs)
+        if (tier !== undefined) member.tier = tier
+      }
+    } else if (slot !== null) {
+      const holder = holdersOf(this.#members(), slot.role, slot.tier)[0]
+      if (holder) {
+        this.#member.say(takenWords(slot.role, slot.tier, holder.name))
+        return
+      }
+      const designer = isImageAgentRole(slot.role)
+      this.#draft.push(
+        designer
+          ? { harness: picked.harness, _id: this.#nextId++, roles: [slot.role], designer }
+          : { ...picked, _id: this.#nextId++, roles: [slot.role], designer },
+      )
+    }
+    this.#member.reset(this.#missing)
+    // A refusal of the start goes with the change; a crowded slot's words follow the slot (`#draw`).
+    if (!this.#crowdSaid) this.#say('')
+    this.#draw()
+  }
+
+  /** Takes `role` from the draft's member `key`; with none left it goes, its backup with it. */
+  #removeRole(key, role) {
+    const member = this.#memberOf(key)
+    if (!member) return
+    // Its last role takes the member and its backup out of the draft: asked first, in the slot,
+    // as Project settings asks.
+    if (member.roles.length === 1 && member.roles[0] === role) {
+      this.#removing = { key, role }
+      this.#draw()
+      return
+    }
+    member.roles = member.roles.filter((held) => held !== role)
+    this.#draw()
+  }
+
+  /** The draft's member `key` out, its backup with it, once the person said so. */
+  #removeMember(key) {
+    this.#removing = null
+    this.#draft = this.#draft.filter((kept) => kept._id !== key && kept.backupOf !== key)
+    this.#draw()
+  }
+
+  /** What the ask before a draft member's last role says: that its backup goes with it, where it has one. */
+  #removeWords(holder) {
+    const backup = this.#draft.some((member) => member.backupOf === holder.key)
+    return backup
+      ? `Remove ${holder.name} and its backup from the new project's staff?`
+      : `Remove ${holder.name} from the new project's staff?`
+  }
+
   #draw() {
-    const backups = new Map(
-      this.#picked.filter((pick) => pick.backupOf != null).map((pick) => [pick.backupOf, pick]),
+    const members = this.#members()
+    const slot = this.#member.slot
+    this.#slotHead.replaceChildren(slotHead())
+    redraw(
+      this.#slots,
+      slotRows(members, {
+        draft: true,
+        picking:
+          slot === null ? null : slot.tier === null ? slot.role : `${slot.role}:${slot.tier}`,
+        add: (role, tier) => {
+          this.#member.forSlot(role, tier)
+          this.#draw()
+        },
+        give: (role, holder) => {
+          const member = this.#memberOf(holder.key)
+          if (member && !member.roles.includes(role)) member.roles.push(role)
+          this.#draw()
+        },
+        remove: (role, holder) => this.#removeRole(holder.key, role),
+        confirming: this.#removing,
+        keep: () => {
+          this.#removing = null
+          this.#draw()
+        },
+        confirm: (holder) => this.#removeMember(holder.key),
+        confirmWords: (holder) => this.#removeWords(holder),
+      }),
     )
-    // A member is its picks, one a role, under one id: drawn as one group.
-    const members = new Map()
-    for (const pick of this.#picked) {
-      if (pick.backupOf != null) continue
-      if (!members.has(pick._id)) members.set(pick._id, [])
-      members.get(pick._id).push(pick)
+    // A crowded slot's words beside Start follow the slot: the slot as it is now, or none.
+    if (this.#crowdSaid) {
+      const crowd = this.#crowded()
+      this.#say(crowd ?? '')
+      this.#crowdSaid = crowd !== null
     }
-    const groups = [...members.values()]
-      .map((picks) => {
-        const roles = inRoleOrder(picks.map((pick) => pick.role))
-        // The member's tier is its tiered picks' (a role with no tier is picked with none).
-        const lead = picks.find((pick) => pick.tier !== undefined) ?? picks[0]
-        return { picks, roles, lead, role: roles[0], tier: lead.tier, name: modelShown(lead) }
-      })
+    const backups = new Map(
+      this.#draft
+        .filter((member) => member.backupOf != null)
+        .map((member) => [member.backupOf, member]),
+    )
+    const groups = this.#draft
+      .filter((member) => member.backupOf == null)
+      .map((member) => ({
+        member,
+        role: inRoleOrder(member.roles)[0],
+        tier: member.tier,
+        name: modelShown(member),
+      }))
       .sort(byRoleAndTier)
-    const rows = shaded(groups.map((group) => this.#group(group, backups.get(group.lead._id))))
+      .map(({ member }) => this.#group(member, backups.get(member._id), members))
+    const rows = shaded(groups)
     if (rows.length === 0) {
-      rows.push(nobodyRow('Nobody yet: pick a role, a harness, a model and a tier, then Add.'))
+      rows.push(nobodyRow('Nobody yet: Add fills an empty slot with a new member.'))
     }
-    this.#staff.replaceChildren(...rows)
+    redraw(this.#staff, rows)
     this.#drawComputerUse()
   }
 
-  /** A member's group: its rows, one a role, and its backup slot. */
-  #group({ roles, lead, name }, backup) {
-    const id = lead._id
-    const who = whoCell(name, runsLabel({ ...lead, roles }, false))
+  /** A member's group: its row, with its own things once, and its backup slot. */
+  #group(member, backup, members) {
+    const id = member._id
+    const name = modelShown(member)
+    const designer = member.designer || member.roles.some(isImageAgentRole)
+    const who = whoCell(name, runsLabel(member, false))
     const tools = []
-    if (lead.vacationSince) {
+    if (!designer) {
+      tools.push(
+        button(
+          'Edit',
+          'quiet-button',
+          () => {
+            const shown = members.find((one) => one.key === id)
+            void this.#member.edit(
+              { ...member, handle: String(id), label: name },
+              shown ? inTheWay(members, shown) : new Map(),
+            )
+            this.#draw()
+          },
+          `Edit ${name}`,
+        ),
+      )
+    }
+    if (member.vacationSince) {
       who.append(element('br'), element('span', 'member-meta', 'on Vacation'))
       tools.push(
         vacationButton(name, true, () => {
-          for (const chosen of this.#picked) if (chosen._id === id) chosen.vacationSince = null
+          member.vacationSince = null
           this.#draw()
         }),
       )
     }
-    const removes = roles.map((role) => ({
-      role,
-      remove: button(
-        'Remove',
-        'quiet-button',
-        () => {
-          this.#picked = this.#picked.filter((kept) => !(kept._id === id && kept.role === role))
-          if (!this.#picked.some((kept) => kept._id === id)) {
-            this.#picked = this.#picked.filter((kept) => kept.backupOf !== id)
-          }
-          this.#draw()
-        },
-        `Remove ${roleLabel(role)} ${name}`,
-      ),
-    }))
-    const rows = memberGroup(who, removes, tools)
-    for (const row of rows) row.dataset.model = lead.model ?? ''
-    if (roles.includes('designer')) return rows
+    const row = memberRow(who, member.roles, tools)
+    row.dataset.member = String(id)
+    row.dataset.model = member.model ?? ''
+    // An image designer is offered no backup: one it has from before is shown, to keep or remove.
+    if (designer && !backup) return [row]
     const owner = { key: id, label: name }
     if (!backup) {
-      const { row } = backupSlot(name, null, [
-        addBackup(name, () => void this.#member.backupFor(owner)),
+      const { row: none } = backupSlot(name, null, [
+        addBackup(name, () => {
+          void this.#member.backupFor(owner)
+          this.#draw()
+        }),
       ])
-      return [...rows, row]
+      return [row, none]
     }
     const said = whoCell(
       modelShown(backup),
-      runsLabel({ ...backup, roles, tier: lead.tier }, false),
+      runsLabel({ ...backup, roles: member.roles, tier: member.tier }, false),
     )
-    const actions = [
-      changeBackup(
-        name,
-        () => void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) }),
-      ),
-    ]
+    const actions = designer
+      ? []
+      : [
+          changeBackup(name, () => {
+            void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) })
+            this.#draw()
+          }),
+        ]
     if (backup.vacationSince) {
       said.append(element('br'), element('span', 'member-meta', 'on Vacation'))
       actions.push(
-        vacationButton(backup.model, true, () => {
+        vacationButton(modelShown(backup), true, () => {
           backup.vacationSince = null
           this.#draw()
         }),
@@ -1347,44 +1532,40 @@ export class NewProjectDialog {
     }
     actions.push(
       removeBackup(name, () => {
-        this.#picked = this.#picked.filter((kept) => kept.backupOf !== id)
+        this.#draft = this.#draft.filter((kept) => kept.backupOf !== id)
         this.#draw()
       }),
     )
-    const { row } = backupSlot(name, said, actions)
-    row.dataset.model = backup.model ?? ''
-    return [...rows, row]
+    const { row: slot } = backupSlot(name, said, actions)
+    slot.dataset.model = backup.model ?? ''
+    return [row, slot]
   }
 
-  /** The picked rows as the daemon takes a staff: each member once, with its roles. */
+  /** The draft as the daemon takes a staff: each member once, with its roles, its backups after their link. */
   #pickedStaff() {
-    const staff = new Map()
     const owners = new Set(
-      this.#picked.filter((pick) => pick.backupOf != null).map((pick) => pick.backupOf),
+      this.#draft.filter((member) => member.backupOf != null).map((member) => member.backupOf),
     )
-    for (const { harness, model, effort, tier, role, read, _id, backupOf, vacationSince } of this
-      .#picked) {
-      if (!staff.has(_id))
-        staff.set(_id, {
-          harness,
-          model,
-          effort,
-          tier,
-          roles: [],
-          ...(owners.has(_id) || backupOf != null ? { id: _id } : {}),
-          ...(backupOf != null ? { backupOf } : {}),
-          ...(vacationSince ? { vacationSince } : {}),
-        })
-      const member = staff.get(_id)
-      member.roles.push(role)
-      // A member that holds a role with no tier first has the tier of the one it holds with one.
-      if (member.tier === undefined && tier !== undefined) member.tier = tier
+    return this.#draft.map((member) => {
+      const { harness, model, effort, read, _id, backupOf, vacationSince } = member
+      // A backup takes its member's tier.
+      const tier = backupOf == null ? member.tier : this.#memberOf(backupOf)?.tier
+      const entry = {
+        harness,
+        model,
+        effort,
+        ...(tier !== undefined ? { tier } : {}),
+        roles: [...member.roles],
+        ...(owners.has(_id) || backupOf != null ? { id: _id } : {}),
+        ...(backupOf != null ? { backupOf } : {}),
+        ...(vacationSince ? { vacationSince } : {}),
+      }
       // The read the pick was made from (a pick copied from the last staff was made from none:
       // it is checked against the read the dialog shows of its harness, else the daemon reads).
       const named = read ?? (model ? this.#lists.readOf(harnessOf(harness)) : null)
-      if (named !== null && member.read === undefined) member.read = named
-    }
-    return [...staff.values()]
+      if (named !== null) entry.read = named
+      return entry
+    })
   }
 }
 
@@ -1471,6 +1652,8 @@ export class SwitchChiefDialog {
 export class ProjectSettingsDialog {
   #dialog
   #form
+  #slots
+  #slotHead
   #members
   #gate
   #page
@@ -1491,8 +1674,17 @@ export class ProjectSettingsDialog {
   #project = null
   /** The board of that project, as the dialog last drew it. */
   #board = null
-  /** The member whose removal waits for the human's yes, kept across redraws. */
+  /**
+   * The removal that waits for the human's yes, kept across redraws: a member's last role, by
+   * its handle and that role's slot (`{ key, role }`).
+   */
   #removing = null
+  /**
+   * What the daemon refused of a slot the person changed (a give, a Remove), said under its
+   * role's row until the next change of a slot (`{ role, words }`): the status line is behind
+   * the dialog.
+   */
+  #slotRefusal = null
   /** Refusals beside the member whose Vacation button was pressed. */
   #vacationErrors = new Map()
   /** Each harness's models, read once while the dialog is open (T-1143). */
@@ -1519,6 +1711,8 @@ export class ProjectSettingsDialog {
   constructor(dialog, page) {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
+    this.#slots = dialog.querySelector('#staff-slots')
+    this.#slotHead = dialog.querySelector('table.slots thead')
     this.#members = dialog.querySelector('#staff-members')
     this.#page = page
     // The sections save for the project the dialog is for, not for the one the page shows, and a
@@ -1568,9 +1762,13 @@ export class ProjectSettingsDialog {
     })
     this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
+      this.#draw()
+      this.#member.refocus(dialog)
     })
     this.#form.addEventListener('submit', (event) => {
       event.preventDefault()
+      // Enter in a field of another section adds nobody: the form is shut until a slot opens it.
+      if (!this.#member.open) return
       const values = this.#member.values()
       if (values === null) return
       // The name the harness gives the model is the daemon's to read from its listing.
@@ -1578,7 +1776,7 @@ export class ProjectSettingsDialog {
       const project = this.#project
       const editing = this.#member.editing
       const backup = this.#member.backup
-      const role = this.#member.role
+      const slot = this.#member.slot
       void page.act(async () => {
         try {
           if (backup !== null) {
@@ -1606,16 +1804,16 @@ export class ProjectSettingsDialog {
             this.#member.reset(this.#missing)
             return
           }
-          const held = this.#board.lanes
-            .map((lane) => lane.participant)
-            .filter(isMember)
-            .map((member) => member.handle)
-          const { member } = await page.daemon('member.add', { project, ...picked, roles: [role] })
-          page.note(
-            held.includes(member.handle)
-              ? `@${member.handle} is ${roleLabel(role)} now too.`
-              : `@${member.handle} joined the staff as ${roleLabel(role)}.`,
-          )
+          if (slot === null) return
+          // A slot's Add always makes a new member (D8): the same model at a second tier is a
+          // second member, and a member is given a role by its slot's give, never by an Add.
+          const { member } = await page.daemon('member.add', {
+            project,
+            ...picked,
+            roles: [slot.role],
+          })
+          page.note(`@${member.handle} joined the staff as ${roleLabel(slot.role)}.`)
+          this.#member.reset(this.#missing)
         } catch (refused) {
           // The daemon's words go where the human picked, as well as on the status line.
           this.#member.say(refused instanceof Error ? refused.message : String(refused))
@@ -1662,6 +1860,7 @@ export class ProjectSettingsDialog {
     this.#project = project
     this.#board = board
     this.#removing = null
+    this.#slotRefusal = null
     this.#vacationErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
@@ -1735,7 +1934,7 @@ export class ProjectSettingsDialog {
     this.#draw()
   }
 
-  /** Draws the staff from the project's board, in place. */
+  /** Draws the staff from the project's board, in place: every slot, then each member once. */
   #draw() {
     const board = this.#board
     // The members only: a member's sessions are lanes too, named after it.
@@ -1745,6 +1944,30 @@ export class ProjectSettingsDialog {
       members
         .filter((member) => member.backupOf != null)
         .map((member) => [member.backupOf, member]),
+    )
+    const holders = primaries.map((member) => this.#slotMember(member))
+    const slot = this.#member.slot
+    this.#slotHead.replaceChildren(slotHead())
+    redraw(
+      this.#slots,
+      slotRows(holders, {
+        draft: false,
+        picking:
+          slot === null ? null : slot.tier === null ? slot.role : `${slot.role}:${slot.tier}`,
+        confirming: this.#removing,
+        refusal: this.#slotRefusal,
+        add: (role, tier) => {
+          this.#member.forSlot(role, tier)
+          this.#draw()
+        },
+        give: (role, holder) => this.#give(role, holder.key),
+        remove: (role, holder) => this.#removeRole(role, holder.key),
+        keep: () => {
+          this.#removing = null
+          this.#draw()
+        },
+        confirm: (holder) => this.#removeMember(holder.key, this.#removing?.role),
+      }),
     )
     const rows = shaded(
       primaries
@@ -1756,10 +1979,11 @@ export class ProjectSettingsDialog {
         }))
         .sort(byRoleAndTier)
         .map(({ member }) => {
-          const rows = this.#memberRows(member)
-          if (member.designer || this.#removing === member.handle) return rows
+          const row = this.#memberRow(member)
           const backup = backups.get(member.id)
-          return [...rows, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
+          // An image designer is offered no backup: one it has from before is shown, to keep or remove.
+          if (member.designer && !backup) return [row]
+          return [row, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
         }),
     )
     if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the members this project may use.'))
@@ -1767,6 +1991,99 @@ export class ProjectSettingsDialog {
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
     this.#computerUse.draw(harnessesOf(board))
+  }
+
+  /**
+   * A member as its slots show it: its name, what it runs on where its name does not say, and
+   * its state in a few words (on Vacation, out, needs an edit).
+   */
+  #slotMember(member) {
+    const marks = []
+    if (member.needsEdit) marks.push({ text: 'needs an edit', tone: 'out' })
+    else if (this.#modelGone(member)) marks.push({ text: 'model no longer listed', tone: 'out' })
+    if (member.vacationSince) marks.push({ text: 'on Vacation', tone: 'rest' })
+    const lane = this.#board.lanes.find(
+      (found) => found.participant.handle === member.handle && isMember(found.participant),
+    )
+    const out = lane ? outWords(lane, Date.now()) : null
+    if (out !== null) marks.push({ text: out.split(/; |: /)[0], tone: 'out' })
+    return {
+      key: member.handle,
+      name: `@${member.handle}`,
+      runs: [
+        ...(nameApart(member) ? [modelShown(member), member.effort] : []),
+        harnessLabel(member),
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      roles: member.roles,
+      tier: takesNoTier(member.roles) ? null : member.tier,
+      designer: Boolean(member.designer),
+      marks,
+    }
+  }
+
+  /** Gives the empty slot of `role` at its tier to the member `handle` (`member.roles`). */
+  #give(role, handle) {
+    const page = this.#page
+    const { roles } = this.#memberNow({ handle })
+    void this.#slotAct(role, async () => {
+      await page.daemon('member.roles', {
+        project: this.#project,
+        agent: handle,
+        roles: inRoleOrder([...roles, role]),
+      })
+      page.note(`@${handle} is ${roleLabel(role)} now too.`)
+    })
+  }
+
+  /** The role's Remove in its slot: the member keeps its other roles; its last asks first. */
+  #removeRole(role, handle) {
+    const page = this.#page
+    const { roles } = this.#memberNow({ handle })
+    if (roles.length === 1) {
+      this.#removing = { key: handle, role }
+      this.#draw()
+      return
+    }
+    void this.#slotAct(role, async () => {
+      await page.daemon('member.roles', {
+        project: this.#project,
+        agent: handle,
+        roles: roles.filter((held) => held !== role),
+      })
+    })
+  }
+
+  /** The member off the staff, once the human said yes: its open tasks are cancelled. */
+  #removeMember(handle, role) {
+    const page = this.#page
+    return this.#slotAct(role, async () => {
+      await page.daemon('member.remove', { project: this.#project, agent: handle })
+      this.#removing = null
+      page.note(`@${handle} left the staff.`)
+    })
+  }
+
+  /**
+   * A change of a slot (a give, a Remove), run as `page.act` runs it, the status line saying a
+   * refusal; the dialog says it too, under the role's row, where the person acted, while it is
+   * still open for the same project.
+   */
+  #slotAct(role, work) {
+    const project = this.#project
+    this.#slotRefusal = null
+    return this.#page.act(async () => {
+      try {
+        await work()
+      } catch (refused) {
+        if (this.#dialog.open && this.#project === project) {
+          const words = refused instanceof Error ? refused.message : String(refused)
+          this.#slotRefusal = { role, words }
+        }
+        throw refused
+      }
+    })
   }
 
   /**
@@ -1856,12 +2173,17 @@ export class ProjectSettingsDialog {
       : this.#modelGone(backup)
         ? goneCell(name, modelShown(backup), runs, HARNESS_NAMES[backup.harness])
         : whoCell(name, runs)
+    // An image designer's backup (an earlier version's) has nothing to change: it is kept or removed.
+    const change = owner.designer
+      ? []
+      : [
+          changeBackup(of, () => {
+            void this.#member.backupFor({ key: owner.handle, label: of }, this.#memberNow(backup))
+            this.#draw()
+          }),
+        ]
     const { row, part } = backupSlot(of, who, [
-      changeBackup(
-        of,
-        () =>
-          void this.#member.backupFor({ key: owner.handle, label: of }, this.#memberNow(backup)),
-      ),
+      ...change,
       this.#vacation(backup),
       removeBackup(
         of,
@@ -1889,17 +2211,18 @@ export class ProjectSettingsDialog {
   #noBackupRow(owner) {
     const of = `@${owner.handle}`
     return backupSlot(of, null, [
-      addBackup(of, () => void this.#member.backupFor({ key: owner.handle, label: of })),
+      addBackup(of, () => {
+        void this.#member.backupFor({ key: owner.handle, label: of })
+        this.#draw()
+      }),
     ]).row
   }
 
   /**
-   * A member's rows, one per role, each with the role it stands for and its Remove: Remove
-   * drops that role, or, for its last role, asks first and takes the member off the staff. Its
-   * name and its own tools (Edit, its Vacation) are once, beside all of them.
+   * A member's row, its own things once however many slots it holds: its name and what it runs
+   * on, its state, the slots it holds, Edit and its Vacation. Each slot's Remove is the slot's.
    */
-  #memberRows(member) {
-    const page = this.#page
+  #memberRow(member) {
     const name = `@${member.handle}`
     // A model its harness no longer lists is marked, and said (T-1143); ending its shift
     // and its replacement are the staff chains' (CHN-11).
@@ -1912,56 +2235,6 @@ export class ProjectSettingsDialog {
       : gone
         ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
         : whoCell(name, runs)
-    if (this.#removing === member.handle) {
-      const row = element('tr', 'staff-group')
-      row.dataset.handle = member.handle
-      row.append(who)
-      // The ask takes the role's column, its Remove's and the tools'.
-      const cell = element('td')
-      cell.colSpan = 3
-      const keep = button(`Keep ${name}`, 'quiet-button', () => {
-        this.#removing = null
-        this.#draw()
-      })
-      const yes = button(`Remove ${name}`, 'danger-button', () =>
-        page.act(async () => {
-          const { handle } = this.#memberNow(member)
-          await page.daemon('member.remove', { project: this.#project, agent: handle })
-          this.#removing = null
-          page.note(`${name} left the staff.`)
-        }),
-      )
-      cell.append(
-        element('span', 'member-confirm', `Remove ${name}? Its open tasks are cancelled. `),
-        keep,
-        yes,
-      )
-      row.append(cell)
-      return [row]
-    }
-    const removes = inRoleOrder(member.roles).map((role) => ({
-      role,
-      remove: button(
-        'Remove',
-        'quiet-button',
-        () => {
-          const { handle, roles } = this.#memberNow(member)
-          if (roles.length === 1) {
-            this.#removing = handle
-            this.#draw()
-            return
-          }
-          void page.act(async () => {
-            await page.daemon('member.roles', {
-              project: this.#project,
-              agent: handle,
-              roles: roles.filter((held) => held !== role),
-            })
-          })
-        },
-        `Remove ${roleLabel(role)} ${name}`,
-      ),
-    }))
     // An image designer has nothing to edit: Codex's own model, no effort, no tier.
     const edit = member.designer
       ? []
@@ -1969,16 +2242,23 @@ export class ProjectSettingsDialog {
           button(
             'Edit',
             'quiet-button',
-            () => void this.#member.edit(this.#memberNow(member)),
+            () => {
+              const now = this.#memberNow(member)
+              const members = this.#board.lanes
+                .map((lane) => lane.participant)
+                .filter((one) => isMember(one) && one.backupOf == null)
+                .map((one) => this.#slotMember(one))
+              const shown = members.find((one) => one.key === now.handle)
+              void this.#member.edit(now, shown ? inTheWay(members, shown) : new Map())
+              this.#draw()
+            },
             `Edit ${name}`,
           ),
         ]
     this.#sayOut(who, member)
-    const rows = memberGroup(who, removes, [...edit, this.#vacation(member)])
-    for (const row of rows) {
-      row.dataset.handle = member.handle
-      if (gone) row.dataset.modelGone = member.model
-    }
-    return rows
+    const row = memberRow(who, member.roles, [...edit, this.#vacation(member)])
+    row.dataset.handle = member.handle
+    if (gone) row.dataset.modelGone = member.model
+    return row
   }
 }

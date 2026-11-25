@@ -562,6 +562,16 @@ pub struct TaskRetiered {
     pub holders: Vec<String>,
 }
 
+/// What the placement leaves an open task at a dispatcher pass: where it is (its slot, or the
+/// nearest held one it fell to) or that it waits. `critical` is who holds its role's Critical
+/// slot, which takes only critical work: none when the role is held nowhere.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum TaskPlaced {
+    Stays,
+    Fell(TaskRetiered),
+    Waits { critical: Vec<String> },
+}
+
 /// How the tasks a task needs, or that wait for it, are changed: the list is
 /// replaced, or some are added and some removed.
 #[derive(Debug, Clone, PartialEq)]
@@ -591,6 +601,8 @@ pub struct TaskEdited {
 pub struct TaskEdit {
     pub body: Option<String>,
     pub tier: Option<String>,
+    /// The purpose of critical work, given with `tier: critical` only.
+    pub purpose: Option<String>,
     pub needs: Option<Links>,
     pub before: Option<Links>,
 }

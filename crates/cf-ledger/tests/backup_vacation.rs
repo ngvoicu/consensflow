@@ -76,6 +76,9 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
         own_hands, 1,
         "migration 0039 preserves the own-hands setting"
     );
+    // Migration 0045 gives the tierless frontend designer its home tier, and nothing else.
+    let mut old_rows = old_rows;
+    old_rows[0].2 = Some("standard".to_owned());
     assert_eq!(
         old_rows,
         legacy(&db),
@@ -152,7 +155,7 @@ fn member(model: &str, role: &str, tier: &str) -> NewMember {
 
 fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
     ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/backup".into(),
             name: "backup".into(),
             chief: NewChief {
@@ -290,10 +293,15 @@ fn a_backup_does_not_create_a_tier_but_a_primary_on_vacation_still_holds_its_tie
         .unwrap()
         .task;
     assert_eq!(worker.tier.as_deref(), Some("standard"));
-    let review = ledger.create_task(p.id, &work("reviewer", "complex"));
-    assert!(
-        review.is_err(),
-        "a backup alone cannot hold the reviewer tier"
+    // Nobody holds the reviewer slot (a backup holds none): the task waits for one, unrefused.
+    let review = ledger
+        .create_task(p.id, &work("reviewer", "complex"))
+        .unwrap()
+        .task;
+    assert_eq!(
+        (review.state.as_str(), review.assignee),
+        ("open", None),
+        "a backup alone does not hold the reviewer slot"
     );
 }
 
@@ -382,7 +390,7 @@ fn a_primarys_roles_and_tier_follow_to_its_backup() {
         )
         .unwrap();
     ledger
-        .set_roles(p.id, "alpha", &["worker", "reviewer"], Some("complex"))
+        .set_roles(p.id, "alpha", &["worker", "reviewer"])
         .unwrap();
     let (roles, tier): (String, String) = ledger
         .sqlite()
@@ -396,7 +404,8 @@ fn a_primarys_roles_and_tier_follow_to_its_backup() {
         serde_json::from_str::<Value>(&roles).unwrap(),
         json!(["worker", "reviewer"])
     );
-    assert_eq!(tier, "complex");
+    // The role came at the tier the member has: only Edit changes one.
+    assert_eq!(tier, "standard");
 }
 
 #[test]
@@ -405,9 +414,7 @@ fn a_backup_of_an_untiered_member_keeps_the_null_tier_even_when_edited() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
     let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
-    ledger
-        .set_roles(p.id, "alpha", &["frontend"], None)
-        .unwrap();
+    ledger.set_roles(p.id, "alpha", &["frontend"]).unwrap();
     // Older ledgers can contain a null tier for an untiered member.
     ledger
         .sqlite()
@@ -492,7 +499,7 @@ fn adding_a_primary_never_rejoins_a_departed_backup_with_the_same_model() {
         )
         .unwrap();
     let added = ledger
-        .add_member(p.id, &member("beta", "worker", "standard"))
+        .add_member(p.id, &member("beta", "worker", "complex"))
         .unwrap();
     assert_ne!(
         added.id, backup,
@@ -520,7 +527,7 @@ fn a_backup_cannot_be_repurposed_as_an_independent_member_by_editing_its_roles()
             [primary, backup],
         )
         .unwrap();
-    let changed = ledger.set_roles(p.id, "beta", &["reviewer"], None);
+    let changed = ledger.set_roles(p.id, "beta", &["reviewer"]);
     assert!(changed.is_err(), "the backup's roles follow its member");
 }
 

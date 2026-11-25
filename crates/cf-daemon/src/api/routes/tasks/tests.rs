@@ -203,10 +203,10 @@ async fn own_hands_leaves_every_kind_of_board_task_available() {
         json!({"tier":"standard", "review":true, "body":"review"}),
         json!({"tier":"standard", "test":true, "body":"test"}),
         json!({"design":true, "body":"image"}),
-        json!({"frontend":true, "body":"frontend"}),
-        json!({"architect":true, "body":"architecture"}),
-        json!({"research":true, "body":"research"}),
-        json!({"integrate":true, "body":"integrate"}),
+        json!({"frontend":true, "tier":"standard", "body":"frontend"}),
+        json!({"architect":true, "tier":"standard", "body":"architecture"}),
+        json!({"research":true, "tier":"standard", "body":"research"}),
+        json!({"integrate":true, "tier":"standard", "body":"integrate"}),
         json!({"after":finished, "body":"follow up"}),
         json!({"self":true, "body":"own later step"}),
     ] {
@@ -303,30 +303,16 @@ async fn a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_
         let answered = post(&scene, &scene.chief, body).await;
         assert_eq!(refused(&answered), (400, "two-roles", said), "{body}");
     }
-    for (body, said) in [
-        (
-            r#"{"advice":true,"body":"x","tier":"standard"}"#,
-            "no advisor is on the staff: ask the human for one, in your terminal",
-        ),
-        (
-            r#"{"review":true,"body":"x","tier":"standard"}"#,
-            "no reviewer is on the staff: ask the human for one, in your terminal",
-        ),
-        (
-            r#"{"test":true,"body":"x","tier":"standard"}"#,
-            "no tester is on the staff: ask the human for one, in your terminal",
-        ),
-        (
-            r#"{"design":true,"body":"x"}"#,
-            "no image designer is on the staff: ask the human for one, in your terminal",
-        ),
+    // A task is never refused for want of a member: it waits on the board for one.
+    for body in [
+        r#"{"advice":true,"body":"x","tier":"standard"}"#,
+        r#"{"review":true,"body":"x","tier":"standard"}"#,
+        r#"{"test":true,"body":"x","tier":"standard"}"#,
+        r#"{"design":true,"body":"x"}"#,
     ] {
-        let answered = post(&scene, &scene.chief, body).await;
-        assert_eq!(
-            refused(&answered),
-            (409, "no-member-of-tier", said),
-            "{body}"
-        );
+        let (status, said) = post(&scene, &scene.chief, body).await;
+        assert_eq!(status, 201, "{body}: {said}");
+        assert_eq!(said["task"]["state"], "open", "{body}");
     }
     // Only `true` is a flag.
     let (status, _) = post(
@@ -336,7 +322,7 @@ async fn a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_
     )
     .await;
     assert_eq!(status, 201);
-    assert_eq!(scene.kicks.get(), 1);
+    assert_eq!(scene.kicks.get(), 5);
     let (status, said) = post(
         &scene,
         &scene.chief,
@@ -357,15 +343,18 @@ async fn a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_
 async fn a_role_in_the_table_alone_is_asked_for_by_its_field_and_refused_by_its_name() {
     let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
     let scene = scene();
-    let answered = post(&scene, &scene.chief, r#"{"scout":true,"body":"x"}"#).await;
-    assert_eq!(
-        refused(&answered),
-        (
-            409,
-            "no-member-of-tier",
-            "no field scout is on the staff: ask the human for one, in your terminal"
-        )
-    );
+    // The SQLite CHECK of `task.pool` holds the table's roles alone.
+    scene
+        .context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute_batch("PRAGMA ignore_check_constraints = ON")
+        .unwrap();
+    // A staff with nobody in the role takes the task, which waits for one.
+    let (status, said) = post(&scene, &scene.chief, r#"{"scout":true,"body":"x"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["task"]["state"], "open");
     // Asked beside others, it is named among them in the table's order, and none is taken
     // (T-1453).
     for (body, said) in [
@@ -431,47 +420,59 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
     assert_eq!(refused(&answered).1, "not-a-coordinator");
 }
 
-/// The four roles of spec new-roles (FD-04): each is asked for by its field, with no tier, and a
-/// staff with none of it refuses it by the role's name; once a member of it is on the staff
-/// the task waits on the board for its role's pool, with no tier. A tier said beside it is
-/// refused in the role's name.
+/// The four roles of spec new-roles (FD-04) have tiers now (the staff as slots): each is asked
+/// for by its field and a tier, a staff with nobody in it takes the task and it waits for one,
+/// critical work asks for its purpose in each of them (every role has a Critical slot), and a
+/// tier nobody holds goes to the nearest one somebody does.
 #[tokio::test]
-async fn each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff()
-{
+async fn each_new_role_is_asked_for_by_its_field_and_a_tier_and_waits_until_one_is_on_the_staff() {
     let scene = scene();
-    for (field, pool, named, whose) in [
-        (
-            "frontend",
-            "frontend",
-            "frontend designer",
-            "a frontend designer's",
-        ),
-        ("architect", "architect", "architect", "an architect's"),
-        ("research", "researcher", "researcher", "a researcher's"),
-        ("integrate", "integrator", "integrator", "an integrator's"),
+    for (field, pool) in [
+        ("frontend", "frontend"),
+        ("architect", "architect"),
+        ("research", "researcher"),
+        ("integrate", "integrator"),
     ] {
-        // A tier said beside it is refused in the role's name (T-1453), not dropped.
-        let tiered = format!(r#"{{"{field}":true,"body":"x","tier":"standard"}}"#);
-        let answered = post(&scene, &scene.chief, &tiered).await;
-        assert_eq!(
-            refused(&answered),
-            (
-                400,
-                "no-tier-for-role",
-                format!("{whose} task has no tier: leave out --tier").as_str()
-            ),
-            "{tiered}"
-        );
+        // No tier is asked for the tier.
         let body = format!(r#"{{"{field}":true,"body":"x"}}"#);
         let answered = post(&scene, &scene.chief, &body).await;
         assert_eq!(
             refused(&answered),
             (
-                409,
-                "no-member-of-tier",
-                format!("no {named} is on the staff: ask the human for one, in your terminal")
-                    .as_str()
+                400,
+                "invalid-tier",
+                "a tier is critical, complex, standard, light, not undefined"
             ),
+            "{body}"
+        );
+        // Critical: every role names a purpose there.
+        let critical = format!(r#"{{"{field}":true,"body":"x","tier":"critical"}}"#);
+        let answered = post(&scene, &scene.chief, &critical).await;
+        assert_eq!(refused(&answered).1, "purpose-required", "{critical}");
+        // A purpose comes with Critical only.
+        let purposed =
+            format!(r#"{{"{field}":true,"body":"x","tier":"light","purpose":"architecture"}}"#);
+        let answered = post(&scene, &scene.chief, &purposed).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                400,
+                "purpose-without-critical",
+                "a purpose comes with --tier critical"
+            ),
+            "{purposed}"
+        );
+        // With nobody in the role the task waits for one: it is never refused for want of it.
+        let body = format!(r#"{{"{field}":true,"body":"x","tier":"standard"}}"#);
+        let (status, said) = post(&scene, &scene.chief, &body).await;
+        assert_eq!(status, 201, "{said}");
+        assert_eq!(
+            (
+                said["task"]["pool"].as_str(),
+                said["task"]["tier"].as_str(),
+                said["task"]["state"].as_str()
+            ),
+            (Some(pool), Some("standard"), Some("open")),
             "{body}"
         );
         scene
@@ -491,17 +492,19 @@ async fn each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_o
                 },
             )
             .unwrap();
+        // A tier nobody holds goes to the nearest one somebody does, and says which was asked.
         let (status, said) = post(&scene, &scene.chief, &body).await;
         assert_eq!(status, 201, "{said}");
         assert_eq!(
             (
                 said["task"]["pool"].as_str(),
                 said["task"]["tier"].as_str(),
-                said["task"]["state"].as_str(),
+                said["asked"].as_str()
             ),
-            (Some(pool), None, Some("open")),
+            (Some(pool), Some("light"), Some("standard")),
             "{body}"
         );
+        assert_eq!(said["heldBy"], json!([format!("{pool}-agent")]));
     }
 }
 
@@ -512,7 +515,7 @@ async fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_betwee
     let (status, said) = post(
         &scene,
         &scene.chief,
-        r#"{"tier":"critical","purpose":"hard-problem","body":"Why is it slow?"}"#,
+        r#"{"tier":"light","body":"Why is it slow?"}"#,
     )
     .await;
     assert_eq!(status, 201, "{said}");
@@ -521,7 +524,7 @@ async fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_betwee
         said.as_object().unwrap().keys().collect::<Vec<_>>(),
         ["task", "message", "asked", "heldBy", "gated"]
     );
-    assert_eq!(said["asked"], "critical");
+    assert_eq!(said["asked"], "light");
     assert_eq!(said["heldBy"], json!(["zeus"]), "whose tier it went to");
 }
 
@@ -560,6 +563,14 @@ async fn what_is_wrong_with_the_task_is_said_in_the_order_the_ledger_checks_it()
         ),
         (
             r#"{"body":"x","tier":"critical"}"#,
+            (
+                400,
+                "purpose-required",
+                "critical work names its purpose: critical-review, architecture, hard-problem, important-question",
+            ),
+        ),
+        (
+            r#"{"advice":true,"body":"x","tier":"critical"}"#,
             (
                 400,
                 "purpose-required",
@@ -678,8 +689,8 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
             r#"{"frontend":true,"tier":"critical","purpose":"design","body":"x"}"#,
             (
                 400,
-                "no-tier-for-role",
-                "a frontend designer's task has no tier: leave out --tier and --purpose",
+                "purpose-required",
+                "critical work names its purpose: critical-review, architecture, hard-problem, important-question",
             ),
         ),
         (
@@ -691,11 +702,19 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
             ),
         ),
         (
-            r#"{"integrate":true,"purpose":"design","body":"x"}"#,
+            r#"{"design":true,"tier":"standard","purpose":"design","body":"x"}"#,
             (
                 400,
                 "no-tier-for-role",
-                "an integrator's task has no tier, and so no purpose: leave out --purpose",
+                "an image designer's task has no tier: leave out --tier and --purpose",
+            ),
+        ),
+        (
+            r#"{"design":true,"purpose":"design","body":"x"}"#,
+            (
+                400,
+                "no-tier-for-role",
+                "an image designer's task has no tier, and so no purpose: leave out --purpose",
             ),
         ),
     ] {
@@ -943,6 +962,239 @@ async fn stc_post(scene: &Scene, body: &Value) -> (u16, Value) {
     post(scene, &scene.chief, &body.to_string()).await
 }
 
+/// Each section's answer carries the tier it went to, kept with the key: a Complex request that
+/// fell to Standard reads Standard, with the tier asked and whose, and the key sent again after
+/// the holder moved gives the answer it first gave.
+#[tokio::test]
+async fn a_plans_answer_carries_each_sections_tier_and_a_replay_gives_it_again_after_the_holder_moved(
+) {
+    let scene = scene();
+    let plan = json!({ "key": "one", "plan": [
+        { "name": "build", "tier": "complex", "body": "Build\n" },
+        { "name": "polish", "tier": "standard", "body": "Polish\n" }
+    ] });
+    let (status, said) = stc_post(&scene, &plan).await;
+    assert_eq!(status, 201, "{said}");
+    let first = said["tasks"].clone();
+    assert_eq!(first[0]["tier"], "standard", "{said}");
+    assert_eq!(first[0]["asked"], "complex");
+    assert_eq!(first[0]["heldBy"], json!(["zeus"]));
+    assert_eq!(first[1]["tier"], "standard");
+    assert!(
+        first[1].get("asked").is_none(),
+        "a section that did not fall asks nothing"
+    );
+    // The holder moves to another tier; the same file and key answer as they first did.
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .edit_member(
+            scene.project.id,
+            "zeus",
+            &cf_ledger::MemberEdit {
+                harness: "claude-code".to_owned(),
+                model: Some("claude-sonnet-5".to_owned()),
+                effort: None,
+                model_name: Some("zeus".to_owned()),
+                tier: "light".to_owned(),
+            },
+        )
+        .unwrap();
+    let (status, again) = stc_post(&scene, &plan).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(
+        again["tasks"], first,
+        "the original destination, not a recomputed one"
+    );
+}
+
+/// A plan an earlier version took under a key replays its saved answer, though its section had
+/// no tier (a researcher's): the key is looked up before the section is read for its tier, and
+/// the same file under a fresh key is refused for it.
+#[tokio::test]
+async fn a_keyed_plan_an_earlier_version_took_replays_its_saved_answer_and_a_fresh_key_refuses_it()
+{
+    let scene = scene();
+    let plan = json!({ "key": "old", "plan": [
+        { "name": "lookup", "research": true, "body": "Look it up\n" }
+    ] });
+    let (status, said) = stc_post(&scene, &json!({ "key": "fresh", "plan": plan["plan"] })).await;
+    assert_eq!(status, 400, "{said}");
+    assert_eq!(said["error"], "invalid-tier");
+    // What the earlier version kept for this file under its key: the ledger's own fingerprint
+    // of the sections and of the file, and the answer as `[name, number]`.
+    let task = cf_ledger::NewTask {
+        from: "chief".to_owned(),
+        pool: Some("researcher".to_owned()),
+        body: "Look it up\n".to_owned(),
+        ..cf_ledger::NewTask::default()
+    };
+    let sections = [cf_ledger::PlanTask {
+        name: "lookup".to_owned(),
+        task,
+        needs: Vec::new(),
+        before: Vec::new(),
+    }];
+    let source = serde_json::to_string(&json!({ "plan": plan["plan"], "source": null })).unwrap();
+    let fingerprint = {
+        use sha2::{Digest, Sha256};
+        let raw = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let _ = raw;
+        let route = format!("{:x}", Sha256::digest(source.as_bytes()));
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(&sections[..], route)).unwrap())
+        )
+    };
+    scene
+        .context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute(
+            "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, 'old', ?, '[[\"lookup\", 7]]')",
+            rusqlite::params![scene.project.id, fingerprint],
+        )
+        .unwrap();
+    let (status, replayed) = stc_post(&scene, &plan).await;
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(replayed["tasks"][0]["task"]["number"], 7, "{replayed}");
+    assert_eq!(scene.kicks.get(), 0, "no second task and no wake-up");
+    // A changed file under the old key is a different plan.
+    let changed = json!({ "key": "old", "plan": [
+        { "name": "lookup", "research": true, "body": "Another\n" }
+    ] });
+    let (status, said) = stc_post(&scene, &changed).await;
+    assert_ne!(status, 200, "{said}");
+}
+
+/// Keeps a plan under a key as an earlier version did: the ledger's own fingerprint of its
+/// sections and of the file, and the answer as `[name, number]`.
+fn keep_plan_under_key(scene: &Scene, key: &str, plan: &Value, task: cf_ledger::NewTask) {
+    use sha2::{Digest, Sha256};
+    let sections = [cf_ledger::PlanTask {
+        name: "only".to_owned(),
+        task,
+        needs: Vec::new(),
+        before: Vec::new(),
+    }];
+    let source = serde_json::to_string(&json!({ "plan": plan["plan"], "source": null })).unwrap();
+    let route = format!("{:x}", Sha256::digest(source.as_bytes()));
+    let fingerprint = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(&sections[..], route)).unwrap())
+    );
+    scene
+        .context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute(
+            "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, ?, ?, '[[\"only\", 7]]')",
+            rusqlite::params![scene.project.id, key, fingerprint],
+        )
+        .unwrap();
+}
+
+/// A plan an earlier version took that the staff now refuses (a purpose at a tier below Critical,
+/// on advice or a review) replays its saved answer: the key is looked up
+/// before any role, tier or purpose is checked, a changed file under it is `key-used`, and the
+/// same file under a fresh key is refused for what it asks.
+#[tokio::test]
+async fn a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_still_replays() {
+    for (section, pool, purpose, tier, refusal) in [
+        (
+            json!({ "name": "only", "advice": true, "tier": "light",
+                    "purpose": "important-question", "body": "Ask\n" }),
+            "advisor",
+            "important-question",
+            "light",
+            "purpose-without-critical",
+        ),
+        (
+            json!({ "name": "only", "review": true, "tier": "standard",
+                    "purpose": "critical-review", "body": "Check\n" }),
+            "reviewer",
+            "critical-review",
+            "standard",
+            "purpose-without-critical",
+        ),
+    ] {
+        let scene = scene();
+        let plan = json!({ "key": "old", "plan": [section.clone()] });
+        let fresh = json!({ "key": "fresh", "plan": [section.clone()] });
+        let (status, said) = stc_post(&scene, &fresh).await;
+        assert_eq!(status, 400, "{said}");
+        assert_eq!(said["error"], refusal, "{said}");
+        let task = cf_ledger::NewTask {
+            from: "chief".to_owned(),
+            pool: Some(pool.to_owned()),
+            tier: Some(tier.to_owned()),
+            purpose: Some(purpose.to_owned()),
+            body: section["body"].as_str().unwrap().to_owned(),
+            ..cf_ledger::NewTask::default()
+        };
+        keep_plan_under_key(&scene, "old", &plan, task);
+        let (status, replayed) = stc_post(&scene, &plan).await;
+        assert_eq!(status, 200, "{refusal}: {replayed}");
+        assert_eq!(replayed["tasks"][0]["task"]["number"], 7, "{replayed}");
+        assert_eq!(scene.kicks.get(), 0, "no second task and no wake-up");
+        let mut changed = plan.clone();
+        changed["plan"][0]["body"] = json!("Another\n");
+        let (status, said) = stc_post(&scene, &changed).await;
+        assert_eq!(status, 409, "{refusal}: {said}");
+        assert_eq!(said["error"], "key-used", "{said}");
+    }
+}
+
+/// A plan alpha.13 took for a role that had no tier then (worker's frontend designer, architect,
+/// researcher, integrator), its section saying `"tier": null` as `cf task plan` wrote it, replays
+/// its saved answer: the key is looked up before the tier is read, so the null the role now
+/// refuses is never parsed; the file changed under the key is `key-used`, and under a fresh key
+/// the null is refused as any tier that is no tier.
+#[tokio::test]
+async fn a_keyed_plan_alpha_13_took_with_a_null_tier_for_a_role_that_had_none_still_replays() {
+    for (switch, pool) in [
+        ("research", "researcher"),
+        ("frontend", "frontend"),
+        ("architect", "architect"),
+        ("integrate", "integrator"),
+    ] {
+        let scene = scene();
+        let section = json!({ "name": "only", switch: true, "tier": null, "body": "Do it.\n" });
+        let plan = json!({ "key": "old", "plan": [section.clone()] });
+        let fresh = json!({ "key": "fresh", "plan": [section.clone()] });
+        let (status, said) = stc_post(&scene, &fresh).await;
+        assert_eq!(status, 400, "{pool}: {said}");
+        assert_eq!(said["error"], "invalid-tier", "{pool}: {said}");
+        // As alpha.13 read the section: a role with no tier, so the null was no tier.
+        let task = cf_ledger::NewTask {
+            from: "chief".to_owned(),
+            pool: Some(pool.to_owned()),
+            body: "Do it.\n".to_owned(),
+            ..cf_ledger::NewTask::default()
+        };
+        keep_plan_under_key(&scene, "old", &plan, task);
+        let (status, replayed) = stc_post(&scene, &plan).await;
+        assert_eq!(status, 200, "{pool}: {replayed}");
+        assert_eq!(
+            replayed["tasks"][0]["task"]["number"], 7,
+            "{pool}: {replayed}"
+        );
+        assert_eq!(
+            scene.kicks.get(),
+            0,
+            "{pool}: no second task and no wake-up"
+        );
+        let mut changed = plan.clone();
+        changed["plan"][0]["body"] = json!("Another\n");
+        let (status, said) = stc_post(&scene, &changed).await;
+        assert_eq!(status, 409, "{pool}: {said}");
+        assert_eq!(said["error"], "key-used", "{pool}: {said}");
+    }
+}
+
 #[tokio::test]
 async fn stc_three_sections_resolve_a_plan_name() {
     let scene = scene();
@@ -1177,7 +1429,7 @@ async fn stc_cancel_refusal_rolls_back_earlier_cancels() {
 async fn stc_a_refusal_during_creation_rolls_back_an_already_inserted_section() {
     let scene = scene();
     let mut plan = stc_plan();
-    plan["plan"][1]["advice"] = json!(true);
+    plan["plan"][1]["tier"] = json!("huge");
     let (status, said) = stc_post(&scene, &plan).await;
     assert_ne!(status, 201, "{said}");
     assert!(

@@ -91,11 +91,13 @@ find = '''
     show(said, system) {
       if (system === 'windows') return { status: 'Not available on Windows', state: 'none' }
       if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.on === null) return { status: CANT_TELL, state: 'none' }
       if (said.on) {
 '''
 replace = '''
     show(said, system) {
       if (system !== 'macos') return { status: 'Only on macOS', state: 'none' }
+      if (said.on === null) return { status: CANT_TELL, state: 'none' }
       if (said.on) {
 '''
 

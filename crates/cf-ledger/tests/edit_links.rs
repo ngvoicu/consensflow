@@ -356,6 +356,7 @@ fn the_brief_the_tier_and_the_lists_change_together_or_not_at_all() {
         &TaskEdit {
             body: Some("A new brief".into()),
             tier: Some("light".into()),
+            purpose: None,
             needs: Some(Links::Set(vec![99])),
             before: Some(Links::Set(vec![b])),
         },
@@ -383,6 +384,7 @@ fn the_brief_the_tier_and_the_lists_change_together_or_not_at_all() {
         &TaskEdit {
             body: Some("A new brief".into()),
             tier: Some("light".into()),
+            purpose: None,
             needs: None,
             before: Some(Links::Set(vec![b])),
         },
