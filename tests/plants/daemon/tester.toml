@@ -203,7 +203,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''A change that can be run goes to a tester before you accept it only where its
+find = '''A change that can be run goes to a tester before you accept it only where the
 '''
 replace = ''
 
