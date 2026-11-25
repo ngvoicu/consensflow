@@ -19635,6 +19635,8 @@ test('UTF-8 cut after the em dash second byte survives three output messages', a
         return { ok: true }
       },
     })
+    // The page's subscription stands: no window pulls its history, or goes live, before it.
+    link.subscribed()
     for (const [seq, bytes] of [
       [1, [0x41, 0xe2, 0x80]],
       [2, [0x94]],
