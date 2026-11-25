@@ -278,13 +278,18 @@ runs = ["harness-launch-codex", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
-            let mut args = Vec::new();'''
-replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
-            let setting = format!(
+find = '''            let (role, children) = crate::shared::off_thread::plan('''
+replace = '''            let setting = format!(
                 "developer_instructions={}",
                 cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
             );
+            let (role, children) = crate::shared::off_thread::plan('''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            .await??;
+            let mut args = Vec::new();'''
+replace = '''            .await??;
             let mut args = vec!["-c".to_owned(), setting];'''
 
 [[plant]]
@@ -295,13 +300,18 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/adapter.rs"
-find = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
-            let mut args = Vec::new();'''
-replace = '''            let children = role::write_children(&services.env, launch.id, &texts)?;
-            let setting = format!(
+find = '''            let (role, children) = crate::shared::off_thread::plan('''
+replace = '''            let setting = format!(
                 "developer_instructions={}",
                 cf_base::js::stringify(&serde_json::Value::String(texts.role.clone()))
             );
+            let (role, children) = crate::shared::off_thread::plan('''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            .await??;
+            let mut args = Vec::new();'''
+replace = '''            .await??;
             let mut args = vec!["-c".to_owned(), setting];'''
 
 [[plant]]
@@ -323,8 +333,10 @@ runs = ["harness-codex-role", "harness-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/role.rs"
-find = '''    write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;'''
-replace = '''    write_file(Path::new(&file), text.as_bytes(), 0o644).map_err(said)?;'''
+find = '''    write_in_place(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
+    Ok((ROLE_VARIABLE'''
+replace = '''    write_in_place(Path::new(&file), text.as_bytes(), 0o644).map_err(said)?;
+    Ok((ROLE_VARIABLE'''
 
 [[plant]]
 name = "codex role file: the role's file is in a folder every launch shares"
