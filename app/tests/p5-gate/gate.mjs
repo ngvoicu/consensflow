@@ -514,6 +514,15 @@ async function runCase(c) {
       b = await app.evaluate(readOf, read)
     }
     const d = []
+    // A cut history starts with the terminal's own reverse wraparound (mode 45), which no mark
+    // keeps (limit 4): against the continuous xterm it is not compared.
+    if (past || cut) {
+      for (const side of [a, b]) {
+        for (const key of ['modes', 'dec']) {
+          side.state[key] = side.state[key].replace(/"reverseWraparound(Mode)?":(true|false),?/, '')
+        }
+      }
+    }
     const diff = (one, other, words) => {
       for (const k of Object.keys(one)) {
         const x = JSON.stringify(one[k])

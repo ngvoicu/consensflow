@@ -398,6 +398,51 @@ for (const later of [false, true]) {
   })
 }
 
+test("a live message below the emulator's offset is dropped, and one that straddles it is written from it", async ({
+  page,
+}) => {
+  await blankPage(page)
+  const result = await page.evaluate(async () => {
+    const text = (value) => Uint8Array.from(new TextEncoder().encode(value))
+    const acks = []
+    const win = P5.window('straddle', {
+      cols: 80,
+      rows: 24,
+      pageId: 'straddle',
+      invoke: async (command, args) => {
+        if (command === 'pane_ack') acks.push(args.seq)
+        if (command !== 'pane_history') return { ok: true }
+        return {
+          ok: true,
+          reset: true,
+          truncated: false,
+          from: 0,
+          size: { rows: 8, cols: 30 },
+          seed: [],
+          resizes: [],
+          bytes: [...text('012345')],
+          boundary: 6,
+          done: true,
+        }
+      },
+    })
+    const output = (seq, offset, value) =>
+      win.link.output({ id: 'w', generation: 1, seq, offset, bytes: text(value) }, () => win.emulator)
+    // Below the offset the history ends at, straddling it, and past it.
+    output(1, 0, '0123')
+    output(2, 4, '456789')
+    output(3, 10, 'ab')
+    win.start()
+    await win.replayed
+    await win.quiet()
+    await P5.sleep(20)
+    return { text: P5.state(win.emulator).text, acks, truncated: win.truncated }
+  })
+  expect(result.text).toEqual(['0123456789ab'])
+  expect(result.acks.at(-1)).toBe(3)
+  expect(result.truncated).toBe(false)
+})
+
 test("the page reads the frame the app's pane_history command writes", async ({ page }) => {
   await blankPage(page)
   // The same header and bytes as `a_piece_of_history_is_framed_as_the_page_reads_it` in commands.rs.

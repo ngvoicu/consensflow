@@ -98,8 +98,8 @@ replace = """        let highest_issued = state.next_seq.saturating_sub(1);
         if seq > highest_issued {"""
 
 [[plant]]
-name = "journal: a window's room is past what the journal keeps for a page that has not pulled"
-meant = "a_flood_before_the_first_pull_keeps_the_boundary_in_the_journal_and_the_first_question_live"
+name = "journal: a window's room is past main's 1 MiB"
+meant = "subscriptions_that_refuse_do_not_grow_the_room_of_a_window"
 runs = ["host"]
 platforms = ["macos", "linux"]
 

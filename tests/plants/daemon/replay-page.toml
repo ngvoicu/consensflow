@@ -22,7 +22,7 @@ replace = "    if (on) {"
 
 [[plant]]
 name = "replay page: a live message that straddles the boundary is written whole, twice"
-meant = "a replay that begins past the boundary drops what is below it and writes the rest of a straddling message"
+meant = "a live message below the emulator's offset is dropped, and one that straddles it is written from it"
 runs = ["page"]
 
 [[plant.edit]]
@@ -163,4 +163,4 @@ runs = ["board"]
 [[plant.edit]]
 file = "app/ui/terminal-link.js"
 find = "    if (this.#retired.has(key)) return this.#drawn(key, message)\n"
-replace = "    if (this.#retired.has(key)) {\n      void this.reply(message, '\\x1b[0n')\n      this.#retired.delete(key)\n      void this.reply(message, '\\x1b[0n')\n      this.#retired.add(key)\n      return this.#drawn(key, message)\n    }\n"
+replace = "    if (this.#retired.has(key)) {\n      void this.#invoke('pane_reply_enqueue', { pageId: this.#pageId, id: message.id, generation: message.generation, sequence: 99, length: 4, bytes: btoa('\\x1b[0n') })\n      return this.#drawn(key, message)\n    }\n"
