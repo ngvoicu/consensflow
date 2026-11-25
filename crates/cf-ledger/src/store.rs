@@ -17,6 +17,10 @@ use crate::tasks::{no_longer_failed, no_longer_waiting};
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
 
+/// What a holding's end says between its closing and the reading of the clock that
+/// dates it, within one write.
+pub(crate) const ENDING: i64 = -1;
+
 /// Told the cause when the ledger breaks.
 type BrokenHook = Box<dyn FnMut(&str)>;
 
@@ -24,11 +28,22 @@ pub(crate) struct Store {
     pub(crate) db: Connection,
     pub(crate) question_run: String,
     clock: Box<dyn Clock>,
+    /// What the clock last said, in ms: the time a holding's bounds are kept at
+    /// without a reading of their own.
+    last_ms: Option<i64>,
+    /// A holding ended in this operation and waits for the operation's next
+    /// reading of the clock to say when ([`ENDING`]).
+    ending: bool,
+    /// The write that dated a holding's end failed: the operation's commit fails with it.
+    end_failed: Option<rusqlite::Error>,
     names: Box<dyn FnMut() -> String>,
     /// Told each event once it is committed, in the order it was logged.
     trace: Box<dyn FnMut(&Event)>,
     /// Events of the open transaction, discarded if it does not commit.
     logged: Vec<Event>,
+    /// An operation's write is open: what it logs waits for its commit, even where SQLite
+    /// has ended the transaction under it (a full disk rolls it back).
+    open: bool,
     /// Why the ledger can go on no more: a rollback did not take and a
     /// transaction is open still, so whatever is done now would join it and
     /// never be committed. Every write after it is refused.
@@ -48,9 +63,13 @@ impl Store {
             db,
             question_run: crate::holding::initial_run(),
             clock,
+            last_ms: None,
+            ending: false,
+            end_failed: None,
             names,
             trace,
             logged: Vec::new(),
+            open: false,
             broken: None,
             on_broken: None,
         }
@@ -87,13 +106,23 @@ impl Store {
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
         self.refuse_if_broken()?;
+        if self.open {
+            self.lost()?;
+            return work(self);
+        }
         if !self.db.is_autocommit() {
             return work(self);
         }
         self.db.execute_batch("BEGIN IMMEDIATE")?;
+        self.open = true;
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
-            Ok(Ok(value)) => match self.db.execute_batch("COMMIT") {
+            Ok(Ok(value)) => match self
+                .settle_ends_unread()
+                .and_then(|()| self.end_failed.take().map_or(Ok(()), Err))
+                .and_then(|()| self.db.execute_batch("COMMIT"))
+            {
                 Ok(()) => {
+                    self.open = false;
                     for event in std::mem::take(&mut self.logged) {
                         (self.trace)(&event);
                     }
@@ -129,11 +158,25 @@ impl Store {
         }
     }
 
+    /// An operation that never read the clock after a holding ended dates its end by
+    /// the reading before it.
+    fn settle_ends_unread(&mut self) -> rusqlite::Result<()> {
+        if self.ending {
+            let at = self.last_ms.unwrap_or_default();
+            self.settle_ends(at);
+        }
+        Ok(())
+    }
+
     /// Rolls back the transaction and drops everything it logged. `first`,
     /// what the operation failed with, comes back as it was, or with a
     /// rollback that failed added to it; a transaction still open after that
-    /// breaks the ledger.
+    /// breaks the ledger. Where SQLite ended the transaction itself there is
+    /// nothing to roll back.
     fn roll_back(&mut self, first: LedgerError) -> LedgerError {
+        self.open = false;
+        self.ending = false;
+        self.end_failed = None;
         self.logged.clear();
         let rolled = crate::rollback::roll_back(&self.db);
         if let Err(cause) = &rolled {
@@ -166,13 +209,22 @@ impl Store {
         }
     }
 
+    /// The operation stops where SQLite ended its transaction (a settlement that failed
+    /// and rolled it back): the saved error is the operation's.
+    fn lost(&mut self) -> Result<(), LedgerError> {
+        match self.end_failed.take() {
+            Some(cause) => Err(cause.into()),
+            None => Ok(()),
+        }
+    }
+
     /// A batch is one visible operation and needs a transaction of its own.
     pub(crate) fn write_batch<T>(
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
         self.refuse_if_broken()?;
-        if !self.db.is_autocommit() {
+        if self.open || !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",
                 "a batch needs its own transaction",
@@ -183,7 +235,44 @@ impl Store {
 
     /// The time now, as the ledger writes it: one reading of the clock.
     pub(crate) fn at(&mut self) -> String {
-        iso(self.clock.now_ms())
+        iso(self.now_ms())
+    }
+
+    /// The time now in milliseconds: one reading of the clock.
+    pub(crate) fn now_ms(&mut self) -> i64 {
+        let now = self.clock.now_ms();
+        self.last_ms = Some(now);
+        self.settle_ends(now);
+        now
+    }
+
+    /// A holding that ended in this operation has the operation's next reading
+    /// of the clock for its end, which an event of the same operation makes: the
+    /// ledger reads the clock no more often for it.
+    pub(crate) fn end_with_next_reading(&mut self) {
+        self.ending = true;
+    }
+
+    fn settle_ends(&mut self, at: i64) {
+        if std::mem::take(&mut self.ending) {
+            // A failed write fails the operation: its commit reads the error.
+            if let Err(cause) = self.db.execute(
+                "UPDATE question_holding SET ended_at = ?1 WHERE ended_at = ?2",
+                rusqlite::params![at, ENDING],
+            ) {
+                self.end_failed.get_or_insert(cause);
+            }
+        }
+    }
+
+    /// The time the clock last said, in milliseconds, with no reading of its own:
+    /// the operation that sets a holding's bounds has read the clock for its events
+    /// already, and a ledger's replay counts its readings. A clock not yet read is read.
+    pub(crate) fn recent_ms(&mut self) -> i64 {
+        match self.last_ms {
+            Some(at) => at,
+            None => self.now_ms(),
+        }
     }
 
     /// A project's row, or a refusal naming the id.
@@ -356,6 +445,7 @@ impl Store {
         data: Value,
     ) -> Result<(), LedgerError> {
         let at = self.at();
+        self.lost()?;
         let data = cf_base::json::js_order(data);
         self.db.execute(
             "INSERT INTO event (project_id, at, kind, data) VALUES (?, ?, ?, ?)",
@@ -367,10 +457,10 @@ impl Store {
             kind: kind.to_string(),
             data,
         };
-        if self.db.is_autocommit() {
-            (self.trace)(&event);
-        } else {
+        if self.open || !self.db.is_autocommit() {
             self.logged.push(event);
+        } else {
+            (self.trace)(&event);
         }
         Ok(())
     }

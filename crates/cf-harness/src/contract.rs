@@ -20,11 +20,12 @@ use cf_proto::panes::{HumanInput, Servers, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
+/// What an input box on the screen holds ([`Window::input_box`]).
+pub use crate::claude::Status as ProcessStatus;
 use crate::records::{
     Boundary, Item, LastCall, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement,
     Timeline,
 };
-/// What an input box on the screen holds ([`Window::input_box`]).
 pub use crate::shared::input_box::InputBox;
 
 /// What waits, on the engine's one thread.
@@ -1027,6 +1028,13 @@ pub struct Observed {
     /// None where the window has not named a conversation to read yet.
     pub reading: Option<Arc<Reading>>,
     pub settled: bool,
+    /// The window's prompt takes words now: what every delivery gate reads in place of
+    /// `settled`. It equals `settled` for every harness and platform but one case of
+    /// Claude Code on the Mac, a turn an interrupt for a tool use ended while its
+    /// background work runs: the status says busy, the record says over, and the
+    /// prompt takes a typed line (`claude::adapter`). Results, stops and the rest of the
+    /// engine keep `settled`.
+    pub takes_words: bool,
     /// Whether the turn the window was last in is over by its harness's own
     /// record, though its live status kept the look from reading it `settled`
     /// ([`Over`]). A harness whose `settled` is its record's word says no.
@@ -1366,6 +1374,26 @@ pub trait Records {
         _at_ms: i64,
     ) -> Work<'a, Option<bool>> {
         Box::pin(async { None })
+    }
+
+    /// Claude Code's own status of each of its processes in `folder` (its `sessions`
+    /// folder), by process id: read off the engine's thread, where a scan opens a file for
+    /// each process that ever ran and, on Windows, the process each names (P22-1, T-2029: a
+    /// look took 40 ms of the one thread once the files of ended windows piled up). A look
+    /// opens no file whose name's process is not alive and keeps nothing of a file for the
+    /// next. The default reads them here, as a fake that has no worker does.
+    fn claude_statuses<'a>(&'a self, folder: &'a str) -> Work<'a, Vec<(u32, ProcessStatus)>> {
+        Box::pin(async move { crate::claude::scan_statuses(folder) })
+    }
+
+    /// The Claudes in `folder` that show the conversation `session`, by process id: none
+    /// where the folder cannot be read ([`Records::claude_statuses`]).
+    fn claude_holders<'a>(
+        &'a self,
+        folder: &'a str,
+        session: &'a str,
+    ) -> Work<'a, Option<Vec<u32>>> {
+        Box::pin(async move { crate::claude::scan_holders(folder, session) })
     }
 
     /// Whether `harness`'s record of `session`, read with no window open, ends in

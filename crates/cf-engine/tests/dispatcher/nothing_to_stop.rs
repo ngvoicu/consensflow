@@ -15,6 +15,8 @@
 //! words that send the task on go into the same window once it rests.
 
 use cf_engine::testing::Context;
+#[cfg(target_os = "macos")]
+use cf_engine::testing::Made;
 use std::rc::Rc;
 
 use cf_harness::contract::{Held, Over, Pane, Readiness, Waiting};
@@ -282,69 +284,6 @@ fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_a
     );
 }
 
-#[test]
-#[ignore = "D3 must supply a safe-input signal for the stopped turn"]
-fn an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs() {
-    let context = Context::new();
-    let project = working(&context);
-    let launches = context.adapter.prepared().len();
-    // The host still sees work from this window. Like Claude's interrupted turn,
-    // the stand-in's record reads over but has no pending-agent count, while its
-    // live status remains busy. Nothing else ends the work or makes it idle.
-    context.background.leaves(Some(Background {
-        total: 1,
-        processes: vec![BackgroundProcess {
-            pid: 4711,
-            command: "background-agent".to_owned(),
-        }],
-        ..Background::default()
-    }));
-    context.adapter.busy_with_agents_until_interrupted("zeus");
-    context.pause_task(project, 1);
-    context.resume_task(project, 1, "Go on with the parser");
-    context.pass().unwrap();
-    let pane = context.host.last("zeus").expect("its window").pane;
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "the first turn was interrupted"
-    );
-    for _ in 0..4 {
-        context.advance(3_100);
-        context.pass().unwrap();
-    }
-
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "no later pause round"
-    );
-    assert!(
-        context.host.killed().is_empty(),
-        "background work was not ended"
-    );
-    assert_eq!(
-        given(&context, "zeus", "Resumed: Go on with the parser"),
-        1,
-        "the resume must reach the same window while its background work still runs"
-    );
-    assert_eq!(context.task(project, 1).task.state, "working");
-    assert_eq!(
-        context.adapter.prepared().len(),
-        launches,
-        "the same window"
-    );
-    for _ in 0..4 {
-        context.advance(3_100);
-        context.pass().unwrap();
-    }
-    assert_eq!(
-        context.host.inputs(),
-        [escape(&pane)],
-        "no later pause round cuts the resumed turn"
-    );
-}
-
 /// Notices to the chief about the resume words, excluding the separate notice that a
 /// window ignored its interrupt rounds.
 fn resume_wait_notices(context: &Context, project: i64) -> Vec<String> {
@@ -444,7 +383,9 @@ fn a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human() {
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.resume_task(project, 1, "Go on with the parser");
     context.pass().unwrap();
@@ -520,7 +461,9 @@ fn a_resume_long_after_a_paid_pause_gets_a_chance_to_arrive_before_any_wait_noti
 fn a_resume_sent_late_in_the_two_minutes_is_told_when_the_paid_stops_clock_reaches_them() {
     let context = Context::new();
     let project = working(&context);
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.pass().unwrap();
     context.pass().unwrap();
@@ -538,7 +481,9 @@ fn resume_words_still_waiting_when_the_member_goes_out_tell_the_chief_the_quota_
     let context = Context::new();
     let project = working(&context);
     let zeus = context.id(project, "zeus");
-    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
     context.pause_task(project, 1);
     context.resume_task(project, 1, "Go on with the parser");
     context.pass().unwrap();
@@ -565,7 +510,9 @@ fn a_later_pause_and_resume_has_its_own_single_wait_notice() {
     let context = Context::new();
     let project = working(&context);
     for words in ["First direction", "Second direction"] {
-        context.adapter.busy_with_agents_until_interrupted("zeus");
+        context
+            .adapter
+            .busy_with_agents_until_interrupted_in_generation("zeus");
         context.pause_task(project, 1);
         context.resume_task(project, 1, words);
         context.pass().unwrap();
@@ -846,4 +793,144 @@ fn the_chief_whose_tell_kept_a_human_given_tasks_window_is_told_too_once() {
     context.pass().unwrap();
     assert!(context.host.killed().is_empty(), "a hung turn is kept");
     assert_eq!(closes_told(&context, project.id), KEPT, "one note to each");
+}
+
+/// A project with zeus at work on T-1, a pause and a resume of T-1 sent after the
+/// stop's one Escape ended the turn in its record while its status stayed busy for a
+/// background agent (Claude Code, T-604): the engine's third pass has read the end
+/// stand its second.
+fn paused_and_resumed_with_an_agent_running(context: &Context, project: i64) -> Pane {
+    // The host still sees work from this window. Like Claude's interrupted turn, the
+    // stand-in's record reads over but has no pending-agent count, while its live status
+    // remains busy. Nothing else ends the work or makes it idle.
+    context.background.leaves(Some(Background {
+        total: 1,
+        processes: vec![BackgroundProcess {
+            pid: 4711,
+            command: "background-agent".to_owned(),
+        }],
+        ..Background::default()
+    }));
+    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    let pane = context.host.last("zeus").expect("its window").pane;
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "the first turn was interrupted"
+    );
+    pane
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs() {
+    // N23, on the Mac (Claude Code 2.1.329, T-1857's recording): after the interrupt for
+    // a tool use the prompt takes a typed line though the status says busy for the agent.
+    let context = Context::new();
+    let project = working(&context);
+    let launches = context.adapter.prepared().len();
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no later pause round"
+    );
+    assert!(
+        context.host.killed().is_empty(),
+        "background work was not ended"
+    );
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on with the parser"),
+        1,
+        "the resume must reach the same window while its background work still runs"
+    );
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no later pause round cuts the resumed turn"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_paced_resume_goes_into_the_stopped_window_once_the_settle_has_stood_and_a_fresh_look_reads_it_so(
+) {
+    // The pacing's gate reads the same word as the step's: the rest holds over looks of
+    // one frontier for the settle, and the fresh look before the paste must read the
+    // window taking words too (it is not settled: its status says busy for the agent).
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    let project = working(&context);
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+    for _ in 0..6 {
+        context.advance(1_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on with the parser"),
+        1,
+        "once the settle stood"
+    );
+    assert_eq!(context.host.inputs(), [escape(&pane)], "no more keys");
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn an_immediate_resume_waits_where_the_window_was_never_recorded_taking_words_after_the_interrupt()
+{
+    // Windows (and every platform nothing recorded): the words wait as they did, and
+    // nothing is pressed or ended meanwhile.
+    let context = Context::new();
+    let project = working(&context);
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+    assert!(context.host.killed().is_empty());
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+}
+
+#[test]
+fn a_window_that_takes_words_for_its_background_agent_has_no_result_taken_while_it_runs() {
+    // The prompt takes words (the Mac, after the interrupt for a tool use), but the
+    // turn's answer is not final while the agent runs: `settled` decides a result, and it
+    // stays false.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.answer("zeus", "Parser done.");
+    context.adapter.with("zeus", |agent| {
+        agent.settled = false;
+        agent.over = Over::Held;
+        agent.busy_when_interrupted = true;
+    });
+    rounds(&context);
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(
+        context.inbox(context.id(project, "chief")).len(),
+        0,
+        "nothing of it reached the chief"
+    );
 }

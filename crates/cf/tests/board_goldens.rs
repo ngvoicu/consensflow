@@ -60,6 +60,25 @@ fn is_receipt(request: &cf_board::scripted::Received) -> bool {
         && request.path.ends_with("/receipt")
 }
 
+/// A question's request carries when its asking began (`askedAt`), which Node's
+/// board never asked for: the stamp is checked to be a time and taken out, and
+/// the rest of the body is Node's, byte for byte. Its own tests are in
+/// `ask_stamp.rs`.
+#[allow(clippy::expect_used)]
+fn unstamped(method: &str, path: &str, body: Option<String>) -> Option<String> {
+    if method != "POST" || path != "/api/questions" {
+        return body;
+    }
+    let mut body: serde_json::Value =
+        serde_json::from_str(&body.expect("a question has a body")).expect("a JSON body");
+    let stamp = body
+        .as_object_mut()
+        .and_then(|fields| fields.remove("askedAt"))
+        .expect("a question is stamped");
+    assert!(stamp.as_i64().is_some_and(|at| at > 0), "{stamp}");
+    Some(body.to_string())
+}
+
 fn run(golden: &Golden) -> Ran {
     let node_has_no_receipt = reply_text(
         404,
@@ -95,10 +114,10 @@ fn run(golden: &Golden) -> Ran {
             .into_iter()
             .filter(|received| !is_receipt(received))
             .map(|received| Request {
+                body: unstamped(&received.method, &received.path, received.body),
                 method: received.method,
                 path: received.path,
                 authorization: received.authorization,
-                body: received.body,
             })
             .collect(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

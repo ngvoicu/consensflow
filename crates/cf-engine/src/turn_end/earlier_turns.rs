@@ -62,6 +62,8 @@
 //!     when it ends", "The lexer is half done" before a resume's note), which the results of
 //!     held tasks never began with (the owner's decision of 2026-10-15) and the hold's note
 //!     told. T-1200's was 8,786;
+//! - are the words before the go-on note (`waits`, T-1923): a turn that ended to wait is a line about
+//!   the wait, short or not told from one by when its note was made;
 //! - are the question ConsensFlow raised, whole (it is on the board with them);
 //! - are the words the result is (a reply that repeats the write-up word for word), or
 //!   repeat another turn's.
@@ -82,6 +84,7 @@ use cf_proto::ledger::MessageView;
 use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::Value;
 
+use super::waits::is_go_on_note;
 use super::{with_finish_line, words_of, WITHOUT_ANSWER};
 use crate::delivery_text::header_id;
 use crate::dispatcher::Dispatcher;
@@ -273,6 +276,10 @@ impl Dispatcher {
             let why = match message_of(thread, &items[ended.at]) {
                 Some(message) => match message.reply_to.filter(|asked| own.contains(asked)) {
                     Some(question) if message.kind == "answer" => Why::Answer(question),
+                    // The go-on note (T-1923) went in when the turn's last words said it ended
+                    // to wait: those words are a line about the wait, however the window read
+                    // when the note was made, and a short one is not a report.
+                    _ if message.kind == "note" && is_go_on_note(message) => Why::Note(message.id),
                     _ if message.kind == "note" && sent_at_work(message, &thread.messages) => {
                         Why::Told(message.id)
                     }

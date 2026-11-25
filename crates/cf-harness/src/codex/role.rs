@@ -66,8 +66,15 @@ use crate::shared::launch_files::{launch_folder, CODEX_FOLDER};
 /// Why a launch is refused when Codex's own instructions could not be read.
 const UNREAD: &str = "Cannot read native Codex instructions safely";
 
-/// How long Codex's app-server has to answer, from the moment it starts.
-const ANSWER_WITHIN_MS: u64 = 10_000;
+/// How long Codex's app-server has to answer `initialize`, from the moment it starts.
+const START_WITHIN_MS: u64 = 10_000;
+
+/// How long it then has to read its configuration: its first start in a home indexes
+/// that home's sessions before it answers, and that grows with their number.
+const READ_WITHIN_MS: u64 = 60_000;
+
+/// How many times the app-server is asked, when it is silent.
+const ASKS: u32 = 2;
 
 /// The most a line of the app-server's may say.
 const LINE_LIMIT: usize = 2 * 1024 * 1024;
@@ -192,13 +199,60 @@ fn toml_string(text: &str) -> String {
     quoted
 }
 
+/// What of Codex's own instructions could not be had: its app-server was silent too long,
+/// at its start or in the read of its configuration, or it was wrong or refused.
+#[derive(Debug, PartialEq, Eq)]
+enum Unread {
+    /// No answer to `initialize` in time: the program did not start answering.
+    Silent,
+    /// `initialize` was answered, and the read of the configuration was not in time.
+    Preparing,
+    /// It would not start, or said what is no answer: a protocol error, never retried.
+    Wrong,
+}
+
+impl Unread {
+    fn words(&self) -> String {
+        match self {
+            Self::Wrong => UNREAD.to_owned(),
+            Self::Silent => format!(
+                "{UNREAD}: Codex's program did not start answering within {} seconds (a newly installed Codex may still be under macOS's first-run check, Gatekeeper); it was asked twice",
+                START_WITHIN_MS / 1000
+            ),
+            Self::Preparing => format!(
+                "{UNREAD}: Codex started, but was still preparing its sessions after {} seconds; it was asked twice",
+                READ_WITHIN_MS / 1000
+            ),
+        }
+    }
+}
+
 /// The instructions Codex itself would give a window opened in `cwd`, asked of
-/// its app-server, which is then asked to end whatever came of it.
+/// its app-server, which is then asked to end whatever came of it. A silence is
+/// asked again once, as the app-server is then warm (it indexed the sessions of
+/// its home on its first start, or macOS finished its check of the program).
 async fn instructions(
     services: &Services,
     executable: &str,
     cwd: &str,
 ) -> Result<(String, Vec<&'static str>), String> {
+    let mut asked = 0;
+    loop {
+        asked += 1;
+        match ask(services, executable, cwd).await {
+            Ok(said) => return Ok(said),
+            Err(Unread::Silent | Unread::Preparing) if asked < ASKS => {}
+            Err(unread) => return Err(unread.words()),
+        }
+    }
+}
+
+/// One start of the app-server, asked, then asked to end.
+async fn ask(
+    services: &Services,
+    executable: &str,
+    cwd: &str,
+) -> Result<(String, Vec<&'static str>), Unread> {
     let program = Program {
         executable: PathBuf::from(executable),
         args: vec!["app-server".to_owned()],
@@ -208,55 +262,130 @@ async fn instructions(
     let child = services
         .processes
         .spawn(program, Streams::Lines)
-        .map_err(|_| UNREAD.to_owned())?;
-    let timer = arm(&*services.time, ANSWER_WITHIN_MS);
-    let said = timer.bound(converse(&*child, cwd)).await;
+        .map_err(|_| Unread::Wrong)?;
+    let said = dialogue(services, &*child, cwd).await;
     child.terminate(Ending::Asked);
-    said.flatten().ok_or_else(|| UNREAD.to_owned())
+    said
 }
 
-/// The app-server's dialogue: it is initialized, then asked for its
-/// configuration, and the developer instructions in that are the answer. None
-/// where it fails to be: it ends or says too much, speaks no JSON, refuses a
-/// request, or has no configuration or instructions that are text.
+/// The two waits of the dialogue, each under its own timer: the reply to
+/// `initialize` from the app-server's start, and the read of its configuration, which
+/// grows with the sessions it has to index, from that reply.
+async fn dialogue(
+    services: &Services,
+    child: &dyn Child,
+    cwd: &str,
+) -> Result<(String, Vec<&'static str>), Unread> {
+    let start = arm(&*services.time, START_WITHIN_MS);
+    let heard = start
+        .bound(initialize(child))
+        .await
+        .ok_or(Unread::Silent)?
+        .ok_or(Unread::Wrong)?;
+    drop(start);
+    let said = match heard {
+        Heard::Answered(said) => said,
+        Heard::Initialized => {
+            let read = arm(&*services.time, READ_WITHIN_MS);
+            read.bound(converse(child, cwd))
+                .await
+                .ok_or(Unread::Preparing)?
+        }
+    };
+    said.ok_or(Unread::Wrong)
+}
+
+/// What the app-server's first answer was.
+enum Heard {
+    /// To `initialize`.
+    Initialized,
+    /// To the read of the configuration, asked for or not: heard early.
+    Answered(Option<(String, Vec<&'static str>)>),
+}
+
+/// The app-server is initialized: its first answer to either request. None
+/// where it ends or says too much, speaks no JSON, or refuses.
+async fn initialize(child: &dyn Child) -> Option<Heard> {
+    send(
+        child,
+        json!({
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": { "name": "consensflow-role-config", "version": "3.0.0" },
+                "capabilities": { "experimentalApi": true },
+            },
+        }),
+    )
+    .await?;
+    loop {
+        let message = heard(child).await?;
+        match message.get("id").and_then(Value::as_f64) {
+            Some(1.0) => {
+                return if js::truthy(message.get("error")) {
+                    None
+                } else {
+                    Some(Heard::Initialized)
+                };
+            }
+            Some(2.0) => {
+                return Some(Heard::Answered(
+                    configured(&message).map(|text| (text, owned(&message))),
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn send(child: &dyn Child, message: Value) -> Option<()> {
+    child.write_line(&js::stringify(&message)).await.ok()
+}
+
+/// The next line of the app-server, as a JSON value that is not null.
 ///
 /// Kept from Node on purpose: a line of `null` fails here, where reading its
 /// `id` threw a `TypeError` out of the stream's handler; and JSON nested past
 /// 127 levels, or holding a number past a double's range, is no JSON here.
+async fn heard(child: &dyn Child) -> Option<Value> {
+    let line = child.read_line(LINE_LIMIT).await.ok()??;
+    from_slice_lossy(line.as_bytes())
+        .ok()
+        .filter(|message| !message.is_null())
+}
+
+/// The app-server's dialogue once it is initialized: it is told so, then asked for its
+/// configuration, and the developer instructions in that are the answer. None
+/// where it fails to be: it ends or says too much, speaks no JSON, refuses a
+/// request, or has no configuration or instructions that are text.
 async fn converse(child: &dyn Child, cwd: &str) -> Option<(String, Vec<&'static str>)> {
-    let send =
-        |message: Value| async move { child.write_line(&js::stringify(&message)).await.ok() };
-    send(json!({
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "clientInfo": { "name": "consensflow-role-config", "version": "3.0.0" },
-            "capabilities": { "experimentalApi": true },
-        },
-    }))
-    .await?;
+    ask_configuration(child, cwd).await?;
     loop {
-        let line = child.read_line(LINE_LIMIT).await.ok()??;
-        let message = from_slice_lossy(line.as_bytes())
-            .ok()
-            .filter(|message| !message.is_null())?;
+        let message = heard(child).await?;
         match message.get("id").and_then(Value::as_f64) {
             Some(1.0) => {
                 if js::truthy(message.get("error")) {
                     return None;
                 }
-                send(json!({ "method": "initialized", "params": {} })).await?;
-                let read = json!({
-                    "id": 2,
-                    "method": "config/read",
-                    "params": { "cwd": cwd, "includeLayers": false },
-                });
-                send(read).await?;
+                ask_configuration(child, cwd).await?;
             }
             Some(2.0) => return configured(&message).map(|text| (text, owned(&message))),
             _ => {}
         }
     }
+}
+
+async fn ask_configuration(child: &dyn Child, cwd: &str) -> Option<()> {
+    send(child, json!({ "method": "initialized", "params": {} })).await?;
+    send(
+        child,
+        json!({
+            "id": 2,
+            "method": "config/read",
+            "params": { "cwd": cwd, "includeLayers": false },
+        }),
+    )
+    .await
 }
 
 /// The developer instructions the app-server's answer to the read of its

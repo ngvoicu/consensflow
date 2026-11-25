@@ -15,6 +15,10 @@
 }
 .update-banner span { min-width: 0; color: var(--text); }
 .update-banner .icon-button { min-height: 26px; padding: 2px 7px; }
+.local-network-notice { right: auto; left: 14px; align-items: flex-start; }
+.local-network-words { min-width: 0; display: grid; gap: 6px; color: var(--text); }
+.local-network-words p { margin: 0; }
+.local-network-problem { color: var(--danger, #f87171); }
 
 #updates-dialog {
   width: min(560px, calc(100vw - 32px));

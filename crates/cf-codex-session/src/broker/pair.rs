@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use cf_board::door::Asking;
 use cf_board::{door, Board};
 use cf_proto::questions::{Answer, Reply};
 use futures_util::StreamExt;
@@ -439,14 +440,18 @@ impl Pair {
         // A task of the broker's, not the pair's: a pair that ends while the
         // board is still polled for the question has its poll end at the next
         // request, and an answer the board claimed meanwhile is still given back.
+        // Each receipt is its own asking, stamped as the request arrives: a request
+        // Codex replays to a reconnected pair is asked, and stamped, anew.
+        let begun = Asking::now();
         self.shared.spawn(async move {
-            let (asking, polling, raised) = (
+            let (putting, polling, raised) = (
                 asked.clone(),
                 Arc::clone(&board),
                 Arc::clone(&ending.raised),
             );
             let outcome =
-                tokio::task::spawn_blocking(move || asking.ask(&polling, wait, &raised)).await;
+                tokio::task::spawn_blocking(move || putting.ask(&polling, &begun, wait, &raised))
+                    .await;
             let ended = ending.is_raised();
             match (outcome, ended) {
                 (Ok(Reply::Answered(answer)), false) => {

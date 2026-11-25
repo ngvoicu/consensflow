@@ -1879,6 +1879,9 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
+            // A launch's first message keeps `settled`: a window opened again on a record that
+            // ends in the old process's interrupt has a new Claude whose busy status says
+            // nothing of its prompt (T-1985).
             if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
@@ -1888,7 +1891,7 @@ impl Dispatcher {
             return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
-            && observed.settled
+            && observed.takes_words
             && observed.waiting.is_none();
         let idle = free && !drawing;
         self.note_rest(record, &observed, idle, looked);

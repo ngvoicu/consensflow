@@ -129,7 +129,9 @@ async fn a_held_trace_file_holds_neither_a_timer_nor_a_ping_nor_does_a_warning_m
             assert!(took < WITHIN, "a ping and a timer took {took:?}");
             let lines = log_lines(&rig.home);
             assert!(
-                lines.iter().any(|line| line.contains("a warning meanwhile")),
+                lines
+                    .iter()
+                    .any(|line| line.contains("a warning meanwhile")),
                 "{lines:?}"
             );
         })
@@ -170,7 +172,10 @@ async fn a_held_trace_file_holds_neither_a_timer_nor_a_ping_nor_does_a_projects_
                 took < WITHIN,
                 "the line behind the held file, a ping and a timer took {took:?}"
             );
-            assert!(!deleting.is_finished(), "the delete waits for the held file");
+            assert!(
+                !deleting.is_finished(),
+                "the delete waits for the held file"
+            );
             held.release();
             let deleted = tokio::time::timeout(WITHIN, deleting)
                 .await
@@ -294,7 +299,8 @@ fn lines_past_the_queue_behind_a_held_file_are_one_count_once_it_drains() {
 }
 
 #[tokio::test]
-async fn a_forgetting_and_the_deletes_notice_get_through_a_full_queue_and_the_caller_does_not_wait() {
+async fn a_forgetting_and_the_deletes_notice_get_through_a_full_queue_and_the_caller_does_not_wait()
+{
     let dir = tempfile::tempdir().unwrap();
     let trace = trace_in(dir.path(), 5_000_000);
     let held = Held::on(trace.file());
@@ -404,8 +410,20 @@ fn a_forgetting_answers_done_only_once_both_files_were_flushed_renamed_and_the_f
 #[test]
 fn a_forgetting_whose_flush_failed_is_an_error_and_keeps_the_lines() {
     for (durable, said) in [
-        (Durable { flush: failed_flush, ..DISK }, "would not flush"),
-        (Durable { rename: failed_rename, ..DISK }, "rename would not go"),
+        (
+            Durable {
+                flush: failed_flush,
+                ..DISK
+            },
+            "would not flush",
+        ),
+        (
+            Durable {
+                rename: failed_rename,
+                ..DISK
+            },
+            "rename would not go",
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let trace = durable_trace(dir.path(), durable);
@@ -426,14 +444,23 @@ fn a_forgetting_whose_flush_failed_is_an_error_and_keeps_the_lines() {
 fn a_retry_that_finds_nothing_to_remove_still_needs_the_folder_flushed() {
     // The first forgetting renamed both files and then could not flush the folder.
     let dir = tempfile::tempdir().unwrap();
-    let trace = durable_trace(dir.path(), Durable { folder: failed_folder, ..DISK });
+    let trace = durable_trace(
+        dir.path(),
+        Durable {
+            folder: failed_folder,
+            ..DISK
+        },
+    );
     trace.event(&event(1, "one"));
     settled(&trace);
     assert!(trace.forget_blocking(1, None).is_err());
     assert!(kinds(trace.file()).is_empty(), "the name is clean already");
     // A retry on a folder that still cannot be flushed finds clean names and no answer of done.
     let retry = trace.forget_blocking(1, None).unwrap_err();
-    assert!(retry.to_string().contains("the folder would not flush"), "{retry}");
+    assert!(
+        retry.to_string().contains("the folder would not flush"),
+        "{retry}"
+    );
     // One that can be flushed is done.
     let dir = tempfile::tempdir().unwrap();
     let trace = durable_trace(dir.path(), DISK);
@@ -446,7 +473,10 @@ fn a_retry_that_finds_nothing_to_remove_still_needs_the_folder_flushed() {
 fn a_retry_on_a_folder_that_cannot_be_flushed_is_no_success_though_both_names_are_clean() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    for name in [dir.path().join("events.jsonl"), dir.path().join("events.jsonl.1")] {
+    for name in [
+        dir.path().join("events.jsonl"),
+        dir.path().join("events.jsonl.1"),
+    ] {
         std::fs::write(name, "{\"project\":3,\"kind\":\"old\"}\n").unwrap();
     }
     let trace = Trace::new(dir.path());
@@ -458,14 +488,23 @@ fn a_retry_on_a_folder_that_cannot_be_flushed_is_no_success_though_both_names_ar
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     if cannot {
         assert!(first.is_err(), "{first:?}");
-        assert!(retry.is_err(), "a retry that found clean names answered done: {retry:?}");
+        assert!(
+            retry.is_err(),
+            "a retry that found clean names answered done: {retry:?}"
+        );
     }
 }
 
 #[test]
 fn a_replacement_that_is_not_there_for_its_rename_is_no_success() {
     let dir = tempfile::tempdir().unwrap();
-    let trace = durable_trace(dir.path(), Durable { rename: vanished_replacement, ..DISK });
+    let trace = durable_trace(
+        dir.path(),
+        Durable {
+            rename: vanished_replacement,
+            ..DISK
+        },
+    );
     trace.event(&event(7, "original"));
     settled(&trace);
     let failed = trace.forget_blocking(7, None).unwrap_err();
@@ -486,37 +525,63 @@ fn an_abandoned_replacement_is_removed_by_a_forgetting_and_by_a_start_before_any
     again.forget_blocking(9, None).unwrap();
     std::fs::write(&temporary, line).unwrap();
     again.forget_blocking(2, None).unwrap();
-    assert!(!temporary.exists(), "the replacement a forgetting left is removed");
+    assert!(
+        !temporary.exists(),
+        "the replacement a forgetting left is removed"
+    );
     assert_eq!(kinds(again.file()), ["one"]);
     // By a start: the writer removes both before it writes anything.
     let dir = tempfile::tempdir().unwrap();
-    let names = [dir.path().join("events.jsonl.tmp"), dir.path().join("events.jsonl.1.tmp")];
+    let names = [
+        dir.path().join("events.jsonl.tmp"),
+        dir.path().join("events.jsonl.1.tmp"),
+    ];
     for name in &names {
         std::fs::write(name, line).unwrap();
     }
     let started = durable_trace(dir.path(), DISK);
     started.event(&event(3, "three"));
     settled(&started);
-    assert!(names.iter().all(|name| !name.exists()), "a start removes them");
+    assert!(
+        names.iter().all(|name| !name.exists()),
+        "a start removes them"
+    );
 }
 
 #[test]
 fn a_file_whose_last_line_was_cut_is_ended_before_the_first_line_written_after() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("events.jsonl"), "{\"project\":6,\"kind\":\"unfinished").unwrap();
+    std::fs::write(
+        dir.path().join("events.jsonl"),
+        "{\"project\":6,\"kind\":\"unfinished",
+    )
+    .unwrap();
     let trace = trace_in(dir.path(), 5_000_000);
     trace.event(&event(8, "first_after_restart"));
     trace.event(&event(8, "second"));
     settled(&trace);
     let text = std::fs::read_to_string(trace.file()).unwrap();
-    let whole: Vec<Value> = text.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+    let whole: Vec<Value> = text
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
     assert_eq!(whole.len(), 2, "the new lines are whole: {text}");
-    assert_eq!(text.lines().count(), 3, "the fragment is a bad line of its own: {text}");
+    assert_eq!(
+        text.lines().count(),
+        3,
+        "the fragment is a bad line of its own: {text}"
+    );
     // A whole last line takes no extra newline.
     let again = trace_in(dir.path(), 5_000_000);
     again.event(&event(8, "third"));
     settled(&again);
-    assert_eq!(std::fs::read_to_string(again.file()).unwrap().lines().count(), 4);
+    assert_eq!(
+        std::fs::read_to_string(again.file())
+            .unwrap()
+            .lines()
+            .count(),
+        4
+    );
 }
 
 #[test]
@@ -537,9 +602,15 @@ fn the_dropped_lines_report_has_a_place_of_its_own_that_later_lines_cannot_put_o
     trace.event(&event(1, "late"));
     settled(&trace);
     let found = kinds(trace.file());
-    let report = found.iter().position(|kind| kind == "daemon.error").unwrap();
+    let report = found
+        .iter()
+        .position(|kind| kind == "daemon.error")
+        .unwrap();
     let late = found.iter().position(|kind| kind == "late").unwrap();
-    assert!(report < late, "the report of the lost line came before a later line: {report} {late}");
+    assert!(
+        report < late,
+        "the report of the lost line came before a later line: {report} {late}"
+    );
 }
 
 #[test]
@@ -547,7 +618,11 @@ fn a_trace_whose_writer_could_not_start_says_so_and_answers_no_forgetting_with_d
     let dir = tempfile::tempdir().unwrap();
     let trace = trace_in(dir.path(), 5_000_000);
     trace.shared_failed_for_test("no thread");
-    assert!(trace.started().unwrap_err().to_string().contains("no thread"));
+    assert!(trace
+        .started()
+        .unwrap_err()
+        .to_string()
+        .contains("no thread"));
     assert!(trace.forget_blocking(1, None).is_err());
 }
 
@@ -573,7 +648,8 @@ async fn the_stop_waits_a_quarter_of_a_second_for_a_held_trace_and_ends_without_
                 "the stop waited {took:?} for the held trace"
             );
             assert_eq!(*rig.exited.borrow(), [0], "it ended");
-            let written = std::fs::read_to_string(rig.home.join("events.jsonl")).unwrap_or_default();
+            let written =
+                std::fs::read_to_string(rig.home.join("events.jsonl")).unwrap_or_default();
             assert!(!written.contains("project.created"), "{written}");
             assert!(
                 log_lines(&rig.home)
@@ -622,7 +698,9 @@ fn ledger_is_let_go(home: &Path) -> bool {
     };
     reader.busy_timeout(Duration::ZERO).unwrap();
     reader
-        .query_row("SELECT count(*) FROM project", [], |row| row.get::<_, i64>(0))
+        .query_row("SELECT count(*) FROM project", [], |row| {
+            row.get::<_, i64>(0)
+        })
         .is_ok()
 }
 
@@ -748,7 +826,9 @@ async fn a_stop_after_a_delete_that_is_asked_has_the_deletes_notice_and_none_of_
                 "the notice of the committed delete is in the trace at exit: {written}"
             );
             assert!(
-                lines.iter().all(|line| line["project"].as_i64() != Some(id)),
+                lines
+                    .iter()
+                    .all(|line| line["project"].as_i64() != Some(id)),
                 "none of the project's lines: {written}"
             );
             drop(deleting);
@@ -775,7 +855,13 @@ async fn answered(forgetting: impl std::future::Future<Output = io::Result<()>>)
 #[tokio::test]
 async fn a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an_error() {
     let dir = tempfile::tempdir().unwrap();
-    let trace = durable_trace(dir.path(), Durable { folder: panicking_folder, ..DISK });
+    let trace = durable_trace(
+        dir.path(),
+        Durable {
+            folder: panicking_folder,
+            ..DISK
+        },
+    );
     let mut held = Held::on(trace.file());
     // The writer is behind the held file with a line in hand; two forgettings wait behind it.
     trace.event(&event(1, "one"));
@@ -783,9 +869,18 @@ async fn a_writer_that_panics_answers_every_forgetting_pending_and_later_with_an
     held.release();
     // The first is the one whose job the panic broke; the second was queued behind it.
     assert!(answered(first).await.is_err());
-    assert!(answered(second).await.is_err(), "a forgetting queued behind the panic");
-    assert!(answered(trace.forget(1, None)).await.is_err(), "a forgetting after it");
-    assert!(trace.started().is_err(), "the trace says its writer is gone");
+    assert!(
+        answered(second).await.is_err(),
+        "a forgetting queued behind the panic"
+    );
+    assert!(
+        answered(trace.forget(1, None)).await.is_err(),
+        "a forgetting after it"
+    );
+    assert!(
+        trace.started().is_err(),
+        "the trace says its writer is gone"
+    );
     // Lines said now are dropped, not waited for, and the stop need not wait for a writer that is gone.
     trace.event(&event(1, "after"));
     assert!(trace.end(Duration::from_millis(50)));
@@ -804,7 +899,11 @@ fn a_home_that_is_not_there_answers_an_error_not_done() {
     std::fs::rename(&home, &away).unwrap();
     assert!(trace.forget_blocking(1, None).is_err());
     std::fs::rename(&away, &home).unwrap();
-    assert_eq!(kinds(trace.file()), ["one"], "the lines were never claimed gone");
+    assert_eq!(
+        kinds(trace.file()),
+        ["one"],
+        "the lines were never claimed gone"
+    );
 }
 
 #[test]
@@ -825,7 +924,11 @@ fn a_rewrite_drops_every_line_that_does_not_parse_so_no_fragment_of_a_deleted_pr
     trace.forget_blocking(5, None).unwrap();
     for file in [trace.file().to_owned(), aside(trace.file())] {
         let bytes = std::fs::read_to_string(&file).unwrap();
-        assert!(!bytes.contains("SECRET-PAYLOAD"), "{}: {bytes}", file.display());
+        assert!(
+            !bytes.contains("SECRET-PAYLOAD"),
+            "{}: {bytes}",
+            file.display()
+        );
         assert!(!bytes.contains("not json"), "{}: {bytes}", file.display());
     }
     assert_eq!(kinds(trace.file()), ["kept"]);
@@ -853,7 +956,11 @@ fn a_line_a_prior_process_wrote_after_its_successors_forgetting_is_found_by_the_
     // The successor, which has the home now, deletes the project and is answered.
     let successor = trace_in(dir.path(), 5_000_000);
     successor.forget_blocking(1, None).unwrap();
-    assert_eq!(verifying_scan(successor.file(), 1), 0, "clean at the answer");
+    assert_eq!(
+        verifying_scan(successor.file(), 1),
+        0,
+        "clean at the answer"
+    );
     // The prior writer gets the file and writes behind the answer.
     held.release();
     settled(&prior);

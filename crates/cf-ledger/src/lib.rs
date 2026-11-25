@@ -61,7 +61,7 @@ pub use conversations::{
     ChiefSwitch, HistoryAsk, FIELD_MAX, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES,
     ID_SHOWN, NATIVE_SESSION_MAX, TRANSCRIPT_ITEM_MAX,
 };
-pub use holding::WindowHolding;
+pub use holding::{QuestionStamp, WindowHolding};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_existing_ledger, open_ledger, Event, Ledger, Options};

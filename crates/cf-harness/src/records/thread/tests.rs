@@ -414,14 +414,26 @@ fn a_look_the_worker_never_answers_is_unreadable_and_the_engine_goes_on() {
     // A worker that ended: nobody reads the queue.
     let (asks, waiting) = mpsc::channel(1);
     drop(waiting);
-    let ended = Thread { time: time(), asks };
+    let ended = Thread {
+        time: time(),
+        asks,
+        scans: mpsc::channel(1).0,
+    };
     // Workers that take an ask and let go of it unanswered.
     let (asks, mut waiting) = mpsc::channel(1);
     let letting_go = std::thread::spawn(move || waiting.blocking_recv().map(drop));
-    let dropped = Thread { time: time(), asks };
+    let dropped = Thread {
+        time: time(),
+        asks,
+        scans: mpsc::channel(1).0,
+    };
     let (asks, mut waiting) = mpsc::channel(1);
     let letting_go_too = std::thread::spawn(move || waiting.blocking_recv().map(drop));
-    let dropped_too = Thread { time: time(), asks };
+    let dropped_too = Thread {
+        time: time(),
+        asks,
+        scans: mpsc::channel(1).0,
+    };
     on_engine(async {
         for thread in [&ended, &dropped] {
             let reading = thread.look(Harness::Codex, "a", &Options::default()).await;

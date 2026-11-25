@@ -1,10 +1,10 @@
 //! A file that is only ever appended to, kept to a size: what the daemon's log
 //! and its trace both do.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -145,7 +145,10 @@ mod tests {
     #[test]
     fn a_file_that_is_held_holds_the_appends_to_it_and_to_no_other_file() {
         let dir = tempfile::tempdir().unwrap();
-        let (held, free) = (dir.path().join("events.jsonl"), dir.path().join("daemon.log"));
+        let (held, free) = (
+            dir.path().join("events.jsonl"),
+            dir.path().join("daemon.log"),
+        );
         let lock = held_lock(&held);
         let (began, begun) = std::sync::mpsc::channel();
         let waiting = {

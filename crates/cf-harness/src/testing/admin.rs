@@ -19,7 +19,7 @@ use super::{named, Later};
 use crate::admin::feed::{Answer, Network, Request, TERMINATED};
 use crate::admin::{Capture, Latest, Source};
 use crate::contract::Work;
-use crate::seams::processes::Program;
+use crate::seams::processes::{Child, Failed, Processes, Program, StartRefusal, Streams};
 
 /// How a scripted seam answers one call.
 #[derive(Debug, Clone)]
@@ -97,8 +97,19 @@ impl<T: 'static> Script<T> {
 
     /// Answers the call to `key` held longest: whether one was held.
     fn release(&self, key: &str, answer: T) -> bool {
+        self.release_of(key, answer, false)
+    }
+
+    /// Answers the call to `key` held longest, or the one held shortest where `newest`.
+    fn release_of(&self, key: &str, answer: T, newest: bool) -> bool {
         let mut held = self.held.borrow_mut();
-        let Some(at) = held.iter().position(|(held, _)| held == key) else {
+        let mut found = held.iter().enumerate().filter(|(_, (held, _))| held == key);
+        let at = if newest {
+            found.next_back()
+        } else {
+            found.next()
+        };
+        let Some((at, _)) = at else {
             return false;
         };
         let released = held.remove(at);
@@ -155,6 +166,11 @@ impl ScriptedCapture {
         self.script.release(named, answer)
     }
 
+    /// Answers the run of `named` held shortest: whether one was held.
+    pub fn release_newest(&self, named: &str, answer: Said) -> bool {
+        self.script.release_of(named, answer, true)
+    }
+
     /// Every program run since the last time they were taken, as it was
     /// given, with its limits.
     pub fn take_ran(&self) -> Vec<(Program, Limits)> {
@@ -180,6 +196,32 @@ impl Capture for ScriptedCapture {
                 stderr: String::new(),
             })
         })
+    }
+}
+
+/// The programs a launch's own check runs, answered as the admin's scripted programs are:
+/// one script serves a CLI's answers to whichever of the two asks, and a held answer is
+/// released through [`ScriptedCapture::release`].
+pub struct CaptureAsProcesses(pub Rc<ScriptedCapture>);
+
+impl Processes for CaptureAsProcesses {
+    fn run(&self, program: Program, limits: Limits) -> Work<'_, Result<String, Failed>> {
+        let asked = self.0.capture(program, limits);
+        Box::pin(async move {
+            match asked.await {
+                Ok(said) => Ok(said.stdout),
+                Err(failed) => Err(Failed {
+                    message: failed.message,
+                    code: failed.code,
+                    killed: failed.killed,
+                    stdout: failed.stdout,
+                }),
+            }
+        })
+    }
+
+    fn spawn(&self, _: Program, _: Streams) -> Result<Box<dyn Child>, StartRefusal> {
+        panic!("the admin spawns no program");
     }
 }
 

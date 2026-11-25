@@ -65,7 +65,9 @@ async fn a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window
             register(&daemon, &rig.page, &rig.spawn);
             let context = &rig.kit;
             let (project, session) = serving_the_docs(context);
-            context.adapter.busy_with_agents_until_interrupted("zeus");
+            context
+                .adapter
+                .busy_with_agents_until_interrupted_in_generation("zeus");
             context.pause_task(project, 1);
             context.resume_task(project, 1, "Go on");
             context.pass().unwrap();
