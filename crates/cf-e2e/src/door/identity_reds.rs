@@ -3,13 +3,17 @@
 //! asks the door of every child. Every store and every "person's folder" here is a folder the test
 //! made (`unowned_tempdir` is the test's own decoy): never a harness home, never the Keychain.
 
+// The tests make their links and read the machine's names as the system gives them.
+#![allow(clippy::disallowed_methods)]
+
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use super::account::TestRoot;
+#[cfg(windows)]
+use super::inside_protected;
 use super::place::{self, Act};
-use super::{inside_protected, judge, made, reads};
+use super::{judge, made, reads};
 
 /// Makes `link` lead to the folder `target`: a symbolic link on Unix, a junction on Windows (which
 /// needs no privilege).
@@ -481,5 +485,4 @@ fn a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it() {
         !held,
         "a variable below a folder the account cannot enter was held"
     );
-    let _: io::Result<()> = Ok(());
 }
