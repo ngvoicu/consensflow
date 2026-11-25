@@ -4,6 +4,8 @@
 [run]
 question-reminded-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "closed_wait::"]
 question-reminded-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "closed_wait_inbox"]
+question-reminded-hold = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "hold_table::"]
+question-reminded-read = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_read_hold"]
 question-reminded-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1924_"]
 
 [[plant]]
@@ -315,3 +317,28 @@ runs = ["question-reminded-ledger"]
 file = "crates/cf-ledger/src/meeting.rs"
 find = '''closed.state != 'open')))",'''
 replace = '''closed.state = 'gone')))",'''
+
+[[plant]]
+name = "question reminded: a Close's hold asks handed_at alone, not transport's handover decision"
+meant = "a_whole_read_is_received_wherever_its_reader_has_the_message_and_nothing_else_holds"
+runs = ["question-reminded-hold", "question-reminded-read"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''m.state IN ('queued', 'delivering') AND NOT {}'''
+replace = '''m.state IN ('queued', 'delivering') AND m.handed_at IS NULL'''
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''            held_by_meeting("m"),
+            crate::messages::handed_over_condition("m")
+        ))?'''
+replace = '''            held_by_meeting("m")
+        ))?'''
+
+[[plant]]
+name = "question reminded: transport's handover decision forgets an answer's claim"
+meant = "a_claimed_answer_read_during_a_close_is_received_and_not_returned"
+runs = ["question-reminded-read"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''AND ({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)))"'''
+replace = '''AND {alias}.handed_at IS NOT NULL))"'''

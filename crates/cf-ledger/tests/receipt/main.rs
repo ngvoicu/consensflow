@@ -32,6 +32,7 @@ mod finished_questions;
 mod fixture;
 mod gate;
 mod handed;
+mod hold_table;
 mod legacy;
 mod moved_answer_contract;
 mod open_questions;
