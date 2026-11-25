@@ -301,7 +301,7 @@ impl Shared {
 
     /// These routers reading the registry's names from `names`, for a test of what a window is
     /// sent (T-2119 B1-b: the Mac's registry stores none).
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn naming(self, names: StoredNames) -> Shared {
         Shared {
             names: Some(names),
@@ -310,7 +310,7 @@ impl Shared {
     }
 
     /// How many windows the rig refused to open.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn refused_count(&self) -> usize {
         self.seen().refused.len()
     }

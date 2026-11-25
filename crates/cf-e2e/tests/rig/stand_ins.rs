@@ -411,6 +411,7 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
 fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores() -> Outcome
 {
     let rig = crate::rig()?;
+    #[allow(clippy::disallowed_methods)] // The system's folder, for the test's own shell.
     let system = std::env::var_os("SystemRoot").ok_or("no SystemRoot")?;
     let shell = Path::new(&system).join("System32").join("cmd.exe");
     // A script file of the run's own: the door reads no shell command with `>` or `&` in it.

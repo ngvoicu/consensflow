@@ -26,6 +26,7 @@ use serde_json::json;
 use crate::{config, secs, Outcome};
 
 /// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+#[cfg(unix)]
 fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
     cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
 }

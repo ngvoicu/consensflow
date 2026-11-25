@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::*;
+#[cfg(unix)]
 use crate::process::Run;
 
 #[test]

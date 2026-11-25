@@ -512,6 +512,7 @@ mod tests {
     }
 
     /// A home of the run's own for the shim's runs: the seal starts no program on another.
+    #[cfg(unix)]
     fn home() -> PathBuf {
         static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
         HOME.get_or_init(|| crate::door::made("cf-wrapper-home-").unwrap().hand_on())
@@ -519,11 +520,13 @@ mod tests {
     }
 
     /// The Claude folder a rig gives its windows, in [`home`].
+    #[cfg(unix)]
     fn rig_claude() -> PathBuf {
         home().join("rig").join("claude")
     }
 
     /// `path` as the shell prints it, with its line's end.
+    #[cfg(unix)]
     fn said(path: &Path) -> String {
         format!("{}\n", path.display())
     }

@@ -64,7 +64,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

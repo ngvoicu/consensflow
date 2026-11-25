@@ -131,6 +131,7 @@ pub fn engine_ask() -> Result<&'static Path> {
 enum Cargo {
     Door,
     #[cfg(test)]
+    #[cfg_attr(windows, allow(dead_code))] // Only the Unix tests start a fake cargo.
     Fake(Box<Run>),
 }
 

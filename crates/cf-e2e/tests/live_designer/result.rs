@@ -49,6 +49,7 @@ fn plain(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
     use super::*;
