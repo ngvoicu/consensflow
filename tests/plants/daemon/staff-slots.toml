@@ -324,6 +324,13 @@ file = "crates/cf-ledger/migrations/0045.sql"
 find = '''
      AND (p.tier IS NULL OR p.tier = 'light')
    ORDER BY p.id;
+INSERT INTO event (project_id, at, kind, data)
+  SELECT p.project_id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.unsettled',
+         json_object('handle', p.handle, 'reason', 'the role list is not JSON')
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief') AND NOT json_valid(p.roles)
+   ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
       ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
@@ -333,6 +340,13 @@ CREATE TEMP TABLE settled_rows AS
 '''
 replace = '''
      AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+INSERT INTO event (project_id, at, kind, data)
+  SELECT p.project_id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.unsettled',
+         json_object('handle', p.handle, 'reason', 'the role list is not JSON')
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief') AND NOT json_valid(p.roles)
    ORDER BY p.id;
 CREATE TEMP TABLE settled_rows AS
   SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p

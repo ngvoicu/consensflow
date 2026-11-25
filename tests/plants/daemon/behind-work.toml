@@ -452,8 +452,8 @@ runs = ["ledger-edited-brief"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = "        let renewed = if row == old {\n"
-replace = "        let renewed = if true {\n"
+find = "                if row == *old {\n"
+replace = "                if true {\n"
 
 [[plant]]
 name = "behind work: an edit leaves the brief of a resume that carries it as it was"
