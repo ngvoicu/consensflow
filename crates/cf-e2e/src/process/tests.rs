@@ -921,7 +921,11 @@ fn a_plain_start_refuses_a_harness_program_and_the_keychains_utility() {
         "/usr/bin/security",
         "cargo",
     ] {
-        let refused = Run::new(program).arg("--version").run().unwrap_err();
+        // Judged and not started: a guard that is out must start no real program.
+        let refused = Run::new(program)
+            .arg("--version")
+            .admitted(&[])
+            .unwrap_err();
         assert!(
             refused.to_string().contains("a door of its own"),
             "{program}: {refused}"
@@ -1085,9 +1089,12 @@ fn a_run_that_inherits_nothing_holds_no_variable_of_the_test_process() {
 /// out starts nothing either).
 #[test]
 fn a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts() {
+    // Named at a path the test made: only the word's last part is read.
+    let root = crate::door::made("script-words-").unwrap();
+    let security = format!("{}/security dump-keychain | cat", root.path().display());
     for script in [
         "echo a; cargo build",
-        "/usr/bin/security dump-keychain | cat",
+        security.as_str(),
         "x=1; Claude --version",
         "cd /tmp && codex exec",
     ] {
