@@ -57,6 +57,13 @@ pub fn codex_session(env: &Env, args: &[OsString]) -> Option<i32> {
 /// [`codex_session`].
 pub fn native_ui(env: &Env, args: &[OsString]) -> Option<i32> {
     let (first, rest) = args.split_first()?;
+    // In a board's window `ui` is refused, said as every refusal of `cf ui` is: within the
+    // bound, whatever becomes of the words (a full or closed error output is no reason to wait).
+    let mut given = args.iter().filter(|arg| *arg != "--json");
+    if given.next().is_some_and(|word| word == "ui") && env.text("CONSENSFLOW_TOKEN").is_some() {
+        let json = args.iter().any(|arg| arg == "--json");
+        return Some(cf_daemon::refuse(json, 1, UI_IN_A_WINDOW));
+    }
     let asked = first == "ui" && env.text("CONSENSFLOW_TOKEN").is_none();
     let words: Vec<String> = rest
         .iter()

@@ -54,5 +54,5 @@ mod contract;
 #[cfg(test)]
 mod testing;
 
-pub use cli::ui;
+pub use cli::{refuse, ui};
 pub use start::{start, Daemon, Options, StartError};

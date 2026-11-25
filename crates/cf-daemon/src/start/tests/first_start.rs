@@ -125,20 +125,28 @@ fn a_home_is_judged_from_its_witnesses_and_a_look_that_fails_is_unknown() {
     };
     assert!(matches!(judged(&half), Home::Unknown(..)));
     // A listing that says the folder is not there is not a failure.
-    let gone = |_: &Path| -> io::Result<Vec<io::Result<String>>> {
-        Err(io::ErrorKind::NotFound.into())
-    };
+    let gone =
+        |_: &Path| -> io::Result<Vec<io::Result<String>>> { Err(io::ErrorKind::NotFound.into()) };
     assert!(matches!(judged(&gone), Home::Unused));
     // A witness found settles it even where the listing failed, or an entry did not read.
     std::fs::write(home.join("daemon.log"), "x").unwrap();
     assert!(matches!(judged(&denied), Home::Used));
     std::fs::remove_file(home.join("daemon.log")).unwrap();
-    assert!(matches!(judged(&*listed(&["events.jsonl.old.jsonl"])), Home::Used));
+    assert!(matches!(
+        judged(&*listed(&["events.jsonl.old.jsonl"])),
+        Home::Used
+    ));
     assert!(matches!(judged(&*listed(&["notes.txt"])), Home::Unused));
     let ordered = |_: &Path| -> io::Result<Vec<io::Result<String>>> {
-        Ok(vec![Err(io::Error::other("an entry")), Ok("p.jsonl".to_owned())])
+        Ok(vec![
+            Err(io::Error::other("an entry")),
+            Ok("p.jsonl".to_owned()),
+        ])
     };
-    assert!(matches!(judged(&ordered), Home::Used), "a witness after a failed entry");
+    assert!(
+        matches!(judged(&ordered), Home::Used),
+        "a witness after a failed entry"
+    );
 }
 
 /// A home that can't be listed, and one that can't be searched: the start is refused as 74,
@@ -164,9 +172,16 @@ async fn a_home_that_cannot_be_listed_or_searched_is_refused_with_its_folder_nam
                 let (code, words) = refused_with(refused);
                 assert_eq!(code, crate::broken::EXIT, "{row}");
                 assert_eq!(words, cf_base::home::unread_home_words(&home), "{row}");
-                assert!(words.contains(&home.display().to_string()), "{row}: {words}");
+                assert!(
+                    words.contains(&home.display().to_string()),
+                    "{row}: {words}"
+                );
                 assert!(words.contains("Nothing in it was changed."), "{row}");
-                assert_eq!(names(&home), Vec::<String>::new(), "{row}: nothing was made");
+                assert_eq!(
+                    names(&home),
+                    Vec::<String>::new(),
+                    "{row}: nothing was made"
+                );
             }
         })
         .await;
@@ -229,7 +244,9 @@ async fn the_ledgers_name_is_a_witness_as_anything() {
         .run_until(async {
             type Spoil = fn(&Path);
             let table: Vec<(&str, Spoil)> = vec![
-                ("an empty file", |ledger| std::fs::write(ledger, b"").unwrap()),
+                ("an empty file", |ledger| {
+                    std::fs::write(ledger, b"").unwrap()
+                }),
                 ("a folder", |ledger| std::fs::create_dir(ledger).unwrap()),
                 #[cfg(unix)]
                 ("a dangling link", |ledger| {
@@ -302,9 +319,7 @@ fn counted_steps() -> Steps {
 }
 
 fn reset() {
-    for cell in [&COUNT] {
-        cell.set(0);
-    }
+    COUNT.set(0);
     CUT_BEFORE.set(usize::MAX);
     CUT.set(false);
     FAIL_AT.set(usize::MAX);
@@ -321,7 +336,11 @@ async fn a_first_creation_refused_at_each_step_is_retried_unmodified() {
     LocalSet::new()
         .run_until(async {
             // Operations of a first start: 0 make, 1 flush, 2 put.
-            for (row, at) in [("the staging file's making", 0), ("its flush", 1), ("the put", 2)] {
+            for (row, at) in [
+                ("the staging file's making", 0),
+                ("its flush", 1),
+                ("the put", 2),
+            ] {
                 reset();
                 let root = tempfile::tempdir().unwrap();
                 let home = root.path().join("consensflow");
@@ -367,7 +386,8 @@ async fn a_first_start_cut_at_every_file_operation_is_followed_by_two_starts_tha
                     assert!(first.is_err(), "{row}");
                     let left = names(&home);
                     assert!(
-                        left.iter().all(|name| name.starts_with("consensflow.db.new-")),
+                        left.iter()
+                            .all(|name| name.starts_with("consensflow.db.new-")),
                         "{row}: only a staging file: {left:?}"
                     );
                     assert!(
@@ -384,7 +404,8 @@ async fn a_first_start_cut_at_every_file_operation_is_followed_by_two_starts_tha
                 }
                 let left = names(&home);
                 assert!(
-                    left.iter().all(|name| !name.starts_with("consensflow.db.new-")),
+                    left.iter()
+                        .all(|name| !name.starts_with("consensflow.db.new-")),
                     "{row}: a leftover was removed by the start that holds the ledger: {left:?}"
                 );
             }
@@ -444,7 +465,9 @@ async fn the_states_a_cut_leaves_are_each_followed_by_two_starts_that_come_up() 
                         .unwrap_or_else(|failed| panic!("{row}, start {start}: {failed}"));
                 }
                 assert!(
-                    !names(&home).iter().any(|name| name.starts_with("consensflow.db.new-")),
+                    !names(&home)
+                        .iter()
+                        .any(|name| name.starts_with("consensflow.db.new-")),
                     "{row}: the leftover is removed: {:?}",
                     names(&home)
                 );
@@ -495,7 +518,9 @@ async fn a_name_taken_between_the_look_and_the_put_is_refused_as_locked_and_not_
             assert_eq!(failed.code(), Some("ledger-locked"), "{failed}");
             assert_eq!(held, 1, "the other ConsensFlow took the name");
             assert!(
-                !names(&home).iter().any(|name| name.starts_with("consensflow.db.new-")),
+                !names(&home)
+                    .iter()
+                    .any(|name| name.starts_with("consensflow.db.new-")),
                 "its staging file is removed: {:?}",
                 names(&home)
             );
@@ -522,7 +547,12 @@ async fn a_first_start_that_fails_writes_no_log_and_no_trace() {
             STEPS.set(counted_steps());
             let _ = started_over(root.path()).await;
             reset();
-            for name in ["daemon.log", "daemon.log.lock", "events.jsonl", "consensflow.board"] {
+            for name in [
+                "daemon.log",
+                "daemon.log.lock",
+                "events.jsonl",
+                "consensflow.board",
+            ] {
                 assert!(!home.join(name).exists(), "{name}");
             }
         })
@@ -553,7 +583,10 @@ async fn a_leftover_is_removed_only_by_the_start_that_holds_the_ledger() {
             let other = cf_ledger::hold_ledger(&home.join("consensflow.db")).unwrap();
             let refused = started_over(root.path()).await;
             assert!(matches!(refused, Err(StartError::Ledger(_))), "{refused:?}");
-            assert!(leftover.exists(), "a start that holds no ledger removes none");
+            assert!(
+                leftover.exists(),
+                "a start that holds no ledger removes none"
+            );
             drop(other);
             started_over(root.path()).await.unwrap();
             assert!(!leftover.exists(), "the holder removed it");
@@ -576,7 +609,10 @@ async fn a_marker_that_cannot_be_written_leaves_an_old_ledger_untouched() {
             let file = home.join("consensflow.db");
             let older = cf_ledger::open_ledger(&file, LedgerOptions::default()).unwrap();
             cf_ledger::testing::undo_migration_0044(older.sqlite()).unwrap();
-            older.sqlite().execute_batch("PRAGMA user_version = 43").unwrap();
+            older
+                .sqlite()
+                .execute_batch("PRAGMA user_version = 43")
+                .unwrap();
             drop(older);
             let bytes = std::fs::read(&file).unwrap();
             let in_the_way = home.join(format!(
@@ -588,7 +624,11 @@ async fn a_marker_that_cannot_be_written_leaves_an_old_ledger_untouched() {
             let (code, words) = refused_with(started_over(root.path()).await);
             assert_eq!(code, crate::broken::EXIT);
             assert!(words.contains("No saved work was changed."), "{words}");
-            assert_eq!(std::fs::read(&file).unwrap(), bytes, "the ledger was not written");
+            assert_eq!(
+                std::fs::read(&file).unwrap(),
+                bytes,
+                "the ledger was not written"
+            );
             assert!(!names(&home).iter().any(|name| name.ends_with("-wal")));
         })
         .await;
@@ -609,6 +649,33 @@ async fn an_empty_claim_left_by_a_cut_is_refused_as_lost() {
             assert_eq!(code, crate::broken::EXIT);
             assert_eq!(words, lost(&home));
             assert!(words.contains("move"), "{words}");
+        })
+        .await;
+}
+
+/// A marked home whose folder can't be written and whose ledger is whole is a ledger that
+/// cannot be saved to, said so, and not one that is lost: its words don't offer to move the
+/// home away. A ledger that is not there, or is no ledger, still gets the lost-ledger words.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_whole_ledger_in_a_folder_that_cannot_be_written_is_not_told_as_lost() {
+    use std::os::unix::fs::PermissionsExt;
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let home = a_marked_home(root.path());
+            let file = home.join("consensflow.db");
+            drop(cf_ledger::open_ledger(&file, LedgerOptions::default()).unwrap());
+            std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let refused = started_over(root.path()).await;
+            std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+            if refused.is_ok() {
+                return; // a session that writes past its mode (root): nothing to prove
+            }
+            let (code, words) = refused_with(refused);
+            assert_eq!(code, crate::broken::EXIT);
+            assert_eq!(words, crate::broken::words(&file), "the folder's case");
+            assert!(!words.contains("move"), "{words}");
         })
         .await;
 }

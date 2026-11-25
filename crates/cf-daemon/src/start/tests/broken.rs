@@ -367,7 +367,11 @@ async fn a_marker_that_cannot_be_written_stops_the_start_and_names_the_file() {
             };
             assert!(words.contains(crate::broken::MARKER), "{words}");
             assert!(!home.join(crate::broken::MARKER).exists());
-            assert_eq!(std::fs::read(&file).unwrap(), bytes, "the ledger was not written");
+            assert_eq!(
+                std::fs::read(&file).unwrap(),
+                bytes,
+                "the ledger was not written"
+            );
             let now = rusqlite::Connection::open(&file).unwrap();
             let version: i64 = now
                 .query_row("PRAGMA user_version", [], |row| row.get(0))

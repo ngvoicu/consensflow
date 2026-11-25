@@ -24,7 +24,10 @@ pub fn rename_durably(from: &Path, to: &Path) -> io::Result<()> {
 /// The file at `path` flushed to the disk, through a handle opened for writing: on Windows
 /// a handle that only reads is refused (`Access is denied`) a flush.
 pub fn flush_path(path: &Path) -> io::Result<()> {
-    std::fs::OpenOptions::new().write(true).open(path)?.sync_all()
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .sync_all()
 }
 
 /// `from` put at `to` only if nothing is at `to`, written through: the name is taken or
@@ -177,7 +180,11 @@ mod tests {
         fs::write(at("staged"), "newer").unwrap();
         let taken = put_new(&at("staged"), &at("free")).unwrap_err();
         assert_eq!(taken.kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(fs::read_to_string(at("free")).unwrap(), "new", "not replaced");
+        assert_eq!(
+            fs::read_to_string(at("free")).unwrap(),
+            "new",
+            "not replaced"
+        );
         assert!(at("staged").exists(), "a refused put leaves its source");
 
         fs::create_dir(at("folder")).unwrap();
@@ -195,8 +202,14 @@ mod tests {
         std::os::unix::fs::symlink(at("nowhere"), at("dangling")).unwrap();
         let taken = put_new(&at("staged"), &at("dangling")).unwrap_err();
         assert_eq!(taken.kind(), io::ErrorKind::AlreadyExists);
-        assert!(!at("nowhere").exists(), "nothing was made where the link leads");
-        assert!(fs::symlink_metadata(at("dangling")).unwrap().file_type().is_symlink());
+        assert!(
+            !at("nowhere").exists(),
+            "nothing was made where the link leads"
+        );
+        assert!(fs::symlink_metadata(at("dangling"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]

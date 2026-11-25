@@ -25,6 +25,10 @@ pub struct Halt {
     /// How many effects are under way off the ledger's thread, and the wait for none.
     under_way: Mutex<usize>,
     idle: Condvar,
+    /// How many acts were under way when an act asked the refusal: one at least, its own,
+    /// or the refusal was asked before the hold was taken (a test reads it).
+    #[cfg(test)]
+    asked_with: Mutex<Vec<usize>>,
 }
 
 /// One effect counted as under way, until it is dropped (a panic in it drops it too).
@@ -87,10 +91,23 @@ impl Halt {
     pub fn act<T>(&self, act: impl FnOnce() -> T) -> Result<T, &'static str> {
         *self.count() += 1;
         let _held = Held(self);
-        match self.refusal() {
+        match self.refusal_under_the_hold() {
             Some(words) => Err(words),
             None => Ok(act()),
         }
+    }
+
+    /// The refusal, asked by an act that holds the hold.
+    fn refusal_under_the_hold(&self) -> Option<&'static str> {
+        #[cfg(test)]
+        {
+            let under_way = *self.count();
+            self.asked_with
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(under_way);
+        }
+        self.refusal()
     }
 
     /// The break's wait for the acts under way, `within` at most: false where one outlasted it.
@@ -117,5 +134,27 @@ impl Halt {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An act is counted before it asks the refusal: the break sets its flags and then waits for
+    /// the count to be none, so an act that asked first and counted after could pass the
+    /// refusal, be left out of the wait, and publish after the app was told (finding 8).
+    #[test]
+    fn an_act_asks_the_refusal_only_under_the_hold() {
+        let halt = Halt::new();
+        assert_eq!(halt.act(|| 7), Ok(7));
+        halt.break_ledger();
+        assert_eq!(halt.act(|| 8), Err(BROKEN_REFUSED));
+        let asked = halt
+            .asked_with
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        assert_eq!(asked, [1, 1], "each act was counted when it asked");
     }
 }

@@ -163,10 +163,14 @@ fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
     }
 }
 
-/// [`at_start`] for the look at a ledger that is there: one that was there and is not any more,
-/// is no ledger of ConsensFlow's, or can't be looked at, is a ledger lost, said as one.
+/// [`at_start`] for the look at a ledger that is there: one that is no ledger of ConsensFlow's
+/// (`ledger-unreadable`), or that went and is not there any more, is a ledger lost, said as
+/// one, with how to start anew. A ledger that is there whole and can't be looked at or
+/// written (the folder's permission, a disk that is gone) is one that cannot be saved to, and
+/// is said so: moving the home away is not advice for it.
 fn at_start_of_used(file: &std::path::Path, failed: LedgerError) -> StartError {
-    if failed.cannot_save() || failed.code() == Some("ledger-unreadable") {
+    let whole = crate::broken::ledger_file(file) == crate::broken::Ledgerfile::Held;
+    if failed.code() == Some("ledger-unreadable") || (failed.cannot_save() && !whole) {
         StartError::CannotSave(crate::broken::lost_words(file))
     } else {
         at_start(file, failed)
@@ -248,12 +252,11 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
             }
         }
         crate::broken::Home::Unused => {
-            let first_failed = || {
-                StartError::CannotSave(cf_base::home::first_ledger_words(&ledger_file))
-            };
+            let first_failed =
+                || StartError::CannotSave(cf_base::home::first_ledger_words(&ledger_file));
             make_folder(&home, 0o777, Mkdir::Sync).map_err(|_| first_failed())?;
             crate::broken::first_ledger(&home, &crate::broken::steps())
-                .map_err(|()| first_failed())?;
+                .map_err(|_| first_failed())?;
         }
     }
     let trace = Rc::new(Trace::new(&home));

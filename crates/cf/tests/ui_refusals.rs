@@ -11,6 +11,11 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// How long a refused start may take to end whatever its readers do: the bound of every
+/// refusal (the daemon's `SETTLE`, the number the test holds) and the margin a loaded machine
+/// needs to start a process. A refusal that waited 5 s in place would not end within it.
+const ENDS_WITHIN: Duration = Duration::from_millis(250 + 2500);
+
 /// A refusal's status for a ledger that cannot be saved to.
 const CANNOT_SAVE: i32 = 74;
 
@@ -76,7 +81,7 @@ fn a_refusal_does_not_wait_for_an_error_output_nobody_drains() {
         .spawn()
         .expect("cf starts");
     assert_eq!(
-        ends_within(&mut child, Duration::from_secs(10)),
+        ends_within(&mut child, ENDS_WITHIN),
         Some(CANNOT_SAVE),
         "the refused start ends with its status, the words unread"
     );
@@ -93,11 +98,39 @@ fn a_refusal_under_json_does_not_wait_for_an_output_nobody_drains() {
         .spawn()
         .expect("cf starts");
     assert_eq!(
-        ends_within(&mut child, Duration::from_secs(10)),
+        ends_within(&mut child, ENDS_WITHIN),
         Some(CANNOT_SAVE),
         "the refused start ends with its status, the line unread"
     );
     drop(reader);
+}
+
+#[test]
+fn the_bound_is_the_daemons_settle() {
+    assert_eq!(cf_daemon::files::SETTLE, Duration::from_millis(250));
+}
+
+#[test]
+fn a_ui_in_a_boards_window_is_refused_within_the_bound_whatever_its_reader_does() {
+    let home = a_home_that_lost_its_ledger();
+    for json in [false, true] {
+        let (reader, writer) = a_full_pipe();
+        let mut command = cf_ui(home.path(), &["--no-open"]);
+        command.env("CONSENSFLOW_TOKEN", "a-members-token");
+        if json {
+            command.arg("--json");
+            command.stdout(writer).stderr(Stdio::null());
+        } else {
+            command.stdout(Stdio::null()).stderr(writer);
+        }
+        let mut child = command.spawn().expect("cf starts");
+        assert_eq!(
+            ends_within(&mut child, ENDS_WITHIN),
+            Some(1),
+            "json {json}: the refusal of a window ends with its status, the words unread"
+        );
+        drop(reader);
+    }
 }
 
 /// The first line of what the child wrote to its output, and all it wrote to its error output.

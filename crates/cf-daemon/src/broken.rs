@@ -205,7 +205,8 @@ impl Steps {
     /// What a start does.
     pub const REAL: Steps = Steps {
         make: |staging| {
-            cf_ledger::make_ledger(staging).map_err(|failed| std::io::Error::other(failed.to_string()))
+            cf_ledger::make_ledger(staging)
+                .map_err(|failed| std::io::Error::other(failed.to_string()))
         },
         flush: cf_base::file::flush_path,
         put: cf_base::file::put_new,
@@ -244,19 +245,19 @@ fn is_staging(name: &str) -> bool {
 /// under a name that is no witness, flushed, and put at [`LEDGER`] only if that name is free.
 /// A failure or a cut before the put leaves a staging file and nothing that counts; a name
 /// that was taken meanwhile is left to the start that goes on (it holds the ledger, or is
-/// refused as `ledger-locked`). Returns nothing the caller must clean up.
-pub fn first_ledger(home: &Path, steps: &Steps) -> Result<(), ()> {
+/// refused as `ledger-locked`). A failure is the one that stopped it, with nothing left
+/// for the caller to clean up.
+pub fn first_ledger(home: &Path, steps: &Steps) -> std::io::Result<()> {
     let name = home.join(LEDGER);
-    let Ok(random) = crate::api::credentials::random_hex(&cf_harness::seams::SystemEntropy, 8) else {
-        return Err(());
-    };
+    let random = crate::api::credentials::random_hex(&cf_harness::seams::SystemEntropy, 8)
+        .map_err(std::io::Error::other)?;
     let staging = home.join(format!("{STAGING}{random}"));
     let put = (steps.make)(&staging)
         .and_then(|()| (steps.flush)(&staging))
         .and_then(|()| (steps.put)(&staging, &name));
-    if put.is_ok() {
+    let Err(failed) = put else {
         return Ok(());
-    }
+    };
     // Where the name is there now, another start took it, or this one did and failed to flush
     // the folder: either way it goes on as a start on a ledger that is there.
     let taken = fs::symlink_metadata(&name).is_ok();
@@ -264,7 +265,7 @@ pub fn first_ledger(home: &Path, steps: &Steps) -> Result<(), ()> {
     if taken {
         Ok(())
     } else {
-        Err(())
+        Err(failed)
     }
 }
 

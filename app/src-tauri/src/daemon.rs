@@ -729,7 +729,7 @@ fn reaped(child: &mut Child) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::sync::mpsc;
 
     use cf_bridge::BridgeBuilder;
@@ -1666,6 +1666,23 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
+    /// The executable a `cargo build --message-format=json` says it made of the bin `cf`: where
+    /// cargo put it, whatever `--target`, `--target-dir` or `CARGO_TARGET_DIR` the run uses.
+    fn built_cf(output: &str) -> Option<PathBuf> {
+        output.lines().rev().find_map(|line| {
+            let message: serde_json::Value = serde_json::from_str(line).ok()?;
+            let artifact = message["reason"] == "compiler-artifact"
+                && message["target"]["name"] == "cf"
+                && message["target"]["kind"]
+                    .as_array()?
+                    .iter()
+                    .any(|kind| kind == "bin");
+            artifact
+                .then(|| message["executable"].as_str().map(PathBuf::from))
+                .flatten()
+        })
+    }
+
     /// The `cf` of this checkout, built here: the app's tests link no binary of the daemon's.
     fn real_cf() -> PathBuf {
         let mut build = crate::testing::command(env!("CARGO"));
@@ -1678,20 +1695,40 @@ mod tests {
                 "cf",
                 "--bin",
                 "cf",
+                "--message-format=json-render-diagnostics",
             ])
-            .current_dir(env!("CARGO_MANIFEST_DIR"));
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .stdout(Stdio::piped());
         if !cfg!(debug_assertions) {
             build.arg("--release");
         }
-        let built = build.status().expect("cargo runs");
-        assert!(built.success(), "cf did not build");
-        // This test's binary is in `<target>/<profile>/deps`.
-        let mut folder = std::env::current_exe().expect("this test's binary");
-        folder.pop();
-        if folder.ends_with("deps") {
-            folder.pop();
-        }
-        folder.join(if cfg!(windows) { "cf.exe" } else { "cf" })
+        let built = build.output().expect("cargo runs");
+        assert!(built.status.success(), "cf did not build");
+        built_cf(&String::from_utf8_lossy(&built.stdout)).expect("cargo says where it put cf")
+    }
+
+    /// Where cargo says it put `cf` is what is run, wherever that is: not a place derived from
+    /// this test's own binary, which a `--target` or a `--target-dir` puts somewhere else.
+    #[test]
+    fn the_real_cf_is_where_cargo_says_it_put_it() {
+        let said = [
+            r#"{"reason":"compiler-artifact","target":{"name":"cf","kind":["bin"]},"executable":"/elsewhere/aarch64-apple-darwin/debug/cf"}"#,
+            r#"{"reason":"compiler-artifact","target":{"name":"cf","kind":["lib"]},"executable":null}"#,
+            r#"{"reason":"build-finished","success":true}"#,
+        ]
+        .join("\n");
+        assert_eq!(
+            built_cf(&said),
+            Some(PathBuf::from("/elsewhere/aarch64-apple-darwin/debug/cf"))
+        );
+        assert_eq!(built_cf(r#"{"reason":"build-finished"}"#), None);
+        let folder = std::env::current_exe().expect("this test's binary");
+        let beside = folder.with_file_name(if cfg!(windows) { "cf.exe" } else { "cf" });
+        assert!(
+            real_cf().is_file(),
+            "the cf cargo built is there (beside this binary: {})",
+            beside.display()
+        );
     }
 
     /// The real `cf ui --json --no-open` on the scratch home `home`, under the supervisor: what
@@ -1776,13 +1813,20 @@ mod tests {
     /// A stand-in that says `line` where the handle line goes (`{pid}` its own number) and ends
     /// with `code`.
     fn a_refusing_stand_in(line: &str, code: i32) -> Command {
+        a_refusing_stand_in_that_lingers(line, code, 0)
+    }
+
+    /// [`a_refusing_stand_in`] that stays `linger_ms` more after it has said its line, as a
+    /// daemon does that is still ending: a start that ended it first would read another status.
+    fn a_refusing_stand_in_that_lingers(line: &str, code: i32, linger_ms: u64) -> Command {
         #[cfg(unix)]
         {
             let line = line.replace("{pid}", "'\"$$\"'");
             let mut command = crate::testing::command("/bin/sh");
-            command
-                .arg("-c")
-                .arg(format!("printf '%s\\n' '{line}'; exit {code}"));
+            command.arg("-c").arg(format!(
+                "printf '%s\\n' '{line}'; sleep {}; exit {code}",
+                linger_ms as f64 / 1000.0
+            ));
             command
         }
         #[cfg(windows)]
@@ -1791,7 +1835,9 @@ mod tests {
             let mut command = crate::testing::command("powershell.exe");
             command
                 .args(["-NoProfile", "-NonInteractive", "-Command"])
-                .arg(format!("[Console]::Out.WriteLine('{line}'); exit {code}"));
+                .arg(format!(
+                    "[Console]::Out.WriteLine('{line}'); Start-Sleep -Milliseconds {linger_ms}; exit {code}"
+                ));
             command
         }
     }
@@ -1830,16 +1876,39 @@ mod tests {
         }
     }
 
-    /// The app opens and measures no ledger (findings 14 and 15): the child is its one judge.
-    /// The guard reads the product's sources of the daemon's supervision.
+    /// A start that is refused is waited for, never ended first: its status is the answer. A
+    /// child that says its refusal and goes on for a moment ends with 74 and is told as a
+    /// ledger that cannot be saved to, and is started no more.
     #[test]
-    fn the_app_opens_and_measures_no_ledger() {
-        let sources = [
-            ("daemon.rs", include_str!("daemon.rs")),
-            ("daemon/connect.rs", include_str!("daemon/connect.rs")),
-            ("daemon_command.rs", include_str!("daemon_command.rs")),
-        ];
-        let looks = [
+    fn a_refused_child_is_read_for_its_status_before_it_is_ended() {
+        let line = r#"{"refused":{"exit":74,"pid":{pid},"words":"said by the child"}}"#;
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let starter: DaemonStarter = Arc::new(move |closed| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+            builder.on_close(closed);
+            connect_daemon(
+                a_refusing_stand_in_that_lingers(line, LEDGER_EXIT, 1500),
+                builder,
+                Duration::from_secs(30),
+            )
+        });
+        let (report, heard) = listener();
+        let daemon = Daemon::new(report);
+        daemon.start(starter, Arc::new(PaneTable::new()), QUICK);
+        let told = told_of(&heard, 1);
+        assert!(told[0].ledger, "{told:?}");
+        assert_eq!(told[0].cause.as_deref(), Some("said by the child"));
+        assert!(heard.recv_timeout(Duration::from_millis(1200)).is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "no second start");
+    }
+
+    /// The statements of `source`'s product code (its comments and its tests left out) that name a
+    /// ledger and look at a file: a statement is what ends at a `;` or a brace, so a call split
+    /// over lines is one.
+    fn ledger_looks(source: &str) -> Vec<String> {
+        const LOOKS: [&str; 10] = [
             "File::open",
             "OpenOptions",
             "metadata(",
@@ -1851,21 +1920,56 @@ mod tests {
             "read_exact",
             "unsaved_words",
         ];
-        let mut found = Vec::new();
-        for (name, source) in sources {
-            let product = source
-                .split("#[cfg(test)]\nmod tests")
-                .next()
-                .unwrap_or_default();
-            for (at, line) in product.lines().enumerate() {
-                if !line.trim_start().starts_with("//")
-                    && line.contains("ledger")
-                    && looks.iter().any(|look| line.contains(look))
-                {
-                    found.push(format!("{name}:{}: {}", at + 1, line.trim()));
-                }
-            }
-        }
+        let product = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let code: String = product
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        code.split([';', '{', '}'])
+            .map(|statement| statement.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|statement| {
+                statement.contains("ledger") && LOOKS.iter().any(|look| statement.contains(look))
+            })
+            .collect()
+    }
+
+    /// The guard finds a look at a ledger however the call is laid out.
+    #[test]
+    fn the_guard_that_the_app_looks_at_no_ledger_finds_a_call_split_over_lines() {
+        let split = "fn a() {\n    let found = std::fs::read(\n        ledger_path,\n    );\n}\n";
+        assert_eq!(ledger_looks(split).len(), 1, "{:?}", ledger_looks(split));
+        let apart = "fn a() {\n    let ledger = home.join(\"x\");\n    let found = std::fs::read(path);\n}\n";
+        assert!(ledger_looks(apart).is_empty());
+        let said = "// a ledger is read with std::fs::read(ledger)\nfn a() {}\n";
+        assert!(ledger_looks(said).is_empty(), "a comment looks at nothing");
+        let tests = "fn a() {}\n#[cfg(test)]\nmod tests {\n fn t() { std::fs::read(ledger); }\n}\n";
+        assert!(
+            ledger_looks(tests).is_empty(),
+            "tests look at what they like"
+        );
+    }
+
+    /// The app opens and measures no ledger (findings 14 and 15): the child is its one judge.
+    /// The guard reads the product's sources of the daemon's supervision.
+    #[test]
+    fn the_app_opens_and_measures_no_ledger() {
+        let sources = [
+            ("daemon.rs", include_str!("daemon.rs")),
+            ("daemon/connect.rs", include_str!("daemon/connect.rs")),
+            ("daemon_command.rs", include_str!("daemon_command.rs")),
+        ];
+        let found: Vec<String> = sources
+            .iter()
+            .flat_map(|(name, source)| {
+                ledger_looks(source)
+                    .into_iter()
+                    .map(move |statement| format!("{name}: {statement}"))
+            })
+            .collect();
         assert!(found.is_empty(), "the app looks at the ledger: {found:#?}");
     }
 

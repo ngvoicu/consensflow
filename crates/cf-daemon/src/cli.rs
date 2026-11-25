@@ -144,7 +144,7 @@ fn outside_parent_sessions(env: &Env) -> Env {
 /// and then the words to the error output, as `cf: <words>`. A thread says it and is waited
 /// for [`SETTLE`] at most; one that cannot be made, or is still writing (a reader that drains
 /// nothing), loses the words, never the end.
-fn refuse(json: bool, exit: i32, words: &str) -> i32 {
+pub fn refuse(json: bool, exit: i32, words: &str) -> i32 {
     let words = words.to_owned();
     let line = json
         .then(|| {
