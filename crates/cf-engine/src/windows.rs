@@ -1955,7 +1955,7 @@ impl Dispatcher {
     }
 
     /// Whether the message a launch was to give first still stands for `participant`: not
-    /// cancelled or failed, and a task's brief for a task that is still the member's and still
+    /// cancelled or failed, and, of a brief or words that go on with a task (kind `task`), for a task that is still the member's and still
     /// wants a window (not handed to a backup or moved to another member, done, accepted,
     /// cancelled or failed). A ledger that cannot be read holds it.
     fn first_message_held(&self, participant: &ParticipantView, message: i64) -> bool {
@@ -1969,7 +1969,14 @@ impl Dispatcher {
         if ["cancelled", "failed"].contains(&found.state.as_str()) {
             return false;
         }
-        let (Some(number), true) = (found.task_number, participant.role != "chief") else {
+        // Only what starts or goes on with the task's work for this member is judged by the
+        // task: a tell, a question's answer or a note for its window goes whatever the task
+        // (the ledger's `next_delivery`), and is the window's to read.
+        let (Some(number), true, true) = (
+            found.task_number,
+            participant.role != "chief",
+            found.kind == "task",
+        ) else {
             return true;
         };
         match ledger.task(participant.project_id, number) {

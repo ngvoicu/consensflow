@@ -337,3 +337,13 @@ file = "crates/cf-engine/src/windows.rs"
 find = """        let handed_on = !self.launch_still_wanted(record, participant, first_id)
             && first_id.is_some_and(|message| !self.first_message_held(participant, message));"""
 replace = """        let handed_on = false;"""
+
+[[plant]]
+name = 'launch-freeze: a tell for a task handed on is judged by its task and dropped at the open'
+meant = "no_kind_of_first_message_is_dropped_in_silence_whatever_its_tasks_state"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """            found.kind == "task","""
+replace = """            true,"""

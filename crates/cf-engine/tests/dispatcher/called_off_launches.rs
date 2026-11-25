@@ -693,3 +693,177 @@ fn a_task_handed_to_a_backup_as_the_old_open_answers_is_done_once() {
         );
     }
 }
+
+/// What of a member's window is left when the first message of a launch is each kind a member
+/// gets, for a task in each state: the message is given (delivered), or waits in its queue, or
+/// was cancelled or failed by the ledger before the launch, and never stays "delivering" with
+/// no window holding it. Printed one line a cell (`--nocapture`) for the account.
+#[test]
+fn no_kind_of_first_message_is_dropped_in_silence_whatever_its_tasks_state() {
+    use cf_ledger::NewNote;
+    let kinds = [
+        "reopen words",
+        "tell",
+        "urgent tell",
+        "note",
+        "answer",
+        "follow-up brief",
+    ];
+    let states = [
+        "working",
+        "paused",
+        "done",
+        "accepted",
+        "failed",
+        "cancelled",
+        "handed on",
+    ];
+    let mut stuck = Vec::new();
+    for kind in kinds {
+        for state in states {
+            let context = Context::new();
+            let tiers = Tiers::new(&context, &["zeus", "diana"]);
+            let project = tiers.project.id;
+            tiers.open();
+            for _ in 0..3 {
+                context.pass().unwrap();
+                context.settle();
+            }
+            let session = tiers.assignee(1);
+            let question = (kind == "answer")
+                .then(|| context.ask(project, &session, "chief", 1, "Which format?"));
+            match state {
+                "working" => {}
+                "paused" => context.pause_task(project, 1),
+                "done" | "accepted" => {
+                    context.adapter.answer(&session, "Parser done");
+                    for _ in 0..3 {
+                        context.pass().unwrap();
+                        context.settle();
+                    }
+                    if state == "accepted" {
+                        let _ = context.ledger.borrow_mut().accept_task(project, 1, "chief");
+                    }
+                }
+                "failed" => {
+                    let _ = context.ledger.borrow_mut().fail_task(project, 1, "test");
+                }
+                "cancelled" => {
+                    let _ = context.ledger.borrow_mut().cancel_task(project, 1, "human");
+                }
+                _ => {
+                    if context.reassign_task(project, 1).is_err() {
+                        println!("TABLE {kind} | {state} | cannot be set up");
+                        continue;
+                    }
+                }
+            }
+            context.settle();
+            if context.host.last(&session).is_some() {
+                context.exit(&session);
+            }
+            let made: Result<i64, String> = match kind {
+                "reopen words" => {
+                    let reopened = context
+                        .ledger
+                        .borrow_mut()
+                        .reopen_task(project, 1, "chief", "Handle empty input too")
+                        .map(|_| ())
+                        .map_err(|cause| cause.to_string());
+                    reopened.map(|()| context.task(project, 1).messages.last().map_or(0, |m| m.id))
+                }
+                "urgent tell" => context
+                    .ledger
+                    .borrow_mut()
+                    .ask(
+                        project,
+                        &cf_ledger::NewQuestion {
+                            from: Some("chief".to_owned()),
+                            to: session.clone(),
+                            body: Some("Use the v2 grammar".to_owned()),
+                            task: Some(1),
+                            questions: None,
+                            urgent: true,
+                        },
+                    )
+                    .map(|m| m.id)
+                    .map_err(|cause| cause.to_string()),
+                "tell" => context
+                    .ledger
+                    .borrow_mut()
+                    .tell_queued(project, 1, "chief", "Use the v2 grammar")
+                    .map(|m| m.id)
+                    .map_err(|cause| cause.to_string()),
+                "note" => context
+                    .ledger
+                    .borrow_mut()
+                    .note(
+                        project,
+                        &NewNote {
+                            from: Some("chief".to_owned()),
+                            to: session.clone(),
+                            task: Some(1),
+                            body: "Use tabs".to_owned(),
+                        },
+                    )
+                    .map(|m| m.id)
+                    .map_err(|cause| cause.to_string()),
+                "answer" => {
+                    let id = question.as_ref().map(|q| q.id).unwrap();
+                    let chief = context.id(project, "chief");
+                    context
+                        .ledger
+                        .borrow_mut()
+                        .answer(id, chief, Some(&serde_json::json!("Use tabs")), None)
+                        .map(|m| m.id)
+                        .map_err(|cause| cause.to_string())
+                }
+                _ => context
+                    .ledger
+                    .borrow_mut()
+                    .create_task(
+                        project,
+                        &cf_ledger::NewTask {
+                            from: "chief".to_owned(),
+                            to: Some(session.clone()),
+                            body: "Also the empty case".to_owned(),
+                            ..Default::default()
+                        },
+                    )
+                    .map(|created| created.message.map_or(0, |m| m.id))
+                    .map_err(|cause| cause.to_string()),
+            };
+            let id = match made {
+                Ok(id) if id != 0 => id,
+                other => {
+                    println!("TABLE {kind} | {state} | not producible: {other:?}");
+                    continue;
+                }
+            };
+            for _ in 0..4 {
+                context.pass().unwrap();
+                context.settle();
+            }
+            let after = context.message(id);
+            let owner = context
+                .project(project)
+                .participants
+                .into_iter()
+                .find(|who| who.handle == after.recipient);
+            let window = owner
+                .as_ref()
+                .is_some_and(|who| context.dispatcher.pane(who.id).is_some());
+            println!(
+                "TABLE {kind} | {state} | message {} (attempts {}) | task {} | window {}",
+                after.state,
+                after.attempts,
+                context.task(project, 1).task.state,
+                window
+            );
+            if after.state == "delivering" && !window {
+                stuck.push(format!("{kind} / {state}: delivering with no window"));
+            }
+        }
+    }
+    assert!(stuck.is_empty(), "{stuck:#?}");
+}
