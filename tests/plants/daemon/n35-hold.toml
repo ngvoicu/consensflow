@@ -59,8 +59,8 @@ runs = ["n35-dispatcher", "n35-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
-find = "    if linked > 0 {"
-replace = "    if linked == 0 {\n        reset(store, task)?;\n    }\n    if linked > 0 {"
+find = "    let Some(hold) = hold else {\n        return Ok(());"
+replace = "    let Some(hold) = hold else {\n        reset(store, task)?;\n        return Ok(());"
 
 [[plant]]
 name = "n35 hold: the last numbered Resume taken by its wall-clock time"
