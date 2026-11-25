@@ -496,9 +496,12 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''                && process.identity.started >= parent.started
-'''
-replace = ""
+find = '''    if child.identity.started < parent.identity.started {
+        return Made::No;
+    }'''
+replace = '''    if child.identity.started == u64::MAX {
+        return Made::No;
+    }'''
 
 [[plant]]
 name = "devin resume: the window's number is taken for the window it was"
@@ -507,8 +510,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''    if !all.iter().any(|process| process.identity == root) {'''
-replace = '''    if false {'''
+find = '''    let Some(first) = all.iter().find(|process| process.identity == root) else {'''
+replace = '''    let Some(first) = all.iter().find(|process| process.identity.pid == root.pid) else {'''
 
 [[plant]]
 name = "devin resume: a process is ended by the number chosen, whichever process has it now"
@@ -517,8 +520,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''        Ok(Some(started)) if started == identity.started => match act(&*held) {'''
-replace = '''        Ok(Some(_)) => match act(&*held) {'''
+find = '''        Ok(Some(started)) if started == process.identity.started => {}'''
+replace = '''        Ok(Some(_)) => {}'''
 
 # Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
 # many lines is one string; read as lines, an argument made up a process of the window.
@@ -659,12 +662,12 @@ runs = ["e2e-lib-descent"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''
-        match end_one(holds, process.identity) {
+        match end_one(holds, process) {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
 replace = '''
-        match end_one(holds, process.identity) {
+        match end_one(holds, process) {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(_) => said.gone.push(process.clone()),'''
@@ -741,8 +744,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
-replace = '''            Ok(Some(created)) => {'''
+find = '''            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
+replace = '''            Ok(Some(opened)) => {'''
 
 # Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`
 # program started by its name.

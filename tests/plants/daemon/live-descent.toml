@@ -1,0 +1,115 @@
+# The live kit proves each child of a window's tree against the particular parent that made it, and
+# leaves a process it cannot prove running, and says so (review T-2228: on a Mac a stranger's child
+# that took a listed leaf's number and its parent's number in the same printed second, and on Windows a
+# parent taken from a later Git Bash listing, were taken for the window's and ended). On a Mac the
+# child's forker must be the parent's own unique identifier; on Windows the creator the child's own
+# handle names, read with every other handle held open, and the order they began in; a link the system
+# would not say, one that is ambiguous, or one read another way proves nothing, and what it leaves is
+# named as left running, never ended. The leaf's identifier is read again at the send. One plant takes
+# one rule out; a test of it fails. Every name holds `live descent`. No plant sends a signal: the tests
+# read recorded tables and the recorder says what it was asked to end.
+
+[run]
+ld-recorded = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::ownership"]
+ld-tests = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests"]
+ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_the_windows_tree"]
+
+[[plant]]
+name = "live descent: a Mac child is the parent's on the parent's number alone"
+meant = "a_mac_leaf_whose_number_and_parent_number_a_stranger_took_in_the_same_printed_second_is_left_running"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            } else if forker != own {'''
+replace = '''            } else if own == u64::MAX {'''
+
+[[plant]]
+name = "live descent: a Windows child is the parent's on the parent's number alone"
+meant = "a_windows_child_born_before_the_process_that_holds_its_creators_number_is_no_one_of_the_windows"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''    if child.identity.started < parent.identity.started {
+        return Made::No;
+    }'''
+replace = '''    if child.identity.started == u64::MAX {
+        return Made::No;
+    }'''
+
+[[plant]]
+name = "live descent: a Windows handle's creator that is not the table's is believed"
+meant = "a_windows_child_whose_handle_names_another_creator_than_the_table_is_named_and_left_running"
+runs = ["ld-recorded", "ld-tests"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                    Some(by) if by == process.ppid => Link::Created {'''
+replace = '''                    Some(by) => Link::Created {'''
+
+[[plant]]
+name = "live descent: a parent a later Git Bash listing describes decides an edge"
+meant = "a_windows_leaf_of_a_foreign_process_is_left_running_when_a_later_git_bash_listing_names_its_number_under_the_window"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            process.link = Link::Created {
+                by,
+                described: Some(parent),
+            };'''
+replace = '''            process.link = Link::Created {
+                by: parent,
+                described: Some(parent),
+            };
+            process.ppid = parent;'''
+
+[[plant]]
+name = "live descent: a link the system would not say is acted on"
+meant = "a_child_the_system_would_not_read_is_named_and_left_running_with_what_is_under_it"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''        (Link::Unread, _) | (_, Link::Unread) => Made::Unproved(format!(
+            "the system said nothing of what made it, or of process {}",
+            parent.identity.pid
+        )),'''
+replace = '''        (Link::Unread, _) | (_, Link::Unread) => Made::Yes,'''
+
+[[plant]]
+name = "live descent: two processes of one reading with one identifier are acted on"
+meant = "two_processes_of_one_reading_with_one_identifier_prove_no_edge_and_are_named"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            if own == 0
+                || twice(&|row| matches!(row.link, Link::Forked { own: same, .. } if same == own))
+            {'''
+replace = '''            if own == 0 {'''
+
+[[plant]]
+name = "live descent: a leaf whose identifier is another's at the send is ended"
+meant = "a_chosen_leaf_whose_unique_identifier_is_another_processs_at_the_send_is_gone_and_not_ended"
+runs = ["ld-recorded"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Ok(Some(_)) => return Outcome::Gone,
+            Ok(None) => {'''
+replace = '''            Ok(Some(_)) => {}
+            Ok(None) => {'''
+
+[[plant]]
+name = "live descent: what the tree names and does not prove is not said as left running"
+meant = "what_the_windows_tree_names_and_does_not_prove_is_said_as_left_running_never_ended"
+runs = ["ld-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    for (process, why) in chosen.unproved() {
+        ended.failed.push(('''
+replace = '''    for (process, why) in chosen.unproved().iter().take(0) {
+        ended.failed.push(('''
