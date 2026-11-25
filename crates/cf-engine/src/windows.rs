@@ -845,11 +845,6 @@ impl Dispatcher {
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
                 self.seams.launch_files.forget(&launch_id);
-                // A launch that is over fails nothing: what it was to deliver waits, as
-                // where its plan was made (T-2263).
-                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {
-                    return Ok(());
-                }
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
@@ -863,6 +858,11 @@ impl Dispatcher {
                     Startup::new(Stage::Prepare, why),
                     &cause.to_string(),
                 );
+                // A launch that is over fails nothing, its cause in the log all the same:
+                // what it was to deliver waits, as where its plan was made (T-2263).
+                if self.over_though_failed(record, participant, failing.as_ref(), asked_before)? {
+                    return Ok(());
+                }
                 return self.launch_failed(record, project, participant, failing, &said);
             }
         };
@@ -1684,11 +1684,6 @@ impl Dispatcher {
         if let Some(failing) = failing {
             let message = self.seams.ledger.borrow().message(failing.message)?;
             displaced = message.is_some_and(|message| message.state == "queued");
-        }
-        if let Some(captured) = captured.filter(|_| displaced && participant.role != "chief") {
-            if self.seams.ledger.borrow().stop_of(participant.id)? != captured {
-                return Ok(true);
-            }
         }
         self.launch_over(
             record,
