@@ -477,3 +477,63 @@ fn a_name_taken_while_a_new_file_is_written_beside_is_not_taken_over() {
     assert_eq!(fs::read(&path).unwrap(), b"already published");
     assert_eq!(left_in(dir.path()), ["config.json"]);
 }
+
+/// A volume that makes no second name for a file (exFAT, some network shares) says one of these
+/// where one is asked of it.
+#[cfg(unix)]
+const NO_LINKS: [i32; 4] = [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS, libc::EPERM];
+
+/// A new file where the volume makes no link is written all the same, whole, with its mode,
+/// and nothing is left beside it (T-2274, round 2).
+#[cfg(unix)]
+#[test]
+fn a_new_file_is_written_where_the_volume_makes_no_link() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    for code in NO_LINKS {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let refuses: Link = match code {
+            libc::ENOTSUP => |_, _| Err(io::Error::from_raw_os_error(libc::ENOTSUP)),
+            libc::EOPNOTSUPP => |_, _| Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP)),
+            libc::ENOSYS => |_, _| Err(io::Error::from_raw_os_error(libc::ENOSYS)),
+            _ => |_, _| Err(io::Error::from_raw_os_error(libc::EPERM)),
+        };
+        write_new_with(&path, b"{\"ok\":true}", 0o600, refuses)
+            .unwrap_or_else(|failed| panic!("errno {code}: {failed}"));
+        assert_eq!(fs::read(&path).unwrap(), b"{\"ok\":true}", "errno {code}");
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "errno {code}");
+        assert_eq!(left_in(dir.path()), ["config.json"], "errno {code}");
+    }
+}
+
+/// Where the volume makes no link, a name that is there is refused as it is where it does.
+#[cfg(unix)]
+#[test]
+fn a_name_that_is_taken_is_refused_where_the_volume_makes_no_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    fs::write(&path, b"already published").unwrap();
+    let refused = write_new_with(&path, b"late", 0o600, |_, _| {
+        Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+    })
+    .expect_err("the name was taken over");
+    assert!(refused.to_string().starts_with("EEXIST"), "{refused}");
+    assert_eq!(fs::read(&path).unwrap(), b"already published");
+    assert_eq!(left_in(dir.path()), ["config.json"]);
+}
+
+/// Any other failure of the link is said, and no name is claimed.
+#[cfg(unix)]
+#[test]
+fn a_link_that_fails_for_another_reason_claims_no_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let failed = write_new_with(&path, b"late", 0o600, |_, _| {
+        Err(io::Error::from_raw_os_error(libc::ENOSPC))
+    })
+    .expect_err("the failure was gone past");
+    assert!(failed.to_string().starts_with("ENOSPC"), "{failed}");
+    assert!(left_in(dir.path()).is_empty());
+}

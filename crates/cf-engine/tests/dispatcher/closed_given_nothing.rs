@@ -13,6 +13,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use cf_base::startup::{StartFailure, StartKind, StartRefusal};
 use cf_engine::testing::{Context, Gate};
 use cf_engine::SwitchWhen;
 use cf_harness::contract::{Admission, FirstMessage, Readiness};
@@ -1713,4 +1714,157 @@ fn a_launch_is_told_it_is_over_once_its_project_closes() {
         assert_eq!(wanted.get(), Some(!closes), "closes: {closes}");
         context.close();
     }
+}
+
+/// How the pane host's open of a window ends.
+#[derive(Clone, Copy, Debug)]
+enum Ends {
+    Refused,
+    Unrunnable,
+    Silent,
+}
+
+fn host_ends(context: &Context, how: Ends) {
+    match how {
+        Ends::Refused => context.host.refuse.set(true),
+        Ends::Unrunnable => {
+            context.host.refuse.set(true);
+            *context.host.unrunnable_with.borrow_mut() = Some(StartRefusal::new(
+                StartFailure::of(StartKind::NoNode),
+                "Node.js was not found".to_owned(),
+            ));
+        }
+        Ends::Silent => context.host.unanswered.set(true),
+    }
+}
+
+/// What the chief and the human were told of a failure.
+fn told_of_a_failure(context: &Context, project: i64) -> Vec<String> {
+    to_the_chief(context, project)
+        .into_iter()
+        .chain(to_human(context, project))
+        .filter(|body| {
+            body.contains("failed")
+                || body.contains("could not start")
+                || body.contains("did not reach")
+        })
+        .collect()
+}
+
+/// A Close that comes while the host has not answered a member's open, which it then refuses,
+/// cannot run, or never answers: the task waits for the Resume and nobody is told of a failure
+/// (T-2274, as finding 10 for the step of the plan).
+#[test]
+fn a_member_s_open_that_ends_after_its_project_closed_leaves_its_task_for_the_resume() {
+    let mut failed = Vec::new();
+    for how in [Ends::Refused, Ends::Unrunnable, Ends::Silent] {
+        for first in MODES {
+            let seeds = format!("{how:?} {first:?}");
+            let context = Context::new();
+            context.adapter.first.set(first);
+            let project = context.with_staff(&["zeus"]).id;
+            let opening = context.host.open_holds.hold(|_| true);
+            host_ends(&context, how);
+            let created = context.give(project, "zeus", "Parser");
+            let brief = created.message.expect("its brief").id;
+            context.pass().unwrap();
+            context.settle();
+            let closing = context.begin_close_project(project);
+            context.settle();
+            opening.open();
+            context.finish(closing).unwrap();
+
+            let waiting = context.message(brief);
+            let state = context.task(project, created.task.number).task.state;
+            let told = told_of_a_failure(&context, project);
+            if (waiting.state.as_str(), waiting.attempts) != ("queued", 0)
+                || state == "failed"
+                || !told.is_empty()
+            {
+                failed.push(format!(
+                    "{seeds}: task {state}, brief {} {}, told {told:?}",
+                    waiting.state, waiting.attempts
+                ));
+                continue;
+            }
+            context.resume_project(project).unwrap();
+            for _ in 0..3 {
+                context.pass().unwrap();
+            }
+            let after = context.message(brief).state;
+            if !["delivering", "delivered"].contains(&after.as_str()) {
+                failed.push(format!("{seeds}: after the Resume the brief is {after}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The chief's open ends the same ways after a Close: the handoff waits, and the human is told
+/// nothing of a chief that could not start.
+#[test]
+fn a_chief_s_open_that_ends_after_its_project_closed_says_nothing_of_it() {
+    let mut failed = Vec::new();
+    for how in [Ends::Refused, Ends::Unrunnable, Ends::Silent] {
+        for first in MODES {
+            let seeds = format!("{how:?} {first:?}");
+            let context = with_codex();
+            context.codex.first.set(first);
+            let project = chief_at_rest(&context);
+            let opening = context.host.open_holds.hold(|_| true);
+            host_ends(&context, how);
+            context
+                .switch_chief(project, to("codex", "astraeus"), SwitchWhen::Now, false)
+                .unwrap();
+            context.settle();
+            let closing = context.begin_close_project(project);
+            context.settle();
+            opening.open();
+            context.finish(closing).unwrap();
+
+            let waiting = handoff(&context, project);
+            let told = told_of_a_failure(&context, project);
+            if (waiting.state.as_str(), waiting.attempts) != ("queued", 0) || !told.is_empty() {
+                failed.push(format!(
+                    "{seeds}: handoff {} {}, told {told:?}",
+                    waiting.state, waiting.attempts
+                ));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A window given up for never showing its first message, with a Close while its screen is
+/// looked at: the task waits for the Resume.
+#[test]
+fn a_window_given_up_after_its_project_closed_leaves_its_task_for_the_resume() {
+    let context = Context::new();
+    context.adapter.first.set(FirstMessage::Delivered);
+    let project = context.with_staff(&["zeus"]).id;
+    let fake = Rc::downgrade(&context.adapter);
+    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |handle| {
+        if let Some(fake) = fake.upgrade() {
+            fake.with(handle, |agent| agent.items.clear());
+        }
+    }));
+    let created = context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.advance(121_000);
+    let looking = context
+        .host
+        .request_holds
+        .hold(|args| args[0] == "pane.snapshot" && args[1].get("tail").is_some());
+    let passing = context.begin_pass();
+    context.settle();
+    let closing = context.begin_close_project(project);
+    context.settle();
+    looking.open();
+    context.finish(passing).unwrap();
+    context.finish(closing).unwrap();
+
+    let state = context.task(project, created.task.number).task.state;
+    assert_ne!(state, "failed", "the task waits for the Resume");
+    let told = told_of_a_failure(&context, project);
+    assert!(told.is_empty(), "nobody is told of a failure: {told:?}");
 }

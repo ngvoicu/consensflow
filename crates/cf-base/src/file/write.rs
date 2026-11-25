@@ -47,9 +47,34 @@ pub fn write_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileEr
 /// where the name is free, so that one another writer put there meanwhile stays as it is (an
 /// `EEXIST` of `open`, as `writeFile` with the flag `wx` says it). Nothing is renamed over a name.
 pub fn write_new_in_place(path: &Path, bytes: &[u8], mode: u32) -> Result<(), FileError> {
+    #[cfg(unix)]
+    let linked = write_new_with(path, bytes, mode, |from, to| fs::hard_link(from, to));
+    #[cfg(windows)]
+    let linked = write_new_by(path, bytes, mode, publish_new);
+    linked
+}
+
+/// How a file written beside is given its name on Unix.
+#[cfg(unix)]
+type Link = fn(&Path, &Path) -> io::Result<()>;
+
+/// [`write_new_in_place`] with the link a volume makes, which a test stands in for.
+#[cfg(unix)]
+fn write_new_with(path: &Path, bytes: &[u8], mode: u32, link: Link) -> Result<(), FileError> {
+    write_new_by(path, bytes, mode, |from, to| {
+        link(from, to).map_err(|error| publish_failed(error, from, to))
+    })
+}
+
+/// The file written beside, given its name by `publish`.
+fn write_new_by(
+    path: &Path,
+    bytes: &[u8],
+    mode: u32,
+    publish: impl FnOnce(&Path, &Path) -> Result<(), FileError>,
+) -> Result<(), FileError> {
     let temporary = beside(path);
-    let published =
-        write_file(&temporary, bytes, mode).and_then(|()| publish_new(&temporary, path));
+    let published = write_file(&temporary, bytes, mode).and_then(|()| publish(&temporary, path));
     // Unix leaves the file beside as a second name of the one published.
     let removed = remove(&temporary);
     match published {
@@ -63,13 +88,6 @@ fn beside(path: &Path) -> PathBuf {
     let mut temporary = OsString::from(path.as_os_str());
     temporary.push(format!(".{}.tmp", std::process::id()));
     PathBuf::from(temporary)
-}
-
-/// Gives `from` the name `to` where nothing has it: a second name for the file (`link`), which
-/// the system refuses where the name is taken.
-#[cfg(unix)]
-fn publish_new(from: &Path, to: &Path) -> Result<(), FileError> {
-    fs::hard_link(from, to).map_err(|error| publish_failed(error, from, to))
 }
 
 /// Gives `from` the name `to` where nothing has it: a move with no leave to replace.
