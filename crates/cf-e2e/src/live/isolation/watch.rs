@@ -178,7 +178,9 @@ impl Seen {
                 names.iter().cloned().collect::<Vec<_>>().join(", ")
             }
         };
-        let run_tables = crate::door::reads::read(run).ok().and_then(|bytes| table_names(&bytes));
+        let run_tables = crate::door::reads::read(run)
+            .ok()
+            .and_then(|bytes| table_names(&bytes));
         let in_run = run_tables.map_or_else(
             || "unavailable".to_owned(),
             |tables| show(&added.intersection(&tables).cloned().collect()),
@@ -276,7 +278,8 @@ mod tests {
         let files = [Source::from(&path)];
         let before = Seen::look(&files, &[], None, &files);
         let after = Seen::look(&files, &[], None, &files);
-        assert!(before.changes_to(&after, &Source::from(root.path()))[0].contains("could not be compared"));
+        assert!(before.changes_to(&after, &Source::from(root.path()))[0]
+            .contains("could not be compared"));
     }
 
     #[test]
@@ -356,7 +359,9 @@ mod tests {
         let before = Seen::look(&files, &[], Some(&owner_source), &[]);
         crate::door::make_dir(&owner).unwrap();
         let after = Seen::look(&files, &[], Some(&owner_source), &[]);
-        let said = before.codex_tables_to(&after, &owner_source, &owner).unwrap();
+        let said = before
+            .codex_tables_to(&after, &owner_source, &owner)
+            .unwrap();
         assert!(said.contains("could not be compared"), "{said}");
     }
 }

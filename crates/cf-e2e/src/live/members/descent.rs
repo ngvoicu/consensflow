@@ -539,10 +539,7 @@ fn ps(pid: Option<u32>) -> Result<Vec<Running>> {
         ],
         None => vec!["-axo".to_owned(), "pid=,ppid=,lstart=,command=".to_owned()],
     };
-    let ran = Run::new("ps")
-        .args(words)
-        .var("LC_ALL", "C")
-        .run()?;
+    let ran = Run::new("ps").args(words).var("LC_ALL", "C").run()?;
     // `ps -p` of a number no process has says nothing, and ends with 1.
     let nothing = pid.is_some() && ran.stdout.trim().is_empty();
     if ran.code != Some(0) && !nothing {

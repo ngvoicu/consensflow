@@ -112,9 +112,7 @@ mod tests {
         assert!(!task.brief.contains('\n'), "a brief is one line");
         // What the result must hold is what the machine's own `hostname` printed.
         assert!(!task.output.is_empty() && !task.output.contains('\n'));
-        let again = Run::new(command(COMMAND).unwrap())
-            .run()
-            .unwrap();
+        let again = Run::new(command(COMMAND).unwrap()).run().unwrap();
         assert_eq!(again.stdout.trim(), task.output);
     }
 

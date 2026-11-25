@@ -464,8 +464,8 @@ impl Decoy {
     fn start(file: &Path, folder: &Path) -> Result<Self> {
         use cf_e2e::live::members::{Machine, ThisMachine};
 
-        let ran = cf_e2e::process::Run::new("/bin/sh")
-            .args(["-c", "tail -f \"$1\" > /dev/null 2>&1 & echo $!", "sh"])
+        let ran = cf_e2e::process::Run::fixture_script("tail -f \"$1\" > /dev/null 2>&1 & echo $!")
+            .arg("sh")
             .arg(file)
             .cwd(folder)
             .run()?;

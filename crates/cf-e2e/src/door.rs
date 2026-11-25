@@ -82,13 +82,14 @@ mod writes;
 pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
+pub use writes::{
+    append, copy, copy_cloning, copy_keeping_mode, copy_keeping_mode_from, copy_tree,
+    copy_tree_from, create, create_new, create_new_private, made_dir, made_file, make_dir,
+    make_dir_private, remove, rename, say_its_process, set_modified, set_permissions, write,
+    write_executable, write_whole,
+};
 #[cfg(windows)]
 pub use writes::{symlink_dir, symlink_file};
-pub use writes::{
-    append, copy, copy_cloning, copy_keeping_mode, copy_keeping_mode_from, copy_tree, copy_tree_from, create, create_new,
-    create_new_private, made_dir, made_file, make_dir, make_dir_private, remove, rename,
-    say_its_process, set_modified, set_permissions, write, write_executable, write_whole,
-};
 
 /// The variable that makes the door say only.
 pub const AUDIT: &str = "CF_LIVE_AUDIT";
@@ -1120,10 +1121,7 @@ fn env_value(env: &[(std::ffi::OsString, std::ffi::OsString)], wanted: &str) -> 
 
 /// The file `program` is, as a start with the environment `env` finds it: its own path where it
 /// has a folder, a bare name's first place on the search path otherwise.
-fn found_on(
-    program: &Path,
-    env: &[(std::ffi::OsString, std::ffi::OsString)],
-) -> Option<PathBuf> {
+fn found_on(program: &Path, env: &[(std::ffi::OsString, std::ffi::OsString)]) -> Option<PathBuf> {
     if program.components().count() > 1 || program.is_absolute() {
         return Some(program.to_path_buf());
     }
@@ -1171,7 +1169,9 @@ fn started_within(
         shells::Told::Nothing => Ok(judged),
         shells::Told::Command(words) => {
             if depth >= STARTERS_DEEP {
-                return Err("the shell's command starts shells inside shells too deep to judge".into());
+                return Err(
+                    "the shell's command starts shells inside shells too deep to judge".into(),
+                );
             }
             started_within(Path::new(&words[0]), &words[1..], env, depth + 1)
         }

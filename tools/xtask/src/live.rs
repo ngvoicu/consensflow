@@ -195,7 +195,10 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
     if args.first().is_some_and(|word| word == SWEEP) && !names.iter().any(|name| name == SWEEP) {
         // The kit's own program lists and takes nothing in any mode, and under `CF_LIVE_AUDIT`
         // leaves with 1, which a say-only run does whatever it came to.
-        return Ok(process::run_cargo(&sweep(context, &args[1..]), &context.env)?);
+        return Ok(process::run_cargo(
+            &sweep(context, &args[1..]),
+            &context.env,
+        )?);
     }
     let asked = parse(args, &names)?;
     let audit = audit_file(&context.env);

@@ -369,14 +369,8 @@ fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_
     // A window's shell is not told a command the door cannot read: the case's script is a file of
     // the run's own.
     let script = rig.workspace().join("window-env.sh");
-    cf_e2e::door::write(
-        &script,
-        format!("env > '{}'; sleep 30\n", said.display()),
-    )?;
-    let opened = rig.open_pane(window(
-        "the-next",
-        json!({ "argv": ["/bin/sh", script] }),
-    ))?;
+    cf_e2e::door::write(&script, format!("env > '{}'; sleep 30\n", said.display()))?;
+    let opened = rig.open_pane(window("the-next", json!({ "argv": ["/bin/sh", script] })))?;
     assert_eq!(opened["ok"], true, "{opened}");
     rig.wait_for("the window's environment", crate::secs(10), || {
         Ok(std::fs::read_to_string(&said)
@@ -419,11 +413,17 @@ fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account
     let rig = crate::rig()?;
     let system = std::env::var_os("SystemRoot").ok_or("no SystemRoot")?;
     let shell = Path::new(&system).join("System32").join("cmd.exe");
+    // A script file of the run's own: the door reads no shell command with `>` or `&` in it.
+    let script = rig.workspace().join("window-env.cmd");
+    cf_e2e::door::write(
+        &script,
+        "set > window-env.txt\r\nping -n 30 127.0.0.1 > nul\r\n",
+    )?;
     let body = json!({
         "id": "the-window",
         "generation": 1,
         "cwd": rig.workspace(),
-        "argv": [shell, "/d", "/c", "set > window-env.txt & ping -n 30 127.0.0.1 > nul"],
+        "argv": [shell, "/d", "/c", script],
         "env": {},
         "size": { "rows": 24, "cols": 80 },
         "backlogBytes": 65536,

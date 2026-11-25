@@ -621,11 +621,8 @@ mod tests {
         #[cfg(unix)]
         {
             let run = cf_e2e::door::made("cf-pi-sessions-").unwrap();
-            cf_e2e::door::symlink(
-                foreign.path().join("sessions"),
-                run.path().join("sessions"),
-            )
-            .unwrap();
+            cf_e2e::door::symlink(foreign.path().join("sessions"), run.path().join("sessions"))
+                .unwrap();
             assert!(
                 pi_compactions(run.path()).is_err(),
                 "a linked-out Pi session was accepted"

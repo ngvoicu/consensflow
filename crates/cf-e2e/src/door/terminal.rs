@@ -58,8 +58,14 @@ pub(crate) fn open(
         .slave
         .spawn_command(command)
         .map_err(failed("start the program on the pty"))?;
-    let mut reader = pair.master.try_clone_reader().map_err(failed("read the pty"))?;
-    let writer = pair.master.take_writer().map_err(failed("write to the pty"))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(failed("read the pty"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(failed("write to the pty"))?;
     let screen = Arc::new(Mutex::new(Vec::new()));
     let kept = Arc::clone(&screen);
     thread::spawn(move || {

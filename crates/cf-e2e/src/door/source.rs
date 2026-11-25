@@ -103,19 +103,13 @@ impl Account {
     /// The account's home (`HOME`, else `USERPROFILE`), which the rows are below: a source to
     /// say the places below it.
     pub fn home(&self, why: Purpose) -> Option<Source> {
-        account::home_of_this_process().map(|path| Source {
-            path,
-            why,
-        })
+        account::home_of_this_process().map(|path| Source { path, why })
     }
 
     /// The folder a variable of the table names (`CODEX_HOME`, `XDG_CONFIG_HOME`, `APPDATA`,
     /// `PI_CODING_AGENT_DIR`), where the account set it: none where it did not.
     pub fn variable(&self, name: &str, why: Purpose) -> Option<Source> {
-        account::variable_of_this_process(name).map(|path| Source {
-            path,
-            why,
-        })
+        account::variable_of_this_process(name).map(|path| Source { path, why })
     }
 
     /// A program the machine installed, found on the search path (a harness's), read for `why`:
@@ -164,11 +158,10 @@ impl Source {
 
     /// `name` below it (`name` may hold several parts, spelled with `/`).
     pub fn join(&self, name: &str) -> Source {
-        self.at(
-            name.split('/')
-                .filter(|part| !part.is_empty())
-                .fold(self.path.clone(), |path, part| path.join(part)),
-        )
+        self.at(name
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .fold(self.path.clone(), |path, part| path.join(part)))
     }
 
     /// The folder it is in.

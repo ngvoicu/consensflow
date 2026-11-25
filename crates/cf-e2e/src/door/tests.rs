@@ -532,7 +532,10 @@ fn a_rename_moves_a_link_itself_and_writes_nothing_through_it() {
     // The link is moved, and what it leads to is neither written nor moved.
     let moved = mine.path().join("moved");
     rename(&link, &moved).unwrap();
-    assert!(fs::symlink_metadata(&moved).unwrap().file_type().is_symlink());
+    assert!(fs::symlink_metadata(&moved)
+        .unwrap()
+        .file_type()
+        .is_symlink());
     assert!(fs::symlink_metadata(&link).is_err());
     assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
     // A link over a link replaces the link, not what it leads to.

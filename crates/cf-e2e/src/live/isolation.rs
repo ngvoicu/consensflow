@@ -94,10 +94,10 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::agents;
-use crate::door::source::{Account, Purpose, Source as Owned};
 use super::login::{private_folder, write_private_bytes};
 use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
+use crate::door::source::{Account, Purpose, Source as Owned};
 use crate::rig::HarnessHome;
 use crate::{Error, Result};
 use watch::{shown, Seen};
@@ -538,12 +538,7 @@ impl Isolation {
 
     /// Pi's home, copying the login in `agent`, the owner's Pi folder (in the home `home`), that
     /// the Pi model `model` needs, if it lasts a run of `run` and [`MARGIN`].
-    pub fn pi(
-        home: impl Into<Owned>,
-        agent: impl Into<Owned>,
-        model: &str,
-        run: Duration,
-    ) -> Self {
+    pub fn pi(home: impl Into<Owned>, agent: impl Into<Owned>, model: &str, run: Duration) -> Self {
         Self::pi_on(home, agent, &[model.to_owned()], run)
     }
 
@@ -577,11 +572,7 @@ impl Isolation {
     /// Devin's home on Windows, copying the login in the owner's Roaming folder `roaming` (the
     /// owner whose profile is `home`).
     pub fn devin_on_windows(home: impl Into<Owned>, roaming: impl Into<Owned>) -> Self {
-        Self::new(
-            Harness::Devin,
-            home,
-            Plan::devin_on_windows(roaming),
-        )
+        Self::new(Harness::Devin, home, Plan::devin_on_windows(roaming))
     }
 
     fn new(harness: Harness, owner_home: impl Into<Owned>, plan: Plan) -> Self {
@@ -780,8 +771,7 @@ impl Isolation {
         let read_file = |name: &str| {
             let path = from.join(name);
             let meta = path.lstat()?;
-            if meta.file_type().is_symlink() || !path.real()?.is_inside(&from.real()?)
-            {
+            if meta.file_type().is_symlink() || !path.real()?.is_inside(&from.real()?) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "a provider file leaves its tree",

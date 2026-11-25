@@ -503,8 +503,7 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     // is `sleep <seconds>; true` in a shell. The outsider's shell becomes its `sleep` (`exec`), so
     // the test's handle holds all of it, and its drop leaves nothing running.
     let command = LongCommand::new("sleep 613");
-    let mut outsider = Run::fixture_script("exec sleep 613")
-        .spawn()?;
+    let mut outsider = Run::fixture_script("exec sleep 613").spawn()?;
     let window = Open::new(&rig, &install, "work", "work-devin")
         .agent(json!({ "kind": "devin", "model": "fake" }))
         .member(Member::new("worker", "# ConsensFlow worker\n").first_message(

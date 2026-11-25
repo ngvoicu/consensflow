@@ -276,11 +276,9 @@ runs = ["rig-lib-powershell"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/pid.rs"
-find = """
-        .limit(super::POWERSHELL_LIMIT)
-}"""
-replace = """
-}"""
+find = '''    .limit(super::POWERSHELL_LIMIT)
+}'''
+replace = '''}'''
 
 # The rig's leftover check on Windows (T-1226; CI runs 41787972093 and 41792519144): a number
 # Windows gave to another program after the last note is none of the windows', as its process

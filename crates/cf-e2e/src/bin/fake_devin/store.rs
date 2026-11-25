@@ -491,8 +491,7 @@ mod tests {
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("hello", "client-1").unwrap();
         // Read-only, and never waiting on a writer, as the daemon reads it.
-        let reader = cf_e2e::door::database::read(&file)
-        .unwrap();
+        let reader = cf_e2e::door::database::read(&file).unwrap();
         reader.busy_timeout(Duration::ZERO).unwrap();
         let seen: i64 = reader
             .query_row("SELECT count(*) FROM message_nodes", [], |row| row.get(0))

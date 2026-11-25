@@ -722,11 +722,7 @@ mod tests {
         // commands in it, so that it stays the process that holds the mark).
         let mark = "cf-live-members-cut-mark-4171";
         let command = LongCommand::new(mark);
-        let shell = |line: String| {
-            Run::fixture_script(line)
-                .spawn()
-                .unwrap()
-        };
+        let shell = |line: String| Run::fixture_script(line).spawn().unwrap();
         let mut window = shell(format!("/bin/sh -c 'sleep 30; : {mark}' & wait"));
         let mut outsider = shell(format!("sleep 30; : {mark}"));
         let own = process_of(window.id()).expect("the window's process is read");

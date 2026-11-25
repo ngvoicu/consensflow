@@ -73,9 +73,9 @@ fn posix_told(args: &[String]) -> Result<Told, String> {
             continue;
         }
         if flags.chars().all(char::is_alphabetic) && flags.contains('c') {
-            let command = words.next().ok_or_else(|| {
-                format!("the shell is given {word} and no command to run")
-            })?;
+            let command = words
+                .next()
+                .ok_or_else(|| format!("the shell is given {word} and no command to run"))?;
             return posix_words(command).map(Told::Command);
         }
         // `-o name`, `-O name` and `--rcfile file` take a word of their own.
@@ -134,8 +134,8 @@ fn posix_words(text: &str) -> Result<Vec<String>, String> {
                 }
                 _ => return unread("an escape that ends the command or a line"),
             },
-            ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' | '$' | '`' | '\n' | '\r'
-            | '*' | '?' | '[' | ']' | '~' | '#' | '!' | '=' => {
+            ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' | '$' | '`' | '\n' | '\r' | '*'
+            | '?' | '[' | ']' | '~' | '#' | '!' | '=' => {
                 if next == '=' && word.is_some() && !words.is_empty() {
                     // `a=b` after the program is an argument, not an assignment.
                     word.get_or_insert_with(String::new).push(next);
@@ -167,7 +167,12 @@ fn cmd_told(args: &[String]) -> Result<Told, String> {
         return Ok(Told::Nothing);
     };
     let line = args[at + 1..].join(" ");
-    windows_words(&line, &['&', '|', '<', '>', '^', '%', '(', ')', '!'], "cmd's own").map(Told::Command)
+    windows_words(
+        &line,
+        &['&', '|', '<', '>', '^', '%', '(', ')', '!'],
+        "cmd's own",
+    )
+    .map(Told::Command)
 }
 
 fn powershell_told(args: &[String]) -> Result<Told, String> {
@@ -189,7 +194,9 @@ fn powershell_told(args: &[String]) -> Result<Told, String> {
             }
             return windows_words(
                 &rest.join(" "),
-                &['&', '|', '<', '>', ';', '$', '`', '(', ')', '{', '}', '@', '%', '\n', '\r'],
+                &[
+                    '&', '|', '<', '>', ';', '$', '`', '(', ')', '{', '}', '@', '%', '\n', '\r',
+                ],
                 "PowerShell's own",
             )
             .map(Told::Command);
@@ -198,8 +205,16 @@ fn powershell_told(args: &[String]) -> Result<Told, String> {
             return Err("PowerShell is given an encoded command, which cannot be read".to_owned());
         }
         // `-ExecutionPolicy x`, `-WindowStyle x`, `-Version x`, `-ConfigurationName x` take a word.
-        if ["executionpolicy", "ep", "windowstyle", "w", "version", "v", "configurationname"]
-            .contains(&flag)
+        if [
+            "executionpolicy",
+            "ep",
+            "windowstyle",
+            "w",
+            "version",
+            "v",
+            "configurationname",
+        ]
+        .contains(&flag)
         {
             words.next();
         }
@@ -268,7 +283,10 @@ pub fn names_a_door_program(args: &[String]) -> Option<&'static str> {
         .flat_map(|arg| {
             arg.split(|c: char| {
                 c.is_whitespace()
-                    || matches!(c, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\'' | '"' | '=' | '`')
+                    || matches!(
+                        c,
+                        ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\'' | '"' | '=' | '`'
+                    )
             })
             .filter(|word| !word.is_empty())
             .map(str::to_lowercase)
@@ -288,7 +306,10 @@ mod tests {
     fn said(shell: Shell, words: &[&str]) -> Result<Told, String> {
         told(
             shell,
-            &words.iter().map(|word| (*word).to_owned()).collect::<Vec<_>>(),
+            &words
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -325,7 +346,10 @@ mod tests {
             Ok(command(&["claude"]))
         );
         assert_eq!(
-            said(Shell::Posix, &["-l", "-i", "-c", "exec pi 'a b' \"c d\" e\\ f"]),
+            said(
+                Shell::Posix,
+                &["-l", "-i", "-c", "exec pi 'a b' \"c d\" e\\ f"]
+            ),
             Ok(command(&["pi", "a b", "c d", "e f"]))
         );
         assert_eq!(
@@ -338,7 +362,10 @@ mod tests {
     fn a_posix_shell_with_no_command_runs_no_program_of_its_words() {
         assert_eq!(said(Shell::Posix, &[]), Ok(Told::Nothing));
         assert_eq!(said(Shell::Posix, &["-i"]), Ok(Told::Nothing));
-        assert_eq!(said(Shell::Posix, &["./setup.sh", "-c", "claude"]), Ok(Told::Nothing));
+        assert_eq!(
+            said(Shell::Posix, &["./setup.sh", "-c", "claude"]),
+            Ok(Told::Nothing)
+        );
         assert_eq!(said(Shell::Posix, &["--", "-c"]), Ok(Told::Nothing));
     }
 
@@ -372,12 +399,31 @@ mod tests {
 
     #[test]
     fn an_unreadable_command_that_names_a_program_with_a_door_is_found_by_its_words() {
-        let words = |text: &[&str]| text.iter().map(|word| (*word).to_owned()).collect::<Vec<_>>();
-        assert_eq!(names_a_door_program(&words(&["-c", "echo a; Claude --x"])), Some("claude"));
-        assert_eq!(names_a_door_program(&words(&["-c", "/usr/bin/security x | cat"])), Some("security"));
-        assert_eq!(names_a_door_program(&words(&["/c", "cargo.exe build & dir"])), Some("cargo"));
-        assert_eq!(names_a_door_program(&words(&["-c", "sleep 4; printf 'a' > /dev/null"])), None);
-        assert_eq!(names_a_door_program(&words(&["-c", "pipe pizza opium"])), None);
+        let words = |text: &[&str]| {
+            text.iter()
+                .map(|word| (*word).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "echo a; Claude --x"])),
+            Some("claude")
+        );
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "/usr/bin/security x | cat"])),
+            Some("security")
+        );
+        assert_eq!(
+            names_a_door_program(&words(&["/c", "cargo.exe build & dir"])),
+            Some("cargo")
+        );
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "sleep 4; printf 'a' > /dev/null"])),
+            None
+        );
+        assert_eq!(
+            names_a_door_program(&words(&["-c", "pipe pizza opium"])),
+            None
+        );
         // A folder of a harness's name on the way to another program names none; the program does.
         assert_eq!(
             names_a_door_program(&words(&["-c", "'/x/integrations/claude/ab/bin/cf' hook"])),
@@ -396,14 +442,20 @@ mod tests {
             Ok(command(&["codex", "--version"]))
         );
         assert_eq!(
-            said(Shell::Cmd, &["/c", "\"C:\\Program Files\\x\\pi.exe\" --version"]),
+            said(
+                Shell::Cmd,
+                &["/c", "\"C:\\Program Files\\x\\pi.exe\" --version"]
+            ),
             Ok(command(&["C:\\Program Files\\x\\pi.exe", "--version"]))
         );
         assert_eq!(said(Shell::Cmd, &[]), Ok(Told::Nothing));
         assert!(said(Shell::Cmd, &["/c", "echo a & claude"]).is_err());
         assert!(said(Shell::Cmd, &["/c", "claude %X%"]).is_err());
         assert_eq!(
-            said(Shell::Powershell, &["-NoProfile", "-Command", "node", "./a.cjs"]),
+            said(
+                Shell::Powershell,
+                &["-NoProfile", "-Command", "node", "./a.cjs"]
+            ),
             Ok(command(&["node", "./a.cjs"]))
         );
         assert_eq!(
@@ -411,7 +463,10 @@ mod tests {
             Ok(command(&["pi --version"]))
         );
         assert_eq!(
-            said(Shell::Powershell, &["-NoProfile", "-File", "x.ps1", "-Command", "claude"]),
+            said(
+                Shell::Powershell,
+                &["-NoProfile", "-File", "x.ps1", "-Command", "claude"]
+            ),
             Ok(Told::Nothing)
         );
         assert!(said(Shell::Powershell, &["-Command", "claude; pi"]).is_err());

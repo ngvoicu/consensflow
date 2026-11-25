@@ -53,7 +53,8 @@ const STAYS_AT_REST: u64 = 6;
 /// Devin's store as a GPT model's session leaves it: its messages carry no
 /// `finish_reason`.
 fn as_a_gpt_models_session_ends(store: &Path) -> Result<()> {
-    let db = cf_e2e::door::database::write(store).map_err(|error| Error::Daemon(error.to_string()))?;
+    let db =
+        cf_e2e::door::database::write(store).map_err(|error| Error::Daemon(error.to_string()))?;
     db.busy_timeout(secs(5))
         .map_err(|error| Error::Daemon(error.to_string()))?;
     let changed = db

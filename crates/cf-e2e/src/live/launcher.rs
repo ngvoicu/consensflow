@@ -181,10 +181,8 @@ impl Watch {
 
     /// What it is now.
     pub fn look(&self) -> Seen {
-        self.home.require_home(&format!(
-            "{} launcher home lookup",
-            self.harness.name()
-        ));
+        self.home
+            .require_home(&format!("{} launcher home lookup", self.harness.name()));
         Seen {
             keychain: self.keychain.and_then(|names| names()),
             launchers: self

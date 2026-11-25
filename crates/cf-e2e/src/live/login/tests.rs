@@ -671,8 +671,7 @@ impl Person {
             ".claude/history.jsonl",
             "{\"display\":\"fix it\",\"project\":\"/Users/me/work\",\"sessionId\":\"s1\"}\n",
         );
-        crate::door::make_dir(person.home.path().join(".claude/projects/-Users-me-work"))
-            .unwrap();
+        crate::door::make_dir(person.home.path().join(".claude/projects/-Users-me-work")).unwrap();
         person
     }
 

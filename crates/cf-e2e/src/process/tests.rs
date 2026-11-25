@@ -67,9 +67,9 @@ fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
     fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let asking = || {
         Run::fixture_script(format!(
-                "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
-                stray.as_raw_fd()
-            ))
+            "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+            stray.as_raw_fd()
+        ))
     };
     let ran = asking().run().unwrap();
     assert_eq!(ran.stdout, "clear\n");
@@ -118,10 +118,7 @@ fn a_machine_environment_holds_the_machine_and_nothing_of_the_account() {
 fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
     let kit = crate::door::made("kits-home-").unwrap();
     let home = kit.path().join("home");
-    let ran = Run::new("/usr/bin/env")
-        .var("HOME", &home)
-        .run()
-        .unwrap();
+    let ran = Run::new("/usr/bin/env").var("HOME", &home).run().unwrap();
     assert!(ran
         .stdout
         .lines()
@@ -842,7 +839,10 @@ fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded
 /// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
 #[test]
 fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
-    let (first, second) = (crate::door::made("t-").unwrap(), crate::door::made("t-").unwrap());
+    let (first, second) = (
+        crate::door::made("t-").unwrap(),
+        crate::door::made("t-").unwrap(),
+    );
     let file = |folder: &crate::door::Made| {
         folder
             .path()
@@ -1003,7 +1003,11 @@ fn a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that
     // A home: only a folder the run made, outside every store.
     assert!(inheritable(&os("HOME"), run.path().as_os_str(), &roots));
     assert!(!inheritable(&os("HOME"), store.path().as_os_str(), &roots));
-    assert!(!inheritable(&os("HOME"), OsStr::new("relative/home"), &roots));
+    assert!(!inheritable(
+        &os("HOME"),
+        OsStr::new("relative/home"),
+        &roots
+    ));
     // The profile's halves are the door's to say again.
     assert!(!inheritable(&os("HOMEDRIVE"), OsStr::new("C:"), &roots));
     assert!(!inheritable(&os("homepath"), OsStr::new("/h"), &roots));
@@ -1014,10 +1018,15 @@ fn a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that
 #[test]
 fn the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them() {
     let machine = || -> Vec<(OsString, OsString)> {
-        [("HOMEDRIVE", "C:"), ("HOMEPATH", "\\Users\\caller"), ("LANG", "C"), ("homepath", "x")]
-            .iter()
-            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-            .collect()
+        [
+            ("HOMEDRIVE", "C:"),
+            ("HOMEPATH", "\\Users\\caller"),
+            ("LANG", "C"),
+            ("homepath", "x"),
+        ]
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
     };
     let mut env = machine();
     without_unnamed_profile_halves(&mut env, &[]);
@@ -1050,10 +1059,15 @@ fn the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them()
 #[cfg(unix)]
 #[test]
 fn a_run_that_inherits_nothing_holds_no_variable_of_the_test_process() {
-    assert!(own_var("CARGO_MANIFEST_DIR").is_some(), "cargo gives the test process this");
+    assert!(
+        own_var("CARGO_MANIFEST_DIR").is_some(),
+        "cargo gives the test process this"
+    );
     let ran = Run::new("/usr/bin/env").run().unwrap();
     assert!(
-        !ran.stdout.lines().any(|line| line.starts_with("CARGO_MANIFEST_DIR=")),
+        !ran.stdout
+            .lines()
+            .any(|line| line.starts_with("CARGO_MANIFEST_DIR=")),
         "{}",
         ran.stdout
     );

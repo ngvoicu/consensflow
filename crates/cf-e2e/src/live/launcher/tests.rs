@@ -47,7 +47,10 @@ fn claude_launcher(home: &OwnerHome) -> PathBuf {
 fn changes(watch: &Watch, home: &OwnerHome, act: impl FnOnce()) -> Vec<String> {
     let before = watch.look();
     act();
-    before.changes_to(&watch.look(), &crate::door::source::Source::from(home.0.path()))
+    before.changes_to(
+        &watch.look(),
+        &crate::door::source::Source::from(home.0.path()),
+    )
 }
 
 #[test]
@@ -88,7 +91,12 @@ fn a_launcher_that_is_a_file_is_hashed_and_named_in_the_summary_and_left_alone_i
     let command = claude_launcher(&home);
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
-    assert!(seen.changes_to(&watch.look(), &crate::door::source::Source::from(home.0.path())).is_empty());
+    assert!(seen
+        .changes_to(
+            &watch.look(),
+            &crate::door::source::Source::from(home.0.path())
+        )
+        .is_empty());
     // The program the kit runs and the one the installer writes are the one file, said once.
     let summary = seen.summary(&crate::door::source::Source::from(home.0.path()));
     assert_eq!(summary.matches("claude").count(), 1, "{summary}");
@@ -252,7 +260,10 @@ fn a_path_followed_through_a_link_is_said_below_the_home_the_run_was_given() {
     let home = OwnerHome::new();
     home.write("a/b", "x");
     let real = fs::canonicalize(home.path("a/b")).unwrap();
-    let shown = shown(&crate::door::source::Source::from(&real), &crate::door::source::Source::from(home.0.path()));
+    let shown = shown(
+        &crate::door::source::Source::from(&real),
+        &crate::door::source::Source::from(home.0.path()),
+    );
     assert!(
         shown.starts_with("~/") || shown.starts_with("~\\"),
         "{shown}"
@@ -309,7 +320,9 @@ fn a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no
         "{found:?}"
     );
     // It is the Keychain's, not the launchers': the launchers' changes say nothing of it.
-    assert!(before.changes_to(&after, &crate::door::source::Source::from(home.0.path())).is_empty());
+    assert!(before
+        .changes_to(&after, &crate::door::source::Source::from(home.0.path()))
+        .is_empty());
 }
 
 #[test]

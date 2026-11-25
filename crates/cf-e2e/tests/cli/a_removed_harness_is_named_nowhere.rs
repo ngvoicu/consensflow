@@ -164,10 +164,7 @@ mod what_the_check_is_for_planted_in_a_tree_of_its_own {
             add.extend(tracked.iter().map(|(file, _)| *file));
             add
         }] {
-            let ran = Run::new("git")
-                .args(args)
-                .cwd(root.path())
-                .run()?;
+            let ran = Run::new("git").args(args).cwd(root.path()).run()?;
             assert_eq!(ran.code, Some(0), "{}", ran.stderr);
         }
         Ok(root)

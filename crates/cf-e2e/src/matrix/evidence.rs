@@ -67,9 +67,9 @@ impl Owner {
                 .named(link, Purpose::Guard)
                 .link_target()
                 .map_or_else(
-                |_| "no link".to_owned(),
-                |to| format!("-> {}", to.display()),
-            );
+                    |_| "no link".to_owned(),
+                    |to| format!("-> {}", to.display()),
+                );
             seen.insert(link.clone(), OwnerFile::Text(target));
         }
         for file in files.iter().filter(|file| !login_files.contains(file)) {
@@ -77,16 +77,16 @@ impl Owner {
                 .named(file, Purpose::Guard)
                 .read()
                 .map_or_else(
-                |_| "absent".to_owned(),
-                |bytes| {
-                    let digest = Sha256::digest(bytes);
-                    digest
-                        .iter()
-                        .take(8)
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect()
-                },
-            );
+                    |_| "absent".to_owned(),
+                    |bytes| {
+                        let digest = Sha256::digest(bytes);
+                        digest
+                            .iter()
+                            .take(8)
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect()
+                    },
+                );
             seen.insert(file.clone(), OwnerFile::Text(hash));
         }
         for file in login_files {

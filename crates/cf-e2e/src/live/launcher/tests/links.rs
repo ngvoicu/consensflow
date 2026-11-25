@@ -1,8 +1,8 @@
 // The tests for the machines that install by links: the Unix ones. The portable ones, a launcher that
 // is a file as Windows installs it, are in the parent.
 
-use std::os::unix::fs::PermissionsExt;
 use crate::door::symlink;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use super::*;
@@ -80,7 +80,12 @@ fn a_launcher_that_is_left_alone_is_no_change_and_the_summary_names_it_and_its_h
     let command = home.claude();
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
-    assert!(seen.changes_to(&watch.look(), &crate::door::source::Source::from(home.0.path())).is_empty());
+    assert!(seen
+        .changes_to(
+            &watch.look(),
+            &crate::door::source::Source::from(home.0.path())
+        )
+        .is_empty());
     let summary = seen.summary(&crate::door::source::Source::from(home.0.path()));
     assert!(summary.starts_with("~/.local/bin/claude "), "{summary}");
     assert_eq!(
@@ -304,7 +309,9 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
     );
     assert_eq!(
         watch.launchers,
-        [crate::door::source::Source::from(PathBuf::from("/opt/homebrew/bin/codex"))]
+        [crate::door::source::Source::from(PathBuf::from(
+            "/opt/homebrew/bin/codex"
+        ))]
     );
     assert!(watch.folders.is_empty() && watch.files.is_empty());
     let pi = Watch::of(

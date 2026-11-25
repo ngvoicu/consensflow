@@ -624,8 +624,8 @@ impl Run {
                 Arg::Raw(word) => word.to_string_lossy().into_owned(),
             })
             .collect();
-        let program = crate::door::program_started(Path::new(&self.program), &args, env)
-            .map_err(|why| {
+        let program =
+            crate::door::program_started(Path::new(&self.program), &args, env).map_err(|why| {
                 Error::LiveApp(format!(
                     "{} is not started: {why}",
                     self.program.to_string_lossy()

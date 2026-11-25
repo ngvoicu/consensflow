@@ -945,8 +945,7 @@ mod tests {
             let store = run.path().join("sessions.db");
             cf_e2e::door::write(&store, "fabricated store").unwrap();
             let name = format!("sessions.db{suffix}");
-            cf_e2e::door::symlink(foreign.path().join("secret"), run.path().join(&name))
-                .unwrap();
+            cf_e2e::door::symlink(foreign.path().join("secret"), run.path().join(&name)).unwrap();
             let copy = run.path().join("copy");
             cf_e2e::door::make_dir(&copy).unwrap();
             copy_devin_store(&store, &copy);

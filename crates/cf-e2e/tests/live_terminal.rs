@@ -134,8 +134,12 @@ mod on_windows {
 
     /// The OpenConsole.exe processes running now, by where each runs from.
     fn console_hosts() -> Result<Vec<String>> {
-        let ran = Run::script_in(live::command("powershell")?, &["-NoProfile", "-Command"], CONSOLE_HOSTS)
-            .run()?;
+        let ran = Run::script_in(
+            live::command("powershell")?,
+            &["-NoProfile", "-Command"],
+            CONSOLE_HOSTS,
+        )
+        .run()?;
         if ran.code != Some(0) {
             return Err(Error::Daemon(format!(
                 "PowerShell could not list the console hosts: {ran}"

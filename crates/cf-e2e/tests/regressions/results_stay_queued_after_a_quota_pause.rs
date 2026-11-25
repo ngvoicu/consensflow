@@ -33,11 +33,11 @@
 
 use std::path::PathBuf;
 
+use cf_e2e::door::Made;
 use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use cf_e2e::door::Made;
 
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief};
 use crate::{config, secs, Outcome};
@@ -51,12 +51,11 @@ struct Account {
 impl Account {
     /// An account with quota.
     fn new() -> Result<Self> {
-        let folder = cf_e2e::door::made("cf-account-")
-            .map_err(|source| cf_e2e::Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        let folder = cf_e2e::door::made("cf-account-").map_err(|source| cf_e2e::Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
         Ok(Self { folder })
     }
 

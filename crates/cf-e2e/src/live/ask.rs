@@ -130,10 +130,10 @@ pub fn question_sealed(body: &mut Value) -> Result {
     // variables, the temporary folders, the language): under what the caller named. The helper
     // starts the harness's program on this environment alone, so a caller no longer builds it.
     for (name, value) in crate::process::machine_vars(std::env::vars_os()) {
-        if !env
-            .iter()
-            .any(|(held, _)| held.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()))
-        {
+        if !env.iter().any(|(held, _)| {
+            held.to_string_lossy()
+                .eq_ignore_ascii_case(&name.to_string_lossy())
+        }) {
             env.push((name, value));
         }
     }

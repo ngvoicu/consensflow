@@ -494,9 +494,7 @@ fn forget<S: Into<crate::door::source::Source> + Copy>(
             continue;
         };
         let path = record.path();
-        let there_before = path
-            .file_name()
-            .is_some_and(|name| baseline.held(at, name));
+        let there_before = path.file_name().is_some_and(|name| baseline.held(at, name));
         if there_before {
             refused.push(format!(
                 "{} was there before the renewal, so it is the owner's and was left",

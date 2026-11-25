@@ -23,11 +23,11 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
+use cf_e2e::door::Made;
 use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use cf_e2e::door::Made;
 
 use crate::{config, secs, session_of, Outcome};
 
@@ -44,12 +44,11 @@ struct Account {
 
 impl Account {
     fn new() -> Result<Self> {
-        let folder = cf_e2e::door::made("cf-account-")
-            .map_err(|source| cf_e2e::Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        let folder = cf_e2e::door::made("cf-account-").map_err(|source| cf_e2e::Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
         files::write(&folder.path().join("refused"), "")?;
         Ok(Self { folder })
     }

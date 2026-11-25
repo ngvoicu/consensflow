@@ -426,10 +426,7 @@ pub fn result_kept(judged: &Judged, name: &str) -> Check {
 pub fn fixture(folder: &Path) -> Vec<Check> {
     let read = |name: &str| std::fs::read_to_string(folder.join(name)).unwrap_or_default();
     let (check, greet) = (read("check.cjs"), read("greet.cjs"));
-    let checked = Run::new("node")
-        .args(["-e", CHECK])
-        .cwd(folder)
-        .run();
+    let checked = Run::new("node").args(["-e", CHECK]).cwd(folder).run();
     vec![
         Check::new(
             "fixture",

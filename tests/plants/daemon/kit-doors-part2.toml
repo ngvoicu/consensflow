@@ -77,9 +77,9 @@ runs = ["kd-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/keychain.rs"
-find = '''        names().map(Listing).ok_or_else(|| {
-            Error::Daemon("the login Keychain cannot be listed here".to_owned())
-        })'''
+find = '''        names()
+            .map(Listing)
+            .ok_or_else(|| Error::Daemon("the login Keychain cannot be listed here".to_owned()))'''
 replace = '''        Ok(Listing(names().unwrap_or_default()))'''
 
 [[plant]]

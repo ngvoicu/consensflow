@@ -1,9 +1,9 @@
 // The cases that need links and a shell updater: the Unix machines'. The ones that hold on every
 // machine, a launcher that is a file as Windows installs one, are in the parent.
 
+use cf_e2e::door::symlink;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use cf_e2e::door::symlink;
 use std::path::{Path, PathBuf};
 
 use cf_e2e::live::{self, Harness, Installed};

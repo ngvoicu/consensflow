@@ -21,10 +21,10 @@
 
 use std::path::PathBuf;
 
+use cf_e2e::door::Made;
 use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
-use cf_e2e::door::Made;
 
 use crate::{config_with_codex, secs, Outcome};
 
@@ -68,12 +68,11 @@ fn notes_starting(project: &Project, start: &str) -> cf_e2e::Result<Vec<Value>> 
 
 /// The account the worker's harness refuses while its file is there.
 fn account() -> cf_e2e::Result<(Made, PathBuf)> {
-    let folder = cf_e2e::door::made("cf-account-")
-        .map_err(|source| cf_e2e::Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+    let folder = cf_e2e::door::made("cf-account-").map_err(|source| cf_e2e::Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let file = folder.path().join("refused");
     files::write(&file, "")?;
     Ok((folder, file))

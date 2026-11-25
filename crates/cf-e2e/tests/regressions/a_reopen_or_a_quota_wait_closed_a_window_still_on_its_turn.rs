@@ -33,11 +33,11 @@
 
 use std::path::{Path, PathBuf};
 
+use cf_e2e::door::Made;
 use cf_e2e::files;
 use cf_e2e::rig::{Config, Project, Rig, OPEN};
 use cf_e2e::Error;
 use serde_json::{json, Value};
-use cf_e2e::door::Made;
 
 use crate::{config, secs, Outcome};
 
@@ -221,12 +221,11 @@ fn paused_only_for_quota(rig: &Rig) {
 
 /// The account the worker's harness refuses while its file is there.
 fn account() -> cf_e2e::Result<(Made, PathBuf)> {
-    let folder = cf_e2e::door::made("cf-account-")
-        .map_err(|source| Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+    let folder = cf_e2e::door::made("cf-account-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let file = folder.path().join("refused");
     files::write(&file, "")?;
     Ok((folder, file))

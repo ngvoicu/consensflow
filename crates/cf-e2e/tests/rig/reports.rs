@@ -1334,10 +1334,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         .map(|found| found[1].to_owned())
         .ok_or("the step that names the folder asks no node")?;
     let rust = std::env::temp_dir().to_string_lossy().into_owned();
-    let temp = match Run::new(Path::new("node"))
-        .args(["-p", &asked])
-        .run()
-    {
+    let temp = match Run::new(Path::new("node")).args(["-p", &asked]).run() {
         Ok(ran) if ran.code == Some(0) => ran.stdout.trim().to_owned(),
         _ => {
             eprintln!("there is no node here: the folder the step names is not asked of it");

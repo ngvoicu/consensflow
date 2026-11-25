@@ -500,11 +500,21 @@ mod tests {
     #[test]
     fn the_variables_that_name_a_login_of_gcloud_are_roots_where_the_account_sets_them() {
         let vars: HashMap<&'static str, PathBuf> = [
-            ("HOME", PathBuf::from(if cfg!(windows) { r"C:\h" } else { "/h" })),
-            ("CLOUDSDK_CONFIG", PathBuf::from(if cfg!(windows) { r"C:\g" } else { "/g" })),
+            (
+                "HOME",
+                PathBuf::from(if cfg!(windows) { r"C:\h" } else { "/h" }),
+            ),
+            (
+                "CLOUDSDK_CONFIG",
+                PathBuf::from(if cfg!(windows) { r"C:\g" } else { "/g" }),
+            ),
             (
                 "GOOGLE_APPLICATION_CREDENTIALS",
-                PathBuf::from(if cfg!(windows) { r"C:\c\adc.json" } else { "/c/adc.json" }),
+                PathBuf::from(if cfg!(windows) {
+                    r"C:\c\adc.json"
+                } else {
+                    "/c/adc.json"
+                }),
             ),
         ]
         .into();
@@ -524,7 +534,11 @@ mod tests {
         let names: Vec<&str> = SECRET_STORES.iter().map(|(_, name, _)| *name).collect();
         assert_eq!(
             names,
-            ["Keychain", "Windows' Credential Manager", "the Secret Service"]
+            [
+                "Keychain",
+                "Windows' Credential Manager",
+                "the Secret Service"
+            ]
         );
         assert!(SECRET_STORES.iter().all(|(_, _, why)| !why.is_empty()));
     }

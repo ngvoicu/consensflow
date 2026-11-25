@@ -332,7 +332,10 @@ mod tests {
     fn a_file_of_the_name_that_does_not_run_is_passed_over_for_a_later_one_that_does() {
         // The Store's alias of `python3`, as zeewin has it first on its PATH: a shell finds
         // it, and whatever it is asked it ends 9009 and says there is no Python.
-        let (alias, real) = (crate::door::made("t-").unwrap(), crate::door::made("t-").unwrap());
+        let (alias, real) = (
+            crate::door::made("t-").unwrap(),
+            crate::door::made("t-").unwrap(),
+        );
         let stub = program(
             alias.path(),
             "python3",

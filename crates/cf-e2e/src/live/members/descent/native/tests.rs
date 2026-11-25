@@ -13,10 +13,7 @@ fn waiting() -> Spawned {
     } else {
         Run::new("sleep").args(["30"])
     };
-    program
-        .closed_input()
-        .spawn()
-        .expect("the program starts")
+    program.closed_input().spawn().expect("the program starts")
 }
 
 /// The process `identity`, as a check that chose it has it.

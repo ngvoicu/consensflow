@@ -119,7 +119,10 @@ impl Owner {
                 ),
             )),
             Installed::at(Harness::Codex, self.path("bin/codex"), self.path(".codex"))
-                .with_isolation(Arc::new(Isolation::codex(owned(home), owned(self.path(".codex"))))),
+                .with_isolation(Arc::new(Isolation::codex(
+                    owned(home),
+                    owned(self.path(".codex")),
+                ))),
             Installed::at(Harness::Devin, self.path("bin/devin"), home).with_isolation(Arc::new(
                 Isolation::devin(
                     owned(home),

@@ -427,7 +427,15 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     // 1. The controls.
     let folder = folders.config("control-list", &servers, false)?;
     let project = folders.project("project-control-list", &[])?;
-    let came = run(&mut folders, &claude, &["mcp", "list"], &folder, &project, both, None)?;
+    let came = run(
+        &mut folders,
+        &claude,
+        &["mcp", "list"],
+        &folder,
+        &project,
+        both,
+        None,
+    )?;
     checks.push(Check::new(
         "claude",
         "the control: `mcp list` on a folder with no login makes the folder's Keychain item, of the name the kit computes, holding the servers' OAuth state alone",
@@ -438,7 +446,15 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
 
     let folder = folders.config("control-login", &servers, true)?;
     let project = folders.project("project-control-login", &[])?;
-    let came = run(&mut folders, &claude, &session, &folder, &project, both, None)?;
+    let came = run(
+        &mut folders,
+        &claude,
+        &session,
+        &folder,
+        &project,
+        both,
+        None,
+    )?;
     checks.push(Check::new(
         "claude",
         "the control: a session on a folder with a made-up login makes the item hold the login and the servers' state, and takes the login out of the folder",
@@ -459,7 +475,15 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
         .copied()
         .chain(["--plugin-dir", plugin_flag.as_str()])
         .collect();
-    let came = run(&mut folders, &claude, &with_plugin, &folder, &project, both, None)?;
+    let came = run(
+        &mut folders,
+        &claude,
+        &with_plugin,
+        &folder,
+        &project,
+        both,
+        None,
+    )?;
     checks.push(Check::new(
         "claude",
         "the control: a plugin's server that asks for OAuth makes the item too",

@@ -99,7 +99,14 @@ const PTY_STARTS: &[&str] = &[
 ];
 
 /// The calls that start a program, by their names alone, outside `std::process`: the system's own.
-const START_CALLS: &[&str] = &["fork", "posix_spawn", "posix_spawnp", "execv", "execve", "execvp"];
+const START_CALLS: &[&str] = &[
+    "fork",
+    "posix_spawn",
+    "posix_spawnp",
+    "execv",
+    "execve",
+    "execvp",
+];
 
 /// The functions of `std::fs` that read: what a held file ([`READS_HELD`]) does through the door's
 /// readers ([`crate::door::reads`]) for a place of the run's, and through a
@@ -237,7 +244,12 @@ const SECRET_STORE_CALLS: &[&str] = &[
 ];
 
 /// The crates that read a secret store of the account's.
-const SECRET_STORE_CRATES: &[&str] = &["keyring", "security_framework", "secret_service", "libsecret"];
+const SECRET_STORE_CRATES: &[&str] = &[
+    "keyring",
+    "security_framework",
+    "secret_service",
+    "libsecret",
+];
 
 /// The programs that read or write one, named in a string (the `security` utility is the
 /// Keychain's door's alone).
@@ -245,17 +257,19 @@ const SECRET_STORE_PROGRAMS: &[&str] = &["cmdkey", "vaultcmd", "secret-tool"];
 
 /// Whether `text` names a program that reads or writes a secret store of the account's.
 fn names_a_secret_store_program(text: &str) -> bool {
-    text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ';' | '&' | '|' | '(' | ')'))
-        .filter(|word| !word.is_empty())
-        .any(|word| {
-            let name = word
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(word)
-                .to_ascii_lowercase();
-            let name = name.strip_suffix(".exe").unwrap_or(&name);
-            SECRET_STORE_PROGRAMS.contains(&name)
-        })
+    text.split(|c: char| {
+        c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ';' | '&' | '|' | '(' | ')')
+    })
+    .filter(|word| !word.is_empty())
+    .any(|word| {
+        let name = word
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(word)
+            .to_ascii_lowercase();
+        let name = name.strip_suffix(".exe").unwrap_or(&name);
+        SECRET_STORE_PROGRAMS.contains(&name)
+    })
 }
 
 /// The ways to open a SQLite database, which can write: its journal, its WAL, its shared memory.
@@ -664,6 +678,12 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         Class::Operation,
         "a script of the kit's own or a fixture's, started through `Run::script_in`",
     ),
+    (
+        "tests/live_finish/stand_in.rs",
+        "start",
+        Class::Operation,
+        "an offline fixture's own script, started through `Run::fixture_script`",
+    ),
 ];
 
 /// The functions of `std::fs` (and `std::os::*::fs`) that write, copy, rename, link, make or set
@@ -882,7 +902,10 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
     if REMOVALS.contains(&last) {
         return Some((
             Class::Write,
-            format!("{}(…) (a removal that does not ask the write door)", segments.join("::")),
+            format!(
+                "{}(…) (a removal that does not ask the write door)",
+                segments.join("::")
+            ),
         ));
     }
     if (CALLS.contains(&last) && !read) || libc_kill {
@@ -891,19 +914,31 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
     if last == "new" && before == Some("Command") {
         return Some((
             Class::Start,
-            format!("{} (a program started outside the spawn door)", segments.join("::")),
+            format!(
+                "{} (a program started outside the spawn door)",
+                segments.join("::")
+            ),
         ));
     }
-    if START_CALLS.contains(&last) || last.starts_with("CreateProcess") || last.starts_with("ShellExecute") {
+    if START_CALLS.contains(&last)
+        || last.starts_with("CreateProcess")
+        || last.starts_with("ShellExecute")
+    {
         return Some((
             Class::Start,
-            format!("{}(…) (a program started outside the spawn door)", segments.join("::")),
+            format!(
+                "{}(…) (a program started outside the spawn door)",
+                segments.join("::")
+            ),
         ));
     }
     if before == Some("Connection") && DATABASE_OPENS.contains(&last) {
         return Some((
             Class::Database,
-            format!("{}(…) (a database opened outside the database door)", segments.join("::")),
+            format!(
+                "{}(…) (a database opened outside the database door)",
+                segments.join("::")
+            ),
         ));
     }
     if matches!(
@@ -914,7 +949,10 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
     ) {
         return Some((
             Class::Operation,
-            format!("{}(…) (a door's operation, made outside the files that make them)", segments.join("::")),
+            format!(
+                "{}(…) (a door's operation, made outside the files that make them)",
+                segments.join("::")
+            ),
         ));
     }
     if before == Some("Run") && matches!(last, "fixture_script" | "script_in" | "shell_line") {
@@ -929,10 +967,7 @@ fn path_call(segments: &[String], xtask: bool) -> Option<(Class, String)> {
             "Run::operation(…) (a door's operation, made outside the files that make them)".into(),
         ));
     }
-    if xtask
-        && before == Some("process")
-        && XTASK_RUNS.contains(&last)
-    {
+    if xtask && before == Some("process") && XTASK_RUNS.contains(&last) {
         return Some((
             Class::Start,
             format!("process::{last}(…) (a generic start of a program in xtask's live run)"),
@@ -973,7 +1008,9 @@ fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
     if args == 0 && PATH_READS.contains(&name) {
         return Some((
             Class::Read,
-            format!(".{name}() (a read of the file system outside the door's readers and a source)"),
+            format!(
+                ".{name}() (a read of the file system outside the door's readers and a source)"
+            ),
         ));
     }
     if PTY_STARTS.contains(&name) || (name == "exec" && args == 0) {
@@ -985,7 +1022,8 @@ fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
     if name == "start_claude" && args == 5 {
         return Some((
             Class::Operation,
-            ".start_claude(…) (the Keychain control's start of Claude Code, made outside its case)".into(),
+            ".start_claude(…) (the Keychain control's start of Claude Code, made outside its case)"
+                .into(),
         ));
     }
     if name == "as_this_window" {
@@ -996,7 +1034,11 @@ fn method_call(name: &str, args: usize) -> Option<(Class, String)> {
         ));
     }
     let sets = match name {
-        "inheriting_env" | "inheriting_window_env" | "machine_env" | "env_clear" | "env_remove"
+        "inheriting_env"
+        | "inheriting_window_env"
+        | "machine_env"
+        | "env_clear"
+        | "env_remove"
         | "envs" => true,
         "env" => args > 0,
         _ => false,
@@ -1030,7 +1072,9 @@ impl Reader {
     /// Notes a place that does `what`, of `class`. Inside a closure handed to the door only the
     /// door's own act, an ending, is its to allow: a write or a start there is found.
     fn flag(&mut self, class: Class, what: String) {
-        if (class == Class::End && (self.in_door > 0 || self.in_cfg_test > 0)) || self.skip.contains(&class) {
+        if (class == Class::End && (self.in_door > 0 || self.in_cfg_test > 0))
+            || self.skip.contains(&class)
+        {
             return;
         }
         // The unit tests of a file read and name what they made.
@@ -1283,7 +1327,10 @@ impl<'ast> Visit<'ast> for Reader {
             .iter()
             .map(|segment| segment.ident.to_string())
             .collect();
-        if let Some(name) = named.iter().find(|name| PTY_STARTS.contains(&name.as_str())) {
+        if let Some(name) = named
+            .iter()
+            .find(|name| PTY_STARTS.contains(&name.as_str()))
+        {
             self.flag(
                 Class::Start,
                 format!("{name} (a program started on a pty of its own)"),
@@ -1911,10 +1958,24 @@ fn xtasks_live_run_names_no_program_of_its_own_and_the_door_holds_what_it_is_mad
         assert_eq!(xtask(text), Vec::new(), "{text}");
     }
     // The same words in cf-e2e's own files are no xtask's runs.
-    assert_eq!(read("x.rs", "fn f() { let _ = process::run(&i, &env); }"), Vec::new());
+    assert_eq!(
+        read("x.rs", "fn f() { let _ = process::run(&i, &env); }"),
+        Vec::new()
+    );
     // A class a file is left out of is not found there; the others are.
-    let door = |text: &str| read_as("src/door/x.rs", text, false, left_out("src/door/x.rs"), false);
-    assert_eq!(door("fn f() { Command::new(\"x\"); fs::write(p, \"\"); }"), Vec::new());
+    let door = |text: &str| {
+        read_as(
+            "src/door/x.rs",
+            text,
+            false,
+            left_out("src/door/x.rs"),
+            false,
+        )
+    };
+    assert_eq!(
+        door("fn f() { Command::new(\"x\"); fs::write(p, \"\"); }"),
+        Vec::new()
+    );
     assert_eq!(
         door(r#"fn f() { Run::operation("x", p); }"#).len(),
         1,
@@ -1923,12 +1984,22 @@ fn xtasks_live_run_names_no_program_of_its_own_and_the_door_holds_what_it_is_mad
     assert!(left_out("src/live/members/descent/tests.rs").contains(&Class::End));
     assert!(!left_out("src/live/members/descent/tests.rs").contains(&Class::Write));
     // The offline suites are held for every class but the ending of processes they started.
-    let bin = |text: &str| read_as("src/bin/fake_agent.rs", text, false, left_out("src/bin/fake_agent.rs"), false);
-    assert_eq!(bin("fn f() { let _ = Run::new(\"x\").as_this_window(Window::this()); }"), Vec::new());
+    let bin = |text: &str| {
+        read_as(
+            "src/bin/fake_agent.rs",
+            text,
+            false,
+            left_out("src/bin/fake_agent.rs"),
+            false,
+        )
+    };
+    assert_eq!(
+        bin("fn f() { let _ = Run::new(\"x\").as_this_window(Window::this()); }"),
+        Vec::new()
+    );
     assert_eq!(left_out("tests/rig/layout.rs"), [Class::End]);
     assert!(left_out("tests/live_stops/stuck.rs").is_empty());
 }
-
 
 #[test]
 fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files() {
@@ -1961,7 +2032,9 @@ fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_it
             "{text} is not found as a read: {found:?}"
         );
         assert!(
-            !elsewhere(text).iter().any(|found| found.class == Class::Read),
+            !elsewhere(text)
+                .iter()
+                .any(|found| found.class == Class::Read),
             "{text} is found in a file that is no held file's"
         );
     }
@@ -2004,13 +2077,7 @@ fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_it
             !asks,
             "{name}: {found:?}"
         );
-        let imported = read_as(
-            name,
-            "use crate::door::source::Account;",
-            false,
-            &[],
-            false,
-        );
+        let imported = read_as(name, "use crate::door::source::Account;", false, &[], false);
         assert_eq!(
             imported.iter().any(|found| found.class == Class::Owner),
             !asks,
@@ -2025,7 +2092,10 @@ fn the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_it
         &[],
         false,
     );
-    assert!(tally.iter().all(|found| found.class != Class::Owner), "{tally:?}");
+    assert!(
+        tally.iter().all(|found| found.class != Class::Owner),
+        "{tally:?}"
+    );
 }
 
 #[test]
@@ -2082,10 +2152,21 @@ fn the_rule_finds_a_secret_store_no_path_names_and_each_listed_store_has_a_way_i
         "fn f() { let key = keyring_size; }",
     ] {
         assert!(
-            found(text).iter().all(|found| found.class != Class::Account),
+            found(text)
+                .iter()
+                .all(|found| found.class != Class::Account),
             "{text} is found"
         );
     }
-    let door = read_as("src/door/keychain.rs", "fn f() { SecItemAdd(a, b); }", false, left_out("src/door/keychain.rs"), false);
-    assert!(door.iter().all(|found| found.class != Class::Account), "{door:?}");
+    let door = read_as(
+        "src/door/keychain.rs",
+        "fn f() { SecItemAdd(a, b); }",
+        false,
+        left_out("src/door/keychain.rs"),
+        false,
+    );
+    assert!(
+        door.iter().all(|found| found.class != Class::Account),
+        "{door:?}"
+    );
 }

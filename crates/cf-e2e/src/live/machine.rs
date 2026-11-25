@@ -36,8 +36,8 @@ use std::time::Duration;
 use super::isolation::{lasting, Isolation};
 use super::launcher::Guard;
 use super::login::Login;
-use crate::door::source::{Account, Purpose, Source as Owned};
 use super::PLANNED;
+use crate::door::source::{Account, Purpose, Source as Owned};
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, Error, Result};
@@ -535,9 +535,8 @@ pub(super) fn seed_claude_trust_login_only(config: &Path, home: impl Into<Owned>
 }
 
 fn seed_claude_trust_checked(config: &Path, home: &Owned, check_owner: bool) -> Result {
-    let real = |path: &Path| {
-        crate::door::reads::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-    };
+    let real =
+        |path: &Path| crate::door::reads::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let config = real(config);
     if check_owner {
         let owners = home.join(".claude");

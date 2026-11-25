@@ -48,7 +48,11 @@ pub fn start(
     Run::operation("renewal", program)
         .args(words)
         .vars(account.iter().cloned())
-        .vars(crate::live::launcher::updates_off_of(harness).iter().copied())
+        .vars(
+            crate::live::launcher::updates_off_of(harness)
+                .iter()
+                .copied(),
+        )
         .cwd(cwd)
         .closed_input()
         .limit(limit)

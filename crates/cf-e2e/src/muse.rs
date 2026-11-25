@@ -347,8 +347,8 @@ impl StandIn {
     pub fn beside_this_program() -> std::result::Result<Self, String> {
         let me = std::env::current_exe().map_err(|error| error.to_string())?;
         let file = Self::file_of(&me);
-        let text =
-            crate::door::reads::read_to_string(&file).map_err(|error| format!("{}: {error}", file.display()))?;
+        let text = crate::door::reads::read_to_string(&file)
+            .map_err(|error| format!("{}: {error}", file.display()))?;
         Self::from_json(&text).ok_or_else(|| format!("{} says no stand-in", file.display()))
     }
 

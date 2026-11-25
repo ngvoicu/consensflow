@@ -73,10 +73,10 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
         ),
     )
     .vars(home.vars())
-        // A cold Windows PowerShell on a CI runner can take more than the
-        // usual limit just to start.
-        .limit(Duration::from_secs(180))
-        .run()?;
+    // A cold Windows PowerShell on a CI runner can take more than the
+    // usual limit just to start.
+    .limit(Duration::from_secs(180))
+    .run()?;
     assert_eq!(ran.code, Some(1), "{ran}");
     assert_eq!(ran.stderr, unknown(&text));
     Ok(())

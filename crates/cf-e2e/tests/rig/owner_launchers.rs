@@ -15,7 +15,6 @@ use std::fs;
 use std::path::PathBuf;
 
 use cf_e2e::live::{self, Harness, Installed};
-#[cfg(target_os = "macos")]
 use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};

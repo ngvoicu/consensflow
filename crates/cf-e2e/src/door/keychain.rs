@@ -132,7 +132,11 @@ impl Control {
             .args(args)
             .vars(vars)
             .var("HOME", home)
-            .vars(crate::live::launcher::updates_off_of(crate::live::Harness::Claude).iter().copied())
+            .vars(
+                crate::live::launcher::updates_off_of(crate::live::Harness::Claude)
+                    .iter()
+                    .copied(),
+            )
             .cwd(cwd)
             .limit(limit)
             .run()
@@ -197,9 +201,9 @@ pub struct Listing(BTreeSet<String>);
 impl Listing {
     /// The names now: an error where the Keychain cannot be listed here.
     pub fn take() -> Result<Listing> {
-        names().map(Listing).ok_or_else(|| {
-            Error::Daemon("the login Keychain cannot be listed here".to_owned())
-        })
+        names()
+            .map(Listing)
+            .ok_or_else(|| Error::Daemon("the login Keychain cannot be listed here".to_owned()))
     }
 
     /// Of a listing before and one after, the item Claude Code made for `folder`, a config folder
@@ -243,7 +247,14 @@ impl OwnItem {
     pub fn shape(&self, _control: &Control) -> Vec<String> {
         let Ok(ran) = security(
             "keychain::shape",
-            ["find-generic-password", "-s", &self.name, "-a", &self.user, "-w"],
+            [
+                "find-generic-password",
+                "-s",
+                &self.name,
+                "-a",
+                &self.user,
+                "-w",
+            ],
             Duration::from_secs(60),
         ) else {
             return Vec::new();
@@ -354,11 +365,8 @@ mod control_tests {
         let run = crate::door::made("cf-control-start-").unwrap();
         let program = run.path().join("claude");
         let seen = run.path().join("seen");
-        crate::door::write_executable(
-            &program,
-            format!("#!/bin/sh\nenv > '{}'\n", seen.display()),
-        )
-        .unwrap();
+        crate::door::write_executable(&program, format!("#!/bin/sh\nenv > '{}'\n", seen.display()))
+            .unwrap();
         let config = run.path().join("config");
         crate::door::make_dir(&config).unwrap();
         let named = |config: &Path| {
@@ -371,18 +379,31 @@ mod control_tests {
             ]
         };
         control
-            .start_claude(&program, &[], named(&config), run.path(), Duration::from_secs(20))
+            .start_claude(
+                &program,
+                &[],
+                named(&config),
+                run.path(),
+                Duration::from_secs(20),
+            )
             .unwrap();
         let env = std::fs::read_to_string(&seen).unwrap();
         let home = crate::live::machine::home().unwrap();
-        assert!(env.lines().any(|line| line == format!("HOME={}", home.display())), "{env}");
+        assert!(
+            env.lines()
+                .any(|line| line == format!("HOME={}", home.display())),
+            "{env}"
+        );
         assert!(
             env.lines()
                 .any(|line| line == format!("CLAUDE_CONFIG_DIR={}", config.display())),
             "{env}"
         );
         for (name, value) in crate::live::launcher::updates_off_of(crate::live::Harness::Claude) {
-            assert!(env.lines().any(|line| line == format!("{name}={value}")), "{name}: {env}");
+            assert!(
+                env.lines().any(|line| line == format!("{name}={value}")),
+                "{name}: {env}"
+            );
         }
         // A home a caller names, a config folder nobody made, and none named: refused, nothing run.
         let mut with_home = named(&config);
@@ -393,7 +414,10 @@ mod control_tests {
             let refused = control
                 .start_claude(&program, &[], vars, run.path(), Duration::from_secs(20))
                 .unwrap_err();
-            assert!(refused.to_string().contains("Keychain control"), "{refused}");
+            assert!(
+                refused.to_string().contains("Keychain control"),
+                "{refused}"
+            );
             assert!(!seen.exists(), "a refused start ran");
         }
     }

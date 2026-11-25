@@ -143,11 +143,7 @@ fn copy_muse_login_text(text: &str, to: &Path) -> io::Result<()> {
 /// (its secret is in the keychain, which the copy does not carry) and the model catalog cache,
 /// and nothing else of the config (the settings and their backup, what it trusts) or of the data
 /// (its sessions): Muse lists the account's models from the cache and the login alone.
-pub fn copy_muse_into(
-    home: impl Into<Owned>,
-    scratch: &Path,
-    auth: &str,
-) -> io::Result<()> {
+pub fn copy_muse_into(home: impl Into<Owned>, scratch: &Path, auth: &str) -> io::Result<()> {
     let home = home.into();
     copy_muse_login_text(auth, &scratch.join("config/muse/auth.json"))?;
     copy_folder_kept(

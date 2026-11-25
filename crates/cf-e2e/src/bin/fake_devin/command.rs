@@ -57,11 +57,14 @@ pub fn start(
     #[cfg(not(windows))]
     let shell = Run::fixture_script(format!("{command}; true"));
     #[cfg(windows)]
-    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
-        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
-            .to_owned()
-    })?)
-    .args(["-c", &format!("{command}; true")]);
+    let shell = Run::script_in(
+        cf_e2e::process::git_bash().ok_or_else(|| {
+            "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+                .to_owned()
+        })?,
+        &["-c"],
+        format!("{command}; true"),
+    );
     let shell = shell
         .as_this_window(cf_e2e::door::spawn::Window::this())
         .closed_input()

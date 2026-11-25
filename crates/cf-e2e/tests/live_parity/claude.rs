@@ -882,12 +882,16 @@ mod tests {
             }
             cf_e2e::door::make_dir(home.join("bin")).unwrap();
             cf_e2e::door::write(home.join("bin/claude"), "stand-in; never executed").unwrap();
-            cf_e2e::door::set_permissions(home.join("bin/claude"), fs::Permissions::from_mode(0o700))
-                .unwrap();
+            cf_e2e::door::set_permissions(
+                home.join("bin/claude"),
+                fs::Permissions::from_mode(0o700),
+            )
+            .unwrap();
         }
         #[cfg(windows)]
         {
-            cf_e2e::door::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
+            cf_e2e::door::write(home.join(".claude/settings.json"), "invalid owner settings")
+                .unwrap();
             cf_e2e::door::write(home.join(".claude.json"), "invalid owner config").unwrap();
         }
         let credentials = json!({"claudeAiOauth": {"accessToken": "fake-access",

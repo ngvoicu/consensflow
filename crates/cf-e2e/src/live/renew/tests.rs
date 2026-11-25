@@ -411,7 +411,10 @@ mod running {
             "{said}"
         );
         // Put right what the test made unremovable, so that the scratch can go.
-        let _ = crate::door::set_permissions(stuck.join("stuck/inner"), fs::Permissions::from_mode(0o700));
+        let _ = crate::door::set_permissions(
+            stuck.join("stuck/inner"),
+            fs::Permissions::from_mode(0o700),
+        );
         let _ = crate::door::remove(stuck);
     }
 
@@ -603,8 +606,7 @@ fn a_marker_the_account_stores_marks_no_test_machine() {
     assert!(TestMachine::signalled_unless_stored(Some("kit"), stored(&[])).is_some());
     for spelled in ["CONSENSFLOW_TEST_MACHINE", "consensflow_test_machine"] {
         assert!(
-            TestMachine::signalled_unless_stored(Some("kit"), stored(&["Path", spelled]))
-                .is_none(),
+            TestMachine::signalled_unless_stored(Some("kit"), stored(&["Path", spelled])).is_none(),
             "{spelled}"
         );
     }
@@ -637,8 +639,9 @@ fn a_records_folder_that_cannot_be_listed_gives_no_listing() {
 fn a_record_named_in_another_case_is_the_one_listed() {
     let records = crate::door::made("t-").unwrap();
     crate::door::make_dir(records.path().join("-Users-Someone-Work")).unwrap();
-    let listing = crate::door::renewal::Listing::of(&[records.path(), &records.path().join("absent")])
-        .unwrap();
+    let listing =
+        crate::door::renewal::Listing::of(&[records.path(), &records.path().join("absent")])
+            .unwrap();
     assert!(listing.held(0, std::ffi::OsStr::new("-users-someone-work")));
     assert!(!listing.held(0, std::ffi::OsStr::new("-users-someone-other")));
     assert!(!listing.held(1, std::ffi::OsStr::new("-Users-Someone-Work")));

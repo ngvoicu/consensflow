@@ -1090,10 +1090,11 @@ impl Drop for Reaper {
 fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict(
 ) {
     let elsewhere = cf_e2e::door::made("t-").unwrap();
-    let ran = cf_e2e::process::Run::fixture_script(format!("{} > /dev/null 2>&1 & echo $!", command()))
-        .cwd(elsewhere.path())
-        .run()
-        .unwrap();
+    let ran =
+        cf_e2e::process::Run::fixture_script(format!("{} > /dev/null 2>&1 & echo $!", command()))
+            .cwd(elsewhere.path())
+            .run()
+            .unwrap();
     let pid: u32 = ran.stdout.trim().parse().unwrap();
     let mut reaper = Reaper(Grounded::none());
     let began = ThisMachine
@@ -1170,10 +1171,7 @@ fn the_command_of_this_runs_word_is_found_by_it_anywhere_and_another_runs_word_i
         } else {
             ("sleep", vec![word.to_owned()])
         };
-        Run::new(program)
-            .args(args)
-            .spawn()
-            .unwrap()
+        Run::new(program).args(args).spawn().unwrap()
     };
     let began = ThisMachine
         .identity(std::process::id())
@@ -1282,10 +1280,7 @@ fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of
     let spawn = |line: &str| {
         let mut words = line.split_whitespace();
         let program = words.next().unwrap().to_owned();
-        Run::new(program)
-            .args(words)
-            .spawn()
-            .unwrap()
+        Run::new(program).args(words).spawn().unwrap()
     };
     // The run's window began before either.
     let began = ThisMachine
@@ -1461,10 +1456,7 @@ fn a_detached_command_of_the_runs_word_is_said_to_have_escaped_and_runs_on_after
         .started;
     let line = command();
     let mut words = line.split_whitespace();
-    let mut own = Run::new(words.next().unwrap())
-        .args(words)
-        .spawn()
-        .unwrap();
+    let mut own = Run::new(words.next().unwrap()).args(words).spawn().unwrap();
     let pid = own.id();
     let ours = |all: &[Running]| -> Vec<Running> {
         all.iter()

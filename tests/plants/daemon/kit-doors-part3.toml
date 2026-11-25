@@ -309,8 +309,9 @@ runs = ["kd3-lib-door"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/rule.rs"
-find = '''"inheriting_env" | "inheriting_window_env" | "machine_env" | "env_clear" | "env_remove"'''
-replace = '''"inheriting_env" | "inheriting_window_env" | "env_clear" | "env_remove"'''
+find = '''        | "machine_env"
+'''
+replace = ''''''
 
 [[plant]]
 name = "K3 part 3: a run is given the whole environment of the test, not the machine's"

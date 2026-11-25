@@ -110,10 +110,7 @@ pub fn copy_keeping_mode(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result
 }
 
 /// [`copy_keeping_mode`] of a file of the account's, which is read as a [`super::source::Source`].
-pub fn copy_keeping_mode_from(
-    from: &super::source::Source,
-    to: impl AsRef<Path>,
-) -> Result {
+pub fn copy_keeping_mode_from(from: &super::source::Source, to: impl AsRef<Path>) -> Result {
     keep_mode(from.path_for_door(), to.as_ref())
 }
 
@@ -349,11 +346,9 @@ pub fn copy_tree_from(
     to: impl AsRef<Path>,
     skip: &dyn Fn(&super::source::Source) -> bool,
 ) -> Result {
-    tree(
-        from.path_for_door(),
-        to.as_ref(),
-        &|entry| skip(&from.of_walk(entry)),
-    )
+    tree(from.path_for_door(), to.as_ref(), &|entry| {
+        skip(&from.of_walk(entry))
+    })
 }
 
 fn tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result {

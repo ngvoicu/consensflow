@@ -27,11 +27,11 @@
 use std::path::PathBuf;
 use std::thread::sleep;
 
+use cf_e2e::door::Made;
 use cf_e2e::process::is_alive;
 use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Error};
 use serde_json::{json, Value};
-use cf_e2e::door::Made;
 
 use crate::{config, secs, Outcome};
 
@@ -42,12 +42,11 @@ struct Account {
 
 impl Account {
     fn new() -> cf_e2e::Result<Self> {
-        let folder = cf_e2e::door::made("cf-account-")
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        let folder = cf_e2e::door::made("cf-account-").map_err(|source| Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
         Ok(Self { folder })
     }
 

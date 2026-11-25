@@ -289,7 +289,8 @@ mod tests {
         let write = |reports: &Reports| {
             let folder = reports.path().join("windows");
             cf_e2e::door::make_dir(&folder).unwrap();
-            cf_e2e::door::write(folder.join("p1-worker.txt"), "the worker's last screen\n").unwrap();
+            cf_e2e::door::write(folder.join("p1-worker.txt"), "the worker's last screen\n")
+                .unwrap();
         };
         {
             let reports = Reports::keeping_in(kept.path().to_path_buf());

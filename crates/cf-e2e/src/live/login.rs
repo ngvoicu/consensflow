@@ -999,8 +999,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         return Ok(());
     }
     let not_copied = |source: &Path| {
-        source.extension().is_some_and(|ext| ext == "key")
-            || crate::door::reads::is_symlink(source)
+        source.extension().is_some_and(|ext| ext == "key") || crate::door::reads::is_symlink(source)
     };
     crate::door::copy_tree(from, to, &not_copied)
 }
@@ -1022,12 +1021,10 @@ impl Login {
     /// The latter item also holds the owner's MCP tokens, which are not compared there.
     fn owner_login_changed(&self, copied: &OwnerLogin) -> Option<String> {
         let kept = match (&self.source, copied) {
-            (Source::File(file), OwnerLogin::File(Ok(was))) => {
-                Account::this()
-                    .named(file, Purpose::Guard)
-                    .stat()
-                    .is_ok_and(|now| now == *was)
-            }
+            (Source::File(file), OwnerLogin::File(Ok(was))) => Account::this()
+                .named(file, Purpose::Guard)
+                .stat()
+                .is_ok_and(|now| now == *was),
             (Source::Keychain, OwnerLogin::Keychain(copied)) => self
                 .source
                 .read()

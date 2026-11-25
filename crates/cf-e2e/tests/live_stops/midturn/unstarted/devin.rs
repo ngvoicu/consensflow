@@ -327,7 +327,8 @@ mod tests {
         cf_e2e::door::write(store.join("sessions.db"), b"12345").unwrap();
         // A time of whole seconds, which no file system rounds.
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
-        cf_e2e::door::set_modified(store.join("sessions.db"), now - Duration::from_secs(7)).unwrap();
+        cf_e2e::door::set_modified(store.join("sessions.db"), now - Duration::from_secs(7))
+            .unwrap();
         let at = |path: &Path| path.to_string_lossy().into_owned();
         let env = vec![
             ("APPDATA".to_owned(), at(&roaming)),

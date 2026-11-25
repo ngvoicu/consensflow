@@ -6,8 +6,8 @@ use std::os::unix::fs::PermissionsExt;
 use serde_json::json;
 
 use super::*;
-use std::fs;
 use crate::process::Run;
+use std::fs;
 
 /// What a login holds that must never be said or kept in a home that is not its owner's.
 const ACCESS: &str = "pi-access-0123456789";
@@ -2566,7 +2566,12 @@ fn every_store_a_plan_names_is_a_row_of_the_table() {
                 Seed::Fixed { .. } => {}
             }
         }
-        for held in plan.watched.iter().chain(&plan.login_watched).chain(&plan.records) {
+        for held in plan
+            .watched
+            .iter()
+            .chain(&plan.login_watched)
+            .chain(&plan.records)
+        {
             named.push(PathBuf::from(held.to_argument()));
         }
         for path in named {
