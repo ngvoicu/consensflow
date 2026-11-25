@@ -165,6 +165,32 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
             "{line}"
         );
     }
+    // Both PowerShells, as a harness runs a command in them: Windows PowerShell 5.1, and
+    // PowerShell 7 where the machine has it. (`Stop-Process -Name` is a cmdlet: out of reach.)
+    for shell in ["powershell.exe", "pwsh.exe"] {
+        for line in ["taskkill /IM x.exe", "tskill notepad"] {
+            let ran = Command::new(shell)
+                .args(["-NoProfile", "-NonInteractive", "-Command", line])
+                .env("PATH", &window.path)
+                .output();
+            let ran = match ran {
+                Ok(ran) => ran,
+                Err(failed) if shell == "pwsh.exe" => {
+                    eprintln!("SHELL {shell}: not on this machine ({failed})");
+                    continue;
+                }
+                Err(failed) => panic!("{shell}: {failed}"),
+            };
+            let said = String::from_utf8_lossy(&ran.stderr);
+            assert_ne!(ran.status.code(), Some(0), "{shell} {line}: {said}");
+            assert!(said.contains("ConsensFlow:"), "{shell} {line}: {said}");
+            eprintln!("SHELL {shell} {line}: refused");
+        }
+        assert!(
+            !window.reached("taskkill") && !window.reached("tskill"),
+            "{shell}"
+        );
+    }
     // By number it is the real program, with the arguments as they were: a SystemRoot of the
     // test's holds a harmless program as the real taskkill: the test's own executable.
     let root = window.home.join("root");
