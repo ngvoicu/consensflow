@@ -13,7 +13,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::disallowed_methods
+    clippy::disallowed_methods,
+    clippy::print_stderr
 )]
 
 // The window's program writes on a fifo, which only Unix has: elsewhere the tool says so and stops.
