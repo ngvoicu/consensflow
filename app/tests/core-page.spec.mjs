@@ -585,10 +585,10 @@ async function open(page, given = model()) {
               : { accessibility: false, screenRecording: false },
           harnesses: {
             'claude-code': {
-              on: said.on ?? false,
+              on: 'on' in said ? said.on : false,
               folder,
             },
-            codex: { setUp: said.codexSetUp ?? false },
+            codex: { setUp: 'codexSetUp' in said ? said.codexSetUp : false },
           },
         })
       },
@@ -12593,6 +12593,33 @@ const KEPT =
 const OPEN = 'Open System Settings'
 const ACCESSIBILITY = 'Accessibility'
 const SCREEN = 'Screen & System Audio Recording'
+
+test('Project settings: a check the system did not answer says it cannot tell, never off or not set up', async ({
+  page,
+}) => {
+  const data = model()
+  allOn(data, 'claude-code')
+  const worker = data.boards[1].lanes.find((l) => l.participant.role === 'worker')
+  worker.participant.harness = 'codex'
+  data.computerUse = {
+    on: null,
+    codexSetUp: null,
+    permissions: { accessibility: null, screenRecording: null },
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.locator('fieldset.computer-use')).toBeVisible()
+  const shown = await computerUse(dialog)
+  for (const harness of ['claude-code', 'codex']) {
+    const block = shown.find((one) => one.block === harness)
+    expect(block.status).toBe("Can't tell right now")
+    expect(block.lines).toEqual([])
+  }
+  const permissions = shown.find((one) => one.block === 'permissions')
+  expect(permissions.rows.map((row) => row[1])).toEqual(['unknown', 'unknown'])
+  await expect(dialog.getByText(MEND)).toBeHidden()
+})
 
 test('Project settings: a project with no member on a harness with computer use, the chief included, shows no computer use', async ({
   page,

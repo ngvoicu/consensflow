@@ -203,4 +203,30 @@ mod tests {
             "2026-10-05T10:00:01.000Z error the launch of @zeus failed\n    no model\n"
         );
     }
+    /// A log whose file another process holds takes none of the daemon's time: the line goes to
+    /// a writer of its own (T-2232, finding 4).
+    #[test]
+    fn a_line_said_while_the_log_is_held_does_not_wait_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Log::new(dir.path());
+        let beside = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(cf_base::file::lock_beside(log.file()))
+            .unwrap();
+        beside.lock().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            beside.unlock().unwrap();
+        });
+        let began = std::time::Instant::now();
+        cf_engine::seams::Log::warn(&log, "the launch of @chief went on without it");
+        let took = began.elapsed();
+        release.join().unwrap();
+        assert!(
+            took < std::time::Duration::from_millis(200),
+            "the line waited for the log's lock: {took:?}"
+        );
+    }
 }

@@ -978,6 +978,22 @@ impl Drop for OtherProcess {
 mod tests {
     use super::*;
 
+    /// A future that is pending with nobody to wake it must fail at once, never be polled again
+    /// and pass (T-2232, finding 8).
+    #[test]
+    #[should_panic(expected = "work that waited on nothing it was given")]
+    fn work_pending_with_no_wake_fails_though_it_would_be_ready_when_polled_again() {
+        let mut polls = 0;
+        finished(Box::pin(std::future::poll_fn(move |_| {
+            polls += 1;
+            if polls == 1 {
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })));
+    }
+
     #[test]
     fn a_sleep_ends_when_the_clock_reaches_it_and_one_given_up_is_forgotten() {
         let time = Rc::new(ManualTime::new(1_000));
