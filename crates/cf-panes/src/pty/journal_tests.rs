@@ -14,6 +14,7 @@ use crate::pane_handlers::forward_journaled;
 
 type Live = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;
 type Kept = Arc<Mutex<Vec<(Page, u64, Vec<u8>, bool)>>>;
+#[cfg(unix)]
 type Seen = Arc<Mutex<Vec<(u64, usize, u64)>>>;
 
 /// A page's sink: what it was given, whether it is still there.
