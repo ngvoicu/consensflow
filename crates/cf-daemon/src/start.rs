@@ -322,6 +322,7 @@ async fn run(
     // A marker that cannot be written stops the start: a home that would not be known to
     // have a board is one that could open empty at the next start.
     if let Err(failed) = crate::broken::mark(&home) {
+        announce(true);
         log.error_within(
             "the home could not be marked as having a board",
             Some(&failed.to_string()),
