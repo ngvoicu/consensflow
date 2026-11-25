@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::Path;
 
+use super::super::super::threads_value;
+use super::caller_threads;
 use crate::context::Context;
 use crate::process::Invocation;
 
@@ -12,6 +14,9 @@ pub(super) const PLAYWRIGHT_REPORTER: &str = include_str!("playwright.mjs");
 const PLAYWRIGHT_REPORTER_FILE: &str = "plants-playwright.mjs";
 pub(super) const PLAYWRIGHT_REPORT: &str = "playwright.json";
 pub(super) const PLAYWRIGHT_REPORT_VAR: &str = "PLANTS_PLAYWRIGHT_REPORT";
+/// The workers of a run where nothing says how many: Playwright's own number is half the
+/// machine's cores, which is not a limit anybody chose.
+const DEFAULT_WORKERS: u32 = 4;
 
 pub(super) fn setup(
     command: &[String],
@@ -21,7 +26,11 @@ pub(super) fn setup(
     fs::write(dir.join(PLAYWRIGHT_REPORTER_FILE), PLAYWRIGHT_REPORTER)?;
     let reporter = super::from_root(&dir.join(PLAYWRIGHT_REPORTER_FILE), &context.root)?;
     Ok(Invocation::new(command[0].clone(), &context.root)
-        .args(playwright_words(command, &reporter).into_iter().skip(1))
+        .args(
+            playwright_words(command, &reporter, context)
+                .into_iter()
+                .skip(1),
+        )
         .var(PLAYWRIGHT_REPORT_VAR, dir.join(PLAYWRIGHT_REPORT)))
 }
 
@@ -55,7 +64,27 @@ pub(super) fn retried(command: &[String]) -> Option<String> {
 /// word, and a test it runs again is no catch (the reporter's `why`). Each test is
 /// run once too (`--repeat-each=1`, over the command's and the config's), its
 /// repeats being one test to the report (Calliope's look at round 8).
-pub(super) fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
+///
+/// The run is also given its width, `--workers`: the threads the driver was asked for
+/// (`caller_threads`), over the command's own; else the command's own, as written; else
+/// the machine's limit on tests at once (`RUST_TEST_THREADS`, which nextest is given too);
+/// else `DEFAULT_WORKERS`.
+pub(super) fn playwright_words(
+    command: &[String],
+    reporter: &str,
+    context: &Context,
+) -> Vec<String> {
+    let mut command = command.to_vec();
+    let mut width = caller_threads(context);
+    if width.is_some() {
+        command = without_workers(&command);
+    } else if without_workers(&command) == command {
+        let machine = context
+            .env
+            .text("RUST_TEST_THREADS")
+            .and_then(threads_value);
+        width = Some(machine.unwrap_or(DEFAULT_WORKERS).to_string());
+    }
     let mut words: Vec<String> = Vec::new();
     let mut given = command.iter();
     while let Some(word) = given.next() {
@@ -72,13 +101,27 @@ pub(super) fn playwright_words(command: &[String], reporter: &str) -> Vec<String
         .iter()
         .position(|word| word == "test")
         .map_or(words.len(), |at| at + 1);
-    words.splice(
-        test..test,
-        [
-            format!("--reporter=list,{reporter}"),
-            "--retries=0".to_owned(),
-            "--repeat-each=1".to_owned(),
-        ],
-    );
+    let mut ours = vec![
+        format!("--reporter=list,{reporter}"),
+        "--retries=0".to_owned(),
+        "--repeat-each=1".to_owned(),
+    ];
+    ours.extend(width.map(|width| format!("--workers={width}")));
+    words.splice(test..test, ours);
+    words
+}
+
+/// `command` without the words that say how many workers it has, in each way Playwright
+/// takes them: `--workers N`, `--workers=N`, `-j N`, `-jN` and `-j=N`.
+fn without_workers(command: &[String]) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut given = command.iter();
+    while let Some(word) = given.next() {
+        if word == "--workers" || word == "-j" {
+            given.next();
+        } else if !word.starts_with("--workers=") && !word.starts_with("-j") {
+            words.push(word.clone());
+        }
+    }
     words
 }

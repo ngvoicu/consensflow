@@ -47,7 +47,7 @@ const ABOUT: &str = "Plant the bugs of a family one at a time and check that a t
 const USAGE: &str = "<family> [words in a plant's name…] [--check] [--test-threads N]";
 /// What `--test-threads` does and why it is there: the Mac's one machine, where a run
 /// uncapped stopped the board over its heat (`this heat stopped the board once`).
-const OPTIONS: &str = "      --test-threads N   nextest and cargo test runs get N threads; it wins over a table's; this heat stopped the board once\n      CF_PLANTS_TEST_THREADS=N   the same, where no flag is given";
+const OPTIONS: &str = "      --test-threads N   nextest and cargo test runs get N threads, Playwright runs N workers (4 where nothing says); it wins over a table's; this heat stopped the board once\n      CF_PLANTS_TEST_THREADS=N   the same, where no flag is given";
 
 /// The variable that carries the threads the plants driver was asked for, from the flag
 /// or the environment: nextest is given them as its own option (`reporters`).
