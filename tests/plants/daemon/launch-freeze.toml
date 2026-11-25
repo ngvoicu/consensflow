@@ -8,7 +8,10 @@
 # so in the log (crates/cf-engine/src/computer_use.rs, `went_on_without_the_note`).
 
 [run]
-lf-plan = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread"]
+lf-late = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_whose_plan_was_late", "--", "--test-threads=2"]
+lf-logfile = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::log::tests"]
+lf-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_check_the_system_did_not_answer"]
+lf-plan = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "plan_off_thread", "--", "--test-threads=1"]
 lf-log = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_launch_the_system_gave_no_answer", "--", "--test-threads=2"]
 lf-query = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_permission_query_that_waits"]
 lf-config = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "computer_use::off_thread::a_read_of_claude_codes"]
@@ -21,7 +24,7 @@ runs = ["lf-query"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/computer_use.rs"
-find = """        Box::pin(async move { Ok(self.ask(move |_| grants()).await?) })"""
+find = """        Box::pin(async move { self.ask(move |_| grants()).await })"""
 replace = """        Box::pin(async move { Ok(grants()) })"""
 
 [[plant]]
@@ -49,45 +52,14 @@ replace = """        let _ = within;"""
 
 [[plant]]
 name = 'launch-freeze: the plan makes its files on the engine thread again'
-meant = "a_plan_whose_file_is_slow_to_write_leaves_the_thread_going_and_the_write_is_whole"
-runs = ["lf-plan"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/off_thread.rs"
-find = """            launch.with(|launch| work(&env, launch))
-        })) {
-            let _ = answer.send(made);
-        }
-    });
-    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));"""
-replace = """            launch.with(|launch| work(&env, launch))
-        })) {
-            let _ = answer.send(made);
-        }
-    });
-    job();
-    let sent: Result<Result<(), ()>, ()> = Ok(Ok(()));"""
-
-[[plant]]
-name = 'launch-freeze: the folders of the project are read on the engine thread again'
 meant = "a_plan_that_waits_on_a_folder_of_the_project_leaves_the_thread_going"
 runs = ["lf-plan"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/off_thread.rs"
-find = """            launch.with(|launch| work(&env, launch))
-        })) {
-            let _ = answer.send(made);
-        }
-    });
-    let sent = queue().lock().map(|jobs| jobs.send(counted(job)));"""
-replace = """            launch.with(|launch| work(&env, launch))
-        })) {
-            let _ = answer.send(made);
-        }
-    });
-    job();
-    let sent: Result<Result<(), ()>, ()> = Ok(Ok(()));"""
+find = """    apart(env, step, move || launch.with(|launch| work(&own, launch))).await"""
+replace = """    let _ = step;
+    Ok(launch.with(|launch| work(&own, launch)))"""
 
 [[plant]]
 name = 'launch-freeze: a launch the system gave no answer to says nothing in the log'
@@ -100,3 +72,106 @@ find = """        self.seams.log.warn(&format!(
             "the launch of @{} went on without"""
 replace = """        self.seams.log.info(&format!(
             "the launch of @{} went on without"""
+
+[[plant]]
+name = 'launch-freeze: the trust watch reads the project settings on the engine thread again'
+meant = "the_trust_watch_reads_the_project_settings_off_the_thread"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = """        Box::pin(async move {
+            crate::shared::off_thread::work(
+                &self.env,
+                crate::shared::off_thread::step::SETTINGS,
+                move |_| trust::chosen(&directory),
+            )
+            .await
+            .ok()
+        })"""
+replace = """        Box::pin(async move { Some(trust::chosen(&directory)) })"""
+
+[[plant]]
+name = 'launch-freeze: one plan at a time again'
+meant = "a_launch_of_another_project_is_planned_while_one_waits_on_its_folder"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """            if let Ok(value) = catch_unwind(AssertUnwindSafe(call)) {"""
+replace = """            static ONE: Mutex<()> = Mutex::new(());
+            let _one = ONE.lock();
+            if let Ok(value) = catch_unwind(AssertUnwindSafe(call)) {"""
+
+[[plant]]
+name = 'launch-freeze: a plan has no deadline'
+meant = "a_plan_that_does_not_end_in_its_time_fails_naming_its_step"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/off_thread.rs"
+find = """                answered(&answer, None);"""
+replace = """                let _ = &answer;"""
+
+[[plant]]
+name = 'launch-freeze: a launch file is written in place'
+meant = "a_launch_file_is_in_place_only_once_it_is_whole"
+runs = ["lf-plan"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = """write_in_place(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;"""
+replace = """cf_base::file::write_file(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;"""
+
+[[plant]]
+name = 'launch-freeze: a late plan is not named in its note'
+meant = "a_launch_whose_plan_was_late_says_which_step_took_too_long"
+runs = ["lf-late"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """                    Why::Late(step, seconds)"""
+replace = """                    let _ = (step, seconds);
+                    Why::Unsaid"""
+
+[[plant]]
+name = 'launch-freeze: the log appends where the line is said'
+meant = "a_line_said_while_the_log_is_held_does_not_wait_for_it"
+runs = ["lf-logfile"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = """        let Some(writer) = &self.writer else {
+            // The home may be read-only or gone mid-run."""
+replace = """        let Some(writer) = None::<&Writer> else {
+            // The home may be read-only or gone mid-run."""
+
+[[plant]]
+name = 'launch-freeze: a dropped line of the log is not counted'
+meant = "lines_the_writer_is_too_far_behind_to_take_are_dropped_and_counted"
+runs = ["lf-logfile"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/log.rs"
+find = """            writer.dropped.fetch_add(dropped + 1, Ordering::SeqCst);"""
+replace = """            let _ = dropped;"""
+
+[[plant]]
+name = 'launch-freeze: a permission check with no answer reads as none'
+meant = "a_check_the_system_did_not_answer_is_unknown_and_never_off"
+runs = ["lf-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/computer_use.rs"
+find = """        Err(_) => json!({ "accessibility": null, "screenRecording": null }),"""
+replace = """        Err(_) => Value::Null,"""
+
+[[plant]]
+name = 'launch-freeze: a Codex check with no answer reads as not set up'
+meant = "a_check_the_system_did_not_answer_is_unknown_and_never_off"
+runs = ["lf-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/computer_use.rs"
+find = """    let codex_set_up = codex.ok().map(|codex| codex.set_up);"""
+replace = """    let codex_set_up = Some(codex.unwrap_or_default().set_up);"""
