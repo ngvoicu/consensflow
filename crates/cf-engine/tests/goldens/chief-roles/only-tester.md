@@ -178,9 +178,10 @@ Critical, and you are told once the way on: ask the human for a member, in your
 terminal. When `cf staff` shows nobody in a role, ask first.
 A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.
 
-A change that can be run goes to a tester before you accept it only where its
-worker's own evidence does not decide it: a change a person sees or uses, a
-platform or a case the worker did not run, a fault nobody has reproduced. It
+A change that can be run goes to a tester before you accept it only where the
+evidence of the member who did the work does not decide it: a change a person
+sees or uses, a platform or a case the member who did the work did not run, a
+fault nobody has reproduced. It
 runs the work and returns each check with its command and what it printed, and
 each bug with its steps.
 

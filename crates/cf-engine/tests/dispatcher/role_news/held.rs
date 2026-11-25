@@ -579,3 +579,75 @@ fn a_role_change_is_told_though_the_skill_of_specs_that_did_not_change_cannot_be
     );
     context.close();
 }
+
+/// Muse Code's `/clear` runs no hook, so its greeting waits to go in; the person types into the
+/// new session first and its hook greets it. The greeting is withdrawn, and the session holds
+/// the role the window launched with: a role gained since is told it, at the next rest.
+#[test]
+fn a_greeting_withdrawn_because_a_hook_greeted_the_session_leaves_a_role_gained_since_the_launch_to_be_told(
+) {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "muse");
+    let chief = at_rest(&context, &project);
+    joins(&context, project.id, "athena", "advisor", "standard");
+    passes(&context);
+    rests(&context, &project);
+    assert_eq!(told(&context, chief).len(), 1, "the gain, told");
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    context.adapter.with("chief", |agent| agent.settled = false);
+    passes(&context);
+    let greeting = role_notes(&context, chief)
+        .into_iter()
+        .find(|note| note.body.contains("began without your ConsensFlow role"))
+        .expect("the greeting waits");
+    assert_eq!(greeting.state, "queued");
+    // The person types, and the hook greets the session with the launch's role.
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.clear();
+        agent.settled = true;
+    });
+    passes(&context);
+    passes(&context);
+    assert_eq!(context.message(greeting.id).state, "cancelled");
+    rests(&context, &project);
+    passes(&context);
+    let notes = told(&context, chief);
+    assert_eq!(notes.len(), 2, "the advisor said again: {notes:?}");
+    says_the_section(&notes[1], &["worker", "advisor"], &CfWord::bare());
+    context.close();
+}
+
+/// A conversation the window comes back to, already told the role as it is now, is taken as
+/// told it: nothing is said to it again.
+#[test]
+fn a_return_to_a_conversation_already_told_the_role_as_it_is_now_tells_it_nothing_more() {
+    let context = made(FirstMessage::Delivered);
+    let project = project_on(&context, "claude-code");
+    let chief = at_rest(&context, &project);
+    joins(&context, project.id, "athena", "advisor", "standard");
+    passes(&context);
+    rests(&context, &project);
+    // A session no hook greeted is given the role as it is, and recorded told it.
+    context.adapter.with("chief", |agent| {
+        agent.ungreeted.push("native-cleared".into())
+    });
+    context.adapter.switch_to("chief", "native-cleared");
+    passes(&context);
+    passes(&context);
+    rests(&context, &project);
+    let before = role_notes(&context, chief).len();
+    // A conversation a hook greeted holds the launch's role; then back to the first.
+    context.adapter.switch_to("chief", "native-older");
+    context.pass().unwrap();
+    context.adapter.switch_to("chief", "native-cleared");
+    passes(&context);
+    passes(&context);
+    rests(&context, &project);
+    passes(&context);
+    let notes = role_notes(&context, chief);
+    assert_eq!(notes.len(), before, "{notes:?}");
+    context.close();
+}

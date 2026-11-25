@@ -117,11 +117,8 @@ fn paragraph_of(role: &str) -> &'static str {
 }
 
 /// The words in which "worker" stands for any member whose window, message or work is spoken
-/// of (the design's known limit): they name no role of the staff. The first eight are the
-/// body's. The rest are in the paragraphs of a held role, which the design gives word for
-/// word: the frontend designer's, the architect's and the tester's, whose "worker" is the
-/// author of the work.
-const ANY_MEMBER: [&str; 14] = [
+/// of (the design's known limit): they name no role of the staff. They are the body's.
+const ANY_MEMBER: [&str; 8] = [
     "a worker's task",
     "a worker starts from nothing",
     "result from @worker",
@@ -130,12 +127,6 @@ const ANY_MEMBER: [&str; 14] = [
     "A worker's question",
     "A worker's window",
     "board for a fresh worker",
-    "a worker's question of look",
-    "Never give it and a worker the same files",
-    "a screen a worker built",
-    "the workers' briefs point to them",
-    "its worker's own evidence",
-    "a case the worker did not run",
 ];
 
 /// `text` without the line that names the roles nobody holds, the image fallback, the staff

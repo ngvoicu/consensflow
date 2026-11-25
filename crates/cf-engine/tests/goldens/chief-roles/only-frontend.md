@@ -180,9 +180,10 @@ A task its member cannot run goes to that member's backup; a member on Vacation 
 
 How a screen looks, feels and moves is the frontend designer's call: its brief
 gives the purpose (who uses the screen, what they must be able to do, what
-exists already), never the look, and a worker's question of look goes to it
-through you. Never give it and a worker the same files at once: order the two
-with `--needs`. It can also go over a screen a worker built.
+exists already), never the look, and another member's question of look goes
+to it through you. Never give it and another member the same files at once:
+order the two with `--needs`. It can also go over a screen another member
+built.
 
 A member that needs images asks you with a drawing order for each. With no image
 designer, the member makes them itself (SVG, CSS or its harness's image tool),

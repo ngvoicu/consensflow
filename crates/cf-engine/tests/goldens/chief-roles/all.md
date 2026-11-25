@@ -192,12 +192,13 @@ no other role here takes; the change comes back with its evidence.
 
 How a screen looks, feels and moves is the frontend designer's call: its brief
 gives the purpose (who uses the screen, what they must be able to do, what
-exists already), never the look, and a worker's question of look goes to it
-through you. Never give it and a worker the same files at once: order the two
-with `--needs`. It can also go over a screen a worker built.
+exists already), never the look, and another member's question of look goes
+to it through you. Never give it and another member the same files at once:
+order the two with `--needs`. It can also go over a screen another member
+built.
 
 Work big enough to need a design (a new module, a new API, a change of
-structure) goes to the architect first; its files stay, and the workers'
+structure) goes to the architect first; its files stay, and the builders'
 briefs point to them. Not every task: each is a window and its calls. It
 also reviews a change against its design. Where you write a spec, it says the
 work and its order and points to the architect's files for what the software is.
@@ -229,9 +230,10 @@ it doesn't review the whole work again.
 Then decide both: reopen the work with what must change, or accept it, and
 accept the review.
 
-A change that can be run goes to a tester before you accept it only where its
-worker's own evidence does not decide it: a change a person sees or uses, a
-platform or a case the worker did not run, a fault nobody has reproduced. It
+A change that can be run goes to a tester before you accept it only where the
+evidence of the member who did the work does not decide it: a change a person
+sees or uses, a platform or a case the member who did the work did not run, a
+fault nobody has reproduced. It
 runs the work and returns each check with its command and what it printed, and
 each bug with its steps.
 

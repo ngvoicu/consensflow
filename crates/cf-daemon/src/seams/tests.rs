@@ -220,6 +220,34 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
 }
 
 #[test]
+fn a_chief_is_given_the_roles_it_is_handed_and_not_those_of_the_table() {
+    let scene = scene();
+    let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
+    let chief = participant(&scene.project, "chief");
+    let table = held(&scene.project);
+    assert_eq!(table, vec!["worker"], "the scene's staff is one worker");
+    let own = texts
+        .instructions(chief, &scene.project, &table, None)
+        .unwrap();
+    assert!(!own.contains("--advice"), "{own}");
+    let handed = texts
+        .instructions(chief, &scene.project, &["worker", "advisor"], None)
+        .unwrap();
+    assert!(handed.contains("--advice"), "the advisor handed: {handed}");
+    assert!(
+        !handed.contains("| advisor |"),
+        "its table is the project's: {handed}"
+    );
+    let none = texts
+        .instructions(chief, &scene.project, &["advisor"], None)
+        .unwrap();
+    assert!(
+        !none.contains("task add --tier "),
+        "no worker handed: {none}"
+    );
+}
+
+#[test]
 fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();
     let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());

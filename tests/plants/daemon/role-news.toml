@@ -14,6 +14,7 @@
 
 [run]
 rn-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::"]
+rn-daemon-seam = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::tests::a_chief_is_given_the_roles_it_is_handed"]
 rn-news-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "roles::news"]
 rn-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "--", "a_chief_whose_window_is_open"]
 rn-harness-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::tests::a_chief_whose_window_is_open"]
@@ -399,3 +400,13 @@ runs = ["rn-page"]
 file = "app/ui/core/staff-rules.js"
 find = "    const told = this.#page.chiefRunning() ? 'the chief is told now, and ' : ''"
 replace = "    const told = ''"
+
+[[plant]]
+name = "role news: the daemon gives a chief the roles of its table, not those it is handed"
+meant = "a_chief_is_given_the_roles_it_is_handed_and_not_those_of_the_table"
+runs = ["rn-daemon-seam"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "            &staff_of(project),\n            held,\n"
+replace = "            &staff_of(project),\n            &cf_engine::roles::held_roles(&staff_of(project)),\n"

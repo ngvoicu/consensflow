@@ -179,7 +179,7 @@ terminal. When `cf staff` shows nobody in a role, ask first.
 A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.
 
 Work big enough to need a design (a new module, a new API, a change of
-structure) goes to the architect first; its files stay, and the workers'
+structure) goes to the architect first; its files stay, and the builders'
 briefs point to them. Not every task: each is a window and its calls. It
 also reviews a change against its design. Where you write a spec, it says the
 work and its order and points to the architect's files for what the software is.

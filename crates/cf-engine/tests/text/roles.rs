@@ -227,7 +227,7 @@ fn teaches_only_the_boards_commands(role: &str) {
         }
         assert!(!found(r"no file changed|changes no file", &text));
         assert!(found(
-            r"A change that can be run goes to a tester before you accept it only where its\s+worker's own evidence does not decide it",
+            r"A change that can be run goes to a tester before you accept it only where the\s+evidence of the member who did the work does not decide it",
             &text
         ));
         assert!(text.contains("`cf staff` shows them as they are now"));
@@ -564,13 +564,13 @@ fn tells_the_chief_when_work_goes_to_each_role_and_how_a_members_images_are_draw
             "A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.",
             "Work that can run on its own in a fresh window (a fix, a feature, a document, a script) goes to a worker",
             // The architect (A3, A5): a design first, and the briefs point to its files.
-            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",
+            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the builders' briefs point to them.",
             "It also reviews a change against its design.",
             "Where you write a spec, it says the work and its order and points to the architect's files for what the software is.",
             // The frontend designer: the purpose, never the look (rule 0); never beside a worker in the same files.
-            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and a worker's question of look goes to it through you.",
-            "Never give it and a worker the same files at once: order the two with `--needs`.",
-            "It can also go over a screen a worker built.",
+            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and another member's question of look goes to it through you.",
+            "Never give it and another member the same files at once: order the two with `--needs`.",
+            "It can also go over a screen another member built.",
             "A question of fact you need answered before you plan or decide",
             "goes to the researcher when it takes more than a few lookups.",
             "goes to an advisor before you commit to it",
