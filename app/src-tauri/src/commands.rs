@@ -304,6 +304,8 @@ fn enqueue_page_call<R: Runtime>(
 /// What the human types or pastes, in one call: the bytes of a key, or of a
 /// paste whole with its markers.
 #[tauri::command]
+// The page names each argument; a command cannot take them as one value.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
@@ -325,6 +327,8 @@ pub fn pane_input_enqueue<R: Runtime>(
 }
 
 #[tauri::command]
+// The page names each argument; a command cannot take them as one value.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
