@@ -99,13 +99,17 @@ function standIn() {
   }
   // The product's fit asks the box for a size; here it asks for the size the xterm has, so the
   // sizes are the case's (a drag is the case's own resize of the xterm) and the fit's own paths
-  // run unchanged.
-  import('/vendor/xterm.js').then(({ FitAddon }) => {
+  // run unchanged. The modules are the page's own, imported once it has loaded them (no card, and
+  // so no terminal, comes before the page has asked the app anything).
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Whole URLs: WebKit resolves a relative one in an injected script against its own scripts.
+    const [{ FitAddon }, { XtermEmulator }] = await Promise.all([
+      import(`${location.origin}/vendor/xterm.js`),
+      import(`${location.origin}/term.js`),
+    ])
     FitAddon.prototype.proposeDimensions = function () {
       return { cols: this._terminal.cols, rows: this._terminal.rows }
     }
-  })
-  import('/term.js').then(({ XtermEmulator }) => {
     window.__XtermEmulator = XtermEmulator
   })
   const decode = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0))
