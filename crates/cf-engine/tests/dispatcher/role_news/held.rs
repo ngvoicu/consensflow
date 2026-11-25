@@ -514,6 +514,7 @@ fn a_clear_with_nothing_told_since_the_launch_tells_the_new_conversation_nothing
 fn a_clear_cancels_a_note_that_waited_for_the_conversation_left_and_says_it_anew() {
     let context = made(FirstMessage::Delivered);
     let project = project_on(&context, "devin");
+    let chief = at_rest(&context, &project);
     joins(&context, project.id, "athena", "advisor", "standard");
     passes(&context);
     rests(&context, &project);
