@@ -450,9 +450,15 @@ mod control_tests {
             "claude_config_dir".to_owned(),
             foreign.path().to_string_lossy().into_owned(),
         )];
-        assert!(control
+        let refused = control
             .start_claude(&program, &[], lower, run.path(), Duration::from_secs(20))
-            .is_err());
+            .unwrap_err()
+            .to_string();
+        // It is refused as a folder no run made, not as no folder named.
+        assert!(
+            refused.contains(&foreign.path().to_string_lossy().into_owned()),
+            "{refused}"
+        );
         assert!(!seen.exists(), "a refused start ran");
         // Any program but Claude Code's is refused, whatever it is named: a file of the run's the
         // kit does not know as Claude's, the Keychain's utility, cargo, a shell given a command.
