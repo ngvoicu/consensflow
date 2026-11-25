@@ -387,9 +387,11 @@ fn the_last_numbered_resume_is_the_last_by_the_ledger_s_order_not_by_its_wall_cl
 fn retry_at(ledger: &Ledger) -> Option<String> {
     ledger
         .sqlite()
-        .query_row("SELECT turn_retry_at FROM task WHERE number = 1", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT turn_retry_at FROM task WHERE number = 1",
+            [],
+            |row| row.get(0),
+        )
         .expect("the time")
 }
 

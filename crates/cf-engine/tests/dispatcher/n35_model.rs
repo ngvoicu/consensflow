@@ -24,8 +24,8 @@
 
 use super::fixtures::{given, Tiers};
 use super::n35_hold::{fail, next_turn_opens, resumes, retrying, working};
-use cf_harness::records::Quota;
 use cf_engine::testing::{Context, Restarted};
+use cf_harness::records::Quota;
 use cf_harness::seams::Time;
 
 const RENEWAL_MS: i64 = 30 * 60 * 1000;
@@ -54,11 +54,16 @@ enum Phase {
     /// A turn is at work in the task's window.
     Working,
     /// A failed turn's task is held for its retry, due at this wall-clock time.
-    Held { due: i64 },
+    Held {
+        due: i64,
+    },
     /// main's numbered Resume is queued for the busy window.
     Queued,
     /// The member's quota or a busy model holds the task until this time.
-    Quota { until: i64, busy: bool },
+    Quota {
+        until: i64,
+        busy: bool,
+    },
     Failed,
     Done,
 }
@@ -80,6 +85,9 @@ enum Step {
     Restart,
     Forward,
     Back,
+    /// The clock moves on to the failure's side of the 30 minutes after the last numbered retry:
+    /// a few milliseconds either way of the boundary.
+    Boundary,
     /// The clock moves on by this many milliseconds (both clocks).
     Wait(i64),
     /// The wall clock is put back by this many milliseconds.
@@ -220,12 +228,23 @@ impl<'a> Model<'a> {
     fn enabled(&self) -> Vec<Step> {
         use Step::*;
         let mut steps = vec![Forward];
+        if self.last.is_some() {
+            steps.extend([Boundary, Boundary]);
+        }
         if matches!(self.phase, Phase::Working | Phase::Held { .. }) {
             steps.push(Back);
         }
         match self.phase {
             Phase::Working => {
-                steps.extend([Fail, Fail, Fail, ChiefWord, QuotaStart(false), QuotaStart(true), Move]);
+                steps.extend([
+                    Fail,
+                    Fail,
+                    Fail,
+                    ChiefWord,
+                    QuotaStart(false),
+                    QuotaStart(true),
+                    Move,
+                ]);
                 if self.fresh && !self.woke {
                     steps.push(Result);
                 }
@@ -246,8 +265,12 @@ impl<'a> Model<'a> {
     }
 
     fn run(&mut self, step: Step, rng: &mut Rng) {
-        self.log.push(format!("{step:?} at {} ({:?})", self.now(), self.phase));
-        if !matches!(step, Step::Forward | Step::Back | Step::Wait(_) | Step::Rewind(_)) {
+        self.log
+            .push(format!("{step:?} at {} ({:?})", self.now(), self.phase));
+        if !matches!(
+            step,
+            Step::Forward | Step::Back | Step::Boundary | Step::Wait(_) | Step::Rewind(_)
+        ) {
             self.fresh = matches!(
                 step,
                 Step::DueDelivered | Step::Deliver | Step::Reopen | Step::QuotaEnd | Step::Move
@@ -259,27 +282,35 @@ impl<'a> Model<'a> {
         let pastes = matches!(
             step,
             Step::DueDelivered
-                | Step::DueQueued
                 | Step::Deliver
-                | Step::Withdraw
                 | Step::ChiefWord
                 | Step::PersonResume
                 | Step::Reopen
                 | Step::QuotaEnd
                 | Step::Move
-                | Step::QuotaStart(_)
-                | Step::Result
         );
         match step {
             Step::Forward => {
-                let by = [1_000, 31_000, 121_000, 600_000, 1_799_000, 1_800_000, 1_801_000, 3_600_000]
-                    [rng.below(8) as usize];
+                let by = [
+                    1_000, 31_000, 121_000, 600_000, 1_799_000, 1_800_000, 1_801_000, 3_600_000,
+                ][rng.below(8) as usize];
                 self.c.advance(by);
+            }
+            Step::Boundary => {
+                // The failure that follows waits a second first: it lands this far from the
+                // 30 minutes after the last moment anything happened to a numbered retry.
+                let d = [-1_001, -1_000, -999, -1, 0, 1, 1_000][rng.below(7) as usize];
+                let last = self.last.expect("a numbered retry happened");
+                let at = last + RENEWAL_MS + d - 1_000;
+                if at > self.now() {
+                    self.c.advance(at - self.now());
+                }
             }
             Step::Wait(by) => self.c.advance(by),
             Step::Rewind(by) => self.c.step_wall(-by),
             Step::Back => {
-                let by = [1_000, 60_000, 300_000, 1_800_000][rng.below(4) as usize];
+                let by = [1_000, 60_000, 300_000, 1_800_000, 1_860_000, 2_700_000]
+                    [rng.below(6) as usize];
                 if self.now() - by > self.floor.max(self.pasted) {
                     self.c.step_wall(-by);
                 }
@@ -338,7 +369,14 @@ impl<'a> Model<'a> {
         let thread = self.t.task(1);
         if std::env::var("CF_N35_DEBUG").is_ok() {
             for m in &thread.messages {
-                eprintln!("  m-{} {} {} from {:?}: {}", m.id, m.kind, m.state, m.sender, m.body.chars().take(60).collect::<String>());
+                eprintln!(
+                    "  m-{} {} {} from {:?}: {}",
+                    m.id,
+                    m.kind,
+                    m.state,
+                    m.sender,
+                    m.body.chars().take(60).collect::<String>()
+                );
             }
         }
         let task = thread.task;
@@ -399,6 +437,7 @@ impl<'a> Model<'a> {
             }
             _ => {
                 self.touched();
+                self.pasted = self.pasted.max(self.now());
                 next_turn_opens(c, &window);
                 self.passes(2);
                 self.phase = Phase::Working;
@@ -478,7 +517,12 @@ impl<'a> Model<'a> {
         self.word += 1;
         c.ledger
             .borrow_mut()
-            .tell_queued(self.t.project.id, 1, "chief", &format!("Use file number {}.", self.word))
+            .tell_queued(
+                self.t.project.id,
+                1,
+                "chief",
+                &format!("Use file number {}.", self.word),
+            )
             .unwrap();
         self.reset("the chief's word");
         if matches!(self.phase, Phase::Held { .. }) {
@@ -505,7 +549,10 @@ impl<'a> Model<'a> {
         c.resume_task(self.t.project.id, 1, "go on with the plan");
         for _ in 0..8 {
             self.pass();
-            if given(c, "zeus").iter().any(|text| text.contains("go on with the plan")) {
+            if given(c, "zeus")
+                .iter()
+                .any(|text| text.contains("go on with the plan"))
+            {
                 break;
             }
         }
@@ -522,9 +569,14 @@ impl<'a> Model<'a> {
             return;
         }
         c.advance(1_000);
-        c.adapter.answer("zeus", "Receipt 42, the requested action is complete.");
+        c.adapter
+            .answer("zeus", "Receipt 42, the requested action is complete.");
         self.passes(4);
-        assert_eq!(self.state(), "done", "the turn's answer is the task's result");
+        assert_eq!(
+            self.state(),
+            "done",
+            "the turn's answer is the task's result"
+        );
         self.reset("a result");
         self.phase = Phase::Done;
     }
@@ -539,7 +591,10 @@ impl<'a> Model<'a> {
             .unwrap();
         for _ in 0..8 {
             self.pass();
-            if given(c, "zeus").iter().any(|text| text.contains("Handle one more case.")) {
+            if given(c, "zeus")
+                .iter()
+                .any(|text| text.contains("Handle one more case."))
+            {
                 break;
             }
         }
@@ -596,7 +651,10 @@ impl<'a> Model<'a> {
                 break;
             }
         }
-        assert!(resumes(c, "zeus") > before, "the quota's own Resume reached the window");
+        assert!(
+            resumes(c, "zeus") > before,
+            "the quota's own Resume reached the window"
+        );
         c.adapter.with(&window, |agent| agent.quota = None);
         next_turn_opens(c, &window);
         self.passes(2);
@@ -797,7 +855,11 @@ fn t_2246_finding_5_a_quota_between_two_failures_changes_nobody_s_count() {
 #[test]
 fn t_2246_finding_6_a_word_in_a_hold_begins_the_count_and_the_next_charge_is_the_first() {
     let (_c, phase, count) = script(&[Fail, DueDelivered, Fail, ChiefWord, DueDelivered, Fail]);
-    assert_eq!((held(phase), count), (true, 1), "the second try of a fresh pair");
+    assert_eq!(
+        (held(phase), count),
+        (true, 1),
+        "the second try of a fresh pair"
+    );
 }
 
 #[test]
@@ -815,7 +877,11 @@ fn t_2262_finding_8_one_delivery_renews_the_count_once() {
         DueDelivered,
         Fail,
     ]);
-    assert_eq!((phase, count), (Phase::Failed, 2), "two in the fresh pair, no third");
+    assert_eq!(
+        (phase, count),
+        (Phase::Failed, 2),
+        "two in the fresh pair, no third"
+    );
 }
 
 #[test]
@@ -837,5 +903,9 @@ fn t_2280_finding_9_a_first_turn_failing_after_a_word_with_a_count_of_zero_stamp
         DueDelivered,
         Fail,
     ]);
-    assert_eq!((phase, count), (Phase::Failed, 2), "two charged since the word, no third");
+    assert_eq!(
+        (phase, count),
+        (Phase::Failed, 2),
+        "two charged since the word, no third"
+    );
 }
