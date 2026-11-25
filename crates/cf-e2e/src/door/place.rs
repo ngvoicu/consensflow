@@ -258,6 +258,131 @@ pub fn within(inner: &Path, outer: &Path, any_case: bool) -> bool {
     inner.len() >= outer.len() && inner[..outer.len()] == outer[..]
 }
 
+/// A part of a path that is there, by its identity, and the names that lead from it to the path
+/// the chain was made of (none where it is the path itself).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub id: String,
+    pub tail: Vec<OsString>,
+}
+
+/// Whether `ours` begins with `theirs`, name by name, in any case where `any_case`.
+fn begins_with(ours: &[OsString], theirs: &[OsString], any_case: bool) -> bool {
+    let fold = |name: &OsString| {
+        let name = name.to_string_lossy();
+        if any_case {
+            name.to_lowercase()
+        } else {
+            name.into_owned()
+        }
+    };
+    ours.len() >= theirs.len()
+        && ours
+            .iter()
+            .zip(theirs)
+            .all(|(one, other)| fold(one) == fold(other))
+}
+
+/// The identity of every part of `path` that is there, from the deepest to the root, each with
+/// the names below it (K3, N7): the file system's own word for a place, which two spellings of
+/// one folder share (`/Users/Shared` and `/System/Volumes/Data/Users/Shared`; an admin share or a
+/// `subst` drive of a folder on Windows). The first link is the deepest part there is, so a
+/// `path` that is not there yet is judged by its nearest ancestor that is. An error where an
+/// identity cannot be read for any reason but absence, or where a name is `..`.
+pub fn chain(path: &Path) -> io::Result<Vec<Link>> {
+    let path = std::path::absolute(path)?;
+    let mut links = Vec::new();
+    let mut tail: Vec<OsString> = Vec::new();
+    let mut at = path.clone();
+    loop {
+        match super::identity::of_path(&at) {
+            Ok(id) => links.push(Link {
+                id,
+                tail: tail.iter().rev().cloned().collect(),
+            }),
+            Err(failed)
+                if links.is_empty()
+                    && matches!(
+                        failed.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) => {}
+            Err(failed) => return Err(unresolved(&at, &failed)),
+        }
+        match at.components().next_back() {
+            Some(Component::Normal(name)) => tail.push(name.to_os_string()),
+            Some(Component::ParentDir) => {
+                return Err(refused(format!(
+                    "{} leads up out of the folder it names",
+                    path.display()
+                )))
+            }
+            _ => {}
+        }
+        match at.parent() {
+            Some(parent) => at = parent.to_path_buf(),
+            None => break,
+        }
+    }
+    if links.is_empty() {
+        return Err(refused(format!(
+            "{} has no part that is there",
+            path.display()
+        )));
+    }
+    Ok(links)
+}
+
+/// Whether the place `chain` was made of is the place `outer` stands for, or inside it, by
+/// identity: some part of it is `outer`'s deepest part that is there, and the names below that
+/// part begin with the names `outer` has that are not there.
+pub fn inside_by_identity(chain: &[Link], outer: &Link, any_case: bool) -> bool {
+    chain
+        .iter()
+        .any(|link| link.id == outer.id && begins_with(&link.tail, &outer.tail, any_case))
+}
+
+/// What a protected root stands for: the identity of its deepest part that is there, and the
+/// names after it. Refused where it cannot be read. It stops at that part: the parts above it
+/// are the place's to be asked of, never the root's.
+pub fn key_of(root: &Path) -> io::Result<Link> {
+    let path = std::path::absolute(root)?;
+    let mut tail: Vec<OsString> = Vec::new();
+    let mut at = path.clone();
+    loop {
+        match super::identity::of_path(&at) {
+            Ok(id) => {
+                tail.reverse();
+                return Ok(Link { id, tail });
+            }
+            Err(failed)
+                if matches!(
+                    failed.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) => {}
+            Err(failed) => return Err(unresolved(&at, &failed)),
+        }
+        match at.components().next_back() {
+            Some(Component::Normal(name)) => tail.push(name.to_os_string()),
+            Some(Component::ParentDir) => {
+                return Err(refused(format!(
+                    "{} leads up out of the folder it names",
+                    path.display()
+                )))
+            }
+            _ => {}
+        }
+        at = match at.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => {
+                return Err(refused(format!(
+                    "{} has no part that is there",
+                    path.display()
+                )))
+            }
+        };
+    }
+}
+
 /// What the run made, as the judge asks it: a folder, or a file and its identity.
 pub trait Registry {
     /// Whether `real` is a folder this run made.
@@ -282,6 +407,41 @@ fn resolved_roots(protected: &[PathBuf]) -> Vec<PathBuf> {
     roots
 }
 
+/// What each of `roots` stands for by identity (the same order): refused where one cannot be read.
+fn root_keys(roots: &[PathBuf]) -> io::Result<Vec<Link>> {
+    roots.iter().map(|root| key_of(root)).collect()
+}
+
+/// The root `place` is, or is inside, by its text or by identity (N7: another spelling of a
+/// store is the store): refused where the place's identity cannot be read.
+pub(crate) fn inside_root<'a>(
+    place: &Path,
+    roots: &'a [PathBuf],
+    keys: &[Link],
+    any_case: bool,
+) -> io::Result<Option<&'a PathBuf>> {
+    let parts = chain(place)?;
+    Ok(roots.iter().zip(keys).find_map(|(root, key)| {
+        (within(place, root, any_case) || inside_by_identity(&parts, key, any_case)).then_some(root)
+    }))
+}
+
+/// The root that is `place`, or is inside it, by its text or by identity: refused where a root's
+/// identity cannot be read.
+fn holds_root<'a>(
+    place: &Path,
+    roots: &'a [PathBuf],
+    any_case: bool,
+) -> io::Result<Option<&'a PathBuf>> {
+    let key = key_of(place)?;
+    for root in roots {
+        if within(root, place, any_case) || inside_by_identity(&chain(root)?, &key, any_case) {
+            return Ok(Some(root));
+        }
+    }
+    Ok(None)
+}
+
 /// The tree check of a removal, alone: refused where a protected root resolves to `path` (by its
 /// own name, where it is a link) or inside it. For the renewal's record, which lies inside a
 /// store and is taken whole: the judge's inside check cannot be asked of it, but the tree it
@@ -303,7 +463,7 @@ pub fn tree_holds_no_root(path: &Path, protected: &[PathBuf]) -> io::Result<()> 
     let roots = resolved_roots(protected);
     for way in &ways {
         let place = way.whole();
-        if let Some(root) = roots.iter().find(|root| within(root, &place, any_case)) {
+        if let Some(root) = holds_root(&place, &roots, any_case)? {
             return Err(refused(format!(
                 "{} holds {}, a store of a harness or of the account, which no run takes away",
                 place.display(),
@@ -344,9 +504,10 @@ pub fn judge_with(
     }
     let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));
     let roots = resolved_roots(protected);
+    let keys = root_keys(&roots)?;
     for way in &ways {
         let place = way.whole();
-        if let Some(root) = roots.iter().find(|root| within(&place, root, any_case)) {
+        if let Some(root) = inside_root(&place, &roots, &keys, any_case)? {
             return Err(refused(format!(
                 "{} is inside {}, a store of a harness or of the account, which no run writes",
                 place.display(),
@@ -354,7 +515,7 @@ pub fn judge_with(
             )));
         }
         if matches!(act, Act::Remove | Act::Rename) {
-            if let Some(root) = roots.iter().find(|root| within(root, &place, any_case)) {
+            if let Some(root) = holds_root(&place, &roots, any_case)? {
                 return Err(refused(format!(
                     "{} holds {}, a store of a harness or of the account, which no run takes away or moves",
                     place.display(),

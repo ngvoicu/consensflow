@@ -622,11 +622,9 @@ impl Door {
             return Removed::Absent(path.to_path_buf());
         }
         let judged = judge(path, place::Act::Remove);
-        let under = judged.as_ref().is_ok_and(|real| {
-            registry().iter().any(|made| {
-                made.file.is_none() && real.starts_with(&made.real) && *real != made.real
-            })
-        });
+        let under = judged
+            .as_ref()
+            .is_ok_and(|real| place::Registry::is_below_made(&*registry(), real, true));
         if !under {
             let why = match judged {
                 Err(refused) => refused.to_string(),
@@ -842,31 +840,46 @@ fn registry() -> std::sync::MutexGuard<'static, Vec<Entry>> {
     .unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The identity of a folder the run made, as it is now: none where it is no longer a folder.
+fn made_folder_identity(made: &Entry) -> Option<String> {
+    if made.file.is_some() || !made.real.is_dir() {
+        return None;
+    }
+    identity::of_path(&made.real).ok()
+}
+
+/// What the run made is judged by the file system's identity, not by the text of a path (N7): a
+/// place is a folder the run made, or below one, where it or one of its ancestors is that folder
+/// itself, whatever way the path to it is spelled. A place whose identity cannot be read is the
+/// run's by no folder.
 impl place::Registry for Vec<Entry> {
-    fn is_made_folder(&self, real: &Path, any_case: bool) -> bool {
-        self.iter().any(|made| {
-            made.file.is_none()
-                && place::within(real, &made.real, any_case)
-                && place::within(&made.real, real, any_case)
-                && made.real.is_dir()
+    fn is_made_folder(&self, real: &Path, _any_case: bool) -> bool {
+        let Ok(parts) = place::chain(real) else {
+            return false;
+        };
+        self.iter().filter_map(made_folder_identity).any(|id| {
+            parts
+                .first()
+                .is_some_and(|here| here.tail.is_empty() && here.id == id)
         })
     }
 
-    fn is_below_made(&self, real: &Path, any_case: bool) -> bool {
-        self.iter().any(|made| {
-            made.file.is_none()
-                && place::within(real, &made.real, any_case)
-                && !place::within(&made.real, real, any_case)
-                && made.real.is_dir()
+    fn is_below_made(&self, real: &Path, _any_case: bool) -> bool {
+        let Ok(parts) = place::chain(real) else {
+            return false;
+        };
+        self.iter().filter_map(made_folder_identity).any(|id| {
+            parts
+                .iter()
+                .any(|part| part.id == id && !part.tail.is_empty())
         })
     }
 
-    fn is_made_file(&self, real: &Path, any_case: bool) -> bool {
+    fn is_made_file(&self, real: &Path, _any_case: bool) -> bool {
         self.iter().any(|made| {
             made.file.as_ref().is_some_and(|identity| {
-                place::within(real, &made.real, any_case)
-                    && place::within(&made.real, real, any_case)
-                    && identity::of_path(real).is_ok_and(|now| now == *identity)
+                identity::of_path(real).is_ok_and(|now| now == *identity)
+                    && identity::of_path(&made.real).is_ok_and(|now| now == *identity)
             })
         })
     }
@@ -884,6 +897,9 @@ pub fn judge(path: &Path, act: place::Act) -> io::Result<PathBuf> {
 /// filter that asks of many paths ([`Roots::holds`]), never kept between calls.
 pub struct Roots {
     roots: Vec<PathBuf>,
+    /// What each stands for by identity (N7), or why it cannot be read: a store whose identity
+    /// cannot be read leaves nothing safe to say of any path, and the seal refuses.
+    keys: Result<Vec<place::Link>, ()>,
 }
 
 impl Roots {
@@ -896,20 +912,41 @@ impl Roots {
             }
             roots.push(root);
         }
-        Roots { roots }
+        Roots::of(roots)
     }
 
-    /// Whether `path` resolves inside one of them, by any way it resolves, or is spelled inside
-    /// one.
+    /// `roots`, as spelled and resolved, with what each stands for by identity.
+    fn of(roots: Vec<PathBuf>) -> Roots {
+        let keys = roots
+            .iter()
+            .map(|root| place::key_of(root).ok())
+            .collect::<Option<Vec<_>>>()
+            .ok_or(());
+        Roots { roots, keys }
+    }
+
+    /// Whether `path` resolves inside one of them, by any way it resolves or by identity, or is
+    /// spelled inside one. A path or a root whose identity cannot be read is held.
     pub fn holds(&self, path: &Path) -> bool {
-        let ways = place::resolve(path)
-            .map(|ways| ways.iter().map(place::Resolved::whole).collect::<Vec<_>>())
-            .unwrap_or_default();
+        let Ok(keys) = &self.keys else {
+            return true;
+        };
+        let ways = match place::resolve(path) {
+            Ok(ways) => ways.iter().map(place::Resolved::whole).collect::<Vec<_>>(),
+            Err(_) => return true,
+        };
         let any_case = cfg!(any(windows, target_os = "macos"));
-        self.roots.iter().any(|root| {
-            place::within(path, root, any_case)
-                || ways.iter().any(|way| place::within(way, root, any_case))
-        })
+        let by_identity = ways.iter().any(|way| {
+            place::chain(way).map_or(true, |parts| {
+                keys.iter()
+                    .any(|key| place::inside_by_identity(&parts, key, any_case))
+            })
+        });
+        by_identity
+            || self.roots.iter().any(|root| {
+                place::within(path, root, any_case)
+                    || ways.iter().any(|way| place::within(way, root, any_case))
+            })
     }
 }
 
@@ -1290,20 +1327,16 @@ fn forget_made(path: &Path) {
 
 /// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
 pub fn is_made(path: &Path) -> bool {
-    canonical(path).is_some_and(|real| {
-        registry()
-            .iter()
-            .any(|made| made.file.is_none() && made.real == real)
-    })
+    canonical(path).is_some_and(|real| place::Registry::is_made_folder(&*registry(), &real, true))
 }
 
 /// Whether `path` is a folder this process made through the door, or is below one, by real paths
 /// (a file this run made counts as below the folder it is in only where that folder is the run's).
 pub fn is_made_or_below(path: &Path) -> bool {
     real_beneath(path).is_some_and(|real| {
-        registry()
-            .iter()
-            .any(|made| made.file.is_none() && real.starts_with(&made.real))
+        let made = registry();
+        place::Registry::is_made_folder(&*made, &real, true)
+            || place::Registry::is_below_made(&*made, &real, true)
     })
 }
 
@@ -1693,6 +1726,8 @@ impl Grounded {
     }
 }
 
+#[cfg(test)]
+mod identity_tests;
 #[cfg(test)]
 mod k3_tests;
 #[cfg(test)]

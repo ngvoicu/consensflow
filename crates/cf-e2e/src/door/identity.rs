@@ -58,11 +58,12 @@ pub fn of_path(path: &Path) -> io::Result<String> {
 #[cfg(windows)]
 fn of_path_opened(path: &Path) -> io::Result<String> {
     let mut open = fs::OpenOptions::new();
-    open.read(true);
     {
         use std::os::windows::fs::OpenOptionsExt as _;
-        // A folder is opened only with the flag that asks for it (`FILE_FLAG_BACKUP_SEMANTICS`).
-        open.custom_flags(0x0200_0000);
+        // Only the file's attributes are asked for (`FILE_READ_ATTRIBUTES`), so that a folder
+        // above a place that no one may read still tells its identity; a folder is opened only
+        // with the flag that asks for it (`FILE_FLAG_BACKUP_SEMANTICS`).
+        open.access_mode(0x0080).custom_flags(0x0200_0000);
     }
     of_file(&open.open(path)?)
 }
