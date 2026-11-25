@@ -786,8 +786,8 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "          await page.daemon('member.remove', { project: this.#project, agent: handle })"
-replace = "          await page.daemon('member.remove', { project: page.board().project.id, agent: handle })"
+find = '''      await page.daemon('member.remove', { project: this.#project, agent: handle })'''
+replace = '''      await page.daemon('member.remove', { project: page.board().project.id, agent: handle })'''
 
 [[plant]]
 name = "project settings: a member loses a role in the project the board shows"
@@ -796,8 +796,14 @@ runs = ["page-project-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "            await page.daemon('member.roles', {\n              project: this.#project,\n"
-replace = "            await page.daemon('member.roles', {\n              project: page.board().project.id,\n"
+find = '''      await page.daemon('member.roles', {
+        project: this.#project,
+        agent: handle,
+        roles: roles.filter('''
+replace = '''      await page.daemon('member.roles', {
+        project: page.board().project.id,
+        agent: handle,
+        roles: roles.filter('''
 
 [[plant]]
 name = "project settings: a member is looked for on the board shown, whose members are another project's"

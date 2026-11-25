@@ -236,12 +236,10 @@ runs = ["nps-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''
-    this.#staff.replaceChildren(...rows)
+find = '''    redraw(this.#staff, rows)
     this.#drawComputerUse()
 '''
-replace = '''
-    this.#staff.replaceChildren(...rows)
+replace = '''    redraw(this.#staff, rows)
 '''
 
 [[plant]]

@@ -40,8 +40,8 @@ runs = ["rr-ledger-sixth"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
-find = '''    find(pool).is_some_and(|role| !role.tiered)'''
-replace = '''    find(pool).is_some_and(|role| role.tiered)'''
+find = '''    find(pool).is_some_and(|role| !role.tiered())'''
+replace = '''    find(pool).is_some_and(|role| role.tiered())'''
 
 [[plant]]
 name = "role registry: the image designer's row has tiers"
@@ -50,9 +50,11 @@ runs = ["rr-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
-find = '''    tiered: false,
+find = '''    tiers: &[],
+    home: "standard",
     image_agent: true,'''
-replace = '''    tiered: true,
+replace = '''    tiers: ALL_TIERS,
+    home: "standard",
     image_agent: true,'''
 
 [[plant]]
@@ -199,18 +201,6 @@ find = '''        tier: tier_for(&found.roles, body)?,'''
 replace = '''        tier: tier_of(body.get("tier"))?,'''
 
 [[plant]]
-name = "role registry: a scout's role added to a worker drops its tier"
-meant = "a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier"
-runs = ["rr-daemon-members"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''    if cf_ledger::roles::takes_no_tier(&member.roles) {
-        edit.tier = existing.tier'''
-replace = '''    if false {
-        edit.tier = existing.tier'''
-
-[[plant]]
 name = "role registry: board.get answers no roles"
 meant = "a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_given_the_rules_at_its_first_launch"
 runs = ["rr-daemon-opening"]
@@ -279,26 +269,30 @@ replace = '''part('tier', participant.designer ? null : participant.tier)'''
 
 [[plant]]
 name = "role registry: New project picks the last scout with its tier"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''                ...(untiered(role) ? {} : { tier: member.tier }),'''
-replace = '''                tier: member.tier,'''
+find = '''          ...(takesNoTier(member.roles) ? {} : { tier: member.tier }),'''
+replace = '''          tier: member.tier,'''
 
 [[plant]]
 name = "role registry: New project starts a scout and worker with no tier"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      if (member.tier === undefined && tier !== undefined) member.tier = tier
-'''
-replace = ''''''
+find = '''      const tier = backupOf == null ? member.tier : this.#memberOf(backupOf)?.tier'''
+replace = '''      const tier =
+        backupOf == null
+          ? member.roles.some((role) => takesNoTier([role]))
+            ? undefined
+            : member.tier
+          : this.#memberOf(backupOf)?.tier'''
 
 [[plant]]
 name = "role registry: the staff route says a scout's tier"
@@ -321,15 +315,18 @@ find = '''    let tier = tier_for(roles, body)?;'''
 replace = '''    let tier = tier_of(body.get("tier"))?;'''
 
 [[plant]]
-name = "role registry: New project's scout after a worker takes the worker's tier away"
-meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+name = "role registry: New project's scout given to a worker takes the worker's tier away"
+meant = "New project asks no tier of a role whose one slot has none, and a member that holds it beside a role with tiers keeps its tier"
 runs = ["rr-page-new"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      if (picked.tier !== undefined) {'''
-replace = '''      if (true) {'''
+find = '''          if (member && !member.roles.includes(role)) member.roles.push(role)'''
+replace = '''          if (member && !member.roles.includes(role)) {
+            member.roles.push(role)
+            if (takesNoTier([role])) delete member.tier
+          }'''
 
 [[plant]]
 name = "role registry: Edit member asks a scout the tier of the role picked"

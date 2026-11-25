@@ -499,6 +499,16 @@ find = '''            shell_env: consensflow_variables(plan.env),'''
 replace = '''            shell_env: Vec::new(),'''
 
 [[plant]]
+name = "codex role file: the window's mark is left out of the variables a thread's commands are given"
+meant = "every_start_resume_and_fork_is_given_the_windows_mark_in_its_config"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/arguments.rs"
+find = '''        .filter(|(name, _)| is_consensflow_variable(name) || name == PANE_OWNER)'''
+replace = '''        .filter(|(name, _)| is_consensflow_variable(name))'''
+
+[[plant]]
 name = "codex role file: a role variable set to nothing opens a window without its role"
 meant = "a_role_file_that_is_missing_or_empty_or_a_variable_set_to_nothing_is_refused"
 runs = ["codex-session"]

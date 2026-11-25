@@ -270,8 +270,8 @@ runs = ["bcr-daemon-verbs"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "        no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()\n"
-replace = "        false && no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()\n"
+find = "        no_words\n            && edit.tier.is_none()\n            && edit.purpose.is_none()\n            && edit.needs.is_none()\n            && edit.before.is_none()\n"
+replace = "        false && no_words\n            && edit.tier.is_none()\n            && edit.purpose.is_none()\n            && edit.needs.is_none()\n            && edit.before.is_none()\n"
 
 [[plant]]
 name = "cli reports 1118 title: the API gives no title with the words of a reopen or a resume"

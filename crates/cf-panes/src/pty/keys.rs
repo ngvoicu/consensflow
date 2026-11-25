@@ -420,6 +420,90 @@ mod conpty {
         (hex, seen)
     }
 
+    /// What a Node program that reads its terminal raw is given of what the host's input queue
+    /// writes for a page that reloads (P4-B on Windows, the byte order a page can see): the page
+    /// `s:1` handed A (number 1) over, and C (number 3, with number 2 missing), the reload began,
+    /// the page `s:2` typed D at once, and the old page's number 2 (B) came after. Every chunk
+    /// the program was handed, as the characters it read, and whether the host kept a notice
+    /// for the window.
+    fn node_reads_a_reload() -> (String, String, bool) {
+        use crate::input_queue::{InputQueue, InputWork};
+        let node = node().expect("a node.exe on the PATH, which the app's own Windows tests need");
+        let _pty_guard = serial_pty_test();
+        of_the_shipped_host();
+        let table = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = InputQueue::new(Arc::clone(&table), Arc::clone(&arbiter));
+        let argv = vec![
+            node.to_string_lossy().into_owned(),
+            "-e".to_owned(),
+            "process.stdin.setRawMode(true); console.log('READY'); \
+             process.stdin.on('data', (d) => console.log('HEX=[' + d.toString('hex') + ']#'))"
+                .to_owned(),
+        ];
+        let (key, output) = open(&table, &argv, &HashMap::new(), 1 << 20);
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        read_until(&table, &key, &output, "READY");
+        let typed = |text: &[u8]| InputWork::Typed(text.to_vec());
+        let first = inputs.begin_page("s:1").expect("the first page");
+        for (number, text) in [(1, b"A"), (3, b"C")] {
+            inputs
+                .enqueue_page("s:1", first, key.clone(), number, typed(text), true)
+                .expect("a call of the first page");
+        }
+        inputs.end_page().expect("navigation begins");
+        let next = inputs.begin_page("s:2").expect("the next page");
+        inputs
+            .enqueue_page("s:2", next, key.clone(), 1, typed(b"D"), true)
+            .expect("the next page types at once");
+        // The old page's number 2 comes after the cut: it is never written.
+        assert!(inputs
+            .enqueue_page("s:1", first, key.clone(), 2, typed(b"B"), true)
+            .is_err());
+        let owed = inputs
+            .pending_losses("s:2", next)
+            .expect("the page is current")
+            .iter()
+            .any(|notice| {
+                matches!(&notice.body, crate::input_queue::NoticeBody::Window { key: of, .. } if *of == key)
+            });
+        let mut seen = String::new();
+        let settled = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < settled {
+            if let Ok(chunk) = output.recv_timeout(Duration::from_millis(100)) {
+                seen.push_str(&take(&table, &key, &chunk));
+            }
+        }
+        inputs.close_and_drain();
+        table.kill(&key).expect("close the pane");
+        let hex: String = seen
+            .match_indices("HEX=[")
+            .filter_map(|(at, _)| {
+                let rest = &seen[at + "HEX=[".len()..];
+                Some(rest.split_once("]#")?.0.to_owned())
+            })
+            .collect();
+        let text = hex
+            .as_bytes()
+            .chunks(2)
+            .filter_map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+            .map(char::from)
+            .collect();
+        (text, seen, owed)
+    }
+
+    /// The reload at the program's own end, through the shipped console host: A was handed over
+    /// before the page went, C waited behind a missing number and is cancelled as a loss, the next
+    /// page typed D at once, and the old page's B came after. The program is given A and D, and the
+    /// host owes the person a notice for the window.
+    #[test]
+    fn a_reload_reaches_a_node_program_as_ad_and_tells_what_was_cancelled() {
+        let (text, seen, owed) = node_reads_a_reload();
+        assert_eq!(text, "AD", "its screen: {seen:?}");
+        assert!(owed, "the host kept a notice for the window");
+    }
+
     /// What a terminal answers a program's questions with (xterm.js: an OSC colour ended by ST or
     /// by BEL, a DCS name ended by ST) goes through the pane host's input like a key and reaches a
     /// Node program whole, with the words typed after it: the console host gives the program the

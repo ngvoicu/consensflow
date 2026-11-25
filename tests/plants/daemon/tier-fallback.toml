@@ -26,15 +26,13 @@ runs = ["tf-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-            let retiered = self
+find = '''            let placed = self
                 .seams
                 .ledger
                 .borrow_mut()
                 .retier_open_task(project.id, task.number)?;
 '''
-replace = '''
-            let retiered: Option<cf_ledger::TaskRetiered> = None;
+replace = '''            let placed = cf_ledger::TaskPlaced::Stays;
 '''
 
 [[plant]]
@@ -57,26 +55,27 @@ meant = "a_task_for_a_tier_somebody_holds_is_never_moved_though_that_member_is_o
 runs = ["tf-engine-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''
-        if tier == asked || !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''    if may_take_slot(pool, asked, purpose)
+        && has_members_of_tier(store, project_id, pool, Some(asked))?
+    {
 '''
-replace = '''
-        if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
+replace = '''    if false
+        && may_take_slot(pool, asked, purpose)
+        && has_members_of_tier(store, project_id, pool, Some(asked))?
+    {
 '''
 
 [[plant]]
 name = "tier fallback: a task given now for a tier nobody holds waits for it, as before"
-meant = "a_tier_nobody_holds_goes_to_the_nearest_for_every_role_and_every_tier"
+meant = "a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical_for_every_role"
 runs = ["tf-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''
-            None => nearest_tier(store, project_id, pool, asked.as_deref())?,
+find = '''                Placed::Fell(to) => to,
 '''
-replace = '''
-            None => asked.clone(),
+replace = '''                Placed::Fell(_) => asked.to_owned(),
 '''
 
 [[plant]]
@@ -122,46 +121,15 @@ replace = '''
 '''
 
 [[plant]]
-name = "tier fallback: a role nobody holds is not refused at add"
-meant = "a_role_nobody_holds_is_refused_at_add_for_every_pool_in_the_words_the_chief_is_told"
-runs = ["tf-engine-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''
-        if assignee.is_none() && !has_members_of_tier(store, project_id, pool, tier.as_deref())? {
-'''
-replace = '''
-        if false && assignee.is_none() && !has_members_of_tier(store, project_id, pool, tier.as_deref())? {
-'''
-
-[[plant]]
-name = "tier fallback: edit takes a tier of a role nobody holds"
-meant = "a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes"
-runs = ["tf-ledger-edit-tier"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-    if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
-'''
-replace = '''
-    if false && !has_members_of_tier(store, project_id, pool, Some(&tier))? {
-'''
-
-[[plant]]
 name = "tier fallback: edit asks the tier as it was named when nobody holds it"
 meant = "a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_and_whose_it_went_to"
 runs = ["tf-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-    let tier =
-        nearest_tier(store, project_id, pool, Some(wanted))?.unwrap_or_else(|| wanted.to_owned());
+find = '''        Placed::Fell(tier) => tier,
 '''
-replace = '''
-    let tier = wanted.to_owned();
+replace = '''        Placed::Fell(_) => wanted.to_owned(),
 '''
 
 [[plant]]
@@ -171,11 +139,9 @@ runs = ["tf-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-    if wanted == "critical"
+find = '''    if wanted == "critical" && !may_take_slot(pool, wanted, purpose) {
 '''
-replace = '''
-    if false && wanted == "critical"
+replace = '''    if false && wanted == "critical" && !may_take_slot(pool, wanted, purpose) {
 '''
 
 [[plant]]
@@ -225,11 +191,9 @@ runs = ["tf-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-        require_not_given(store, &task)?;
+find = '''        require_not_given(store, &task, routes_only)?;
 '''
-replace = '''
-        let _ = require_not_given(store, &task);
+replace = '''        let _ = require_not_given(store, &task, routes_only);
 '''
 
 [[plant]]
@@ -239,25 +203,34 @@ runs = ["tf-ledger-edit-links"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-        require_not_given(store, &task)?;
+find = '''        require_not_given(store, &task, routes_only)?;
 '''
-replace = '''
-        let _ = require_not_given(store, &task);
+replace = '''        let _ = require_not_given(store, &task, routes_only);
 '''
 
 [[plant]]
 name = "tier fallback: a refused tier is let through with the brief changed"
-meant = "a_role_nobody_holds_is_refused_in_the_words_of_task_add_and_nothing_changes"
+meant = "a_tier_that_is_none_is_refused_and_critical_work_needs_its_purpose"
 runs = ["tf-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-            Some(wanted) => Some(tier_for(store, project_id, &task, wanted)?),
+find = '''            Some(wanted) => Some(tier_for(
+                store,
+                project_id,
+                &task,
+                wanted,
+                edit.purpose.as_deref(),
+            )?),
 '''
-replace = '''
-            Some(wanted) => tier_for(store, project_id, &task, wanted).ok(),
+replace = '''            Some(wanted) => tier_for(
+                store,
+                project_id,
+                &task,
+                wanted,
+                edit.purpose.as_deref(),
+            )
+            .ok(),
 '''
 
 [[plant]]
@@ -477,12 +450,12 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '''
-        tier,
+find = '''        tier,
+        purpose,
         needs: links(request.get("needs"), "needs")?,
 '''
-replace = '''
-        tier: None,
+replace = '''        tier: None,
+        purpose,
         needs: links(request.get("needs"), "needs")?,
 '''
 
@@ -604,12 +577,8 @@ runs = ["tf-engine-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-the next one up first; you are told whose.
-'''
-replace = '''
-the next one up first.
-'''
+find = '''never into Critical, and you are told whose. Critical'''
+replace = '''never into Critical. Critical'''
 
 [[plant]]
 name = "tier fallback: the chief's text does not know the tier, needs and before of an edit"
@@ -618,8 +587,10 @@ runs = ["tf-engine-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
-replace = "    {{cf}} task edit T-3 \"…\"          replace the brief of a task before any window has its brief (open, queued, or paused)\n"
+find = '''    {{cf}} task edit T-3 "…" [--tier <tier> [--purpose <purpose>]] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
+'''
+replace = '''    {{cf}} task edit T-3 "…"          replace the brief of a task before any window has its brief (open, queued, or paused)
+'''
 
 [[plant]]
 name = "tier fallback: cf help does not know the tier, needs and before of an edit"
@@ -628,9 +599,7 @@ runs = ["tf-cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = '''
-  cf task edit T-3 "…" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]
+find = '''  cf task edit T-3 "…" [--tier <tier> [--purpose <purpose>]] [--needs T-4,T-5|+T-5|-T-5] [--before …]
 '''
-replace = '''
-  cf task edit T-3 "…"
+replace = '''  cf task edit T-3 "…"
 '''

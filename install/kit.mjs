@@ -154,7 +154,7 @@ export function listedHash(bytes, name) {
  */
 export function jxaCheck(keyLine, sigText, sums, fileName, artifact, env = {}) {
   const lines = readFileSync(INSTALL_SH, 'utf8').split('\n')
-  const from = lines.indexOf('    cat > "$1" <<\'VERIFIER\'')
+  const from = lines.indexOf('    "$cat" > "$1" <<\'VERIFIER\'')
   const to = lines.indexOf('VERIFIER', from + 1)
   if (from < 0 || to < 0) return 'install.sh holds no check to run'
   const work = mkdtempSync(path.join(os.tmpdir(), 'cf-jxa-check-'))

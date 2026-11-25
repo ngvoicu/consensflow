@@ -214,6 +214,9 @@ fn in_thread(said: &Value, id: i64) -> Option<&Value> {
 #[tokio::test]
 async fn a_thread_says_in_the_place_of_what_a_meeting_holds_that_it_waits_and_gives_none_of_its_text(
 ) {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     let scene = scene();
     let number = working_task(&scene);
     let result = result_of(&scene, number);
