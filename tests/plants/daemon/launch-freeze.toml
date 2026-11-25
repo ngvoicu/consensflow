@@ -214,7 +214,11 @@ runs = ["lf-told"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = """            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))"""
+find = """            Rc::new(move || {
+                !this.forgotten(&held)
+                    && held.window.borrow().moving == 0
+                    && this.in_open_project(id).unwrap_or(true)
+            })"""
 replace = """            let _ = (this, held, id);
             Rc::new(|| true)"""
 
