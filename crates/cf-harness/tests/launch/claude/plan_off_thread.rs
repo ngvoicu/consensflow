@@ -120,9 +120,14 @@ fn a_plan_whose_file_is_slow_to_write_leaves_the_thread_going_and_the_write_is_w
     let home = Home::new();
     let project = path::join(&[&home.root, "project"]);
     fs::create_dir_all(&project).unwrap();
-    // The launch's own settings file: its open waits until the test reads the other end.
+    // The file the launch's own settings are written beside: its open waits until the test
+    // reads the other end.
     fs::create_dir_all(home.launch_folder()).unwrap();
-    let gate = path::join(&[&home.launch_folder(), "settings.json"]);
+    let gate = format!(
+        "{}.{}.tmp",
+        path::join(&[&home.launch_folder(), "settings.json"]),
+        std::process::id()
+    );
     nix::unistd::mkfifo(
         Path::new(&gate),
         nix::sys::stat::Mode::from_bits_truncate(0o600),
