@@ -238,15 +238,13 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/flow.rs"
-find = '''            state.unacked.pop_front();
-            state.unacked_bytes -= byte_count;
+find = '''            state.acked_bytes += byte_count as u64;
         }
         self.ready.notify_all();
-        Ok(())'''
-replace = '''            state.unacked.pop_front();
-            state.unacked_bytes -= byte_count;
+        Ok(state.acked_bytes)'''
+replace = '''            state.acked_bytes += byte_count as u64;
         }
-        Ok(())'''
+        Ok(state.acked_bytes)'''
 
 # --- the app: the hanging login shell is ended when it has started what it started ---
 
