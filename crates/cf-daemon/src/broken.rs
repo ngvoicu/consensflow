@@ -89,17 +89,18 @@ pub fn reaction(
     })
 }
 
-/// The file that says a home has a board: written beside the ledger when the ledger is
-/// first made, and again at every start that opens one that has none, so a home that an
-/// earlier build made is marked by its first start under this one. It names the ledger.
-/// A home that holds it is used, and is never started with an empty board.
+/// The file that says a home has a board: written once a ledger is held and known to be
+/// ConsensFlow's, before the first write to it, and again at every start that finds a home
+/// without it, so a home that an earlier build made is marked by its first start under this
+/// one. It names the ledger. It is a witness: a home that holds it is used, and is never
+/// started with an empty board.
 pub const MARKER: &str = "consensflow.board";
 
 /// The ledger's file in a home.
 pub const LEDGER: &str = "consensflow.db";
 
-/// Says in `home` that its board is `LEDGER`. It is written only once a ledger has been
-/// opened whole, so a home that holds it had one.
+/// Says in `home` that its board is `LEDGER`. It is written only once a ledger is held and
+/// known to be ConsensFlow's, so a home that holds it had one.
 pub fn mark(home: &Path) -> std::io::Result<()> {
     let marker = home.join(MARKER);
     if marker.exists() {
@@ -180,11 +181,6 @@ pub fn judge_with(home: &Path, list: &Lister) -> Home {
         Some(failed) => Home::Unknown(home.to_path_buf(), failed),
         None => Home::Unused,
     }
-}
-
-/// Whether `home` holds the marker, as a name that is there (a link included).
-pub fn marked(home: &Path) -> bool {
-    fs::symlink_metadata(home.join(MARKER)).is_ok()
 }
 
 /// What a first start does to the disk, each a file operation of its own: the real ones, or

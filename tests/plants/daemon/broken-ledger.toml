@@ -473,14 +473,16 @@ find = '''            Err(_) => reap_all(panes),'''
 replace = '''            Err(_) => return Reaped::TooLate,'''
 
 [[plant]]
-name = "broken ledger: a home that has a marker and lost its ledger is opened empty"
+name = "broken ledger: the marker is no witness of a used home"
 meant = "a_used_home_whose_ledger_is_gone_empty_dangling_or_not_a_file_is_never_opened_empty"
 runs = ["p23a-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/broken.rs"
-find = '''    fs::symlink_metadata(home.join(MARKER)).is_ok()'''
-replace = '''    false'''
+find = '''const WITNESSES: [&str; 9] = [
+    MARKER,'''
+replace = '''const WITNESSES: [&str; 9] = [
+    "consensflow.board.never",'''
 
 [[plant]]
 name = "broken ledger: the marker is never written"
