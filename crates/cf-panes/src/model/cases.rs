@@ -8,7 +8,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cf_harness::{EnterFor, NoLook};
+use cf_harness::contract::Held;
+use cf_harness::{licence_paste, BoxState, EnterFor, NoLook, PasteLicence};
 use cf_proto::agents::Harness;
 
 use super::program::Echo;
@@ -1193,6 +1194,55 @@ fn t2233_the_first_enter_waits_for_the_terminal_and_goes_at_the_cap() {
         assert!(
             waited >= Duration::from_millis(super::world::ENTER_TIMING.most_ms + 3_000),
             "{harness:?}: the Enter went after {waited:?}, before the cap and its grace"
+        );
+        case.rules();
+        case.end();
+    });
+}
+
+/// A screen that never holds still for a second, as a status line with a seconds clock makes
+/// one: the paste that would set the count aside waits, with the hold that says to press
+/// Ctrl+U, and after Ctrl+U there is no count and it goes on the same screen.
+#[test]
+fn t2255_a_screen_that_never_holds_still_keeps_the_paste_until_ctrl_u() {
+    /// Passes over a screen whose first line changes 900 ms before each.
+    fn ticking(world: &World, passes: u32) {
+        for second in 0..passes {
+            let clock = format!("10:00:0{second}");
+            world.program.lock().unwrap().print_line(1, &clock);
+            settled(world);
+            crate::arbiter::Clock::rest(&*world.clock, Duration::from_millis(900));
+            world.pass(false);
+        }
+    }
+    each_harness(|harness| {
+        let answer = kept();
+        let kept_answer = Arc::clone(&answer);
+        let case = run_script(harness, move |world| {
+            world.program.lock().unwrap().show_dialog();
+            settled(&world);
+            types(&world, b"2");
+            settled(&world);
+            a_while(&world);
+            world.program.lock().unwrap().print_line(1, "09:59:59");
+            settled(&world);
+            let look = world.look().expect("a look");
+            let licence = licence_paste(&look, harness, BoxState::default(), &[3]);
+            ticking(&world, 8);
+            let before = world.program.lock().unwrap().taken.len();
+            let held_pasted = world.program.lock().unwrap().held.len();
+            types(&world, b"\x15");
+            ticking(&world, 3);
+            *kept_answer.lock().unwrap() = Some((licence, before, held_pasted));
+        });
+        let (licence, taken_before, held_before) = answer.lock().unwrap().take().expect("asked");
+        assert_eq!(licence, PasteLicence::Wait(Held::Unproven), "{harness:?}");
+        assert_eq!((taken_before, held_before), (0, 0), "{harness:?}");
+        assert_eq!(
+            case.taken(),
+            [1],
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
         );
         case.rules();
         case.end();

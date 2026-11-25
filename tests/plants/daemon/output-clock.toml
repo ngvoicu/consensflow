@@ -595,6 +595,20 @@ replace = """            .is_none_or(|quiet| quiet < SETTLED_MS && false)
             return PasteLicence::Wait(Held::Unproven);"""
 
 [[plant]]
+name = "output clock: a screen that never holds still keeps the paste with no words"
+meant = "t2255_a_screen_that_never_holds_still_keeps_the_paste_until_ctrl_u"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Unproven);"""
+replace = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Because("the screen changed".to_owned()));"""
+
+[[plant]]
 name = "output clock: the host admits readEmpty on the daemon's word"
 meant = "t2233_a_paste_naming_evidence_the_host_lacks_is_refused"
 runs = ["oc-model", "oc-feed"]
