@@ -61,6 +61,10 @@ pub fn again_under_audit(test: &str) -> Result {
             run = run.var(name, value);
         }
     }
+    // The nested cargo of a test that builds finds its toolchain by these; no other child is told.
+    for (name, value) in super::account::toolchain_homes() {
+        run = run.var(name, value);
+    }
     let ran = run
         .var(AUDIT, "1")
         .var(AUDIT_FILE, &audit)

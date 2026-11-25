@@ -208,7 +208,8 @@ pub fn project_home() -> Option<PathBuf> {
 }
 
 /// What a child the door starts is told of the protection: the file of the roots and its digest,
-/// the file written in a folder this run makes the first time a child is started.
+/// the file written in a folder this run makes the first time a child is started. No cargo or
+/// rustup folder of the account is among them ([`toolchain_homes`]).
 pub fn child_vars() -> Result<Vec<(String, String)>, String> {
     // A test that adds roots hands its children a file of its own with them: a child keeps the
     // roots of the run and is refused the test's decoys as it is the account's.
@@ -232,27 +233,40 @@ pub fn child_vars() -> Result<Vec<(String, String)>, String> {
         }
     }
     let (path, digest) = own_file()?;
-    let mut vars = vec![
+    Ok(vec![
         (
             PROTECTED_FILE.to_owned(),
             path.to_string_lossy().into_owned(),
         ),
         (PROTECTED_DIGEST.to_owned(), digest),
-    ];
-    // A child has no home of the person's to find cargo's and rustup's folders by (its own are the
-    // run's): it is told the ones this process works with.
-    let home = project_home();
+    ])
+}
+
+/// The cargo and rustup folders this process works with, for the two starts that run cargo
+/// themselves: the door's cargo ([`super::cargo`], which names its own) and the say-only run's
+/// child ([`super::again`]), whose nested cargo has no home of the person's to find them by. No
+/// other child is told them: a harness's shell must not reach the account's toolchain, registry
+/// cache or `credentials.toml`.
+pub fn toolchain_homes() -> Vec<(String, String)> {
+    toolchain_homes_of(own_variable, project_home().as_deref())
+}
+
+/// [`toolchain_homes`] from `own` (a variable of this process) and `home` (the person's home).
+pub(super) fn toolchain_homes_of(
+    own: impl Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Vec<(String, String)> {
+    let mut vars = Vec::new();
     for (name, below) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-        let held = own_variable(name).map(PathBuf::from).or_else(|| {
-            home.as_ref()
-                .map(|home| home.join(below))
+        let held = own(name).map(PathBuf::from).or_else(|| {
+            home.map(|home| home.join(below))
                 .filter(|dir| dir.is_dir())
         });
         if let Some(held) = held {
             vars.push((name.to_owned(), held.to_string_lossy().into_owned()));
         }
     }
-    Ok(vars)
+    vars
 }
 
 /// A variable of this process's environment, as the door's own reads take it.

@@ -1218,3 +1218,226 @@ fn a_name_made_while_it_is_resolved_is_not_refused() {
     other.join().unwrap();
     assert!(refused.is_none(), "{refused:?}");
 }
+
+/// The names of an environment, in upper case.
+fn names_of(env: &[(OsString, OsString)]) -> Vec<String> {
+    env.iter()
+        .map(|(name, _)| name.to_string_lossy().to_ascii_uppercase())
+        .collect()
+}
+
+/// T-2295 finding 10: no program is told the account's `~/.cargo` or `~/.rustup` but the two
+/// starts that run cargo: a harness's shell must not reach the toolchain, the registry cache or
+/// `credentials.toml`. The door's variables, which a daemon, a pane host and a window are given,
+/// and a plain or a harness start's whole environment carry neither; a case's own value stands.
+#[test]
+fn no_child_is_told_the_accounts_cargo_or_rustup_folder() {
+    let toolchain = ["CARGO_HOME", "RUSTUP_HOME"];
+    let given: Vec<String> = super::Door::child_vars()
+        .into_iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect();
+    for name in toolchain {
+        assert!(!given.iter().any(|held| held == name), "{name}: {given:?}");
+    }
+    let root = made("k3-no-cargo-").unwrap();
+    let program = root.path().join("program");
+    for (case, run) in [
+        ("a plain start", crate::process::Run::new(&program)),
+        (
+            "a harness start",
+            crate::process::Run::harness("claude", &program),
+        ),
+    ] {
+        let env = run.environment().unwrap();
+        let held = names_of(&env);
+        for name in toolchain {
+            assert!(
+                !held.iter().any(|held| held == name),
+                "{case} holds {name}: {held:?}"
+            );
+        }
+    }
+    // A case that names its own value keeps it, with no word from the door.
+    let own = root.path().join("own-cargo");
+    let env = crate::process::Run::new(&program)
+        .var("CARGO_HOME", &own)
+        .environment()
+        .unwrap();
+    let value = env
+        .iter()
+        .find(|(name, _)| name == "CARGO_HOME")
+        .map(|(_, value)| value.clone());
+    assert_eq!(value, Some(own.into_os_string()));
+}
+
+/// T-2295 finding 10: the two starts that run cargo carry both folders: the say-only run's child
+/// (the nested cargo of `live_approval` and `live_specs` finds its toolchain by them, on Windows
+/// above all) and the door's cargo. A variable of the process is told as it is; where it holds
+/// none the person's folder is, where it is there.
+#[test]
+fn the_starts_that_run_cargo_are_told_the_cargo_and_rustup_folders() {
+    let root = made("k3-toolchain-").unwrap();
+    let home = root.path().join("home");
+    fs::create_dir_all(home.join(".cargo")).unwrap();
+    fs::create_dir_all(home.join(".rustup")).unwrap();
+    let told = |own: &[(&str, &str)]| {
+        super::account::toolchain_homes_of(
+            |name| {
+                own.iter()
+                    .find(|(held, _)| *held == name)
+                    .map(|(_, value)| (*value).to_owned())
+            },
+            Some(&home),
+        )
+    };
+    let found = told(&[]);
+    assert_eq!(
+        found,
+        vec![
+            (
+                "CARGO_HOME".to_owned(),
+                home.join(".cargo").to_string_lossy().into_owned()
+            ),
+            (
+                "RUSTUP_HOME".to_owned(),
+                home.join(".rustup").to_string_lossy().into_owned()
+            ),
+        ]
+    );
+    let own = told(&[("CARGO_HOME", "/elsewhere/cargo")]);
+    assert_eq!(own[0], ("CARGO_HOME".to_owned(), "/elsewhere/cargo".to_owned()));
+    // The door's cargo names them from the account's home as well.
+    let scratch = root.path().join("scratch");
+    fs::create_dir_all(&scratch).unwrap();
+    let env = super::cargo::environment_of(
+        std::iter::empty::<(OsString, OsString)>(),
+        Some(&home),
+        &scratch,
+        &|_| false,
+    )
+    .unwrap();
+    let held = names_of(&env);
+    for name in ["CARGO_HOME", "RUSTUP_HOME"] {
+        assert!(held.iter().any(|held| held == name), "{name}: {held:?}");
+    }
+}
+
+/// T-2295 finding 13: a script entry starts a shell and no other program: `script_in` is not a
+/// way to start the Keychain's utility, cargo or a harness with its words only read. The programs
+/// here are decoys a folder of the run holds (named as the real ones are), which write a mark
+/// where they run: with the check out, the start must never reach anything real.
+#[cfg(unix)]
+#[test]
+fn a_script_entry_starts_a_shell_and_no_other_program() {
+    use crate::process::Run;
+    let root = made("k3-script-entry-").unwrap();
+    let mark = root.path().join("ran");
+    for name in ["security", "cargo", "claude", "muse-bin-1.4.14"] {
+        let decoy = root.path().join(name);
+        crate::door::write_executable(
+            &decoy,
+            format!("#!/bin/sh\necho {name} >> '{}'\n", mark.display()),
+        )
+        .unwrap();
+        let refused = Run::script_in(&decoy, &["find-generic-password"], "-w")
+            .run()
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("run by a shell"),
+            "{name}: {refused}"
+        );
+        assert!(!mark.exists(), "{name} ran");
+    }
+    // The shells the kit's own scripts use are still started.
+    assert_eq!(
+        Run::script_in("/bin/sh", &["-c"], "echo ready")
+            .run()
+            .unwrap()
+            .stdout
+            .trim(),
+        "ready"
+    );
+}
+
+/// T-2295 finding 11: the read door's one refusal. Every plain reader, `files::read` and the
+/// source side of each of the door's four copies refuse a path below a protected root, naming
+/// that a source of the account is what reads it, and read the same file below a folder of the
+/// run's. Without the refusal a path of the kit's own reads a store and nothing else goes red.
+#[test]
+fn a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy() {
+    use super::reads;
+    let root = made("k3-reads-").unwrap();
+    let store = root.path().join("store");
+    let free = root.path().join("free");
+    for folder in [&store, &free] {
+        fs::create_dir_all(folder.join("inner")).unwrap();
+        fs::write(folder.join("secret.txt"), "made up").unwrap();
+        fs::write(folder.join("inner").join("a.txt"), "a").unwrap();
+    }
+    let _held = TestRoot::add(&store);
+    let said = "which only a Source of the account reads";
+    let refused = |what: &str, found: std::io::Result<()>| {
+        let why = found.expect_err(&format!("{what} of a protected path was read"));
+        assert!(why.to_string().contains(said), "{what}: {why}");
+    };
+    let file = |folder: &Path| folder.join("secret.txt");
+    let (inside, outside) = (file(&store), file(&free));
+    refused("read", reads::read(&inside).map(drop));
+    refused("read_to_string", reads::read_to_string(&inside).map(drop));
+    refused("open", reads::open(&inside).map(drop));
+    refused("metadata", reads::metadata(&inside).map(drop));
+    refused("symlink_metadata", reads::symlink_metadata(&inside).map(drop));
+    refused("canonicalize", reads::canonicalize(&inside).map(drop));
+    refused("read_link", reads::read_link(&inside).map(drop));
+    refused("read_dir", reads::read_dir(&store).map(drop));
+    assert!(!reads::exists(&inside) && !reads::is_file(&inside) && !reads::is_dir(&store));
+    assert!(!reads::is_symlink(&inside));
+    refused(
+        "files::read",
+        crate::files::read(&inside).map(drop).map_err(std::io::Error::other),
+    );
+    refused(
+        "files::read_string",
+        crate::files::read_string(&inside).map(drop).map_err(std::io::Error::other),
+    );
+    // The door's copies refuse the source side, and make nothing.
+    let into = |name: &str| root.path().join("copies").join(name);
+    for (name, copied) in [
+        ("copy", crate::door::copy(&inside, into("copy"))),
+        (
+            "copy_keeping_mode",
+            crate::door::copy_keeping_mode(&inside, into("keeping")),
+        ),
+        (
+            "copy_cloning",
+            crate::door::copy_cloning(&inside, into("cloning")),
+        ),
+        (
+            "copy_tree",
+            crate::door::copy_tree(&store, into("tree"), &|_| false),
+        ),
+    ] {
+        let why = copied.expect_err(&format!("{name} copied a protected path"));
+        assert!(why.to_string().contains(said), "{name}: {why}");
+    }
+    assert!(!into("copy").exists() && !into("keeping").exists());
+    assert!(!into("cloning").exists() && !into("tree").exists());
+    // The same files below a folder of the run's are read and copied.
+    assert_eq!(reads::read_to_string(&outside).unwrap(), "made up");
+    assert_eq!(reads::read(&outside).unwrap(), b"made up");
+    assert!(reads::open(&outside).is_ok() && reads::metadata(&outside).is_ok());
+    assert!(reads::symlink_metadata(&outside).is_ok() && reads::canonicalize(&outside).is_ok());
+    assert!(reads::read_dir(&free).unwrap().len() == 2);
+    assert!(reads::exists(&outside) && reads::is_file(&outside) && reads::is_dir(&free));
+    assert_eq!(crate::files::read(&outside).unwrap(), b"made up");
+    assert_eq!(crate::files::read_string(&outside).unwrap(), "made up");
+    crate::door::copy(&outside, into("copy")).unwrap();
+    crate::door::copy_keeping_mode(&outside, into("keeping")).unwrap();
+    crate::door::copy_cloning(&outside, into("cloning")).unwrap();
+    crate::door::copy_tree(&free, into("tree"), &|_| false).unwrap();
+    for name in ["copy", "keeping", "cloning"] {
+        assert_eq!(fs::read_to_string(into(name)).unwrap(), "made up", "{name}");
+    }
+    assert!(into("tree").join("inner").join("a.txt").is_file());
+}

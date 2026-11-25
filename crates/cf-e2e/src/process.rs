@@ -599,6 +599,14 @@ impl Run {
             return Ok(());
         }
         if let Kind::Script = self.kind {
+            // A script is run by a shell: any other program is a start with no judgement of its
+            // program, which is what a script entry is not.
+            if crate::door::shells::shell_named(&self.program.to_string_lossy()).is_none() {
+                return Err(Error::LiveApp(format!(
+                    "{} is not started: a script is run by a shell, and this is none the door knows",
+                    self.program.to_string_lossy()
+                )));
+            }
             let words: Vec<String> = self
                 .args
                 .iter()

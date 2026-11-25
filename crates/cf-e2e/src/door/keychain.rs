@@ -106,26 +106,49 @@ impl Control {
         limit: Duration,
     ) -> Result<Ran> {
         let _ = self;
+        let config = |name: &str| name.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR");
         for (name, value) in &vars {
             if crate::door::spawn::HOME_VARS
                 .iter()
                 .chain(&crate::door::spawn::PROFILE_HALVES)
-                .any(|home| home.eq_ignore_ascii_case(name) && *home != "CLAUDE_CONFIG_DIR")
+                .any(|home| home.eq_ignore_ascii_case(name) && !config(home))
             {
                 return Err(Error::Daemon(format!(
                     "the Keychain control gives {name} itself; a caller names none of the homes"
                 )));
             }
-            if name == "CLAUDE_CONFIG_DIR" && !crate::door::is_made_or_below(Path::new(value)) {
+            if config(name) && !crate::door::is_made_or_below(Path::new(value)) {
                 return Err(Error::Daemon(format!(
                     "the Keychain control runs Claude Code on a config folder this run made, and {value} is none"
                 )));
             }
         }
-        if !vars.iter().any(|(name, _)| name == "CLAUDE_CONFIG_DIR") {
+        if !vars.iter().any(|(name, _)| config(name)) {
             return Err(Error::Daemon(
                 "the Keychain control runs Claude Code on a config folder this run made, and none is named".to_owned(),
             ));
+        }
+        // The program is Claude Code's, by the file it resolves to as any start is judged: the
+        // control starts nothing else on the account's home.
+        let words: Vec<String> = args.iter().map(|word| (*word).to_owned()).collect();
+        let given: Vec<(std::ffi::OsString, std::ffi::OsString)> = vars
+            .iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        match crate::door::program_started(program, &words, &given) {
+            Ok(crate::door::spawn::Program::Harness("claude")) => {}
+            Ok(_) => {
+                return Err(Error::Daemon(format!(
+                    "the Keychain control runs Claude Code, and {} is another program",
+                    program.display()
+                )));
+            }
+            Err(why) => {
+                return Err(Error::Daemon(format!(
+                    "the Keychain control does not start {}: {why}",
+                    program.display()
+                )));
+            }
         }
         let home = crate::live::machine::home()?;
         Run::operation("keychain-control", program)
@@ -367,6 +390,8 @@ mod control_tests {
         let seen = run.path().join("seen");
         crate::door::write_executable(&program, format!("#!/bin/sh\nenv > '{}'\n", seen.display()))
             .unwrap();
+        // A file the run made is Claude Code's where the kit says it is its wrapper of Claude.
+        crate::door::register_wrapper(&program, "claude");
         let config = run.path().join("config");
         crate::door::make_dir(&config).unwrap();
         let named = |config: &Path| {
@@ -419,6 +444,47 @@ mod control_tests {
                 "{refused}"
             );
             assert!(!seen.exists(), "a refused start ran");
+        }
+        // The config folder's name is matched in any case, as the homes are.
+        let lower = vec![(
+            "claude_config_dir".to_owned(),
+            foreign.path().to_string_lossy().into_owned(),
+        )];
+        assert!(control
+            .start_claude(&program, &[], lower, run.path(), Duration::from_secs(20))
+            .is_err());
+        assert!(!seen.exists(), "a refused start ran");
+        // Any program but Claude Code's is refused, whatever it is named: a file of the run's the
+        // kit does not know as Claude's, the Keychain's utility, cargo, a shell given a command.
+        let other = run.path().join("other");
+        crate::door::write_executable(&other, format!("#!/bin/sh\nenv > '{}'\n", seen.display()))
+            .unwrap();
+        // Decoys of the run's own, named as the programs they stand for.
+        let decoy = |name: &str| {
+            let path = run.path().join(name);
+            crate::door::write_executable(
+                &path,
+                format!("#!/bin/sh\necho {name} >> '{}'\n", seen.display()),
+            )
+            .unwrap();
+            path
+        };
+        let (security, cargo) = (decoy("security"), decoy("cargo"));
+        for (program, args) in [
+            (other.as_path(), vec![]),
+            (security.as_path(), vec!["find-generic-password"]),
+            (cargo.as_path(), vec!["--version"]),
+            (Path::new("/bin/sh"), vec!["-c", "echo no"]),
+        ] {
+            let refused = control
+                .start_claude(program, &args, named(&config), run.path(), Duration::from_secs(20))
+                .unwrap_err();
+            assert!(
+                refused.to_string().contains("Keychain control"),
+                "{}: {refused}",
+                program.display()
+            );
+            assert!(!seen.exists(), "{} ran", program.display());
         }
     }
 }
