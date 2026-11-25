@@ -427,6 +427,8 @@ export class XtermEmulator {
     this.pending = null
     this.resizeObserver = new ResizeObserver(() => this.fit())
     this.resizeObserver.observe(host)
+    /** An unfinished UTF-8 suffix, at most three bytes, for the next output. */
+    this.utf8Pending = null
   }
 
   /**
@@ -465,10 +467,41 @@ export class XtermEmulator {
     return false
   }
 
-  /** Resolve only after xterm's parser has committed these bytes. */
+  /** Resolve once xterm has parsed the complete prefix; an unfinished suffix waits for more. */
   write(bytes) {
-    const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+    let payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+    if (this.utf8Pending !== null) {
+      const joined = new Uint8Array(this.utf8Pending.length + payload.length)
+      joined.set(this.utf8Pending)
+      joined.set(payload, this.utf8Pending.length)
+      payload = joined
+      this.utf8Pending = null
+    }
+    // xterm 6 loses a character when a write ends after its 0x80 second byte.
+    // Leave a trailing incomplete sequence out of xterm until more bytes arrive.
+    let start = payload.length
+    while (start > 0 && payload.length - start < 3 && (payload[start - 1] & 0xc0) === 0x80)
+      start -= 1
+    if (start > 0) {
+      const lead = payload[start - 1]
+      // Include the malformed leads xterm itself treats as multi-byte starts: it
+      // decides whether the completed sequence is valid when it parses it.
+      const size =
+        lead >= 0xc0 && lead <= 0xdf
+          ? 2
+          : lead >= 0xe0 && lead <= 0xef
+            ? 3
+            : lead >= 0xf0 && lead <= 0xf7
+              ? 4
+              : 0
+      if (size && payload.length - start < size - 1) {
+        this.utf8Pending = payload.slice(start - 1)
+        payload = payload.subarray(0, start - 1)
+      }
+    }
     return new Promise((resolve) => {
+      // Even an empty prefix must be queued behind earlier writes: callers can
+      // acknowledge this message only once those earlier bytes have been parsed.
       this.terminal.write(payload, resolve)
     })
   }
@@ -523,6 +556,8 @@ export class XtermEmulator {
 
   dispose() {
     clearTimeout(this.settling)
+    // There is no page-side EOF event. A suffix left at close cannot form a glyph.
+    this.utf8Pending = null
     this.terminal.element?.removeEventListener('paste', this.imagePaste, true)
     this.terminal.textarea?.removeEventListener('blur', this.clearPaste)
     this.resizeObserver.disconnect()

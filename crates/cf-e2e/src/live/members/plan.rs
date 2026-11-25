@@ -44,8 +44,10 @@ pub fn stand_in_worker() -> Value {
 
 /// The work tier of the member of `harness`: its own, so that a task which names
 /// the tier lands on that harness. The daemon picks a member by tier alone, and a
-/// check that needs one harness's question tool must land on that harness. There are
-/// four tiers for five harnesses: Devin and Codex share one, and Pi and Muse another.
+/// check that needs one harness's question tool must land on that harness. A member
+/// is a worker, and the staff has one slot to a tier (every tier is offered): there are four
+/// tiers for five harnesses, so Devin and Codex share one, and Pi and Muse another, and no
+/// check seats two of a pair.
 const fn tier(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "complex",
@@ -296,6 +298,21 @@ mod tests {
             tiers,
             ["complex", "standard", "critical", "critical", "standard"]
         );
+    }
+
+    /// A member of a check is a worker, offered every tier; a Critical one's task names its
+    /// purpose, which `tier_flag` gives.
+    #[test]
+    fn each_harnesss_work_tier_is_a_slot_the_staff_offers_a_worker_and_asks_no_purpose() {
+        for harness in Harness::ALL {
+            let tier = tier(harness);
+            assert!(
+                cf_ledger::roles::offers("worker", tier),
+                "{} at {tier}: a worker is not offered it",
+                harness.name()
+            );
+            assert!(tier_flag(tier).starts_with(&["--tier".to_owned(), tier.to_owned()]));
+        }
     }
 
     #[test]

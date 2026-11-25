@@ -50,8 +50,23 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
                     let fields = choice
                         .as_object_mut()
                         .ok_or_else(|| Said::from("a staff row is an object"))?;
-                    fields.insert("roles".to_owned(), json!(["worker"]));
-                    fields.insert("tier".to_owned(), json!("light"));
+                    // An image designer's backup stays one, drawn on Codex's own model with
+                    // none asked of it; any other backup is read as a light worker whose
+                    // model the page picked.
+                    let draws = fields.get("designer") == Some(&Value::Bool(true))
+                        || fields
+                            .get("roles")
+                            .and_then(Value::as_array)
+                            .is_some_and(|roles| roles.iter().any(|role| role == "designer"));
+                    if draws {
+                        fields.insert("roles".to_owned(), json!(["designer"]));
+                        for key in ["model", "effort", "modelName", "tier", "read"] {
+                            fields.remove(key);
+                        }
+                    } else {
+                        fields.insert("roles".to_owned(), json!(["worker"]));
+                        fields.insert("tier".to_owned(), json!("light"));
+                    }
                 }
                 let picked = picked_member(page, Body::new(&choice), false).await?;
                 let mut row = member_json(&picked);

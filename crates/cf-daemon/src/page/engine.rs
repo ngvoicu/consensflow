@@ -184,6 +184,11 @@ pub trait Engine {
     /// always. A lane says it only then, as it says an ignored stop.
     fn held(&self, participant: i64) -> Option<Value>;
 
+    /// A task whose resume words wait for its window, and why.
+    fn resume_wait(&self, _participant: i64) -> Result<Option<Value>, EngineError> {
+        Ok(None)
+    }
+
     /// Until when `member` is out because its model is busy for a moment, while it is
     /// (`model_busy_until`, T-1357): none when it is not out, or out for anything else.
     /// A lane of the member says it only then, as it says an ignored stop.
@@ -389,6 +394,10 @@ impl Engine for Rc<Dispatcher> {
     fn held(&self, participant: i64) -> Option<Value> {
         Dispatcher::held_for(self, participant)
             .map(|hold| json!({ "task": hold.task, "jobs": hold.jobs, "agents": hold.agents }))
+    }
+
+    fn resume_wait(&self, participant: i64) -> Result<Option<Value>, EngineError> {
+        Dispatcher::resume_wait(self, participant)
     }
 
     fn model_busy_until(&self, member: &ParticipantView) -> Option<String> {

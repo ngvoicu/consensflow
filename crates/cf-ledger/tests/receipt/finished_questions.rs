@@ -269,7 +269,7 @@ fn migration_keeps_an_old_ledgers_delivered_question_and_its_receipt_time() {
         .clone()
         .expect("the question was received");
     w.edit(|db| {
-        cf_ledger::testing::undo_migration_0045(db).expect("closed waits undone");
+        cf_ledger::testing::undo_migration_0046(db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(db).expect("holding bounds undone");
         cf_ledger::testing::undo_migration_0043(db).expect("question boundaries undone");
         cf_ledger::testing::undo_migration_0042(db).unwrap();

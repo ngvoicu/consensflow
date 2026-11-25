@@ -377,6 +377,7 @@ impl Window for PiWindow {
                 && !working(&session, &self.env, &options)?
             {
                 observed.settled = true;
+                observed.takes_words = true;
             }
             Ok(match shown {
                 None => unnamed(observed, HOLD),

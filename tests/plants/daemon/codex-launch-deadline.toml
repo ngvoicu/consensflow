@@ -1,0 +1,78 @@
+# Plants in the deadline and the retry of a Codex window's read of its own instructions
+# (`crates/cf-harness/src/codex/role.rs`): ten seconds for the reply to `initialize`,
+# sixty for the read of the configuration, the whole dialogue asked again once after a
+# silence and never after a protocol error, and the refusal naming which silence it was.
+
+[run]
+# The harness's tests of a Codex window's role, its dialogue with the app-server among them.
+harness-codex-role = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::role"]
+
+[[plant]]
+name = "codex launch deadline: the app-server has a minute to initialize"
+meant = "an_app_server_has_ten_seconds_from_its_start_to_initialize_and_is_asked_again_once"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "const START_WITHIN_MS: u64 = 10_000;"
+replace = "const START_WITHIN_MS: u64 = 60_000;"
+
+[[plant]]
+name = "codex launch deadline: the read of the configuration has the old ten seconds"
+meant = "the_read_of_the_configuration_has_sixty_seconds_from_the_answer_to_initialize_and_a_slow_one_is_read"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "const READ_WITHIN_MS: u64 = 60_000;"
+replace = "const READ_WITHIN_MS: u64 = 10_000;"
+
+[[plant]]
+name = "codex launch deadline: a silence is not asked again"
+meant = "an_app_server_that_is_silent_once_and_then_answers_is_asked_again_and_read"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "const ASKS: u32 = 2;"
+replace = "const ASKS: u32 = 1;"
+
+[[plant]]
+name = "codex launch deadline: a silent read of the configuration is not asked again"
+meant = "a_read_of_the_configuration_that_is_not_answered_is_asked_again_once_and_then_refused_in_its_own_words"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "Err(Unread::Silent | Unread::Preparing) if asked < ASKS => {}"
+replace = "Err(Unread::Silent) if asked < ASKS => {}"
+
+[[plant]]
+name = "codex launch deadline: a protocol error is asked again"
+meant = "a_protocol_error_is_refused_at_once_and_asked_again_never"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "Err(Unread::Silent | Unread::Preparing) if asked < ASKS => {}"
+replace = "Err(_) if asked < ASKS => {}"
+
+[[plant]]
+name = "codex launch deadline: a silence before initialize says it was the read"
+meant = "an_app_server_has_ten_seconds_from_its_start_to_initialize_and_is_asked_again_once"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "        .ok_or(Unread::Silent)?"
+replace = "        .ok_or(Unread::Preparing)?"
+
+[[plant]]
+name = "codex launch deadline: a silent read of the configuration says the program did not start"
+meant = "a_read_of_the_configuration_that_is_not_answered_is_asked_again_once_and_then_refused_in_its_own_words"
+runs = ["harness-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = "                .ok_or(Unread::Preparing)?"
+replace = "                .ok_or(Unread::Silent)?"

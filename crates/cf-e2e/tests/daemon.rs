@@ -17,6 +17,8 @@
 mod bridge;
 #[path = "daemon/core_daemon.rs"]
 mod core_daemon;
+#[path = "daemon/harness_check.rs"]
+mod harness_check;
 #[path = "daemon/over_bridge.rs"]
 mod over_bridge;
 

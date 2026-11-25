@@ -74,21 +74,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "member models: a second Add of a model a member runs makes another member"
-meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
-runs = ["mm-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''
-            && member_now.designer == member.designer
-    })?;'''
-replace = '''
-            && member_now.designer == member.designer
-            && false
-    })?;'''
-
-[[plant]]
 name = "member models: Edit member leaves the member on the model it ran"
 meant = "edit_member_moves_a_member_to_another_model_in_the_tier_chosen"
 runs = ["mm-daemon"]

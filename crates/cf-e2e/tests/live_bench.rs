@@ -40,7 +40,7 @@ mod review;
 use std::path::Path;
 
 use cf_e2e::live::agents;
-use cf_e2e::live::members::{member_as, Members, Plan, BENCH_BRIEF};
+use cf_e2e::live::members::{member, member_as, Members, Plan, BENCH_BRIEF};
 use cf_e2e::live::report::{self};
 use cf_e2e::live::{self, Harness, Log};
 use cf_e2e::{Error, Result};
@@ -102,6 +102,19 @@ fn options(
             .map(|word| harness(word, "worker"))
             .collect::<Result<_>>()?
     };
+    // The staff has one worker to a tier: two harnesses of one tier cannot both be seated.
+    for (at, first) in workers.iter().enumerate() {
+        if let Some(second) = workers[at + 1..]
+            .iter()
+            .find(|second| member(**second)["workTier"] == member(*first)["workTier"])
+        {
+            return Err(Error::Daemon(format!(
+                "bench workers {} and {} share a tier, and the staff has one worker to a tier",
+                first.name(),
+                second.name()
+            )));
+        }
+    }
     Ok(Options {
         chief,
         reviewer: harness(reviewer.unwrap_or("devin"), "reviewer")?,
@@ -262,6 +275,16 @@ mod tests {
             refused(options(None, None, None, &words(&["kimi"]))).as_deref(),
             Some("unsupported bench worker: kimi")
         );
+    }
+
+    #[test]
+    fn two_bench_workers_of_one_tier_are_refused_for_the_staff_has_one_worker_to_a_tier() {
+        let refused = options(None, None, None, &words(&["pi", "muse"])).unwrap_err();
+        assert!(
+            refused.to_string().contains("pi and muse share a tier"),
+            "{refused}"
+        );
+        assert!(options(None, None, None, &words(&["claude", "pi", "devin"])).is_ok());
     }
 
     #[test]

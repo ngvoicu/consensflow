@@ -45,7 +45,7 @@ impl Key {
 }
 
 /// What tells one object a reader keys by from another.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Keys {
     objects: u64,
 }

@@ -61,7 +61,14 @@ const BRIEFED: Shape = Shape {
 /// The flags of `cf task edit`: a brief and a title as any other, and the tier, the tasks it
 /// needs and the tasks that wait for it, which may stand alone.
 const EDIT: Shape = Shape {
-    valued: &[brief::FILE, TITLE, "--tier", "--needs", "--before"],
+    valued: &[
+        brief::FILE,
+        TITLE,
+        "--tier",
+        "--purpose",
+        "--needs",
+        "--before",
+    ],
     ..Shape::TEXT
 };
 
@@ -211,7 +218,7 @@ fn add(
                 .into(),
         ));
     }
-    let untiered = switched.iter().any(|role| !role.tiered);
+    let untiered = switched.iter().any(|role| !role.tiered());
     // Two roles are the board's to refuse, in words that name both.
     if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
         return Err(Failure::Usage(ADD_USAGE.into()));
@@ -362,7 +369,23 @@ fn add_plan(words: &Split, given: &[OsString], board: &Board) -> Result<Said, Fa
         let name = section["name"].as_str().unwrap_or_default();
         let number = js::text(task.get("task").and_then(|task| task.get("number")));
         let brief = section["body"].as_str().unwrap_or_default();
-        output.push(format!("{name} → T-{number}"));
+        let fell = match task.get("asked") {
+            None | Some(Value::Null) => String::new(),
+            asked => {
+                let role =
+                    cf_ledger::roles::asked(|field| section.get(field) == Some(&Value::Bool(true)))
+                        .first()
+                        .map_or(cf_ledger::roles::unasked(), |role| *role);
+                format!(
+                    " (no {} {} is on the staff, so the nearest tier, {}{})",
+                    js::text(asked),
+                    role.name,
+                    js::text(task.get("tier")),
+                    held_by(task)
+                )
+            }
+        };
+        output.push(format!("{name} → T-{number}{fell}"));
         if gated && !js::truthy(section.get("self")) {
             output.push(format!(
                 "T-{number}: The human approves each message before it moves."
@@ -541,10 +564,9 @@ fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Fail
             "you are already at it: do it now, or give it --needs T-3".into(),
         ));
     }
-    let untiered = switched.iter().any(|role| !role.tiered);
-    if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
-        return Err(Failure::Usage(ADD_USAGE.into()));
-    }
+    // A section's tier is the board's to ask for, not the CLI's: a plan an earlier version took
+    // under a key replays its saved answer before any section is checked.
+    let untiered = switched.iter().any(|role| !role.tiered());
     let text = if words.given(brief::FILE) {
         let file = words
             .value(brief::FILE)?
@@ -820,9 +842,13 @@ fn moved(
         .value("--tier")?
         .filter(|_| action == "edit")
         .map(str::to_owned);
+    let purpose = words
+        .value("--purpose")?
+        .filter(|_| action == "edit")
+        .map(str::to_owned);
     let needs = links_of("--needs", &words, action)?;
     let before = links_of("--before", &words, action)?;
-    let alone = tier.is_some() || needs.is_some() || before.is_some();
+    let alone = tier.is_some() || purpose.is_some() || needs.is_some() || before.is_some();
     let title = new_title(&words)?;
     let text = brief::brief_of(&words, given, input)?;
     // An edit with a title and nothing else changes the title alone.
@@ -840,13 +866,13 @@ fn moved(
         };
         return Err(Failure::Usage(match action {
             "edit" => format!(
-                "cf task edit T-{number} \"{what}\", or --tier <tier>, --needs T-4 or --before T-9"
+                "cf task edit T-{number} \"{what}\", or --tier <tier> [--purpose <purpose>], --needs T-4 or --before T-9"
             ),
             _ => format!("cf task {action} T-{number} \"{what}\""),
         }));
     }
     // What the words that send a window on say of themselves.
-    let sent = if (briefed || action == "pause") && !text.is_empty() {
+    let sent = if (briefed || action == "pause") && action != "resume" && !text.is_empty() {
         format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
@@ -858,6 +884,9 @@ fn moved(
     }
     if let Some(tier) = &tier {
         body.insert("tier".into(), tier.as_str().into());
+    }
+    if let Some(purpose) = &purpose {
+        body.insert("purpose".into(), purpose.as_str().into());
     }
     if let Some(needs) = &needs {
         body.insert("needs".into(), needs.clone());
@@ -882,6 +911,12 @@ fn moved(
         Some(running) => still_running(number, running),
         None => String::new(),
     };
+    let resume_gated = answer
+        .value()
+        .get("message")
+        .and_then(|message| message.get("state"))
+        .and_then(Value::as_str)
+        == Some("gated");
     let task = answer.take("task")?;
     // A resume's line names no title, so a new one is said.
     let titled = title.as_ref().map_or_else(String::new, |title| {
@@ -911,10 +946,13 @@ fn moved(
             pause_withdrew(answer.value().get("toldWithdrawn"))
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
-            "T-{number} is back on the board for {}: the window that had it has ended.{titled}",
+            "T-{number} is back on the board for {}: the window that had it has ended. Your words are in its brief.{titled}",
             a_pool(task.get("pool"), task.get("tier"))
         ),
-        "resume" => format!("T-{number} resumes in @{} with your words.{titled}", js::text(task.get("assignee"))),
+        "resume" => {
+            let approval = if resume_gated { " The human must approve them first." } else { "" };
+            format!("T-{number}: your resume words are queued for @{}'s window and go in when it stops.{approval}{titled}", js::text(task.get("assignee")))
+        }
         "finish" => {
             let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
             let withdrawn = match answer.value().get("toldWithdrawn") {
@@ -1864,40 +1902,132 @@ and 2 idle sessions (`cf task list --all`)";
         });
     }
 
-    /// The four roles of spec new-roles are asked for by their switches, take no tier, and the
-    /// receipt names each by its name.
+    /// The four roles of spec new-roles are asked for by their switches and a tier (the staff as
+    /// slots), and the receipt names each by its name. With no tier, `cf` prints the usage whose
+    /// lines name each role's tiers, and posts nothing.
     #[test]
-    fn the_four_new_roles_are_asked_for_by_their_switches_and_named_by_their_rows() {
+    fn the_four_new_roles_are_asked_for_by_their_switches_and_a_tier_and_named_by_their_rows() {
         for (switch, field, pool, named) in [
-            ("--frontend", "frontend", "frontend", "a frontend designer"),
-            ("--architect", "architect", "architect", "an architect"),
-            ("--research", "research", "researcher", "a researcher"),
-            ("--integrate", "integrate", "integrator", "an integrator"),
+            (
+                "--frontend",
+                "frontend",
+                "frontend",
+                "a standard frontend designer",
+            ),
+            (
+                "--architect",
+                "architect",
+                "architect",
+                "a standard architect",
+            ),
+            (
+                "--research",
+                "research",
+                "researcher",
+                "a standard researcher",
+            ),
+            (
+                "--integrate",
+                "integrate",
+                "integrator",
+                "a standard integrator",
+            ),
         ] {
             let answer = json!({
                 "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
-                    "title": "Do it", "blockedBy": [], "pool": pool, "tier": null },
+                    "title": "Do it", "blockedBy": [], "pool": pool, "tier": "standard" },
                 "message": null, "gated": false,
             });
-            let (posted, said) = added(&[switch, "Do it"], &answer);
+            let (posted, said) = added(&[switch, "--tier", "standard", "Do it"], &answer);
             assert_eq!(
                 posted,
-                Some(json!({ field: true, "body": "Do it" })),
+                Some(json!({ field: true, "tier": "standard", "body": "Do it" })),
                 "{switch}"
             );
             assert_eq!(
                 said,
                 format!("T-3 is on the board for {named}; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 5 characters, ending \"Do it\".")
             );
-            // A tier given with it goes to the board, which refuses it in the role's name: `cf`
-            // drops nothing it was asked.
-            let (posted, _) = added(&[switch, "--tier", "light", "Do"], &answer);
-            assert_eq!(
-                posted,
-                Some(json!({ field: true, "tier": "light", "body": "Do" })),
-                "{switch} with a tier"
+            // With no tier, the usage is printed, whose lines name each role's tiers.
+            let api = scripted(vec![]);
+            let given: Vec<OsString> = [switch, "Do it"].iter().map(OsString::from).collect();
+            let words: Vec<String> = [switch, "Do it"]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
+            let refused = add(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            );
+            assert!(
+                matches!(&refused, Err(Failure::Usage(usage)) if usage == ADD_USAGE && usage.contains("<critical|complex|standard|light>")),
+                "{switch}: not the usage"
+            );
+            assert!(
+                api.received().is_empty(),
+                "{switch}: nothing is asked of the board"
             );
         }
+    }
+
+    /// A plan's answer says each section's destination: a Complex request that fell to Standard
+    /// reads Standard (the tier it went to, kept with the key), never the tier asked.
+    #[test]
+    fn a_plan_section_that_fell_says_the_tier_it_went_to_and_never_the_one_it_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(
+            &file,
+            "=== check --test --tier complex\nRun it\n=== build --tier standard\nBuild it\n",
+        )
+        .unwrap();
+        let answer = json!({
+            "tasks": [
+                { "name": "check", "task": { "number": 5 }, "tier": "standard", "asked": "complex", "heldBy": ["tess"] },
+                { "name": "build", "task": { "number": 6 }, "tier": "standard" },
+            ],
+            "gated": false,
+        });
+        let api = scripted(vec![reply(201, answer)]);
+        let words = vec!["--plan".to_owned(), file.display().to_string()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let said = add(
+            &words,
+            &given,
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        assert!(
+            said.text.contains(
+                "check → T-5 (no complex tester is on the staff, so the nearest tier, standard: @tess)"
+            ),
+            "{}",
+            said.text
+        );
+        assert!(said.text.contains("build → T-6\n"), "{}", said.text);
+        assert!(
+            !said.text.contains("check → T-5 for a complex"),
+            "{}",
+            said.text
+        );
+    }
+
+    /// `cf task edit T-n --tier critical --purpose …` posts the purpose beside the tier.
+    #[test]
+    fn an_edit_posts_its_purpose_beside_critical() {
+        let answer = json!({ "task": card(2, "open", None) });
+        let (posted, _) = edited(
+            &["T-2", "--tier", "critical", "--purpose", "critical-review"],
+            "",
+            &answer,
+        );
+        assert_eq!(
+            posted[0].1,
+            Some(json!({ "tier": "critical", "purpose": "critical-review" }))
+        );
     }
 
     /// The review of T-1441 (T-1453): `cf task add` sent `--self` or `--after` before any role,
@@ -2229,7 +2359,7 @@ and 2 idle sessions (`cf task list --all`)";
             &mut std::io::empty(),
         );
         assert!(
-            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\", or --tier <tier>, --needs T-4 or --before T-9"),
+            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\", or --tier <tier> [--purpose <purpose>], --needs T-4 or --before T-9"),
             "a usage line was expected"
         );
         assert!(api.received().is_empty());

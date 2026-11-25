@@ -1,9 +1,8 @@
-//! The harness diagnostics' routes: what is known of each harness's CLI here,
-//! and its update. Both are the harness admin's
-//! ([`HarnessAdmin`](cf_harness::admin::HarnessAdmin)): the screen only checks
-//! that the harness asked about is one of the five, before the machine is asked
-//! anything, and says what the admin answered, or why it would not (a harness
-//! that is not installed is asked to update: `Claude is not installed`).
+//! The harness diagnostics' route: what is known of each harness's CLI here, as the harness
+//! admin ([`HarnessAdmin`](cf_harness::admin::HarnessAdmin)) says it. The page is read-only:
+//! it installs nothing, and says the command that updates a harness the way it was installed.
+//! The screen only checks that the harness asked about is one of the five, before the machine
+//! is asked anything.
 
 use cf_proto::agents::Harness;
 use serde_json::{json, Value};
@@ -23,6 +22,15 @@ fn known(id: Option<&Value>) -> Result<Harness, String> {
         .ok_or_else(|| UNKNOWN.to_owned())
 }
 
+/// A row as the page reads it: its fields and its `stamp`, the number its look took when it began.
+fn stamped(row: &impl serde::Serialize, stamp: u64) -> Value {
+    let mut row = serde_json::to_value(row).unwrap_or(Value::Null);
+    if let Some(fields) = row.as_object_mut() {
+        fields.insert("stamp".to_owned(), json!(stamp));
+    }
+    row
+}
+
 impl Screens {
     /// `POST /api/harnesses/check`: every harness's row, or the one `id` names;
     /// a row kept less than five minutes is answered as it was, unless `refresh`
@@ -33,15 +41,11 @@ impl Screens {
             .map(|id| known(Some(id)))
             .transpose()?;
         let refresh = property(body, "refresh")? == Some(&Value::Bool(true));
-        let harnesses = self.admin.check(id.map(Harness::as_str), refresh).await?;
+        let observed = self.admin.observe(id.map(Harness::as_str), refresh).await?;
+        let harnesses: Vec<Value> = observed
+            .iter()
+            .map(|(stamp, row)| stamped(row.as_ref(), *stamp))
+            .collect();
         Ok(Answer::ok(json!({ "harnesses": harnesses })))
-    }
-
-    /// `POST /api/harnesses/update`: the harness `id` names, brought to its latest
-    /// release the way it was installed, and what became of it.
-    pub(super) async fn update_harness(&self, body: &Value) -> Result<Answer, String> {
-        let id = known(property(body, "id")?)?;
-        let result = self.admin.update(id.as_str()).await?;
-        Ok(Answer::ok(json!({ "result": result })))
     }
 }

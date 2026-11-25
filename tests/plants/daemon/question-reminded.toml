@@ -165,7 +165,7 @@ name = "question reminded: a wait's rows stay when its project is deleted"
 meant = "a_project_with_a_recorded_wait_is_deleted_with_it"
 runs = ["question-reminded-ledger"]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0046.sql"
 find = "REFERENCES message(id) ON DELETE CASCADE,"
 replace = "REFERENCES message(id),"
 
@@ -174,15 +174,15 @@ name = "question reminded: the migration takes a quotation for the notice"
 meant = "the_migration_takes_no_members_quotation_for_the_closure_notice"
 runs = ["question-reminded-ledger"]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0046.sql"
 find = "' closed when ') = 1)) AS note"
 replace = "' closed when ') > 0)) AS note"
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0046.sql"
 find = "instr(n.body, '@' || s.handle || '''s question m-' || q.id"
 replace = "instr(n.body, 'question m-' || q.id"
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0046.sql"
 find = "CASE WHEN count(*) = 1 THEN min(n.id) END"
 replace = "min(n.id)"
 
@@ -191,6 +191,6 @@ name = "question reminded: the migration takes the first of two matching notices
 meant = "the_migration_skips_a_closure_notice_it_cannot_tell_from_another"
 runs = ["question-reminded-ledger"]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0046.sql"
 find = "CASE WHEN count(*) = 1 THEN min(n.id) END"
 replace = "min(n.id)"

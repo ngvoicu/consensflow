@@ -75,8 +75,8 @@ runs = ["relaunch-follow-ups-status"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/status.rs"
-find = "                if status.session == session && !parked && !holders.contains(&pid) =>"
-replace = "                if status.session == session && !holders.contains(&pid) =>"
+find = "            if status.session == session && !parked && !holders.contains(&pid) {"
+replace = "            if status.session == session && !holders.contains(&pid) {"
 
 [[plant]]
 name = "relaunch-follow-ups: a window opened again with no proof from the host is told no boundary though no Claude shows the conversation"
@@ -126,12 +126,12 @@ runs = ["relaunch-follow-ups-adapter"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
 find = """
-            if self.shares() {
+            if self.shares_of(holders) {
                 self.shared.set(true);
             }
 """
 replace = """
-            self.shared.set(self.shares());
+            self.shared.set(self.shares_of(holders));
 """
 
 [[plant]]

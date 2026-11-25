@@ -20,6 +20,40 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **T-1986 Codex's launch survives a slow first start.** Node's launch gave Codex's
+  app-server ten seconds from its spawn to answer both requests. Rust gives it ten
+  seconds for the reply to `initialize` and then sixty for the read of the
+  configuration, asks the whole dialogue once more after either silence, and says in
+  the refusal which of the two it was (a protocol error is refused at once, in Node's
+  words, never asked again). In each of the Darwin and Windows launch recordings the
+  two scenarios of a silent app-server (`says nothing in ten seconds`, `answers
+  initialize and then nothing`) were edited by hand: a second scripted child, a second
+  `advance`, and the records of those steps as the Rust launch plays them; their first
+  record is Node's own, but for the read's timer of 60000 in place of 10000.
+
+- **The Admin's verdict is the launch's own check (T-1969, P2 A2).** For Codex, Devin and Muse
+  Code a row's `setup` and its version are the launch's check of the CLI, asked through the
+  launches' own map of probes and not through the admin's capture: a probe runs in no folder of
+  its own, with 30 s and 128 KiB (Node's probe took 3 s and 8 KiB, in the home), and a Codex is
+  also asked `queue --help`, which Node's scenarios never scripted. In both platforms'
+  recordings every step that looked at a Codex gained its `setup` (`unchecked`: the scenario
+  scripts no queue), and every step that asked one of the three for its version moved its
+  recorded call. A CLI's `--version` is asked once as the file is on disk, so three scenarios
+  (the row kept five minutes, the look dated when it began, the update whose first look is
+  older than five minutes) no longer ask for the later answers their effects held: those are
+  dropped. The steps were moved by hand, once, to what the admin now says. A probe whose last
+  caller stopped waiting (a look cut at its time) leaves the map, so a CLI's version a cut look
+  never got is asked again at the next look: the look dated when it began holds a second answer
+  for it, and its step 4 records the second `--version` run (T-2068).
+
+- **Tested releases on the Admin row (T-1968).** Both platform scenarios now
+  include `tested` after `update`, including on missing harnesses. The installed
+  release is read only from the CLI's own complete version line (or Muse's pin),
+  and a recognized release is also the displayed and compared version. The
+  scenario runner masks `tested.newest` as `<newest tested>` so a declaration
+  bump does not rewrite the recordings. The threshold and the feed/CLI/declaration
+  round trip have separate assertions; the other recorded fields are unchanged.
+
 - **T-1715 shorter adapter text.** In each of the Darwin and Windows launch
   recordings, 88 recorded role files use the shorter Codex introduction and 88
   recorded child configuration files use its shorter identity/board sentence.
@@ -391,6 +425,15 @@ and the hash that names a bundle of an extension is `$HASH`.
   Node's was `unknown`; `inFlight`, `failed`, `quota` and the items are Node's. The
   other Pi readings are unmoved (a failure that is not yet quiet is in flight in
   both, and the extension's evidence settled it already). Moved by hand.
+- **A Pi provider error is not a failed turn while Pi may retry** (T-1958, N35).
+  A recorded first error had `failed: true` while the turn was in flight, so a
+  dispatcher look could fail its working task during Pi's own retries. A failed
+  Pi step now reads failed only when the extension's boundary or the quiet
+  fallback settles it. In `records/`, nine in-flight readings of seven Pi
+  scenarios moved from `failed: true` to `failed: false`; the quota, items,
+  settlement and settled failures remain as before. The Pi refused-request
+  observation in `launch/` moved the same one field on each platform. The new
+  tests replay T-1939's recordings at every prefix and through the dispatcher.
 - **A launch tells Pi that the pane draws hyperlinks** (2026-11-08, T-1315, the reviews of T-1291).
   The pane is xterm.js and draws OSC 8, but Pi (1.5.0) knows only the terminals it lists, and
   `ConsensFlow` is none: it printed a link as `words (address)` text, which Pi's own rows, written

@@ -12,7 +12,7 @@ tep-engine-turn-end = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 tep-turn-end-finish-cf-verb = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
 tep-turn-end-finish-cf-goldens = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
 tep-turn-end-finish-daemon-api = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api"]
-tep-turn-end-finish-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "background|Finish"]
+tep-turn-end-finish-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "background|Finish", "--workers=4"]
 tep-turn-end-finish-regression-never-ends = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_never_ends"]
 tep-turn-end-review-2-claude-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 tep-turn-end-review-2-cf-board-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
@@ -82,8 +82,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number\n        ? { ...task, held: lane.held }\n        : task"
-replace = "      return task"
+find = "        shown = { ...shown, held: lane.held }"
+replace = "        shown = task"
 
 [[plant]]
 name = "turn end finish page: every working task of a lane is said to wait"
@@ -93,8 +93,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number"
-replace = "      return task.state === 'working' && lane.held"
+find = "      } else if (task.state === 'working' && lane.held?.task === task.number) {"
+replace = "      } else if (task.state === 'working' && lane.held) {"
 
 [[plant]]
 name = "turn end finish page: a paused task is said to wait"
@@ -104,8 +104,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "      return task.state === 'working' && lane.held?.task === task.number"
-replace = "      return lane.held?.task === task.number"
+find = "      } else if (task.state === 'working' && lane.held?.task === task.number) {"
+replace = "      } else if (lane.held?.task === task.number) {"
 
 [[plant]]
 name = "turn end finish page: a lane that waits is said idle"

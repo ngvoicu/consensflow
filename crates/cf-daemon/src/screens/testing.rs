@@ -7,7 +7,10 @@ use std::rc::Rc;
 
 use cf_base::env::Env;
 use cf_harness::admin::HarnessAdmin;
-use cf_harness::testing::{fake_executable, ManualTime, ScriptedCapture, ScriptedLatest, EPOCH_MS};
+use cf_harness::seams::Probes;
+use cf_harness::testing::{
+    fake_executable, ManualTime, ScriptedCapture, ScriptedLatest, ScriptedProcesses, EPOCH_MS,
+};
 
 use super::Screens;
 
@@ -47,6 +50,8 @@ impl Rig {
                 Rc::new(ManualTime::new(EPOCH_MS)),
                 Rc::clone(&latest) as _,
                 Rc::clone(&capture) as _,
+                Rc::new(Probes::default()),
+                Rc::new(ScriptedProcesses::default()),
             ),
         };
         Self {
@@ -68,6 +73,8 @@ pub(crate) fn inert() -> Screens {
             Rc::new(ManualTime::new(EPOCH_MS)),
             Rc::new(ScriptedLatest::default()),
             Rc::new(ScriptedCapture::default()),
+            Rc::new(Probes::default()),
+            Rc::new(ScriptedProcesses::default()),
         ),
     }
 }

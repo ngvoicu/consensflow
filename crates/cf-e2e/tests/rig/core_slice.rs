@@ -7,7 +7,6 @@
 //! it arrived.
 
 use cf_e2e::rig::{chief_body, Project, Rig, OPEN};
-use cf_e2e::{files, Error};
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -87,15 +86,9 @@ fn a_chief_hands_a_task_to_a_worker_through_the_board_and_the_result_lands_in_it
 
     // Every move also went to the home's event file as it happened, for
     // whoever watches the daemon from outside.
-    let events: Vec<Value> = files::read_string(&rig.home().join("events.jsonl"))?
-        .trim()
-        .split('\n')
-        .map(serde_json::from_str)
-        .collect::<Result<_, _>>()
-        .map_err(|source| Error::Json {
-            text: "events.jsonl".to_owned(),
-            source,
-        })?;
+    // The daemon's one writer of the file takes a line a moment after the move: read it
+    // again until the file is still.
+    let events: Vec<Value> = rig.events_settled();
     assert!(events
         .iter()
         .any(|e| e["kind"] == "task.opened" && e["data"]["task"] == 1));

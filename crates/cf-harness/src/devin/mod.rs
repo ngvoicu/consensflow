@@ -4,9 +4,10 @@
 
 mod adapter;
 mod channel;
+pub(crate) mod declared;
 mod history;
 pub(crate) mod input_box;
-mod install;
+pub(crate) mod install;
 pub(crate) mod kept;
 mod last_used;
 pub(crate) mod models;
@@ -23,9 +24,9 @@ pub(crate) use adapter::{store_took, window_on, wire_readiness};
 pub(crate) use history::took;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use install::added_hooks;
+pub(crate) use install::minimum_version;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use install::native_config;
-pub(crate) use install::{minimum_version, supported_version};
 
 pub use adapter::DevinAdapter;
 pub use kept::forget_kept;

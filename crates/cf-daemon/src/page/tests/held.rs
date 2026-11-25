@@ -56,6 +56,38 @@ fn serving_the_docs(context: &Context) -> (i64, String) {
 }
 
 #[tokio::test]
+async fn a_lane_says_why_its_tasks_resume_waits_until_the_words_reach_the_window() {
+    LocalSet::new()
+        .run_until(async {
+            let (_home, env) = home_with("[]");
+            let rig = rig_over(env, None);
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let context = &rig.kit;
+            let (project, session) = serving_the_docs(context);
+            context
+                .adapter
+                .busy_with_agents_until_interrupted_in_generation("zeus");
+            context.pause_task(project, 1);
+            context.resume_task(project, 1, "Go on");
+            context.pass().unwrap();
+            context.pass().unwrap();
+
+            assert_eq!(
+                lane(&app, project, &session).await["resumeWait"],
+                json!({ "task": 1, "reason": "window shows working" })
+            );
+            assert_eq!(lane(&app, project, "chief").await.get("resumeWait"), None);
+
+            context.adapter.with("zeus", |agent| agent.settled = true);
+            context.pass().unwrap();
+            context.pass().unwrap();
+            assert_eq!(lane(&app, project, &session).await.get("resumeWait"), None);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn a_lane_says_what_its_task_waits_on_while_it_does_and_finish_ends_the_wait() {
     LocalSet::new()
         .run_until(async {

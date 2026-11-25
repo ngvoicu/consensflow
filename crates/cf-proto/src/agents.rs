@@ -286,7 +286,7 @@ pub const fn work_tier_info(tier: WorkTier) -> WorkTierInfo {
     match tier {
         WorkTier::Critical => WorkTierInfo {
             label: "Critical work",
-            description: "Important reviews, architecture, hard problems and important questions. No coding or routine advice.",
+            description: "The hardest and most important work, coding included: important reviews, architecture, hard problems and important questions; never routine work.",
         },
         WorkTier::Complex => WorkTierInfo {
             label: "Complex work",

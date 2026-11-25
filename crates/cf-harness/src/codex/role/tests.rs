@@ -199,10 +199,71 @@ fn an_app_server_that_is_not_there_refuses_the_launch_and_has_nothing_to_end() {
     assert!(stage.watching.ended.borrow().is_empty());
 }
 
+const SILENT: &str = "Cannot read native Codex instructions safely: Codex's program did not start answering within 10 seconds (a newly installed Codex may still be under macOS's first-run check, Gatekeeper); it was asked twice";
+const PREPARING: &str = "Cannot read native Codex instructions safely: Codex started, but was still preparing its sessions after 60 seconds; it was asked twice";
+
+/// An app-server whose lines come when the test gives them: a line is heard once
+/// pushed, and none is heard before, as a live one's output stays open.
+struct Feed {
+    lines: Rc<std::cell::RefCell<std::collections::VecDeque<String>>>,
+}
+
+impl Child for Feed {
+    fn write_line<'a>(&'a self, _line: &'a str) -> crate::contract::Work<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn read_line(
+        &self,
+        _limit: usize,
+    ) -> crate::contract::Work<'_, Result<Option<String>, String>> {
+        Box::pin(std::future::poll_fn(move |_| {
+            match self.lines.borrow_mut().pop_front() {
+                Some(line) => std::task::Poll::Ready(Ok(Some(line))),
+                None => std::task::Poll::Pending,
+            }
+        }))
+    }
+
+    fn exited(&self) -> bool {
+        false
+    }
+
+    fn closed(&self) -> crate::contract::Work<'_, ()> {
+        Box::pin(std::future::pending())
+    }
+
+    fn terminate(&self, _how: Ending) {}
+}
+
+/// Processes that start the one app-server of `lines`, once.
+struct Feeding(Rc<std::cell::RefCell<std::collections::VecDeque<String>>>);
+
+impl Processes for Feeding {
+    fn run(
+        &self,
+        _program: Program,
+        _limits: crate::seams::processes::Limits,
+    ) -> crate::contract::Work<'_, Result<String, crate::seams::processes::Failed>> {
+        unreachable!("only the app-server is started")
+    }
+
+    fn spawn(
+        &self,
+        _program: Program,
+        _streams: Streams,
+    ) -> Result<Box<dyn Child>, crate::seams::processes::StartRefusal> {
+        Ok(Box::new(Feed {
+            lines: Rc::clone(&self.0),
+        }))
+    }
+}
+
 #[test]
-fn an_app_server_has_ten_seconds_from_its_start_and_is_asked_to_end_when_they_are_up() {
+fn an_app_server_has_ten_seconds_from_its_start_to_initialize_and_is_asked_again_once() {
     let stage = Stage::new();
-    stage.app_server(&[INITIALIZED], Ends::Asked);
+    stage.app_server(&[], Ends::Asked);
+    stage.app_server(&[], Ends::Asked);
     let mut driver = Driver::default();
     let services = stage.services.clone();
     driver.begin(0, async move {
@@ -213,15 +274,112 @@ fn an_app_server_has_ten_seconds_from_its_start_and_is_asked_to_end_when_they_ar
     assert!(stage.watching.ended.borrow().is_empty());
     assert!(!stage.fakes.time.fire_next(EPOCH_MS + 9_999));
     assert!(stage.fakes.time.fire_next(EPOCH_MS + 10_000));
-    assert_eq!(
-        driver.run(),
-        [(
-            0,
-            Err("Cannot read native Codex instructions safely".to_owned())
-        )]
-    );
+    // The first is asked to end, and a second is started with ten seconds of its own.
+    assert!(driver.run().is_empty());
     assert_eq!(*stage.watching.ended.borrow(), [Ending::Asked]);
+    assert_eq!(stage.fakes.time.waits(0), [10_000]);
+    assert!(stage.fakes.time.fire_next(EPOCH_MS + 20_000));
+    assert_eq!(driver.run(), [(0, Err(SILENT.to_owned()))]);
+    assert_eq!(
+        *stage.watching.ended.borrow(),
+        [Ending::Asked, Ending::Asked]
+    );
+    assert_eq!(stage.watching.spawned.borrow().len(), 2);
     assert!(stage.fakes.time.waits(0).is_empty());
+}
+
+#[test]
+fn an_app_server_that_is_silent_once_and_then_answers_is_asked_again_and_read() {
+    let stage = Stage::new();
+    stage.app_server(&[], Ends::Asked);
+    stage.app_server(&[INITIALIZED, &Stage::configured("warm")], Ends::Asked);
+    let mut driver = Driver::default();
+    let services = stage.services.clone();
+    driver.begin(0, async move {
+        text(&services, "worker", CODEX, "/work/app", "x").await
+    });
+    assert!(driver.run().is_empty());
+    assert!(stage.fakes.time.fire_next(EPOCH_MS + 10_000));
+    let settled = driver.run();
+    assert!(settled[0].1.as_ref().unwrap().role.contains("warm"));
+    assert_eq!(stage.watching.spawned.borrow().len(), 2);
+    assert_eq!(
+        *stage.watching.ended.borrow(),
+        [Ending::Asked, Ending::Asked]
+    );
+}
+
+#[test]
+fn the_read_of_the_configuration_has_sixty_seconds_from_the_answer_to_initialize_and_a_slow_one_is_read(
+) {
+    let lines = Rc::new(std::cell::RefCell::new(std::collections::VecDeque::new()));
+    let mut stage = Stage::new();
+    stage.services.processes = Rc::new(Feeding(Rc::clone(&lines)));
+    let mut driver = Driver::default();
+    let services = stage.services.clone();
+    driver.begin(0, async move {
+        text(&services, "worker", CODEX, "/work/app", "x").await
+    });
+    assert!(driver.run().is_empty());
+    assert_eq!(stage.fakes.time.waits(0), [10_000]);
+    lines.borrow_mut().push_back(INITIALIZED.to_owned());
+    assert!(driver.run().is_empty());
+    // Its ten seconds are done with, and the read has sixty of its own.
+    assert_eq!(stage.fakes.time.waits(0), [60_000]);
+    stage.fakes.time.settle_at(EPOCH_MS + 30_000);
+    assert!(driver.run().is_empty(), "thirty seconds in, still waiting");
+    lines.borrow_mut().push_back(Stage::configured("indexed"));
+    let settled = driver.run();
+    assert!(settled[0].1.as_ref().unwrap().role.contains("indexed"));
+}
+
+#[test]
+fn a_read_of_the_configuration_that_is_not_answered_is_asked_again_once_and_then_refused_in_its_own_words(
+) {
+    let stage = Stage::new();
+    stage.app_server(&[INITIALIZED], Ends::Asked);
+    stage.app_server(&[INITIALIZED], Ends::Asked);
+    let mut driver = Driver::default();
+    let services = stage.services.clone();
+    driver.begin(0, async move {
+        text(&services, "worker", CODEX, "/work/app", "x").await
+    });
+    assert!(driver.run().is_empty());
+    assert_eq!(stage.fakes.time.waits(0), [60_000]);
+    assert!(!stage.fakes.time.fire_next(EPOCH_MS + 59_999));
+    assert!(stage.fakes.time.fire_next(EPOCH_MS + 60_000));
+    assert!(driver.run().is_empty());
+    assert_eq!(stage.watching.spawned.borrow().len(), 2);
+    assert!(stage.fakes.time.fire_next(EPOCH_MS + 120_000));
+    assert_eq!(driver.run(), [(0, Err(PREPARING.to_owned()))]);
+    assert_ne!(SILENT, PREPARING);
+}
+
+#[test]
+fn a_protocol_error_is_refused_at_once_and_asked_again_never() {
+    let configured = Stage::configured("x");
+    for lines in [
+        vec![r#"{"id":1,"error":{"message":"no"}}"#],
+        vec!["null"],
+        vec!["not json"],
+        vec![INITIALIZED, r#"{"id":2,"error":{}}"#],
+        vec![INITIALIZED, r#"{"id":2,"result":{}}"#],
+        vec![
+            INITIALIZED,
+            r#"{"id":2,"result":{"config":{"developer_instructions":7}}}"#,
+        ],
+        vec![],
+    ] {
+        let stage = Stage::new();
+        stage.app_server(&lines, Ends::Itself);
+        stage.app_server(&[INITIALIZED, configured.as_str()], Ends::Asked);
+        assert_eq!(
+            stage.text("x"),
+            Err("Cannot read native Codex instructions safely".to_owned()),
+            "{lines:?}"
+        );
+        assert_eq!(stage.watching.spawned.borrow().len(), 1, "{lines:?}");
+    }
 }
 
 #[test]

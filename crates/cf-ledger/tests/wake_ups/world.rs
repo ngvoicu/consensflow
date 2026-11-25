@@ -58,7 +58,7 @@ fn world_with(gate: bool) -> World {
     )
     .expect("a ledger");
     let project = ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".to_owned(),
             name: "app".to_owned(),
             chief: NewChief {

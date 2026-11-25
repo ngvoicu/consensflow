@@ -127,7 +127,7 @@ fn a_caught_panic_goes_to_the_log_with_its_place_and_to_the_trace_as_a_daemon_er
         lines.next(),
         Some("        at crates/cf-engine/src/scheduler.rs:9:5")
     );
-    let trace = std::fs::read_to_string(home.path().join("events.jsonl")).unwrap();
+    let trace = crate::files::settled_trace(home.path()).unwrap();
     let line: serde_json::Value = serde_json::from_str(trace.trim()).unwrap();
     assert_eq!(line["kind"], "daemon.error");
     assert_eq!(line["project"], serde_json::Value::Null);
@@ -154,7 +154,7 @@ async fn work_that_goes_on_apart_is_caught_and_written_down_and_the_rest_goes_on
     let log = std::fs::read_to_string(home.path().join("daemon.log")).unwrap();
     assert!(log.contains("error a task failed"), "{log}");
     assert!(log.contains("panic: a bug apart"), "{log}");
-    let trace = std::fs::read_to_string(home.path().join("events.jsonl")).unwrap();
+    let trace = crate::files::settled_trace(home.path()).unwrap();
     assert!(
         trace.contains(r#""reason":"a task failed: a bug apart""#),
         "{trace}"

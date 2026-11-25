@@ -26,6 +26,8 @@ use serde_json::{json, Map, Value};
 use super::paths;
 use super::version::{self, Version};
 use crate::contract::LaunchId;
+use crate::launch::{Check, Refused, Said};
+use crate::seams::processes::{probe_afresh, Asking, Unanswered};
 use crate::shared::launch_files::launch_folder;
 use crate::shared::shell::cf_hook;
 
@@ -51,34 +53,111 @@ pub(super) struct Integration {
     pub(super) said: PathBuf,
 }
 
-/// The binary the launcher `executable` runs: `muse-bin-<version>` beside it, where
-/// `.muse-version` names a version and that binary is there (`.exe` on Windows); the
-/// program itself where not. A Muse older than ConsensFlow reads is refused, and so is
-/// a launcher that is a batch file (Windows' `muse.cmd`) with no binary of its own
-/// beside it: `cmd.exe` runs one, and takes the quotes and the `|`, `&`, `<` and `>`
-/// of the hooks' JSON (`-c hooks=…`) for its own, so the window would open with no
-/// hooks of ConsensFlow's, or none at all.
-pub(super) fn pinned(executable: &str, env: &Env) -> Result<String, String> {
+/// What [`pinned`] came to: the program the window runs, and the check of it.
+pub(crate) struct Pinned {
+    /// The program a window runs: the binary the pin names, else the launcher itself.
+    pub(crate) program: String,
+    pub(crate) check: Check,
+}
+
+/// The program the launcher `executable` runs, and the check of that program:
+/// 1. `muse-bin-<version>` beside it, where `.muse-version` names a version and that
+///    binary is there (`.exe` on Windows): the window runs it. Its name is its version:
+///    a Muse older than ConsensFlow reads is refused, and a newer one asks nothing.
+/// 2. A launcher that is a batch file (Windows' `muse.cmd`) with no such binary: refused.
+///    `cmd.exe` runs one, and takes the quotes and the `|`, `&`, `<` and `>` of the hooks'
+///    JSON (`-c hooks=…`) for its own, so the window would open with no hooks of
+///    ConsensFlow's, or none at all. No program is run.
+/// 3. Anything else (no pin, a pin that names no version, or whose binary is absent): the
+///    window runs the launcher itself, so the launcher is asked `--version`, with its
+///    update and login off, at every launch: the answer is never kept, nor shared with another executable name's kept answers, as a launcher that
+///    is a script may run another Muse the next time with its own file unchanged. A
+///    version older than ConsensFlow reads is refused; one it reads, or none, opens.
+pub(crate) async fn pinned(asking: &Asking<'_>, executable: &str) -> Pinned {
     let launcher = Path::new(executable);
-    let pinned = match version::installed(launcher) {
-        None => None,
-        Some(line) => {
-            if Version::of(&line).is_some_and(|found| !found.supported()) {
-                return Err(version::required());
+    let line = version::installed(launcher);
+    let suffix = if asking.env.on_windows() { ".exe" } else { "" };
+    let binary = line.as_deref().and_then(|line| {
+        let binary = really(launcher).with_file_name(format!("muse-bin-{line}{suffix}"));
+        binary.is_file().then_some(binary)
+    });
+    if let (Some(binary), Some(line)) = (binary, line) {
+        let old = Version::of(&line).is_some_and(|found| !found.supported());
+        return Pinned {
+            program: binary.to_string_lossy().into_owned(),
+            check: Check {
+                verdict: if old { Err(older()) } else { Ok(()) },
+                said: Said::Read(line),
+            },
+        };
+    }
+    if batch_file(launcher) {
+        return Pinned {
+            program: executable.to_owned(),
+            check: Check {
+                said: Said::NotAsked,
+                verdict: Err(Refused {
+                    sentence: format!(
+                        "Muse Code's launcher {executable} is a batch file, which cmd.exe would run with the hooks ConsensFlow gives the window mangled, and no muse-bin-<version>.exe named by its .muse-version is beside it: reinstall Muse Code or run `muse` once to finish its update"
+                    ),
+                    read: false,
+                }),
+            },
+        };
+    }
+    Pinned {
+        program: executable.to_owned(),
+        check: ask(asking, launcher).await,
+    }
+}
+
+/// A Muse older than ConsensFlow reads, refused.
+fn older() -> Refused {
+    Refused {
+        sentence: version::required(),
+        read: true,
+    }
+}
+
+/// What the launcher's own `--version` says, asked afresh.
+async fn ask(asking: &Asking<'_>, launcher: &Path) -> Check {
+    let mut env = asking.env.clone();
+    for (name, value) in version::QUIET {
+        env = env.with_var(name, value);
+    }
+    let said = match probe_afresh(asking.processes, launcher, &["--version"], &env).await {
+        Ok(probed) => probed.stdout,
+        Err(Unanswered::Unread(why)) => {
+            return Check {
+                said: Said::Unanswered(why),
+                verdict: Ok(()),
             }
-            let suffix = if env.on_windows() { ".exe" } else { "" };
-            let binary = really(launcher).with_file_name(format!("muse-bin-{line}{suffix}"));
-            binary
-                .is_file()
-                .then(|| binary.to_string_lossy().into_owned())
+        }
+        Err(Unanswered::Failed(failed)) => {
+            let why = if failed.killed {
+                crate::launch::TIMED_OUT.to_owned()
+            } else {
+                failed.message
+            };
+            return Check {
+                said: Said::Unanswered(why),
+                verdict: Ok(()),
+            };
         }
     };
-    match pinned {
-        Some(binary) => Ok(binary),
-        None if batch_file(launcher) => Err(format!(
-            "Muse Code's launcher {executable} is a batch file, which cmd.exe would run with the hooks ConsensFlow gives the window mangled, and no muse-bin-<version>.exe named by its .muse-version is beside it: reinstall Muse Code or run `muse` once to finish its update"
-        )),
-        None => Ok(executable.to_owned()),
+    match version::native(&said) {
+        Some(found) if !found.supported() => Check {
+            said: Said::Read(said),
+            verdict: Err(older()),
+        },
+        Some(_) => Check {
+            said: Said::Read(said),
+            verdict: Ok(()),
+        },
+        None => Check {
+            said: Said::Unanswered(crate::launch::NO_VERSION_NAMED.to_owned()),
+            verdict: Ok(()),
+        },
     }
 }
 
@@ -197,15 +276,17 @@ pub(super) fn hooks(env: &Env, added: Value) -> Result<Value, String> {
 /// launch gives [`super::session_hook::MOST_PARTS`]: a hook for each part of the role and, past
 /// them, one that writes a filler over each block an older role may have left): its folder
 /// made, the program it runs, and the hooks it is given.
-pub(super) fn integration(
-    env: &Env,
+pub(super) async fn integration(
+    asking: &Asking<'_>,
     launch: &LaunchId,
     executable: &str,
     pane_cf: &str,
     role_file: &str,
     count: usize,
 ) -> Result<Integration, String> {
-    let program = pinned(executable, env)?;
+    let env = asking.env;
+    let Pinned { program, check } = pinned(asking, executable).await;
+    check.verdict.map_err(|refused| refused.sentence)?;
     let root = launch_folder("muse", env, launch)?;
     make_folder(Path::new(&root), 0o700, Mkdir::Promise).map_err(|error| error.to_string())?;
     let said = path::join(&[&root, SAID]);

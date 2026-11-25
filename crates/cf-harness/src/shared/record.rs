@@ -16,6 +16,7 @@ pub(crate) mod reading;
 pub(crate) mod sort;
 pub(crate) mod sqlite;
 pub(crate) mod torn;
+pub(crate) mod zstd;
 
 use cf_base::env::Env;
 

@@ -53,7 +53,7 @@ use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
 use crate::steps::{Step, StepsState};
 use crate::trust::{self, TrustState, Trusting};
-use crate::turn_end::{last_paste, lost_in_turn, Turn};
+use crate::turn_end::{last_paste, lost_in_turn, Turn, Watching};
 use crate::windows::{Activity, ActivityState, WindowsState};
 
 /// When a Switch chief goes: now, or once the chief's turn ends.
@@ -796,23 +796,27 @@ impl Dispatcher {
         let deleted = self.seams.ledger.borrow_mut().delete_project(project)?;
         // What is remembered of its tasks and participants goes now, and so do its own lines in the trace.
         self.forget_project(deleted.id);
+        // The trace is asked here, where the ledger has just committed the delete, and awaited
+        // after the windows are closed: the thread is free meanwhile. The line that says the
+        // project was deleted is in the same job, so a stop that comes after this call cannot lose
+        // it: a deleted project leaves no trace but that line.
+        let notice = TraceLine {
+            at: iso(self.now()),
+            what: Traced::ProjectDeleted(deleted.clone()),
+        };
+        let forgetting = self.seams.trace.forget(project, notice);
+        let ids: Vec<i64> = found
+            .map(|found| found.participants.iter().map(|p| p.id).collect())
+            .unwrap_or_default();
+        self.forget(&ids).await?;
         // The project is gone from the ledger already: a trace that kept some of its
         // lines is said in the log, where the person who reads the trace looks.
-        if let Err(cause) = self.seams.trace.forget(project) {
+        if let Err(cause) = forgetting.await {
             self.seams.log.error(
                 "a deleted project's lines could not be removed from the trace",
                 &cause,
             );
         }
-        let ids: Vec<i64> = found
-            .map(|found| found.participants.iter().map(|p| p.id).collect())
-            .unwrap_or_default();
-        self.forget(&ids).await?;
-        // A deleted project leaves no trace but the line that says it was.
-        self.seams.trace.line(TraceLine {
-            at: iso(self.now()),
-            what: Traced::ProjectDeleted(deleted.clone()),
-        });
         self.changed();
         Ok(deleted)
     }
@@ -951,6 +955,80 @@ impl Dispatcher {
         }
     }
 
+    /// A worker's window that exits right after its harness wrote the final answer to its
+    /// working task, before the pass that would take it: the answer is collected first, by
+    /// the collector a pass uses, so the exit finds the task done and not working. Only a
+    /// turn a pass would take as an answer is collected here: settled, not failed, not
+    /// another program's, nothing left running. Everything else an exit settles is as it
+    /// was: a window that ended mid-turn, a crash, a task not working (paused, waiting), a
+    /// turn that left work running, a close the engine made itself.
+    async fn collect_at_exit(self: &Rc<Self>, record: &Rc<Record>, pane: &Pane) {
+        if let Err(cause) = self.try_collect_at_exit(record, pane).await {
+            self.write_down(&cause);
+        }
+    }
+
+    async fn try_collect_at_exit(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        pane: &Pane,
+    ) -> Result<(), EngineError> {
+        if record.window.borrow().own_exit_of(pane).is_some() {
+            return Ok(());
+        }
+        let working = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(record.id, false)?
+            .is_some_and(|thread| thread.task.state == "working");
+        if !working {
+            return Ok(());
+        }
+        // The window's own look at its harness's record, which asks no one else.
+        let Some(window) = record.window.borrow().window.clone() else {
+            return Ok(());
+        };
+        let Ok(observed) = returning(window.observe()).await else {
+            return Ok(());
+        };
+        if self.forgotten(record)
+            || !observed.settled
+            || observed.failed
+            || observed.shared
+            || observed.switched.is_some()
+            || observed.pending().total() > 0
+        {
+            return Ok(());
+        }
+        let Some(project) = self.project_of(record.id)? else {
+            return Ok(());
+        };
+        let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
+            return Ok(());
+        };
+        // A refusal a pass would act on is the quota's to settle, not a result: the look
+        // reads it as the pass does (`refused_here`, and `refused_unhandled` for a member already out) and leaves what it recorded as it was.
+        let owner = self.member_of(&project, participant);
+        let before = record.quota.borrow().reported.clone();
+        self.record_quota(record, observed.quota.clone());
+        let refused = self.refused_here(record, &owner) || self.refused_unhandled(record);
+        self.record_quota(record, before);
+        // A member held for its quota is settled as it was: its windows' turns are the hold's.
+        if refused || self.is_out(&owner) {
+            return Ok(());
+        }
+        self.collect(
+            &project,
+            participant,
+            record,
+            &observed,
+            Watching::Undecided,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// What a window's exit settles: the engine's own close of a window
     /// awaits it and fails with it; the host's event (`pane_exited`) tells it
     /// to the log. `shown` is what the host said of the window's end, which a
@@ -987,6 +1065,9 @@ impl Dispatcher {
             }
             return Ok(());
         }
+        // An answer its harness wrote before the window went is collected before the exit
+        // settles anything, as the pass the exit beat would have (`collect_at_exit`).
+        self.collect_at_exit(&record, pane).await;
         // The conversation the window ran in: the id its harness may have printed as it quit is
         // no secret in the window's own note (`Shown::with_own_session`).
         let shown = shown.with_own_session(self.native_session_of(record.id));
@@ -1751,6 +1832,8 @@ impl Dispatcher {
             // A resumed task whose window is at work on it reads working while its words
             // wait for the window's rest.
             self.show_resumed_at_work(project, participant, record, &observed)?;
+            // A resume still waiting well after its stop was paid is told to the chief.
+            self.tell_resume_wait(project, participant, record)?;
             // A task the daemon resumed whose turn got through: its requester hears it goes on.
             self.tell_it_went_on(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
@@ -1796,6 +1879,9 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
+            // A launch's first message keeps `settled`: a window opened again on a record that
+            // ends in the old process's interrupt has a new Claude whose busy status says
+            // nothing of its prompt (T-1985).
             if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
@@ -1805,7 +1891,7 @@ impl Dispatcher {
             return Ok(());
         }
         let free = record.delivery.borrow().delivering.is_none()
-            && observed.settled
+            && observed.takes_words
             && observed.waiting.is_none();
         let idle = free && !drawing;
         self.note_rest(record, &observed, idle, looked);
@@ -1949,6 +2035,7 @@ impl Dispatcher {
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {
+                self.tell_resume_wait(project, participant, record)?;
                 self.close_if_free(record).await?;
             }
         }

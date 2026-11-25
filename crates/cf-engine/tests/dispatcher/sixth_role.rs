@@ -26,7 +26,7 @@ fn project_of(context: &Context, staff: &[(&str, &str, &str)]) -> ProjectView {
         })
         .collect();
     context
-        .open_project(json!({
+        .open_project_overflowing(json!({
             "directory": "/work/app",
             "name": "app",
             "chief": { "harness": "claude-code", "model": "apollo" },
@@ -121,7 +121,7 @@ fn the_chiefs_staff_table_says_no_tier_for_a_member_whose_roles_have_none() {
             .execute_batch("PRAGMA ignore_check_constraints = ON")
             .unwrap();
         let project = context
-            .open_project(json!({
+            .open_project_overflowing(json!({
                 "directory": "/work/app",
                 "name": "app",
                 "chief": { "harness": "claude-code", "model": "apollo" },

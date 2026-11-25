@@ -448,7 +448,7 @@ fn the_migration_links_only_the_notes_the_ledger_names() {
         let arrived = w.message(note).delivered_at;
         // The ledger as alpha.13 left it: no table of waits, version 44.
         w.edit(|db| {
-            cf_ledger::testing::undo_migration_0045(db).unwrap();
+            cf_ledger::testing::undo_migration_0046(db).unwrap();
             if case == "no note" {
                 db.execute("UPDATE message SET body='something else' WHERE id=?", [note]).unwrap();
             }
@@ -575,7 +575,7 @@ fn a_project_with_a_recorded_wait_is_deleted_with_it() {
 /// The ledger as alpha.13 left it: no table of waits, version 44; opened again.
 fn as_alpha_13(w: &mut World) {
     w.edit(|db| {
-        cf_ledger::testing::undo_migration_0045(db).unwrap();
+        cf_ledger::testing::undo_migration_0046(db).unwrap();
         db.pragma_update(None, "user_version", 44).unwrap();
     });
 }

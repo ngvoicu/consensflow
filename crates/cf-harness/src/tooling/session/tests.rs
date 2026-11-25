@@ -134,6 +134,58 @@ fn codexs_newest_rollout_of_a_folder_since_a_time_names_the_session_of_the_windo
     assert_eq!(none, None);
 }
 
+#[test]
+fn codexs_newest_compressed_rollout_names_the_session_of_the_window() {
+    let home = tempfile::tempdir().unwrap();
+    let day = home.path().join("sessions/2026/11/22");
+    fs::create_dir_all(&day).unwrap();
+    let workspace = text(home.path());
+    let meta = json!({ "type": "session_meta", "payload": { "id": "cold", "cwd": workspace } });
+    let bytes = format!("{meta}\n{{\"type\":\"response_item\"}}\n");
+    let zipped = day.join("rollout-2026-11-22T00-00-00-cold.jsonl.zst");
+    fs::write(
+        &zipped,
+        ::zstd::stream::encode_all(bytes.as_bytes(), 3).unwrap(),
+    )
+    .unwrap();
+    let named = text(home.path());
+    let env = env(&[("CODEX_HOME", &named)]);
+    assert_eq!(
+        newest(Harness::Codex, "codex", &workspace, 0, &env)
+            .unwrap()
+            .as_deref(),
+        Some("cold")
+    );
+    assert_eq!(session_of(&zipped, &workspace).as_deref(), Some("cold"));
+    // Codex publishes the plain sibling before deleting its old compressed form.
+    rollout(
+        &day,
+        "rollout-2026-11-22T00-00-00-cold.jsonl",
+        "resumed",
+        &workspace,
+        0,
+    );
+    assert_eq!(
+        newest(Harness::Codex, "codex", &workspace, 0, &env)
+            .unwrap()
+            .as_deref(),
+        Some("resumed")
+    );
+}
+
+#[test]
+fn codexs_compressed_rollout_with_a_truncated_tail_does_not_name_a_session() {
+    let home = tempfile::tempdir().unwrap();
+    let workspace = text(home.path());
+    let meta = json!({ "type": "session_meta", "payload": { "id": "cold", "cwd": workspace } });
+    let bytes = format!("{meta}\n{{\"type\":\"response_item\"}}\n");
+    let mut compressed = ::zstd::stream::encode_all(bytes.as_bytes(), 3).unwrap();
+    compressed.pop();
+    let zipped = home.path().join("rollout-cold.jsonl.zst");
+    fs::write(&zipped, compressed).unwrap();
+    assert_eq!(session_of(&zipped, &workspace), None);
+}
+
 /// The answer for a Codex home that holds nothing.
 fn newest_in(codex_home: &Path) -> Option<String> {
     let home = text(codex_home);

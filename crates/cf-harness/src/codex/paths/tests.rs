@@ -52,6 +52,8 @@ fn rollout() -> String {
 fn lookalikes() -> Vec<String> {
     vec![
         format!("{}.bak", rollout()),
+        format!("{}.zst.bak", rollout()),
+        format!("{}.zst.tmp", rollout()),
         format!("{}~", rollout()),
         format!("rollout-2026-10-05T01-00-00-{THREAD}-old.jsonl"),
         format!("rollout-2026-10-05T01-00-00-x{THREAD}.jsonl"),
@@ -87,6 +89,17 @@ fn the_rollout_of_a_thread_is_kept_once_a_file_is_named_as_codex_names_it() {
     let home = tempfile::tempdir().unwrap();
     assert!(!kept(home.path()), "nothing kept yet");
     keep(home.path(), &rollout());
+    assert!(kept(home.path()));
+}
+
+#[test]
+fn the_compressed_rollout_of_a_thread_is_kept() {
+    let home = tempfile::tempdir().unwrap();
+    for name in lookalikes() {
+        keep(home.path(), &name);
+    }
+    assert!(!kept(home.path()));
+    keep(home.path(), &format!("{}.zst", rollout()));
     assert!(kept(home.path()));
 }
 

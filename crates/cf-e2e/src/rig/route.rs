@@ -39,13 +39,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::cursor::CursorQueries;
 use super::report::plain;
 use crate::live::members::{Identity, Machine, ThisMachine};
 use crate::process::Sink;
 use crate::wire::{self, Pending};
-
-/// Where a terminal asks for the cursor's place.
-const CURSOR_QUERY: [u8; 4] = [0x1b, b'[', b'6', b'n'];
 
 /// How much of what a window printed is kept: its last 8 MiB, give or take a line.
 pub(super) const KEPT: usize = 8 * 1024 * 1024;
@@ -173,6 +171,8 @@ pub(super) struct Seen {
     pub moves: Vec<i64>,
     /// What each pane printed, the end of it ([`Printed`]), by the pane's id.
     pub printed: HashMap<String, Printed>,
+    /// Unfinished cursor queries, isolated by window and generation.
+    cursor_queries: HashMap<(String, u64), CursorQueries>,
     /// The body of each `pane.exit` the pane host told.
     pub exits: Vec<Value>,
     /// When the rig saw each of `exits`, in milliseconds since the epoch: a
@@ -588,15 +588,23 @@ impl Shared {
             if frame["op"] == "pane.output" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
                     let pane = frame["body"]["id"].as_str().unwrap_or_default().to_owned();
-                    if bytes
-                        .windows(CURSOR_QUERY.len())
-                        .any(|at| at == CURSOR_QUERY)
-                    {
-                        reply = Some(json!({
-                            "id": frame["body"]["id"],
-                            "generation": frame["body"]["generation"],
-                            "bytes": CURSOR_REPLY,
-                        }));
+                    if let Some(generation) = frame["body"]["generation"].as_u64() {
+                        let key = (pane.clone(), generation);
+                        let mut queries = seen.cursor_queries.remove(&key).unwrap_or_default();
+                        let count = queries.take(&bytes);
+                        if queries.unfinished() {
+                            seen.cursor_queries.insert(key, queries);
+                        }
+                        if count > 0 {
+                            reply = Some((
+                                count,
+                                json!({
+                                    "id": frame["body"]["id"],
+                                    "generation": frame["body"]["generation"],
+                                    "bytes": CURSOR_REPLY,
+                                }),
+                            ));
+                        }
                     }
                     let printed = seen.printed.entry(pane).or_default();
                     printed.push(&bytes, KEPT, SLACK);
@@ -614,14 +622,23 @@ impl Shared {
                 }
             }
             if frame["op"] == "pane.exit" {
+                if let (Some(id), Some(generation)) = (
+                    frame["body"]["id"].as_str(),
+                    frame["body"]["generation"].as_u64(),
+                ) {
+                    seen.cursor_queries.remove(&(id.to_owned(), generation));
+                }
                 seen.exits.push(frame["body"].clone());
                 seen.exit_times
                     .push(jiff::Timestamp::now().as_millisecond());
             }
         }
-        if let Some(body) = reply {
-            // Nobody waits for the answer, which stops at the next frame's check.
-            host.send(wire::request(&self.next_host_id(), "pane.reply", &body));
+        if let Some((count, body)) = reply {
+            // Each query gets a reply. Nobody waits for the answers, which stop
+            // at the next frames' checks.
+            for _ in 0..count {
+                host.send(wire::request(&self.next_host_id(), "pane.reply", &body));
+            }
         }
         if let Some(body) = taken {
             // The frame is taken, as the page says once it drew it; nor is this answer waited for.
@@ -1028,6 +1045,72 @@ mod tests {
         assert_eq!(
             passed,
             [printed.to_string(), more.to_string(), exit.to_string()]
+        );
+    }
+
+    #[test]
+    fn every_cursor_query_in_a_joined_frame_gets_a_reply() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _) = sinks();
+        let printed = json!({
+            "v": 1, "id": "e-1", "kind": "evt", "op": "pane.output",
+            "body": {"id": "p1-chief", "generation": 5, "bytes": [27, 91, 54, 110, 27, 91, 54, 110]},
+        });
+        shared.route_host(&printed.to_string(), &host, &daemon);
+        for _ in 0..2 {
+            let line = host_lines
+                .recv_timeout(Duration::from_secs(2))
+                .expect("one reply per query");
+            let reply: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(reply["op"], "pane.reply");
+            assert_eq!(
+                reply["body"],
+                json!({"id": "p1-chief", "generation": 5, "bytes": [27, 91, 49, 59, 49, 82]})
+            );
+        }
+        assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn a_split_cursor_query_is_kept_for_its_own_window_and_generation() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _) = sinks();
+        let printed = |id: &str, generation: u64, bytes: &[u8]| {
+            json!({
+                "v": 1, "id": "e-1", "kind": "evt", "op": "pane.output",
+                "body": {"id": id, "generation": generation, "bytes": bytes},
+            })
+        };
+        for frame in [
+            printed("p1-chief", 5, b"\x1b["),
+            printed("p1-other", 5, b"6n"),
+            printed("p1-chief", 6, b"6n"),
+            printed("p1-chief", 5, b"6n"),
+        ] {
+            shared.route_host(&frame.to_string(), &host, &daemon);
+        }
+        let line = host_lines
+            .recv_timeout(Duration::from_secs(2))
+            .expect("reply to split query");
+        let reply: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(reply["op"], "pane.reply");
+        assert_eq!(
+            reply["body"],
+            json!({"id": "p1-chief", "generation": 5, "bytes": [27, 91, 49, 59, 49, 82]})
+        );
+        assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
+
+        shared.route_host(
+            &printed("p1-chief", 5, b"\x1b[").to_string(),
+            &host,
+            &daemon,
+        );
+        let exit = json!({"v": 1, "id": "e-2", "kind": "evt", "op": "pane.exit", "body": {"id": "p1-chief", "generation": 5}});
+        shared.route_host(&exit.to_string(), &host, &daemon);
+        shared.route_host(&printed("p1-chief", 5, b"6n").to_string(), &host, &daemon);
+        assert!(
+            host_lines.recv_timeout(Duration::from_millis(100)).is_err(),
+            "a retired prefix was reused"
         );
     }
 

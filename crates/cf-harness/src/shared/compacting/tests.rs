@@ -6,12 +6,13 @@ fn screen(lines: &[&str]) -> Vec<String> {
 
 #[test]
 fn reads_codex_compacting_as_the_field_s_screen_drew_it() {
+    // The workspace folder in the field screen is a placeholder.
     let field = screen(&[
         "• Compacting context (2m 57s • esc to interrupt)",
         "└ Making room to continue.",
         "└ Tip: Press ⌃g to edit your current draft in an external editor.",
         "› Ask Codex to do anything",
-        "GPT-6.1-Sol xhigh · ~/Projects/ngvoicu/consensflow · Test candidate pass T-852",
+        "GPT-6.1-Sol xhigh · ~/Projects/example/consensflow · Test candidate pass T-852",
     ]);
     assert!(drawn(&field, &CODEX));
     // Its bullet blinks to a hollow one between frames.

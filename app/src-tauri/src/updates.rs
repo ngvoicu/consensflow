@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_updater::Update;
 
 mod check;
+pub(crate) mod local_network;
 #[cfg(target_os = "macos")]
 mod relaunch;
 
@@ -270,6 +271,20 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
+/// Whether ConsensFlow's home shows an earlier run, read before the app's own start makes any
+/// of what it looks for (the daemon's ledger): the notice of an update needs to tell a first
+/// install from an upgrade by a build that wrote no marker (T-2114).
+#[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
+pub fn earlier_run(app: &tauri::App) -> bool {
+    app.path().home_dir().is_ok_and(|home| {
+        let directory = preferences_directory(
+            &home,
+            std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from),
+        );
+        directory.parent().is_some_and(local_network::earlier_run)
+    })
+}
+
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
     configured
         .unwrap_or_else(|| home.join(".consensflow"))
@@ -277,7 +292,7 @@ fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
 }
 
 #[allow(clippy::disallowed_methods)] // Finds ConsensFlow's home (CONSENSFLOW_HOME) itself, as the daemon does.
-pub fn setup(app: &tauri::App) -> tauri::Result<()> {
+pub fn setup(app: &tauri::App, earlier_run: bool) -> tauri::Result<()> {
     let directory = preferences_directory(
         &app.path().home_dir()?,
         std::env::var_os("CONSENSFLOW_HOME").map(PathBuf::from),
@@ -291,6 +306,15 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.manage(UpdateManager::new(
         &app.package_info().version.to_string(),
         preferences,
+    ));
+    // The notice of the first launch after an update on a Mac (T-2105); no file is written elsewhere.
+    app.manage(local_network::Notice::new(
+        cfg!(target_os = "macos")
+            && local_network::record(
+                &directory.join("local-network.json"),
+                &app.package_info().version.to_string(),
+                earlier_run,
+            ),
     ));
     let menu = tauri::menu::Menu::default(app.handle())?;
     let check = tauri::menu::MenuItem::with_id(
@@ -1370,6 +1394,267 @@ mod tests {
                 "{}\n--first\nsecond word\nholds none\nthe smoke's input\n",
                 home.display()
             )
+        );
+    }
+
+    /// The installed app is started through LaunchServices in the app, and directly only in a
+    /// packaged self-test (T-2105): a direct start makes the new app the old one's child, which
+    /// no Finder or LaunchServices open does.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_installed_app_is_started_through_launch_services_and_directly_only_in_a_selftest() {
+        let app = Path::new("/Applications/ConsensFlow.app");
+        let run = |selftest| {
+            let steps = std::cell::RefCell::new(Vec::new());
+            let started = relaunch::start_installed(
+                app,
+                selftest,
+                |at| {
+                    steps.borrow_mut().push(format!("direct {}", at.display()));
+                    Ok(())
+                },
+                |at| {
+                    steps
+                        .borrow_mut()
+                        .push(format!("launch services {}", at.display()));
+                    Ok(())
+                },
+            );
+            assert_eq!(started, Ok(()));
+            steps.into_inner()
+        };
+        assert_eq!(
+            run(false),
+            ["launch services /Applications/ConsensFlow.app"]
+        );
+        assert_eq!(run(true), ["direct /Applications/ConsensFlow.app"]);
+    }
+
+    /// A folder holding stand-ins for the opener, the bundle's executable and the system's
+    /// `logger`, each writing what it was asked to a file of its own (the first two exit with
+    /// the statuses given), and a log the helper writes to, or none that can be written.
+    #[cfg(target_os = "macos")]
+    struct Handoff {
+        directory: tempfile::TempDir,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Handoff {
+        fn new(opener_status: i32, executable_status: i32) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempfile::tempdir().expect("a folder");
+            for (name, status) in [
+                ("open", opener_status),
+                ("executable", executable_status),
+                ("logger", 0),
+            ] {
+                let path = directory.path().join(name);
+                std::fs::write(
+                    &path,
+                    format!(
+                        "#!/bin/sh\necho \"$@\" >> '{}'\nexit {status}\n",
+                        directory.path().join(format!("{name}-asked")).display()
+                    ),
+                )
+                .expect("write a stand-in");
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("mode");
+            }
+            Self { directory }
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.directory.path().join(name)
+        }
+
+        fn asked(&self, name: &str) -> Option<String> {
+            std::fs::read_to_string(self.path(&format!("{name}-asked"))).ok()
+        }
+
+        /// The helper, its log at `log` (a folder that is not there makes it unwritable).
+        fn start(&self, old: u32, log: &str) -> std::process::Child {
+            relaunch::launch_services_with(relaunch::Handoff {
+                opener: &self.path("open"),
+                old,
+                app: &self.path("ConsensFlow.app"),
+                args: vec![std::ffi::OsString::from("--first")],
+                home: Some(self.directory.path()),
+                executable: &self.path("executable"),
+                logger: &self.path("logger"),
+                log: Some(&self.path(log)),
+            })
+            .expect("start the helper")
+        }
+
+        fn log(&self) -> String {
+            std::fs::read_to_string(self.path("log")).unwrap_or_default()
+        }
+    }
+
+    /// The helper waits for the old app to end, however long that takes, and then opens the
+    /// bundle without `-n` (T-2118): `open` starts the app where none runs and brings up the
+    /// one a person reopened by hand where one does, never two. A stand-in opener writes what
+    /// it was asked; a child that ends later stands for the old app.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance() {
+        let fixture = Handoff::new(0, 0);
+        let mut old = crate::testing::command("/bin/sleep")
+            .arg("2")
+            .spawn()
+            .expect("the old app's stand-in");
+        let mut helper = fixture.start(old.id(), "log");
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        assert!(
+            helper.try_wait().expect("the helper").is_none(),
+            "the helper ended while the old app lived"
+        );
+        assert!(
+            fixture.asked("open").is_none(),
+            "opened while the old app was alive"
+        );
+        old.wait().expect("the old app ends");
+        assert!(helper.wait().expect("the helper ends").success());
+        assert_eq!(
+            fixture.asked("open"),
+            Some(format!(
+                "--env CONSENSFLOW_HOME={} {} --args --first\n",
+                fixture.directory.path().display(),
+                fixture.path("ConsensFlow.app").display()
+            )),
+            "the opener is asked for no new instance"
+        );
+        assert_eq!(fixture.asked("executable"), None, "started it directly too");
+    }
+
+    /// A transient LaunchServices failure gets another `open`, and the successful retry starts
+    /// the app without the helper starting its executable directly.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds() {
+        let fixture = Handoff::new(0, 0);
+        std::fs::write(
+            fixture.path("open"),
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{asked}'\nif [ $(/usr/bin/wc -l < '{asked}') -eq 1 ]; then exit 41; fi\n'{executable}' from-open\n",
+                asked = fixture.path("open-asked").display(),
+                executable = fixture.path("executable").display(),
+            ),
+        )
+        .expect("write the opener");
+        assert!(fixture.start(u32::MAX, "log").wait().unwrap().success());
+        let asked = fixture.asked("open").expect("the opener was asked");
+        let expected = format!(
+            "--env CONSENSFLOW_HOME={} {} --args --first",
+            fixture.directory.path().display(),
+            fixture.path("ConsensFlow.app").display()
+        );
+        assert_eq!(asked.lines().collect::<Vec<_>>(), [expected.as_str(); 2]);
+        assert_eq!(fixture.asked("executable"), Some("from-open\n".into()));
+        let log = fixture.log();
+        assert!(log.contains("failed with status 41"), "the log: {log:?}");
+        let success = log.lines().find(|line| line.contains("succeeded"));
+        assert!(
+            success.is_some_and(|line| line.contains("41")),
+            "the log: {log:?}"
+        );
+        assert!(
+            !log.contains("starting the installed app directly"),
+            "the log: {log:?}"
+        );
+    }
+
+    /// Every failed `open` is reported, including its status in the direct-start line; the
+    /// final fallback follows the short retries with the old app's arguments.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retries_a_failed_open_then_starts_directly_and_reports_every_status() {
+        let fixture = Handoff::new(0, 0);
+        std::fs::write(
+            fixture.path("open"),
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{asked}'\nexit $((10 + $(/usr/bin/wc -l < '{asked}')))\n",
+                asked = fixture.path("open-asked").display(),
+            ),
+        )
+        .expect("write the opener");
+        let before = std::time::Instant::now();
+        assert!(fixture.start(u32::MAX, "log").wait().unwrap().success());
+        let elapsed = before.elapsed();
+        let asked = fixture.asked("open").expect("the opener was asked");
+        assert_eq!(asked.lines().count(), 4, "the opener was asked: {asked:?}");
+        assert!(
+            elapsed >= std::time::Duration::from_secs(3),
+            "the retries took {elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "the retries took {elapsed:?}"
+        );
+        assert_eq!(fixture.asked("executable"), Some("--first\n".into()));
+        let log = fixture.log();
+        for status in [11, 12, 13, 14] {
+            assert!(
+                log.contains(&format!("failed with status {status}")),
+                "the log: {log:?}"
+            );
+        }
+        let direct = log
+            .lines()
+            .find(|line| line.contains("starting the installed app directly"));
+        assert!(
+            direct.is_some_and(|line| line.contains("11, 12, 13, 14")),
+            "the log: {log:?}"
+        );
+    }
+
+    /// An opener that fails leaves the person with their app (T-2114): the helper starts the
+    /// installed app directly, with the old app's arguments, and says why in the log.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_open_starts_the_installed_app_directly_and_says_why() {
+        let fixture = Handoff::new(1, 0);
+        let mut helper = fixture.start(u32::MAX, "log");
+        helper.wait().expect("the helper ends");
+        assert_eq!(fixture.asked("executable"), Some("--first\n".into()));
+        assert!(
+            fixture.log().contains("failed with status 1"),
+            "the log says nothing: {:?}",
+            fixture.log()
+        );
+    }
+
+    /// Both starts failing is told (T-2118): in the app's log, and where that cannot be written,
+    /// in the system log by `logger`, naming what failed and saying to open the app from the
+    /// Finder; the old app is gone, so no one else will.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log() {
+        let fixture = Handoff::new(1, 7);
+        fixture
+            .start(u32::MAX, "log")
+            .wait()
+            .expect("the helper ends");
+        let said = fixture.log();
+        assert!(
+            said.contains("failed with status 7") && said.contains("Finder"),
+            "the log: {said:?}"
+        );
+        assert_eq!(fixture.asked("logger"), None, "the system log was used too");
+
+        let fixture = Handoff::new(1, 7);
+        fixture
+            .start(u32::MAX, "no-folder/log")
+            .wait()
+            .expect("the helper ends");
+        let said = fixture
+            .asked("logger")
+            .expect("the system log heard nothing");
+        assert!(
+            said.contains("failed with status 1")
+                && said.contains("failed with status 7")
+                && said.contains("Finder"),
+            "the system log: {said:?}"
         );
     }
 

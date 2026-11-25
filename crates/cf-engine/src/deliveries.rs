@@ -167,6 +167,8 @@ pub(crate) struct DeliveryPart {
     /// first seen waiting, for the look that finds the window acting after them
     /// (`resumed_at_work`).
     pub(crate) resumed: Option<crate::resumed_at_work::ResumeWatch>,
+    /// Resume words observed waiting on an earlier look.
+    pub(crate) resume_wait_seen: Option<i64>,
     /// The words whose task was sent back to queued because the window rested without them
     /// going in, and when, on the engine's clock: it is not shown working for them again
     /// for a while (`resumed_at_work`).
@@ -1405,10 +1407,19 @@ impl Dispatcher {
         if let Some(requester) =
             requester.filter(|requester| requester != "human" && *requester != message.recipient)
         {
-            note(
-                &requester,
-                format!("{}. The human is told.", said(&counted)),
-            )?;
+            let already_told = project
+                .participants
+                .iter()
+                .find(|participant| participant.handle == requester)
+                .map(|participant| self.resume_wait_was_told(message, participant.id))
+                .transpose()?
+                .unwrap_or(false);
+            if !already_told {
+                note(
+                    &requester,
+                    format!("{}. The human is told.", said(&counted)),
+                )?;
+            }
         }
         Ok(())
     }

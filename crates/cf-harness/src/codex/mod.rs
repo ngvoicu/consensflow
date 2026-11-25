@@ -6,10 +6,11 @@
 mod adapter;
 mod channel;
 pub mod computer_use;
+pub(crate) mod declared;
 #[cfg(test)]
 mod fakes;
 mod last_used;
-mod launch;
+pub(crate) mod launch;
 pub(crate) mod memories;
 pub(crate) mod models;
 pub(crate) mod paths;

@@ -220,10 +220,10 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A tier nobody on the staff holds\s+goes to the nearest one somebody does, the next one up first; you are told\s+whose\.",
+            r"A task whose slot is empty goes to the nearest held one, the next one up before the\s+next one down, but never into Critical, and you are told whose\.",
             &text
         ));
-        assert!(text.contains("do not run the command to see the refusal: ask"));
+        assert!(text.contains("When `cf staff` shows nobody in a role, ask first."));
         // The image designer draws the chief's precise orders (Gabriel, 2026-10-21), and a
         // revision goes back to its window.
         assert!(found(
@@ -377,25 +377,29 @@ fn teach_the_designer_only_the_board_s_commands() {
 }
 
 #[test]
-fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
+fn every_member_ends_its_turn_with_its_result_and_waits_inside_it() {
     let rules = [(
-        "delivery and leftovers",
-        "your answer ends your turn, and your result is delivered once nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
+        "turn end, waiting and leftovers",
+        "This window is for one task. The end of your turn hands in your last message as its result, so end your turn only with a result that stands on its own. Wait inside your turn for work you started, even while it waits its turn. The board holds your result while it sees background work still running; before your last answer, end what you left in the background (a wait loop, a watcher).",
     )];
     let mut missing = Vec::new();
-    for (shell, cf) in [
-        ("POSIX", CfWord::bare()),
+    for (shell, mac, cf) in [
+        ("POSIX", true, CfWord::bare()),
         (
             "PowerShell",
+            false,
             CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
         ),
     ] {
         for role in cf_ledger::roles::ids() {
-            let text = role_instructions(&Env::default(), role, &[], &cf, None)
-                .unwrap()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+            let rendered =
+                role_instructions_on(&Env::default(), role, &[], &cf, None, false, mac).unwrap();
+            let text = if mac {
+                rendered
+            } else {
+                as_windows_console(&rendered)
+            };
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for (name, rule) in rules {
                 if !text.contains(rule) {
                     missing.push(format!("{role} ({shell}): {name}"));
@@ -403,6 +407,9 @@ fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_backgro
             }
             if text.contains("if you are still waiting on background work, say so in a line") {
                 missing.push(format!("{role} ({shell}): still-waiting line"));
+            }
+            if text.contains("your result is delivered once nothing you started is still running") {
+                missing.push(format!("{role} ({shell}): unqualified delivery promise"));
             }
         }
     }
@@ -417,9 +424,9 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         // A window the chief continues (`--after`) comes back on its own conversation, and a
         // pinned window stays open: the text says no more of the window than that it is for one
         // task (T-1435).
-        "This window is for one task. Finish with a result that stands on its own:",
-        // A turn's end does not end background work; the result waits for it.
-        "your result is delivered once nothing you started is still running,",
+        "This window is for one task. The end of your turn hands in your last message as its result,",
+        // Only background work the board sees can hold a result.
+        "The board holds your result while it sees background work still running;",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -492,9 +499,16 @@ fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_
     let text = instructions("chief", &[zeus()]);
     let card = section(&text, "Your commands");
     for role in cf_ledger::roles::all() {
-        let shown = match (role.switch, role.tiered) {
-            (None, _) => "cf task add --tier <critical|complex|standard|light> \"…\"".to_owned(),
-            (Some(switch), true) => format!("cf task add {switch} --tier <tier> \"…\""),
+        // The card says a role's tiers as the registry has them: `<tier>` for every one, else
+        // the ones it has (every role but the image designer has all four).
+        let tiers = if role.tiers.len() == 4 {
+            "<tier>".to_owned()
+        } else {
+            format!("<{}>", role.tiers.join("|"))
+        };
+        let shown = match (role.switch, role.tiered()) {
+            (None, _) => format!("cf task add --tier {tiers} \"…\""),
+            (Some(switch), true) => format!("cf task add {switch} --tier {tiers} \"…\""),
             (Some(switch), false) => format!("cf task add {switch} \"…\""),
         };
         assert!(
@@ -520,9 +534,13 @@ fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_im
         section(&text, "Choose the role, not the member"),
         "the chief's section on roles",
         &[
-            "Name the role a task needs, and its tier where its command above takes `--tier`.",
-            "A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks, and you still name only the tier.",
-            "Only a role nobody holds is refused, by its name: only the human adds members, so ask them for one.",
+            "Name the role a task needs and its tier: every command above but `--design` takes `--tier`.",
+            "A role at a tier is a slot, held by one member, and each task gets a new window of that member; you never pick the member or write a task with one in mind.",
+            "A task whose slot is empty goes to the nearest held one, the next one up before the next one down, but never into Critical, and you are told whose.",
+            "You pick the tier of any job, every role's included: Critical, complex, standard or light.",
+            "Critical takes only critical work, added there with its `--purpose`: the hardest and most important work, coding included; with nobody at Critical, it goes to the nearest tier held.",
+            "A task waits only when no slot of its role is held outside Critical, and you are told once the way on: ask the human for a member, in your terminal.",
+            "A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.",
             // The architect (A3, A5): a design first, and the briefs point to its files.
             "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",
             "It also reviews a change against its design.",
@@ -573,7 +591,7 @@ fn never_says_a_member_is_free_or_busy() {
 #[test]
 fn tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier() {
     assert!(found(
-        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member or write a task with one in mind\.",
+        r"A role at a tier is a slot, held by one member, and each task gets a\s+new window of that member; you never pick the member or write a task with one in mind\.",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -676,7 +694,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
+        r#"cf task edit T-3 "…" \[--tier <tier> \[--purpose <purpose>\]\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
     assert!(
@@ -1032,8 +1050,8 @@ fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
         assert_eq!(text.matches(&format!("{word} tell ")).count(), 1, "{role}");
         assert_eq!(
             text.matches("end your turn").count(),
-            1,
-            "{role}: said once"
+            2,
+            "{role}: once for asking and once for the result"
         );
         assert!(!text.contains(&format!("{word} note --human")), "{role}");
     }

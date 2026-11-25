@@ -1,0 +1,80 @@
+# N26: the launch's wire stops pairing an earlier quota with a later turn,
+# while a quota read during that turn is still held.
+[run]
+engine-devin-old-quota = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "devin_old_quota::"]
+harness-devin-old-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::wire_log::tests::"]
+
+[[plant]]
+name = "devin old quota: a later turn leaves the old refusal in view"
+meant = "old_devin_quota_does_not_resume_later_io_errors"
+runs = ["engine-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        if self.turns.follow(&event) {
+            self.quota = None;
+        }'''
+replace = '''        self.turns.follow(&event);'''
+
+[[plant]]
+name = "devin old quota: the wire never reports a turn beginning"
+meant = "old_devin_quota_does_not_resume_later_io_errors"
+runs = ["engine-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.began = !self.open && self.busy;"
+replace = "        self.began = false;"
+
+[[plant]]
+name = "devin old quota: more work in one turn starts another"
+meant = "work_in_the_same_turn_does_not_clear_its_refusal"
+runs = ["harness-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.began = !self.open && self.busy;"
+replace = "        self.began = self.busy;"
+
+[[plant]]
+name = "devin old quota: a rewritten line is dated again"
+meant = "rewriting_the_old_line_before_the_next_turn_does_not_hold_again"
+runs = ["engine-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''                let replayed = if size >= state.offset
+                    && hash_of(&mut file, state.offset)? == state.read.finish()'''
+replace = '''                let replayed = if false && size >= state.offset
+                    && hash_of(&mut file, state.offset)? == state.read.finish()'''
+
+[[plant]]
+name = "devin old quota: an appended refusal is the old line"
+meant = "a_replacement_with_a_new_identical_refusal_dates_the_new_line"
+runs = ["harness-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "        let quota = match replayed.filter(|old| old.number == number) {"
+replace = "        let quota = match replayed {"
+
+[[plant]]
+name = "devin old quota: a changed prefix is treated as unchanged"
+meant = "a_quota_line_in_a_changed_prefix_is_not_assumed_to_be_the_same"
+runs = ["harness-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''                let replayed = if size >= state.offset
+                    && hash_of(&mut file, state.offset)? == state.read.finish()'''
+replace = '''                let replayed = if size >= state.offset'''
+
+[[plant]]
+name = "devin old quota: a removed line keeps its old position"
+meant = "a_fresh_refusal_at_an_old_position_after_truncation_is_new"
+runs = ["harness-devin-old-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "                state.quota_line = None;\n"
+replace = ""

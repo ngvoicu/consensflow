@@ -23,6 +23,8 @@ source record: records not needed by a case are omitted, but fields inside a
 selected record are not.
 Redaction changes leaf values only:
 
+- paths and repository namespaces are synthetic placeholders, preserving their length
+  where the replay scenarios use byte offsets;
 - long or opaque strings may be replaced by `[redacted N chars]`;
 - the long-text guards replace one text leaf with repeated `B`, `X`, `P`,
   or `O` characters while preserving the asserted length;
@@ -34,7 +36,7 @@ Redaction changes leaf values only:
 ## Codex — rollout JSONL, `codex-cli 0.153.4`
 
 - `completed.jsonl` — source
-  `/Users/gabrielvoicu/.codex/sessions/2026/09/06/rollout-2026-09-06T07-14-10-01a074ec-7aff-74b0-8cf6-aa00d8e451cb.jsonl`;
+  `/Users/someone-home/.codex/sessions/2026/09/06/rollout-2026-09-06T07-14-10-01a074ec-7aff-74b0-8cf6-aa00d8e451cb.jsonl`;
   ordinals 0, 2477–2483, and 2485 for turn
   `01a077c2-5d0f-7452-a2be-ace096bbe3be`. It preserves both native user
   IDs, the `AgentMessage phase:final_answer`, its response mirror, and
@@ -45,11 +47,11 @@ Redaction changes leaf values only:
   `task_complete.error.codex_error_info:server_overloaded` with
   `last_agent_message:null`, and the later sub-agent completion.
 - `interrupted.jsonl` — source
-  `/Users/gabrielvoicu/.codex/sessions/2026/09/06/rollout-2026-09-06T21-23-51-01a077f6-6663-7bc2-81cd-e287ccaabdbd.jsonl`;
+  `/Users/someone-home/.codex/sessions/2026/09/06/rollout-2026-09-06T21-23-51-01a077f6-6663-7bc2-81cd-e287ccaabdbd.jsonl`;
   ordinals 0, 1, 9, 10, and 764, ending in the real
   `turn_aborted {reason:interrupted}`.
 - `forked.jsonl` — source
-  `/Users/gabrielvoicu/.codex/sessions/2026/09/06/rollout-2026-09-06T21-28-10-01a077fa-5968-7b62-8fdd-043410a3d4b9.jsonl`;
+  `/Users/someone-home/.codex/sessions/2026/09/06/rollout-2026-09-06T21-28-10-01a077fa-5968-7b62-8fdd-043410a3d4b9.jsonl`;
   ordinals 0, 7, 10, 93–94, and 97. It retains the complete opening
   `session_meta`, including `id`, `session_id`, and `forked_from_id`, plus a
   native user item, final `AgentMessage`, response mirror, and
@@ -68,7 +70,7 @@ content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
 ## Claude Code — session JSONL, versions `2.1.241`, `2.1.247`, and `2.1.250`
 
 - `fragments.jsonl` — source
-  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/15fba934-d727-4777-8791-123675a63649.jsonl`;
+  `/Users/someone-home/.claude/projects/-Users-someone-home-Projects-example-consensflow/15fba934-d727-4777-8791-123675a63649.jsonl`;
   physical lines 117–121 and 128. All five assistant fragments carry native
   message ID `msg_011CeTZ4moLoyUafGxCpFzhW`; they include
   `server_tool_use`, `advisor_tool_result`, later thinking, and the final
@@ -80,7 +82,7 @@ content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
   enqueue/remove pair; only ordinary prompt and queue-content leaves are
   redacted.
 - `queued-turn.jsonl` — source
-  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/1b09fb15-feb1-4595-9f47-5eb9ff768191.jsonl`;
+  `/Users/someone-home/.claude/projects/-Users-someone-home-Projects-example-consensflow/1b09fb15-feb1-4595-9f47-5eb9ff768191.jsonl`;
   physical lines 2219, 2220, 2227, 2229, and 2232: queue enqueue, apparent
   answer, dequeue, three-hook summary, and the queued user turn.
 - `queue-pop-all.jsonl` — the same source; complete queue-history records at
@@ -92,11 +94,11 @@ content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
 - `interrupted.jsonl` — the same source, physical line 3261, including
   `interruptedMessageId` and user text `[Request interrupted by user]`.
 - `provider-429.jsonl` — source
-  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/33383216-87a0-4e6d-a273-07c4b229cdb1.jsonl`;
+  `/Users/someone-home/.claude/projects/-Users-someone-home-Projects-example-consensflow/33383216-87a0-4e6d-a273-07c4b229cdb1.jsonl`;
   complete physical line 1040, including `isApiErrorMessage:true`, status 429,
   native error details, message ID, and user-facing failure text.
 - `compaction.jsonl` — source
-  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/1b09fb15-feb1-4595-9f47-5eb9ff768191.jsonl`;
+  `/Users/someone-home/.claude/projects/-Users-someone-home-Projects-example-consensflow/1b09fb15-feb1-4595-9f47-5eb9ff768191.jsonl`;
   physical lines 4495, 4497, 4500, 4508, and 4509: a completed answer and stop
   hook, the next user turn, the full `compact_boundary` record, and the
   preserved post-compaction user record.
@@ -104,7 +106,7 @@ content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
 ## Claude Code — session JSONL, version `2.1.263` (TEST-PANE-69/IMPL-PANE-70)
 
 - `claude-code/v263-tool-loop.jsonl` — source
-  `/Users/gabrielvoicu/.claude/projects/-Users-gabrielvoicu-Projects-ngvoicu-consensflow/5cbf8973-f472-448a-8763-59fb4268a9d7.jsonl`
+  `/Users/someone-home/.claude/projects/-Users-someone-home-Projects-example-consensflow/5cbf8973-f472-448a-8763-59fb4268a9d7.jsonl`
   (323 physical lines, `claude --version` 2.1.263, session completed
   2026-09-07). Fixture record N maps to source physical line: 1→1 (`mode`),
   2→5 (opening user turn, versioned), 3→6 (versioned `attachment`
@@ -138,7 +140,7 @@ content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
   IMPL-PANE-70.
 
 Root verified the installed 2.1.263 executable JS before admitting this
-boundary: `/Users/gabrielvoicu/.local/share/claude/versions/2.1.263`,
+boundary: `/Users/someone-home/.local/share/claude/versions/2.1.263`,
 `Iyt` constructor at byte 166358621, foreground finalizer at 181924998,
 and deferred swarm finalizer at 181908652. The foreground path follows
 `markQueryComplete`/loading reset and excludes abort. The SDK event schema
@@ -175,7 +177,7 @@ departure is told in `crates/cf-harness/tests/goldens/README.md`.
 ## Pi — session JSONL, protocol `3` (Pi `0.85.1`)
 
 - `between-tool-steps.jsonl` — source
-  `/Users/gabrielvoicu/.pi/agent/sessions/--Users-gabrielvoicu-Projects-ngvoicu-consensflow--/2026-08-24T18-00-00-703Z_hazy-ridge.jsonl`;
+  `/Users/someone-home/.pi/agent/sessions/--Users-someone-home-Projects-example-consensflow--/2026-08-24T18-00-00-703Z_hazy-ridge.jsonl`;
   physical lines 1 and 4–8. Both tool results close by exact `toolCallId`;
   the next assistant tool step appears almost three seconds later.
 - `tool-loop.jsonl` — the same source, physical lines 1, 4–7, and 114.
@@ -183,7 +185,7 @@ departure is told in `crates/cf-harness/tests/goldens/README.md`.
   `stopReason:stop`. The final 1,878-character text leaf is replaced by
   1,878 `P` characters.
 - `provider-429.jsonl` — source
-  `/Users/gabrielvoicu/.pi/agent/sessions/--Users-gabrielvoicu-Projects-ngvoicu-consensflow--/2026-08-26T10-14-49-150Z_triton-jade-fern.jsonl`;
+  `/Users/someone-home/.pi/agent/sessions/--Users-someone-home-Projects-example-consensflow--/2026-08-26T10-14-49-150Z_triton-jade-fern.jsonl`;
   physical lines 1 and 6–9. It retains both complete provider-429 attempts and
   the eventual successful assistant record, with no intervening user turn.
 
@@ -253,7 +255,7 @@ the real Xterm display. The app added no native plugin, channel or configuration
 `claude-code/v268-late-ancestors.jsonl` contains all 11 records, in physical
 order, from the isolated local-provider capture session
 `4e761651-511b-4065-8a65-6ff21582faad` on 2026-09-11 at 14:00:27Z.
-Source: `/private/var/folders/5f/cy8ywl5d2_z_1g1zcn45g7gr0000gn/T/cf-claude-switch-pwwo6m5a/claude/projects/-private-var-folders-5f-cy8ywl5d2-z-1g1zcn45g7gr0000gn-T-cf-claude-switch-pwwo6m5a-workspace/4e761651-511b-4065-8a65-6ff21582faad.jsonl`.
+Source: `/private/tmp/folders/xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/T/cf-claude-switch-pwwo6m5a/claude/projects/-private-var-folders-5f-cy8ywl5d2-z-1g1zcn45g7gr0000gn-T-cf-claude-switch-pwwo6m5a-workspace/4e761651-511b-4065-8a65-6ff21582faad.jsonl`.
 Only local directory leaf values are redacted to `/tmp/claude-fixture`.
 Assistant record 3 and turn_duration record 4 precede initiating user record 6
 and its four attachment ancestors 7–10. UUIDs, parents, timestamps, native

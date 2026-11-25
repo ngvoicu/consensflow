@@ -24,8 +24,8 @@
   "harness": "codex",
   "mode": "osc8",
   "width": 160,
-  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007Source\u001b]8;;\u0007\r\n",
-  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "printed": "\u001b]8;;https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007Source\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
   "expect": "exact",
   "source": "Codex rust-v0.167.0 terminal_hyperlinks.rs (osc8_hyperlink, web_destination, sanitized_destination), compiled in isolation by the review of T-1314"
  },
@@ -34,8 +34,8 @@
   "harness": "codex",
   "mode": "osc8",
   "width": 28,
-  "printed": "\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007https://github.com/ngvoicu/c\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007onsensflow/blob/main/app/src\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007-tauri/src/link.rs#L10-L20\u001b]8;;\u0007\r\n",
-  "destination": "https://github.com/ngvoicu/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
+  "printed": "\u001b]8;;https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007https://github.com/example/c\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007onsensflow/blob/main/app/src\u001b]8;;\u0007\r\n\u001b]8;;https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20\u0007-tauri/src/link.rs#L10-L20\u001b]8;;\u0007\r\n",
+  "destination": "https://github.com/example/consensflow/blob/main/app/src-tauri/src/link.rs#L10-L20",
   "expect": "exact",
   "source": "the OSC 8 writer of Codex rust-v0.167.0 (terminal_hyperlinks.rs, osc8_hyperlink) on each row of an address the review of T-1314 laid out in 28-column rows: the layout is the review's, the writer Codex's"
  },

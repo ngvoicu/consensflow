@@ -15,8 +15,13 @@
 //! words that send the task on go into the same window once it rests.
 
 use cf_engine::testing::Context;
-use cf_harness::contract::{Over, Pane};
+#[cfg(target_os = "macos")]
+use cf_engine::testing::Made;
+use std::rc::Rc;
+
+use cf_harness::contract::{Held, Over, Pane, Readiness, Waiting};
 use cf_harness::records::{Pending, Role};
+use cf_proto::panes::{Background, BackgroundProcess};
 use serde_json::{json, Value};
 
 use crate::fixtures::{after, exhausted, now, Tiers};
@@ -279,6 +284,303 @@ fn a_pause_whose_escape_stopped_a_turn_with_background_agents_keeps_the_window_a
     );
 }
 
+/// Notices to the chief about the resume words, excluding the separate notice that a
+/// window ignored its interrupt rounds.
+fn resume_wait_notices(context: &Context, project: i64) -> Vec<String> {
+    context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .filter(|message| {
+            message.kind == "note"
+                && message.body.contains("resume words")
+                && message.body.contains("wait")
+        })
+        .map(|message| message.body)
+        .collect()
+}
+
+#[test]
+fn a_resume_still_waiting_two_minutes_after_its_stop_was_paid_is_told_to_the_chief_once() {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+
+    // The turn ignores the rounds. Time before the stop is paid does not start
+    // the two-minute wait for the distinct resume notice.
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    context.advance(120_000);
+    context.pass().unwrap();
+    assert!(resume_wait_notices(&context, project).is_empty());
+
+    // The turn's record now says over, paying the stop, but its status still reads
+    // at work; there is no recorded count of background agents.
+    context
+        .adapter
+        .with("zeus", |agent| agent.over = Over::Held);
+    context.pass().unwrap();
+    let zeus = context.id(project, "zeus");
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "window shows working" }))
+    );
+    context.advance(119_999);
+    context.pass().unwrap();
+    assert!(resume_wait_notices(&context, project).is_empty());
+    context.advance(1);
+    context.pass().unwrap();
+
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1, "the chief is told once after two minutes");
+    assert!(notices[0].contains("T-1"), "{}", notices[0]);
+    assert!(notices[0].contains("@zeus"), "{}", notices[0]);
+    assert!(notices[0].contains("window"), "{}", notices[0]);
+    assert!(notices[0].contains("working"), "{}", notices[0]);
+    assert!(notices[0].contains("when checked"), "{}", notices[0]);
+    assert!(!notices[0].contains("background agent"), "{}", notices[0]);
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+
+    context.advance(120_000);
+    context.pass().unwrap();
+    assert_eq!(resume_wait_notices(&context, project), notices);
+    rests(&context, "zeus");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 1);
+    assert_eq!(context.dispatcher.resume_wait(zeus).unwrap(), None);
+}
+
+#[test]
+fn an_ordinary_pause_and_resume_does_not_tell_the_chief_the_resume_is_waiting() {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 1);
+    assert_eq!(
+        context
+            .dispatcher
+            .resume_wait(context.id(project, "zeus"))
+            .unwrap(),
+        None
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    assert!(resume_wait_notices(&context, project).is_empty());
+}
+
+#[test]
+fn a_resume_waiting_on_the_members_question_names_the_dialog_not_the_human() {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    // A member's own question is answered through the board, not necessarily
+    // by the human. Its dialog holds the resume words at the existing gate.
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some("its own question dialog is open".to_owned()),
+        });
+    });
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "window's dialog waits for an answer" }))
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("dialog waits for an answer"));
+    assert!(!notices[0].contains("the human"));
+}
+
+#[test]
+fn a_resume_waiting_for_human_action_says_so_without_quoting_its_window() {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context.adapter.busy_until_interrupted("zeus");
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| {
+        Ok(Readiness::Held(Held::ForHuman(
+            "a private detail in its input box".to_owned(),
+        )))
+    }));
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "window needs the human" }))
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("window needs the human"));
+    assert!(!notices[0].contains("private detail"));
+}
+
+#[test]
+fn a_resume_long_after_a_paid_pause_gets_a_chance_to_arrive_before_any_wait_notice() {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.advance(10 * 60_000);
+    context.pass().unwrap();
+    context.resume_task(project, 1, "Go on with the parser");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 1);
+    assert!(resume_wait_notices(&context, project).is_empty());
+}
+
+#[test]
+fn a_resume_sent_late_in_the_two_minutes_is_told_when_the_paid_stops_clock_reaches_them() {
+    let context = Context::new();
+    let project = working(&context);
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.advance(119_000);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    assert!(resume_wait_notices(&context, project).is_empty());
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(resume_wait_notices(&context, project).len(), 1);
+}
+
+#[test]
+fn resume_words_still_waiting_when_the_member_goes_out_tell_the_chief_the_quota_reason() {
+    let context = Context::new();
+    let project = working(&context);
+    let zeus = context.id(project, "zeus");
+    context
+        .adapter
+        .busy_with_agents_until_interrupted_in_generation("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .mark_out(zeus, "2099-01-01T00:00:00.000Z", "out of quota")
+        .unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.resume_wait(zeus).unwrap(),
+        Some(json!({ "task": 1, "reason": "member out of quota" }))
+    );
+    context.advance(120_000);
+    context.pass().unwrap();
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].contains("out of quota"), "{}", notices[0]);
+}
+
+#[test]
+fn a_later_pause_and_resume_has_its_own_single_wait_notice() {
+    let context = Context::new();
+    let project = working(&context);
+    for words in ["First direction", "Second direction"] {
+        context
+            .adapter
+            .busy_with_agents_until_interrupted_in_generation("zeus");
+        context.pause_task(project, 1);
+        context.resume_task(project, 1, words);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.advance(120_000);
+        context.pass().unwrap();
+        rests(&context, "zeus");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(given(&context, "zeus", &format!("Resumed: {words}")), 1);
+    }
+    let notices = resume_wait_notices(&context, project);
+    assert_eq!(notices.len(), 2);
+    assert_ne!(notices[0], notices[1], "each names its own resume message");
+    context.advance(120_000);
+    context.pass().unwrap();
+    assert_eq!(resume_wait_notices(&context, project), notices);
+}
+
+#[test]
+fn the_existing_long_hold_notice_does_not_tell_the_chief_the_same_resume_wait_twice() {
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.busy_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    let words = context.task(project, 1).messages.last().unwrap().id;
+    *context.adapter.ready.borrow_mut() = Some(std::rc::Rc::new(|| {
+        Ok(cf_harness::contract::Readiness::Held(
+            cf_harness::contract::Held::Unsent,
+        ))
+    }));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let chief = context.id(project, "chief");
+    let notices = || {
+        context
+            .inbox(chief)
+            .into_iter()
+            .filter(|message| {
+                message.kind == "note"
+                    && message.body.contains(&format!("m-{words}"))
+                    && (message.body.contains("resume words")
+                        || message.body.contains("has waited"))
+            })
+            .map(|message| message.body)
+            .collect::<Vec<_>>()
+    };
+    context.advance(120_000);
+    context.pass().unwrap();
+    assert_eq!(notices().len(), 1, "the two-minute notice");
+    context.advance(9 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(notices().len(), 1, "the chief is told once for these words");
+    let human = context.id(project, "human");
+    let human_notices = context
+        .inbox(human)
+        .into_iter()
+        .filter(|message| {
+            message.kind == "note"
+                && message.body.contains(&format!("m-{words}"))
+                && message.body.contains("has waited")
+        })
+        .count();
+    assert_eq!(human_notices, 1, "the existing human notice still goes");
+}
+
 #[test]
 fn a_record_that_says_the_turn_is_over_only_a_moment_ago_is_pressed_no_more_and_paid_once_it_stands(
 ) {
@@ -491,4 +793,144 @@ fn the_chief_whose_tell_kept_a_human_given_tasks_window_is_told_too_once() {
     context.pass().unwrap();
     assert!(context.host.killed().is_empty(), "a hung turn is kept");
     assert_eq!(closes_told(&context, project.id), KEPT, "one note to each");
+}
+
+/// A project with zeus at work on T-1, a pause and a resume of T-1 sent after the
+/// stop's one Escape ended the turn in its record while its status stayed busy for a
+/// background agent (Claude Code, T-604): the engine's third pass has read the end
+/// stand its second.
+fn paused_and_resumed_with_an_agent_running(context: &Context, project: i64) -> Pane {
+    // The host still sees work from this window. Like Claude's interrupted turn, the
+    // stand-in's record reads over but has no pending-agent count, while its live status
+    // remains busy. Nothing else ends the work or makes it idle.
+    context.background.leaves(Some(Background {
+        total: 1,
+        processes: vec![BackgroundProcess {
+            pid: 4711,
+            command: "background-agent".to_owned(),
+        }],
+        ..Background::default()
+    }));
+    context.adapter.busy_with_agents_until_interrupted("zeus");
+    context.pause_task(project, 1);
+    context.resume_task(project, 1, "Go on with the parser");
+    context.pass().unwrap();
+    let pane = context.host.last("zeus").expect("its window").pane;
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "the first turn was interrupted"
+    );
+    pane
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_immediate_resume_reaches_the_stopped_window_while_its_background_agent_runs() {
+    // N23, on the Mac (Claude Code 2.1.329, T-1857's recording): after the interrupt for
+    // a tool use the prompt takes a typed line though the status says busy for the agent.
+    let context = Context::new();
+    let project = working(&context);
+    let launches = context.adapter.prepared().len();
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no later pause round"
+    );
+    assert!(
+        context.host.killed().is_empty(),
+        "background work was not ended"
+    );
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on with the parser"),
+        1,
+        "the resume must reach the same window while its background work still runs"
+    );
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(
+        context.adapter.prepared().len(),
+        launches,
+        "the same window"
+    );
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.inputs(),
+        [escape(&pane)],
+        "no later pause round cuts the resumed turn"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_paced_resume_goes_into_the_stopped_window_once_the_settle_has_stood_and_a_fresh_look_reads_it_so(
+) {
+    // The pacing's gate reads the same word as the step's: the rest holds over looks of
+    // one frontier for the settle, and the fresh look before the paste must read the
+    // window taking words too (it is not settled: its status says busy for the agent).
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    let project = working(&context);
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+    for _ in 0..6 {
+        context.advance(1_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        given(&context, "zeus", "Resumed: Go on with the parser"),
+        1,
+        "once the settle stood"
+    );
+    assert_eq!(context.host.inputs(), [escape(&pane)], "no more keys");
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn an_immediate_resume_waits_where_the_window_was_never_recorded_taking_words_after_the_interrupt()
+{
+    // Windows (and every platform nothing recorded): the words wait as they did, and
+    // nothing is pressed or ended meanwhile.
+    let context = Context::new();
+    let project = working(&context);
+    let pane = paused_and_resumed_with_an_agent_running(&context, project);
+    for _ in 0..4 {
+        context.advance(3_100);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.host.inputs(), [escape(&pane)]);
+    assert!(context.host.killed().is_empty());
+    assert_eq!(given(&context, "zeus", "Resumed: Go on with the parser"), 0);
+}
+
+#[test]
+fn a_window_that_takes_words_for_its_background_agent_has_no_result_taken_while_it_runs() {
+    // The prompt takes words (the Mac, after the interrupt for a tool use), but the
+    // turn's answer is not final while the agent runs: `settled` decides a result, and it
+    // stays false.
+    let context = Context::new();
+    let project = working(&context);
+    context.adapter.answer("zeus", "Parser done.");
+    context.adapter.with("zeus", |agent| {
+        agent.settled = false;
+        agent.over = Over::Held;
+        agent.busy_when_interrupted = true;
+    });
+    rounds(&context);
+    assert_eq!(context.task(project, 1).task.state, "working");
+    assert_eq!(
+        context.inbox(context.id(project, "chief")).len(),
+        0,
+        "nothing of it reached the chief"
+    );
 }

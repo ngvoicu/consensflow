@@ -493,7 +493,7 @@ impl Dispatcher {
         let why = match fresh {
             Err(_) => Some("a look at it failed as the message was to go".to_owned()),
             Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
-            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+            Ok(fresh) if !fresh.takes_words || fresh.waiting.is_some() => {
                 Some("it began a turn as the message was to go".to_owned())
             }
             Ok(fresh) if Frontier::of(&fresh) != paced.frontier => {

@@ -165,6 +165,25 @@ impl Rig {
         events_of(&text.unwrap_or_default())
     }
 
+    /// [`Rig::events`] once the daemon's trace has been written out: the daemon's one
+    /// writer of the file takes a line some milliseconds after it was said, so a read
+    /// taken at a moment that is the end of something (a snapshot, a verdict) reads
+    /// again until the file has not changed for 200 ms, five seconds at most. A read
+    /// that polls for what it waits for needs no such wait: it reads again.
+    pub fn events_settled(&self) -> Vec<Value> {
+        let file = self.home().join("events.jsonl");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut last = files::read_finished_lines(&file).unwrap_or_default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let now = files::read_finished_lines(&file).unwrap_or_default();
+            if now == last || std::time::Instant::now() >= until {
+                return events_of(&now);
+            }
+            last = now;
+        }
+    }
+
     /// Every command line the rig's Muse ([`Config::muse`](super::Config::muse)) was
     /// started with so far, oldest first, as the daemon launched it (its model and
     /// effort in it, which the rig's Muse takes out before it runs).
@@ -260,7 +279,7 @@ impl Rig {
         })?;
         let pane = chief()?["pane"].clone();
         let typed = format!("\u{1b}[200~{text}\u{1b}[201~\r");
-        let mark = self.events().len();
+        let mark = self.events_settled().len();
         let answer = self.host(
             "pane.input",
             json!({

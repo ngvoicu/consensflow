@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -18,7 +18,8 @@ use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
 use crate::pty::{
-    validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneTable, StreamedPane,
+    validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneOutput, PaneTable,
+    StreamedPane,
 };
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
@@ -29,6 +30,10 @@ use cf_proto::panes::{
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
+/// A bound on a page message, even if a pane has much more output waiting.
+const MAX_OUTPUT_MESSAGE_BYTES: usize = 64 * 1024;
+/// A screen update hashes the whole screen, so bound the number before a handoff too.
+const MAX_OUTPUT_READS_PER_BATCH: usize = 4;
 
 /// How long `pane.exit` waits, once a program has closed its terminal, for
 /// the program's exit code to be readable: it closes the terminal a moment
@@ -513,6 +518,72 @@ pub(crate) static EXIT_HANDED: std::sync::Mutex<Option<ExitHanded>> = std::sync:
 #[cfg(test)]
 pub(crate) type ExitHanded = Box<dyn Fn(&PaneKey) + Send>;
 
+/// Join a few reads already waiting. Take them before feeding the screen, so more
+/// reads arriving during screen work cannot extend the batch. The first that would
+/// cross the byte bound is kept for the next handoff. The last sequence acknowledges
+/// every read in the batch.
+fn next_output(
+    stream: &mpsc::Receiver<PaneOutput>,
+    pending: &mut Option<PaneOutput>,
+    mut feed: impl FnMut(&[u8]),
+) -> Option<PaneOutput> {
+    let mut message = pending.take().or_else(|| stream.recv().ok())?;
+    let mut size = message.bytes.len();
+    let mut joined = Vec::new();
+    while joined.len() + 1 < MAX_OUTPUT_READS_PER_BATCH {
+        let Ok(next) = stream.try_recv() else {
+            break;
+        };
+        if next.bytes.len() > MAX_OUTPUT_MESSAGE_BYTES.saturating_sub(size) {
+            *pending = Some(next);
+            break;
+        }
+        size += next.bytes.len();
+        joined.push(next);
+    }
+    feed(&message.bytes);
+    for next in joined {
+        feed(&next.bytes);
+        message.bytes.extend_from_slice(&next.bytes);
+        message.seq = next.seq;
+    }
+    // Extending a Vec can reserve more than its contents. The page's message,
+    // like each read waiting in the channel, holds only the bytes it contains.
+    message.bytes = message.bytes.into_boxed_slice().into_vec();
+    Some(message)
+}
+
+/// A read of the window's output, taken into its screen, and the clocks told: it printed
+/// now, and whether it changed what the screen shows. One call for each read, in the
+/// order the reads came: the paste's Enter and the engine's quiet checks read these.
+fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
+    let changed = screen.feed(bytes);
+    printed.note(changed);
+}
+
+fn forward_output(
+    stream: &mpsc::Receiver<PaneOutput>,
+    mut feed: impl FnMut(&[u8]),
+    mut publish: impl FnMut(PaneOutput),
+) {
+    let mut pending = None;
+    while let Some(message) = pending.take().or_else(|| stream.recv().ok()) {
+        // A ready byte goes on after its own screen update, before any work on
+        // another read. In particular, a writer that was idle must not wait for
+        // reads that arrive while this update is in progress.
+        feed(&message.bytes);
+        publish(message);
+        // There is no wait for another read. When output is already queued, join
+        // the next few reads before going back to the immediate handoff above.
+        if let Ok(next) = stream.try_recv() {
+            pending = Some(next);
+            if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
+                publish(batch);
+            }
+        }
+    }
+}
+
 /// A pane's output, on to the page and into its screen, and its end, which is
 /// for good (`pty`'s `output_end`): `pane.exit`, which says how the program
 /// ended and what the screen showed last, once the program is proven gone (one
@@ -540,11 +611,11 @@ fn stream_to_page(
             #[cfg(target_os = "macos")]
             tree,
         } = streamed;
-        for message in stream {
-            let changed = screen.feed(&message.bytes);
-            printed.note(changed);
-            output.publish(message.into());
-        }
+        forward_output(
+            &stream,
+            |bytes| took_in(&screen, &printed, bytes),
+            |message| output.publish(message.into()),
+        );
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
         // that follows ends it.
@@ -681,6 +752,571 @@ mod tests {
     use crate::headless::MAX_FRAME_BYTES;
     #[cfg(unix)]
     use crate::output_hub::PaneOutputMessage;
+
+    /// The sink accepts output, but processing the second read is held. A ready first
+    /// read must reach the sink before the publisher begins work on the second.
+    fn first_read_is_published_before_slow_second_read(online: bool) {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (sender, stream) = mpsc::channel();
+        let key = PaneKey::new("latency", 1);
+        sender
+            .send(PaneOutput {
+                key: key.clone(),
+                seq: 1,
+                bytes: vec![b'a'],
+            })
+            .unwrap();
+        if !online {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq: 2,
+                    bytes: vec![b'b'],
+                })
+                .unwrap();
+        }
+        let (entered, seen) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        let (published, received) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            forward_output(
+                &stream,
+                |bytes| {
+                    entered.send(bytes[0]).unwrap();
+                    held.recv_timeout(Duration::from_secs(5))
+                        .expect("release the screen feed");
+                },
+                |message| {
+                    published.send(message).unwrap();
+                },
+            );
+        });
+        assert_eq!(seen.recv_timeout(Duration::from_secs(5)).unwrap(), b'a');
+        if online {
+            sender
+                .send(PaneOutput {
+                    key,
+                    seq: 2,
+                    bytes: vec![b'b'],
+                })
+                .unwrap();
+        }
+        drop(sender);
+        release.send(()).unwrap();
+        assert_eq!(seen.recv_timeout(Duration::from_secs(5)).unwrap(), b'b');
+        let first = received.recv_timeout(Duration::from_millis(250));
+        release.send(()).unwrap();
+        worker.join().expect("output thread ends");
+        let first = first.expect("the first byte waited for another read's screen update");
+        assert_eq!((first.seq, first.bytes.as_slice()), (1, &b"a"[..]));
+    }
+
+    #[test]
+    fn tiny_read_queued_first_byte_is_published_before_later_screen_work() {
+        first_read_is_published_before_slow_second_read(false);
+    }
+
+    #[test]
+    fn tiny_read_online_first_byte_is_published_before_a_new_read_is_fed() {
+        first_read_is_published_before_slow_second_read(true);
+    }
+
+    #[test]
+    fn tiny_read_batch_limits_how_many_screen_updates_precede_publication() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        let key = PaneKey::new("latency-bound", 1);
+        for seq in 1..=4096 {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: vec![b'x'],
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let mut fed = 0;
+        let first = next_output(&stream, &mut None, |_| fed += 1).unwrap();
+        assert_eq!(fed, 4, "a batch has a fixed bound on screen updates");
+        assert_eq!(first.bytes.len(), fed);
+    }
+
+    /// A clock that moves only when the test moves it.
+    struct Manual {
+        base: std::time::Instant,
+        elapsed: std::sync::Mutex<Duration>,
+    }
+
+    impl Manual {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                base: std::time::Instant::now(),
+                elapsed: std::sync::Mutex::new(Duration::ZERO),
+            })
+        }
+
+        fn advance(&self, by: Duration) {
+            *self.elapsed.lock().unwrap() += by;
+        }
+    }
+
+    impl crate::arbiter::Clock for Manual {
+        fn now(&self) -> std::time::Instant {
+            self.base + *self.elapsed.lock().unwrap()
+        }
+
+        fn rest(&self, duration: Duration) {
+            self.advance(duration);
+        }
+    }
+
+    /// Queue `reads` as a pane's output and forward them as the host does, each read
+    /// taking `each` of the clock's time to take in. `between` runs before each read is
+    /// taken in; `during` is told, before each read and at each publication, the quiet
+    /// times the arbiter reports then: (output, screen).
+    fn forwarded_with_clocks(
+        reads: &[&[u8]],
+        each: Duration,
+        mut between: impl FnMut(&PaneScreen, usize),
+        during: impl FnMut(&str, usize, (Option<u64>, Option<u64>)),
+    ) {
+        let during = std::cell::RefCell::new(during);
+        let clock = Manual::new();
+        let arbiter =
+            InputArbiter::with_clock(crate::arbiter::EnterTiming::fixed(0), clock.clone());
+        let key = PaneKey::new("clocks", 1);
+        let printed = arbiter.register(&key).expect("register clock");
+        let screen = PaneScreen::new(24, 80);
+        let (sender, stream) = std::sync::mpsc::channel();
+        for (seq, bytes) in reads.iter().enumerate() {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq: seq as u64 + 1,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let quiet = || {
+            let snapshot = arbiter.snapshot(&key).expect("snapshot");
+            (snapshot.output_quiet_ms, snapshot.screen_quiet_ms)
+        };
+        let taken = std::cell::Cell::new(0);
+        forward_output(
+            &stream,
+            |bytes| {
+                let at = taken.get();
+                taken.set(at + 1);
+                (during.borrow_mut())("before a read", at, quiet());
+                between(&screen, at);
+                clock.advance(each);
+                took_in(&screen, &printed, bytes);
+            },
+            |message| (during.borrow_mut())("publication", message.seq as usize, quiet()),
+        );
+    }
+
+    /// Each read stamps the output clock as it is taken in, as before reads were joined,
+    /// so a batch that takes long still prints as it goes: the paste's Enter waits for
+    /// the quiet of the last read, not of the first (T-1941 round 2).
+    #[test]
+    fn tiny_read_every_read_of_a_batch_stamps_the_output_clock_as_it_is_taken_in() {
+        let reads: Vec<&[u8]> = vec![b"x"; 4];
+        let mut seen = Vec::new();
+        forwarded_with_clocks(
+            &reads,
+            Duration::from_millis(100),
+            |_, _| {},
+            |when, at, quiet| seen.push((when.to_owned(), at, quiet.0)),
+        );
+        for (when, at, output) in &seen {
+            if when == "publication" {
+                assert_eq!(*output, Some(0), "at the publication of read {at}");
+            } else if *at > 0 {
+                assert_eq!(
+                    *output,
+                    Some(0),
+                    "before read {at}: the one before it printed"
+                );
+            }
+        }
+        assert_eq!(
+            seen.iter().filter(|seen| seen.0 == "publication").count(),
+            2
+        );
+    }
+
+    /// A screen that changes and changes back across the reads of a batch moves the
+    /// screen's clock with each read, as it did when each read was hashed alone: 70
+    /// cycles of a spinner's frame drawn and erased.
+    #[test]
+    fn tiny_read_a_screen_that_changes_and_changes_back_across_reads_moves_the_screen_clock() {
+        // The first read alone, then batches of four reads that each end on the
+        // screen they began with.
+        let mut reads: Vec<&[u8]> = vec![b"\x1b[0m"];
+        reads.extend((0..70).flat_map(|_| [&b"|"[..], b"\r \r", b"|", b"\r \r"]));
+        let mut at_publication = Vec::new();
+        forwarded_with_clocks(
+            &reads,
+            Duration::from_millis(10),
+            |_, _| {},
+            |when, _, quiet| {
+                if when == "publication" {
+                    at_publication.push(quiet.1);
+                }
+            },
+        );
+        assert!(at_publication.len() >= 2);
+        assert_eq!(at_publication[0], None, "the first read changed nothing");
+        assert!(
+            at_publication[1..].iter().all(|screen| *screen == Some(0)),
+            "the last read of every batch changed the screen: {at_publication:?}"
+        );
+    }
+
+    /// A resize between two reads of a batch leaves the change the reads before it made
+    /// in the screen's clock, and a resize alone changes nothing (T-1941 round 2).
+    #[test]
+    fn tiny_read_a_resize_between_reads_keeps_the_change_made_before_it_and_adds_none() {
+        let reads: Vec<&[u8]> = vec![b"\x1b[0m", b"Trust this folder?", b"\x1b[0m", b"\x1b[0m"];
+        let mut at_publication = Vec::new();
+        forwarded_with_clocks(
+            &reads,
+            Duration::from_millis(10),
+            |screen, at| {
+                if at == 2 {
+                    screen.resize(25, 81);
+                }
+            },
+            |when, at, quiet| {
+                if when == "publication" && at > 1 {
+                    at_publication.push(quiet.1);
+                }
+            },
+        );
+        // The change was the batch's first read's: two reads ago.
+        assert_eq!(at_publication, [Some(20)], "the batch changed the screen");
+
+        let reads: Vec<&[u8]> = vec![b"\x1b[0m", b"\x1b[1m", b"\x1b[0m"];
+        let mut at_publication = Vec::new();
+        forwarded_with_clocks(
+            &reads,
+            Duration::from_millis(10),
+            |screen, at| {
+                if at == 1 {
+                    screen.resize(25, 81);
+                }
+            },
+            |when, at, quiet| {
+                if when == "publication" && at > 1 {
+                    at_publication.push(quiet.1);
+                }
+            },
+        );
+        assert_eq!(at_publication, [None], "a resize alone shows nothing");
+    }
+
+    /// A read of a big screen that is only erases, as a full-screen program's redraws are:
+    /// `2048` of them in 8 KiB (T-2022: a scan of every blank row per erase made a read take
+    /// four times as long, and the paste's Enter went during it).
+    fn erase_read(erases: usize) -> Vec<u8> {
+        b"\x1b[2J".repeat(erases)
+    }
+
+    /// The paste's Enter, by the host's own wait at the app's 120 ms, goes after the last of
+    /// the reads queued behind the window's echo, on the biggest screen the model keeps:
+    /// each read of erases stamps the output clock as it ends, and none takes as long as the
+    /// quiet the wait asks for. Wall clocks and an optimized build: one read takes about
+    /// 60 ms, and 230 ms when each erase scanned every blank row first (T-1941 round 3,
+    /// T-2022); a debug build's fill is slower than a scan.
+    #[test]
+    #[ignore = "optimized builds only: cargo test --release -p cf-panes --lib -- --ignored tiny_read_the_enter"]
+    fn tiny_read_the_enter_goes_after_the_last_of_the_queued_erase_reads() {
+        let reads_each = 2048;
+        let arbiter = InputArbiter::new(crate::arbiter::EnterTiming::fixed(0));
+        let key = PaneKey::new("erases", 1);
+        let printed = arbiter.register(&key).expect("register clock");
+        let (sender, stream) = std::sync::mpsc::channel();
+        let heavy = erase_read(reads_each);
+        let mut reads: Vec<&[u8]> = vec![b"echo"];
+        reads.extend((0..8).map(|_| heavy.as_slice()));
+        for (seq, bytes) in reads.iter().enumerate() {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq: seq as u64 + 1,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (echoed, echo) = std::sync::mpsc::sync_channel(0);
+        let (go, ready) = std::sync::mpsc::sync_channel(0);
+        let forwarding = {
+            let (printed, completed) = (Arc::clone(&printed), Arc::clone(&completed));
+            thread::spawn(move || {
+                let screen = PaneScreen::new(400, 1000);
+                forward_output(
+                    &stream,
+                    |bytes| {
+                        took_in(&screen, &printed, bytes);
+                        completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    },
+                    |message| {
+                        if message.seq == 1 {
+                            echoed.send(()).unwrap();
+                            ready.recv().unwrap();
+                        }
+                    },
+                );
+            })
+        };
+        echo.recv_timeout(Duration::from_secs(30)).unwrap();
+        let wait = crate::headless::ENTER;
+        let pasted = std::time::Instant::now() - Duration::from_millis(20);
+        go.send(()).unwrap();
+        let started = std::time::Instant::now();
+        wait.wait_released(&printed, pasted);
+        let released_after = started.elapsed();
+        let done = completed.load(std::sync::atomic::Ordering::SeqCst);
+        forwarding.join().unwrap();
+        println!("erase reads of {reads_each}: released {released_after:?} after the echo with {done} of 9 reads taken in");
+        assert_eq!(
+            done, 9,
+            "the Enter went while a read was still being taken in"
+        );
+    }
+
+    #[test]
+    fn tiny_read_batch_does_not_grow_while_its_screen_is_fed() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        let key = PaneKey::new("snapshot", 1);
+        sender
+            .send(PaneOutput {
+                key: key.clone(),
+                seq: 1,
+                bytes: vec![b'a'],
+            })
+            .unwrap();
+        let (entered, seen) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            next_output(&stream, &mut None, |bytes| {
+                if bytes == b"a" {
+                    entered.send(()).unwrap();
+                    held.recv_timeout(std::time::Duration::from_secs(5))
+                        .unwrap();
+                }
+            })
+            .unwrap()
+        });
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        sender
+            .send(PaneOutput {
+                key,
+                seq: 2,
+                bytes: vec![b'b'],
+            })
+            .unwrap();
+        drop(sender);
+        release.send(()).unwrap();
+        let batch = worker.join().expect("batch thread");
+        assert_eq!((batch.seq, batch.bytes.as_slice()), (1, &b"a"[..]));
+    }
+
+    #[test]
+    fn tiny_read_batches_obey_the_bound_and_keep_the_last_sequence() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        let key = PaneKey::new("burst", 1);
+        for (seq, byte, len) in [(1, b'a', 40 * 1024), (2, b'b', 40 * 1024), (3, b'c', 1)] {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: vec![byte; len],
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let mut pending = None;
+        let first = next_output(&stream, &mut pending, |_| {}).expect("first batch");
+        let second = next_output(&stream, &mut pending, |_| {}).expect("second batch");
+        assert!(next_output(&stream, &mut pending, |_| {}).is_none());
+        assert_eq!((first.seq, first.bytes), (1, vec![b'a'; 40 * 1024]));
+        let mut expected = vec![b'b'; 40 * 1024];
+        expected.push(b'c');
+        assert_eq!(
+            second.seq, 3,
+            "the cumulative acknowledgement covers both reads"
+        );
+        assert_eq!(second.bytes.capacity(), expected.len());
+        assert_eq!(second.bytes, expected);
+    }
+
+    #[test]
+    fn tiny_read_is_published_without_waiting_for_another_read() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        sender
+            .send(PaneOutput {
+                key: PaneKey::new("interactive", 1),
+                seq: 1,
+                bytes: vec![b'x'],
+            })
+            .unwrap();
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let message = next_output(&stream, &mut None, |_| {}).expect("the first byte");
+            done.send(message).unwrap();
+        });
+        let message = result.recv_timeout(std::time::Duration::from_secs(5));
+        drop(sender);
+        worker.join().expect("reader thread");
+        let message = message.expect("an interactive byte waited for another read");
+        assert_eq!(message.bytes, b"x");
+        assert_eq!(message.seq, 1);
+    }
+
+    #[test]
+    fn tiny_read_batch_keeps_each_screens_change_boundary() {
+        let (sender, stream) = std::sync::mpsc::channel();
+        let key = PaneKey::new("screen", 1);
+        for (seq, bytes) in [(1, &b"a"[..]), (2, &b"\r \r"[..])] {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        let screen = PaneScreen::new(24, 80);
+        let mut changes = Vec::new();
+        let message = next_output(&stream, &mut None, |bytes| changes.push(screen.feed(bytes)))
+            .expect("batch");
+        assert_eq!(message.bytes, b"a\r \r");
+        assert_eq!(
+            changes,
+            [true, true],
+            "the screen changed and then changed back"
+        );
+    }
+
+    /// Start the page's output thread only after a real pane's burst and exit have
+    /// reached its channel. This makes the burst deterministic, including its last
+    /// output, without delaying an interactive window in production.
+    #[cfg(unix)]
+    #[test]
+    fn tiny_read_queued_burst_is_joined_in_order_before_the_exit() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let _pty_guard = crate::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let output = Arc::new(OutputHub::new());
+        let (published, received) = mpsc::channel();
+        output.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            published.send(message).is_ok()
+        }));
+
+        let (host, mut peer) = UnixStream::pair().expect("bridge socket pair");
+        peer.write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("bridge handle");
+        peer.set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let connected = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES)
+            .connect(host.try_clone().unwrap(), host)
+            .expect("connect bridge");
+
+        let pattern = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_";
+        let script = format!("i=0; while [ $i -lt 2048 ]; do printf '{pattern}'; i=$((i+1)); done");
+        let mut streamed = panes
+            .open_streamed(
+                Path::new("/tmp"),
+                &["/bin/sh".to_owned(), "-c".to_owned(), script],
+                PaneEnvironment::new(&HashMap::new(), &[]),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+                DEFAULT_BACKLOG_BYTES,
+            )
+            .expect("open burst pane");
+        let mut reads = Vec::new();
+        loop {
+            match streamed.output.recv_timeout(Duration::from_secs(30)) {
+                Ok(message) => reads.push(message),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(error) => panic!("the burst did not finish: {error}"),
+            }
+        }
+        let read_count = reads.len();
+        let (sender, replay) = mpsc::channel();
+        for message in reads {
+            sender.send(message).unwrap();
+        }
+        drop(sender);
+        streamed.output = replay;
+        let clock = arbiter.register(&streamed.key).expect("register clock");
+        stream_to_page(
+            streamed,
+            connected.bridge.clone(),
+            Arc::clone(&panes),
+            clock,
+            inputs,
+            output,
+        );
+
+        let mut reader = BufReader::new(peer);
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).expect("bridge event"), 0);
+            let frame: Value = serde_json::from_str(&line).expect("event JSON");
+            if frame["op"] == "pane.exit" {
+                break;
+            }
+        }
+        let messages: Vec<_> = received.try_iter().collect();
+        let mut bytes = Vec::new();
+        let mut sequences = Vec::new();
+        for message in &messages {
+            assert!(message.bytes.len() <= 64 * 1024);
+            bytes.extend_from_slice(&message.bytes);
+            sequences.push(
+                serde_json::to_value(message).unwrap()["seq"]
+                    .as_u64()
+                    .unwrap(),
+            );
+        }
+        drop(reader);
+        connected.bridge.wait_closed().expect("bridge closes");
+
+        assert_eq!(
+            bytes,
+            pattern.repeat(2048).as_bytes(),
+            "every byte precedes exit in order"
+        );
+        assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            read_count >= 16,
+            "the burst did not produce enough reads: {read_count}"
+        );
+        assert!(
+            messages.len() * 2 < read_count,
+            "{} reads became {} messages",
+            read_count,
+            messages.len()
+        );
+    }
 
     /// What a test of a window that repaints what it shows reads of it, on either
     /// platform's pane host (and `windows_tests`' twin).

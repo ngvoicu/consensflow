@@ -35,6 +35,7 @@ mod pacing;
 mod privacy;
 mod record;
 mod resume;
+mod resume_wait;
 mod resumed_at_work;
 mod role_change;
 mod role_news;

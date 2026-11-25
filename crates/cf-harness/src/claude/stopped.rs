@@ -29,6 +29,22 @@ use crate::records::{Reading, Record, Role, Settlement};
 /// `over`): a turn that was about to begin has its message in the record by then.
 pub(super) const HOLD_MS: i64 = 1_000;
 
+/// What Claude writes as the user's turn when the interrupt cut a tool use.
+pub(super) const TOOL_USE_INTERRUPT: &str = "[Request interrupted by user for tool use]";
+
+/// Whether the conversation's last item is the interrupt that cut a tool use
+/// (`Request interrupted by user for tool use`): the turn it ended is over, and Claude
+/// wrote no count of what still runs.
+pub(super) fn ends_in_tool_use_interrupt(reading: &Reading) -> bool {
+    let Reading::Known(record) = reading else {
+        return false;
+    };
+    record
+        .items
+        .last()
+        .is_some_and(|item| item.role == Role::User && &*item.text == TOOL_USE_INTERRUPT)
+}
+
 /// The keys that clear the text Claude put back into its input box before
 /// the next message is pasted: a paste goes in where the cursor is, and
 /// would be sent with the old message in front of it. Ctrl+C, once: it clears

@@ -1,0 +1,170 @@
+# The update's relaunch and its Local Network notice (T-2105). A Mac's Local Network decision may
+# not reach an app the old app started directly after an update, so the app starts the installed
+# one through LaunchServices (`open -n`, from a helper that waits for the old app to end), and
+# directly only in a packaged self-test; and the first launch after an update says once how to
+# allow Local Network again, and a first install says nothing. Every name here begins
+# `launch-services:`.
+
+[run]
+app-updates = ["cargo", "xtask", "app", "test", "updates::"]
+app-update-page = ["cargo", "xtask", "app", "test", "update_page::"]
+
+# The production start is the direct one again: the new app is the old one's child.
+[[plant]]
+name = "launch-services: the app starts the installed update directly again"
+meant = "the_installed_app_is_started_through_launch_services_and_directly_only_in_a_selftest"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = """
+    if selftest {
+        direct(installed)
+    } else {
+        through_launch_services(installed)
+    }"""
+replace = """
+    let _ = (selftest, through_launch_services);
+    direct(installed)"""
+
+# The helper opens the new app without waiting for the old one to end.
+[[plant]]
+name = "launch-services: the helper opens the new app while the old one is alive"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = 'while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done'
+replace = 'while false; do /bin/sleep 0.1; done'
+
+# A bound put back (T-2118, blocker 1): the helper gives up on an old app that lives long, and
+# the person is left with the old app or none.
+[[plant]]
+name = "launch-services: the helper's wait for the old app is bounded again"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = 'while kill -0 "$old" 2>/dev/null; do /bin/sleep 0.1; done'
+replace = 'n=0; while kill -0 "$old" 2>/dev/null && [ "$n" -lt 5 ]; do /bin/sleep 0.1; n=$((n+1)); done'
+
+# `-n` put back (T-2118, blocker 2): where the person reopened the app during the wait, a second
+# instance starts.
+[[plant]]
+name = "launch-services: the helper asks for a new instance again"
+meant = "the_launch_services_start_waits_for_the_old_app_and_opens_without_a_new_instance"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = "    let mut prefix: Vec<std::ffi::OsString> = Vec::new();"
+replace = '    let mut prefix: Vec<std::ffi::OsString> = vec!["-n".into()];'
+
+# A failed opener leaves the person with no app: the helper's fall back to the direct start taken out.
+[[plant]]
+name = "launch-services: a failed open leaves no app"
+meant = "a_failed_open_starts_the_installed_app_directly_and_says_why"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '"$opener" "$@" && exit 0'
+replace = '"$opener" "$@"; exit 0'
+
+# A temporary LaunchServices failure must not force the direct start without a retry.
+[[plant]]
+name = "launch-services: a failed open is not retried"
+meant = "retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds"
+runs = ["app-updates"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '''for delay in 0.5 1 2; do
+    /bin/sleep "$delay"
+    if "$opener" "$@"; then
+        say "ConsensFlow relaunch: $opener succeeded after failed tries with statuses $opened"
+        exit 0
+    else
+        status=$?
+        say "ConsensFlow relaunch: $opener failed with status $status"
+        opened="$opened, $status"
+    fi
+done'''
+replace = ': # the retry was left out'
+
+# Every failed attempt must be recorded even when a later open succeeds.
+[[plant]]
+name = "launch-services: failed open attempts are not logged"
+meant = "retries_a_failed_open_and_reports_the_failed_try_when_it_succeeds"
+runs = ["app-updates"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = 'say "ConsensFlow relaunch: $opener failed with status $opened"'
+replace = ': # the first failed attempt was not logged'
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = '        say "ConsensFlow relaunch: $opener failed with status $status"'
+replace = '        : # a failed retry was not logged'
+
+# The failure without a word (T-2118, blocker 3): nothing is said, or nothing where the app's log
+# cannot be written.
+[[plant]]
+name = "launch-services: a failed start leaves no word"
+meant = "two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = """say() { printf '%s\\n' "$1" >> "$log" 2>/dev/null || "$logger" -t ConsensFlow "$1"; }"""
+replace = "say() { :; }"
+
+[[plant]]
+name = "launch-services: a failed start leaves no word where the log cannot be written"
+meant = "two_failed_starts_leave_a_word_in_the_log_and_failing_that_in_the_system_log"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/relaunch.rs"
+find = """|| "$logger" -t ConsensFlow "$1"; }"""
+replace = "|| :; }"
+
+# The Settings opener's status read by no one: a failed open is a success, and the notice's error
+# line stays hidden.
+[[plant]]
+name = "launch-services: a failed settings opener is a success"
+meant = "an_opener_that_exits_with_a_failure_is_an_error"
+runs = ["app-update-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/update_page.rs"
+find = "    if status.success() {"
+replace = "    if status.success() || true {"
+
+# The notice at a first install: no file is a launch after an update.
+[[plant]]
+name = "launch-services: the notice is shown at a first install"
+meant = "the_notice_is_for_the_first_launch_after_an_update_only"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/local_network.rs"
+find = "    seen.map_or(earlier_run, |seen| seen != current)"
+replace = "    seen.map_or(true, |seen| seen != current)"
+
+# The upgrade from a build that wrote no marker (T-2114, blocker 3): a missing file is a first
+# install whatever the home shows.
+[[plant]]
+name = "launch-services: an upgrade from a build with no marker shows no notice"
+meant = "an_upgrade_from_a_build_that_wrote_no_marker_shows_the_notice_once"
+runs = ["app-updates"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates/local_network.rs"
+find = "    seen.map_or(earlier_run, |seen| seen != current)"
+replace = "    seen.map_or(false, |seen| seen != current)"

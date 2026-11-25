@@ -95,8 +95,14 @@ runs = ["harness-launch-claude-agents"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = "observed(at_rest, over, waiting, by_press, at_prompt)"
-replace = "observed(at_rest, Over::No, waiting, by_press, at_prompt)"
+find = '''
+                        at_rest || after_interrupt,
+                        over,
+'''
+replace = '''
+                        at_rest || after_interrupt,
+                        Over::No,
+'''
 
 [[plant]]
 name = "nothing to stop: a kept window is told twice to the human who gave its task"

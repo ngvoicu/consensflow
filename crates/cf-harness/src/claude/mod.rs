@@ -6,6 +6,7 @@
 mod adapter;
 pub mod computer_use;
 pub(crate) mod computer_use_prompt;
+pub(crate) mod declared;
 pub(crate) mod dialog_identity;
 pub(crate) mod input_box;
 pub(crate) mod install;
@@ -22,6 +23,8 @@ pub(crate) mod trust;
 pub use adapter::ClaudeAdapter;
 pub use question_hook::question_hook;
 pub use stale_hooks::{stale_hooks, StaleHooks};
+pub(crate) use status::Scanner;
+pub use status::Status;
 
 use cf_base::env::Env;
 
@@ -33,4 +36,14 @@ pub(crate) fn shown_by_none(session: &str, env: &Env) -> bool {
         .ok()
         .and_then(|folder| status::holders(&folder, session))
         .is_some_and(|holders| holders.is_empty())
+}
+
+/// Claude's statuses read here with no memory ([`Records::claude_statuses`]'s default).
+pub(crate) fn scan_statuses(folder: &str) -> Vec<(u32, Status)> {
+    status::statuses(folder)
+}
+
+/// The holders of `session` read here with no memory ([`Records::claude_holders`]'s default).
+pub(crate) fn scan_holders(folder: &str, session: &str) -> Option<Vec<u32>> {
+    status::holders(folder, session)
 }

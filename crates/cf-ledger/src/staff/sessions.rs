@@ -106,7 +106,8 @@ pub(crate) fn can_continue(store: &Store, session: &ParticipantRow) -> Result<bo
 }
 
 /// A session that left the board comes back for its follow-up, its lane with
-/// it: the row as it is now.
+/// it, at its member's tier (a closed window kept the tier it worked at; an open
+/// one is at its slot's): the row as it is now.
 pub(crate) fn bring_back(
     store: &mut Store,
     session: ParticipantRow,
@@ -115,7 +116,10 @@ pub(crate) fn bring_back(
         return Ok(session);
     }
     store.db.execute(
-        "UPDATE participant SET left_at = NULL WHERE id = ?",
+        "UPDATE participant SET left_at = NULL,
+                tier = COALESCE((SELECT m.tier FROM participant m
+                                  WHERE m.id = participant.member_id), tier)
+          WHERE id = ?",
         [session.id],
     )?;
     store.log(
