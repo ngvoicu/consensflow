@@ -16,6 +16,12 @@
 //! empty; and, where the human's words are still in the box after Escape (Claude Code keeps
 //! them), the result waiting for them, never pasted into them.
 //!
+//! Now (N17, T-2233) a box read empty sets the count aside only on evidence of where the
+//! person's keys went: a code pasted into the dialog in one write went into a screen that was
+//! not the box, and the result goes in by itself. Keys typed there one at a time give none
+//! (a key typed after the dialog's end was drawn could be one in the box), and the result waits,
+//! with words on the lane that say to press Ctrl+U in the window.
+//!
 //! The cases are that shape on the rig: the chief's stand-in draws Claude Code's input box
 //! and its model picker (`CF_TEST_INPUT_BOX`), the chief hands a worker a turn, and the human
 //! types into the chief's window as the app's page does (`pane.typed`, which the pane host
@@ -99,10 +105,15 @@ pub(crate) fn a_worker_at_work(
     Ok(session)
 }
 
-/// The human opens the model picker in the chief's window, types into its filter,
-/// and leaves it with Escape: the box is drawn again, its line `shown`, and the keys
-/// are counted as unsent.
-fn leaves_the_picker_with_escape(rig: &Rig, project: &Project, shown: &str) -> Outcome {
+/// The human opens the model picker in the chief's window, puts `zqv` into its filter
+/// (`pasted`: in one write, as a code is pasted; or a key at a time) and leaves it with
+/// Escape: the box is drawn again, its line `shown`, and the keys are counted as unsent.
+fn leaves_the_picker_with_escape(
+    rig: &Rig,
+    project: &Project,
+    shown: &str,
+    pasted: bool,
+) -> Outcome {
     types(rig, project, "/model")?;
     sleep(Duration::from_millis(600));
     types(rig, project, "\r")?;
@@ -112,7 +123,14 @@ fn leaves_the_picker_with_escape(rig: &Rig, project: &Project, shown: &str) -> O
             .screen(pane.as_str().unwrap_or_default())
             .contains("Select model"))
     })?;
-    types(rig, project, "zqv\x1b")?;
+    if pasted {
+        let pane = project.lane("chief")?["pane"].clone();
+        rig.types(&pane, b"zqv")?;
+        sleep(KEY_GAP);
+    } else {
+        types(rig, project, "zqv")?;
+    }
+    types(rig, project, "\x1b")?;
     rig.wait_for(
         "the box to be drawn empty, the keys counted as unsent",
         secs(10),
@@ -138,7 +156,7 @@ fn keys_typed_into_a_picker_and_left_with_escape_hold_no_result_from_a_chief_who
     let project = Project::open(&rig, "chief", json!({}))?;
     let session = a_worker_at_work(&rig, &project, 20)?;
 
-    leaves_the_picker_with_escape(&rig, &project, "❯")?;
+    leaves_the_picker_with_escape(&rig, &project, "❯", true)?;
     assert_eq!(
         project.task(1)?["state"],
         "working",
@@ -162,6 +180,46 @@ fn keys_typed_into_a_picker_and_left_with_escape_hold_no_result_from_a_chief_who
         },
     )?;
     assert_eq!(project.lane("chief")?["holding"], false);
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_filter_typed_key_by_key_into_a_picker_holds_the_result_until_ctrl_u() -> Outcome {
+    let rig = Rig::start(config().var("CF_TEST_INPUT_BOX", "chief"))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let session = a_worker_at_work(&rig, &project, 20)?;
+    leaves_the_picker_with_escape(&rig, &project, "❯", false)?;
+    rig.wait_for(
+        "the worker's result to wait, with the words of keys nothing shows are gone",
+        secs(90),
+        || {
+            let lane = project.lane("chief")?;
+            Ok(project.task(1)?["state"] == "done"
+                && lane["holding"] == true
+                && lane["holdingUnproven"] == true)
+        },
+    )?;
+    sleep(Duration::from_secs(5));
+    assert_eq!(
+        result(&project)?.map(|(_, delivered)| delivered),
+        Some(false)
+    );
+
+    // Ctrl+U in that window, and the result goes in.
+    types(&rig, &project, "\u{15}")?;
+    rig.wait_for(
+        "the worker's result to be handed to the chief",
+        secs(60),
+        || {
+            Ok(result(&project)?.is_some_and(|(id, delivered)| {
+                delivered
+                    && rig
+                        .transcript(&session)
+                        .contains(&format!("[ConsensFlow m-{id} "))
+            }))
+        },
+    )?;
     rig.close()?;
     Ok(())
 }
@@ -210,7 +268,7 @@ fn a_chief_whose_empty_box_shows_its_suggestion_after_keys_left_in_a_picker_is_h
     let rig = Rig::start(config)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let session = a_worker_at_work(&rig, &project, 20)?;
-    leaves_the_picker_with_escape(&rig, &project, "❯ Try \"fix lint errors\"")?;
+    leaves_the_picker_with_escape(&rig, &project, "❯ Try \"fix lint errors\"", true)?;
     assert_eq!(
         project.task(1)?["state"],
         "working",
