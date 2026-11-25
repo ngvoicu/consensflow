@@ -359,8 +359,17 @@ async function runCase(c) {
       return { state: P5[read](emulator), sends: P5.sends(emulator) }
     }
     const read = past ? 'reliable' : 'state'
-    const a = await refPage.evaluate(readOf, read)
-    const b = await app.evaluate(readOf, read)
+    let a = await refPage.evaluate(readOf, read)
+    let b = await app.evaluate(readOf, read)
+    // The shipped xterm takes synchronized output (mode 2026) off by itself, a second after it
+    // starts to hold a drawing back: the long-lived one may have done so and the replayed one not
+    // yet. Where that mode differs, both are read again once the second is over.
+    const synchronized = (side) => /synchronizedOutput\w*\\?":true/.test(JSON.stringify(side.state))
+    if (synchronized(a) !== synchronized(b)) {
+      await new Promise((done) => setTimeout(done, 1500))
+      a = await refPage.evaluate(readOf, read)
+      b = await app.evaluate(readOf, read)
+    }
     const d = []
     for (const k of Object.keys(a.state)) {
       const x = JSON.stringify(a.state[k])
