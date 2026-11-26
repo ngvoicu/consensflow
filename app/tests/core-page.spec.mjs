@@ -20974,7 +20974,13 @@ test('a lane that leaves while its history is on its way settles every message i
   await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(128)
   await page.evaluate(() => window.__pull['p1-zeus']())
   await page.evaluate(() =>
-    window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 129, offset: 8 << 20, bytes: [65] }),
+    window.__output.onmessage({
+      id: 'p1-zeus',
+      generation: 7,
+      seq: 129,
+      offset: 8 << 20,
+      bytes: [65],
+    }),
   )
   await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(129)
   expect(await asked(page, 'pane_history_done', 'p1-zeus')).toEqual([])
@@ -21001,10 +21007,9 @@ test('the windows the person sees are drawn again first, a hidden one after them
     holdPull: ['p1-chief', 'p1-zeus'],
   })
   await open(page, { ...hiddenSession(), realTerminals: true })
-  await expect.poll(() => page.evaluate(() => Object.keys(window.__pull).sort())).toEqual([
-    'p1-chief',
-    'p1-zeus',
-  ])
+  await expect
+    .poll(() => page.evaluate(() => Object.keys(window.__pull).sort()))
+    .toEqual(['p1-chief', 'p1-zeus'])
   await page.waitForTimeout(150)
   expect(await asked(page, 'pane_history', 'p1-zeus-amber-pine'), 'a hidden window waits').toEqual(
     [],
@@ -21038,8 +21043,9 @@ test('a status question is answered while its window is on the page, and gets no
 }) => {
   await open(page, { ...model(), realTerminals: true })
   const replies = () =>
-    page.evaluate(() =>
-      window.__calls.filter(([c, a]) => c === 'pane_reply_enqueue' && a.id === 'p1-zeus').length,
+    page.evaluate(
+      () =>
+        window.__calls.filter(([c, a]) => c === 'pane_reply_enqueue' && a.id === 'p1-zeus').length,
     )
   const ask = (seq) =>
     page.evaluate(
@@ -21066,7 +21072,9 @@ test('a status question is answered while its window is on the page, and gets no
   // Read, so that the window is never held at the room; answered by nobody, as on main.
   await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(2)
   expect(await replies()).toBe(1)
+})
 
+/**
  * Moving along the dock (T-2180, the owner on alpha.12: "when i open member terminals they
  * appear in the right of the chief but i cannot scroll back to the chief and if i start typing
  * to the chief the members window dissapears"). Real terminals, on a Mac laptop's window: beside
