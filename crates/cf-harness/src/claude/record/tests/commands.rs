@@ -703,12 +703,12 @@ fn typed_line(name: &str, system: bool) -> Vec<Value> {
 }
 
 /// The reader's list of commands it ends at their output is closed (`QUIET_COMMAND`). A
-/// command outside it, whatever it prints and however it is written, is read as the words of
-/// a prompt, whose turn the model's end alone ends: in flight at once, and for as long as it
-/// is looked at, with nothing after it (T-2330). What Claude Code 2.1.3xx writes for `/cost`,
-/// `/context`, `/status`, `/usage`, `/help`, `/config` or `/doctor` is NOT recorded in this
-/// repository: the names here stand for any command Claude writes as a user's echo and output,
-/// the shape the listed commands were recorded in.
+/// command outside it that Claude writes as a user's echo and output, whatever it prints, is
+/// read as the words of a prompt, whose turn the model's end alone ends: in flight at once,
+/// and for as long as it is looked at, with nothing after it (T-2330). The names here stand
+/// for any such command: what Claude Code 2.1.332 writes for `/usage`, `/help` and `/context`
+/// is recorded (`typed-line-*.jsonl`, T-2342) and is NOT this shape, as the tests after this
+/// one hold; `/cost`, `/status`, `/config` and `/doctor` are not recorded.
 #[test]
 fn a_command_outside_the_closed_list_stays_in_flight_for_as_long_as_it_is_looked_at() {
     for name in [
@@ -805,4 +805,103 @@ fn a_shell_line_in_the_assumed_shape_stays_in_flight() {
         ),
     ]);
     assert_eq!(settlement_of(&records), Settlement::InFlight);
+}
+
+/// The records Claude Code 2.1.332 wrote for `line` typed at an idle prompt (a live run,
+/// T-2342; `tests/fixtures/claude/typed-line-<line>.jsonl`), after the turn of `at_rest`.
+fn recorded(line: &str) -> Vec<Value> {
+    let text = match line {
+        "usage" => include_str!("../../../../tests/fixtures/claude/typed-line-usage.jsonl"),
+        "context" => include_str!("../../../../tests/fixtures/claude/typed-line-context.jsonl"),
+        "help" => include_str!("../../../../tests/fixtures/claude/typed-line-help.jsonl"),
+        other => panic!("no recording of /{other}"),
+    };
+    let mut typed: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for record in &mut typed {
+        record["sessionId"] = json!(SESSION);
+    }
+    typed[0]["parentUuid"] = json!("d1");
+    let mut records = at_rest();
+    records.extend(typed);
+    records
+}
+
+/// `/usage` and `/help`, as Claude Code 2.1.332 wrote them (T-2342): the echo and the output
+/// both the system's `local_command` records, nothing the user wrote and no model after. They
+/// begin no turn, so the window is at rest before them, after the echo and after the output,
+/// and no time makes it in flight, though `usage` and `help` are in no list.
+#[test]
+fn a_usage_or_a_help_typed_at_an_idle_prompt_never_leaves_the_window_in_flight() {
+    for line in ["usage", "help"] {
+        let records = recorded(line);
+        let at_rest_len = at_rest().len();
+        assert_eq!(
+            records.len(),
+            at_rest_len + 2,
+            "/{line}: the echo and the output"
+        );
+        assert!(records[at_rest_len..]
+            .iter()
+            .all(|record| record["type"] == "system" && record["subtype"] == "local_command"));
+        for upto in at_rest_len..=records.len() {
+            let mut stage = Stage::new();
+            stage.write(&records[..upto]);
+            for now_ms in [0, 86_400_000] {
+                match &*stage.reader.look(&Options::default(), now_ms) {
+                    Reading::Known(record) => {
+                        assert_eq!(record.settlement, Settlement::Settled, "/{line}, {upto}")
+                    }
+                    other => panic!("/{line}: {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// `/context`, as Claude Code 2.1.332 wrote it (T-2342): the system's echo and output, then a
+/// `user` record (`isMeta`, `rowSource` `local`) holding the same report as markdown for the
+/// model's next turn. No assistant record follows: no model was called. The reader takes that
+/// `user` record for a prompt's words, so the window reads in flight for as long as it is
+/// looked at, though nothing runs; the next turn ends it.
+#[test]
+fn a_context_typed_at_an_idle_prompt_calls_no_model_and_reads_in_flight() {
+    let records = recorded("context");
+    let typed = &records[at_rest().len()..];
+    assert_eq!(typed.len(), 3);
+    assert_eq!(typed[2]["type"], "user");
+    assert_eq!(typed[2]["isMeta"], true);
+    assert_eq!(typed[2]["rowSource"], "local");
+    assert!(records
+        .iter()
+        .all(|record| record["type"] != "assistant" || record["uuid"] == "a1"));
+    // Echo and output alone: at rest. With the meta record: in flight.
+    assert_eq!(
+        settlement_of(&records[..records.len() - 1]),
+        Settlement::Settled
+    );
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    let mut stage = Stage::new();
+    stage.write(&records);
+    for now_ms in [0, 60_000, 86_400_000] {
+        match &*stage.reader.look(&Options::default(), now_ms) {
+            Reading::Known(record) => assert_eq!(record.settlement, Settlement::InFlight),
+            other => panic!("{other:?}"),
+        }
+    }
+    let mut next = records;
+    next.extend([
+        user("u2", json!("n1"), json!("Hello again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Hi"))]),
+            json!("end_turn"),
+        ),
+        duration("d2", "a2"),
+    ]);
+    assert_eq!(settlement_of(&next), Settlement::Settled);
 }

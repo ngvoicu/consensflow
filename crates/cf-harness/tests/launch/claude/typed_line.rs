@@ -1,7 +1,8 @@
-//! A line a person types into a Claude window that begins no turn (T-2330): what the window's
-//! look says of it when the reader holds the turn in flight. The records are the listed
-//! commands' recorded shape under the name of one outside the reader's closed list (the repository
-//! holds no recording of such a command: `/cost` and the like are named in the record tests).
+//! A line a person types into a Claude window that begins no turn (T-2330, T-2342): what the
+//! window's look says of it. The records are what Claude Code 2.1.332 wrote in a live run for
+//! `/usage`, `/help` and `/context` (`typed-line-*.jsonl`), after a turn that ended; the
+//! borrowed shape of a listed command's echo and output (`/cost` and the like, not recorded)
+//! holds the case the reader's closed list does not end.
 
 use cf_harness::contract::Over;
 
@@ -23,13 +24,21 @@ fn line(n: u32, parent: Option<u32>, content: &str, meta: bool) -> String {
     )
 }
 
-/// A turn that ended, then a command outside the list typed at the idle prompt: the caveat,
-/// the echo, and what it printed.
-fn typed() -> Vec<String> {
+/// A turn that ended: the user's `Hello`, the answer, the stop hooks' summary.
+fn at_rest() -> Vec<String> {
     vec![
         line(1, None, "Hello", false),
         answer_line(SESSION, 2, "Hi"),
         stop_line(SESSION, 3),
+    ]
+}
+
+/// A turn that ended, then a command outside the list typed at the idle prompt, in the shape
+/// the listed commands were recorded in (the repository holds no recording of `/cost`): the
+/// caveat, the echo, and what it printed.
+fn typed() -> Vec<String> {
+    let mut lines = at_rest();
+    lines.extend([
         line(
             4,
             Some(3),
@@ -48,7 +57,29 @@ fn typed() -> Vec<String> {
             "<local-command-stdout>Total cost: $0.00</local-command-stdout>",
             false,
         ),
-    ]
+    ]);
+    lines
+}
+
+/// The turn that ended, then the records Claude Code 2.1.332 wrote for `/usage`, `/help` or
+/// `/context` (a live run): the first's parent is the turn's last record.
+fn recorded(name: &str) -> Vec<String> {
+    let text = match name {
+        "usage" => include_str!("../../fixtures/claude/typed-line-usage.jsonl"),
+        "help" => include_str!("../../fixtures/claude/typed-line-help.jsonl"),
+        "context" => include_str!("../../fixtures/claude/typed-line-context.jsonl"),
+        other => panic!("no recording of /{other}"),
+    };
+    let mut lines = at_rest();
+    for (at, text) in text.lines().enumerate() {
+        let mut record: Value = serde_json::from_str(text).unwrap();
+        record["sessionId"] = json!(SESSION);
+        if at == 0 {
+            record["parentUuid"] = json!(format!("{SESSION}-3"));
+        }
+        lines.push(format!("{record}\n"));
+    }
+    lines
 }
 
 fn look(window: &Rc<dyn Window>) -> cf_harness::contract::Observed {
@@ -89,4 +120,41 @@ fn the_same_lines_of_a_listed_command_leave_the_window_at_rest() {
     home.status(SESSION, &json!({ "status": "idle" }), me());
     let observed = look(&window);
     assert!(observed.settled && observed.takes_words);
+}
+
+/// What a look reads of the window with `lines` written and Claude's status idle.
+fn window_after(lines: &[String]) -> cf_harness::contract::Observed {
+    let home = Home::new();
+    home.transcript(SESSION, &lines[..1]);
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
+    home.transcript(SESSION, lines);
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    look(&window)
+}
+
+/// `/usage` and `/help` as Claude Code 2.1.332 wrote them: the system's echo and output, no
+/// turn. The window is at rest and takes words, with no entry in the reader's list.
+#[test]
+fn a_recorded_usage_or_help_leaves_the_window_at_rest_and_taking_words() {
+    for name in ["usage", "help"] {
+        let observed = window_after(&recorded(name));
+        assert!(observed.settled && observed.takes_words, "/{name}");
+        assert_eq!(observed.over, Over::No, "/{name}");
+    }
+}
+
+/// `/context` as Claude Code 2.1.332 wrote it: the echo and output, then a meta `user`
+/// record with the report for the model's next turn, and no model call. The window reads at
+/// work and takes no words, with Claude idle at its prompt.
+#[test]
+fn a_recorded_context_leaves_the_window_at_work_though_no_model_was_called() {
+    let lines = recorded("context");
+    assert!(lines
+        .iter()
+        .all(|line| !line.contains("\"type\":\"assistant\"")
+            || line.contains(&format!("{SESSION}-2"))));
+    let observed = window_after(&lines);
+    assert!(!observed.settled, "the meta user record reads as a prompt");
+    assert!(!observed.takes_words);
+    assert!(observed.at_prompt);
 }
