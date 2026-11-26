@@ -1180,6 +1180,9 @@ async function start() {
     if (subscribed?.ok === true) terminals.subscribed()
   }
   await boardRead
+  // The board was read after the subscription stood, or the board read that follows it will say so:
+  // a window not shown does not wait for a refresh nothing may ask for.
+  if (terminals.isSubscribed) terminals.refreshed()
   document.body.dataset.ready = 'true'
   // The board has loaded: what the host owes the person is asked for again, and on a timer.
   pullLosses = keepAskingForLosses()
