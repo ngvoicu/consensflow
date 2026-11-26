@@ -2471,15 +2471,17 @@ test('a member held for its account says which, billing or login, and the harnes
 }) => {
   // The owner's field find (2026-11-22): the card fell back to "billing or login" because the
   // window's activity that held the words was gone; the hold now keeps them.
-  const login = `its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}} ${'and more words '.repeat(12)}`
+  const login =
+    'its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'
   const shown = await heldFor(page, 'account', { because: login, bare: true })
-  const short = `Unavailable: ${login.replace(/\s+/g, ' ').trim().slice(0, 119)}…`
-  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(short)
-  // The chief's card and the staff list say them in full.
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    `Unavailable: ${login}`,
+  )
+  // The chief's card and the staff list say them with what to do.
   const full = `Unavailable: ${login}. Logged in again, or paid? Press Try again now`
-  await expect(shown.chief.locator('.terminal-status')).toHaveText(full.replace(/\s+/g, ' '))
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(full)
   const staff = await shown.staff()
-  await expect(staff.locator('.member-out')).toHaveText(full.replace(/\s+/g, ' '))
+  await expect(staff.locator('.member-out')).toHaveText(full)
 })
 
 test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {

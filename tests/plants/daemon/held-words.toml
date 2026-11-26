@@ -18,8 +18,8 @@ runs = ["held-words-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = '"reason": reason, "because": because })'
-replace = '"reason": reason })'
+find = 'event["because"] = json!(because);'
+replace = 'let _ = because;'
 
 [[plant]]
 name = "held words: the engine marks an account's refusal out with none of its words"

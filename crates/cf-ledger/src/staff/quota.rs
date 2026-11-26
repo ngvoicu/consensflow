@@ -108,11 +108,11 @@ pub(crate) fn mark_out_kind(
             "UPDATE participant SET out_until = ?, out_since = ?, out_kind = ? WHERE id = ?",
             params![until, since, kind.map(HoldKind::as_str), member.id],
         )?;
-        store.log(
-            member.project_id,
-            "member.out",
-            json!({ "handle": member.handle, "until": until, "reason": reason, "because": because }),
-        )?;
+        let mut event = json!({ "handle": member.handle, "until": until, "reason": reason });
+        if let Some(because) = because {
+            event["because"] = json!(because);
+        }
+        store.log(member.project_id, "member.out", event)?;
         participant_view(&store.participant_row(member.id)?)
     })
 }
