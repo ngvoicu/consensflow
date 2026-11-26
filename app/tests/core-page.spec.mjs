@@ -21165,6 +21165,194 @@ test("a window's last row is whole inside its card where its host's padding woul
   expect(at.underPointer, 'at the prompt the pointer is on the terminal').toBe(true)
 })
 
+/**
+ * Each terminal in the dock, as the person sees it: `rows` drawn and `fitted`, the rows its room
+ * holds; `cut`, the rows that end under its card's edge or the window's; `under`, the rows with
+ * something lying over them somewhere in the part of the dock in view (read at every 6 px along
+ * the row).
+ */
+const docksTerminals = (page) =>
+  page.evaluate(() => {
+    const stage = document.querySelector('#stage')
+    const view = stage.getBoundingClientRect()
+    return [...stage.querySelectorAll('.terminal-card')]
+      .filter((card) => card.querySelector('.xterm-screen') !== null)
+      .map((card) => {
+        const screen = card.querySelector('.xterm-screen')
+        const host = card.querySelector('.terminal-host')
+        const frame = card.getBoundingClientRect()
+        const bottom = Math.min(
+          frame.bottom - parseFloat(getComputedStyle(card).borderBottomWidth),
+          innerHeight,
+        )
+        const pad = getComputedStyle(host)
+        const room =
+          host.getBoundingClientRect().height -
+          parseFloat(pad.paddingTop) -
+          parseFloat(pad.paddingBottom)
+        const rows = [...card.querySelectorAll('.xterm-rows > div')]
+        const cut = []
+        const under = []
+        for (const [index, row] of rows.entries()) {
+          const box = row.getBoundingClientRect()
+          if (box.bottom > bottom + 0.5) cut.push(index + 1)
+          const y = (box.top + box.bottom) / 2
+          for (
+            let x = Math.max(box.left, view.left) + 2;
+            x < Math.min(box.right, view.right) - 1;
+            x += 6
+          ) {
+            if (!screen.contains(document.elementFromPoint(x, y))) {
+              under.push(index + 1)
+              break
+            }
+          }
+        }
+        const cell = rows[0]?.getBoundingClientRect().height ?? 1
+        return {
+          handle: card.dataset.handle,
+          rows: rows.length,
+          fitted: Math.floor(room / cell),
+          cut,
+          under,
+        }
+      })
+  })
+
+/** Until the dock's row holds still: no glide or swipe moving it, and the same place twice. */
+async function dockRests(page) {
+  let last = -1
+  await expect
+    .poll(async () => {
+      const [now, moving] = await page
+        .locator('#stage')
+        .evaluate((node) => [Math.round(node.scrollLeft), node.dataset.moving === 'true'])
+      const still = !moving && now === last
+      last = moving ? -1 : now
+      return still
+    })
+    .toBe(true)
+}
+
+/**
+ * The notices of lost typing lie over no terminal's row (T-2237's find: fixed at the page's bottom
+ * right, they lay over the last rows of the rightmost terminal until dismissed, and stacked upward
+ * over more). With three notices, and with the one that stands for many: each is in view and names
+ * its window, every row of every terminal in the dock is whole and under nothing, each terminal in
+ * view takes a click on its last row and keys, and a notice is dismissed. In the smallest window the
+ * app allows, at a laptop's size, and with two sessions' terminals docked beside the chief's (the
+ * board folded away).
+ */
+for (const [where, layout] of [
+  // The smallest window shares what its dock leaves between the notices and the projects' list:
+  // the line of notices scrolls there.
+  ['in the smallest window the app allows', { width: 560, height: 480, scrolls: true }],
+  ["at a laptop's size", { width: 1280, height: 820 }],
+  [
+    "with members' terminals docked beside the chief's",
+    { width: 1280, height: 820, sessions: true },
+  ],
+]) {
+  for (const [which, owed, said] of [
+    [
+      'three notices',
+      [
+        windowNotice(41, { id: 'p1-chief', generation: 5 }, { name: 'chief' }),
+        windowNotice(
+          42,
+          { id: 'p1-zeus-amber-pine', generation: 9 },
+          { name: '@zeus · amber-pine' },
+        ),
+        windowNotice(
+          43,
+          { id: 'p1-zeus-brisk-birch', generation: 9 },
+          { name: '@zeus · brisk-birch', dropped: true },
+        ),
+      ],
+      [
+        'chief: Some of your typing',
+        '@zeus · amber-pine: Some of your typing',
+        '@zeus · brisk-birch: A file you dropped',
+      ],
+    ],
+    [
+      'the notice that stands for many',
+      [{ id: 44, kind: 'folded', count: 70 }],
+      ['Input was also lost in 70 more places'],
+    ],
+  ]) {
+    test(`${which} of lost typing lie over no terminal's row, and each window takes keys, ${where}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: layout.width, height: layout.height })
+      await open(page, { ...threeSessions(), realTerminals: true })
+      const windows = [{ id: 'p1-chief', generation: 5 }]
+      if (layout.sessions) {
+        await unfold(page)
+        for (const name of ['amber-pine', 'brisk-birch']) {
+          await page.getByRole('button', { name: `Show @zeus · ${name}'s terminal` }).click()
+          await expect.poll(() => docked(page)).toContain(`zeus-${name}`)
+          windows.push({ id: `p1-zeus-${name}`, generation: 9 })
+        }
+        await page.locator('#toggle-board').click()
+      }
+      await owes(page, owed)
+      const rows = page.locator('.input-notices .input-notice')
+      await expect(rows).toHaveCount(owed.length)
+      // Each notice is in view, where the window is short once the line is scrolled to it, and
+      // names its window. In view to a part of a pixel: WebKit cuts a line that starts between two
+      // device pixels at a whole one, and its 42.375 px row reads 0.991 in view.
+      for (const [index, words] of said.entries()) {
+        if (layout.scrolls) await rows.nth(index).scrollIntoViewIfNeeded()
+        await expect(rows.nth(index)).toBeInViewport({ ratio: 0.99 })
+        await expect(rows.nth(index)).toContainText(words)
+      }
+      // The terminals have taken the room the notices left them, and the dock rests.
+      await expect
+        .poll(async () => (await docksTerminals(page)).every((one) => one.rows === one.fitted))
+        .toBe(true)
+      await dockRests(page)
+      // Each window's prompt on its last row.
+      for (const [index, pane] of windows.entries()) {
+        const bytes = [...new TextEncoder().encode('\x1b[999;1H\x1b[2KPROMPT> ')]
+        await page.evaluate(
+          ([pane, seq, bytes]) => window.__output.onmessage({ ...pane, seq, bytes }),
+          [pane, 100 + index, bytes],
+        )
+      }
+      const terminals = await docksTerminals(page)
+      expect(terminals.map((one) => one.handle).sort()).toEqual(
+        layout.sessions ? ['chief', 'zeus-amber-pine', 'zeus-brisk-birch'] : ['chief'],
+      )
+      for (const one of terminals) {
+        expect(one.cut, `${one.handle}: no row under its card's edge or the window's`).toEqual([])
+        expect(one.under, `${one.handle}: no row with anything over it`).toEqual([])
+      }
+      // Each terminal, gone to by its chip in the dock's map where there is one: a click on its
+      // last row, and keys, reach its window.
+      for (const [index, one] of terminals.entries()) {
+        if (layout.sessions) {
+          const chip = one.handle === 'chief' ? 'Chief' : one.handle.replace('zeus-', '')
+          await page.locator('#dock-map .dock-chip').filter({ hasText: chip }).click()
+          await dockRests(page)
+        }
+        const card = page.locator(`#stage .terminal-card[data-handle="${one.handle}"]`)
+        const last = await card.locator('.xterm-rows > div').last().boundingBox()
+        const view = await page.locator('#stage').boundingBox()
+        const left = Math.max(last.x, view.x)
+        const right = Math.min(last.x + last.width, view.x + view.width)
+        expect(right - left, `${one.handle} is in the dock's view`).toBeGreaterThan(40)
+        await page.mouse.click(left + 4, last.y + last.height / 2)
+        await page.keyboard.type(`k${index}`)
+        await expect.poll(() => typedTo(page, windows[index].id)).toBe(`k${index}`)
+      }
+      // And a notice goes when it is dismissed.
+      await rows.first().locator('.input-notice-dismiss').click()
+      await expect(rows).toHaveCount(owed.length - 1)
+    })
+  }
+}
+
 /** The board with a session of zeus whose terminal the human has not asked to see. */
 const hiddenSession = () => {
   const data = model()

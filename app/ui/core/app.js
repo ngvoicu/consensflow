@@ -385,6 +385,8 @@ const pageNonce = crypto.randomUUID()
 const terminals = new TerminalsView(stage, {
   // The dock's map: its windows in the row's order, which are in view, the way to each.
   map: $('#dock-map'),
+  // The host's notices of typing that may be missing: a line of their own under the command bar.
+  notices: $('#input-notices'),
   pageId,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)

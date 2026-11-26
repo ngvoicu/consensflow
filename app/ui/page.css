@@ -89,8 +89,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--projects-width) minmax(0, 1fr);
-  grid-template-rows: 52px auto minmax(0, 1fr);
-  grid-template-areas: "bar bar" "down down" "side main";
+  grid-template-rows: 52px auto minmax(min-content, auto) minmax(0, 1fr);
+  grid-template-areas: "bar bar" "down down" "notices notices" "side main";
 }
 /* Either side panel folds to a rail with its icon; the board takes the room. */
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1193,36 +1193,35 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
   color: var(--text, #eee);
   font-size: 12px;
 }
-/* One row for each window whose typing may not have arrived: shown apart, never one line over another. */
+/* Typing that may not have arrived: a line of its own under the command bar, as the daemon's
+   is, one row for each window, its name first. It lies over no terminal: the room it takes is
+   the dock's and the board's, and every window fits under it (T-2359: fixed at the page's
+   corner, the rows lay over the last rows of the rightmost terminal until dismissed, and stacked
+   upward over more). In reach whatever is folded; past three rows and a half it scrolls. */
 .input-notices {
+  grid-area: notices;
   list-style: none;
   margin: 0;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  /* Over the page, in reach of the pointer, whatever is folded or drawn in the dock. */
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 40;
-  max-width: min(520px, calc(100vw - 24px));
-  max-height: 40vh;
+  padding: 0;
+  max-height: 122px;
   overflow-y: auto;
+  border-bottom: 1px solid rgba(252, 211, 77, .35);
+  border-left: 4px solid var(--amber);
+  background: rgba(252, 211, 77, .08);
 }
-.input-notices[hidden] { display: none; }
 .input-notice {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--surface-2, #3a3a3a);
-  font-size: 12px;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 12px;
+  font-size: 13px;
 }
+.input-notice + .input-notice { border-top: 1px solid rgba(252, 211, 77, .16); }
+.input-notice-text { flex: 1; min-width: 0; }
+.input-notice-window { color: var(--amber); font-weight: 650; }
 .input-notice[data-state="closed"] { font-style: italic; }
-.input-notice-dismiss { flex: 0 0 auto; }
+.input-notice-dismiss { flex: none; padding: 3px 10px; }
 @media (min-width: 761px) {
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
@@ -1713,7 +1712,9 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 .history-refusal { color: var(--history-refusal); }
 
 @media (max-width: 760px) {
-  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
+  /* The dock is 42% of the window; the board keeps at least its own padding, which it would
+     otherwise draw over the dock's top. */
+  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(60px, 1fr) 42vh; }
   .main[data-dock="hidden"] { grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: 1fr; }
   .divider { display: none; }
   .main > .board, .main > .dock { grid-column: 1; }
@@ -1722,11 +1723,18 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
   .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
   .shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-    grid-template-areas: "bar" "down" "side" "main";
+    /* Where the window is short, the projects' list gives way to the notices before the dock and
+       the board do, and scrolls (T-2359; at 560 by 480 three notices left the chief's terminal no
+       row). The notices keep their rows, up to their own height's limit. */
+    grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(calc(42vh + 60px), 1fr);
+    grid-template-areas: "bar" "down" "notices" "side" "main";
   }
   .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
-  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+  /* Its padding above and below is its content's, so that it can give way whole. */
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; padding-block: 0; }
+  .shell:not([data-projects="hidden"]) .sidebar > .panel-head { padding-top: 14px; }
+  .shell:not([data-projects="hidden"]) .sidebar > #projects { padding-bottom: 14px; }
+  .shell:has(> .main[data-dock="hidden"]) { grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(0, 1fr); }
   .board { padding: 12px 12px 48px; }
 }
 @media (prefers-reduced-motion: reduce) {

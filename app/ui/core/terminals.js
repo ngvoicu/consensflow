@@ -108,13 +108,14 @@ export class TerminalsView {
    * terminal alone, and Show terminal brings a session's back.
    */
   #showing = new Set()
-  /** The host's notices of typing that may be missing, one row for each, above the dock. */
+  /** The host's notices of typing that may be missing, one row for each, under the command bar. */
   #noticeList
 
   constructor(
     stage,
     {
       map = null,
+      notices,
       invoke,
       pageId,
       report,
@@ -129,11 +130,7 @@ export class TerminalsView {
     },
   ) {
     this.#stage = stage
-    this.#noticeList = element('ul', 'input-notices')
-    this.#noticeList.setAttribute('aria-label', 'Typing that may not have arrived')
-    this.#noticeList.setAttribute('role', 'status')
-    this.#noticeList.hidden = true
-    stage.parentElement?.insertBefore(this.#noticeList, stage)
+    this.#noticeList = notices
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
@@ -227,7 +224,14 @@ export class TerminalsView {
         row.dataset.notice = String(notice.id)
         row.dataset.state = notice.kind === 'window' && notice.closed ? 'closed' : 'open'
         if (notice.kind === 'window') row.dataset.generation = String(notice.generation)
-        row.firstElementChild.textContent = this.#noticeWords(notice)
+        // The window it is about first, picked out: its words are the notice's, whole.
+        const words = this.#noticeWords(notice)
+        const called = notice.kind === 'window' ? (notice.name ?? `Window ${notice.window}`) : ''
+        const named = called !== '' && words.startsWith(called)
+        row.firstElementChild.replaceChildren(
+          ...(named ? [element('strong', 'input-notice-window', called)] : []),
+          named ? words.slice(called.length) : words,
+        )
       }
     }
     this.#noticeList.hidden = this.#noticeList.children.length === 0
@@ -264,7 +268,7 @@ export class TerminalsView {
       row = element('li', 'input-notice')
       row.dataset.window = window
       const words = element('span', 'input-notice-text')
-      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+      const dismiss = button('Dismiss', 'quiet-button input-notice-dismiss', () => {
         const id = Number(row.dataset.notice)
         row.remove()
         this.#noticeList.hidden = this.#noticeList.children.length === 0
