@@ -468,3 +468,16 @@ runs = ["fm-engine-delivered"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """        if let Some(why) = self.first_still_at_rest(record, frontier).await? {"""
 replace = """        if let Some(why) = self.first_still_at_rest(record, frontier).await?.filter(|_| false) {"""
+
+[[plant]]
+name = "first message: the first handoff's last look asks for a record a new window does not have"
+meant = "a_first_message_goes_to_a_window_whose_record_cannot_be_read_yet"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())"""
+replace = """            Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
+            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())"""
