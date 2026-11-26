@@ -364,8 +364,11 @@ fn a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says
 /// the words are written (T-2353), for every harness and every kind of hold.
 const BOUND: usize = 300;
 
+/// A hold's report made from the harness's words and the time of the refusal.
+type Made = fn(String, String) -> Quota;
+
 /// How each kind of hold's report is made from the harness's words.
-fn holds() -> [(&'static str, fn(String, String) -> Quota); 3] {
+fn holds() -> [(&'static str, Made); 3] {
     [
         ("its login was refused: 401 ", |because, at| {
             Quota::Unavailable {
