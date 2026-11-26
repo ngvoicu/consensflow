@@ -78,6 +78,7 @@ fn a_ledger_from_before_the_column_proves_no_program_gone() {
     let mut w = world();
     let first = conversation_of_zeus(&mut w);
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0046(db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(db).expect("holding bounds undone");
         cf_ledger::testing::undo_migration_0043(db).expect("question boundaries undone");
         cf_ledger::testing::undo_migration_0042(db).expect("reminders undone");

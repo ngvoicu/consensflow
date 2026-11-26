@@ -108,6 +108,11 @@ pub use slots::{
 };
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the closed questions' waits when a fixture reconstructs a ledger before 0046.
+pub fn undo_migration_0046(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("DROP TABLE question_wait; DROP TABLE question_reminder_sent")
+}
+
 /// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
 pub fn undo_migration_0044(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
@@ -255,6 +260,8 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             "question_binding",
             "question_handover",
             "question_reminder",
+            "question_wait",
+            "question_reminder_sent",
         ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
@@ -325,6 +332,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_binding_wait"
             && entry["name"] != "question_handover"
             && entry["name"] != "question_reminder"
+            && entry["name"] != "question_wait"
+            && entry["name"] != "question_wait_note"
+            && entry["name"] != "question_wait_reminder"
+            && entry["name"] != "question_reminder_sent"
             && entry["name"] != "question_reminder_by_message"
             && entry["name"] != "message_questions_for_chief"
             && entry["name"] != "message_answers_by_question"
