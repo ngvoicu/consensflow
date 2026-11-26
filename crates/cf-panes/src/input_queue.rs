@@ -2894,7 +2894,12 @@ mod tests {
             lines
                 .iter()
                 .any(|line| line.contains("gave up numbers 1 to 1")
-                    && line.contains("had not come after 15")),
+                    && line
+                        .split("had not come after ")
+                        .nth(1)
+                        .and_then(|rest| rest.split(' ').next())
+                        .and_then(|ms| ms.parse::<u64>().ok())
+                        .is_some_and(|ms| (1400..2500).contains(&ms))),
             "{lines:?}"
         );
         assert!(

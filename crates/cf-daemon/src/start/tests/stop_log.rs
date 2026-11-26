@@ -50,16 +50,14 @@ async fn stopped_while_held(held: Duration) -> (String, Duration) {
     (text, took)
 }
 
-/// The count a line of dropped lines gives, where there is one.
+/// The count the lines of dropped lines give together, where there is one.
 fn dropped_in(text: &str) -> Option<usize> {
-    text.lines()
-        .find(|line| line.contains("lines of the log were dropped"))?
-        .split(" warn ")
-        .nth(1)?
-        .split(' ')
-        .next()?
-        .parse()
-        .ok()
+    let counts: Vec<usize> = text
+        .lines()
+        .filter(|line| line.contains("lines of the log were dropped"))
+        .filter_map(|line| line.split(" warn ").nth(1)?.split(' ').next()?.parse().ok())
+        .collect();
+    (!counts.is_empty()).then(|| counts.iter().sum())
 }
 
 #[tokio::test]
@@ -107,4 +105,29 @@ async fn a_stop_with_the_log_held_past_its_bound_ends_anyway() {
             assert!(took < Duration::from_millis(1900), "the stop took {took:?}");
         })
         .await;
+}
+
+/// The writer's count of what it dropped can be said in more than one line, and every line is
+/// in the written ones or in the sum of the counts. The release of the file comes after all the
+/// lines were said (`stopped_while_held`), so it splits nothing: the writer takes a batch off
+/// the queue while the burst is still filling it, the room that frees lets later lines in, and
+/// the lines dropped on either side of them are counted apart. The text here has the shape of
+/// a hosted Mac's failure: 884 counted and 2,704 written, where the 412 missing were in a
+/// second count that the test did not read (the CI output recorded only the first; the 412
+/// is what the 4,000 lines leave).
+#[test]
+fn the_dropped_are_the_sum_of_every_count_in_the_log() {
+    let mut text = String::new();
+    for line in 0..2704 {
+        text.push_str(&format!("2026-11-25T10:00:00.000Z info end-burst {line}\n"));
+        if line == 1000 {
+            text.push_str(
+                "2026-11-25T10:00:00.100Z warn 884 lines of the log were dropped: its file was held\n",
+            );
+        }
+    }
+    text.push_str(
+        "2026-11-25T10:00:01.000Z warn 412 lines of the log were dropped: its file was held\n",
+    );
+    assert_eq!(dropped_in(&text), Some(884 + 412));
 }
