@@ -97,6 +97,8 @@ fn observe(kind: &str, words: &str) -> Value {
     })
 }
 
+// The golden is recorded by running this test on the base: the one reading of the environment.
+#[allow(clippy::disallowed_methods)]
 #[test]
 fn a_hold_keeps_shows_and_tells_of_a_harness_s_words_what_the_base_did() {
     let inputs: Vec<String> =
