@@ -685,7 +685,7 @@ fn a_ledger_with_holds_from_before_the_column_gains_it_null_keeps_every_row_and_
     };
     let before = rows(&raw);
     drop(raw);
-    let mut ledger = open_ledger(&file, Options::default()).unwrap();
+    let ledger = open_ledger(&file, Options::default()).unwrap();
     assert_eq!(rows(ledger.sqlite()), before, "every row kept");
     assert_eq!(
         column(&ledger, member),
