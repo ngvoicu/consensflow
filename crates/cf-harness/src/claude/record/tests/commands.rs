@@ -683,3 +683,40 @@ fn a_command_that_is_a_prompt_prints_nothing_and_its_turn_ends_at_its_answer() {
     records.extend([answered, duration("d2", "a2")]);
     assert_eq!(settlement_of(&records), Settlement::Settled);
 }
+
+/// A look that falls between a command and the output it prints (the two records are written
+/// apart): the turn reads in flight there, and the look after the output reads it at rest.
+#[test]
+fn a_look_between_a_command_and_its_output_does_not_keep_the_turn_open() {
+    let state = |reading: &str| {
+        serde_json::from_str::<Value>(reading).unwrap()["settlement"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    for (why, before, command, output) in [
+        (
+            "as Claude Code writes them",
+            vec![caveat("k1", "d1")],
+            typed_command("n1", "k1", "model", "haiku"),
+            printed("o1", "n1", "Set model to Haiku"),
+        ),
+        (
+            "as the stand-in writes them",
+            vec![],
+            typed_command("n1", "d1", "model", ""),
+            printed("o1", "n1", "Set model to Haiku"),
+        ),
+    ] {
+        let mut typed = before;
+        typed.push(command);
+        let read = looks(&[&at_rest(), &typed, &[output]]);
+        assert_eq!(
+            read.iter()
+                .map(|reading| state(reading))
+                .collect::<Vec<_>>(),
+            ["settled", "in-flight", "settled"],
+            "{why}"
+        );
+    }
+}

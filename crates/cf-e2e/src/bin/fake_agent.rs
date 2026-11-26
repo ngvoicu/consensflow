@@ -685,8 +685,11 @@ fn model_switch(text: &str) -> Option<(String, Option<String>)> {
 }
 
 /// The human switched the model in the window, with the key that keeps it to the
-/// conversation (CHF-05): no turn, and the records Claude Code writes of the command,
-/// which name no model; its next answer says the one switched to.
+/// conversation (CHF-05): no turn, and the records Claude Code 2.1.301 writes of a command
+/// that runs no model, which name no model: the caveat (a meta record), the echo of the
+/// command and what it printed, each of the main conversation and the child of the one
+/// before. The daemon's reader ends the command's turn at its output only so; its next
+/// answer says the model switched to.
 fn switch_model(
     records: &mut Records,
     pid: u32,
@@ -694,15 +697,21 @@ fn switch_model(
     effort: Option<String>,
 ) -> Result<(), String> {
     let said = format!("Set model to {model}");
-    for content in [
-        "<command-name>/model</command-name>".to_owned(),
-        format!("<local-command-stdout>{said}</local-command-stdout>"),
+    for (content, fields) in [
+        (CAVEAT.to_owned(), json!({ "isMeta": true })),
+        (
+            "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>".to_owned(),
+            json!({}),
+        ),
+        (
+            format!("<local-command-stdout>{said}</local-command-stdout>"),
+            json!({}),
+        ),
     ] {
+        let mut record = user(&content, fields);
+        record["parentUuid"] = json!(records.last_uuid(pid));
         records
-            .append(
-                pid,
-                json!({ "type": "user", "message": { "role": "user", "content": content } }),
-            )
+            .append(pid, record)
             .map_err(|cause| cause.to_string())?;
     }
     records.runs_on(Some(model), effort);
@@ -1508,6 +1517,33 @@ mod tests {
     }
 
     #[test]
+    fn a_typed_model_is_written_as_claude_2_1_301_writes_a_command_the_caveat_the_echo_and_what_it_printed(
+    ) {
+        let config = cf_e2e::door::made("cf-test-").unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        told(&mut records);
+        switch_model(&mut records, 7, "fake-switched".to_owned(), None).unwrap();
+        let written = written_from(config.path(), 1);
+        assert_eq!(
+            written.iter().map(shape).collect::<Vec<_>>(),
+            [
+                "user <local-command-caveat",
+                "user <command-name",
+                "user <local-command-stdout"
+            ]
+        );
+        // The reader of the daemon ends the command's turn at its output only for records of
+        // the main conversation, each the child of the one before: a look that falls between
+        // the echo and the output reads the turn in flight until the output is read, and
+        // records lacking either never end it (the chief stayed at work for good).
+        assert!(written.iter().all(|record| record["isSidechain"] == false));
+        assert_eq!(written[0]["isMeta"], true);
+        for pair in written.windows(2) {
+            assert_eq!(pair[1]["parentUuid"], pair[0]["uuid"]);
+        }
+    }
+
+    #[test]
     fn an_answer_says_its_model_and_effort_and_a_typed_model_switches_them_naming_none_itself() {
         let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
@@ -1534,6 +1570,7 @@ mod tests {
             said,
             [
                 ("assistant".to_owned(), &json!("fake-chief"), &json!("high")),
+                ("user <local-command-caveat".to_owned(), &none, &none),
                 ("user <command-name".to_owned(), &none, &none),
                 ("user <local-command-stdout".to_owned(), &none, &none),
                 (

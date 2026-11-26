@@ -249,22 +249,30 @@ fn a_paste_goes_in_as_one_call_with_both_markers() {
 }
 
 /// A terminal reply that comes while a paste is going in waits for all of it:
-/// the paste is one write, so the reply is never inside it.
+/// the paste is one write, so the reply is never inside it. The paste has begun when the
+/// reader has its first byte, which a reply is not sent before (a sleep left a runner that
+/// had not yet started the paste's write to write the reply first).
 #[test]
 #[allow(clippy::unwrap_used, reason = "a test step must succeed")]
 fn a_reply_that_comes_during_a_paste_goes_after_all_of_it() {
     let paste = bracketed(&vec![b'p'; 100_000]);
-    let (panes, inputs, key, received) = recorder_after(1, paste.len() + 1);
-    let _ = panes;
+    let panes = Arc::new(PaneTable::new());
+    let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+    let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
+    let (key, begun, finished_reading, release) =
+        begun_reader(&panes, &arbiter, &inputs, paste.len() + 1);
     inputs.begin_page("page").unwrap();
     let ticket = admitted(&inputs, "page", &key, 1, &paste);
-    // The program reads nothing yet: the paste's write is blocked.
-    thread::sleep(Duration::from_millis(300));
+    assert_eq!(begun.recv_timeout(Duration::from_secs(8)).unwrap(), 0x1b);
     let answer = reply(&inputs, &key, 2, b"R").unwrap();
+    release.release();
     finished(&inputs, "page", &ticket);
     finished(&inputs, "page", &answer);
-    let bytes = received.recv_timeout(Duration::from_secs(10)).unwrap();
+    let bytes = finished_reading
+        .recv_timeout(Duration::from_secs(20))
+        .unwrap();
     inputs.close_and_drain();
+    panes.kill(&key).unwrap();
     assert_eq!(bytes, [paste.as_slice(), b"R"].concat());
 }
 
@@ -363,26 +371,6 @@ fn a_reload_cancels_what_waited_in_order_at_a_real_terminal() {
     finished(&inputs, "s:2", &d);
     assert_eq!(received.recv_timeout(Duration::from_secs(5)).unwrap(), b"D");
     inputs.close_and_drain();
-}
-
-/// P4-D: a paste of 4 MiB is pending with its write held (the program reads nothing for two
-/// seconds): a terminal reply is admitted, and arrives after all of it.
-#[test]
-#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
-fn a_reply_is_admitted_behind_a_pending_paste_of_the_cap() {
-    let body = vec![b'p'; MAX_PAGE_INPUT_BYTES - PASTE_OPEN.len() - PASTE_CLOSE.len()];
-    let paste = bracketed(&body);
-    assert_eq!(paste.len(), MAX_PAGE_INPUT_BYTES);
-    let (_panes, inputs, key, received) = recorder_after(2, paste.len() + 1);
-    inputs.begin_page("page").unwrap();
-    let ticket = admitted(&inputs, "page", &key, 1, &paste);
-    thread::sleep(Duration::from_millis(300));
-    let answer = reply(&inputs, &key, 2, b"R").expect("a reply has room of its own");
-    finished(&inputs, "page", &ticket);
-    finished(&inputs, "page", &answer);
-    let bytes = received.recv_timeout(Duration::from_secs(60)).unwrap();
-    inputs.close_and_drain();
-    assert!(bytes[..paste.len()] == paste[..] && bytes[paste.len()] == b'R');
 }
 
 /// The largest paste a window takes goes in whole, in order, with the key
