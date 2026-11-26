@@ -372,9 +372,23 @@ thread_local! {
     static BUFFERS_MADE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The fields after the program's path and its padding: the arguments, as many
-/// as the count says, and then the environment, as far as the first empty field.
-fn fields_of(bytes: &[u8]) -> Option<(usize, impl Iterator<Item = &[u8]> + '_)> {
+/// The next field of `rest`, ended by a NUL, and `rest` after it: none for what no NUL
+/// ends (a buffer the system cut short).
+fn next_field<'a>(rest: &mut &'a [u8]) -> Option<&'a [u8]> {
+    let end = rest.iter().position(|b| *b == 0)?;
+    let field = &rest[..end];
+    *rest = &rest[end + 1..];
+    Some(field)
+}
+
+/// What `KERN_PROCARGS2` lays out, exactly as the kernel writes it (`sysctl_procargsx`
+/// reads what `exec_extract_strings` made): the count of arguments, then the strings of
+/// the exec, each ended by a NUL: the program's path, NULs that pad the path and its own
+/// NUL to a multiple of 8 (the pointer size), exactly `count` arguments (an empty one is
+/// a NUL alone, so the padding is told from it only by that rule), and the environment.
+/// Returns the arguments, and the environment as far as its first empty field. None for
+/// a buffer that does not hold the count's arguments, each ended.
+fn fields_of(bytes: &[u8]) -> Option<(Vec<&[u8]>, impl Iterator<Item = &[u8]> + '_)> {
     let count = bytes
         .get(..4)
         .and_then(|b| b.try_into().ok())
@@ -384,38 +398,32 @@ fn fields_of(bytes: &[u8]) -> Option<(usize, impl Iterator<Item = &[u8]> + '_)> 
     }
     let tail = &bytes[4..];
     let executable_end = tail.iter().position(|b| *b == 0)?;
-    let tail = &tail[executable_end..];
-    let arguments_start = tail.iter().position(|b| *b != 0)?;
-    Some((
-        count as usize,
-        tail[arguments_start..].split(|b: &u8| *b == 0),
-    ))
+    let mut rest = tail.get((executable_end + 1).next_multiple_of(8)..)?;
+    let arguments = (0..count)
+        .map(|_| next_field(&mut rest))
+        .collect::<Option<Vec<_>>>()?;
+    let environment =
+        std::iter::from_fn(move || next_field(&mut rest)).take_while(|field| !field.is_empty());
+    Some((arguments, environment))
 }
 
 fn environment_has_marker(bytes: &[u8], marker: &str) -> bool {
-    let Some((count, mut fields)) = fields_of(bytes) else {
+    let Some((_, mut environment)) = fields_of(bytes) else {
         return false;
     };
-    for _ in 0..count {
-        if fields.next().is_none() {
-            return false;
-        }
-    }
     let expected = format!("{OWNER_ENV}={marker}");
-    fields
-        .take_while(|field| !field.is_empty())
-        .any(|field| field == expected.as_bytes())
+    environment.any(|field| field == expected.as_bytes())
 }
 
 /// The command line a process was started with: its arguments, one blank
 /// apart. None where the arguments cannot be read or there are none.
 pub(super) fn command_line(bytes: &[u8]) -> Option<String> {
-    let (count, fields) = fields_of(bytes)?;
-    let arguments: Vec<String> = fields
-        .take(count)
+    let (arguments, _) = fields_of(bytes)?;
+    let arguments: Vec<String> = arguments
+        .into_iter()
         .map(|argument| String::from_utf8_lossy(argument).into_owned())
         .collect();
-    (!arguments.is_empty()).then(|| arguments.join(" "))
+    Some(arguments.join(" "))
 }
 
 #[cfg(test)]
