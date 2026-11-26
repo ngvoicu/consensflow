@@ -408,6 +408,26 @@ impl Dispatcher {
         Ok(released)
     }
 
+    /// Whether the message last pasted into the task's window went into the pane that is the
+    /// window's now: a turn ended in an earlier opening (a window that crashed, was held for
+    /// quota, shown again, or restarted) is never a result of this one.
+    fn pasted_in_this_opening(
+        &self,
+        record: &Record,
+        participant: i64,
+        task: i64,
+    ) -> Result<bool, EngineError> {
+        let Some(pasted) = self.seams.ledger.borrow().last_pasted(participant, task)? else {
+            return Ok(false);
+        };
+        let window = record.window.borrow();
+        Ok(window
+            .pasted_in
+            .as_ref()
+            .zip(window.pane.as_ref())
+            .is_some_and(|((message, was), now)| *message == pasted.id && was == now))
+    }
+
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
     /// failure, whatever it left running, with why ([`Dispatcher::why_it_failed`]); one
@@ -471,12 +491,13 @@ impl Dispatcher {
                     && !observed.failed
                     && !observed.shared =>
             {
-                !self
-                    .seams
-                    .ledger
-                    .borrow()
-                    .left_open_before_the_turn(participant.id, thread.task.id)?
-                    .is_empty()
+                self.pasted_in_this_opening(record, participant.id, thread.task.id)?
+                    && !self
+                        .seams
+                        .ledger
+                        .borrow()
+                        .left_open_before_the_turn(participant.id, thread.task.id)?
+                        .is_empty()
             }
             _ => false,
         };
@@ -553,6 +574,11 @@ impl Dispatcher {
             self.tell_lost(project, participant, record, &thread, lost)?;
             return Ok(Turn::Open);
         };
+        // A turn with no words past a question still open is no result: the placeholder is
+        // for a task that was working, and this one waits (T-2197).
+        if thread.task.state == "waiting" && !has_words(&answers.final_run) {
+            return Ok(Turn::Open);
+        }
         let pending = pending_after_look(observed, watching);
         // A line lost in the turn is said with its words, held or not: the hold's note is
         // where the requester chooses between waiting and Finish (Calliope's P3 (b), T-624).
@@ -1741,6 +1767,14 @@ impl Words for Run<'_> {
     fn last_words(&self) -> bool {
         self.last_words
     }
+}
+
+/// Whether the turn wrote any words of its own (what [`words_of`] would put in place of).
+fn has_words(final_run: &(impl Words + ?Sized)) -> bool {
+    final_run
+        .items()
+        .iter()
+        .any(|item| !item.commentary && !js::trim(&item.text).is_empty())
 }
 
 /// The words of a final answer, in the items it was written in: each trimmed, a blank

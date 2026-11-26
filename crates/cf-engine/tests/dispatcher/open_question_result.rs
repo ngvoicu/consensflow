@@ -181,10 +181,11 @@ fn a_question_closed_by_the_result_is_never_reminded() {
 
 /// A quick chief: the answer to the first question is written while the window is at work, the
 /// window asks a second question in that same turn and ends it, and only then is the answer
-/// pasted. The turn the paste begins asked nothing, so its end is the result, though the
-/// second question's id is higher than the answer's.
+/// pasted. The answer was written before the second question existed, so it says nothing of
+/// it: the turn it begins is no result, though it asked nothing, and the task keeps waiting
+/// (T-2268's finding 8).
 #[test]
-fn a_result_after_an_answer_written_before_the_next_question_is_still_the_result() {
+fn an_answer_written_before_the_next_question_is_no_result_after_it() {
     let context = Context::new();
     let tiers = working(&context);
     let project = tiers.project.id;
@@ -196,7 +197,6 @@ fn a_result_after_an_answer_written_before_the_next_question_is_still_the_result
     context.pass().unwrap();
     let second = context.ask(project, &worker, "chief", 1, "Which format?");
     context.pass().unwrap();
-    // The turn that asked both ends; the answer is pasted at rest and begins the next turn.
     context.adapter.answer("zeus", "I asked which format");
     context.pass().unwrap();
     context.pass().unwrap();
@@ -206,16 +206,9 @@ fn a_result_after_an_answer_written_before_the_next_question_is_still_the_result
     context.pass().unwrap();
     context.pass().unwrap();
 
-    assert_eq!(tiers.task(1).task.state, "done");
-    let results = results(&context, &tiers);
-    assert_eq!(results.len(), 1, "{results:?}");
-    assert!(
-        results[0].contains(&format!(
-            "m-{} was left unanswered and is closed",
-            second.id
-        )),
-        "{results:?}"
-    );
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(results(&context, &tiers), Vec::<String>::new());
+    assert_ne!(context.message(second.id).state, "cancelled");
 }
 
 /// A waiting task whose result is held for background jobs: when the jobs end and the held

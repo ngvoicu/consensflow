@@ -7,7 +7,7 @@
 # runs them all.
 
 [run]
-oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::"]
+oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::", "open_question_opening::"]
 
 [[plant]]
 name = "open question result: the result is held while a question is open"
@@ -40,14 +40,44 @@ find = '''        if after {'''
 replace = '''        if false && after {'''
 
 [[plant]]
-name = "open question result: a question is placed by its id against the answer's"
-meant = "a_result_after_an_answer_written_before_the_next_question_is_still_the_result"
+name = "open question result: a question is placed by the paste's order, not by when the answer was written"
+meant = "an_answer_written_before_the_next_question_is_no_result_after_it"
 runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            (Some(asked), Some(paste)) => asked > paste,'''
-replace = '''            (Some(_), Some(_)) => *question > pasted.id,'''
+find = '''            (Some(asked), Some(written)) => asked > written,'''
+replace = '''            (Some(asked), Some(_)) => paste.is_none_or(|paste| asked > paste),'''
+
+[[plant]]
+name = "open question result: a turn that ended in another pane is taken for a result"
+meant = "a_real_hold_route_and_show_do_not_take_the_pre_exit_turn"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''*message == pasted.id && was == now))'''
+replace = '''*message == pasted.id && (was == now || true)))'''
+
+[[plant]]
+name = "open question result: a turn after a change of conversation is taken for a result"
+meant = "returning_to_a_conversation_does_not_publish_the_stored_turn"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''        if conversation_changed_since(store, window, pasted.project_id, paste)? {'''
+replace = '''        if false && conversation_changed_since(store, window, pasted.project_id, paste)? {'''
+
+[[plant]]
+name = "open question result: a turn with no words is taken for a result"
+meant = "an_empty_following_turn_does_not_close_an_open_question"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''if thread.task.state == "waiting" && !has_words(&answers.final_run) {'''
+replace = '''if false && thread.task.state == "waiting" && !has_words(&answers.final_run) {'''
 
 [[plant]]
 name = "open question result: words on their way do not hold the result"

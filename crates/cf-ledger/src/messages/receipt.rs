@@ -271,10 +271,10 @@ pub(crate) fn open_questions(
 /// restarted or resumed), and nothing of the
 /// task is on its way to the window. Empty otherwise.
 ///
-/// "After" is the ledger's own order: the question's `message.sent` event against the paste's
-/// last `delivery.begun`, never the messages' ids (an answer written while the window was at
-/// work has a lower id than a question the same turn then asked, and is pasted after it). A
-/// question or a paste with no such event is placed by its message id.
+/// "After" is when each was written, by the ledger's own order: the question's `message.sent`
+/// event against the pasted message's, never when it was pasted and never the messages' ids
+/// (an answer written before a question existed says nothing of that question, though it is
+/// pasted after it). A question or a message with no such event is placed by its id.
 pub(crate) fn left_open_before_the_turn(
     store: &Store,
     task: i64,
@@ -313,9 +313,17 @@ pub(crate) fn left_open_before_the_turn(
     if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) {
         return Ok(Vec::new());
     }
+    // A paste before the window's conversation changed (a new one, a switch away and back)
+    // went into another opening of it.
+    if let Some(paste) = paste {
+        if conversation_changed_since(store, window, pasted.project_id, paste)? {
+            return Ok(Vec::new());
+        }
+    }
+    let written = place("message.sent", pasted.id)?;
     for question in &open {
-        let after = match (place("message.sent", *question)?, paste) {
-            (Some(asked), Some(paste)) => asked > paste,
+        let after = match (place("message.sent", *question)?, written) {
+            (Some(asked), Some(written)) => asked > written,
             _ => *question > pasted.id,
         };
         if after {
@@ -323,6 +331,27 @@ pub(crate) fn left_open_before_the_turn(
         }
     }
     Ok(open)
+}
+
+/// Whether the conversation of `window` was started, followed onto another or ended after the
+/// event `since`.
+fn conversation_changed_since(
+    store: &Store,
+    window: i64,
+    project: i64,
+    since: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event e WHERE e.project_id = ?1 AND e.id > ?2 AND (
+                 (e.kind IN ('conversation.started', 'conversation.followed')
+                    AND json_extract(e.data, '$.participant') = (SELECT handle FROM participant WHERE id = ?3))
+              OR (e.kind = 'conversation.ended'
+                    AND json_extract(e.data, '$.conversation') IN (SELECT id FROM conversation WHERE participant_id = ?3)))
+             LIMIT 1",
+        )?
+        .exists(params![project, since, window])?)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:
