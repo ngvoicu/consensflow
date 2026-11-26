@@ -68,5 +68,27 @@ runs = ["login-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_retry.rs"
-find = "                let delivering = record.delivery.borrow_mut().delivering.take();\n                if let Some(delivering) = delivering {\n                    self.give_back(delivering.message, \"its login was refused and is tried again\")?;\n                }\n                Ok(true)"
-replace = "                let delivering = record.delivery.borrow_mut().delivering.take();\n                if let Some(delivering) = delivering {\n                    self.give_back(delivering.message, \"its login was refused and is tried again\")?;\n                }\n                let member = participant.member_id.unwrap_or(participant.id);\n                let until = cf_base::time::iso(self.now() + 120_000);\n                self.seams.ledger.borrow_mut().mark_out_with_kind(member, &until, \"plant\", cf_ledger::HoldKind::Quota)?;\n                Ok(true)"
+find = "                    )?;\n                }\n                Ok(true)"
+replace = "                    )?;\n                }\n                let member = participant.member_id.unwrap_or(participant.id);\n                let until = cf_base::time::iso(self.now() + 120_000);\n                self.seams.ledger.borrow_mut().mark_out_with_kind(member, &until, \"plant\", cf_ledger::HoldKind::Quota)?;\n                Ok(true)"
+
+# The model alone: a login refusal drawn as a step holds the member at once, or fails the task at
+# the last try.
+[[plant]]
+name = "login retry: a login refusal is held at once, found by the model"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" || true {"
+
+[[plant]]
+name = "login retry: the last try's refusal fails the task, found by the model"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(said) => {\n                self.fail_task(project, participant.id, &thread.task, &said, \"login\")?;\n                Ok(true)\n            }"
