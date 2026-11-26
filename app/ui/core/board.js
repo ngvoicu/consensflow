@@ -138,7 +138,9 @@ const retryWords = (retry, drawer = false, now = Date.now(), why = null) => {
       second: '2-digit',
       hour12: false,
     })
-    return drawer ? `its turn failed: tries again at ${at}${count}` : `Trying again at ${at}${count}`
+    return drawer
+      ? `its turn failed: tries again at ${at}${count}`
+      : `Trying again at ${at}${count}`
   }
   // From its time on, what it waits for is the real state: the window, or the project's
   // resume, or its member's return from quota.

@@ -279,7 +279,9 @@ runs = ["ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1\","
+find = """       ORDER BY COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'
+                           AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.message') END = m.id), 0) DESC,
+                m.id DESC LIMIT 1\","""
 replace = "       ORDER BY m.id DESC LIMIT 1\","
 
 [[plant]]

@@ -331,11 +331,11 @@ runs = ["ledger-suspended"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             paused_with_project = 0, held_until = NULL
+             paused_with_project = 0, held_until = NULL, retry_hold = NULL
            WHERE id = ?",'''
 replace = '''
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             held_until = NULL
+             held_until = NULL, retry_hold = NULL
            WHERE id = ?",'''
 
 [[plant]]
