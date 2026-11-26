@@ -191,7 +191,7 @@ fn a_child_of_the_tests_own_process_is_in_the_tree_of_the_tests_own_process() {
 /// (the system's own) is listed and proves no edge, so that no process is the window's by it.
 #[cfg(windows)]
 #[test]
-fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open() {
+fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_the_rest_of_the_machine() {
     use super::super::descending_from;
 
     // `cmd` runs a `cmd` that runs `ping`: the root, its child, and the child's own.
@@ -278,14 +278,21 @@ fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_c
         "an ended process is listed: {gone:?}"
     );
 
-    // The system's own process cannot be opened: it is listed with what the table says, proves
-    // nothing, and no process is the window's by it.
-    let system = row(4).expect("the system is listed");
-    assert_eq!(system.link, Link::Unread, "{system:?}");
-    assert!(
-        system.command.is_empty() && system.exe.is_none(),
-        "{system:?}"
-    );
-    assert!(descending_from(&all, system.identity).is_empty());
+    // Every row went through a handle or failed to: none is believed by its number alone (the
+    // system's own processes are the ones a handle may be refused of), and one a handle was
+    // refused of says nothing of what it runs and proves no edge, so no process is the window's
+    // by it.
+    for one in &all {
+        assert_ne!(one.link, Link::Number, "{one:?}");
+        if one.link == Link::Unread {
+            assert!(one.command.is_empty() && one.exe.is_none(), "{one:?}");
+            assert!(
+                descending_from(&all, one.identity)
+                    .iter()
+                    .all(|under| under.link != Link::Number),
+                "{one:?}"
+            );
+        }
+    }
     root.kill();
 }

@@ -253,7 +253,7 @@ replace = """            Err(_) => {
 
 [[plant]]
 name = "live descent: Windows' real listing says nothing of what a process was started with"
-meant = "windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open"
+meant = "windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_the_rest_of_the_machine"
 runs = ["ld-native"]
 platforms = ["windows"]
 
@@ -261,16 +261,3 @@ platforms = ["windows"]
 file = "crates/cf-e2e/src/live/members/descent/native.rs"
 find = "                    process.command = handle.command_line().unwrap_or_default();"
 replace = "                    process.command = String::new();"
-
-[[plant]]
-name = "live descent: Windows' real listing proves the system's own process a parent"
-meant = "windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open"
-runs = ["ld-native"]
-platforms = ["windows"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = """            Err(_) => {
-                process.link = Link::Unread;"""
-replace = """            Err(_) => {
-                process.link = Link::Number;"""

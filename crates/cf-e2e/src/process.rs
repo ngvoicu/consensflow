@@ -459,12 +459,6 @@ impl Run {
         self
     }
 
-    /// The most the run may take before it is ended: none for a run never ended.
-    #[cfg(test)]
-    pub(crate) fn limit_given(&self) -> Option<Duration> {
-        self.limit
-    }
-
     /// Never ended for running long: for a build, which takes what it takes.
     #[must_use]
     pub fn unlimited(mut self) -> Self {
