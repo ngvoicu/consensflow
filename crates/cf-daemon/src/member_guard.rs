@@ -50,7 +50,9 @@ pub fn install(home: &Path, cf: &Path) -> Result<PathBuf, (PathBuf, io::Error)> 
 /// Makes in `root` what `path_helper` reads of the system's `etc` (`/etc`): `paths` with
 /// `folder` as its first line and the system's own lines after it, `manpaths`, and the files
 /// of `paths.d` and `manpaths.d`, so that it answers as it would for the system with `folder`
-/// first. A file that is gone from the system's goes from the root. Every file is written
+/// first. Only what the helper itself reads is taken: a regular file, one level deep; a link
+/// and a folder it skips (it walks with `FTS_PHYSICAL`), and so does this, and a file it
+/// cannot read it passes over, as it does. A file that is gone from the system's goes from the root. Every file is written
 /// beside and renamed into place, so a window's shell reads a whole one, and a link at a
 /// name is replaced, never written through; a link where a folder of the root belongs is
 /// refused. Called at each of the daemon's starts: what the system gains while it runs is
@@ -63,22 +65,22 @@ pub fn mirror(etc: &Path, root: &Path, folder: &Path) -> io::Result<()> {
     }
     let mut paths = folder.as_os_str().as_encoded_bytes().to_vec();
     paths.push(b'\n');
-    paths.extend(read_or_nothing(&etc.join("paths"))?.unwrap_or_default());
+    paths.extend(read_regular(&etc.join("paths")).unwrap_or_default());
     replace(root, &ours.join("paths"), Some(&paths))?;
     replace(
         root,
         &ours.join("manpaths"),
-        read_or_nothing(&etc.join("manpaths"))?.as_deref(),
+        read_regular(&etc.join("manpaths")).as_deref(),
     )?;
     for name in ["paths.d", "manpaths.d"] {
-        let theirs = names_in(&etc.join(name))?;
-        for gone in names_in(&ours.join(name))? {
+        let theirs = regular_files_in(&etc.join(name))?;
+        for gone in regular_files_in(&ours.join(name))? {
             if !theirs.contains(&gone) {
                 std::fs::remove_file(ours.join(name).join(gone))?;
             }
         }
         for file in theirs {
-            let text = read_or_nothing(&etc.join(name).join(&file))?;
+            let text = read_regular(&etc.join(name).join(&file));
             replace(root, &ours.join(name).join(&file), text.as_deref())?;
         }
     }
@@ -99,25 +101,36 @@ fn own_folder(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// What `path_helper` reads of `file`: its text where it is a regular file (not a link, which
+/// the helper's physical walk does not follow) it can read, none otherwise.
 #[cfg(unix)]
-fn read_or_nothing(file: &Path) -> io::Result<Option<Vec<u8>>> {
-    match std::fs::read(file) {
-        Ok(text) => Ok(Some(text)),
-        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(failed) => Err(failed),
+fn read_regular(file: &Path) -> Option<Vec<u8>> {
+    let found = std::fs::symlink_metadata(file).ok()?;
+    if !found.is_file() {
+        return None;
     }
+    std::fs::read(file).ok()
 }
 
-/// The names in `dir`, none where there is no such folder.
+/// The names of the regular files in `dir`, one level deep, as `path_helper` takes them: no
+/// link and no folder, and none where `dir` is no folder of its own (a link to one is skipped
+/// by the helper) or is not there.
 #[cfg(unix)]
-fn names_in(dir: &Path) -> io::Result<Vec<std::ffi::OsString>> {
-    match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .map(|entry| entry.map(|entry| entry.file_name()))
-            .collect(),
-        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(failed) => Err(failed),
+fn regular_files_in(dir: &Path) -> io::Result<Vec<std::ffi::OsString>> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(found) if found.is_dir() => {}
+        Ok(_) => return Ok(Vec::new()),
+        Err(failed) if failed.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(failed) => return Err(failed),
     }
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            names.push(entry.file_name());
+        }
+    }
+    Ok(names)
 }
 
 /// `file` holding `text`, or gone where there is none: written in `scratch` (the root, which
@@ -180,6 +193,9 @@ fn put(file: &Path, cf: &Path) -> io::Result<()> {
 /// be made the windows open without it, and the log says why: a guard that cannot stand is no
 /// reason for a board not to start.
 pub fn guard(windows: WindowEnv, home: &Path, cf: &Path, log: &Log) -> WindowEnv {
+    // `CONSENSFLOW_HOME` may be relative, and a window opens in its project's folder: what a
+    // window is given names the daemon's folder whole.
+    let home = &std::path::absolute(home).unwrap_or_else(|_| home.to_path_buf());
     let folder = match install(home, cf) {
         Ok(folder) => folder,
         Err((file, failed)) => {

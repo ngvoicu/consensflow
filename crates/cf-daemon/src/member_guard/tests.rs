@@ -182,36 +182,41 @@ fn a_person_with_a_path_helper_root_of_their_own_keeps_it() {
     );
 }
 
+/// What the system's own `path_helper -s` says `PATH` and `MANPATH` are, with `helper_root` as
+/// its `PATH_HELPER_ROOT` (the system's own files where there is none), and `MANPATH` given as
+/// `/x`.
+#[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods)] // The test asks the system's own helper.
+fn helper_answers(helper_root: Option<&Path>) -> (Option<String>, Option<String>) {
+    let mut helper = std::process::Command::new("/usr/libexec/path_helper");
+    helper.arg("-s").env_clear().env("MANPATH", "/x");
+    if let Some(helper_root) = helper_root {
+        helper.env("PATH_HELPER_ROOT", helper_root);
+    }
+    let said = String::from_utf8(helper.output().unwrap().stdout).unwrap();
+    let value = |name: &str| {
+        let start = format!("{name}=\"");
+        said.lines()
+            .find_map(|line| line.strip_prefix(&start))
+            .and_then(|line| line.split('"').next())
+            .map(str::to_owned)
+    };
+    (value("PATH"), value("MANPATH"))
+}
+
 /// The system's own `path_helper`, on the root the daemon makes: the system's answer with the
 /// guard's folder first, and the same MANPATH. It fails where an OS stops reading
 /// `PATH_HELPER_ROOT`, which the guard's hold in a Mac's login shells stands on (CI's Mac
 /// runners run it).
 #[cfg(target_os = "macos")]
 #[test]
-#[allow(clippy::disallowed_methods)] // The test asks the system's own helper.
 fn macos_path_helper_reads_path_helper_root_and_answers_as_the_system_with_the_guards_folder_first()
 {
     let home = tempfile_dir("helper home");
     let root = path_helper_root(&home);
     mirror(Path::new("/etc"), &root, &folder(&home)).unwrap();
-    let asked = |helper_root: Option<&Path>| {
-        let mut helper = std::process::Command::new("/usr/libexec/path_helper");
-        helper.arg("-s").env_clear().env("MANPATH", "/x");
-        if let Some(helper_root) = helper_root {
-            helper.env("PATH_HELPER_ROOT", helper_root);
-        }
-        let said = String::from_utf8(helper.output().unwrap().stdout).unwrap();
-        let value = |name: &str| {
-            let start = format!("{name}=\"");
-            said.lines()
-                .find_map(|line| line.strip_prefix(&start))
-                .and_then(|line| line.split('"').next())
-                .map(str::to_owned)
-        };
-        (value("PATH"), value("MANPATH"))
-    };
-    let (system_path, system_manpath) = asked(None);
-    let (path, manpath) = asked(Some(&root));
+    let (system_path, system_manpath) = helper_answers(None);
+    let (path, manpath) = helper_answers(Some(&root));
     let system_path = system_path.expect("the system's PATH");
     assert_eq!(
         path,
@@ -220,6 +225,107 @@ fn macos_path_helper_reads_path_helper_root_and_answers_as_the_system_with_the_g
     );
     assert_eq!(manpath, system_manpath);
     std::fs::remove_dir_all(&home).unwrap();
+}
+
+/// A system root (`<root>/etc`) holding what `path_helper` skips beside what it reads: in
+/// `paths.d` and `manpaths.d` a link to a file with a line of its own and a folder with a file
+/// in it (T-2277 finding 11).
+#[cfg(unix)]
+fn system_root_with_what_the_helper_skips(what: &str) -> PathBuf {
+    let sys = tempfile_dir(what);
+    let etc = sys.join("etc");
+    std::fs::create_dir_all(&etc).unwrap();
+    std::fs::write(etc.join("paths"), "/usr/bin\n/bin\n").unwrap();
+    std::fs::write(etc.join("manpaths"), "/usr/share/man\n").unwrap();
+    let outside = sys.join("outside");
+    std::fs::write(&outside, "/linked\n").unwrap();
+    for (dir, read) in [("paths.d", "/one"), ("manpaths.d", "/man-one")] {
+        std::fs::create_dir_all(etc.join(dir).join("30-folder")).unwrap();
+        std::fs::write(etc.join(dir).join("10-one"), format!("{read}\n")).unwrap();
+        std::fs::write(etc.join(dir).join("30-folder/inner"), "/inner\n").unwrap();
+        std::os::unix::fs::symlink(&outside, etc.join(dir).join("20-link")).unwrap();
+    }
+    sys
+}
+
+#[cfg(unix)]
+#[test]
+fn the_mirror_takes_only_the_entries_the_helper_reads_not_a_link_and_not_a_folder() {
+    let sys = system_root_with_what_the_helper_skips("skips-etc");
+    let home = tempfile_dir("skips-home");
+    let root = path_helper_root(&home);
+    mirror(&sys.join("etc"), &root, &folder(&home)).expect("a folder under paths.d is no failure");
+    for dir in ["paths.d", "manpaths.d"] {
+        let mut listed: Vec<_> = std::fs::read_dir(root.join("etc").join(dir))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        listed.sort();
+        assert_eq!(listed, ["10-one"], "{dir}");
+    }
+    // Again, with what was made in place.
+    mirror(&sys.join("etc"), &root, &folder(&home)).unwrap();
+    std::fs::remove_dir_all(&sys).unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+}
+
+/// The mirror answers exactly as the system does, with the guard's folder first, where the
+/// system's folders hold a link and a folder that the helper skips.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_mirror_of_a_system_with_a_link_and_a_folder_answers_as_that_system_does() {
+    let sys = system_root_with_what_the_helper_skips("compare-etc");
+    let home = tempfile_dir("compare-home");
+    let root = path_helper_root(&home);
+    mirror(&sys.join("etc"), &root, &folder(&home)).unwrap();
+    let (system_path, system_manpath) = helper_answers(Some(&sys));
+    let (path, manpath) = helper_answers(Some(&root));
+    let system_path = system_path.expect("the scratch system's PATH");
+    assert!(
+        !system_path.contains("/linked") && !system_path.contains("/inner"),
+        "the helper reads neither: {system_path}"
+    );
+    assert_eq!(
+        path,
+        Some(format!("{}:{system_path}", folder(&home).display()))
+    );
+    assert_eq!(manpath, system_manpath);
+    std::fs::remove_dir_all(&sys).unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+}
+
+/// A relative `CONSENSFLOW_HOME` is a folder under the daemon's own, and a window opens in a
+/// project's: what a window is given names the daemon's folder whole (T-2277 finding 10).
+#[test]
+fn a_relative_home_gives_every_window_whole_paths() {
+    let name = format!("cf-relative-home-{}", std::process::id());
+    let relative = PathBuf::from(&name);
+    let whole = std::env::current_dir().unwrap().join(&name);
+    let _ = std::fs::remove_dir_all(&whole);
+    // Gone however the test ends: it is made under the test's own working folder.
+    struct Gone(PathBuf);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _gone = Gone(whole.clone());
+    let cf = std::env::temp_dir().join(format!("cf-relative-cf-{}", std::process::id()));
+    std::fs::write(&cf, b"cf").unwrap();
+    let env = Env::from_vars([("PATH", "/usr/bin:/bin")]);
+    let windows = WindowEnv::new(&env, "http://127.0.0.1:1", "/bundle/bin");
+    let guarded = guard(windows, &relative, &cf, &log_in(&whole));
+    let delimiter = if cfg!(windows) { ';' } else { ':' };
+    let first = guarded.path().split(delimiter).next().unwrap().to_owned();
+    assert_eq!(Path::new(&first), folder(&whole));
+    assert!(Path::new(&first).is_absolute(), "{first}");
+    for (variable, value) in guarded.guard_env() {
+        assert!(Path::new(&value).is_absolute(), "{variable}={value}");
+        assert_eq!(Path::new(&value), path_helper_root(&whole), "{variable}");
+    }
+    #[cfg(target_os = "macos")]
+    assert_eq!(guarded.guard_env().len(), 2, "the root is given too");
+    std::fs::remove_file(&cf).unwrap();
 }
 
 /// An update replaces `cf.exe` and leaves the old hard link on the old file, which may have the

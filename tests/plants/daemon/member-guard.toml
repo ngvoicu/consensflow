@@ -75,3 +75,28 @@ runs = ["guard-codex"]
 file = "crates/cf-codex-session/src/arguments.rs"
 find = "        if root == ours {"
 replace = "        if root != ours {"
+
+[[plant]]
+name = "member-guard: a relative home is published as it is, so a window opened in its project resolves both names to the system's"
+meant = "member_guard::tests::a_relative_home_gives_every_window_whole_paths"
+runs = ["guard-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = "    let home = &std::path::absolute(home).unwrap_or_else(|_| home.to_path_buf());"
+replace = "    let _ = std::path::absolute(home);"
+
+[[plant]]
+name = "member-guard: the mirror takes a link in paths.d that path_helper skips, so its answer differs from the system's"
+meant = "member_guard::tests::the_mirror_takes_only_the_entries_the_helper_reads_not_a_link_and_not_a_folder"
+runs = ["guard-daemon"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = "        if entry.file_type()?.is_file() {"
+replace = "        if std::fs::metadata(entry.path())?.is_file() {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/member_guard.rs"
+find = "    let found = std::fs::symlink_metadata(file).ok()?;"
+replace = "    let found = std::fs::metadata(file).ok()?;"

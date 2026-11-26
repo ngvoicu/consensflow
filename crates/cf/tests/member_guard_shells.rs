@@ -6,7 +6,8 @@
 //!
 //! No case runs a command by a name that could reach the real one: each shell is asked which
 //! program the name resolves to (`whence -p`, `type -P`, `command -v`), and only once that is
-//! the guard's own is the name run, for its words. Every shell runs where it may signal
+//! the guard's own is its exact path run, for its words, never a bare name in a fresh shell.
+//! Every shell runs where it may signal
 //! nothing but itself (`sandbox-exec`), so nothing it runs could end a program.
 
 #![cfg(target_os = "macos")]
@@ -145,11 +146,14 @@ fn each_form_is_refused_in_the_words_once_the_guard_is_what_it_resolves_to() {
         let form = format!("{shell} {flags}");
         // Asked first: nothing is run by name unless it is the guard's.
         scene.resolves_to_the_guard(shell, flags, &resolving(how), &form);
-        for (line, command) in [
-            ("pkill -f zz-no-such-cmdline-t2213", "pkill"),
-            ("killall zz-no-such-program-t2213", "killall"),
+        for (command, args) in [
+            ("pkill", "-f zz-no-such-cmdline-t2213"),
+            ("killall", "zz-no-such-program-t2213"),
         ] {
-            let (code, _, said) = scene.run(shell, flags, line);
+            // The exact path the shell just resolved the name to, which is the guard's own.
+            let exact = scene.guard.join(command);
+            let line = format!("{} {args}", word(&exact.display().to_string()));
+            let (code, _, said) = scene.run(shell, flags, &line);
             assert_eq!(code, Some(1), "{form} {line}: {said}");
             assert!(
                 said.contains(&format!("ConsensFlow: {command} {WORDS}")),

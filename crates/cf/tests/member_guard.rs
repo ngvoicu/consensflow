@@ -2,7 +2,11 @@
 //! what it finds, whatever else the PATH holds: the folder the daemon makes
 //! (`cf_daemon::member_guard`) holds `cf` under those names, first on the window's PATH
 //! (`WindowEnv`, as `start` builds it). A recorder named like the real command sits later on
-//! the PATH; no test here starts the real command by its name.
+//! the PATH; no test here can start a real utility: the system's folder of a window is a scratch
+//! one (empty on a Mac; on Windows it holds this test's own executable as `taskkill.exe` and
+//! `tskill.exe`, and `SystemRoot` and `windir` name it, in every shell from the first case),
+//! so a call that goes through reaches a harmless program, and the test says which program
+//! received each call.
 
 // The tests start programs themselves.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
@@ -24,6 +28,8 @@ const OWNERS_WORDS: &str = "isn't run in member windows. It ends every program w
 struct Window {
     home: PathBuf,
     recorder: PathBuf,
+    /// The window's system folder: scratch, never the machine's.
+    system: PathBuf,
     path: String,
 }
 
@@ -39,17 +45,31 @@ impl Window {
             record(&recorder, command);
         }
         let cf = Path::new(env!("CARGO_BIN_EXE_cf"));
-        let system = if cfg!(windows) {
-            std::env::var("SystemRoot").map_or_else(
-                |_| r"C:\Windows\System32".into(),
-                |root| format!(r"{root}\System32"),
+        let system = home.join("system");
+        std::fs::create_dir_all(&system).unwrap();
+        #[cfg(windows)]
+        for program in ["taskkill.exe", "tskill.exe"] {
+            std::fs::create_dir_all(system.join("System32")).unwrap();
+            std::fs::copy(
+                std::env::current_exe().unwrap(),
+                system.join("System32").join(program),
             )
+            .unwrap();
+        }
+        let system_folder = if cfg!(windows) {
+            system.join("System32")
         } else {
-            "/usr/bin:/bin".into()
+            system.clone()
         };
         let delimiter = if cfg!(windows) { ';' } else { ':' };
-        let given =
-            Env::from_vars([("PATH", format!("{}{delimiter}{system}", recorder.display()))]);
+        let given = Env::from_vars([(
+            "PATH",
+            format!(
+                "{}{delimiter}{}",
+                recorder.display(),
+                system_folder.display()
+            ),
+        )]);
         let windows = WindowEnv::new(
             &given,
             "http://127.0.0.1:1",
@@ -60,8 +80,21 @@ impl Window {
         Self {
             home,
             recorder,
+            system,
             path,
         }
+    }
+
+    /// `command` given the window's PATH and, on Windows, the scratch system folder as its
+    /// `SystemRoot` and `windir`: where the real `taskkill` is looked for.
+    fn given<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+        command.env("PATH", &self.path);
+        if cfg!(windows) {
+            command
+                .env("SystemRoot", &self.system)
+                .env("windir", &self.system);
+        }
+        command
     }
 
     /// Whether a recorder ran.
@@ -69,8 +102,8 @@ impl Window {
         self.recorder.join(format!("{command}.reached")).exists()
     }
 
-    /// `line` run by the window's shell on its PATH: its exit code and standard error.
-    fn run(&self, line: &str) -> (Option<i32>, String) {
+    /// `line` run by the window's shell on its PATH: its exit code, standard output and error.
+    fn run(&self, line: &str) -> (Option<i32>, String, String) {
         let mut shell = if cfg!(windows) {
             let mut shell = Command::new("cmd");
             shell.args(["/c", line]);
@@ -80,13 +113,14 @@ impl Window {
             shell.args(["-c", line]);
             shell
         };
-        let ran = shell
-            .env("PATH", &self.path)
+        let ran = self
+            .given(&mut shell)
             .env("CONSENSFLOW_TOOL_FOLDERS", "")
             .output()
             .unwrap();
         (
             ran.status.code(),
+            String::from_utf8_lossy(&ran.stdout).into_owned(),
             String::from_utf8_lossy(&ran.stderr).into_owned(),
         )
     }
@@ -140,27 +174,51 @@ fn record(folder: &Path, command: &str) {
 #[test]
 fn pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reached() {
     let window = Window::new("mac", &["pkill", "killall"]);
+    let guard = folder_of(&window);
     for (line, command) in [
         ("pkill -f x", "pkill"),
         ("pkill", "pkill"),
         ("killall x", "killall"),
         ("killall -9 node", "killall"),
     ] {
-        let (code, said) = window.run(line);
-        assert_eq!(code, Some(1), "{line}: {said}");
+        // The name is asked first, and what it resolves to must be the guard's own file; the
+        // words are then asked of that exact path, never of a bare name.
+        let (_, found, said) = window.run(&format!("command -v {command}"));
+        let wanted = guard.join(command);
+        assert_eq!(found.trim_end(), wanted.display().to_string(), "{said}");
+        let exact = line.replacen(command, &format!("'{}'", wanted.display()), 1);
+        let (code, _, said) = window.run(&exact);
+        assert_eq!(code, Some(1), "{exact}: {said}");
         assert!(
             said.contains(&format!(
                 "ConsensFlow: {command} {OWNERS_WORDS} by its number"
             )),
-            "{line}: {said}"
+            "{exact}: {said}"
         );
         assert!(!window.reached(command), "{line} reached the real command");
     }
 }
 
+/// The guard's folder of `window`, the first on its PATH.
+#[cfg(unix)]
+fn folder_of(window: &Window) -> PathBuf {
+    PathBuf::from(window.path.split(':').next().unwrap())
+}
+
+/// Whether a call reached the program standing for the real `taskkill` or `tskill`: this
+/// test's own executable, which takes the call's words for filters of its tests (`running 0
+/// tests`) or refuses them as options of its own, and says so either way. A refused call is
+/// answered by ConsensFlow's words, and neither.
+#[cfg(windows)]
+fn received(out: &str, said: &str) -> bool {
+    out.contains("running 0 tests") || said.contains("Unrecognized option")
+}
+
 #[cfg(windows)]
 #[test]
-fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() {
+fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_one_the_system_has() {
+    // The window's system folder is the scratch one from its first case on: every shell below
+    // is given it as `SystemRoot`, so what a call reaches is the test's own executable.
     let window = Window::new("win", &["taskkill", "tskill"]);
     for line in [
         "taskkill /IM x.exe",
@@ -168,21 +226,32 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
         "taskkill /FI \"IMAGENAME eq x.exe\"",
         "tskill notepad",
     ] {
-        let (code, said) = window.run(line);
+        let (code, out, said) = window.run(line);
         assert_eq!(code, Some(1), "{line}: {said}");
         assert!(said.contains(OWNERS_WORDS), "{line}: {said}");
+        assert!(!received(&out, &said), "{line}: {out} {said}");
         assert!(
             !window.reached("taskkill") && !window.reached("tskill"),
             "{line}"
         );
     }
+    // By number, the program the system has receives it.
+    for line in ["taskkill /PID 123", "taskkill /F /T /PID 123", "tskill 123"] {
+        let (_, out, said) = window.run(line);
+        assert!(received(&out, &said), "{line}: {out} {said}");
+        assert!(!said.contains("ConsensFlow:"), "{line}: {said}");
+    }
     // Both PowerShells, as a harness runs a command in them: Windows PowerShell 5.1, and
     // PowerShell 7 where the machine has it. (`Stop-Process -Name` is a cmdlet: out of reach.)
     for shell in ["powershell.exe", "pwsh.exe"] {
         for line in ["taskkill /IM x.exe", "tskill notepad"] {
-            let ran = Command::new(shell)
-                .args(["-NoProfile", "-NonInteractive", "-Command", line])
-                .env("PATH", &window.path)
+            let ran = window
+                .given(Command::new(shell).args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    line,
+                ]))
                 .output();
             let ran = match ran {
                 Ok(ran) => ran,
@@ -193,8 +262,10 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
                 Err(failed) => panic!("{shell}: {failed}"),
             };
             let said = String::from_utf8_lossy(&ran.stderr);
+            let out = String::from_utf8_lossy(&ran.stdout);
             assert_ne!(ran.status.code(), Some(0), "{shell} {line}: {said}");
             assert!(said.contains("ConsensFlow:"), "{shell} {line}: {said}");
+            assert!(!received(&out, &said), "{shell} {line}: {out} {said}");
             eprintln!("SHELL {shell} {line}: refused");
         }
         assert!(
@@ -204,17 +275,8 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
     }
     // Git Bash, which Claude Code, Pi and Devin run commands in: it turns `/PID` into a
     // path before a program reads it, so `//PID` is its spelling, and every other call is
-    // refused.
+    // refused. A call counts as passed only when the program the system has received it.
     let bash = git_bash();
-    // The test's own executable stands for the real taskkill (below), so a call that goes
-    // through ends nothing.
-    let fake_root = window.home.join("bash-root");
-    std::fs::create_dir_all(fake_root.join("System32")).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        fake_root.join(r"System32\taskkill.exe"),
-    )
-    .unwrap();
     for (line, goes_through) in [
         ("taskkill //PID 123", true),
         ("taskkill -PID 123 //F", true),
@@ -224,21 +286,21 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
         ("taskkill /FI 'IMAGENAME eq x.exe'", false),
         ("tskill notepad", false),
     ] {
-        let ran = Command::new(&bash)
-            .args(["--noprofile", "--norc", "-c", line])
-            .env("PATH", &window.path)
-            .env("SystemRoot", &fake_root)
+        let ran = window
+            .given(Command::new(&bash).args(["--noprofile", "--norc", "-c", line]))
             .output()
             .unwrap();
         let said = String::from_utf8_lossy(&ran.stderr);
+        let out = String::from_utf8_lossy(&ran.stdout);
         assert_eq!(
-            !said.contains("ConsensFlow:"),
+            received(&out, &said),
             goes_through,
-            "Git Bash {line}: {said}"
+            "Git Bash {line}: {out} {said}"
         );
-        // A call that goes through exits as the program standing for the real one does with
-        // these arguments, which is its own affair; a refused one exits 1.
-        if !goes_through {
+        if goes_through {
+            assert!(!said.contains("ConsensFlow:"), "Git Bash {line}: {said}");
+        } else {
+            assert!(said.contains(OWNERS_WORDS), "Git Bash {line}: {said}");
             assert_eq!(ran.status.code(), Some(1), "Git Bash {line}: {said}");
         }
         eprintln!(
@@ -250,33 +312,18 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_real_one() 
         !window.reached("taskkill") && !window.reached("tskill"),
         "Git Bash"
     );
-    // By number it is the real program, with the arguments as they were: a SystemRoot of the
-    // test's holds a harmless program as the real taskkill: the test's own executable.
-    let root = window.home.join("root");
-    std::fs::create_dir_all(root.join("System32")).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        root.join(r"System32\taskkill.exe"),
-    )
-    .unwrap();
+    // By number the stand-in itself starts the program the system has, with the arguments as
+    // they were: this test's own executable, which takes `/PID` and `123` for filters of its
+    // tests and runs none.
     let taskkill = window.home.join("member-guard").join("taskkill.exe");
-    let through = |args: &[&str]| {
-        let ran = Command::new(&taskkill)
-            .args(args)
-            .env("SystemRoot", &root)
-            .output()
-            .unwrap();
-        (
-            ran.status.code(),
-            String::from_utf8_lossy(&ran.stdout).to_string()
-                + &String::from_utf8_lossy(&ran.stderr),
-        )
-    };
-    // The real program here is this test's own executable, which takes `/PID` and `123` for
-    // filters of its tests and runs none: it ran, with the arguments as they were given.
-    let (code, said) = through(&["/PID", "123"]);
-    assert_eq!(code, Some(0), "{said}");
-    assert!(said.contains("running 0 tests"), "{said}");
+    let ran = window
+        .given(Command::new(&taskkill).args(["/PID", "123"]))
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&ran.stdout);
+    let said = String::from_utf8_lossy(&ran.stderr);
+    assert_eq!(ran.status.code(), Some(0), "{out} {said}");
+    assert!(received(&out, &said), "{out} {said}");
     assert!(!said.contains("ConsensFlow:"), "{said}");
     assert!(!window.reached("taskkill"));
 }
