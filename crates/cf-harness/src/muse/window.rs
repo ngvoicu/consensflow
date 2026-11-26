@@ -225,6 +225,10 @@ impl Window for MuseWindow {
         self.restored.get()
     }
 
+    fn put_back_by_our_stop(&self) -> bool {
+        self.restored.get()
+    }
+
     fn ready_on<'a>(
         &'a self,
         _host: &'a dyn PaneHost,

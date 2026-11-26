@@ -474,6 +474,8 @@ struct Flags {
 }
 
 /// A number of the page's, waiting for the numbers before it.
+// A parked call is held by value: a paste now carries its look, its evidence and its clearing key.
+#[allow(clippy::large_enum_variant)]
 enum Slot {
     /// A call that came early. It holds its bytes, and the worker it goes to.
     Parked {

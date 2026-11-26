@@ -326,11 +326,14 @@ fn a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_nothing_is
         Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned())),
         "the box is the human's to empty, in words the board shows"
     );
-    // Even asked to deliver, no licence is given for a box the reader cannot read, and nothing
-    // is pressed or pasted.
+    // The engine asks readiness before every paste, and a cut box is held there, for good, in
+    // words: the licence (N6: our put-back with no key of the person's counted is cleared blind
+    // where the reader cannot read the box) is never asked of it. Asked again, the hold stands.
     host.answer("pane.snapshot", [tall_box()]);
-    let refused = finished(window.deliver(&host, &pane(), "The next one.")).unwrap();
-    assert!(matches!(refused, Admission::Refused { .. }), "{refused:?}");
+    assert_eq!(
+        finished(window.ready(&host, &pane())).unwrap(),
+        Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned())),
+    );
     assert_eq!(
         asked(&host),
         ["pane.snapshot", "pane.snapshot"],

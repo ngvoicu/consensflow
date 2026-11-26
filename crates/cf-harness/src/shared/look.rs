@@ -293,6 +293,10 @@ pub struct BoxState {
     /// message an interrupt put back, a `/compact` the human's cancel left): the paste clears it
     /// first.
     pub stale_paste: bool,
+    /// The stale words are ours and were put back by our own stop (an interrupt of ours that
+    /// took the brief back out of the conversation): where the box cannot be read, the clear
+    /// goes blind with the paste if no key of the person's was counted (N6).
+    pub put_back_by_our_stop: bool,
 }
 
 /// What a look licenses for a window that takes pastes.
@@ -362,7 +366,11 @@ pub fn licence_paste(
     // are the ones our own stop put back. Any key since, an arrow that recalls their own words
     // among them, leaves it held, and the words say what is in the box, never "what you typed".
     let stale = state.stale_paste && !over_count;
-    if stale && reads == BoxReading::Unread && look.at().typed > 0 {
+    if stale && reads == BoxReading::Unread && !(state.put_back_by_our_stop && look.at().typed == 0)
+    {
+        if !state.put_back_by_our_stop {
+            return PasteLicence::Wait(Held::Unsent);
+        }
         // Said as what is in the box and what lifts the hold: Enter sends it, and the record
         // then no longer shows it put back. Nothing here says "typed", for nothing is unsent.
         return PasteLicence::Wait(Held::ForHuman(

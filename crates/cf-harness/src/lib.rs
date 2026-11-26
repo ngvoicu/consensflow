@@ -48,8 +48,8 @@ pub use shared::look::{
     after_wait, licence_enter, licence_paste, AfterWait, At, BoxReading, BoxState, EnterFor,
     EnterLicence, Look, NoLook, PasteLicence, NO_LOOK, SCREEN_QUIET_FOR_ENTER_MS,
 };
-pub use shared::pane::{enter, look};
 pub use shared::off_thread::{late_step, launch_wanted, while_wanted};
+pub use shared::pane::{enter, look};
 pub use shared::specmint::bundled_specmint;
 
 // Fakes other crates' tests compile too: a failure in one is the test's.

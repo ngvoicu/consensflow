@@ -915,7 +915,11 @@ mod tests {
             .iter()
             .map(|press| (press.pane.as_str(), press.bytes.as_slice()))
             .collect();
-        assert_eq!(kept, [("p1-zeus", &[3][..])], "one press, of the paste that had a key");
+        assert_eq!(
+            kept,
+            [("p1-zeus", &[3][..])],
+            "one press, of the paste that had a key"
+        );
     }
 
     #[test]

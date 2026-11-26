@@ -1515,8 +1515,7 @@ impl Dispatcher {
                     since_ms: was.map_or_else(|| self.now(), |was| was.since_ms),
                     unsent: by.is_some_and(Held::for_typing),
                     unproven: by == Some(&Held::Unproven)
-                        || (by == Some(&Held::Settling)
-                            && record.delivery.borrow().unproven),
+                        || (by == Some(&Held::Settling) && record.delivery.borrow().unproven),
                     traced: true,
                 };
                 record.delivery.borrow_mut().held = Some(held.clone());

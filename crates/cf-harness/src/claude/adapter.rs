@@ -845,6 +845,10 @@ impl Window for ClaudeWindow {
         self.restored.get() || self.put_back.get()
     }
 
+    fn put_back_by_our_stop(&self) -> bool {
+        self.restored.get()
+    }
+
     fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,

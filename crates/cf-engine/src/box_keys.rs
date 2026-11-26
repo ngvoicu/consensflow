@@ -53,6 +53,7 @@ impl Dispatcher {
             .is_some_and(|stale| &stale.pane == pane);
         let state = BoxState {
             stale_paste: uncleared || window.stale_paste(),
+            put_back_by_our_stop: window.put_back_by_our_stop(),
         };
         licence_paste(look, window.harness(), state, clear)
     }

@@ -1888,9 +1888,10 @@ impl Dispatcher {
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 let frontier = Frontier::of(&observed);
-                self.act(record, async move {
-                    this.hand_first(&held, &frontier).await
-                })
+                self.act(
+                    record,
+                    async move { this.hand_first(&held, &frontier).await },
+                )
                 .await;
             }
             return Ok(());

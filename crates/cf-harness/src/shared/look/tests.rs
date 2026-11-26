@@ -393,7 +393,10 @@ fn a_paste_on_its_way_waits() {
 /// paste's own `clearFirst`, only where the look reads the box holding something.
 #[test]
 fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
-    let stale = BoxState { stale_paste: true };
+    let stale = BoxState {
+        stale_paste: true,
+        put_back_by_our_stop: true,
+    };
     let holds = look(&snapshot("/compact", false, None));
     match licence_paste(&holds, Harness::Claude, stale, CLEAR) {
         PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, Some(CLEAR)),
@@ -415,7 +418,11 @@ fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
             read_empty,
             ..
         } => {
-            assert_eq!(clear_first, Some(CLEAR), "the blind clear goes with the paste");
+            assert_eq!(
+                clear_first,
+                Some(CLEAR),
+                "the blind clear goes with the paste"
+            );
             assert_eq!(read_empty, None);
         }
         other => panic!("{other:?}"),
@@ -428,7 +435,10 @@ fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
 /// blind: the message waits, and the words never say "what you typed" while nothing is unsent.
 #[test]
 fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons_was_counted() {
-    let stale = BoxState { stale_paste: true };
+    let stale = BoxState {
+        stale_paste: true,
+        put_back_by_our_stop: true,
+    };
     let mut unread = snapshot("", false, None);
     unread["bottom"] = json!(["⏺ 4"]);
     // `typed` is 4 here: the person pressed keys, none left unsent.
@@ -447,13 +457,34 @@ fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons
         licence_paste(&look(&unsent), Harness::Claude, stale, CLEAR),
         PasteLicence::Wait(Held::Unsent)
     );
+    // A stale paste that was not put back by our own stop (a `/compact` the human's cancel left,
+    // a paste whose Enter was withheld): a box the reader does not read holds the paste, as it
+    // did.
+    let mut unread = snapshot("", false, None);
+    unread["bottom"] = json!(["⏺ 4"]);
+    unread["typed"] = json!(0);
+    assert_eq!(
+        licence_paste(
+            &look(&unread),
+            Harness::Claude,
+            BoxState {
+                stale_paste: true,
+                put_back_by_our_stop: false
+            },
+            CLEAR
+        ),
+        PasteLicence::Wait(Held::Unsent)
+    );
     // No put-back of ours: a box the reader does not read is the person's, as it was.
     let mut unread = snapshot("", false, None);
     unread["bottom"] = json!(["⏺ 4"]);
     unread["typed"] = json!(0);
     assert!(matches!(
         licence_paste(&look(&unread), Harness::Claude, BoxState::default(), CLEAR),
-        PasteLicence::Go { clear_first: None, .. }
+        PasteLicence::Go {
+            clear_first: None,
+            ..
+        }
     ));
 }
 

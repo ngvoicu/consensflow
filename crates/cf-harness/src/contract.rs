@@ -742,6 +742,12 @@ pub trait Window {
     fn stale_paste(&self) -> bool {
         false
     }
+    /// Whether the words stale in the box are a message our own stop put back (an interrupt of
+    /// ours took it back out of the conversation), which the paste may clear blind where the
+    /// box cannot be read and no key of the person's was counted (N6).
+    fn put_back_by_our_stop(&self) -> bool {
+        false
+    }
     /// Whether a delivery may go in now, or why that could not be told, on `look` where the
     /// window takes pastes ([`Input::Pasted`]): the one observation it reads, which the engine
     /// took. A window whose harness takes its messages through a channel is given none.
@@ -821,6 +827,7 @@ pub trait Window {
             };
             let state = crate::BoxState {
                 stale_paste: self.stale_paste(),
+                put_back_by_our_stop: self.put_back_by_our_stop(),
             };
             Ok(
                 match crate::licence_paste(look, self.harness(), state, &[3]) {
@@ -855,6 +862,7 @@ pub trait Window {
                     self.harness(),
                     crate::BoxState {
                         stale_paste: self.stale_paste(),
+                        put_back_by_our_stop: self.put_back_by_our_stop(),
                     },
                     &[3],
                 ),
@@ -1077,7 +1085,9 @@ impl Held {
         match self {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::Unproven => "ConsensFlow can't tell that what you typed in this window is gone",
-            Held::Settling => "its screen changed a moment ago and the keys you typed may not be drawn yet",
+            Held::Settling => {
+                "its screen changed a moment ago and the keys you typed may not be drawn yet"
+            }
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
             Held::Because(reason) | Held::ForHuman(reason) => reason,

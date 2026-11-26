@@ -725,8 +725,13 @@ fn a_feed_that_panics_leaves_the_journal_whole_and_handed_on() {
         String::from_utf8_lossy(&handed).contains("JOURNAL-MARKER"),
         "the page now subscribed has it"
     );
-    window.panes.attach_page("page", &window.hub, Arc::new(|_| true));
-    let piece = window.panes.history("page", &window.key, None).expect("kept");
+    window
+        .panes
+        .attach_page("page", &window.hub, Arc::new(|_| true));
+    let piece = window
+        .panes
+        .history("page", &window.key, None)
+        .expect("kept");
     assert!(
         String::from_utf8_lossy(&piece.bytes).contains("JOURNAL-MARKER"),
         "a later page's pull holds it"
