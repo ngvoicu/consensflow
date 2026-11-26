@@ -1496,18 +1496,22 @@ impl Dispatcher {
         reason: &str,
         by: Option<&Held>,
     ) -> Result<(), EngineError> {
+        // A wait for a still screen that has lasted says what to press (N4).
+        {
+            let mut part = record.delivery.borrow_mut();
+            let unproven =
+                by == Some(&Held::Unproven) || (by == Some(&Held::Settling) && part.unproven);
+            if let Some(held) = part
+                .held
+                .as_mut()
+                .filter(|held| held.message == message && held.reason == reason)
+            {
+                held.unproven = unproven;
+            }
+        }
         let was = record.delivery.borrow().held.clone();
         let held = match was.filter(|held| held.message == message) {
-            Some(mut held) if held.reason == reason && held.traced => {
-                // A wait for a still screen that has lasted says what to press (N4).
-                let unproven = by == Some(&Held::Unproven)
-                    || (by == Some(&Held::Settling) && record.delivery.borrow().unproven);
-                if held.unproven != unproven {
-                    held.unproven = unproven;
-                    record.delivery.borrow_mut().held = Some(held.clone());
-                }
-                held
-            }
+            Some(held) if held.reason == reason && held.traced => held,
             was => {
                 let held = HeldBack {
                     message,

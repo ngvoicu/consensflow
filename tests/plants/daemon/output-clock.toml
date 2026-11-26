@@ -589,10 +589,10 @@ runs = ["oc-model", "oc-harness"]
 file = "crates/cf-harness/src/shared/look.rs"
 find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
         {
-            return PasteLicence::Wait(Held::Unproven);"""
+            return PasteLicence::Wait(Held::Settling);"""
 replace = """            .is_none_or(|quiet| quiet < SETTLED_MS && false)
         {
-            return PasteLicence::Wait(Held::Unproven);"""
+            return PasteLicence::Wait(Held::Settling);"""
 
 [[plant]]
 name = "output clock: a screen that never holds still keeps the paste with no words"
@@ -603,7 +603,7 @@ runs = ["oc-model", "oc-harness"]
 file = "crates/cf-harness/src/shared/look.rs"
 find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
         {
-            return PasteLicence::Wait(Held::Unproven);"""
+            return PasteLicence::Wait(Held::Settling);"""
 replace = """            .is_none_or(|quiet| quiet < SETTLED_MS)
         {
             return PasteLicence::Wait(Held::Because("the screen changed".to_owned()));"""
@@ -738,8 +738,8 @@ runs = ["oc-model", "oc-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 {"""
-replace = """    if stale && reads == BoxReading::Unread {"""
+find = """state.put_back_by_our_stop && look.at().typed == 0"""
+replace = """state.put_back_by_our_stop && false"""
 
 [[plant]]
 name = "output clock: our put-back in a box that does not read is cleared blind after a key of the person's"
@@ -748,5 +748,5 @@ runs = ["oc-model", "oc-harness"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 {"""
-replace = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 && false {"""
+find = """state.put_back_by_our_stop && look.at().typed == 0"""
+replace = """state.put_back_by_our_stop && true"""

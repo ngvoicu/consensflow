@@ -99,6 +99,21 @@ fn a_window_delivered_its_first_message_opens_with_none_and_is_handed_its_brief_
     context.close();
 }
 
+/// The last look before a first message asks no record: a new window has none (T-2292; the first
+/// build of the last look held it for "its record cannot be read", and the live matrix's stale
+/// transcript case, a task sent back to a reopened window, was never handed its brief).
+#[test]
+fn a_first_message_goes_to_a_window_whose_record_cannot_be_read_yet() {
+    let context = delivered();
+    let (_, brief) = briefed(&context);
+    context.pass().unwrap();
+    context.settle();
+    context.adapter.unread("zeus", true);
+    passes(&context, 3);
+    assert_eq!(times_handed(&context, SEAM, brief), 1, "handed once");
+    context.close();
+}
+
 #[test]
 fn a_first_message_handed_over_once_up_keeps_the_conversation_it_was_pasted_into() {
     // 3.0.6-alpha.3's integration B (T-664): devin-arrival keeps the conversation a paste

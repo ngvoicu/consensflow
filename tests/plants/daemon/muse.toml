@@ -2691,10 +2691,10 @@ meant = "a_turn_taken_back_whose_box_is_out_of_view_is_refused_in_words_and_noth
 runs = ["muse-unsent"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/look.rs"
-find = '''    if stale && reads == BoxReading::Unread {
-        return PasteLicence::Wait(Held::Unsent);
-    }'''
+file = "crates/cf-harness/src/muse/window.rs"
+find = '''                if self.restored.get() && screen::box_cut(lines) {
+                    return Ok(Readiness::Held(Held::ForHuman(OUT_OF_VIEW.to_owned())));
+                }'''
 replace = ''''''
 
 [[plant]]

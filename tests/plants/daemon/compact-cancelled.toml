@@ -144,10 +144,10 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = '''    if stale && reads == BoxReading::Unread {
-        return PasteLicence::Wait(Held::Unsent);
-    }'''
-replace = ''''''
+find = '''    if stale && reads == BoxReading::Unread && !(state.put_back_by_our_stop && look.at().typed == 0)
+    {'''
+replace = '''    if false
+    {'''
 
 [[plant]]
 name = "compact-cancelled: the adapter takes no word of the reading that the /compact is back in the box"
@@ -221,8 +221,8 @@ runs = ["compact-cancelled-adapter"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/look.rs"
-find = '''    if stale && reads == BoxReading::Unread {
-        return PasteLicence::Wait(Held::Unsent);'''
-replace = '''    if stale && reads == BoxReading::Unread {
-        return PasteLicence::Wait(Held::Because("the box is not shown".to_owned()));'''
+find = '''        if !state.put_back_by_our_stop {
+            return PasteLicence::Wait(Held::Unsent);'''
+replace = '''        if !state.put_back_by_our_stop {
+            return PasteLicence::Wait(Held::Because("the box is not shown".to_owned()));'''
 
