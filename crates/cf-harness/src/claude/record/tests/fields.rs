@@ -4,7 +4,7 @@
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
 use super::absorbed::{field_case as taken_in, AT};
-use super::commands::{printed, typed_command};
+use super::commands::{printed, printed_by_the_system, typed_command};
 use super::jobs::monitor_wait;
 use super::projection::{interrupt, projected};
 use super::restart::closed;
@@ -92,6 +92,24 @@ fn command_printed() -> Vec<Value> {
     records.extend([
         typed_command("n1", "d1", "model", "haiku"),
         printed("o1", "n1", "Set model to Haiku"),
+    ]);
+    records
+}
+
+/// A turn that ended, then a command the harness answered by itself: the system's echo and
+/// output, and the report it holds for the model's next turn (`isMeta`, `rowSource` `local`).
+fn context_reported() -> Vec<Value> {
+    let mut records = ended();
+    records.extend([
+        having(
+            printed_by_the_system("n1", "d1", ""),
+            json!({ "content": "<command-name>/context</command-name>" }),
+        ),
+        printed_by_the_system("o1", "n1", "Context"),
+        having(
+            user("r1", json!("o1"), json!("## Context Usage")),
+            json!({ "isMeta": true, "rowSource": "local" }),
+        ),
     ]);
     records
 }
@@ -767,6 +785,12 @@ fn read() -> Vec<Row> {
             is("promptSource", json!("queued")),
         ),
         ("isMeta", cleared, 1, is("isMeta", json!(true))),
+        (
+            "rowSource",
+            context_reported,
+            ended().len() + 2,
+            is("rowSource", json!("recorded")),
+        ),
         (
             "turnCompanion",
             companioned,

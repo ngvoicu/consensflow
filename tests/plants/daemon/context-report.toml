@@ -1,0 +1,79 @@
+# `/context` typed into a Claude Code window left it reading "working" for good, and its
+# messages held (T-2343; recorded by T-2342 on Claude Code 2.1.332). The command answers by
+# itself and then writes a `user` record with `isMeta` true and `rowSource` `local`, a child of
+# the system's `local_command` output, holding the report for the model's next turn. The reader
+# took any `user` record that is no tool result for the opening of a turn; a record of that
+# shape asks the model nothing and opens none. The guard is three marks together (`isMeta`,
+# `rowSource` `local`, the parent a system `local_command` record the reader has read); a record
+# with some of them (a skill's text, a scheduled task's prompt, the nudge after a call that was no
+# call, a companion of a prompt, a record of a Claude Code that writes no `rowSource`) still opens
+# a turn, which the model's answer ends. A wrong reading either way is silent: at work for good
+# is the stall, at rest in a turn the model is working on lets a message be pasted into it.
+# One plant takes one part of the guard out; a test of it fails. Every name holds
+# `context report`, so `npm run plants:daemon -- "context report"` runs them all.
+
+[run]
+context-report-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::commands::"]
+context-report-fields = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::fields::"]
+context-report-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "typed_line"]
+
+[[plant]]
+name = "context report: any meta record is taken for a report, whatever its row source"
+meant = "a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn"
+runs = ["context-report-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''        && record.get("rowSource").and_then(Value::as_str) == Some("local"))'''
+replace = '''        && record.get("rowSource").is_none() == record.get("rowSource").is_none())'''
+
+[[plant]]
+name = "context report: a record that is no meta record is taken for a report"
+meant = "a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn"
+runs = ["context-report-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    (record.get("isMeta") == Some(&Value::Bool(true))'''
+replace = '''    (record.get("isMeta") != Some(&Value::Null)'''
+
+[[plant]]
+name = "context report: a report's parent need not be a command's output"
+meant = "a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn"
+runs = ["context-report-reader", "context-report-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''            .is_some_and(|parent| self.printed_by_the_system.as_deref() == Some(parent))'''
+replace = '''            .is_some_and(|_| true)'''
+
+[[plant]]
+name = "context report: the command's output is never remembered, so no report is tied to it"
+meant = "a_context_typed_at_an_idle_prompt_calls_no_model_and_is_at_rest"
+runs = ["context-report-reader", "context-report-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''                if printed.uuid.is_some() {'''
+replace = '''                if false {'''
+
+[[plant]]
+name = "context report: a report still opens a turn"
+meant = "a_context_typed_at_an_idle_prompt_calls_no_model_and_is_at_rest"
+runs = ["context-report-reader", "context-report-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''        if self.is_a_report(record) {'''
+replace = '''        if false && self.is_a_report(record) {'''
+
+[[plant]]
+name = "context report: the line builds no value of the row source, and the reader never sees a report"
+meant = "each_field_replay_reads_of_a_record_changes_the_reading"
+runs = ["context-report-fields", "context-report-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("rowSource", &Keep::Scalar),
+'''
+replace = ""

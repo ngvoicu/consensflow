@@ -40,7 +40,14 @@ impl Transcript {
             }
             Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
             Projected::User(user) => self.user(user, place, seq)?,
-            Projected::Output(parent) => self.output(parent),
+            Projected::Output(printed) => {
+                if printed.uuid.is_some() {
+                    self.printed_by_the_system.clone_from(&printed.uuid);
+                }
+                if let Some(parent) = &printed.ends {
+                    self.output(parent);
+                }
+            }
             Projected::Boundary(boundary) => self.boundary(boundary),
             Projected::Compacted(tokens) => self.compacted_from = *tokens,
         }
@@ -391,6 +398,14 @@ impl Transcript {
         if js::trim(&record.text).is_empty() {
             return Ok(());
         }
+        // What a command the harness answered by itself leaves for the model's next turn
+        // (`/context`'s report, a child of the system's record of its output) asks nothing
+        // of the model: an item of the harness's, and the turn is as it was, open or at rest.
+        if self.is_a_report(record) {
+            let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
+            self.items.push(id, Role::Custom, &record.text, at, seq);
+            return Ok(());
+        }
         let ends = record
             .output_of
             .as_deref()
@@ -454,6 +469,17 @@ impl Transcript {
         self.candidate = None;
         self.terminal = None;
         Ok(())
+    }
+
+    /// Whether the user's record is what a command the harness answered by itself holds for
+    /// the model's next turn: marked so (`report_of`), and a child of the system's
+    /// `local_command` record last read, which is the command's output. A record with the same
+    /// marks anywhere else (a companion of a prompt) is no report: it may be asked about.
+    fn is_a_report(&self, record: &User) -> bool {
+        record
+            .report_of
+            .as_deref()
+            .is_some_and(|parent| self.printed_by_the_system.as_deref() == Some(parent))
     }
 
     /// `lateAncestor`: whether the user record at `place` is one of the

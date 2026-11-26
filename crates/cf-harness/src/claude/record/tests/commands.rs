@@ -90,7 +90,7 @@ pub(super) fn printed(uuid: &str, parent: &str, words: &str) -> Value {
 
 /// What a command printed, written as the system's record (`local_command`), a
 /// child of the command `parent`.
-fn printed_by_the_system(uuid: &str, parent: &str, words: &str) -> Value {
+pub(super) fn printed_by_the_system(uuid: &str, parent: &str, words: &str) -> Value {
     of_session(json!({
         "type": "system", "subtype": "local_command", "isMeta": false, "level": "info",
         "content": format!("<local-command-stdout>{words}</local-command-stdout>"),
@@ -844,12 +844,12 @@ fn a_usage_or_a_help_typed_at_an_idle_prompt_never_leaves_the_window_in_flight()
 }
 
 /// `/context`, as Claude Code 2.1.332 wrote it (T-2342): the system's echo and output, then a
-/// `user` record (`isMeta`, `rowSource` `local`) holding the same report as markdown for the
-/// model's next turn. No assistant record follows: no model was called. The reader takes that
-/// `user` record for a prompt's words, so the window reads in flight for as long as it is
-/// looked at, though nothing runs; the next turn ends it.
+/// `user` record (`isMeta`, `rowSource` `local`, a child of the output) holding the same
+/// report as markdown for the model's next turn. No assistant record follows: no model was
+/// called. That record asks nothing of the model, so it begins no turn: the window is at rest
+/// at every record of the line and at every time, and the next turn begins and ends as any.
 #[test]
-fn a_context_typed_at_an_idle_prompt_calls_no_model_and_reads_in_flight() {
+fn a_context_typed_at_an_idle_prompt_calls_no_model_and_is_at_rest() {
     let records = recorded("context");
     let typed = &records[at_rest().len()..];
     assert_eq!(typed.len(), 3);
@@ -859,23 +859,22 @@ fn a_context_typed_at_an_idle_prompt_calls_no_model_and_reads_in_flight() {
     assert!(records
         .iter()
         .all(|record| record["type"] != "assistant" || record["uuid"] == "a1"));
-    // Echo and output alone: at rest. With the meta record: in flight.
-    assert_eq!(
-        settlement_of(&records[..records.len() - 1]),
-        Settlement::Settled
-    );
-    assert_eq!(settlement_of(&records), Settlement::InFlight);
-    let mut stage = Stage::new();
-    stage.write(&records);
-    for now_ms in [0, 60_000, 86_400_000] {
-        match &*stage.reader.look(&Options::default(), now_ms) {
-            Reading::Known(record) => assert_eq!(record.settlement, Settlement::InFlight),
-            other => panic!("{other:?}"),
+    for upto in at_rest().len()..=records.len() {
+        let mut stage = Stage::new();
+        stage.write(&records[..upto]);
+        for now_ms in [0, 60_000, 86_400_000] {
+            match &*stage.reader.look(&Options::default(), now_ms) {
+                Reading::Known(record) => {
+                    assert_eq!(record.settlement, Settlement::Settled, "{upto} records")
+                }
+                other => panic!("{other:?}"),
+            }
         }
     }
     let mut next = records;
+    next.push(user("u2", json!("n1"), json!("Hello again")));
+    assert_eq!(settlement_of(&next), Settlement::InFlight);
     next.extend([
-        user("u2", json!("n1"), json!("Hello again")),
         assistant(
             "a2",
             "u2",
@@ -886,6 +885,158 @@ fn a_context_typed_at_an_idle_prompt_calls_no_model_and_reads_in_flight() {
         duration("d2", "a2"),
     ]);
     assert_eq!(settlement_of(&next), Settlement::Settled);
+}
+
+/// The `/context` report with its parent, its marks and its flags changed by `fields`, in
+/// place of the recorded one (the third record of the line).
+fn context_with(fields: Value) -> Vec<Value> {
+    let mut records = recorded("context");
+    let report = records.len() - 1;
+    records[report] = having(records[report].clone(), fields);
+    records
+}
+
+/// What the guard is made of: a `user` record that is a command's report held for the model's
+/// next turn has `isMeta` true, `rowSource` `local`, and the system's `local_command` output
+/// as its parent. Each part alone, taken away, gives a record that may ask the model
+/// something (a skill's text, the prompt of a scheduled task, a companion of a message), and
+/// that stays in flight, as before.
+#[test]
+fn a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn() {
+    // 2.1.331 and before write no `rowSource` that is known to be on this record (none is
+    // recorded): today's reading holds.
+    let mut without_row_source = recorded("context");
+    let last = without_row_source.len() - 1;
+    without_row_source[last]
+        .as_object_mut()
+        .unwrap()
+        .remove("rowSource");
+    assert_eq!(settlement_of(&without_row_source), Settlement::InFlight);
+    // Another row source: the harness's own or the recorded one.
+    for row_source in ["recorded", "harness"] {
+        assert_eq!(
+            settlement_of(&context_with(json!({ "rowSource": row_source }))),
+            Settlement::InFlight,
+            "{row_source}"
+        );
+    }
+    // Not meta.
+    assert_eq!(
+        settlement_of(&context_with(json!({ "isMeta": false }))),
+        Settlement::InFlight
+    );
+    // Local and meta, as the image companion of a prompt is, but a child of a user's record.
+    let mut companion = recorded("context");
+    let n = companion.len();
+    companion[n - 1]["parentUuid"] = json!("u1");
+    assert_eq!(settlement_of(&companion), Settlement::InFlight);
+    // A child of a system record that is no command's output.
+    let mut scheduled = recorded("context");
+    let n = scheduled.len();
+    scheduled[n - 1]["parentUuid"] = json!("d1");
+    assert_eq!(settlement_of(&scheduled), Settlement::InFlight);
+}
+
+/// A report of this shape that the model is called after: the turn begins at the first record
+/// that shows the call, as for any other, and ends as any turn does. Until that record the
+/// reader reads rest (Claude's own status covers that gap, see the window tests).
+#[test]
+fn a_report_of_a_command_followed_by_the_model_is_in_flight_from_the_models_record() {
+    let mut records = recorded("context");
+    let report = records.last().unwrap()["uuid"].clone();
+    let report = report.as_str().unwrap().to_owned();
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+    records.push(assistant(
+        "a2",
+        &report,
+        json!("m2"),
+        json!([{ "type": "tool_use", "id": "t1", "name": "Bash", "input": { "command": "ls" } }]),
+        json!("tool_use"),
+    ));
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.push(user(
+        "r2",
+        json!("a2"),
+        json!([{ "type": "tool_result", "tool_use_id": "t1", "content": "x" }]),
+    ));
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.extend([
+        assistant(
+            "a3",
+            "r2",
+            json!("m3"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        duration("d3", "a3"),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// The kinds of meta `user` record Claude Code writes that the model is asked after, each in
+/// the shape its records have in the sessions of this repository and of a real board: all
+/// stay in flight from the record itself. A skill's text (`sourceToolUseID`, a child of the
+/// tool result that loaded it, inside a turn), the prompt a scheduled task fires (a child of
+/// the system's `scheduled_task_fire`), the nudge after a call that was no valid call, and
+/// the caveat before a typed command's echo (a child of the turn's last record, with the
+/// command that may ask the model after it).
+#[test]
+fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
+    // A skill's text, inside a turn under way.
+    let mut skill = vec![
+        hello(),
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([{ "type": "tool_use", "id": "t1", "name": "Skill", "input": {} }]),
+            json!("tool_use"),
+        ),
+        user(
+            "r1",
+            json!("a1"),
+            json!([{ "type": "tool_result", "tool_use_id": "t1", "content": "Launching" }]),
+        ),
+    ];
+    skill.push(having(
+        user(
+            "s1",
+            json!("r1"),
+            json!("Base directory for this skill: /x"),
+        ),
+        json!({ "isMeta": true, "sourceToolUseID": "t1" }),
+    ));
+    assert_eq!(settlement_of(&skill), Settlement::InFlight);
+    skill.extend([answer("a2", "s1"), duration("d2", "a2")]);
+    assert_eq!(settlement_of(&skill), Settlement::Settled);
+    // A scheduled task's prompt, at rest before it.
+    let mut fired = at_rest();
+    fired.push(of_session(json!({
+        "type": "system", "subtype": "scheduled_task_fire", "uuid": "f1", "parentUuid": "d1",
+    })));
+    fired.push(having(
+        user("p1", json!("f1"), json!("CHECK the board every 20 minutes")),
+        json!({ "isMeta": true, "rowSource": "recorded" }),
+    ));
+    assert_eq!(settlement_of(&fired), Settlement::InFlight);
+    // The nudge after a call that was no call.
+    let mut retry = at_rest();
+    retry.push(having(
+        user(
+            "p1",
+            json!("d1"),
+            json!("The previous response failed to produce a valid tool call. Please retry."),
+        ),
+        json!({ "isMeta": true }),
+    ));
+    assert_eq!(settlement_of(&retry), Settlement::InFlight);
+    // The caveat and a command outside the list that is a prompt (`/plan <words>`).
+    let mut prompt = at_rest();
+    prompt.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", "plan", "a plan"),
+    ]);
+    assert_eq!(settlement_of(&prompt), Settlement::InFlight);
 }
 
 /// `!echo hi`, as Claude Code 2.1.332 wrote it (T-2342, run 4): two `user` records

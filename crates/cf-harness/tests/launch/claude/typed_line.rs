@@ -145,19 +145,37 @@ fn a_recorded_usage_or_help_leaves_the_window_at_rest_and_taking_words() {
 }
 
 /// `/context` as Claude Code 2.1.332 wrote it: the echo and output, then a meta `user`
-/// record with the report for the model's next turn, and no model call. The window reads at
-/// work and takes no words, with Claude idle at its prompt.
+/// record with the report for the model's next turn, and no model call. The record asks
+/// nothing of the model: the window is at rest and takes words, with Claude idle at its
+/// prompt.
 #[test]
-fn a_recorded_context_leaves_the_window_at_work_though_no_model_was_called() {
+fn a_recorded_context_leaves_the_window_at_rest_and_taking_words() {
     let lines = recorded("context");
     assert!(lines
         .iter()
         .all(|line| !line.contains("\"type\":\"assistant\"")
             || line.contains(&format!("{SESSION}-2"))));
     let observed = window_after(&lines);
-    assert!(!observed.settled, "the meta user record reads as a prompt");
-    assert!(!observed.takes_words);
+    assert!(observed.settled && observed.takes_words);
     assert!(observed.at_prompt);
+    assert_eq!(observed.over, Over::No);
+}
+
+/// The gap after such a report, if the model is asked after it: nothing is written until the
+/// model's first record, and Claude's own status says `busy` from the moment it asks (the
+/// status is the second word the look takes before it says a window takes words). The window
+/// takes no words then, though the transcript alone reads at rest.
+#[test]
+fn claudes_busy_status_covers_the_gap_before_the_models_first_record() {
+    let home = Home::new();
+    let lines = recorded("context");
+    home.transcript(SESSION, &lines[..1]);
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
+    home.transcript(SESSION, &lines);
+    home.status(SESSION, &json!({ "status": "busy" }), me());
+    let observed = look(&window);
+    assert!(!observed.takes_words, "Claude says it works");
+    assert!(!observed.at_prompt);
 }
 
 /// `!echo hi` as Claude Code 2.1.332 wrote it: the shell line and its output as `user`
