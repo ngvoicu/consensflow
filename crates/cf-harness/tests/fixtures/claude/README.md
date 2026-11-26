@@ -199,3 +199,34 @@ result was scrubbed with `cargo xtask scrub-transcript`:
   take of the Resume's note (m-3522), which it never began: the project closed again
   at 19:11:40.
 
+
+Kept 2026-11-26 by `cargo xtask live typed-lines --keep` (T-2342; Claude Code 2.1.332, on
+Sonnet; the case types `/usage`, `/context`, `/help`, `/config`, `!echo hi` and an empty
+Enter into one conversation after a first answered message). Only the records of each
+typed line are kept, not the whole transcript: the first record's `parentUuid` is the
+turn before it, which the test that reads it sets. Scrubbed by hand: `sessionId`
+`$SESSION`, `cwd` `/work/app`, the one MCP server of the run's folder named `example`;
+the words of Claude's own reports stay. The run ended at `/config`, which a single Escape
+did not close, so `/config`, `!echo hi` and the empty Enter have no recording.
+
+- `typed-line-usage.jsonl`, `typed-line-help.jsonl` — two `system` / `local_command`
+  records each: the echo (`<command-name>/usage</command-name>…`, no `commandRun`) and
+  the output (`<local-command-stdout>Settings dialog dismissed</local-command-stdout>`
+  or `Help dialog dismissed`, with `commandRun` naming the command), `isMeta` false,
+  level `info`, the output a child of the echo. No `user` record, no assistant record,
+  no `turn_duration`. Written when the dialog was left with Escape.
+- `typed-line-context.jsonl` — the same two `system` records (the output holds the
+  report, with colour codes) and a third: a `user` record, `isMeta` true, `rowSource`
+  `local`, whose content is the report as markdown (`## Context Usage…`), a child of
+  the output. No assistant record follows: no model was called.
+
+Kept 2026-11-26 by the same case's fourth run (T-2342, `cargo xtask live typed-lines`, which
+typed `!echo hi` and an empty Enter, Claude Code 2.1.332), scrubbed the same way (and
+`session_id`, `requestId`; the two `api-request` records, which the reader never reads, are left out):
+
+- `typed-line-shell.jsonl` — `!echo hi`: a `file-history-snapshot`, `tools-used`, two `user`
+  records with `rowSource` "local" and no `isMeta` (`<bash-input>echo hi</bash-input>`, then
+  `<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>` as its child), then the model's
+  own turn on them: an `assistant` record (`end_turn`, "The command ran and printed `hi`."),
+  `stop_hook_summary` and `turn_duration`. A model IS called. No `system` record.
+- An empty Enter wrote no record at all (the screen drew something), so it has no file.
