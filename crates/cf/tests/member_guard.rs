@@ -294,7 +294,7 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_one_the_sys
             let scratch = window.system.display();
             let call = format!(
                 "$env:SystemRoot='{scratch}'; $env:windir='{scratch}'; \
-                 (Get-Command {name} -CommandType Application).Source"
+                 (Get-Command {name} -CommandType Application | Select-Object -First 1).Source"
             );
             let ran = Command::new(shell)
                 .args(["-NoProfile", "-NonInteractive", "-Command", &call])
