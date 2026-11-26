@@ -35,7 +35,7 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{BILLING, BUSY, CREDENTIALS, REFUSED, SPENT};
+use patterns::{BILLING, BUSY, CREDENTIALS, EXPIRED, REFRESH_REFUSED, REFUSED, SPENT};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -242,8 +242,11 @@ pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal
     let status = status.or_else(|| REFUSED.captures(text).map(|found| js::number(&found[1])));
     match status {
         Some(status) if status == BILLING_STATUS => Some(Refusal::Billing),
-        Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
         _ if BILLING.is_match(text) => Some(Refusal::Billing),
+        // An access token that ran out is renewed by its harness before the next request: the
+        // turn failed and can be tried again, the account is not refused (T-2010).
+        _ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,
+        Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
         _ if CREDENTIALS.is_match(text) => Some(Refusal::Credentials),
         _ => None,
     }

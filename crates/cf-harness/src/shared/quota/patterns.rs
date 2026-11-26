@@ -56,6 +56,21 @@ pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
+/// An access token that ran out, which the harness renews by itself before its next request:
+/// Anthropic's 401 "OAuth token has expired. Please obtain a new token or refresh your existing
+/// token." and OpenAI's `token_expired` ("Your authentication token has expired").
+pub(super) static EXPIRED: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r"(?i-u:oauth token has expired|(?:access|authentication|auth) token (?:has |is |was )?expired|token_expired)",
+    )
+});
+
+/// A refusal of the refresh itself, which no renewal cures: such words beside an expired
+/// token still say the login is refused.
+pub(super) static REFRESH_REFUSED: LazyLock<Regex> = LazyLock::new(|| {
+    compile(r"(?i-u:invalid_grant|refresh token|refresh failed|refresh request failed)")
+});
+
 /// A provider's words for a request it refused for a moment (T-1112): Anthropic's
 /// `overloaded_error` ("Overloaded"), a model "at capacity" (Codex's "Selected model is at
 /// capacity"), servers "currently busy" or in "high demand", a service "temporarily

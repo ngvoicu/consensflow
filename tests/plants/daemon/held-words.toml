@@ -10,6 +10,8 @@
 held-words-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_words"]
 held-words-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
 held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
+held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests::a_quota_refusal"]
+held-words-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::provisional"]
 
 [[plant]]
 name = "held words: the hold keeps none of the harness's words"
@@ -70,3 +72,23 @@ runs = ["held-words-pi"]
 file = "crates/cf-harness/src/shared/quota/patterns.rs"
 find = "refresh failed \\(401\\)|invalid_grant"
 replace = "refresh failed \\(50[0-9]\\)|refresh failed \\(401\\)|invalid_grant"
+
+[[plant]]
+name = "held words: an expired access token is read as a refused login"
+meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
+runs = ["held-words-quota", "held-words-pi", "held-words-muse"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "_ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,"
+replace = "_ if EXPIRED.is_match(text) && false => None,"
+
+[[plant]]
+name = "held words: an expired token beside a refused refresh is read as nothing"
+meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "_ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,"
+replace = "_ if EXPIRED.is_match(text) => None,"

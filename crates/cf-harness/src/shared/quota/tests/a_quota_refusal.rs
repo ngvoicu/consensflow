@@ -155,6 +155,33 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
 }
 
 #[test]
+fn an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are()
+{
+    // The harness renews the token by itself: the turn failed and can be tried again.
+    for text in [
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."},"request_id":"req_1"}"#,
+        r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","type":"invalid_request_error","code":"token_expired"}}"#,
+    ] {
+        assert_eq!(account_refusal(text, None), None, "{text}");
+        assert_eq!(account_refusal(text, Some(401.0)), None, "{text}");
+    }
+    // A refresh that was refused, a key or token that is invalid or revoked, a 401 that names
+    // neither: the login is refused.
+    for text in [
+        "OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={\"error\":\"invalid_grant\"}; the access token has expired",
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has been revoked."}}"#,
+        "401 Unauthorized",
+    ] {
+        assert_eq!(
+            account_refusal(text, None),
+            Some(Refusal::Credentials),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn tells_a_refusal_no_wait_cures_from_a_limit_that_resets() {
     // The words real refusals carried: OpenRouter's spent credit through Pi (2026-09),
     // Muse's billing refusal (T-705, 2026-10-26), Anthropic's API credit, an OpenAI

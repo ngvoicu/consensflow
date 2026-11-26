@@ -433,9 +433,36 @@ fn pi_reads_each_providers_refusal_for_what_it_is() {
             r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
             "moment",
         ),
+        // An access token that ran out is renewed by Pi: no hold, Pi tries it again.
+        (
+            r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#,
+            "none",
+        ),
+        (
+            r#"openai-codex API error (401): {"error":{"message":"Your authentication token has expired. Please try signing in again.","code":"token_expired"}}"#,
+            "none",
+        ),
     ] {
         assert_eq!(read_pi_failure(error), read, "{error}");
     }
+}
+
+#[test]
+fn an_expired_token_that_fails_a_turn_again_is_a_failed_turn_and_no_hold() {
+    let expired = json!(
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#
+    );
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "go"),
+        failing("a1", &expired, &json!(1_790_000_000_000_i64)),
+        user("u2", "again"),
+        failing("a2", &expired, &json!(1_790_000_001_000_i64)),
+    ]);
+    // Settled: the record has been quiet for longer than Pi's own retry takes.
+    let record = stage.at(600_000);
+    assert!(record.failed, "the turn failed, for the engine's tries");
+    assert!(record.quota.is_none(), "{:?}", record.quota);
 }
 
 #[test]
