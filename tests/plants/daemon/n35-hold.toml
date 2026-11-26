@@ -61,7 +61,7 @@ runs = ["n35-dispatcher", "n35-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
 find = "    let Some(hold) = hold else {\n        return Ok(());"
-replace = "    let Some(hold) = hold else {\n        start_again(store, task, \"2026-01-01T00:00:00.000Z\")?;\n        return Ok(());"
+replace = "    let Some(hold) = hold else {\n        start_again(store, task)?;\n        return Ok(());"
 
 [[plant]]
 name = "n35 hold: a tell to the window does not reset the count"
