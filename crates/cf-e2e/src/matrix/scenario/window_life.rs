@@ -542,7 +542,12 @@ pub fn window_life() -> Vec<Scenario> {
             )],
             A,
             |judged| {
-                let failed: Vec<&str> = chief_messages_with(judged, " failed: ");
+                // The task's own failure, not the notes of a turn that failed and is tried again (N35's
+                // holds say "its turn failed" too).
+                let failed: Vec<&str> = chief_messages_with(judged, " failed: ")
+                    .into_iter()
+                    .filter(|body| !body.contains("turn failed"))
+                    .collect();
                 vec![
                     oracle::state(judged, "A", 0, &["failed"]),
                     Check::new(
