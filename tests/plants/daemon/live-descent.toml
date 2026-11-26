@@ -269,8 +269,8 @@ runs = ["ld-tests"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = "    (length % 2 == 0 && offset >= header && offset % 2 == 0 && end <= size)"
-replace = "    (length % 2 == 0 && offset >= header && offset % 2 == 0 && end <= size + 64)"
+find = "end <= size)"
+replace = "end <= size + 64)"
 
 [[plant]]
 name = "live descent: an empty command line is another program's in the rig's leftover check"

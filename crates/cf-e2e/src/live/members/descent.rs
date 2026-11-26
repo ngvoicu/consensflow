@@ -882,7 +882,7 @@ fn text_in_buffer(
 ) -> Option<(usize, usize)> {
     let offset = text.checked_sub(base)?;
     let end = offset.checked_add(length)?;
-    (length % 2 == 0 && offset >= header && offset % 2 == 0 && end <= size)
+    (length.is_multiple_of(2) && offset >= header && offset.is_multiple_of(2) && end <= size)
         .then_some((offset, length / 2))
 }
 
