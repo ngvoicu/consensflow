@@ -683,3 +683,126 @@ fn a_command_that_is_a_prompt_prints_nothing_and_its_turn_ends_at_its_answer() {
     records.extend([answered, duration("d2", "a2")]);
     assert_eq!(settlement_of(&records), Settlement::Settled);
 }
+
+/// What a command typed at an idle prompt leaves as the user's records, named `name`, its
+/// output written as a user's record (`system` false: `/model`, `/effort`, `/clear`) or as the
+/// system's (`/compact` with nothing to compact, `/reload-skills`).
+fn typed_line(name: &str, system: bool) -> Vec<Value> {
+    let mut records = at_rest();
+    let output = if system {
+        printed_by_the_system("o1", "n1", "Printed")
+    } else {
+        printed("o1", "n1", "Printed")
+    };
+    records.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", name, ""),
+        output,
+    ]);
+    records
+}
+
+/// The reader's list of commands it ends at their output is closed (`QUIET_COMMAND`). A
+/// command outside it, whatever it prints and however it is written, is read as the words of
+/// a prompt, whose turn the model's end alone ends: in flight at once, and for as long as it
+/// is looked at, with nothing after it (T-2330). What Claude Code 2.1.3xx writes for `/cost`,
+/// `/context`, `/status`, `/usage`, `/help`, `/config` or `/doctor` is NOT recorded in this
+/// repository: the names here stand for any command Claude writes as a user's echo and output,
+/// the shape the listed commands were recorded in.
+#[test]
+fn a_command_outside_the_closed_list_stays_in_flight_for_as_long_as_it_is_looked_at() {
+    for name in [
+        "cost", "context", "status", "usage", "help", "config", "doctor",
+    ] {
+        for system in [false, true] {
+            let records = typed_line(name, system);
+            let mut stage = Stage::new();
+            stage.write(&records);
+            let mut says = Vec::new();
+            // At once, a minute after, a day after: no time ends it.
+            for now_ms in [0, 60_000, 86_400_000] {
+                match &*stage.reader.look(&Options::default(), now_ms) {
+                    Reading::Known(record) => says.push(record.settlement),
+                    other => panic!("/{name}: {other:?}"),
+                }
+            }
+            assert_eq!(
+                says,
+                [Settlement::InFlight; 3],
+                "/{name}, output as the {} record",
+                if system { "system's" } else { "user's" }
+            );
+        }
+    }
+}
+
+/// The same lines of a listed command, in the same shapes, end at their output: the closed
+/// list is the whole of the difference (a counter-case to the test above).
+#[test]
+fn the_listed_commands_in_the_same_shapes_are_at_rest_at_their_output() {
+    for name in ["clear", "compact", "effort", "model", "reload-skills"] {
+        for system in [false, true] {
+            assert_eq!(
+                settlement_of(&typed_line(name, system)),
+                Settlement::Settled,
+                "/{name}, system {system}"
+            );
+        }
+    }
+}
+
+/// What ends a turn a command outside the list left in flight: the model's turn that comes
+/// after it, as the next prompt of the person's begins and ends one.
+#[test]
+fn the_next_turn_ends_what_a_command_outside_the_list_left_in_flight() {
+    let mut records = typed_line("cost", false);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.extend([
+        user("u2", json!("o1"), json!("Hello again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Hi"))]),
+            json!("end_turn"),
+        ),
+        duration("d2", "a2"),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// A command that writes only the system's records (`/mcp`, `/plugin`: no user's echo) begins
+/// no turn at all: at rest before and after, so no look of any time can read it in flight.
+#[test]
+fn a_command_written_only_as_the_systems_records_is_never_in_flight() {
+    let mut stage = Stage::new();
+    let mut records = at_rest();
+    stage.write(&records);
+    let mut command = printed_by_the_system("n1", "d1", "x");
+    command["content"] = json!("<command-name>/mcp</command-name>");
+    records = vec![command];
+    stage.append(&records);
+    match &*stage.reader.look(&Options::default(), 0) {
+        Reading::Known(record) => assert_eq!(record.settlement, Settlement::Settled),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The `!` shell mode, with the shape the reviewer of T-1988 gave (`<bash-input>`,
+/// `<bash-stdout>`) and no recording of it in this repository: if Claude Code writes a typed
+/// `!` line as user's records with no model turn after, the reader reads them as a prompt's
+/// words and the turn stays in flight. This test holds what the reader makes of that shape;
+/// whether Claude writes it so is for a live recording.
+#[test]
+fn a_shell_line_in_the_assumed_shape_stays_in_flight() {
+    let mut records = at_rest();
+    records.extend([
+        user("n1", json!("d1"), json!("<bash-input>pwd</bash-input>")),
+        user(
+            "o1",
+            json!("n1"),
+            json!("<bash-stdout>/tmp</bash-stdout><bash-stderr></bash-stderr>"),
+        ),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+}

@@ -47,6 +47,7 @@ mod relaunched;
 mod resumed;
 mod specs;
 mod stops;
+mod typed_line;
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
 /// filename-safe word).
