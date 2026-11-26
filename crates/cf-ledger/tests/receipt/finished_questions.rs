@@ -42,7 +42,7 @@ fn a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answ
     assert_eq!(w.message(question).state, "cancelled");
     assert_eq!(
         w.message(question).reason.as_deref(),
-        Some("T-1 was finished")
+        Some("T-1 gave its result with it unanswered")
     );
     assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
     // The chief's list of what waits for it has none.

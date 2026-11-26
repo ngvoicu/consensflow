@@ -359,15 +359,6 @@ fn same_turn_question_with_an_answer_still_in_queue_does_not_allow_the_old_resul
     b.finish();
     let after = b.c.message(queued.id);
     let results = b.results();
-    let events = b.events();
-    let done_at = events
-        .iter()
-        .find(|e| e.kind == "task.state" && e.data["to"] == "done")
-        .map(|e| e.id);
-    let answer_paste_at = events
-        .iter()
-        .find(|e| e.kind == "delivery.begun" && e.data["message"].as_i64() == Some(after.id))
-        .map(|e| e.id);
     b.c.adapter
         .answer("zeus", "Applied the SQLite answer and finished.");
     passes(&b.c, 4);
@@ -579,15 +570,6 @@ mod extras {
             .unwrap();
     }
 
-    fn waiting_words(b: &Board) -> Vec<String> {
-        b.c.task(b.project, 1)
-            .messages
-            .into_iter()
-            .filter(|m| m.kind == "note" && m.recipient == "chief")
-            .map(|m| m.body)
-            .collect()
-    }
-
     fn pastes_since(b: &Board, mark: i64, who: i64) -> Vec<i64> {
         b.events()
             .into_iter()
@@ -721,7 +703,7 @@ mod extras {
 
     #[test]
     fn closing_project_during_a_worker_observation_cannot_take_its_old_turn() {
-        let (b, first, _, _) = field();
+        let (b, _first, _, _) = field();
         let launch = b.c.adapter.agent(&b.worker).launch;
         let gate =
             b.c.adapter
@@ -736,21 +718,10 @@ mod extras {
         assert_eq!(b.c.project(b.project).state, "suspended");
         assert!(close.take().is_none());
         assert!(b.results().is_empty());
-        let suspended = b
-            .events()
-            .iter()
-            .rfind(|e| e.kind == "project.state")
-            .unwrap()
-            .id;
         gate.open();
         b.c.settle();
         pass.take().unwrap().unwrap();
         close.take().unwrap().unwrap();
-        let state_event = b
-            .events()
-            .iter()
-            .find(|e| e.kind == "task.state" && e.data["to"] == "done")
-            .map(|e| e.id);
         assert!(
             b.results().is_empty(),
             "collector accepted the old words after Close"
@@ -758,7 +729,7 @@ mod extras {
     }
 
     fn kept_project(resume: bool) {
-        let (b, first, _, _) = field();
+        let (b, _first, _, _) = field();
         let pane = b.c.dispatcher.pane(b.worker_id);
         b.c.adapter.answer(&b.worker, DONE);
         let before = b.events().last().unwrap().id;

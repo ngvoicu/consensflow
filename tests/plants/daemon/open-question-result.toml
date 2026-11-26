@@ -72,7 +72,7 @@ replace = '''            "",'''
 
 [[plant]]
 name = "open question result: finish leaves the questions open"
-meant = "a_question_closed_by_finish_is_closed_in_a_window_the_human_keeps_open"
+meant = "field_second_answer_then_result_has_one_confirmed_paste"
 runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
