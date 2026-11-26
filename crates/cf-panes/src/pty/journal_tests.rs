@@ -1115,9 +1115,19 @@ fn a_size_whose_page_was_replaced_while_its_terminal_resized_is_undone() {
         })
     };
     inside.recv_timeout(Duration::from_secs(10)).unwrap();
-    inputs.begin_page("new").unwrap();
+    // The next page takes the page's lock while the old one's terminal is still resizing.
+    let (began, begun) = mpsc::channel::<()>();
+    {
+        let inputs = Arc::clone(&inputs);
+        std::thread::spawn(move || {
+            inputs.begin_page("new").unwrap();
+            let _ = began.send(());
+        });
+    }
+    let held = begun.recv_timeout(Duration::from_secs(3)).is_err();
     release.send(()).unwrap();
     let answer = resizing.join().unwrap();
+    assert!(!held, "the next page waited on the old page's slow resize");
     assert_eq!(answer["ok"], false);
     assert_eq!(answer["error"], "pane-input-stale-page");
     assert_eq!(
