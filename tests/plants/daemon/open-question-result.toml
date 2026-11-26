@@ -98,16 +98,6 @@ replace = '''        .exists(params![task, window])? && false
     let Some(pasted)'''
 
 [[plant]]
-name = "open question result: a paste before the close still begins the turn"
-meant = "a_turn_that_ended_before_a_close_unlooked_at_is_no_result"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) {'''
-replace = '''    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) && false {'''
-
-[[plant]]
 name = "open question result: the result names questions it leaves open"
 meant = "a_question_closed_by_the_result_is_closed_in_a_window_the_human_keeps_open"
 runs = ["oqr-dispatcher"]

@@ -267,9 +267,9 @@ pub(crate) fn open_questions(
 
 /// The questions `window` left open on `task` when the turn that just ended is past them, so
 /// that turn's words are the task's result (T-2197): a message was pasted into the window after
-/// every open question was asked, in the window's present run (since the project last closed,
-/// restarted or resumed), and nothing of the
-/// task is on its way to the window. Empty otherwise.
+/// every open question was written, in the window's present conversation, and nothing of the
+/// task is on its way to the window. Empty otherwise. That the paste went into the window's
+/// present pane is the engine's to say (`pasted_in_this_opening`).
 ///
 /// "After" is when each was written, by the ledger's own order: the question's `message.sent`
 /// event against the pasted message's, never when it was pasted and never the messages' ids
@@ -304,15 +304,6 @@ pub(crate) fn left_open_before_the_turn(
         )?)
     };
     let paste = place("delivery.begun", pasted.id)?;
-    // A paste before the project closed, restarted or resumed is not of this run.
-    let run: Option<i64> = store.db.query_row(
-        "SELECT max(id) FROM event WHERE project_id = ?1 AND kind = 'project.state'",
-        [pasted.project_id],
-        |row| row.get(0),
-    )?;
-    if run.is_some_and(|run| paste.is_none_or(|paste| paste < run)) {
-        return Ok(Vec::new());
-    }
     // A paste before the window's conversation changed (a new one, a switch away and back)
     // went into another opening of it.
     if let Some(paste) = paste {
