@@ -90,7 +90,34 @@ impl Ledger {
         reason: &str,
         kind: HoldKind,
     ) -> Result<ParticipantView, LedgerError> {
-        staff::mark_out_kind(&mut self.store, participant, until, reason, Some(kind))
+        staff::mark_out_kind(
+            &mut self.store,
+            participant,
+            until,
+            reason,
+            Some(kind),
+            None,
+        )
+    }
+
+    /// Mark a member out for a typed reason, with the harness's own words of the refusal kept
+    /// with the hold for the board to say.
+    pub fn mark_out_saying(
+        &mut self,
+        participant: i64,
+        until: &str,
+        reason: &str,
+        kind: HoldKind,
+        because: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_out_kind(
+            &mut self.store,
+            participant,
+            until,
+            reason,
+            Some(kind),
+            Some(because),
+        )
     }
 
     /// A member joins the staff, named by its model, or one that left on the same

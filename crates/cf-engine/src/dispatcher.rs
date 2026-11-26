@@ -2168,12 +2168,21 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
-            owner.id,
-            &reset,
-            unwell.map_or("out of quota", Unwell::hold),
-            kind,
-        )?;
+        let hold = unwell.map_or("out of quota", Unwell::hold);
+        // An account's refusal and a model's move keep the harness's own words with the hold,
+        // for the board to say after the window that heard them is gone.
+        let marked = match unwell {
+            Some(Unwell::Account(because) | Unwell::Moved(because)) => self
+                .seams
+                .ledger
+                .borrow_mut()
+                .mark_out_saying(owner.id, &reset, hold, kind, because)?,
+            _ => self
+                .seams
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(owner.id, &reset, hold, kind)?,
+        };
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

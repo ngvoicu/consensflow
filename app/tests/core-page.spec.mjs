@@ -2389,7 +2389,7 @@ test('the staff in Project settings says a member is out of quota and tries it a
  * or billing was refused, which they may have fixed; and a model busy for a moment, which
  * ConsensFlow tries again after a back-off of its own and no press shortens.
  */
-async function heldFor(page, kind) {
+async function heldFor(page, kind, { because, bare } = {}) {
   const data = model()
   const soon = new Date(Date.now() + 90 * 60_000).toISOString()
   const until = kind === 'account' ? '9999-12-31T23:59:59.998Z' : soon
@@ -2397,6 +2397,9 @@ async function heldFor(page, kind) {
   for (const handle of ['zeus', 'chief']) {
     const lane = lanes.find((lane) => lane.participant.handle === handle)
     lane.participant.outUntil = until
+    if (because) lane.participant.outBecause = because
+    // A hold that outlives its window: no activity says anything of it.
+    if (bare) delete lane.activity
     if (kind === 'busy') lane.busy = soon
   }
   const zeus = lanes.find((lane) => lane.participant.handle === 'zeus')
@@ -2461,6 +2464,30 @@ test('a member held for its account says so, to log in again or pay, on its row,
   const staff = await shown.staff()
   await expect(staff.locator('.member-out')).toHaveText(said)
   await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member held for its account says which, billing or login, and the harness’s own words, from the hold it keeps and with no window to say them', async ({
+  page,
+}) => {
+  // The owner's field find (2026-11-22): the card fell back to "billing or login" because the
+  // window's activity that held the words was gone; the hold now keeps them.
+  const login = `its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}} ${'and more words '.repeat(12)}`
+  const shown = await heldFor(page, 'account', { because: login, bare: true })
+  const short = `Unavailable: ${login.replace(/\s+/g, ' ').trim().slice(0, 119)}…`
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(short)
+  // The chief's card and the staff list say them in full.
+  const full = `Unavailable: ${login}. Logged in again, or paid? Press Try again now`
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(full.replace(/\s+/g, ' '))
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(full.replace(/\s+/g, ' '))
+})
+
+test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {
+  const billing = 'its billing was refused: 402 Insufficient credits'
+  const shown = await heldFor(page, 'account', { because: billing, bare: true })
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    `Unavailable: ${billing}`,
+  )
 })
 
 test('a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list', async ({

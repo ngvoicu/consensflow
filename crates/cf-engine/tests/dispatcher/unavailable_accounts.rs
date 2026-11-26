@@ -279,3 +279,28 @@ fn brought_back_by_a_count_of(level: Level, used: u64) {
         "its task went on"
     );
 }
+
+#[test]
+fn keeps_the_harnesss_words_with_the_hold_for_the_board_to_say() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .adapter
+        .refuse("zeus-amber-pine", unavailable(&context));
+    context.pass().unwrap();
+    let board =
+        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
+    let zeus = board["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == "zeus")
+        .expect("zeus's lane");
+    assert_eq!(
+        zeus["participant"]["outBecause"], BECAUSE,
+        "the board says the harness's words from the hold, with no window to say them"
+    );
+}

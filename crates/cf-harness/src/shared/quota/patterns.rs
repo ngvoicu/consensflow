@@ -47,10 +47,12 @@ pub(super) static BILLING: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// An account's login refused (nothing resets it): Anthropic's `authentication_error`, a key
-/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10).
+/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10): Codex's "token refresh
+/// failed (401)", and Anthropic's "token refresh request failed" with the `status=401` its
+/// details name, or its `invalid_grant` (Pi 1.6.1, 2026-11).
 pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
     compile(
-        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\))",
+        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\)|invalid_grant)|token refresh request failed\.[^\n]*status=401(?-u:\b)",
     )
 });
 

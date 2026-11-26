@@ -2,7 +2,7 @@
 
 use cf_base::time;
 use cf_proto::ledger::ParticipantView;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::HoldKind;
@@ -62,7 +62,7 @@ pub(crate) fn mark_out(
         "model moved" => Some(HoldKind::Moved),
         _ => None,
     };
-    mark_out_kind(store, participant_id, until, reason, kind)
+    mark_out_kind(store, participant_id, until, reason, kind, None)
 }
 
 /// Keep the kind with the end which wins; a shorter, later report must not
@@ -73,6 +73,7 @@ pub(crate) fn mark_out_kind(
     until: &str,
     reason: &str,
     kind: Option<HoldKind>,
+    because: Option<&str>,
 ) -> Result<ParticipantView, LedgerError> {
     // Kept as a store keeps a time, however it was written.
     let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
@@ -110,10 +111,33 @@ pub(crate) fn mark_out_kind(
         store.log(
             member.project_id,
             "member.out",
-            json!({ "handle": member.handle, "until": until, "reason": reason }),
+            json!({ "handle": member.handle, "until": until, "reason": reason, "because": because }),
         )?;
         participant_view(&store.participant_row(member.id)?)
     })
+}
+
+/// The words a member's hold was made from, as the harness said them: those of the
+/// `member.out` that set the end the member keeps. None where that hold carries none (a quota,
+/// a busy model, a hold an older build made).
+pub(crate) fn hold_words(
+    store: &Store,
+    project_id: i64,
+    handle: &str,
+    until: &str,
+) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.because') FROM event
+             WHERE project_id = ?1 AND kind = 'member.out' AND json_valid(data)
+               AND json_extract(data, '$.handle') = ?2 AND json_extract(data, '$.until') = ?3
+             ORDER BY id DESC LIMIT 1",
+            params![project_id, handle, until],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// A member out of quota is back before its reset: one of its windows

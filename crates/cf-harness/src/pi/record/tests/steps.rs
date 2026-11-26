@@ -337,6 +337,107 @@ fn pi_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailabl
     ));
 }
 
+/// What Pi's record makes of a failed step's words: a limit that resets, an account that
+/// refused (billing or login), a refusal for a moment, or the turn's own failure.
+fn read_pi_failure(error: &str) -> &'static str {
+    let mut stage = Stage::with(&[
+        header(),
+        failing("a1", &json!(error), &json!(1_790_000_000_000_i64)),
+    ]);
+    let record = stage.at(0);
+    match record.quota.as_deref() {
+        Some(Quota::Exhausted { .. }) => "resets",
+        Some(Quota::Busy { .. }) => "moment",
+        Some(Quota::Unavailable { because, .. }) if because.starts_with("its billing") => "billing",
+        Some(Quota::Unavailable { .. }) => "login",
+        // Pi tries its first error again itself (T-1958): no hold, no failure yet.
+        _ => "none",
+    }
+}
+
+/// The words Pi 1.6.1 records for each provider's refusals (read from its published
+/// `@earendil-works/pi-ai` and `pi-coding-agent`, 2026-11-26): the provider's own body behind its
+/// status, and for an OAuth login the refresh's own sentence.
+#[test]
+fn pi_reads_each_providers_refusal_for_what_it_is() {
+    for (error, read) in [
+        // A limit that resets is never an account's refusal, whatever else its words say.
+        (
+            r#"429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011"}"#,
+            "resets",
+        ),
+        (
+            r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."}}"#,
+            "resets",
+        ),
+        (
+            r#"openai-codex API error (429): {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus","resets_in_seconds":3600}}"#,
+            "resets",
+        ),
+        (
+            "openai-codex API error (429): {\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"}}\nCheck your ChatGPT usage: https://chatgpt.com/settings/usage",
+            "resets",
+        ),
+        (
+            "OpenAI API error (429): Rate limit reached for gpt-5 on tokens per min (TPM): Limit 30000, Used 29000. Please try again in 2s. You can increase your rate limit by adding a payment method at https://platform.openai.com/account/billing.",
+            "resets",
+        ),
+        (
+            r#"429 {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}"#,
+            "resets",
+        ),
+        // An account's refusal that no wait cures.
+        (
+            r#"400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#,
+            "billing",
+        ),
+        (
+            r#"OpenAI API error (429): {"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#,
+            "billing",
+        ),
+        (
+            r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+            "login",
+        ),
+        (
+            "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (401): {\"error\":\"refresh_token_reused\"}",
+            "login",
+        ),
+        (
+            "OAuth refresh failed for anthropic: Anthropic token refresh request failed. url=https://platform.claude.com/v1/oauth/token; details=Error: HTTP request failed. status=401; url=https://platform.claude.com/v1/oauth/token; body={\"error\":\"invalid_grant\"}; stack=Error: HTTP request failed",
+            "login",
+        ),
+        // A refresh refused for a moment is no login refusal: a server's error is tried again,
+        // and a network's is Pi's own to try again.
+        (
+            "OAuth refresh failed for anthropic: Anthropic token refresh request failed. url=https://platform.claude.com/v1/oauth/token; details=Error: HTTP request failed. status=503; url=https://platform.claude.com/v1/oauth/token; body=Service Unavailable",
+            "moment",
+        ),
+        (
+            "OAuth refresh failed for openai-codex: OpenAI Codex token refresh failed (502): Bad Gateway",
+            "moment",
+        ),
+        (
+            "OAuth refresh failed for anthropic: Anthropic token refresh request failed. url=https://platform.claude.com/v1/oauth/token; details=TypeError: fetch failed; cause=Error: getaddrinfo ENOTFOUND platform.claude.com",
+            "none",
+        ),
+        (
+            "OAuth refresh failed for openai-codex: OpenAI Codex token refresh error: fetch failed",
+            "none",
+        ),
+        (
+            "Authentication failed for \"anthropic\". Credentials may have expired or network is unavailable. Run '/login anthropic' to re-authenticate.",
+            "none",
+        ),
+        (
+            r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+            "moment",
+        ),
+    ] {
+        assert_eq!(read_pi_failure(error), read, "{error}");
+    }
+}
+
 #[test]
 fn a_failure_is_the_text_string_makes_of_it() {
     let quota_of = |error: &Value| {

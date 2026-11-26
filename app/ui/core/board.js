@@ -445,16 +445,38 @@ function partState(part, row, now) {
 }
 
 /**
+ * What a held member's harness said, as the hold keeps it (`outBecause`, which says which of
+ * billing or login was refused, and the harness's own words), or else as its window's activity
+ * says it under `prefix`: a hold an older build made keeps no words, and a window can be gone.
+ */
+function heldSaid(participant, activity) {
+  return (prefix) => {
+    if (participant.outBecause) return participant.outBecause
+    return activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+  }
+}
+
+/** A line of the harness's words held to what a card can say; the lane says them in full. */
+function shortened(words) {
+  if (words == null) return null
+  const line = words.replace(/\s+/g, ' ').trim()
+  return line.length > HELD_WORDS_SHORT ? `${line.slice(0, HELD_WORDS_SHORT - 1)}…` : line
+}
+
+const HELD_WORDS_SHORT = 120
+
+/**
  * Why a part of a team cannot run work, short: its words in full are `outWords`, which a lane
  * of its own says; in a team the way back is the button beside them.
  */
 function outShort({ participant, activity, busy }, now) {
   if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
-  const said = (prefix) =>
-    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
-  if (modelMoved(participant)) return `Held: ${said('moved: ') ?? 'its model moved on its own'}`
+  const said = heldSaid(participant, activity)
+  if (modelMoved(participant)) {
+    return `Held: ${shortened(said('moved: ')) ?? 'its model moved on its own'}`
+  }
   if (unavailable(participant)) {
-    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}`
+    return `Unavailable: ${shortened(said('unavailable: ')) ?? 'its account was refused for billing or login'}`
   }
   return `Out of quota until ${backAt(participant.outUntil, now)}`
 }
@@ -815,8 +837,7 @@ export function outWords({ participant, activity, busy }, now) {
   if (typeof busy === 'string') {
     return `Its model is busy: ConsensFlow tries it again at ${backAt(busy, now)}`
   }
-  const said = (prefix) =>
-    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+  const said = heldSaid(participant, activity)
   if (modelMoved(participant)) {
     return `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
   }
