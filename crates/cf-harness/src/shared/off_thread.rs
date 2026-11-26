@@ -67,7 +67,13 @@ pub fn late_step(said: &str) -> Option<(&'static str, u64)> {
 
 /// What a step says where the launch it belongs to is over: nothing of it is told to anybody,
 /// as whoever prepared the launch finds it over too.
-const OVER: &str = "the launch was called off before its window opened";
+pub const OVER: &str = "the launch was called off before its window opened";
+
+/// Whether `said` is what a step says where the launch it belongs to was called off.
+#[must_use]
+pub fn called_off(said: &str) -> bool {
+    said == OVER
+}
 
 /// Whether a launch is still wanted, as its preparer says it.
 type Wanted = Rc<dyn Fn() -> bool>;

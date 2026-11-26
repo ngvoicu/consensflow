@@ -12,6 +12,7 @@
 
 [run]
 lf-pause = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_member_launch_that_fails_after_a_pause", "--", "--test-threads=2"]
+lf-off = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "called_off_launches", "--", "--test-threads=2"]
 lf-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::a_launch_is_told_it_is_over", "--", "--test-threads=2"]
 lf-steps = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::off_thread::tests::a_launch_that_is_over_begins_no_further_step"]
 lf-stop = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::stop_log::a_stop_writes_what_it_holds"]
@@ -213,8 +214,8 @@ runs = ["lf-told"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = """            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))"""
-replace = """            let _ = (this, held, id);
+find = """            Rc::new(move || this.launch_still_wanted(&held, &who, first))"""
+replace = """            let _ = (this, held, who, first);
             Rc::new(|| true)"""
 
 [[plant]]
@@ -305,3 +306,44 @@ runs = ["lf-gaveup"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = """        if delivering.launch && !self.in_open_project(message.project_id)? {"""
 replace = """        if false && delivering.launch && !self.in_open_project(message.project_id)? {"""
+
+[[plant]]
+name = 'launch-freeze: a launch that was called off is counted as a failed one again'
+meant = "a_chief_launch_called_off_is_no_failure_and_the_next_ask_opens_its_window_at_once"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """                if cf_harness::called_off(&cause.to_string()) {"""
+replace = """                if false && cf_harness::called_off(&cause.to_string()) {"""
+
+[[plant]]
+name = 'launch-freeze: a move asked during a launch is not told to the launch'
+meant = "a_move_asked_at_any_moment_of_a_launch_is_a_move"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """        record.window.borrow_mut().moving += 1;"""
+replace = """        record.window.borrow_mut().moving += 0;"""
+
+[[plant]]
+name = 'launch-freeze: a window opens for a task handed on and is given its brief'
+meant = "a_window_that_opens_for_a_task_handed_to_a_backup_is_given_nothing_and_closes"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """        let handed_on = !self.launch_still_wanted(record, participant, first_id)
+            && first_id.is_some_and(|message| !self.first_message_held(participant, message));"""
+replace = """        let handed_on = false;"""
+
+[[plant]]
+name = 'launch-freeze: a tell for a task handed on is judged by its task and dropped at the open'
+meant = "no_kind_of_first_message_is_dropped_in_silence_whatever_its_tasks_state"
+runs = ["lf-off"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """            found.kind == "task","""
+replace = """            true,"""

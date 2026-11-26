@@ -692,8 +692,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            delivery.delivering = delivering;'''
-replace = '''            delivery.delivering = delivering.clone();'''
+find = '''            delivery.delivering = if handed_on { None } else { delivering };'''
+replace = '''            delivery.delivering = if handed_on { None } else { delivering.clone() };'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
