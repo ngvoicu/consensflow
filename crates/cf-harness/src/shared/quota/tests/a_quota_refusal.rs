@@ -172,6 +172,18 @@ fn an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_a
         r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
         r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has been revoked."}}"#,
         "401 Unauthorized",
+        // The review's cases (T-2350): an old expired token beside a revoked or invalid key, a
+        // refresh token that expired, words that tell the person to log in, a refresh token
+        // named beside an expired access token.
+        "401 Invalid API key: key revoked. Previous OAuth token has expired.",
+        r#"401 {"error":{"code":"refresh_token_expired","message":"The access token has expired."}}"#,
+        "401 OAuth token has expired. Use your refresh token to renew.",
+        "401 OAuth token has expired. Run /login to sign in again.",
+        r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","code":"invalid_session"}}"#,
+        // Pi's published Meta error: the identity session cannot be renewed (pi-ai 1.6.1,
+        // auth/oauth/meta.js), in Pi's outer wrapper and bare.
+        "OAuth refresh failed for meta: Meta session expired (status 401). Run `/login meta` to sign in again.",
+        "Meta session expired (status 403). Run `/login meta` to sign in again.",
     ] {
         assert_eq!(
             account_refusal(text, None),

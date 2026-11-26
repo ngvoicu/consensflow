@@ -9,6 +9,7 @@
 [run]
 held-words-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_words"]
 held-words-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
+held-words-n35 = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold::a_task_that_failed_on"]
 held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
 held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests::a_quota_refusal"]
 held-words-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::provisional"]
@@ -60,7 +61,7 @@ runs = ["held-words-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota/patterns.rs"
-find = "|invalid_grant)|token refresh request failed\\.[^\\n]*status=401(?-u:\\b)\""
+find = "|invalid_grant|session expired \\(status 40[13]\\))|token refresh request failed\\.[^\\n]*status=401(?-u:\\b)\""
 replace = ")\""
 
 [[plant]]
@@ -80,15 +81,82 @@ runs = ["held-words-quota", "held-words-pi", "held-words-muse"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota.rs"
-find = "_ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,"
-replace = "_ if EXPIRED.is_match(text) && false => None,"
+find = "_ if access_token_expired(text) => None,"
+replace = "_ if false => None,"
+
 
 [[plant]]
-name = "held words: an expired token beside a refused refresh is read as nothing"
+name = "held words: an expired token beside a revoked key is read as nothing"
 meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
 runs = ["held-words-quota"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/quota.rs"
-find = "_ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,"
-replace = "_ if EXPIRED.is_match(text) => None,"
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'invalid_grant|refresh[_ ]token|refresh (?:request )?failed|invalid x-api-key|invalid[_ ]api[_ ]key|revoked|'
+replace = 'invalid_grant|refresh[_ ]token|refresh (?:request )?failed|invalid x-api-key|invalid[_ ]api[_ ]key|'
+
+[[plant]]
+name = "held words: an expired token beside a refresh token is read as nothing"
+meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'invalid_grant|refresh[_ ]token|refresh (?:request )?failed|'
+replace = 'invalid_grant|refresh (?:request )?failed|'
+
+[[plant]]
+name = "held words: an expired token beside words that tell the person to log in is read as nothing"
+meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = '|/login|log ?in again|sign(?:ing)? in again|please (?:log|sign) ?in)'
+replace = ')'
+
+[[plant]]
+name = "held words: Pi's Meta session that needs a new login is read as nothing"
+meant = "an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = '|session expired \(status 40[13]\))'
+replace = ')'
+
+[[plant]]
+name = "held words: a refusal's words reach the ledger unscreened"
+meant = "a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says_which_it_was"
+runs = ["held-words-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let screened = reported.as_deref().map(crate::shown::screened_hold);
+        let unwell = Unwell::of(screened.as_ref());
+        // A busy model is tried again'''
+replace = '''
+        let screened = reported.as_deref().cloned();
+        let unwell = Unwell::of(screened.as_ref());
+        // A busy model is tried again'''
+
+[[plant]]
+name = "held words: the tries end on an expired token and say nothing of the login"
+meant = "a_task_that_failed_on_an_expired_token_says_what_the_person_does_in_one_sentence"
+runs = ["held-words-n35"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = 'if cf_harness::records::access_token_expired(said) {'
+replace = 'if false {'
+
+[[plant]]
+name = "held words: an edit that renames the member loses the hold's words"
+meant = "an_edit_that_keeps_the_hold_and_renames_the_member_keeps_the_holds_words"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = 'names.extend(serde_json::from_str::<Vec<String>>(&former).unwrap_or_default());'
+replace = 'let _ = former;'

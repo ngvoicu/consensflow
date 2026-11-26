@@ -111,3 +111,44 @@ fn a_hold_of_a_quota_and_a_hold_ended_say_no_words() {
     let said = lane_of(&ledger.board(made.id).unwrap(), member);
     assert!(said.get("outBecause").is_none(), "{said}");
 }
+
+#[test]
+fn an_edit_that_keeps_the_hold_and_renames_the_member_keeps_the_holds_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let made = project(&mut ledger);
+    let held = made
+        .participants
+        .iter()
+        .find(|p| p.harness.as_deref() == Some("pi"))
+        .unwrap();
+    let (member, handle) = (held.id, held.handle.clone());
+    let words = "its login was refused: 401 invalid x-api-key";
+    ledger
+        .mark_out_saying(
+            member,
+            "9999-12-31T23:59:59.998Z",
+            "account unavailable",
+            HoldKind::Account,
+            words,
+        )
+        .unwrap();
+    // Only its effort changes: the name follows it, and the hold, which this edit keeps, stays.
+    let edited = ledger
+        .edit_member(
+            made.id,
+            &handle,
+            &cf_ledger::MemberEdit {
+                harness: "pi".into(),
+                model: Some("claude-fable-5-2".into()),
+                effort: Some("xhigh".into()),
+                model_name: None,
+                tier: "standard".into(),
+            },
+        )
+        .unwrap();
+    assert_ne!(edited.handle, handle, "the effort renames the member");
+    assert!(edited.out_until.is_some(), "the edit kept the hold");
+    let said = lane_of(&ledger.board(made.id).unwrap(), member);
+    assert_eq!(said["outBecause"], words);
+}

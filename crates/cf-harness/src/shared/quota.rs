@@ -35,7 +35,9 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{BILLING, BUSY, CREDENTIALS, EXPIRED, REFRESH_REFUSED, REFUSED, SPENT};
+use patterns::{
+    BILLING, BUSY, CREDENTIALS, EXPIRED, LOGIN_STAYS, OPENAI_EXPIRED_SENTENCE, REFUSED, SPENT,
+};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -245,11 +247,27 @@ pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal
         _ if BILLING.is_match(text) => Some(Refusal::Billing),
         // An access token that ran out is renewed by its harness before the next request: the
         // turn failed and can be tried again, the account is not refused (T-2010).
-        _ if EXPIRED.is_match(text) && !REFRESH_REFUSED.is_match(text) => None,
+        _ if access_token_expired(text) => None,
         Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
         _ if CREDENTIALS.is_match(text) => Some(Refusal::Credentials),
         _ => None,
     }
+}
+
+/// Whether the words say only that the access token expired, and say nothing else of the login
+/// failing (see [`EXPIRED`], [`LOGIN_STAYS`]). OpenAI's expired-access sentence ends "Please try
+/// signing in again": that is set aside where its code `token_expired` stands beside it, as the
+/// provider's own word for the access token, and counts as a demand to log in anywhere else.
+pub fn access_token_expired(text: &str) -> bool {
+    if !EXPIRED.is_match(text) {
+        return false;
+    }
+    let asked = if text.to_ascii_lowercase().contains("token_expired") {
+        OPENAI_EXPIRED_SENTENCE.replace_all(text, "")
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    !LOGIN_STAYS.is_match(&asked)
 }
 
 /// An account that refused at `at_ms` (none when it is no number) for what only its

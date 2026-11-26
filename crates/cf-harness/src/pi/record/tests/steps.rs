@@ -407,6 +407,12 @@ fn pi_reads_each_providers_refusal_for_what_it_is() {
             "OAuth refresh failed for anthropic: Anthropic token refresh request failed. url=https://platform.claude.com/v1/oauth/token; details=Error: HTTP request failed. status=401; url=https://platform.claude.com/v1/oauth/token; body={\"error\":\"invalid_grant\"}; stack=Error: HTTP request failed",
             "login",
         ),
+        // Pi's published Meta error (pi-ai 1.6.1, auth/oauth/meta.js): its identity session
+        // cannot be renewed, and the person signs in again.
+        (
+            "OAuth refresh failed for meta: Meta session expired (status 401). Run `/login meta` to sign in again.",
+            "login",
+        ),
         // A refresh refused for a moment is no login refusal: a server's error is tried again,
         // and a network's is Pi's own to try again.
         (

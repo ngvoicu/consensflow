@@ -2054,7 +2054,10 @@ impl Dispatcher {
         }
         let until = owner.out_until.clone().unwrap_or_default();
         let reported = record.quota.borrow().reported.clone();
-        let unwell = Unwell::of(reported.as_deref());
+        // The harness's words of an account's refusal or a model's move pass the screen of a
+        // program's words before they are kept, shown or told anywhere (T-2350).
+        let screened = reported.as_deref().map(crate::shown::screened_hold);
+        let unwell = Unwell::of(screened.as_ref());
         // A window of a member out for its busy model whose own record shows no refusal says
         // so too (T-1112).
         let words = match unwell {
@@ -2155,7 +2158,10 @@ impl Dispatcher {
         // the quota now, not for a job of an earlier turn (`turn_end`).
         record.held.borrow_mut().reset();
         let reported = record.quota.borrow().reported.clone();
-        let unwell = Unwell::of(reported.as_deref());
+        // The harness's words of an account's refusal or a model's move pass the screen of a
+        // program's words before they are kept, shown or told anywhere (T-2350).
+        let screened = reported.as_deref().map(crate::shown::screened_hold);
+        let unwell = Unwell::of(screened.as_ref());
         // A busy model is tried again after a backoff of the engine's, by its tries (T-1112).
         let reset = if let Some(Unwell::Busy(_)) = unwell {
             self.busy_reset(project, participant)?

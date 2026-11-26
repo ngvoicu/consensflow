@@ -2484,6 +2484,20 @@ test('a member held for its account says which, billing or login, and the harnes
   await expect(staff.locator('.member-out')).toHaveText(full)
 })
 
+test('a long unbroken reason of a held member wraps on the chief’s card and clips nowhere', async ({
+  page,
+}) => {
+  const long = `its login was refused: ${'x'.repeat(280)}`
+  const shown = await heldFor(page, 'account', { because: long, bare: true })
+  await expect(shown.chief.locator('.terminal-status')).toContainText('x'.repeat(280))
+  const within = await shown.chief.evaluate((card) => {
+    const status = card.querySelector('.terminal-status').getBoundingClientRect()
+    const frame = card.getBoundingClientRect()
+    return status.right <= frame.right + 1
+  })
+  expect(within).toBe(true)
+})
+
 test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {
   const billing = 'its billing was refused: 402 Insufficient credits'
   const shown = await heldFor(page, 'account', { because: billing, bare: true })

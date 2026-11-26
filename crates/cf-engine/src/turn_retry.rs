@@ -70,6 +70,10 @@ pub(crate) enum Tried {
     Fails(String),
 }
 
+/// What a person is told where the tries ended on an access token that ran out (T-2350): one
+/// sentence for every harness, with no harness's command in it.
+const LOGIN_EXPIRED: &str = "; its login expired and was not renewed: log in again in that harness's own window or terminal, then reopen or resume the task";
+
 impl Dispatcher {
     /// A failed turn where main would fail its working task: the task is held for a retry if
     /// it has a try left, in one look and one write against this moment (the clock read once),
@@ -109,7 +113,16 @@ impl Dispatcher {
             },
         )?;
         let which = match held {
-            RetryHold::Spent => return Ok(Tried::Fails(format!("{said} (tried again twice)"))),
+            RetryHold::Spent => {
+                return Ok(Tried::Fails(format!(
+                    "{said} (tried again twice){}",
+                    if cf_harness::records::access_token_expired(said) {
+                        LOGIN_EXPIRED
+                    } else {
+                        ""
+                    }
+                )))
+            }
             RetryHold::Held { which } => which,
         };
         if which == 1 {

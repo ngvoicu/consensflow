@@ -46,6 +46,7 @@
 
 use std::sync::LazyLock;
 
+use cf_harness::records::Quota;
 use cf_proto::models::IT_SAID;
 use regex::Regex;
 
@@ -123,6 +124,58 @@ fn said(program: &str) -> Option<String> {
         Some((cut, _)) => format!("{}…", &joined[..cut]),
         None => joined,
     })
+}
+
+/// A hold's report with its words as [`held_words`] lets them be kept: the report every writer
+/// of the hold reads (the ledger's event, the window's activity, the notes).
+pub fn screened_hold(quota: &Quota) -> Quota {
+    match quota {
+        Quota::Unavailable { at, because } => Quota::Unavailable {
+            at: at.clone(),
+            because: held_words(because),
+        },
+        Quota::Moved { at, because } => Quota::Moved {
+            at: at.clone(),
+            because: held_words(because),
+        },
+        Quota::Busy { at, because } => Quota::Busy {
+            at: at.clone(),
+            because: mask(because).text,
+        },
+        other => other.clone(),
+    }
+}
+
+/// What the card says where the harness's words of a refusal were left out.
+pub const LEFT_OUT: &str =
+    "the harness's words were left out because they named a key or a login; read them in its window";
+
+/// The most characters of a kept reason that is no refusal's words (a model's move).
+const REASON_CHARS: usize = 300;
+
+/// The words of a hold (`Quota::Unavailable`'s or `Quota::Moved`'s `because`) as they may be
+/// kept in the ledger, said on the board and told in a note (T-2010). A refusal's words
+/// (`its billing was refused: …`, `its login was refused: …`) are screened whole by the rule of a
+/// program's words ([`said`]): where anything in them may hold a credential none is kept, and
+/// the reason says which refusal it was and that the words were left out. Any other reason
+/// (Muse's fixed sentences, a model's move) is masked and held to [`REASON_CHARS`].
+pub fn held_words(because: &str) -> String {
+    for lead in ["its billing was refused", "its login was refused"] {
+        let Some(rest) = because.strip_prefix(lead) else {
+            continue;
+        };
+        let words = rest.strip_prefix(": ").unwrap_or(rest);
+        return match said(words) {
+            None => lead.to_owned(),
+            Some(kept) if kept == WORDS_WITHHELD => format!("{lead}; {LEFT_OUT}"),
+            Some(kept) => format!("{lead}: {}", kept.replace('\n', " ")),
+        };
+    }
+    let masked = mask(because).text;
+    match masked.char_indices().nth(REASON_CHARS) {
+        Some((cut, _)) => format!("{}…", &masked[..cut]),
+        None => masked,
+    }
 }
 
 #[cfg(test)]

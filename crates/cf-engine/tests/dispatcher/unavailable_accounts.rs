@@ -304,3 +304,58 @@ fn keeps_the_harnesss_words_with_the_hold_for_the_board_to_say() {
         "the board says the harness's words from the hold, with no window to say them"
     );
 }
+
+/// What a refusal's words carry that must never reach the ledger, the trace or the board.
+const KEY: &str = "sk-ant-api03-Zq8vN2mLk4Rt7XyP1wUc5Hd9";
+const ADDRESS: &str = "owner.account@example.com";
+
+fn everything_kept_of_the_hold(context: &Context, tiers: &Tiers) -> String {
+    let board =
+        serde_json::to_string(&context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
+    let events = serde_json::to_string(
+        &context
+            .ledger
+            .borrow()
+            .events(tiers.project.id, 0, 5000)
+            .unwrap(),
+    )
+    .unwrap();
+    format!("{board}\n{events}\n{}", tiers.notes("chief").join("\n"))
+}
+
+#[test]
+fn a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says_which_it_was() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.refuse(
+        "zeus-amber-pine",
+        Quota::Unavailable {
+            at: Some(now(&context)),
+            because: format!(
+                "its login was refused: 401 invalid x-api-key {KEY} for {ADDRESS}, password: hunter2"
+            ),
+        },
+    );
+    context.pass().unwrap();
+    let kept = everything_kept_of_the_hold(&context, &tiers);
+    for secret in [KEY, ADDRESS, "hunter2"] {
+        assert!(
+            !kept.contains(secret),
+            "{secret} reached what is kept:\n{kept}"
+        );
+    }
+    let board: serde_json::Value =
+        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
+    let zeus = board["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == "zeus")
+        .unwrap();
+    let said = zeus["participant"]["outBecause"].as_str().unwrap();
+    assert!(said.starts_with("its login was refused"), "{said}");
+    assert!(said.contains("left out"), "{said}");
+}

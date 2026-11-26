@@ -1880,3 +1880,47 @@ fn one_word_then_its_first_try_withdrawn_then_two_failures_gets_two_tries_and_no
         "no third try after the word"
     );
 }
+
+const LOGIN_EXPIRED: &str = "its login expired and was not renewed: log in again in that harness's own window or terminal, then reopen or resume the task";
+
+/// A task whose turn failed three times in a row with `said`: the note of its failure.
+fn failure_note_after_three_failed_turns(said: &str) -> String {
+    let c = retrying();
+    let (t, window) = working(&c);
+    let fail_saying = |c: &Context| {
+        c.adapter.with(&window, |agent| {
+            agent.failed = true;
+            agent.settled = true;
+            agent.failure = Some(said.to_owned());
+        });
+    };
+    fail_saying(&c);
+    passes(&c, 3);
+    c.advance(31_000);
+    until_resumed(&c, "zeus", 1);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail_saying(&c);
+    passes(&c, 3);
+    c.advance(121_000);
+    until_resumed(&c, "zeus", 2);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    fail_saying(&c);
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.state, "failed");
+    t.notes("chief")
+        .into_iter()
+        .find(|note| note.contains("tried again twice"))
+        .expect("the failure's note")
+}
+
+#[test]
+fn a_task_that_failed_on_an_expired_token_says_what_the_person_does_in_one_sentence() {
+    let note = failure_note_after_three_failed_turns(
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#,
+    );
+    assert!(note.contains(LOGIN_EXPIRED), "{note}");
+    let other = failure_note_after_three_failed_turns("connection reset");
+    assert!(!other.contains("log in again"), "{other}");
+}

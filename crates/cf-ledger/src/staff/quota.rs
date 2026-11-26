@@ -123,17 +123,21 @@ pub(crate) fn mark_out_kind(
 pub(crate) fn hold_words(
     store: &Store,
     project_id: i64,
-    handle: &str,
+    handles: &[String],
     until: &str,
 ) -> Result<Option<String>, LedgerError> {
+    // The hold's event names the member by the handle it had then: an edit that keeps the hold
+    // may have renamed it since (its effort is in its name), and the names it left are kept.
+    let handles = serde_json::to_string(handles)?;
     Ok(store
         .db
         .query_row(
             "SELECT json_extract(data, '$.because') FROM event
              WHERE project_id = ?1 AND kind = 'member.out' AND json_valid(data)
-               AND json_extract(data, '$.handle') = ?2 AND json_extract(data, '$.until') = ?3
+               AND json_extract(data, '$.handle') IN (SELECT value FROM json_each(?2))
+               AND json_extract(data, '$.until') = ?3
              ORDER BY id DESC LIMIT 1",
-            params![project_id, handle, until],
+            params![project_id, handles, until],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?

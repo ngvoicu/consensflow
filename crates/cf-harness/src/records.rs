@@ -28,7 +28,7 @@ use crate::{claude, codex, devin, muse, pi};
 
 mod thread;
 
-pub use crate::shared::quota::{Level, Quota};
+pub use crate::shared::quota::{access_token_expired, Level, Quota};
 pub use crate::shared::record::boundary::Boundary;
 pub use crate::shared::record::cache::{Cache, Look, Open, Options, PiSettlement, IDLE_MS};
 pub use crate::shared::record::calls::LastCall;
