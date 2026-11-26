@@ -1,0 +1,543 @@
+# D3's N35 (T-2108): a turn that fails is tried again twice before its task fails, each try a hold
+# of the task and main's own Resume. The count is a number stored on the task (`task.turn_retries`),
+# raised by the write that queues a numbered Resume and reset by an action, a result or a failure 30 minutes after `turn_retry_at`, the last moment anything happened to
+# a numbered retry (T-2288); the fact of a hold is written once with the hold; the Resume's words go into no window
+# whose question is open; the exit's look reads what a pass's look reads.
+#
+# Not planted, since each is equivalent to what the code does anyway:
+# - the chief held out of a retry (`participant.role == "chief"` in `failed_end`): the chief's turn never
+#   reaches the failed-turn path of `collect`, which only a staff window's look calls;
+# - a reopen that does not reset the count through the task's move: a reopen queues a message from the
+#   person to the window, and `queue` resets the count for it, so no move needs to.
+#
+# Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
+
+[run]
+n35-model = ["env", "CF_N35_SEEDS=400", "cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
+n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold"]
+n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
+n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
+n35-kinds = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "no_way_on_names"]
+n35-card-backup = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "a due retry of a backup"]
+n35-card-follows = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "follows its member"]
+n35-card-closed = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "becomes due while a closed"]
+n35-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "error_before_text"]
+
+[[plant]]
+name = "n35 hold: a third try"
+meant = "the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if used >= TRIES {"
+replace = "        if used > TRIES {"
+
+[[plant]]
+name = "n35 hold: the second hold at the first's time"
+meant = "the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        let wait = if used == 0 {\n            plan.unit_ms\n        } else {\n            plan.second_units * plan.unit_ms\n        };"
+replace = "        let wait = plan.unit_ms;"
+
+[[plant]]
+name = "n35 hold: the counter not raised by a numbered Resume"
+meant = "the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 0, turn_retry_at = ?1 WHERE id = ?2"
+
+[[plant]]
+name = "n35 hold: a quota's own Resume resets the count"
+meant = "a_two_minute_quota_hold_after_two_tries_leaves_the_next_failure_to_fail_the_task"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "    let Some(hold) = hold else {\n        return Ok(());"
+replace = "    let Some(hold) = hold else {\n        start_again(store, task, \"2026-01-01T00:00:00.000Z\")?;\n        return Ok(());"
+
+[[plant]]
+name = "n35 hold: a tell to the window does not reset the count"
+meant = "a_chief_s_tell_delivered_to_the_window_gives_it_two_tries_again"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "        if given {"
+replace = "        if given && false {"
+
+[[plant]]
+name = "n35 hold: a result does not reset the count"
+meant = "a_result_begins_the_count_again"
+runs = ["n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if to == \"done\" {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: a person's Resume back to the board keeps the count"
+meant = "a_persons_resume_that_sends_the_task_back_to_the_board_begins_the_count_again"
+runs = ["n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if by.is_some() {\n            super::turn_retry::start_again(store, task.id)?;"
+replace = "        if false {\n            super::turn_retry::start_again(store, task.id)?;"
+
+[[plant]]
+name = "n35 hold: a person's Resume linked as a retry"
+meant = "a_person_s_resume_pasted_since_gives_the_window_two_tries_again"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if by.is_none() {\n            super::turn_retry::link(store, task.id, retry_hold, message_id)?;"
+replace = "        if true {\n            super::turn_retry::link(store, task.id, retry_hold, message_id)?;"
+
+[[plant]]
+name = "n35 hold: a hold's identity kept past its end"
+meant = "a_quota_s_own_resume_is_never_a_try_at_the_instant_of_an_old_hold_after_two"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "paused_with_project = 0,\n             retry_hold = NULL WHERE id = ?"
+replace = "paused_with_project = 0\n             WHERE id = ?"
+
+[[plant]]
+name = "n35 hold: the column lets a third try be stored"
+meant = "the_write_itself_refuses_a_count_past_two"
+runs = ["n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0047.sql"
+find = "CHECK (turn_retries BETWEEN 0 AND 2)"
+replace = "CHECK (turn_retries >= 0)"
+
+[[plant]]
+name = "n35 hold: the card shows the hold's fixed try after a reset"
+meant = "the_card_shows_the_try_the_next_resume_will_use_after_a_tell_in_the_hold"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "'which', CASE WHEN t.state = 'paused' THEN t.turn_retries + 1"
+replace = "'which', CASE WHEN t.state = 'paused' THEN r.try"
+
+[[plant]]
+name = "n35 hold: a task given to another window keeps its count"
+meant = "a_task_given_to_its_member_s_backup_is_a_fresh_run_with_two_tries_of_its_own"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "message.from.is_some_and(|from| from != message.to);"
+replace = "message.from.is_some_and(|from| from != message.to && message.kind != \"task\");"
+
+[[plant]]
+name = "n35 hold: a second note at the second try"
+meant = "the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if which == 1 {\n            // One note"
+replace = "        if which <= 2 {\n            // One note"
+
+[[plant]]
+name = "n35 hold: the failed end told again while its task is held"
+meant = "the_second_failed_end_in_view_while_its_task_is_held_is_told_to_nobody"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if thread.task.retry.is_some() {\n            return Ok(());\n        }\n"
+replace = ""
+
+[[plant]]
+name = "n35 hold: a failed end still in flight decides"
+meant = "a_failed_end_the_harness_still_works_on_decides_nothing_until_it_settles"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            if crate::turn_retry::turn_at_work(observed) {"
+replace = "            if false && crate::turn_retry::turn_at_work(observed) {"
+
+[[plant]]
+name = "n35 hold: the kept reason lost from the failure"
+meant = "the_second_failed_end_holds_two_minutes_from_its_look_and_the_third_fails_the_task"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "RetryHold::Spent => return Ok(Tried::Fails(format!(\"{said} (tried again twice)\"))),"
+replace = "RetryHold::Spent => return Ok(Tried::Fails(\"(tried again twice)\".to_owned())),"
+
+[[plant]]
+name = "n35 hold: the tries off hold a task"
+meant = "with_the_tries_off_a_failed_end_fails_the_task_at_once_as_before"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if unit == 0 || participant.role == \"chief\" {"
+replace = "        if participant.role == \"chief\" {"
+
+[[plant]]
+name = "n35 hold: the Resume's words into a window whose question is open (the pass)"
+meant = "the_pass_queues_no_words_for_a_task_whose_window_has_a_question_open"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                if crate::messages::outstanding(store, task.id, window.id)? {"
+replace = "                if false && crate::messages::outstanding(store, task.id, window.id)? {"
+
+[[plant]]
+name = "n35 hold: the Resume's words into a window whose question opened since (the hand-over)"
+meant = "a_question_opened_after_the_resume_was_queued_turns_its_bare_words_away_at_the_hand_over"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if crate::tasks::turned_away_for_a_question(store, &message)? {"
+replace = "        if false && crate::tasks::turned_away_for_a_question(store, &message)? {"
+
+[[plant]]
+name = "n35 hold: the exit's look does not confirm what is on its way"
+meant = "a_brief_s_first_receipt_and_its_answer_first_seen_at_the_exit_give_the_result"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if record.delivery.borrow().delivering.is_some() {\n            self.confirm_arrival(record, &observed)?;\n        }\n        // A member held for its quota"
+replace = "        if false {\n            self.confirm_arrival(record, &observed)?;\n        }\n        // A member held for its quota"
+
+[[plant]]
+name = "n35 hold: the exit's look does not read a window that went on by itself"
+meant = "a_finished_turn_first_seen_at_the_exit_of_a_held_task_gives_its_result"
+runs = ["n35-dispatcher", "n35-probe"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.went_on_by_itself(&project, participant, &observed)?;\n        }\n        let working = self"
+replace = "        }\n        let working = self"
+
+[[plant]]
+name = "n35 hold: a proven answer lost to the hold at a count (the pass)"
+meant = "a_proven_answer_is_collected_before_the_hold_at_a_count_that_reached_its_limit"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.keep_proven_answer(project, participant, record, &observed)\n                .await?;\n"
+replace = ""
+
+[[plant]]
+name = "n35 hold: a proven answer lost to the hold at a count (the exit)"
+meant = "a_proven_answer_is_collected_at_an_exit_that_first_sees_a_count_at_its_limit"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if refused && !counted {"
+replace = "        if refused {"
+
+[[plant]]
+name = "n35 hold: the card does not say a retry that waits"
+meant = "a_failed_end_holds_the_task_for_30_seconds_and_main_s_resume_tries_it"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold)"
+replace = "             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold AND 0)"
+
+[[plant]]
+name = "n35 hold: Devin's error end before any answer text not read as failed"
+meant = "a_named_error_after_thoughts_alone_is_a_failed_turn"
+runs = ["n35-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "if self.active.is_none() && self.open && event.get(\"turnClientMessageId\").is_some() {"
+replace = "if false && self.active.is_none() && self.open && event.get(\"turnClientMessageId\").is_some() {"
+
+[[plant]]
+name = "n35 hold: the exit's look takes an out member's held window"
+meant = "an_out_member_s_held_window_that_finished_by_itself_and_exits_stays_held_to_the_reset"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if self.is_out(&owner) {\n            return Ok(());\n        }\n        if participant.role != \"chief\" {"
+replace = "        if participant.role != \"chief\" {"
+
+[[plant]]
+name = "n35 hold: a second try's line is the old quota hold's"
+meant = "a_second_try_after_an_earlier_quota_hold_says_no_old_quota_line"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "             AND t.retry_hold IS NULL\n"
+replace = ""
+
+[[plant]]
+name = "n35 hold: the hold notice tells the requester to reopen a held task"
+meant = "the_hold_notice_offers_the_resume_the_ledger_accepts_and_a_failed_task_the_reopen"
+runs = ["n35-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "resume it with the work rephrased: cf task resume T-{n} "
+replace = "reopen it with the work rephrased: cf task reopen T-{n} "
+
+[[plant]]
+name = "n35 hold: a harness's way on names a reopen again"
+meant = "no_way_on_names_an_action_that_depends_on_the_task_s_state"
+runs = ["n35-kinds"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record/kinds.rs"
+find = "\"rephrase the request\""
+replace = "\"reopen the turn with the request rephrased\""
+
+[[plant]]
+name = "n35 hold: the 30 minutes never run out"
+meant = "a_failure_29_minutes_59_seconds_after_the_second_try_fails_and_30_minutes_after_begins_again"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "at - now >= renew_after_ms)"
+
+[[plant]]
+name = "n35 hold: the 30 minutes counted from nothing (every failure a fresh pair)"
+meant = "a_failure_29_minutes_59_seconds_after_the_second_try_fails_and_30_minutes_after_begins_again"
+runs = ["n35-dispatcher", "n35-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "now - at >= 0)"
+
+[[plant]]
+name = "n35 hold: the folded card reads the primary's quota, not the task's member"
+meant = "a due retry of a backup's task says what its own member waits for, folded or not, when hera is out"
+runs = ["n35-card-backup"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "    const assignee = lanes.find((lane) => lane.participant.handle === assigneeHandle)?.participant"
+replace = "    const assignee = this.#board.lanes.find((lane) => lane.participant.backupOf == null && lane.participant.role === 'worker')?.participant"
+
+[[plant]]
+name = "n35 hold: a closed project's card keeps the time that passed"
+meant = "a retry that becomes due while a closed project's board stays open says to resume the project"
+runs = ["n35-card-closed"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "      for (const held of root.querySelectorAll('.card-held[data-retry]')) {"
+replace = "      for (const held of []) {"
+
+[[plant]]
+name = "n35 hold: the folded card keeps the reason it first read"
+meant = "a folded backup's retry card left open follows its member's quota reset, as the drawer does"
+runs = ["n35-card-follows"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "        const why = this.#retryWhy(held.dataset.assignee || null, now)"
+replace = "        const why = (held.dataset.firstWhy ??= this.#retryWhy(held.dataset.assignee || null, now))"
+[[plant]]
+name = "n35 hold: the time is not written at a charge when the count was zero (T-2280 finding 9's shape)"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 1, turn_retry_at = CASE WHEN turn_retries > 0 THEN ?1 ELSE turn_retry_at END WHERE id = ?2"
+
+[[plant]]
+name = "n35 hold: the time is not written at a charge at all"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "turn_retries = turn_retries + 1, turn_retry_at = ?1 WHERE id = ?2"
+replace = "turn_retries = turn_retries + 1, turn_retry_at = turn_retry_at WHERE id = ?2 AND ?1 != 'x'"
+
+[[plant]]
+name = "n35 hold: the time is not written at a withdrawal"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0047.sql"
+find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
+replace = "NEW.state IN ('failed') AND OLD.state != NEW.state"
+
+[[plant]]
+name = "n35 hold: the time is not written at a delivery"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0047.sql"
+find = "NEW.state IN ('delivered', 'read'))"
+replace = "NEW.state IN ('read'))"
+
+[[plant]]
+name = "n35 hold: a withdrawal's mark is never settled to its time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if marked {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: the count renews on a delivered retry's time alone"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"SELECT turn_retries, turn_retry_at FROM task WHERE id = ?\""
+replace = "\"SELECT turn_retries, (SELECT max(m.delivered_at) FROM turn_retry r JOIN message m ON m.id = r.message_id WHERE r.task_id = task.id) FROM task WHERE id = ?\""
+
+[[plant]]
+name = "n35 hold: a clock that reads earlier than the time renews too"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "(now - at).abs() >= renew_after_ms)"
+
+[[plant]]
+name = "n35 hold: the count renews before the 30 minutes"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "now - at >= renew_after_ms - 1_000)"
+
+[[plant]]
+name = "n35 hold: the count never renews by time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "now - at >= renew_after_ms)"
+replace = "false)"
+
+[[plant]]
+name = "n35 hold: an action on the task writes the time"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries != 0\""
+replace = "\"UPDATE task SET turn_retries = 0, turn_retry_at = NULL WHERE id = ? AND turn_retries != 0\""
+
+[[plant]]
+name = "n35 hold: an action on the task does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/turn_retry.rs"
+find = "\"UPDATE task SET turn_retries = 0 WHERE id = ? AND turn_retries != 0\""
+replace = "\"UPDATE task SET turn_retries = turn_retries WHERE id = ? AND turn_retries != 0\""
+
+[[plant]]
+name = "n35 hold: a third retry is charged"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if used >= TRIES {"
+replace = "        if used > TRIES {"
+
+[[plant]]
+name = "n35 hold: a task fails with a retry left"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "        if used >= TRIES {"
+replace = "        if used >= TRIES - 1 {"
+
+[[plant]]
+name = "n35 hold: a result does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "        if to == \"done\" {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: a word does not start the count again"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = "        if given {"
+replace = "        if false {"
+
+[[plant]]
+name = "n35 hold: the last paste is the one a clock dates last (T-2305 finding 11)"
+meant = "t_2305_finding_11_a_failed_turn_is_seen_after_the_clock_steps_back_a_millisecond_past_a_retry_s_confirmation"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "ORDER BY COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'"
+replace = "ORDER BY m.delivered_at DESC, COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'"
+
+[[plant]]
+name = "n35 hold: a delivery given up for good does not date the withdrawal (T-2305 finding 13)"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0047.sql"
+find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
+replace = "NEW.state IN ('cancelled') AND OLD.state != NEW.state"
+
+[[plant]]
+name = "n35 hold: a delivered retry cancelled at its carrier's take-back does not date it (T-2305 finding 12)"
+meant = "t_2305_finding_12_a_delivered_retry_cancelled_at_its_carrier_s_take_back_dates_it"
+runs = ["n35-model"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0047.sql"
+find = "AND OLD.state != NEW.state)"
+replace = "AND OLD.state NOT IN ('delivered', 'read') AND OLD.state != NEW.state)"

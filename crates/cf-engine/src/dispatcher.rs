@@ -991,13 +991,20 @@ impl Dispatcher {
         if record.window.borrow().own_exit_of(pane).is_some() {
             return Ok(());
         }
-        let working = self
-            .seams
-            .ledger
-            .borrow()
-            .active_task(record.id, false)?
-            .is_some_and(|thread| thread.task.state == "working");
-        if !working {
+        // A working task's answer is collected; a held or queued task's window may have gone
+        // on by itself, and what is on its way to it may have been received.
+        let in_hand = self.seams.ledger.borrow().task_in_hand(record.id)?;
+        let Some(in_hand) = in_hand.filter(|thread| {
+            matches!(thread.task.state.as_str(), "working" | "queued")
+                || (thread.task.state == "paused" && thread.task.held_until.is_some())
+        }) else {
+            return Ok(());
+        };
+        // A queued or held task's window the engine began to close in this step is not looked
+        // at, as a pass does not (`retiring`): its launch's first message was given up, or it
+        // is closing for a reassignment, a compaction or a Switch. A working task's is, as it
+        // always was.
+        if in_hand.task.state != "working" && record.window.borrow().retiring {
             return Ok(());
         }
         // The window's own look at its harness's record, which asks no one else.
@@ -1007,6 +1014,8 @@ impl Dispatcher {
         let Ok(observed) = returning(window.observe()).await else {
             return Ok(());
         };
+        // Only a turn a pass would take as an answer is looked into here: settled, not failed,
+        // not another program's, nothing left running.
         if self.forgotten(record)
             || !observed.settled
             || observed.failed
@@ -1022,15 +1031,47 @@ impl Dispatcher {
         let Some(participant) = project.participants.iter().find(|p| p.id == record.id) else {
             return Ok(());
         };
+        // The exit's look does what a pass's look does before a result is taken: what is on its
+        // way to the window (a brief's or a Resume's receipt first seen now) is confirmed, and a
+        // held or queued task whose window went on by itself goes on with it.
+        if record.delivery.borrow().delivering.is_some() {
+            self.confirm_arrival(record, &observed)?;
+        }
+        // A member held for its quota is settled as it was: its windows' turns are the hold's, and
+        // a held task of its window stays held to the reset, as on main (T-2131). A pass moves
+        // such a task on only where the turn that got through marks the member back first; the
+        // exit does not.
+        let owner = self.member_of(&project, participant);
+        if self.is_out(&owner) {
+            return Ok(());
+        }
+        if participant.role != "chief" {
+            self.went_on_by_itself(&project, participant, &observed)?;
+        }
+        let working = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(record.id, false)?
+            .is_some_and(|thread| {
+                thread.task.id == in_hand.task.id && thread.task.state == "working"
+            });
+        if !working {
+            return Ok(());
+        }
         // A refusal a pass would act on is the quota's to settle, not a result: the look
         // reads it as the pass does (`refused_here`, and `refused_unhandled` for a member already out) and leaves what it recorded as it was.
-        let owner = self.member_of(&project, participant);
         let before = record.quota.borrow().reported.clone();
         self.record_quota(record, observed.quota.clone());
         let refused = self.refused_here(record, &owner) || self.refused_unhandled(record);
+        // A count at its limit is no refusal of a turn: a proven answer is collected.
+        let counted = matches!(
+            observed.quota.as_deref(),
+            Some(cf_harness::records::Quota::Usage { .. })
+        );
         self.record_quota(record, before);
         // A member held for its quota is settled as it was: its windows' turns are the hold's.
-        if refused || self.is_out(&owner) {
+        if refused && !counted {
             return Ok(());
         }
         self.collect(
@@ -1785,6 +1826,10 @@ impl Dispatcher {
         // chief has no task to hold and try again, and a hold would lose its turn unheard.
         let chief_busy = participant.role == "chief" && busy_turn(&observed);
         if !chief_busy && self.refused_here(record, &owner) {
+            // A count at its limit with the turn's proven answer: the answer is collected
+            // first, then main's hold (`turn_retry`).
+            self.keep_proven_answer(project, participant, record, &observed)
+                .await?;
             return self
                 .out_of_quota(project, participant, record, &owner, &observed)
                 .await;

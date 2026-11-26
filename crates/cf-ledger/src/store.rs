@@ -88,7 +88,8 @@ impl Store {
         self.open = true;
         match panic::catch_unwind(AssertUnwindSafe(|| work(self))) {
             Ok(Ok(value)) => match self
-                .settle_ends_unread()
+                .settle_retry_marks()
+                .and_then(|()| self.settle_ends_unread())
                 .and_then(|()| self.end_failed.take().map_or(Ok(()), Err))
                 .and_then(|()| self.db.execute_batch("COMMIT"))
             {
@@ -113,6 +114,24 @@ impl Store {
                 panic::resume_unwind(unwound)
             }
         }
+    }
+
+    /// A numbered retry's message that was delivered or withdrawn in this write left an empty
+    /// mark on its task's `turn_retry_at` (a trigger); the write's own last reading is its time.
+    fn settle_retry_marks(&mut self) -> rusqlite::Result<()> {
+        let marked: bool = self.db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM task WHERE turn_retry_at = '')",
+            [],
+            |row| row.get(0),
+        )?;
+        if marked {
+            let at = iso(self.recent_ms());
+            self.db.execute(
+                "UPDATE task SET turn_retry_at = ?1 WHERE turn_retry_at = ''",
+                [at],
+            )?;
+        }
+        Ok(())
     }
 
     /// An operation that never read the clock after a holding ended dates its end by
@@ -323,10 +342,15 @@ impl Store {
     ) -> Result<(), LedgerError> {
         let at = self.at();
         self.db.execute(
-            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL, paused_with_project = 0
-             WHERE id = ?",
+            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL, paused_with_project = 0,
+             retry_hold = NULL WHERE id = ?",
             params![to, at, task.id],
         )?;
+        // A result starts the task's failed turns' tries again (D3's N35); a reopen does so
+        // by the message it queues (`queue`).
+        if to == "done" {
+            crate::tasks::start_tries_again(self, task.id)?;
+        }
         if matches!(to, "accepted" | "cancelled" | "failed") {
             crate::holding::close_task(self, task, None)?;
         }
@@ -403,7 +427,7 @@ mod tests {
 
     fn store() -> (Store, Rc<RefCell<Vec<Event>>>) {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE event (id INTEGER PRIMARY KEY, project_id INTEGER, at TEXT, kind TEXT, data TEXT)")
+        db.execute_batch("CREATE TABLE event (id INTEGER PRIMARY KEY, project_id INTEGER, at TEXT, kind TEXT, data TEXT); CREATE TABLE task (id INTEGER PRIMARY KEY, turn_retry_at TEXT)")
             .unwrap();
         let events = Rc::new(RefCell::new(Vec::new()));
         let told = Rc::clone(&events);

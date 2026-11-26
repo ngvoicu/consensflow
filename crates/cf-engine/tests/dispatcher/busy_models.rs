@@ -358,7 +358,7 @@ fn a_turn_through_after_a_try_begins_the_tries_again() {
 
 #[test]
 fn a_real_failure_still_fails_its_task() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     context.adapter.with("zeus", |agent| {
         agent.failed = true;

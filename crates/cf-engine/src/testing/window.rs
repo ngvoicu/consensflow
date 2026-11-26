@@ -547,7 +547,13 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             model_moved: None,
             model_drift: agent.model_drift.clone(),
             quota: None,
-            settlement: Settlement::Unknown,
+            settlement: if agent.settlement_unknown {
+                Settlement::Unknown
+            } else if agent.settled {
+                Settlement::Settled
+            } else {
+                Settlement::InFlight
+            },
             pending: agent.pending,
             monitors: agent.monitors.clone(),
             commands: agent.commands.clone(),

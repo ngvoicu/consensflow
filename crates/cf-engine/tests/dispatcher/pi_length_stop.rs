@@ -16,7 +16,7 @@ use crate::fixtures::notes;
 
 #[test]
 fn a_pi_reply_cut_at_the_output_limit_fails_the_task_and_tells_the_chief_once() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let project = context.with_staff(&["zeus"]);
     let worker = context
         .project(project.id)

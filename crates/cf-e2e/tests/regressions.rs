@@ -292,6 +292,13 @@ fn config_with_codex() -> Config {
     config().codex(FAKE_CODEX)
 }
 
+/// [`config_with_codex`] with the daemon's tries of a failed turn off: for a case whose point is
+/// the failed task's own words, which are the same at the third failed end (D3's N35). Every
+/// other case runs with the tries as the daemon ships them.
+fn config_with_codex_tries_off() -> Config {
+    config_with_codex().daemon_var("CONSENSFLOW_TURN_RETRY_MS", "0")
+}
+
 /// `n` seconds.
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)

@@ -89,6 +89,11 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .filter(|column: &String| table != "project" || column != "own_hands")
+        // The count of a task's tries in a row (0047) is not in the ledger this one is made to be.
+        .filter(|column: &String| {
+            table != "task"
+                || !["turn_retries", "retry_hold", "turn_retry_at"].contains(&column.as_str())
+        })
         .collect();
     let quoted = columns
         .iter()
@@ -188,6 +193,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0047(&raw).unwrap();
     cf_ledger::testing::undo_migration_0046(&raw).expect("closed waits undone");
     cf_ledger::testing::undo_migration_0044(&raw).expect("holding bounds undone");
     cf_ledger::testing::undo_migration_0043(&raw).expect("question boundaries undone");
@@ -251,6 +257,11 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
                     "task_plan_key",
                     "question_reminder",
                     "question_reminder_by_message",
+                    "turn_retry",
+                    "turn_retry_by_task",
+                    "turn_retry_by_message",
+                    "turn_retry_message_moved",
+                    "event_confirmed_index",
                     "question_binding_wait",
                     "message_questions_for_chief",
                     "message_answers_by_question",
@@ -269,7 +280,13 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
             (
                 name.clone(),
                 sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
-                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(
+                        ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2)",
+                        "",
+                    )
+                    .replace(", retry_hold INTEGER", "")
+                    .replace(", turn_retry_at TEXT", ""),
             )
         })
         .collect();

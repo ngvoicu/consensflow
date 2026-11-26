@@ -146,6 +146,9 @@ fn refused_for_quota(text: &str) -> bool {
     text.contains("QUOTA-OUT") && ours && spent
 }
 
+/// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.
+static FAILS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 /// What the message `text` asks of a turn, which takes as long as `pace` says
 /// where the message says nothing of it.
 pub fn plan_of(text: &str, pace: Pace) -> Plan {
@@ -575,6 +578,21 @@ impl<W: Write> Window<W> {
                 .map_err(said)?;
             return self.say(&format!("{QUOTA_WORDS}\n")).map_err(said);
         }
+        // Turns that fail a given number of times, the retry's among them, and then answer
+        // (`FAIL-TURNS 2`: this turn and the next fail, the third answers; D3's N35).
+        static FAILS: OnceLock<Regex> = OnceLock::new();
+        if let Some(fails) = pattern::once(&FAILS, r"\bFAIL-TURNS (\d+)\b").captures(text) {
+            FAILS_LEFT.store(
+                fails[1].parse().unwrap_or(0),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        }
+        if FAILS_LEFT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            let words = "The agent crashed: I/O error";
+            self.wire.ended_in_error(&client, words).map_err(said)?;
+            return self.say(&format!("{words}\n")).map_err(said);
+        }
+        FAILS_LEFT.store(0, std::sync::atomic::Ordering::SeqCst);
         self.wire.said(&answer, &stream, &client).map_err(said)?;
         if plan.compact {
             // The compactor ran while the turn worked, as the turn's steps filled the

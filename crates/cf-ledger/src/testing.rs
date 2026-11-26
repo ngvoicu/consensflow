@@ -108,6 +108,18 @@ pub use slots::{
 };
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0047.
+pub fn undo_migration_0047(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "DROP INDEX event_confirmed_index;
+         DROP TRIGGER turn_retry_message_moved;
+         ALTER TABLE task DROP COLUMN turn_retry_at;
+         ALTER TABLE task DROP COLUMN retry_hold;
+         ALTER TABLE task DROP COLUMN turn_retries;
+         DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
+    )
+}
+
 /// Remove the closed questions' waits when a fixture reconstructs a ledger before 0046.
 pub fn undo_migration_0046(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("DROP TABLE question_wait; DROP TABLE question_reminder_sent")
@@ -242,6 +254,9 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "backup_of"),
             ("participant", "vacation_since"),
             ("participant", "out_kind"),
+            ("task", "turn_retries"),
+            ("task", "retry_hold"),
+            ("task", "turn_retry_at"),
         ])
     {
         take_column_out(tables, table, column);
@@ -262,6 +277,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             "question_reminder",
             "question_wait",
             "question_reminder_sent",
+            "turn_retry",
         ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
@@ -337,6 +353,11 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_wait_reminder"
             && entry["name"] != "question_reminder_sent"
             && entry["name"] != "question_reminder_by_message"
+            && entry["name"] != "turn_retry"
+            && entry["name"] != "turn_retry_by_task"
+            && entry["name"] != "turn_retry_by_message"
+            && entry["name"] != "turn_retry_message_moved"
+            && entry["name"] != "event_confirmed_index"
             && entry["name"] != "message_questions_for_chief"
             && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"
@@ -365,7 +386,13 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
-                    .replace(paused_with_project::COLUMN_LINES, "");
+                    .replace(paused_with_project::COLUMN_LINES, "")
+                    .replace(
+                        ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2)",
+                        "",
+                    )
+                    .replace(", retry_hold INTEGER", "")
+                    .replace(", turn_retry_at TEXT", "");
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the

@@ -71,7 +71,7 @@
 use std::fs::{self};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
@@ -608,6 +608,28 @@ impl Agent {
             );
             return;
         }
+        // Turns that fail a given number of times, the retry's among them, and then answer
+        // (`FAIL-TURNS 2`: this turn and the next fail, the third answers; D3's N35).
+        if let Some(fails) = pattern::once(&FAILS, r"\bFAIL-TURNS (\d+)\b").captures(text) {
+            FAILS_LEFT.store(fails[1].parse().unwrap_or(0), Ordering::SeqCst);
+        }
+        if FAILS_LEFT.fetch_sub(1, Ordering::SeqCst) > 0 {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in dropped the connection.",
+                        "codex_error_info": "other",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        FAILS_LEFT.store(0, Ordering::SeqCst);
         if text.contains("TURN-FAILS") {
             self.write(
                 "event_msg",
@@ -691,6 +713,10 @@ fn memory_job_command() -> Option<Vec<String>> {
     }
     cf_in(&format!("CF {}", own_var("CF_TEST_CODEX_MEMORY_JOB")?))
 }
+
+/// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.
+static FAILS_LEFT: AtomicI64 = AtomicI64::new(0);
+static FAILS: OnceLock<Regex> = OnceLock::new();
 
 /// Whether the usage limit refuses this window the message `text`: it says
 /// `QUOTA-OUT`, the window is a session of the member `CF_TEST_QUOTA_OUT` names,

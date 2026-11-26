@@ -105,6 +105,21 @@ pub(crate) fn queue(
         ],
     )?;
     let id = store.db.last_insert_rowid();
+    // What a person or the chief gives a task's window about the task, or an answer to its
+    // question, starts its failed turns' tries again (D3's N35). The daemon's own words do not.
+    if let Some(task) = message.task_id {
+        let given = message.kind == "answer" || message.from.is_some_and(|from| from != message.to);
+        if given {
+            let assigned: bool = store.db.query_row(
+                "SELECT EXISTS (SELECT 1 FROM task WHERE id = ?1 AND assignee_id = ?2)",
+                params![task, message.to],
+                |row| row.get(0),
+            )?;
+            if assigned {
+                crate::tasks::start_tries_again(store, task)?;
+            }
+        }
+    }
     if landing == "queued" && matches!(message.kind, "answer" | "note") {
         adopt(store, id)?;
     }

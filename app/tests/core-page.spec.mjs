@@ -20541,6 +20541,190 @@ test('T1859 a team with one no-end hold gives the other part reset time in eithe
   }
 })
 
+/** A board whose worker's task T-12 waits to be tried again (D3's N35): paused while held, queued once main's Resume is on its way. */
+function retryingModel(state, which, dueIn) {
+  const data = model();
+  const lane = data.boards[1].lanes.find(
+    (l) => l.participant.handle === "zeus",
+  );
+  lane.tasks.push(
+    task(12, "Serve the docs", state, "chief", "zeus", 3, {
+      pool: "worker",
+      tier: "standard",
+      retry: {
+        kind: "failed",
+        which,
+        of: 2,
+        ...(dueIn === null
+          ? {}
+          : { dueAt: new Date(Date.now() + dueIn).toISOString() }),
+      },
+    }),
+  );
+  data.tasks["1:12"] = { ...lane.tasks.at(-1), messages: [] };
+  return data;
+}
+
+for (const [which, words] of [
+  [1, /^Trying again at \d\d:\d\d:\d\d \(1 of 2\)$/],
+  [2, /^Trying again at \d\d:\d\d:\d\d \(2 of 2\)$/],
+]) {
+  test(`a task held to be tried again reads Paused and says when, on the card and in the drawer (${which} of 2)`, async ({
+    page,
+  }) => {
+    await open(page, retryingModel("paused", which, 30_000));
+    const card = page.locator('button.card[data-task="12"]');
+    await expect(card).toHaveAttribute("data-pending", "retry");
+    await expect(card.locator(".card-state")).toHaveText("Paused");
+    await expect(card.locator(".card-held")).toHaveText(words);
+    // A card with no retry on its way says nothing of it.
+    await expect(
+      page.locator('button.card[data-task="2"] .card-state'),
+    ).not.toHaveText(/trying again/i);
+    await card.click();
+    const drawer = page.getByRole("complementary", { name: "Task T-12" });
+    await expect(drawer.locator(".drawer-meta")).toContainText("Paused");
+    await expect(drawer.locator(".drawer-meta")).toContainText(
+      new RegExp(
+        `its turn failed: tries again at \\d\\d:\\d\\d:\\d\\d \\(${which} of 2\\)`,
+      ),
+    );
+  });
+}
+
+test("a task whose time has come, or whose Resume is on its way, says it waits for its window", async ({
+  page,
+}) => {
+  for (const [state, dueIn] of [
+    ["paused", -20_000],
+    ["queued", null],
+  ]) {
+    await open(page, retryingModel(state, 1, dueIn));
+    const card = page.locator('button.card[data-task="12"]');
+    await expect(card.locator(".card-held")).toHaveText(
+      "Trying again, waiting for its window (1 of 2)",
+    );
+    await expect(card.locator(".card-held")).not.toHaveText(/at \d\d:/);
+    await card.click();
+    const drawer = page.getByRole("complementary", { name: "Task T-12" });
+    await expect(drawer.locator(".drawer-meta")).toContainText(
+      "its turn failed: trying again, waiting for its window (1 of 2)",
+    );
+  }
+});
+
+test("a retry past its time waits for what is really missing: the project's resume, or its member's return", async ({
+  page,
+}) => {
+  const closed = retryingModel("paused", 1, -20_000);
+  closed.boards[1].project.state = "closed";
+  await open(page, closed);
+  await expect(
+    page.locator('button.card[data-task="12"] .card-held'),
+  ).toHaveText("Trying again, waiting for the project's resume (1 of 2)");
+  const out = retryingModel("paused", 1, -20_000);
+  const lane = out.boards[1].lanes.find((l) => l.participant.handle === "zeus");
+  lane.participant.outUntil = new Date(Date.now() + 3_600_000).toISOString();
+  await open(page, out);
+  await expect(
+    page.locator('button.card[data-task="12"] .card-held'),
+  ).toHaveText("Trying again, waiting for its member to be back (1 of 2)");
+});
+
+for (const outMember of ["diana", "hera"]) {
+  test(`a due retry of a backup's task says what its own member waits for, folded or not, when ${outMember} is out`, async ({
+    page,
+  }) => {
+    const { data } = team({
+      out: { [outMember]: new Date(Date.now() + 3_600_000).toISOString() },
+      working: ["hera"],
+    });
+    const lane = data.boards[1].lanes.find((l) => l.participant.member === "hera");
+    Object.assign(lane.tasks[0], {
+      state: "paused",
+      retry: {
+        kind: "failed",
+        which: 1,
+        of: 2,
+        dueAt: new Date(Date.now() - 20_000).toISOString(),
+      },
+    });
+    Object.assign(data.tasks["1:22"], lane.tasks[0]);
+    await open(page, data);
+    const card = page.locator('button.card[data-task="22"]');
+    const waits = outMember === "hera" ? "its member to be back" : "its window";
+    await expect(card.locator(".card-held")).toContainText(`waiting for ${waits}`);
+    await page
+      .locator('tr[data-handle="diana"]')
+      .getByRole("button", { name: "Show @diana's 1 session" })
+      .click();
+    await expect(card.locator(".card-held")).toContainText(`waiting for ${waits}`);
+  });
+}
+
+test("a retry that becomes due while a closed project's board stays open says to resume the project", async ({
+  page,
+}) => {
+  const now = Date.now();
+  const data = model();
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === "zeus");
+  data.boards[1].project.state = "closed";
+  data.projects.find((p) => p.id === 1).state = "closed";
+  const work = task(22, "Retry a job", "paused", "chief", "zeus", 2, {
+    pool: "worker",
+    tier: "standard",
+    retry: {
+      kind: "failed",
+      which: 1,
+      of: 2,
+      dueAt: new Date(now + 120_000).toISOString(),
+    },
+  });
+  lane.tasks.push(work);
+  data.tasks["1:22"] = { ...work, messages: [] };
+  await page.clock.install({ time: now });
+  await open(page, data);
+  const card = page.locator('button.card[data-task="22"]');
+  await expect(card.locator(".card-held")).toContainText("Trying again at");
+  await page.clock.fastForward(125_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for the project's resume (1 of 2)",
+  );
+});
+
+test("a folded backup's retry card left open follows its member's quota reset, as the drawer does", async ({
+  page,
+}) => {
+  // T-2189: the reason was computed when the card was drawn and kept on every tick.
+  const base = Date.now();
+  const { data } = team({
+    out: { hera: new Date(base + 120_000).toISOString() },
+    working: ["hera"],
+  });
+  const lane = data.boards[1].lanes.find((l) => l.participant.member === "hera");
+  Object.assign(lane.tasks[0], {
+    state: "paused",
+    retry: { kind: "failed", which: 2, of: 2, dueAt: new Date(base + 60_000).toISOString() },
+  });
+  Object.assign(data.tasks["1:22"], lane.tasks[0]);
+  await page.clock.install({ time: base });
+  await open(page, data);
+  const card = page.locator('button.card[data-task="22"]');
+  await expect(card.locator(".card-held")).toContainText("Trying again at");
+  await page.clock.fastForward(65_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for its member to be back (2 of 2)",
+  );
+  await page.clock.fastForward(65_000);
+  await expect(card.locator(".card-held")).toHaveText(
+    "Trying again, waiting for its window (2 of 2)",
+  );
+  await card.click();
+  await expect(
+    page.getByRole("complementary", { name: "Task T-22" }).locator(".drawer-meta"),
+  ).toContainText("waiting for its window");
+});
+
 /** The real page emulator and a raw xterm oracle, both at a fixed size. */
 async function utf8CutPage(page) {
   await page.route('**/utf8-cut-test', (route) =>

@@ -326,6 +326,9 @@ fn print_lines(bytes: usize) -> std::io::Result<()> {
     out.flush()
 }
 
+/// How many more turns fail (`FAIL-TURNS n`), counted down by each turn this window takes.
+static FAILS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static PACED: OnceLock<Regex> = OnceLock::new();
@@ -343,6 +346,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static DISPATCH: OnceLock<Regex> = OnceLock::new();
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
+    static FAILS: OnceLock<Regex> = OnceLock::new();
     static SAVED: OnceLock<Regex> = OnceLock::new();
     static WRITE: OnceLock<Regex> = OnceLock::new();
     static LONG: OnceLock<Regex> = OnceLock::new();
@@ -575,6 +579,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     if text.lines().any(|line| line.trim() == "MODEL-GONE") {
         return Ok(Reply::ApiError(400));
     }
+    // Turns that fail a given number of times, the retry's among them, and then answer
+    // (`FAIL-TURNS 2`: this turn and the next fail, the third answers; D3's N35).
+    if let Some(fails) = pattern::once(&FAILS, r"\bFAIL-TURNS (\d+)\b").captures(text) {
+        FAILS_LEFT.store(
+            fails[1]
+                .parse::<i64>()
+                .map_err(|failed| failed.to_string())?,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+    if FAILS_LEFT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+        return Ok(Reply::ApiError(400));
+    }
+    FAILS_LEFT.store(0, std::sync::atomic::Ordering::SeqCst);
     if refused(text, window, pattern::once(&REFUSED, "QUOTA-OUT")) {
         return Ok(Reply::Refused);
     }

@@ -229,7 +229,7 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 /// An answer gated for the human still obliges, as does one that failed, was
 /// cancelled or declined. A withdrawn question with an answer still obliges if
 /// that answer did not stand; one withdrawn without an answer obliges no more.
-fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
+pub(crate) fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
     if store.db.prepare(
         "SELECT 1 FROM question_binding WHERE task_id = ?1 AND participant_id = ?2 AND closed IN (2,3) LIMIT 1",
     )?.exists(params![task, window])? {

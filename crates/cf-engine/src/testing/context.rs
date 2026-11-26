@@ -92,6 +92,10 @@ pub struct Made {
     /// The settle of the pacing ([`Limits::settle_ms`]): none, unless the case is
     /// the pacing's.
     pub settle_ms: i64,
+    /// The unit of the tries of a failed turn ([`Limits::turn_retry_ms`]): the daemon's own,
+    /// 30 seconds, so that every case runs as the product ships; 0 is no tries, which a case
+    /// asks for plainly with [`Context::tries_off`].
+    pub turn_retry_ms: i64,
 }
 
 impl Default for Made {
@@ -101,6 +105,7 @@ impl Default for Made {
             harnesses: vec!["claude-code", "pi"],
             codex: false,
             settle_ms: 0,
+            turn_retry_ms: Limits::default().turn_retry_ms,
         }
     }
 }
@@ -175,6 +180,16 @@ impl Drop for LetsGoOfTheFile {
 impl Context {
     pub fn new() -> Self {
         Self::made(Made::default())
+    }
+
+    /// A context whose failed turns are not tried again: a failed end fails its task at once,
+    /// as on main before N35. For a case whose point is the failed task's own words or moves,
+    /// which are the same at the third failed end; every other case runs as the daemon does.
+    pub fn tries_off() -> Self {
+        Self::made(Made {
+            turn_retry_ms: 0,
+            ..Made::default()
+        })
     }
 
     pub fn made(made: Made) -> Self {
@@ -274,6 +289,9 @@ impl Context {
                     made.settle_ms
                 },
                 settle_from_first_look: paced && made.settle_ms == 0,
+                // The tries are the daemon's own unless a case says it runs with them off
+                // (`Context::tries_off`): the suite runs as the product ships.
+                turn_retry_ms: made.turn_retry_ms,
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());

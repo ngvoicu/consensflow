@@ -677,6 +677,7 @@ fn a_project_with_a_recorded_wait_is_deleted_with_it() {
 /// which applies this migration alone.
 fn as_alpha_13(w: &mut World) {
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0047(db).unwrap();
         cf_ledger::testing::undo_migration_0046(db).unwrap();
         db.pragma_update(None, "user_version", 45).unwrap();
     });

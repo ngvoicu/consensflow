@@ -253,3 +253,152 @@ fn t1958_every_recorded_claude_codex_and_pi_prefix_never_fails_in_flight() {
         "terminal failure controls were actually read"
     );
 }
+
+/// What a paste of ConsensFlow's would be in `harness`'s own record after `rows`: the same
+/// rows the recording's own prompt was written in, made over with a new id and the paste's
+/// words, in a new turn where the harness writes one.
+fn paste_after(harness: Harness, rows: &[&str], words: &str) -> Vec<String> {
+    let parsed: Vec<Value> = rows
+        .iter()
+        .map(|row| serde_json::from_str(row).unwrap())
+        .collect();
+    let later = "2026-11-22T00:00:00.000Z";
+    match harness {
+        Harness::Claude => {
+            let mut prompt = parsed
+                .iter()
+                .find(|row| row["type"] == "user")
+                .unwrap()
+                .clone();
+            let last = parsed.iter().rev().find_map(|row| row.get("uuid")).unwrap();
+            prompt["parentUuid"] = last.clone();
+            prompt["uuid"] = json!("pasted-by-consensflow");
+            prompt["promptId"] = json!("pasted-prompt");
+            prompt["timestamp"] = json!(later);
+            prompt["message"]["content"] = json!(words);
+            vec![prompt.to_string()]
+        }
+        Harness::Codex => {
+            let mut began = parsed
+                .iter()
+                .find(|row| row["payload"]["type"] == "task_started")
+                .unwrap()
+                .clone();
+            let mut prompt = parsed
+                .iter()
+                .rev()
+                .find(|row| row["payload"]["role"] == "user")
+                .unwrap()
+                .clone();
+            began["timestamp"] = json!(later);
+            began["payload"]["turn_id"] = json!("pasted-turn");
+            began["payload"]["root_turn_id"] = json!("pasted-turn");
+            began["payload"]["turn_attribution"]["turn_id"] = json!("pasted-turn");
+            began["payload"]["turn_attribution"]["root_turn_id"] = json!("pasted-turn");
+            prompt["timestamp"] = json!(later);
+            prompt["payload"]["id"] = json!("pasted-item");
+            prompt["payload"]["content"] = json!([{ "type": "input_text", "text": words }]);
+            prompt["payload"]["internal_chat_message_metadata_passthrough"]["turn_id"] =
+                json!("pasted-turn");
+            vec![began.to_string(), prompt.to_string()]
+        }
+        Harness::Pi => {
+            let mut prompt = parsed
+                .iter()
+                .find(|row| row["message"]["role"] == "user")
+                .unwrap()
+                .clone();
+            let last = parsed.last().unwrap();
+            prompt["parentId"] = last["id"].clone();
+            prompt["id"] = json!("pasted01");
+            prompt["timestamp"] = json!(later);
+            prompt["message"]["content"] = json!([{ "type": "text", "text": words }]);
+            vec![prompt.to_string()]
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn n35_a_failed_end_is_out_of_view_once_a_later_paste_is_in_the_record() {
+    // The count of a retry stands on this: the Resume of a held task is pasted after the failed
+    // end, and the look after its paste must not read that failed end as the turn it opened.
+    // Every prefix of every recording, with a paste written after it.
+    let cases = OTHER_RECORDINGS.into_iter().chain(
+        PI_RECORDINGS
+            .into_iter()
+            .map(|(name, text)| (name, Harness::Pi, text)),
+    );
+    let (mut failed_ends, mut checked) = (0, 0);
+    for (name, harness, fixture) in cases {
+        let rows: Vec<&str> = fixture.lines().collect();
+        let first: Value = serde_json::from_str(rows[0]).unwrap();
+        let session = match harness {
+            Harness::Claude => first["sessionId"].as_str(),
+            Harness::Codex => first["payload"]["id"].as_str(),
+            Harness::Pi => first["id"].as_str(),
+            _ => None,
+        }
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let file = match harness {
+            Harness::Claude => home
+                .path()
+                .join("projects")
+                .join(format!("{session}.jsonl")),
+            Harness::Codex => home
+                .path()
+                .join("sessions")
+                .join(format!("rollout-{session}.jsonl")),
+            Harness::Pi => home.path().join("pi").join(format!("{session}.jsonl")),
+            _ => unreachable!(),
+        };
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let env = Env::from_vars([
+            ("CLAUDE_CONFIG_DIR", home.path().to_path_buf()),
+            ("CODEX_HOME", home.path().to_path_buf()),
+            ("PI_CODING_AGENT_SESSION_DIR", home.path().join("pi")),
+        ]);
+        let read = |text: String| {
+            fs::write(&file, text).unwrap();
+            let now = fs::metadata(&file)
+                .unwrap()
+                .modified()
+                .unwrap()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            // A quiet minute later: a Pi error end settles by the quiet fallback.
+            let reading = crate::records::answers(
+                harness,
+                session,
+                &env,
+                &Options::default(),
+                &TimeZone::UTC,
+                i64::try_from(now).unwrap() + 120_000,
+            );
+            known(&reading).clone()
+        };
+        for end in 1..=rows.len() {
+            let prefix = format!("{}\n", rows[..end].join("\n"));
+            let before = read(prefix.clone());
+            checked += 1;
+            if !before.failed {
+                continue;
+            }
+            failed_ends += 1;
+            let pasted = paste_after(harness, &rows[..end], "Resumed: Go on where you stopped.");
+            let after = read(format!("{prefix}{}\n", pasted.join("\n")));
+            assert!(
+                !after.failed,
+                "{name} prefix {end}/{}: the failed end is still in view after a later paste: {after:?}",
+                rows.len()
+            );
+        }
+    }
+    assert!(checked >= 200, "every prefix was read: {checked}");
+    assert!(
+        failed_ends >= 3,
+        "failed ends were actually met: {failed_ends}"
+    );
+}

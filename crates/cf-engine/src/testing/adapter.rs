@@ -169,6 +169,10 @@ pub struct FakeAgent {
     /// The commands its harness says it keeps running (`Window::kept_commands`): none
     /// unless a test says, and none where it says the harness could not tell.
     pub kept_commands: Option<Vec<String>>,
+    /// Its record says nothing of whether the turn is over (Codex's end with no proven
+    /// answer: `Settlement::Unknown`): otherwise a window not at rest reads in flight and one at
+    /// rest reads settled.
+    pub settlement_unknown: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -1345,6 +1349,7 @@ impl Asked {
             used: None,
             unreadable: None,
             kept_commands: Some(Vec::new()),
+            settlement_unknown: false,
         };
         if let Some(message) = launch
             .message

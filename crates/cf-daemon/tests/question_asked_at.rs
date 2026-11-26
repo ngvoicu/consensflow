@@ -509,6 +509,7 @@ async fn q1_a_migrated_idle_window_asks_taskless_after_its_preupdate_cancel() {
     w.deliver(brief);
     w.ledger.cancel_task(p, task, "human").unwrap();
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0047(db).unwrap();
         cf_ledger::testing::undo_migration_0046(db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(db).unwrap();
         db.pragma_update(None, "user_version", 43).unwrap();
@@ -607,6 +608,7 @@ async fn q1_an_idle_question_stays_the_sessions_when_the_next_tasks_brief_arrive
     w.deliver(old);
     w.ledger.cancel_task(p, task, "human").unwrap();
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0047(db).unwrap();
         cf_ledger::testing::undo_migration_0046(db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(db).unwrap();
         db.pragma_update(None, "user_version", 43).unwrap();

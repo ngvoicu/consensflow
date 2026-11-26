@@ -122,6 +122,37 @@ const ACTIVITY_LABEL = {
   unknown: 'Unknown',
   out: 'Out of quota',
 }
+/**
+ * What a task waiting to be tried again says (D3's N35): its turn failed, and ConsensFlow's own
+ * Resume tries it again in its window. Held, it names the time and the try ("Trying again at
+ * 14:02:31 (1 of 2)"; the drawer says "its turn failed: tries again at ..."); from that time
+ * until its window has the words, that it waits for its window. `drawer` is the drawer's line.
+ */
+const retryWords = (retry, drawer = false, now = Date.now(), why = null) => {
+  const count = ` (${retry.which} of ${retry.of})`
+  const due = retry.dueAt ? new Date(retry.dueAt).getTime() : null
+  if (due !== null && due > now) {
+    const at = new Date(due).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+    return drawer ? `its turn failed: tries again at ${at}${count}` : `Trying again at ${at}${count}`
+  }
+  // From its time on, what it waits for is the real state: the window, or the project's
+  // resume, or its member's return from quota.
+  const waits = why ?? 'its window'
+  return drawer
+    ? `its turn failed: trying again, waiting for ${waits}${count}`
+    : `Trying again, waiting for ${waits}${count}`
+}
+/** What a retry past its time waits for, from the board's own state: null where it is its window. */
+const retryWaitsFor = (closed, participant, now = Date.now()) => {
+  if (closed) return "the project's resume"
+  if (participant && outOfQuota(participant, now)) return 'its member to be back'
+  return null
+}
 /** How a message's kind reads. */
 const KIND_LABEL = {
   task: 'Task',
@@ -1666,6 +1697,17 @@ export class BoardView {
     )
   }
 
+  /** What a retry past its time waits for, as the drawer says it: from the board's state at `now`. */
+  #retryWhy(assigneeHandle, now) {
+    // The member whose task it is: a backup's task waits on the backup, folded or not.
+    const lanes = this.#board.lanes
+    const assignee = lanes.find((lane) => lane.participant.handle === assigneeHandle)?.participant
+    const owner =
+      lanes.find((lane) => lane.participant.handle === (assignee?.member ?? assignee?.handle))
+        ?.participant ?? null
+    return retryWaitsFor(this.#board.project.state !== 'open', owner, now)
+  }
+
   #tick() {
     const now = Date.now()
     for (const root of [this.#root, this.#stackCards]) {
@@ -1677,6 +1719,12 @@ export class BoardView {
           card.setAttribute('aria-description', `${STATE_LABEL[card.dataset.state]} for ${text}`)
         }
       }
+      for (const held of root.querySelectorAll('.card-held[data-retry]')) {
+        // What it waits for follows the clock too: its member's quota may return meanwhile.
+        const why = this.#retryWhy(held.dataset.assignee || null, now)
+        const text = retryWords(JSON.parse(held.dataset.retry), false, now, why)
+        if (held.textContent !== text) held.textContent = text
+      }
     }
   }
 
@@ -1687,6 +1735,7 @@ export class BoardView {
     card.dataset.state = task.state
     if (task.questionPending) card.dataset.pending = 'question'
     if (task.held) card.dataset.pending = 'background'
+    if (task.retry) card.dataset.pending = 'retry'
     card.setAttribute(
       'aria-label',
       `T-${task.number}, ${task.title}, ${stateLabel(task)}${task.resumeWait ? `, resume waits: ${task.resumeWait.reason}` : ''}, from ${who(task.requester)}`,
@@ -1706,6 +1755,18 @@ export class BoardView {
     // What it waits on is said on the card itself: the window's lamp says it rests.
     if (task.held) {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))
+    }
+    if (task.retry) {
+      const now = Date.now()
+      const held = element(
+        'span',
+        'card-held',
+        retryWords(task.retry, false, now, this.#retryWhy(task.assignee, now)),
+      )
+      // The card left open past its time follows the clock (`#tick`), its reason too.
+      held.dataset.retry = JSON.stringify(task.retry)
+      held.dataset.assignee = task.assignee ?? ''
+      where.append(' · ', held)
     }
     if (task.resumeWait) {
       where.append(' · ', element('span', 'card-held', `resume waits: ${task.resumeWait.reason}`))
@@ -1823,7 +1884,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.retry ? ` · ${retryWords(task.retry, true, now, retryWaitsFor(closed, waitingMember?.participant, now))}` : ''}${resumeWait === null ? '' : ` · resume waits: ${resumeWait.reason}`}${wait === null ? '' : ` · ${wait.words}`}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]

@@ -85,7 +85,7 @@ fn nothing_the_turn_left_is_ended_and_the_host_is_never_asked_to_end_it() {
 
 #[test]
 fn a_turn_that_failed_is_the_tasks_failure_and_nothing_is_ended_for_it() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     // The harness reports the turn failed, with the job still running.
     context.adapter.with("zeus", |agent| agent.failed = true);
