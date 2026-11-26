@@ -328,6 +328,7 @@ await app.exposeFunction('gateCall', async (command, args) => {
       from: args.from,
     })
     if (fault === 'empty-frame') frame = emptied(frame)
+    if (fault === 'short-boundary') frame = shortened(frame)
     if (args.id === here.win) here.piece(frame)
     return frame
   }
@@ -415,6 +416,18 @@ function emptied(frameHex) {
   const size = Buffer.alloc(4)
   size.writeUInt32LE(rewritten.length)
   return Buffer.concat([size, rewritten]).toString('hex')
+}
+
+/** The control `short-boundary`: the host ends its history, bytes and boundary, one byte before the bytes it handed to the page before. */
+function shortened(frameHex) {
+  const frame = Buffer.from(frameHex, 'hex')
+  const length = frame.readUInt32LE(0)
+  const header = JSON.parse(frame.subarray(4, 4 + length))
+  if (!header.ok || !header.reset || header.boundary === 0) return frameHex
+  const rewritten = Buffer.from(JSON.stringify({ ...header, boundary: header.boundary - 1 }))
+  const size = Buffer.alloc(4)
+  size.writeUInt32LE(rewritten.length)
+  return Buffer.concat([size, rewritten, frame.subarray(4 + length, frame.length - 1)]).toString('hex')
 }
 
 /** A window of the case, as the page under test and the host see it. */

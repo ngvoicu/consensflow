@@ -14,6 +14,7 @@ const WAIT = 20
 const controls = [
   { name: 'finding 10, clean', only: 'finding 10', exit: 0 },
   { name: 'finding 10, a history that starts at its boundary', only: 'finding 10', fault: 'empty-frame', exit: 1, cause: /history starts at \d+, past/ },
+  { name: 'finding 10, a history and boundary one byte short of what the page before was handed', only: 'finding 10', fault: 'short-boundary', exit: 1, cause: /retained bytes|boundary/ },
   { name: 'finding 14, clean', only: 'finding 14', exit: 0 },
   { name: 'finding 14, a private cursor report for an ordinary enquiry', only: 'finding 14', fault: 'private-cpr', exit: 1, cause: /answers: expected|cursor report/ },
   { name: 'finding 14, a cursor report for another place than the program set', only: 'finding 14', fault: 'wrong-cpr-place', exit: 1, cause: /answers/ },
