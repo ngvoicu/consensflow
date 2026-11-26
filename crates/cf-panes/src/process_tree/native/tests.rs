@@ -79,7 +79,8 @@ impl Child {
             .args(arguments)
             .env_clear()
             .envs(environment.iter().copied())
-            .stdin(std::process::Stdio::piped());
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
         Child(command.spawn().expect("the program starts"))
     }
 
@@ -96,14 +97,17 @@ impl Drop for Child {
 }
 
 const HELPER: &str = "CF_PROCARGS_TEST_HELPER";
+const READY: &str = "cf-procargs-helper-ready";
 
 /// What [`a_child_started_with_an_empty_first_argument_shows_no_environment_in_its_command_line`]
 /// starts again (the test's own executable, which the system does not restrict, so it shows
-/// the environment): it waits for its input to end, which the test's end brings.
+/// the environment): it says it is ready, then waits for its input to end, which the
+/// test's end brings.
 #[test]
 #[allow(clippy::disallowed_methods)] // A test's own helper, told what it is by its start.
 fn the_helper_waits_for_its_parent() {
     if std::env::var_os(HELPER).is_some() {
+        println!("{READY}");
         let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
     }
 }
@@ -114,13 +118,25 @@ fn a_child_started_with_an_empty_first_argument_shows_no_environment_in_its_comm
     let canary_pair = ("CF_CANARY_SECRET", "do-not-show-0123456789");
     // The test's own executable: the environment is the child's to show.
     let exe = std::env::current_exe().expect("this executable");
-    let test = format!("{}::the_helper_waits_for_its_parent", module_path!());
+    // The name libtest filters by has no crate in front.
+    let module = module_path!();
+    let test = format!(
+        "{}::the_helper_waits_for_its_parent",
+        module.split_once("::").expect("a crate and a module").1
+    );
     let arguments = ["--exact", test.as_str(), "--nocapture"];
     let child = Child::started(
         exe.to_str().expect("a path"),
         &arguments,
         &[canary_pair, (HELPER, "1"), (OWNER_ENV, "native42")],
     );
+    // Read nothing before the child says it is in place: its own line, not a wait of time.
+    let mut child = child;
+    let output = child.0.stdout.take().expect("its output");
+    let said = std::io::BufRead::lines(std::io::BufReader::new(output))
+        .map_while(Result::ok)
+        .any(|line| line == READY);
+    assert!(said, "the helper ran its test and said it was ready");
     let bytes = procargs(child.pid()).expect("its arguments");
     assert!(
         bytes.windows(canary.len()).any(|w| w == canary.as_bytes()),
