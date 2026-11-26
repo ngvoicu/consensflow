@@ -231,7 +231,7 @@ fn a_second_holder_a_tier_edited_and_a_role_changed_with_own_hands_on_tell_nothi
 fn a_role_gained_mid_turn_is_one_note_at_the_next_rest_on_every_harness_in_its_own_cf() {
     for cf in [
         CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "/Users/someone/Apps/ConsensFlow.app/Contents/Resources/cli/bin/cf",
             Shell::Posix,
         ),
         CfWord::new(

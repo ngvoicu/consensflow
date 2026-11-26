@@ -281,7 +281,7 @@ fn the_largest_note_of_the_roles_with_the_setting_goes_into_a_window_whole() {
     let rules = "r".repeat(cf_ledger::STAFF_RULES_MAX_BYTES);
     for cf in [
         CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "/Users/someone/Apps/ConsensFlow.app/Contents/Resources/cli/bin/cf",
             Shell::Posix,
         ),
         CfWord::new(
