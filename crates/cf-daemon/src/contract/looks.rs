@@ -45,6 +45,7 @@ async fn two_workers_with_a_look_each(rig: &mut Rig) -> i64 {
     let project = rig.open_project(&["zeus", "hera"]).await;
     rig.give(project.id, "zeus", "Parser");
     rig.passes(2).await;
+    rig.until_working(project.id, 1).await;
     rig.give(project.id, "hera", "Lexer");
     rig.passes(1).await;
     assert_eq!(rig.task_state(project.id, 1), "working");
@@ -143,6 +144,7 @@ async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_th
         settle().await;
         // Zeus's look was asked before hera's, and the worker answers both
         // before the engine's thread looks at either.
+        standing.asked(2).await;
         standing.answer(2);
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;

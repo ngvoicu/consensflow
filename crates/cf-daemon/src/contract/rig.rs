@@ -375,6 +375,19 @@ impl Rig {
         }
     }
 
+    /// Passes, a turn of real time between them, until task `number` is at work: a launch's steps
+    /// after the pane's open are made on threads of their own (T-2232), so a slow machine has the
+    /// task at work a few turns later than the open's answer. Never more than ten seconds.
+    pub async fn until_working(&mut self, project: i64, number: i64) {
+        for _ in 0..400 {
+            if self.task_state(project, number) == "working" {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            self.passes(1).await;
+        }
+    }
+
     /// The state of task `number`.
     pub fn task_state(&self, project: i64, number: i64) -> String {
         self.ledger
