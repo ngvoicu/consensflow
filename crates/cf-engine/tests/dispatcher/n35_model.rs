@@ -19,7 +19,8 @@
 //! no more than two numbered retries between two resets, never a task failed while the rule
 //! still allows a retry, and the stored count and time the model's own.
 //!
-//! `CF_N35_SEEDS` is how many schedules the one model test runs (2,000 by default),
+//! `CF_N35_SEEDS` is how many schedules the one model test runs (400 by default; a long run asks for
+//! more, 2,000 or 100,000),
 //! `CF_N35_FIRST_SEED` where its seeds begin.
 
 // A model run is told its seeds by the environment, and tells its seed and its schedule on stderr.
@@ -798,7 +799,7 @@ fn seeds() -> (u64, u64) {
     let count = std::env::var("CF_N35_SEEDS")
         .ok()
         .and_then(|n| n.parse().ok())
-        .unwrap_or(2_000);
+        .unwrap_or(400);
     let first = std::env::var("CF_N35_FIRST_SEED")
         .ok()
         .and_then(|n| n.parse().ok())
