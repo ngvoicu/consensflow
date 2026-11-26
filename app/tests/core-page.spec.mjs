@@ -2389,7 +2389,7 @@ test('the staff in Project settings says a member is out of quota and tries it a
  * or billing was refused, which they may have fixed; and a model busy for a moment, which
  * ConsensFlow tries again after a back-off of its own and no press shortens.
  */
-async function heldFor(page, kind, { because, bare } = {}) {
+async function heldFor(page, kind, { form, activity } = {}) {
   const data = model()
   const soon = new Date(Date.now() + 90 * 60_000).toISOString()
   const until = kind === 'account' ? '9999-12-31T23:59:59.998Z' : soon
@@ -2397,13 +2397,14 @@ async function heldFor(page, kind, { because, bare } = {}) {
   for (const handle of ['zeus', 'chief']) {
     const lane = lanes.find((lane) => lane.participant.handle === handle)
     lane.participant.outUntil = until
-    if (because) lane.participant.outBecause = because
-    // A hold that outlives its window: no activity says anything of it.
-    if (bare) delete lane.activity
+    if (form) lane.participant.outForm = form
+    if (activity) lane.activity = { state: 'out', reason: activity }
     if (kind === 'busy') lane.busy = soon
   }
   const zeus = lanes.find((lane) => lane.participant.handle === 'zeus')
-  zeus.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until }))
+  const held = task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until })
+  zeus.tasks.push(held)
+  data.tasks['1:9'] = { ...held, messages: [] }
   await open(page, data)
   return {
     row: page.locator('tr[data-handle="zeus"]'),
@@ -2466,54 +2467,69 @@ test('a member held for its account says so, to log in again or pay, on its row,
   await expect(staff.locator('.try-again')).toHaveCount(1)
 })
 
-test('a member held for its account says which, billing or login, and the harness’s own words, from the hold it keeps and with no window to say them', async ({
+test('a member held for its login says so with the status and the error type its hold keeps, on every surface, and its window’s words are not the card’s', async ({
   page,
 }) => {
-  // The owner's field find (2026-11-22): the card fell back to "billing or login" because the
-  // window's activity that held the words was gone; the hold now keeps them.
-  const login =
-    'its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'
-  const shown = await heldFor(page, 'account', { because: login, bare: true })
+  // T-2353: one function says the hold, from its own closed form; the window's words (the
+  // activity) are not read for it, so nothing of a harness's can reach the card.
+  const shown = await heldFor(page, 'account', {
+    form: { kind: 'login', status: 401, code: 'authentication_error' },
+    activity: 'unavailable: 401 owner.account@example.invalid password: hunter2',
+  })
+  const what = 'its login was refused (401, authentication_error)'
   await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
-    `Unavailable: ${login}`,
+    `Unavailable: ${what}`,
   )
-  // The chief's card and the staff list say them with what to do.
-  const full = `Unavailable: ${login}. Logged in again, or paid? Press Try again now`
-  await expect(shown.chief.locator('.terminal-status')).toHaveText(full)
+  const said = `Unavailable: ${what}. Log in again in its harness, then press Try again now`
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
   const staff = await shown.staff()
-  await expect(staff.locator('.member-out')).toHaveText(full)
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await page
+    .getByRole('dialog', { name: 'Project settings' })
+    .getByRole('button', { name: /Close/ })
+    .first()
+    .click()
+  await page.locator('button.card[data-task="9"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-9' })).toContainText(
+    `its member's account is unavailable: ${what}`,
+  )
+  await expect(page.locator('body')).not.toContainText('hunter2')
 })
 
-test('a long reason of a held member is cut at a word on the chief’s card, whole in its lane, and clips nothing at the smallest window', async ({
+test('a member held for its billing says billing with what its hold keeps, and the kind alone where it keeps no more', async ({
   page,
 }) => {
-  // T-2353: 300 characters on the card clipped Try again by 4 px and left the terminal 6 px at
-  // the smallest window. The card says the first line, cut at a word; the lane says it all.
-  await page.setViewportSize({ width: 560, height: 480 })
-  const words = Array.from({ length: 40 }, (_, at) => `word${at}`).join(' ')
-  const long = `its login was refused: ${words}`
-  const hostOf = (chief) =>
-    chief.evaluate((card) => card.querySelector('.terminal-host').getBoundingClientRect().height)
-  const plain = await heldFor(page, 'account', {
-    because: 'its login was refused: 401',
-    bare: true,
+  const billing = await heldFor(page, 'account', {
+    form: { kind: 'billing', status: 402, code: 'insufficient_quota' },
   })
-  const plainHost = await hostOf(plain.chief)
-  const shown = await heldFor(page, 'account', { because: long, bare: true })
-  const status = shown.chief.locator('.terminal-status')
-  await expect(status).toContainText('Unavailable: its login was refused: word0 word1')
-  const said = await status.innerText()
-  expect(said).toContain('…')
-  expect(said).not.toContain('word39')
-  // Cut at a word: the last one before the dots is whole, and the way back follows.
-  expect(said).toMatch(/ word\d+…\. Logged in again, or paid\? Press Try again now$/)
-  // The lane (the member's row and the staff list) says them all.
-  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
-    `Unavailable: ${long}`,
+  await expect(billing.chief.locator('.terminal-status')).toHaveText(
+    'Unavailable: its billing was refused (402, insufficient_quota). Once it is paid, press Try again now',
   )
-  const staff = await shown.staff()
-  await expect(staff.locator('.member-out')).toContainText('word39')
-  // Nothing of the card is clipped: its Try again and the terminal below it.
+  const bare = await heldFor(page, 'account', { form: { kind: 'billing' } })
+  await expect(bare.row.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its billing was refused',
+  )
+})
+
+test('a hold with no form (an older build’s) says the generic sentence on every surface, whatever its window said', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'account', { activity: 'unavailable: 401 some words' })
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its account was refused for billing or login',
+  )
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now',
+  )
+})
+
+test('the longest form of a hold fits the chief’s card at the smallest window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 560, height: 480 })
+  const shown = await heldFor(page, 'account', {
+    form: { kind: 'billing', status: 402, code: 'credit_balance_too_low' },
+  })
   const box = await shown.chief.evaluate((card) => {
     const frame = card.getBoundingClientRect()
     const button = card.querySelector('.try-again').getBoundingClientRect()
@@ -2521,16 +2537,7 @@ test('a long reason of a held member is cut at a word on the chief’s card, who
     return { buttonBelow: button.bottom - frame.bottom, host: host.height }
   })
   expect(box.buttonBelow).toBeLessThanOrEqual(0)
-  // The terminal keeps what a card with a short reason leaves it, less the lines the words take.
-  expect(box.host).toBeGreaterThan(plainHost - 20)
-})
-
-test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {
-  const billing = 'its billing was refused: 402 Insufficient credits'
-  const shown = await heldFor(page, 'account', { because: billing, bare: true })
-  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
-    `Unavailable: ${billing}`,
-  )
+  expect(box.host).toBeGreaterThan(25)
 })
 
 test('a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list', async ({

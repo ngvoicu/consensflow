@@ -21,12 +21,14 @@
 //!   a reset at a time of day, asked of one, names no reset where Node would
 //!   give one.
 
+mod form;
 mod patterns;
 mod reset;
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 mod zone;
 
+pub use form::hold_form;
 pub(crate) use zone::time_zone;
 
 use cf_base::js;
@@ -65,7 +67,7 @@ pub enum Quota {
     /// A request the provider refused for a moment, which is no failure of the turn and no
     /// quota: its model at capacity or overloaded (Anthropic's 529), a server error (a 5xx),
     /// its server busy (T-1112). The harness gave up retrying it itself; when it happened, if
-    /// the record says, and what it said, whole. It names no reset: the
+    /// the record says, and what it said, held to a line's length. It names no reset: the
     /// engine holds the task and tries it again after a backoff of its own.
     Busy { at: Option<String>, because: String },
 }
@@ -250,8 +252,7 @@ pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal
 }
 
 /// An account that refused at `at_ms` (none when it is no number) for what only its
-/// human cures, told as the harness said it (`said`, whole: the dispatcher screens the words
-/// and bounds them, T-2353). Fails
+/// human cures, told as the harness said it (`said`, held to a line's length). Fails
 /// where `toISOString` throws.
 pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Result<Quota, String> {
     let at = if at_ms.is_finite() {
@@ -263,9 +264,10 @@ pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Res
         Refusal::Billing => "its billing was refused",
         Refusal::Credentials => "its login was refused",
     };
+    let said: String = said.trim().chars().take(300).collect();
     Ok(Quota::Unavailable {
         at,
-        because: format!("{what}: {}", said.trim()),
+        because: format!("{what}: {said}"),
     })
 }
 
@@ -287,8 +289,8 @@ pub(crate) fn busy_refusal(text: &str, status: Option<f64>) -> bool {
 }
 
 /// A request the provider refused for a moment at `at_ms` (none when it is no number), told
-/// as the harness said it (`said`, whole, as for an account's refusal). Fails where
-/// `toISOString` throws.
+/// as the harness said it (`said`, held to a line's length). Fails where `toISOString`
+/// throws.
 pub(crate) fn busy_quota(at_ms: f64, said: &str) -> Result<Quota, String> {
     let at = if at_ms.is_finite() {
         Some(date(at_ms)?)
@@ -297,7 +299,7 @@ pub(crate) fn busy_quota(at_ms: f64, said: &str) -> Result<Quota, String> {
     };
     Ok(Quota::Busy {
         at,
-        because: said.trim().to_owned(),
+        because: said.trim().chars().take(300).collect(),
     })
 }
 

@@ -270,32 +270,3 @@ fn a_moved_model_is_held_as_an_unavailable_account_is_and_says_it_is_neither_a_q
     };
     assert!(!account.moved() && account.unavailable() && account.held_for_the_human());
 }
-
-/// The password fits in the first 300 characters and its terminating `@` is character 301, as
-/// the review of T-2350 found: a reader that cut its words there left the password in what the
-/// dispatcher's screen then saw. Every reader tells the harness's whole words, and the one
-/// bound is the dispatcher's, after the screen (`shown::quotable::held_words`).
-pub(crate) fn words_with_a_url_cut_at(lead: &str) -> String {
-    let url_head = "https://test-user:test-password";
-    let fill = 300 - lead.len() - url_head.len();
-    let filler: String = " .".repeat(fill).chars().take(fill).collect();
-    let words = format!("{lead}{filler}{url_head}@gateway.invalid");
-    assert_eq!(words.as_bytes()[300], b'@');
-    words
-}
-
-#[test]
-fn tells_the_whole_words_of_an_account_s_refusal_and_of_a_busy_one_and_cuts_none() {
-    let words = words_with_a_url_cut_at("401 ");
-    let Quota::Unavailable { because, .. } =
-        unavailable_quota(at(), Refusal::Credentials, &words).unwrap()
-    else {
-        panic!("unavailable");
-    };
-    assert_eq!(because, format!("its login was refused: {words}"));
-    let words = words_with_a_url_cut_at("503 ");
-    let Quota::Busy { because, .. } = busy_quota(at(), &words).unwrap() else {
-        panic!("busy");
-    };
-    assert_eq!(because, words);
-}

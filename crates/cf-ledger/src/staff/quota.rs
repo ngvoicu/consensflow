@@ -1,6 +1,7 @@
 //! A member out of quota: until when it takes no work, and back before its reset.
 
 use cf_base::time;
+use cf_proto::hold::HoldForm;
 use cf_proto::ledger::ParticipantView;
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
@@ -73,7 +74,7 @@ pub(crate) fn mark_out_kind(
     until: &str,
     reason: &str,
     kind: Option<HoldKind>,
-    because: Option<&str>,
+    form: Option<HoldForm>,
 ) -> Result<ParticipantView, LedgerError> {
     // Kept as a store keeps a time, however it was written.
     let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
@@ -109,40 +110,53 @@ pub(crate) fn mark_out_kind(
             params![until, since, kind.map(HoldKind::as_str), member.id],
         )?;
         let mut event = json!({ "handle": member.handle, "until": until, "reason": reason });
-        if let Some(because) = because {
-            // Its words belong to the member by its identity, never by a handle, which another
-            // member may take once this one has left it (T-2353).
-            event["because"] = json!(because);
+        if let Some(form) = form {
+            // An account hold's closed form, and whose it is by the member's id, never by a
+            // handle, which another member may take once this one has left it (T-2353).
             event["participant"] = json!(member.id);
+            event["form"] = json!(form);
         }
         store.log(member.project_id, "member.out", event)?;
         participant_view(&store.participant_row(member.id)?)
     })
 }
 
-/// The words a member's hold was made from, as the harness said them: those of the
-/// `member.out` of this member (by its id, which an edit that renames it keeps) that set the end
-/// the member keeps. None where that hold carries none (a quota, a busy model, a hold an older
-/// build made, which names no id).
-pub(crate) fn hold_words(
+/// The closed form of the account hold the member is under now: that of the `member.out` event
+/// of the mark that set the end it keeps, the member's by its id (an event of an older build
+/// names the member by its handle alone). An event without the form, an older build's or one
+/// whose reason had none, gives none, and no earlier event's form stands in for it. Whatever the
+/// event holds is read back through the lists of [`HoldForm::checked`]: a value that is in none
+/// is no value.
+pub(crate) fn hold_form(
     store: &Store,
     project_id: i64,
     participant: i64,
+    handle: &str,
     until: &str,
-) -> Result<Option<String>, LedgerError> {
-    Ok(store
+) -> Result<Option<HoldForm>, LedgerError> {
+    let found: Option<(Option<String>, Option<i64>, Option<String>)> = store
         .db
         .query_row(
-            "SELECT json_extract(data, '$.because') FROM event
+            "SELECT json_extract(data, '$.form.kind'), json_extract(data, '$.form.status'),
+                    json_extract(data, '$.form.code')
+             FROM event
              WHERE project_id = ?1 AND kind = 'member.out' AND json_valid(data)
-               AND json_extract(data, '$.participant') = ?2
-               AND json_extract(data, '$.until') = ?3
+               AND json_extract(data, '$.until') = ?4
+               AND (json_extract(data, '$.participant') = ?2
+                    OR (json_extract(data, '$.participant') IS NULL
+                        AND json_extract(data, '$.handle') = ?3))
              ORDER BY id DESC LIMIT 1",
-            params![project_id, participant, until],
-            |row| row.get::<_, Option<String>>(0),
+            params![project_id, participant, handle, until],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .optional()?
-        .flatten())
+        .optional()?;
+    Ok(found.and_then(|(kind, status, code)| {
+        HoldForm::checked(
+            kind.as_deref()?,
+            status.and_then(|status| u64::try_from(status).ok()),
+            code.as_deref(),
+        )
+    }))
 }
 
 /// A member out of quota is back before its reset: one of its windows

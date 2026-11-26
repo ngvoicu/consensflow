@@ -1,5 +1,7 @@
 //! The ledger's staff and their sessions, as its callers hold them.
 
+use cf_proto::hold::HoldForm;
+
 use super::Ledger;
 use crate::{
     staff, Candidate, HoldKind, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView,
@@ -100,23 +102,22 @@ impl Ledger {
         )
     }
 
-    /// Mark a member out for a typed reason, with the harness's own words of the refusal kept
-    /// with the hold for the board to say.
-    pub fn mark_out_saying(
+    /// Mark a member out for an account's refusal, with the closed form of the refusal kept
+    /// with the hold for the board to say (T-2353).
+    pub fn mark_out_with_form(
         &mut self,
         participant: i64,
         until: &str,
         reason: &str,
-        kind: HoldKind,
-        because: &str,
+        form: Option<HoldForm>,
     ) -> Result<ParticipantView, LedgerError> {
         staff::mark_out_kind(
             &mut self.store,
             participant,
             until,
             reason,
-            Some(kind),
-            Some(because),
+            Some(HoldKind::Account),
+            form,
         )
     }
 

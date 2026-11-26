@@ -46,6 +46,7 @@ mod assigning;
 mod background;
 mod backup_rule;
 mod backups;
+mod base_equal;
 mod brief_never_began;
 mod busy_models;
 mod cancelled_task;

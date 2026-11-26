@@ -455,26 +455,6 @@ fn pi_reads_each_providers_refusal_for_what_it_is() {
 }
 
 #[test]
-fn pi_tells_the_whole_words_of_a_refusal_whose_url_password_ends_after_character_300() {
-    use crate::shared::quota::tests::a_quota_refusal::words_with_a_url_cut_at;
-    for (lead, login) in [("401 ", true), ("503 ", false)] {
-        let words = words_with_a_url_cut_at(lead);
-        let mut stage = Stage::with(&[
-            header(),
-            failing("a1", &json!(words), &json!(1_790_000_000_000_i64)),
-        ]);
-        let record = stage.at(0);
-        match record.quota.as_deref() {
-            Some(Quota::Unavailable { because, .. }) if login => {
-                assert_eq!(because, &format!("its login was refused: {words}"));
-            }
-            Some(Quota::Busy { because, .. }) if !login => assert_eq!(because, &words),
-            other => panic!("{lead}: {other:?}"),
-        }
-    }
-}
-
-#[test]
 fn a_failure_is_the_text_string_makes_of_it() {
     let quota_of = |error: &Value| {
         let mut stage = Stage::with(&[header(), failing("a1", error, &json!(0))]);

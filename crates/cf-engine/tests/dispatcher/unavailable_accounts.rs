@@ -280,51 +280,34 @@ fn brought_back_by_a_count_of(level: Level, used: u64) {
     );
 }
 
-#[test]
-fn keeps_the_harnesss_words_with_the_hold_for_the_board_to_say() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    context
-        .adapter
-        .refuse("zeus-amber-pine", unavailable(&context));
-    context.pass().unwrap();
+/// The board's participant for `handle`.
+fn participant_of(context: &Context, tiers: &Tiers, handle: &str) -> serde_json::Value {
     let board =
         serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
-    let zeus = board["lanes"]
+    board["lanes"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|lane| lane["participant"]["handle"] == "zeus")
-        .expect("zeus's lane");
-    assert_eq!(
-        zeus["participant"]["outBecause"], BECAUSE,
-        "the board says the harness's words from the hold, with no window to say them"
-    );
+        .find(|lane| lane["participant"]["handle"] == handle)
+        .unwrap()["participant"]
+        .clone()
 }
 
-/// What a refusal's words carry that must never reach the ledger, the trace or the board.
-const KEY: &str = "sk-ant-api03-Zq8vN2mLk4Rt7XyP1wUc5Hd9";
-const ADDRESS: &str = "owner.account@example.com";
-
-fn everything_kept_of_the_hold(context: &Context, tiers: &Tiers) -> String {
-    let board =
-        serde_json::to_string(&context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
-    let events = serde_json::to_string(
-        &context
-            .ledger
-            .borrow()
-            .events(tiers.project.id, 0, 5000)
-            .unwrap(),
-    )
-    .unwrap();
-    format!("{board}\n{events}\n{}", tiers.notes("chief").join("\n"))
+/// The `member.out` events of the project, as the ledger kept them.
+fn member_outs(context: &Context, tiers: &Tiers) -> Vec<serde_json::Value> {
+    context
+        .ledger
+        .borrow()
+        .events(tiers.project.id, 0, 5000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "member.out")
+        .map(|event| event.data)
+        .collect()
 }
 
-#[test]
-fn a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says_which_it_was() {
+/// Zeus refused for `because`, and `then` looking at what it left.
+fn zeus_refused(because: &str, then: impl FnOnce(&Context, &Tiers)) {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
@@ -334,128 +317,96 @@ fn a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says
         "zeus-amber-pine",
         Quota::Unavailable {
             at: Some(now(&context)),
-            because: format!(
-                "its login was refused: 401 invalid x-api-key {KEY} for {ADDRESS}, password: hunter2"
-            ),
+            because: because.to_owned(),
         },
     );
     context.pass().unwrap();
-    let kept = everything_kept_of_the_hold(&context, &tiers);
-    for secret in [KEY, ADDRESS, "hunter2"] {
-        assert!(
-            !kept.contains(secret),
-            "{secret} reached what is kept:\n{kept}"
-        );
-    }
-    let board: serde_json::Value =
-        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
-    let zeus = board["lanes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|lane| lane["participant"]["handle"] == "zeus")
-        .unwrap();
-    let said = zeus["participant"]["outBecause"].as_str().unwrap();
-    assert!(said.starts_with("its login was refused"), "{said}");
-    assert!(said.contains("left out"), "{said}");
-}
-
-/// The most characters of a hold's words that are kept after the screen: one bound, at the place
-/// the words are written (T-2353), for every harness and every kind of hold.
-const BOUND: usize = 300;
-
-/// A hold's report made from the harness's words and the time of the refusal.
-type Made = fn(String, String) -> Quota;
-
-/// How each kind of hold's report is made from the harness's words, each with the lead the screen strips from the words (a refusal's), and the words' own start.
-fn holds() -> [(&'static str, &'static str, Made); 3] {
-    [
-        ("its login was refused: ", "401 ", |because, at| {
-            Quota::Unavailable {
-                at: Some(at),
-                because,
-            }
-        }),
-        (
-            "",
-            "its model moved from a to b on its own (",
-            |because, at| Quota::Moved {
-                at: Some(at),
-                because,
-            },
-        ),
-        ("", "503 ", |because, at| Quota::Busy {
-            at: Some(at),
-            because,
-        }),
-    ]
-}
-
-/// Zeus held by `quota`, and everything kept of it: the ledger's events, the board, the notes,
-/// and the window's activity; with what the board says of the hold.
-fn zeus_held_by(quota: impl FnOnce(&Context) -> Quota) -> (String, String, String) {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    context.adapter.refuse("zeus-amber-pine", quota(&context));
-    context.pass().unwrap();
-    let kept = everything_kept_of_the_hold(&context, &tiers);
-    let board =
-        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
-    let said = board["lanes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|lane| lane["participant"]["handle"] == "zeus")
-        .unwrap()["participant"]["outBecause"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
-    let activity = context
-        .dispatcher
-        .activity(tiers.id("zeus-amber-pine"))
-        .reason
-        .unwrap_or_default();
-    (kept, said, activity)
+    then(&context, &tiers);
 }
 
 #[test]
-fn a_hold_s_words_are_screened_whole_before_they_are_cut_whatever_their_length_and_kind() {
-    // The password fits in the first 300 characters and its terminating `@` is character 301:
-    // the screen sees the whole words, and nothing of them is kept (T-2353, T-2350's check).
-    for (prefix, lead, hold) in holds() {
-        let url_head = "https://test-user:Zq7vN2mLk4RtX9";
-        let fill = BOUND - lead.len() - url_head.len();
-        let filler: String = " .".repeat(fill).chars().take(fill).collect();
-        // The `@` is character 301 of the harness's words, which a refusal's lead precedes.
-        let words =
-            format!("{prefix}{lead}{filler}{url_head}@gateway.invalid and the rest of its words");
-        let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
-        for place in [&kept, &said, &activity] {
-            assert!(!place.contains("Zq7vN2mLk4RtX9"), "{lead}: {place}");
-        }
-    }
-}
-
-#[test]
-fn a_hold_s_words_are_kept_to_one_bound_whatever_the_harness_cut_before_whatever_the_kind() {
-    // Codex's `unauthorized` message and a model's move reach the dispatcher as long as they
-    // are: the bound is set once, after the screen, where the words are written.
-    for (prefix, lead, hold) in holds() {
-        let words = format!("{prefix}{lead}{}", "plain words ".repeat(100));
-        let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
-        for place in [&said, &activity] {
-            assert!(
-                place.chars().count() <= prefix.len() + lead.len() + BOUND + 120,
-                "{lead}: {} characters: {place}",
-                place.chars().count()
+fn keeps_the_closed_form_of_an_account_s_refusal_with_the_hold_for_the_board_to_say() {
+    zeus_refused(
+        r#"its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        |context, tiers| {
+            let zeus = participant_of(context, tiers, "zeus");
+            assert_eq!(
+                zeus["outForm"],
+                serde_json::json!({ "kind": "login", "status": 401, "code": "authentication_error" }),
+                "the board says what the hold was, with no window to say it"
             );
-        }
-        assert!(
-            !kept.contains(&"plain words ".repeat(40)),
-            "{lead}: the tail of the words was kept: {kept}"
+            assert!(zeus.get("outBecause").is_none(), "{zeus}");
+            let outs = member_outs(context, tiers);
+            assert_eq!(outs.len(), 1, "{outs:?}");
+            let mut keys: Vec<&String> = outs[0].as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["form", "handle", "participant", "reason", "until"]);
+        },
+    );
+}
+
+#[test]
+fn the_form_keeps_no_word_of_a_refusal_whatever_it_carries() {
+    // The check's finding 12: an address with international characters, beside a credit
+    // balance; and a short labelled credential, a key and a password. None is a literal of the
+    // form's lists, so none is kept (T-2353).
+    for words in [
+        "its billing was refused: 402 Your credit balance is too low. Contact jos\u{e9}.owner@ex\u{e4}mple.invalid",
+        "its billing was refused: 402 \u{7528}\u{6237}@\u{4f8b}\u{3048}.\u{30c6}\u{30b9}\u{30c8} insufficient_quota issuer_token: Zq7vN2mLk4Rt",
+        "its login was refused: 401 invalid x-api-key sk-ant-api03-Zq8vN2mLk4Rt7XyP1wUc5Hd9 password: hunter2",
+    ] {
+        zeus_refused(words, |context, tiers| {
+        let kept = format!(
+            "{}\n{}",
+            serde_json::to_string(&participant_of(context, tiers, "zeus")).unwrap(),
+            serde_json::to_string(&member_outs(context, tiers)).unwrap()
         );
+        for secret in [
+            "owner@",
+            "ex\u{e4}mple",
+            "\u{7528}\u{6237}",
+            "Zq7vN2mLk4Rt",
+            "sk-ant",
+            "hunter2",
+            "issuer_token",
+        ] {
+            assert!(!kept.contains(secret), "{secret} was kept: {kept}");
+        }
+        assert!(kept.contains("\"form\""), "{kept}");
+        });
+    }
+}
+
+#[test]
+fn a_moved_model_and_a_busy_model_keep_no_form_and_no_word_with_the_hold() {
+    // The check's finding 15: a failed Muse turn's labelled credential rode a model's move into
+    // the event. A moved hold keeps nothing new; nor does a busy one (T-2353).
+    for quota in [
+        Quota::Moved {
+            at: Some("2026-09-19T12:00:00.000Z".to_owned()),
+            because: "its model moved from a to b on its own (Model request rejected. issuer_token: Zq7vN2mLk4Rt)".to_owned(),
+        },
+        Quota::Busy {
+            at: Some("2026-09-19T12:00:00.000Z".to_owned()),
+            because: "503 overloaded issuer_token: Zq7vN2mLk4Rt".to_owned(),
+        },
+    ] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus", "diana"]);
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.adapter.refuse("zeus-amber-pine", quota);
+        context.pass().unwrap();
+        let zeus = participant_of(&context, &tiers, "zeus");
+        assert!(zeus.get("outForm").is_none(), "{zeus}");
+        for out in member_outs(&context, &tiers) {
+            let keys: Vec<&String> = out.as_object().unwrap().keys().collect();
+            assert!(
+                keys.iter().all(|key| ["handle", "until", "reason"].contains(&key.as_str())),
+                "{out}"
+            );
+            assert!(!out.to_string().contains("Zq7vN2mLk4Rt"), "{out}");
+        }
     }
 }

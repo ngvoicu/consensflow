@@ -99,7 +99,7 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         let at = last.and_then(|at| time_of(record.items[at].at.as_ref()));
         record.quota = Some(Arc::new(Quota::Busy {
             at,
-            because: said.trim().to_owned(),
+            because: said.trim().chars().take(300).collect(),
         }));
     }
     // A chain of Devin's own words alone with a compaction's summary among them is a

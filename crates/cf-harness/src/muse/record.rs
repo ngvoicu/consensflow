@@ -78,6 +78,7 @@ use serde_json::Value;
 
 use self::held::Held;
 use self::provisional::Provisional;
+pub(crate) use self::provisional::{LOGIN_REFUSED, NO_ALLOWANCE};
 use self::work::Work;
 use super::paths::transcript;
 use super::version::{self, Version};

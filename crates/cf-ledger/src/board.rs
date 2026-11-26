@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use cf_proto::hold::HoldForm;
 use cf_proto::ledger::{Lane, MessageView, ParticipantView, ProjectView, Resume, TaskCard};
 use serde::{Serialize, Serializer};
 
@@ -12,8 +13,8 @@ pub(crate) struct StaffMark {
     pub(crate) backup_of: Option<i64>,
     pub(crate) vacation_since: Option<String>,
     pub(crate) out_kind: Option<HoldKind>,
-    /// The harness's words of the refusal that made the hold, said with the hold.
-    pub(crate) out_because: Option<String>,
+    /// The closed form of the account refusal that made the hold, said with the hold.
+    pub(crate) out_form: Option<HoldForm>,
 }
 
 /// The board's ordinary fields, with staff marks sent in each lane's participant.
@@ -41,7 +42,7 @@ struct ParticipantOnBoard<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     out_kind: Option<HoldKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    out_because: Option<&'a str>,
+    out_form: Option<HoldForm>,
 }
 
 #[derive(Serialize)]
@@ -79,7 +80,7 @@ impl Serialize for Board {
                         backup_of: mark.and_then(|mark| mark.backup_of),
                         vacation_since: mark.and_then(|mark| mark.vacation_since.as_deref()),
                         out_kind: mark.and_then(|mark| mark.out_kind),
-                        out_because: mark.and_then(|mark| mark.out_because.as_deref()),
+                        out_form: mark.and_then(|mark| mark.out_form),
                     },
                     tasks: &lane.tasks,
                 }

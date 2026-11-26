@@ -249,7 +249,7 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
     let marks = store
         .db
         .prepare(
-            "SELECT id, backup_of, vacation_since, out_kind, out_until FROM participant
+            "SELECT id, handle, backup_of, vacation_since, out_kind, out_until FROM participant
          WHERE project_id = ? AND left_at IS NULL
            AND (backup_of IS NOT NULL OR vacation_since IS NOT NULL OR out_kind IS NOT NULL)",
         )?
@@ -257,24 +257,23 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             let kind: Option<String> = row.get("out_kind")?;
             Ok((
                 row.get("id")?,
+                row.get::<_, String>("handle")?,
                 row.get::<_, Option<String>>("out_until")?,
                 StaffMark {
                     backup_of: row.get("backup_of")?,
                     vacation_since: row.get("vacation_since")?,
                     out_kind: HoldKind::read(kind.as_deref()),
-                    out_because: None,
+                    out_form: None,
                 },
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let marks = marks
         .into_iter()
-        .map(|(id, until, mut mark)| {
-            // Only a hold an account's refusal or a model's move made has words to say.
-            if matches!(mark.out_kind, Some(HoldKind::Account | HoldKind::Moved)) {
-                if let Some(until) = until {
-                    mark.out_because = staff::hold_words(store, project_id, id, &until)?;
-                }
+        .map(|(id, handle, until, mut mark)| {
+            // Only an account's refusal made a hold with a form to say.
+            if let (Some(HoldKind::Account), Some(until)) = (mark.out_kind, until) {
+                mark.out_form = staff::hold_form(store, project_id, id, &handle, &until)?;
             }
             Ok((id, mark))
         })

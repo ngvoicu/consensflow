@@ -1,8 +1,10 @@
-# A member held for its account says which, billing or login, and the harness's own words, from
-# the hold it keeps (the owner's field find, 2026-11-22, T-2010): the hold's `member.out` event
-# keeps them (`mark_out_saying`), the board says them (`outBecause`, `page_reads::board`), and
-# Pi's refusals are read for what they are: a limit that resets is never billing or login, and
-# a login Pi 1.6.1 could not refresh is a login.
+# A member held for its account says which, billing or login, and the status and the provider's
+# error type its refusal carried, from a closed form its `member.out` event keeps (T-2353,
+# which replaced the harness's words kept with the hold: no free text of a harness's is added
+# anywhere). Every value of the form is a literal of `cf_proto::hold`; the form belongs to the
+# member by its id; a hold whose event has no form says none, never an earlier hold's. Pi's
+# refusals are read for what they are: a limit that resets is never billing or login, and a
+# login Pi 1.6.1 could not refresh is a login.
 #
 # Every name holds `held words`, so `cargo xtask plants daemon "held words"` runs them all.
 
@@ -11,28 +13,88 @@ held-words-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", 
 held-words-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
 held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
 held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests"]
-held-words-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::refusals"]
-held-words-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record::tests::refusals"]
+held-words-form = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::form"]
+held-words-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "hold::"]
 
 [[plant]]
-name = "held words: the hold keeps none of the harness's words"
-meant = "the_board_says_the_words_a_hold_was_made_from"
+name = "held words: the hold keeps no form"
+meant = "the_board_says_the_form_an_account_hold_was_made_from_and_the_event_keeps_no_word"
 runs = ["held-words-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = 'event["because"] = json!(because);'
-replace = 'let _ = because;'
+find = 'event["form"] = json!(form);'
+replace = 'let _ = form;'
 
 [[plant]]
-name = "held words: the engine marks an account's refusal out with none of its words"
-meant = "keeps_the_harnesss_words_with_the_hold_for_the_board_to_say"
+name = "held words: the engine marks an account's refusal out with no form"
+meant = "keeps_the_closed_form_of_an_account_s_refusal_with_the_hold_for_the_board_to_say"
 runs = ["held-words-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "Some(Unwell::Account(because) | Unwell::Moved(because)) => self"
-replace = "Some(Unwell::Account(_) | Unwell::Moved(_)) if true => self\n                .seams\n                .ledger\n                .borrow_mut()\n                .mark_out_with_kind(owner.id, &reset, hold, kind)?,\n            Some(Unwell::Account(because) | Unwell::Moved(because)) => self"
+find = "cf_harness::records::hold_form(because)"
+replace = "{ let _ = because; None }"
+
+[[plant]]
+name = "held words: the hold's event keeps a word of the refusal"
+meant = "the_board_says_the_form_an_account_hold_was_made_from_and_the_event_keeps_no_word"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = 'event["participant"] = json!(member.id);'
+replace = 'event["participant"] = json!(member.id);\n            event["because"] = json!(reason);'
+
+[[plant]]
+name = "held words: a code is taken from the other kind's list too"
+meant = "tells_which_was_refused_its_status_and_its_provider_s_error_type"
+runs = ["held-words-form"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/form.rs"
+find = "list.contains(literal) && pattern.is_match(words)"
+replace = "pattern.is_match(words)"
+
+[[plant]]
+name = "held words: a status the lists do not name is written"
+meant = "a_value_that_is_in_no_list_writes_nothing"
+runs = ["held-words-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/hold.rs"
+find = "status: status.and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == status)),"
+replace = "status: status.and_then(|status| u16::try_from(status).ok()),"
+
+[[plant]]
+name = "held words: a hold's form is looked up by any member's hold of that end"
+meant = "a_member_that_takes_the_handle_another_left_says_its_own_form_when_held_after_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "AND (json_extract(data, '$.participant') = ?2"
+replace = "AND (?2 IS NOT NULL"
+
+[[plant]]
+name = "held words: a hold without a form says an earlier hold's form"
+meant = "a_hold_without_a_form_says_none_and_never_an_earlier_hold_s_form"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "ORDER BY id DESC LIMIT 1"
+replace = "AND json_extract(data, '$.form') IS NOT NULL ORDER BY id DESC LIMIT 1"
+
+[[plant]]
+name = "held words: a reader cuts an account's refusal short of the base's 300 characters"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = 'let said: String = said.trim().chars().take(300).collect();'
+replace = 'let said: String = said.trim().chars().take(299).collect();'
 
 [[plant]]
 name = "held words: Pi reads a limit that resets as billing because its words name a billing page"
@@ -85,82 +147,3 @@ find = "refresh failed \\(401\\)|invalid_grant"
 replace = "refresh failed \\(50[0-9]\\)|refresh failed \\(401\\)|invalid_grant"
 
 
-[[plant]]
-name = "held words: a refusal's words reach the ledger unscreened"
-meant = "a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says_which_it_was"
-runs = ["held-words-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-        let screened = reported.as_deref().map(crate::shown::screened_hold);
-        let unwell = Unwell::of(screened.as_ref());
-        // A busy model is tried again'''
-replace = '''
-        let screened = reported.as_deref().cloned();
-        let unwell = Unwell::of(screened.as_ref());
-        // A busy model is tried again'''
-
-[[plant]]
-name = "held words: a reader cuts a refusal's words before the screen sees them"
-meant = "tells_the_whole_words_of_an_account_s_refusal_and_of_a_busy_one_and_cuts_none"
-runs = ["held-words-quota", "held-words-pi", "held-words-claude"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/quota.rs"
-find = 'because: format!("{what}: {}", said.trim()),'
-replace = 'because: format!("{what}: {}", said.trim().chars().take(300).collect::<String>()),'
-
-[[plant]]
-name = "held words: Codex cuts a busy refusal's words in its reader"
-meant = "codex_tells_the_whole_words_of_a_refusal_whose_url_password_ends_after_character_300"
-runs = ["held-words-codex"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/codex/record.rs"
-find = '''                    .trim()
-                    .to_owned(),'''
-replace = '''                    .trim()
-                    .chars()
-                    .take(300)
-                    .collect(),'''
-
-[[plant]]
-name = "held words: the dispatcher's screen sees a cut of the words"
-meant = "a_hold_s_words_are_screened_whole_before_they_are_cut_whatever_their_length_and_kind"
-runs = ["held-words-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/quotable.rs"
-find = "        return match said(words) {"
-replace = "        return match said(&words.chars().take(WORDS_CHARS).collect::<String>()) {"
-
-[[plant]]
-name = "held words: a hold's words have no bound where they are written"
-meant = "a_hold_s_words_are_kept_to_one_bound_whatever_the_harness_cut_before_whatever_the_kind"
-runs = ["held-words-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown/quotable.rs"
-find = "    match text.char_indices().nth(WORDS_CHARS) {"
-replace = "    match text.char_indices().nth(WORDS_CHARS * 1000) {"
-
-[[plant]]
-name = "held words: a hold's words are looked up by any member's hold of that end"
-meant = "a_member_that_takes_the_handle_another_left_says_its_own_words_when_held_after_it"
-runs = ["held-words-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "AND json_extract(data, '$.participant') = ?2"
-replace = "AND ?2 IS NOT NULL"
-
-[[plant]]
-name = "held words: the hold's event does not say whose words they are"
-meant = "the_board_says_the_words_a_hold_was_made_from"
-runs = ["held-words-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = 'event["participant"] = json!(member.id);'
-replace = 'let _ = member.id;'

@@ -78,7 +78,7 @@ impl Provisional {
             Refused::Busy => (
                 Quota::Busy {
                     at,
-                    because: reason?.trim().to_owned(),
+                    because: reason?.trim().chars().take(300).collect(),
                 },
                 None,
             ),
@@ -105,10 +105,10 @@ enum Refused {
 
 /// The plain words of a failure for billing (MUS-23): what `muse usage` calls
 /// `no_allowance`, where the human fixes it.
-const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
+pub(crate) const NO_ALLOWANCE: &str = "Muse refused: the account has no allowance; set up billing at accountscenter.meta.com/muse_code";
 
 /// The plain words of a failure for the login.
-const LOGIN_REFUSED: &str = "Muse refused: its login is not valid; run `muse login`";
+pub(crate) const LOGIN_REFUSED: &str = "Muse refused: its login is not valid; run `muse login`";
 
 fn unavailable(at: Option<String>, because: &str) -> Quota {
     Quota::Unavailable {
