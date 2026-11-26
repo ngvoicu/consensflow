@@ -36,7 +36,9 @@ const bytes = (text) => [...new TextEncoder().encode(text)]
 const ESC = '\x1b'
 const CSI = `${ESC}[`
 
-test('a reloaded page equals a continuous xterm in every case the reviews ran', async ({ page }) => {
+test('a reloaded page equals a continuous xterm in every case the reviews ran', async ({
+  page,
+}) => {
   await blankPage(page)
   const cases = reviewCases(review51)
   expect(cases).toHaveLength(51)
@@ -46,17 +48,19 @@ test('a reloaded page equals a continuous xterm in every case the reviews ran', 
     ['pieces of 7 bytes', 7],
   ]) {
     for (const c of cases) {
-      const differences = await page.evaluate(([c, pieceBytes]) => P5.runCase(c, { pieceBytes }), [
-        c,
-        whole,
-      ])
+      const differences = await page.evaluate(
+        ([c, pieceBytes]) => P5.runCase(c, { pieceBytes }),
+        [c, whole],
+      )
       if (differences.length > 0) failures.push({ at, name: c.name, differences })
     }
   }
   expect(failures).toEqual([])
 })
 
-test('a character cut between messages is drawn whole, live and after a reload', async ({ page }) => {
+test('a character cut between messages is drawn whole, live and after a reload', async ({
+  page,
+}) => {
   await blankPage(page)
   const result = await page.evaluate(async () => {
     const out = {}
@@ -98,7 +102,7 @@ test('a reload keeps bracketed paste', async ({ page }) => {
   const sent = await page.evaluate(async () => {
     const host = P5.fakeHost({ cols: 30, rows: 8 })
     await P5.history(host, [...new TextEncoder().encode('\x1b[?2004hprompt')])
-    let win = P5.window('paste', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'paste' })
+    const win = P5.window('paste', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'paste' })
     host.subscribe((m) => win.link.output(m, () => win.emulator))
     win.start()
     await win.replayed
@@ -115,7 +119,9 @@ test('a replay answers no question of the program and the first live question is
     const host = P5.fakeHost({ cols: 30, rows: 8 })
     // Questions in the history: a status report, a cursor report, device attributes, and a
     // program that asked for the focus reports.
-    await P5.history(host, [...new TextEncoder().encode('\x1b[?1004h\x1b[5n\x1b[6n\x1b[c\x1b[?2004$phi')])
+    await P5.history(host, [
+      ...new TextEncoder().encode('\x1b[?1004h\x1b[5n\x1b[6n\x1b[c\x1b[?2004$phi'),
+    ])
     // The page handed them live has gone: they were answered then or never.
     const win = P5.window('ask', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'ask' })
     host.subscribe((m) => win.link.output(m, () => win.emulator))
@@ -125,7 +131,12 @@ test('a replay answers no question of the program and the first live question is
     const leaks = win.leaks
     host.print([...new TextEncoder().encode('\x1b[5n')])
     await win.quiet()
-    return { afterReplay, leaks, afterLive: win.answers.slice(), muted: win.emulator.terminal.options.disableStdin }
+    return {
+      afterReplay,
+      leaks,
+      afterLive: win.answers.slice(),
+      muted: win.emulator.terminal.options.disableStdin,
+    }
   })
   expect(result.afterReplay).toEqual([])
   expect(result.leaks).toBe(0)
@@ -133,7 +144,9 @@ test('a replay answers no question of the program and the first live question is
   expect(result.muted).toBe(false)
 })
 
-test('nothing typed or pasted into a window while its history is written is sent', async ({ page }) => {
+test('nothing typed or pasted into a window while its history is written is sent', async ({
+  page,
+}) => {
   await blankPage(page)
   const result = await page.evaluate(async () => {
     const host = P5.fakeHost({ cols: 30, rows: 8 })
@@ -157,7 +170,12 @@ test('nothing typed or pasted into a window while its history is written is sent
     const duringTyped = typed.slice()
     win.emulator.terminal.input('y', true)
     win.emulator.paste('q')
-    return { during, duringTyped, afterTyped: typed.slice(), after: win.emulator.terminal.options.disableStdin }
+    return {
+      during,
+      duringTyped,
+      afterTyped: typed.slice(),
+      after: win.emulator.terminal.options.disableStdin,
+    }
   })
   expect(result.during).toBe(true)
   expect(result.duringTyped).toEqual([])
@@ -234,13 +252,21 @@ test('the end of a window: its history is pulled once more and let go, a later p
     await win.replayed
     const text = P5.state(win.emulator).text
     const done = host.done
-    const consumed = host.calls.filter(([c]) => c === 'pane_history_done').map(([, a]) => a.consumed)
+    const consumed = host.calls
+      .filter(([c]) => c === 'pane_history_done')
+      .map(([, a]) => a.consumed)
     // The host keeps no more of it: a page that comes later is told there is none, and goes live.
     const later = P5.window('later', { cols: 80, rows: 24, invoke: host.invoke, pageId: 'later' })
     host.subscribe((m) => later.link.output(m, () => later.emulator))
     later.start()
     await later.replayed
-    return { text, done, consumed, laterText: P5.state(later.emulator).text, reports: later.reports }
+    return {
+      text,
+      done,
+      consumed,
+      laterText: P5.state(later.emulator).text,
+      reports: later.reports,
+    }
   })
   expect(result.text).toEqual(['last words'])
   expect(result.done).toBe(1)
@@ -250,7 +276,9 @@ test('the end of a window: its history is pulled once more and let go, a later p
   expect(result.reports).toEqual([])
 })
 
-test('a pull that fails is tried again from the same offset, and a stale page stops', async ({ page }) => {
+test('a pull that fails is tried again from the same offset, and a stale page stops', async ({
+  page,
+}) => {
   await blankPage(page)
   const result = await page.evaluate(async () => {
     const host = P5.fakeHost({ cols: 30, rows: 8, pieceBytes: 6 })
@@ -303,11 +331,19 @@ test('a window that xterm fails on is drawn clean from the boundary, marked trun
     host.seq = 1
     const out = []
     for (let reload = 0; reload < 2; reload++) {
-      const win = P5.window(`stuck${reload}`, { cols: 80, rows: 24, invoke: host.invoke, pageId: `stuck${reload}` })
+      const win = P5.window(`stuck${reload}`, {
+        cols: 80,
+        rows: 24,
+        invoke: host.invoke,
+        pageId: `stuck${reload}`,
+      })
       host.subscribe((m) => win.link.output(m, () => win.emulator))
       win.start()
       // A replay left stuck never ends: the case is bounded, so it fails on its words.
-      const ended = await Promise.race([win.replayed.then(() => true), P5.sleep(5000).then(() => false)])
+      const ended = await Promise.race([
+        win.replayed.then(() => true),
+        P5.sleep(5000).then(() => false),
+      ])
       if (!ended) {
         out.push({ ended, text: [''], truncated: win.truncated, muted: true, acked: false })
         break
@@ -378,7 +414,10 @@ for (const later of [false, true]) {
           return { ok: true }
         },
       })
-      win.link.output({ id: 'w', generation: 1, seq: 2, offset: 6, bytes: Uint8Array.from(live) }, () => win.emulator)
+      win.link.output(
+        { id: 'w', generation: 1, seq: 2, offset: 6, bytes: Uint8Array.from(live) },
+        () => win.emulator,
+      )
       win.start()
       await win.replayed
       await win.quiet()
@@ -427,7 +466,10 @@ test("a live message below the emulator's offset is dropped, and one that stradd
       },
     })
     const output = (seq, offset, value) =>
-      win.link.output({ id: 'w', generation: 1, seq, offset, bytes: text(value) }, () => win.emulator)
+      win.link.output(
+        { id: 'w', generation: 1, seq, offset, bytes: text(value) },
+        () => win.emulator,
+      )
     // Below the offset the history ends at, straddling it, and past it.
     output(1, 0, '0123')
     output(2, 4, '456789')
@@ -484,7 +526,12 @@ test('an error of the page fails no replay: both windows keep their text and bra
     for (const host of hosts) await P5.history(host, data)
     let writes = 0
     const windows = hosts.map((host, i) => {
-      const win = P5.window(`good${i}`, { cols: 30, rows: 8, invoke: host.invoke, pageId: `good${i}` })
+      const win = P5.window(`good${i}`, {
+        cols: 30,
+        rows: 8,
+        invoke: host.invoke,
+        pageId: `good${i}`,
+      })
       host.subscribe((m) => win.link.output(m, () => win.emulator))
       const original = win.emulator.write.bind(win.emulator)
       win.emulator.write = (bytes) => {
