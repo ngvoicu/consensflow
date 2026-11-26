@@ -121,6 +121,11 @@ find = '''        if finished_by_word {
 '''
 replace = ''
 
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
+
 [[plant]]
 name = "questions not results: a withdrawn question is answered"
 meant = "a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answer_it"
@@ -130,6 +135,11 @@ runs = ["qnr-ledger"]
 file = "crates/cf-ledger/src/messages.rs"
 find = "        if question.state == \"cancelled\" && (finished || !has_any_answer(store, question_id)?) {"
 replace = "        if false {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
 
 [[plant]]
 name = "questions not results: a withdrawal takes a question that has an answer"
@@ -154,6 +164,11 @@ runs = ["qnr-ledger"]
 file = "crates/cf-ledger/src/messages.rs"
 find = "{} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0"
 replace = "{} = ?2 AND ?3 = ?3 AND kind = 'question'"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
 
 [[plant]]
 name = "questions not results: a withdrawn question with an answer that failed is refused another"
@@ -187,6 +202,11 @@ find = '''        if let (true, Some(assignee)) = (finished_by_word, task.assign
         }
 '''
 replace = ''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
 
 [[plant]]
 name = "questions not results: the page offers no Finish for a task that waits"
