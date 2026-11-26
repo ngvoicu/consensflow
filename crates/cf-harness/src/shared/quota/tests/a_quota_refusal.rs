@@ -178,6 +178,7 @@ fn an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_a
         "401 Invalid API key: key revoked. Previous OAuth token has expired.",
         r#"401 {"error":{"code":"refresh_token_expired","message":"The access token has expired."}}"#,
         "401 OAuth token has expired. Use your refresh token to renew.",
+        "401 OAuth token has expired, and the credentials it came from were revoked.",
         "401 OAuth token has expired. Run /login to sign in again.",
         r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","code":"invalid_session"}}"#,
         // Pi's published Meta error: the identity session cannot be renewed (pi-ai 1.6.1,
