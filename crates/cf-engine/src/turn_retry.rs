@@ -71,6 +71,25 @@ fn spoken(ms: i64) -> String {
     format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 
+/// A refused login as a try says it: "its login was refused", and in brackets the status and the
+/// provider's error type the refusal carried, where it carried them (the closed form's literals).
+fn login_words(because: &str) -> String {
+    let Some(form) = cf_harness::records::hold_form(because) else {
+        return "its login was refused".to_owned();
+    };
+    let named: Vec<String> = form
+        .status()
+        .map(|status| status.to_string())
+        .into_iter()
+        .chain(form.code().map(str::to_owned))
+        .collect();
+    if named.is_empty() {
+        "its login was refused".to_owned()
+    } else {
+        format!("its login was refused ({})", named.join(", "))
+    }
+}
+
 /// What a failed turn comes to for its task.
 pub(crate) enum Tried {
     /// The task is held, and main's Resume at its time is the try.
@@ -180,7 +199,11 @@ impl Dispatcher {
         let Some(thread) = thread else {
             return Ok(false);
         };
-        match self.failed_end(project, participant, &thread.task, because, "login")? {
+        // The try says the refusal in the closed form's own words (its status and its provider's
+        // error type, literals of the lists), never in the harness's: no free text of a harness's
+        // goes into a note, an aside or a hold's reason that the base did not write.
+        let said = login_words(because);
+        match self.failed_end(project, participant, &thread.task, &said, "login")? {
             Tried::Fails(_) => Ok(false),
             Tried::Held => {
                 self.handled(record);

@@ -207,8 +207,13 @@ fn a_login_refused_in_the_first_turn_is_tried_again_with_the_brief() {
     let c = retrying();
     let t = Tiers::new(&c, &["zeus"]);
     t.open();
-    passes(&c, 2);
+    passes(&c, 1);
     let window = t.assignee(1);
+    assert_eq!(
+        t.task(1).task.state,
+        "queued",
+        "the brief is still on its way: not yet taken in"
+    );
     refuse(&c, &window, LOGIN);
     passes(&c, 3);
     assert_eq!(t.out_until("zeus"), None, "no member is held");
@@ -247,5 +252,40 @@ fn every_harness_s_login_refusal_takes_the_same_road() {
         assert_eq!(t.out_until("zeus"), None, "{because}");
         tried(&c, &window, 31_000, 1);
         assert_eq!(t.task(1).task.state, "working", "{because}");
+    }
+}
+
+#[test]
+fn a_try_says_the_refusal_in_the_closed_form_s_words_and_none_of_the_harness_s() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    refuse(
+        &c,
+        &window,
+        "its login was refused: 401 {\"error\":{\"type\":\"authentication_error\",\"message\":\"bad key sk-live-0123456789abcdef for alice@example.com\"}}",
+    );
+    passes(&c, 3);
+    let held = t.task(1).task;
+    let aside = held.aside.expect("the card says it tries again");
+    assert!(
+        aside.contains("its login was refused (401, authentication_error)"),
+        "{aside}"
+    );
+    let notes = t.notes("chief");
+    let told: Vec<&String> = notes
+        .iter()
+        .filter(|note| note.contains("tries it again"))
+        .collect();
+    assert_eq!(told.len(), 1, "{notes:?}");
+    assert!(
+        told[0].contains("T-1's turn failed: its login was refused (401, authentication_error). ConsensFlow tries it again in its window in 30 seconds"),
+        "{}",
+        told[0]
+    );
+    for words in std::iter::once(aside).chain(notes) {
+        assert!(
+            !words.contains("sk-live") && !words.contains("alice@example.com"),
+            "no word of the harness's is kept: {words}"
+        );
     }
 }
