@@ -1159,7 +1159,7 @@ fn a_size_that_finds_no_room_when_it_is_recorded_is_undone() {
             &|| true,
             key.clone(),
             &std::env::current_dir().unwrap(),
-            &["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+            &["/bin/sh".into(), "-c".into(), "exec sleep 60".into()],
             PaneEnvironment::new(&HashMap::new(), &[]),
             portable_pty::PtySize {
                 rows: 24,
