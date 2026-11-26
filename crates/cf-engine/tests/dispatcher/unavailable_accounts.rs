@@ -367,22 +367,24 @@ const BOUND: usize = 300;
 /// A hold's report made from the harness's words and the time of the refusal.
 type Made = fn(String, String) -> Quota;
 
-/// How each kind of hold's report is made from the harness's words.
-fn holds() -> [(&'static str, Made); 3] {
+/// How each kind of hold's report is made from the harness's words, each with the lead the screen strips from the words (a refusal's), and the words' own start.
+fn holds() -> [(&'static str, &'static str, Made); 3] {
     [
-        ("its login was refused: 401 ", |because, at| {
+        ("its login was refused: ", "401 ", |because, at| {
             Quota::Unavailable {
                 at: Some(at),
                 because,
             }
         }),
-        ("its model moved from a to b on its own (", |because, at| {
-            Quota::Moved {
+        (
+            "",
+            "its model moved from a to b on its own (",
+            |because, at| Quota::Moved {
                 at: Some(at),
                 because,
-            }
-        }),
-        ("503 ", |because, at| Quota::Busy {
+            },
+        ),
+        ("", "503 ", |because, at| Quota::Busy {
             at: Some(at),
             because,
         }),
@@ -423,11 +425,13 @@ fn zeus_held_by(quota: impl FnOnce(&Context) -> Quota) -> (String, String, Strin
 fn a_hold_s_words_are_screened_whole_before_they_are_cut_whatever_their_length_and_kind() {
     // The password fits in the first 300 characters and its terminating `@` is character 301:
     // the screen sees the whole words, and nothing of them is kept (T-2353, T-2350's check).
-    for (lead, hold) in holds() {
+    for (prefix, lead, hold) in holds() {
         let url_head = "https://test-user:test-password";
         let fill = BOUND - lead.len() - url_head.len();
         let filler: String = " .".repeat(fill).chars().take(fill).collect();
-        let words = format!("{lead}{filler}{url_head}@gateway.invalid and the rest of its words");
+        // The `@` is character 301 of the harness's words, which a refusal's lead precedes.
+        let words =
+            format!("{prefix}{lead}{filler}{url_head}@gateway.invalid and the rest of its words");
         let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
         for place in [&kept, &said, &activity] {
             assert!(!place.contains("test-password"), "{lead}: {place}");
@@ -440,12 +444,12 @@ fn a_hold_s_words_are_screened_whole_before_they_are_cut_whatever_their_length_a
 fn a_hold_s_words_are_kept_to_one_bound_whatever_the_harness_cut_before_whatever_the_kind() {
     // Codex's `unauthorized` message and a model's move reach the dispatcher as long as they
     // are: the bound is set once, after the screen, where the words are written.
-    for (lead, hold) in holds() {
-        let words = format!("{lead}{}", "plain words ".repeat(100));
+    for (prefix, lead, hold) in holds() {
+        let words = format!("{prefix}{lead}{}", "plain words ".repeat(100));
         let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
         for place in [&said, &activity] {
             assert!(
-                place.chars().count() <= lead.len() + BOUND + 120,
+                place.chars().count() <= prefix.len() + lead.len() + BOUND + 120,
                 "{lead}: {} characters: {place}",
                 place.chars().count()
             );
