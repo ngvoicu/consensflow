@@ -2492,6 +2492,13 @@ test('a long reason of a held member is cut at a word on the chief’s card, who
   await page.setViewportSize({ width: 560, height: 480 })
   const words = Array.from({ length: 40 }, (_, at) => `word${at}`).join(' ')
   const long = `its login was refused: ${words}`
+  const hostOf = (chief) =>
+    chief.evaluate((card) => card.querySelector('.terminal-host').getBoundingClientRect().height)
+  const plain = await heldFor(page, 'account', {
+    because: 'its login was refused: 401',
+    bare: true,
+  })
+  const plainHost = await hostOf(plain.chief)
   const shown = await heldFor(page, 'account', { because: long, bare: true })
   const status = shown.chief.locator('.terminal-status')
   await expect(status).toContainText('Unavailable: its login was refused: word0 word1')
@@ -2514,7 +2521,8 @@ test('a long reason of a held member is cut at a word on the chief’s card, who
     return { buttonBelow: button.bottom - frame.bottom, host: host.height }
   })
   expect(box.buttonBelow).toBeLessThanOrEqual(0)
-  expect(box.host).toBeGreaterThan(40)
+  // The terminal keeps what a card with a short reason leaves it, less the lines the words take.
+  expect(box.host).toBeGreaterThan(plainHost - 20)
 })
 
 test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {

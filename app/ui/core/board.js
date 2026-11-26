@@ -479,7 +479,7 @@ function heldSaid(participant, activity, cut = false) {
  */
 function outShort({ participant, activity, busy }, now) {
   if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
-  const said = heldSaid(participant, activity, cut)
+  const said = heldSaid(participant, activity)
   if (modelMoved(participant)) {
     return `Held: ${said('moved: ') ?? 'its model moved on its own'}`
   }
@@ -846,7 +846,7 @@ export function outWords({ participant, activity, busy }, now, cut = false) {
   if (typeof busy === 'string') {
     return `Its model is busy: ConsensFlow tries it again at ${backAt(busy, now)}`
   }
-  const said = heldSaid(participant, activity)
+  const said = heldSaid(participant, activity, cut)
   if (modelMoved(participant)) {
     return `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
   }
