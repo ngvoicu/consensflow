@@ -535,9 +535,7 @@ impl Rollout {
                 because: Self::error_words(error)
                     .unwrap_or_else(|| "the server refused for a moment".to_owned())
                     .trim()
-                    .chars()
-                    .take(300)
-                    .collect(),
+                    .to_owned(),
             }));
         }
         if !info.is_some_and(|info| LIMITS.contains(&info)) {

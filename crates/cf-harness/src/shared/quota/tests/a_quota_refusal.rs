@@ -155,34 +155,16 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
 }
 
 #[test]
-fn an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_and_a_bare_401_are()
-{
-    // The harness renews the token by itself: the turn failed and can be tried again.
+fn an_expired_token_is_a_refused_login_and_so_are_a_refused_refresh_and_pis_meta_session() {
+    // No rule reads the words of an expiry (T-2353): a 401 that says the token expired is a
+    // login refusal, as it is on main, and the card says it in the harness's own words.
     for text in [
         r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."},"request_id":"req_1"}"#,
         r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","type":"invalid_request_error","code":"token_expired"}}"#,
-    ] {
-        assert_eq!(account_refusal(text, None), None, "{text}");
-        assert_eq!(account_refusal(text, Some(401.0)), None, "{text}");
-    }
-    // A refresh that was refused, a key or token that is invalid or revoked, a 401 that names
-    // neither: the login is refused.
-    for text in [
-        "OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={\"error\":\"invalid_grant\"}; the access token has expired",
-        r#"401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
-        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has been revoked."}}"#,
-        "401 Unauthorized",
-        // The review's cases (T-2350): an old expired token beside a revoked or invalid key, a
-        // refresh token that expired, words that tell the person to log in, a refresh token
-        // named beside an expired access token.
-        "401 Invalid API key: key revoked. Previous OAuth token has expired.",
-        r#"401 {"error":{"code":"refresh_token_expired","message":"The access token has expired."}}"#,
-        "401 OAuth token has expired. Use your refresh token to renew.",
-        "401 OAuth token has expired, and the credentials it came from were revoked.",
-        "401 OAuth token has expired. Run /login to sign in again.",
-        r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","code":"invalid_session"}}"#,
-        // Pi's published Meta error: the identity session cannot be renewed (pi-ai 1.6.1,
-        // auth/oauth/meta.js), in Pi's outer wrapper and bare.
+        "401 OAuth token has expired.",
+        // Anthropic's refresh refused (Pi 1.6.1), whatever status the details name.
+        "OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={\"error\":\"invalid_grant\"}",
+        // Pi's published Meta errors (pi-ai 1.6.1, auth/oauth/meta.js), in Pi's wrapper and bare.
         "OAuth refresh failed for meta: Meta session expired (status 401). Run `/login meta` to sign in again.",
         "Meta session expired (status 403). Run `/login meta` to sign in again.",
     ] {
@@ -192,6 +174,14 @@ fn an_expired_access_token_is_no_refused_login_but_a_refused_refresh_a_bad_key_a
             "{text}"
         );
     }
+    // A refresh refused for a moment is none.
+    assert_eq!(
+        account_refusal(
+            "Anthropic token refresh request failed. details=Error: HTTP request failed. status=503; body=Service Unavailable",
+            None
+        ),
+        None
+    );
 }
 
 #[test]
@@ -279,4 +269,33 @@ fn a_moved_model_is_held_as_an_unavailable_account_is_and_says_it_is_neither_a_q
         because: "billing".to_owned(),
     };
     assert!(!account.moved() && account.unavailable() && account.held_for_the_human());
+}
+
+/// The password fits in the first 300 characters and its terminating `@` is character 301, as
+/// the review of T-2350 found: a reader that cut its words there left the password in what the
+/// dispatcher's screen then saw. Every reader tells the harness's whole words, and the one
+/// bound is the dispatcher's, after the screen (`shown::quotable::held_words`).
+pub(crate) fn words_with_a_url_cut_at(lead: &str) -> String {
+    let url_head = "https://test-user:test-password";
+    let fill = 300 - lead.len() - url_head.len();
+    let filler: String = " .".repeat(fill).chars().take(fill).collect();
+    let words = format!("{lead}{filler}{url_head}@gateway.invalid");
+    assert_eq!(words.as_bytes()[300], b'@');
+    words
+}
+
+#[test]
+fn tells_the_whole_words_of_an_account_s_refusal_and_of_a_busy_one_and_cuts_none() {
+    let words = words_with_a_url_cut_at("401 ");
+    let Quota::Unavailable { because, .. } =
+        unavailable_quota(at(), Refusal::Credentials, &words).unwrap()
+    else {
+        panic!("unavailable");
+    };
+    assert_eq!(because, format!("its login was refused: {words}"));
+    let words = words_with_a_url_cut_at("503 ");
+    let Quota::Busy { because, .. } = busy_quota(at(), &words).unwrap() else {
+        panic!("busy");
+    };
+    assert_eq!(because, words);
 }

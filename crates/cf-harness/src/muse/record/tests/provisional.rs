@@ -181,23 +181,6 @@ fn a_402_is_no_quota_and_an_account_whose_login_is_refused_is_unavailable_too() 
 }
 
 #[test]
-fn an_expired_access_token_fails_the_turn_and_holds_no_account() {
-    // The shared reading (T-2010): a token that ran out is renewed, the turn tried again. Muse's
-    // own words for it are not recorded; the common ones stand in.
-    let record = record_of(&[
-        run(2, "t1", json!({ "kind": "started" })),
-        run(
-            3,
-            "t1",
-            json!({ "kind": "terminal", "terminal": "failed",
-                "reason": "API error 401 [request_id=x]: OAuth token has expired (authentication_error)" }),
-        ),
-    ]);
-    assert!(record.failed);
-    assert_eq!(record.quota, None);
-}
-
-#[test]
 fn a_refusal_that_names_its_limit_and_reset_is_exhausted_until_then_and_the_second_wording_is_one()
 {
     // Provisional (MUS-14): the wire's `error.quota` (`QuotaDetail`: `{limitKind, resetsAtMs}`)

@@ -152,3 +152,129 @@ fn an_edit_that_keeps_the_hold_and_renames_the_member_keeps_the_holds_words() {
     let said = lane_of(&ledger.board(made.id).unwrap(), member);
     assert_eq!(said["outBecause"], words);
 }
+
+/// A project of two Pi members of one model and two efforts: the effort is in a member's handle,
+/// so an edit of it renames the member and frees its handle for the other one to take.
+fn two_members(ledger: &mut Ledger) -> (ProjectView, i64, i64) {
+    let member = |effort: &str, role: &str| NewMember {
+        harness: "pi".into(),
+        model: Some("claude-fable-5-2".into()),
+        effort: Some(effort.into()),
+        model_name: None,
+        designer: false,
+        roles: vec![role.into()],
+        tier: "standard".into(),
+    };
+    let made = ledger
+        .create_project_overflowing(&NewProject {
+            directory: "/work/words2".into(),
+            name: "words2".into(),
+            chief: NewChief {
+                harness: "codex".into(),
+                model: None,
+                effort: None,
+                model_name: None,
+            },
+            staff: vec![member("low", "frontend"), member("xhigh", "tester")],
+            gate: false,
+            wake_up: None,
+            specs: None,
+            staff_rules: None,
+            compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
+            own_hands: false,
+        })
+        .expect("a project");
+    let pis: Vec<&cf_ledger::ParticipantView> = made
+        .participants
+        .iter()
+        .filter(|p| p.harness.as_deref() == Some("pi"))
+        .collect();
+    let (a, b) = (pis[0].id, pis[1].id);
+    (made, a, b)
+}
+
+fn effort_of(
+    ledger: &mut Ledger,
+    project: i64,
+    member: i64,
+    effort: &str,
+) -> cf_ledger::ParticipantView {
+    let handle = ledger
+        .board(project)
+        .map(|board| serde_json::to_value(board).unwrap())
+        .unwrap()["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["id"] == member)
+        .unwrap()["participant"]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    ledger
+        .edit_member(
+            project,
+            &handle,
+            &cf_ledger::MemberEdit {
+                harness: "pi".into(),
+                model: Some("claude-fable-5-2".into()),
+                effort: Some(effort.into()),
+                model_name: None,
+                tier: "standard".into(),
+            },
+        )
+        .unwrap()
+}
+
+/// A hold's words belong to the member by its identity, never by a handle (T-2353, the check
+/// of T-2350): a handle a member left is taken by another, held or not yet, and neither shows
+/// the other's words.
+fn two_holds_one_handle(the_taker_is_held_first: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let (made, a, b) = two_members(&mut ledger);
+    let login = "its login was refused: the first member's login";
+    let billing = "its billing was refused: the second member's billing";
+    let mark = |ledger: &mut Ledger, member, words| {
+        ledger
+            .mark_out_saying(
+                member,
+                "9999-12-31T23:59:59.998Z",
+                "account unavailable",
+                HoldKind::Account,
+                words,
+            )
+            .unwrap();
+    };
+    if the_taker_is_held_first {
+        mark(&mut ledger, b, billing);
+    }
+    mark(&mut ledger, a, login);
+    // A changes its effort, which renames it and frees its handle; B takes that handle.
+    let renamed = effort_of(&mut ledger, made.id, a, "high");
+    assert_eq!(renamed.id, a);
+    let taker = effort_of(&mut ledger, made.id, b, "low");
+    assert_eq!(taker.id, b);
+    if !the_taker_is_held_first {
+        mark(&mut ledger, b, billing);
+    }
+    let board = ledger.board(made.id).unwrap();
+    assert_eq!(lane_of(&board, a)["outBecause"], login, "the first member");
+    assert_eq!(
+        lane_of(&board, b)["outBecause"],
+        billing,
+        "the second member"
+    );
+}
+
+#[test]
+fn a_member_that_takes_the_handle_another_left_says_its_own_words_when_held_after_it() {
+    two_holds_one_handle(false);
+}
+
+#[test]
+fn a_member_that_takes_the_handle_another_left_says_its_own_words_when_held_before_it() {
+    two_holds_one_handle(true);
+}

@@ -110,7 +110,10 @@ pub(crate) fn mark_out_kind(
         )?;
         let mut event = json!({ "handle": member.handle, "until": until, "reason": reason });
         if let Some(because) = because {
+            // Its words belong to the member by its identity, never by a handle, which another
+            // member may take once this one has left it (T-2353).
             event["because"] = json!(because);
+            event["participant"] = json!(member.id);
         }
         store.log(member.project_id, "member.out", event)?;
         participant_view(&store.participant_row(member.id)?)
@@ -118,26 +121,24 @@ pub(crate) fn mark_out_kind(
 }
 
 /// The words a member's hold was made from, as the harness said them: those of the
-/// `member.out` that set the end the member keeps. None where that hold carries none (a quota,
-/// a busy model, a hold an older build made).
+/// `member.out` of this member (by its id, which an edit that renames it keeps) that set the end
+/// the member keeps. None where that hold carries none (a quota, a busy model, a hold an older
+/// build made, which names no id).
 pub(crate) fn hold_words(
     store: &Store,
     project_id: i64,
-    handles: &[String],
+    participant: i64,
     until: &str,
 ) -> Result<Option<String>, LedgerError> {
-    // The hold's event names the member by the handle it had then: an edit that keeps the hold
-    // may have renamed it since (its effort is in its name), and the names it left are kept.
-    let handles = serde_json::to_string(handles)?;
     Ok(store
         .db
         .query_row(
             "SELECT json_extract(data, '$.because') FROM event
              WHERE project_id = ?1 AND kind = 'member.out' AND json_valid(data)
-               AND json_extract(data, '$.handle') IN (SELECT value FROM json_each(?2))
+               AND json_extract(data, '$.participant') = ?2
                AND json_extract(data, '$.until') = ?3
              ORDER BY id DESC LIMIT 1",
-            params![project_id, handles, until],
+            params![project_id, participant, until],
             |row| row.get::<_, Option<String>>(0),
         )
         .optional()?

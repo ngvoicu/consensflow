@@ -444,15 +444,32 @@ function partState(part, row, now) {
   return canWork(row, now) ? ['closed', 'Standing by'] : ['idle', "Takes its member's tasks"]
 }
 
+/** The most characters of a held member's words the chief's card says; the lane says them all. */
+const CARD_WORDS = 140
+
+/**
+ * `words` as the chief's card says them: the first line, cut at a word where it is long, and
+ * saying so. The words in full stay in the member's lane (`outWords` with no cut).
+ */
+function cardWords(words) {
+  const line = words.split('\n', 1)[0].trim()
+  if (line.length <= CARD_WORDS) return line
+  const room = line.slice(0, CARD_WORDS)
+  const space = room.lastIndexOf(' ')
+  return `${(space > CARD_WORDS / 2 ? room.slice(0, space) : room).trimEnd()}…`
+}
+
 /**
  * What a held member's harness said, as the hold keeps it (`outBecause`, which says which of
  * billing or login was refused, and the harness's own words), or else as its window's activity
  * says it under `prefix`: a hold an older build made keeps no words, and a window can be gone.
  */
-function heldSaid(participant, activity) {
+function heldSaid(participant, activity, cut = false) {
   return (prefix) => {
-    if (participant.outBecause) return participant.outBecause
-    return activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+    const words =
+      participant.outBecause ||
+      (activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null)
+    return words !== null && cut ? cardWords(words) : words
   }
 }
 
@@ -462,7 +479,7 @@ function heldSaid(participant, activity) {
  */
 function outShort({ participant, activity, busy }, now) {
   if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
-  const said = heldSaid(participant, activity)
+  const said = heldSaid(participant, activity, cut)
   if (modelMoved(participant)) {
     return `Held: ${said('moved: ') ?? 'its model moved on its own'}`
   }
@@ -819,9 +836,10 @@ function identityLine(participant, className) {
  * engine's own words (its account refused, its model moved on its own), where it said them;
  * its model busy for a moment, which the lane says (`busy`), with no hope of a press; else what
  * the time it marked the member out until says of it, and that the human may have renewed the
- * quota early (T-1357). Said on its row, the chief's card and the staff list.
+ * quota early (T-1357). Said on its row, the chief's card and the staff list; with `cut` the
+ * harness's words are cut as the chief's card says them (`cardWords`).
  */
-export function outWords({ participant, activity, busy }, now) {
+export function outWords({ participant, activity, busy }, now, cut = false) {
   if (!outOfQuota(participant, now)) return null
   // Its model is busy for a moment: tried again after a back-off of ConsensFlow's own, which
   // no press shortens, so no renewal is hoped for and no button is offered (T-1357).
@@ -886,7 +904,7 @@ export function laneStatus(lane, board, now) {
   }
   // A member the update could not run on what it ran on (T-1202) runs nothing until edited.
   if (participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]
-  const out = outWords(lane, now)
+  const out = outWords(lane, now, true)
   if (out !== null) {
     const backup = lane.backupReady?.[participant.role]
     const covered = backup ? `${out}; @${backup}, its backup, takes its tasks` : out

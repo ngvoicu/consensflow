@@ -439,14 +439,15 @@ fn pi_reads_each_providers_refusal_for_what_it_is() {
             r#"529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
             "moment",
         ),
-        // An access token that ran out is renewed by Pi: no hold, Pi tries it again.
+        // An expired token is read as it is on main: a login refusal, which holds the member
+        // (T-2353); its card says so in the harness's own words.
         (
             r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#,
-            "none",
+            "login",
         ),
         (
             r#"openai-codex API error (401): {"error":{"message":"Your authentication token has expired. Please try signing in again.","code":"token_expired"}}"#,
-            "none",
+            "login",
         ),
     ] {
         assert_eq!(read_pi_failure(error), read, "{error}");
@@ -454,21 +455,23 @@ fn pi_reads_each_providers_refusal_for_what_it_is() {
 }
 
 #[test]
-fn an_expired_token_that_fails_a_turn_again_is_a_failed_turn_and_no_hold() {
-    let expired = json!(
-        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#
-    );
-    let mut stage = Stage::with(&[
-        header(),
-        user("u1", "go"),
-        failing("a1", &expired, &json!(1_790_000_000_000_i64)),
-        user("u2", "again"),
-        failing("a2", &expired, &json!(1_790_000_001_000_i64)),
-    ]);
-    // Settled: the record has been quiet for longer than Pi's own retry takes.
-    let record = stage.at(600_000);
-    assert!(record.failed, "the turn failed, for the engine's tries");
-    assert!(record.quota.is_none(), "{:?}", record.quota);
+fn pi_tells_the_whole_words_of_a_refusal_whose_url_password_ends_after_character_300() {
+    use crate::shared::quota::tests::a_quota_refusal::words_with_a_url_cut_at;
+    for (lead, login) in [("401 ", true), ("503 ", false)] {
+        let words = words_with_a_url_cut_at(lead);
+        let mut stage = Stage::with(&[
+            header(),
+            failing("a1", &json!(words), &json!(1_790_000_000_000_i64)),
+        ]);
+        let record = stage.at(0);
+        match record.quota.as_deref() {
+            Some(Quota::Unavailable { because, .. }) if login => {
+                assert_eq!(because, &format!("its login was refused: {words}"));
+            }
+            Some(Quota::Busy { because, .. }) if !login => assert_eq!(because, &words),
+            other => panic!("{lead}: {other:?}"),
+        }
+    }
 }
 
 #[test]

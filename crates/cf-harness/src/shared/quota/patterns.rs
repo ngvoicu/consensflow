@@ -47,42 +47,15 @@ pub(super) static BILLING: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// An account's login refused (nothing resets it): Anthropic's `authentication_error`, a key
-/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10): Codex's "token refresh
-/// failed (401)", and Anthropic's "token refresh request failed" with the `status=401` its
-/// details name, or its `invalid_grant` (Pi 1.6.1, 2026-11).
+/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10), Anthropic's refresh
+/// refused with `invalid_grant` (Pi 1.6.1, 2026-11), and Pi's published Meta error "session
+/// expired (status 401|403)", whose `/login meta` is the way back. An expired token is read as
+/// the login refusal it is: no rule tells it from a refused one by its words (T-2353).
 pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
     compile(
-        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\)|invalid_grant|session expired \(status 40[13]\))|token refresh request failed\.[^\n]*status=401(?-u:\b)",
+        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\)|invalid_grant|session expired \(status 40[13]\))",
     )
 });
-
-/// Words that say the **access** token ran out, which the harness renews before its next
-/// request. Only these two are recorded nowhere: they are the provider's wording as known, not
-/// as any fixture or published package shows it (T-2010).
-/// - Anthropic: `OAuth token has expired. Please obtain a new token or refresh your existing
-///   token.` (a 401 `authentication_error`);
-/// - OpenAI: `Your authentication token has expired. Please try signing in again.`, with its
-///   code `token_expired` (a 401).
-pub(super) static EXPIRED: LazyLock<Regex> = LazyLock::new(|| {
-    compile(
-        r"(?i-u:oauth token has expired)|(?-u:\b)(?i-u:(?:access|authentication) token (?:has |is |was )?expired)|(?:^|[^A-Za-z0-9_])(?i-u:token_expired)(?:$|[^A-Za-z0-9_])",
-    )
-});
-
-/// What keeps an expired token a login refusal, whatever else the text says: a key that is
-/// invalid or revoked, a refresh token that expired or was refused, and words that tell the
-/// person to log in. When in doubt it is a login refusal: a member wrongly held says so on its
-/// card with its words, where one wrongly left at work fails its tasks.
-pub(super) static LOGIN_STAYS: LazyLock<Regex> = LazyLock::new(|| {
-    compile(
-        r"(?i-u:invalid_grant|refresh[_ ]token|refresh (?:request )?failed|invalid x-api-key|invalid[_ ]api[_ ]key|revoked|/login|log ?in again|sign(?:ing)? in again|please (?:log|sign) ?in)",
-    )
-});
-
-/// OpenAI's own sentence for an expired access token, whose "try signing in again" is no
-/// demand for a new login where its code `token_expired` stands beside it.
-pub(super) static OPENAI_EXPIRED_SENTENCE: LazyLock<Regex> =
-    LazyLock::new(|| compile(r"(?i-u:please try signing in again)"));
 
 /// A provider's words for a request it refused for a moment (T-1112): Anthropic's
 /// `overloaded_error` ("Overloaded"), a model "at capacity" (Codex's "Selected model is at

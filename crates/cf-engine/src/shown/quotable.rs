@@ -140,7 +140,7 @@ pub fn screened_hold(quota: &Quota) -> Quota {
         },
         Quota::Busy { at, because } => Quota::Busy {
             at: at.clone(),
-            because: mask(because).text,
+            because: bounded(&mask(because).text),
         },
         other => other.clone(),
     }
@@ -150,15 +150,27 @@ pub fn screened_hold(quota: &Quota) -> Quota {
 pub const LEFT_OUT: &str =
     "the harness's words were left out because they named a key or a login; read them in its window";
 
-/// The most characters of a kept reason that is no refusal's words (a model's move).
-const REASON_CHARS: usize = 300;
+/// The most characters of a hold's words that are kept: the one bound, set here, after the
+/// screen has seen the words whole. No harness cuts its words before they come here (T-2353: a
+/// cut before the screen took the `@` of a gateway URL and left its password in what the screen
+/// saw), and none of the writers of a hold sets a bound of its own.
+const WORDS_CHARS: usize = 300;
+
+/// `text` cut at [`WORDS_CHARS`] characters, and saying so.
+fn bounded(text: &str) -> String {
+    match text.char_indices().nth(WORDS_CHARS) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_owned(),
+    }
+}
 
 /// The words of a hold (`Quota::Unavailable`'s or `Quota::Moved`'s `because`) as they may be
 /// kept in the ledger, said on the board and told in a note (T-2010). A refusal's words
 /// (`its billing was refused: …`, `its login was refused: …`) are screened whole by the rule of a
 /// program's words ([`said`]): where anything in them may hold a credential none is kept, and
-/// the reason says which refusal it was and that the words were left out. Any other reason
-/// (Muse's fixed sentences, a model's move) is masked and held to [`REASON_CHARS`].
+/// the reason says which refusal it was and that the words were left out; what passes is cut at
+/// [`WORDS_CHARS`]. Any other reason (Muse's fixed sentences, a model's move) is masked whole and
+/// cut at the same bound.
 pub fn held_words(because: &str) -> String {
     for lead in ["its billing was refused", "its login was refused"] {
         let Some(rest) = because.strip_prefix(lead) else {
@@ -168,14 +180,10 @@ pub fn held_words(because: &str) -> String {
         return match said(words) {
             None => lead.to_owned(),
             Some(kept) if kept == WORDS_WITHHELD => format!("{lead}; {LEFT_OUT}"),
-            Some(kept) => format!("{lead}: {}", kept.replace('\n', " ")),
+            Some(kept) => format!("{lead}: {}", bounded(&kept.replace('\n', " "))),
         };
     }
-    let masked = mask(because).text;
-    match masked.char_indices().nth(REASON_CHARS) {
-        Some((cut, _)) => format!("{}…", &masked[..cut]),
-        None => masked,
-    }
+    bounded(&mask(because).text)
 }
 
 #[cfg(test)]

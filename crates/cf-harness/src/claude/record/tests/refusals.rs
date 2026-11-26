@@ -320,6 +320,22 @@ fn quota_of(said: &str, fields: &str) -> Value {
 }
 
 #[test]
+fn claude_code_tells_the_whole_words_of_a_refusal_whose_url_password_ends_after_character_300() {
+    use crate::shared::quota::tests::a_quota_refusal::words_with_a_url_cut_at;
+    let words = words_with_a_url_cut_at("Invalid API key ");
+    assert_eq!(
+        quota_of(&words, r#"{"apiErrorStatus":401}"#),
+        json!({ "state": "unavailable", "at": AT, "resetsAt": null,
+            "because": format!("its login was refused: {words}") })
+    );
+    let words = words_with_a_url_cut_at("Overloaded ");
+    assert_eq!(
+        quota_of(&words, r#"{"apiErrorStatus":529}"#),
+        json!({ "state": "busy", "at": AT, "resetsAt": null, "because": words })
+    );
+}
+
+#[test]
 fn claude_code_reads_a_refusal_of_the_accounts_billing_or_login_as_the_account_unavailable_and_no_quota(
 ) {
     // MUS-23: a 402, a 401, and the words Anthropic gives an API account with no credit or

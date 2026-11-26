@@ -78,7 +78,7 @@ impl Provisional {
             Refused::Busy => (
                 Quota::Busy {
                     at,
-                    because: reason?.trim().chars().take(300).collect(),
+                    because: reason?.trim().to_owned(),
                 },
                 None,
             ),

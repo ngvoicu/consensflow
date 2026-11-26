@@ -149,6 +149,25 @@ fn a_turn_its_server_refused_for_a_moment_is_busy_and_no_quota() {
 }
 
 #[test]
+fn codex_tells_the_whole_words_of_a_refusal_whose_url_password_ends_after_character_300() {
+    use crate::shared::quota::tests::a_quota_refusal::words_with_a_url_cut_at;
+    let words = words_with_a_url_cut_at("The server is overloaded ");
+    let read = read(&[
+        limits(40.0, RESETS),
+        started(json!("t1")),
+        errored(json!("other"), &words),
+    ])
+    .unwrap();
+    assert_eq!(
+        read.quota.as_deref(),
+        Some(&Quota::Busy {
+            at: Some(AT.to_owned()),
+            because: words,
+        })
+    );
+}
+
+#[test]
 fn a_request_codex_gave_up_on_for_no_server_error_is_no_refusal() {
     let read = read(&[
         limits(40.0, RESETS),

@@ -359,3 +359,97 @@ fn a_refusal_that_names_a_key_or_a_login_is_kept_with_none_of_its_words_and_says
     assert!(said.starts_with("its login was refused"), "{said}");
     assert!(said.contains("left out"), "{said}");
 }
+
+/// The most characters of a hold's words that are kept after the screen: one bound, at the place
+/// the words are written (T-2353), for every harness and every kind of hold.
+const BOUND: usize = 300;
+
+/// How each kind of hold's report is made from the harness's words.
+fn holds() -> [(&'static str, fn(String, String) -> Quota); 3] {
+    [
+        ("its login was refused: 401 ", |because, at| {
+            Quota::Unavailable {
+                at: Some(at),
+                because,
+            }
+        }),
+        ("its model moved from a to b on its own (", |because, at| {
+            Quota::Moved {
+                at: Some(at),
+                because,
+            }
+        }),
+        ("503 ", |because, at| Quota::Busy {
+            at: Some(at),
+            because,
+        }),
+    ]
+}
+
+/// Zeus held by `quota`, and everything kept of it: the ledger's events, the board, the notes,
+/// and the window's activity; with what the board says of the hold.
+fn zeus_held_by(quota: impl FnOnce(&Context) -> Quota) -> (String, String, String) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.refuse("zeus-amber-pine", quota(&context));
+    context.pass().unwrap();
+    let kept = everything_kept_of_the_hold(&context, &tiers);
+    let board =
+        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
+    let said = board["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == "zeus")
+        .unwrap()["participant"]["outBecause"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let activity = context
+        .dispatcher
+        .activity(tiers.id("zeus-amber-pine"))
+        .reason
+        .unwrap_or_default();
+    (kept, said, activity)
+}
+
+#[test]
+fn a_hold_s_words_are_screened_whole_before_they_are_cut_whatever_their_length_and_kind() {
+    // The password fits in the first 300 characters and its terminating `@` is character 301:
+    // the screen sees the whole words, and nothing of them is kept (T-2353, T-2350's check).
+    for (lead, hold) in holds() {
+        let url_head = "https://test-user:test-password";
+        let fill = BOUND - lead.len() - url_head.len();
+        let filler: String = " .".repeat(fill).chars().take(fill).collect();
+        let words = format!("{lead}{filler}{url_head}@gateway.invalid and the rest of its words");
+        let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
+        for place in [&kept, &said, &activity] {
+            assert!(!place.contains("test-password"), "{lead}: {place}");
+            assert!(!place.contains("gateway.invalid"), "{lead}: {place}");
+        }
+    }
+}
+
+#[test]
+fn a_hold_s_words_are_kept_to_one_bound_whatever_the_harness_cut_before_whatever_the_kind() {
+    // Codex's `unauthorized` message and a model's move reach the dispatcher as long as they
+    // are: the bound is set once, after the screen, where the words are written.
+    for (lead, hold) in holds() {
+        let words = format!("{lead}{}", "plain words ".repeat(100));
+        let (kept, said, activity) = zeus_held_by(|context| hold(words.clone(), now(context)));
+        for place in [&said, &activity] {
+            assert!(
+                place.chars().count() <= lead.len() + BOUND + 120,
+                "{lead}: {} characters: {place}",
+                place.chars().count()
+            );
+        }
+        assert!(
+            !kept.contains(&"plain words ".repeat(40)),
+            "{lead}: the tail of the words was kept: {kept}"
+        );
+    }
+}

@@ -24,7 +24,7 @@
 mod patterns;
 mod reset;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod zone;
 
 pub(crate) use zone::time_zone;
@@ -35,9 +35,7 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{
-    BILLING, BUSY, CREDENTIALS, EXPIRED, LOGIN_STAYS, OPENAI_EXPIRED_SENTENCE, REFUSED, SPENT,
-};
+use patterns::{BILLING, BUSY, CREDENTIALS, REFUSED, SPENT};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +65,7 @@ pub enum Quota {
     /// A request the provider refused for a moment, which is no failure of the turn and no
     /// quota: its model at capacity or overloaded (Anthropic's 529), a server error (a 5xx),
     /// its server busy (T-1112). The harness gave up retrying it itself; when it happened, if
-    /// the record says, and what it said, held to a line's length. It names no reset: the
+    /// the record says, and what it said, whole. It names no reset: the
     /// engine holds the task and tries it again after a backoff of its own.
     Busy { at: Option<String>, because: String },
 }
@@ -244,34 +242,16 @@ pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal
     let status = status.or_else(|| REFUSED.captures(text).map(|found| js::number(&found[1])));
     match status {
         Some(status) if status == BILLING_STATUS => Some(Refusal::Billing),
-        _ if BILLING.is_match(text) => Some(Refusal::Billing),
-        // An access token that ran out is renewed by its harness before the next request: the
-        // turn failed and can be tried again, the account is not refused (T-2010).
-        _ if access_token_expired(text) => None,
         Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
+        _ if BILLING.is_match(text) => Some(Refusal::Billing),
         _ if CREDENTIALS.is_match(text) => Some(Refusal::Credentials),
         _ => None,
     }
 }
 
-/// Whether the words say only that the access token expired, and say nothing else of the login
-/// failing (see [`EXPIRED`], [`LOGIN_STAYS`]). OpenAI's expired-access sentence ends "Please try
-/// signing in again": that is set aside where its code `token_expired` stands beside it, as the
-/// provider's own word for the access token, and counts as a demand to log in anywhere else.
-pub fn access_token_expired(text: &str) -> bool {
-    if !EXPIRED.is_match(text) {
-        return false;
-    }
-    let asked = if text.to_ascii_lowercase().contains("token_expired") {
-        OPENAI_EXPIRED_SENTENCE.replace_all(text, "")
-    } else {
-        std::borrow::Cow::Borrowed(text)
-    };
-    !LOGIN_STAYS.is_match(&asked)
-}
-
 /// An account that refused at `at_ms` (none when it is no number) for what only its
-/// human cures, told as the harness said it (`said`, held to a line's length). Fails
+/// human cures, told as the harness said it (`said`, whole: the dispatcher screens the words
+/// and bounds them, T-2353). Fails
 /// where `toISOString` throws.
 pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Result<Quota, String> {
     let at = if at_ms.is_finite() {
@@ -283,10 +263,9 @@ pub(crate) fn unavailable_quota(at_ms: f64, refusal: Refusal, said: &str) -> Res
         Refusal::Billing => "its billing was refused",
         Refusal::Credentials => "its login was refused",
     };
-    let said: String = said.trim().chars().take(300).collect();
     Ok(Quota::Unavailable {
         at,
-        because: format!("{what}: {said}"),
+        because: format!("{what}: {}", said.trim()),
     })
 }
 
@@ -308,8 +287,8 @@ pub(crate) fn busy_refusal(text: &str, status: Option<f64>) -> bool {
 }
 
 /// A request the provider refused for a moment at `at_ms` (none when it is no number), told
-/// as the harness said it (`said`, held to a line's length). Fails where `toISOString`
-/// throws.
+/// as the harness said it (`said`, whole, as for an account's refusal). Fails where
+/// `toISOString` throws.
 pub(crate) fn busy_quota(at_ms: f64, said: &str) -> Result<Quota, String> {
     let at = if at_ms.is_finite() {
         Some(date(at_ms)?)
@@ -318,7 +297,7 @@ pub(crate) fn busy_quota(at_ms: f64, said: &str) -> Result<Quota, String> {
     };
     Ok(Quota::Busy {
         at,
-        because: said.trim().chars().take(300).collect(),
+        because: said.trim().to_owned(),
     })
 }
 

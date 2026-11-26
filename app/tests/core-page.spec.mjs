@@ -2484,18 +2484,37 @@ test('a member held for its account says which, billing or login, and the harnes
   await expect(staff.locator('.member-out')).toHaveText(full)
 })
 
-test('a long unbroken reason of a held member wraps on the chief’s card and clips nowhere', async ({
+test('a long reason of a held member is cut at a word on the chief’s card, whole in its lane, and clips nothing at the smallest window', async ({
   page,
 }) => {
-  const long = `its login was refused: ${'x'.repeat(280)}`
+  // T-2353: 300 characters on the card clipped Try again by 4 px and left the terminal 6 px at
+  // the smallest window. The card says the first line, cut at a word; the lane says it all.
+  await page.setViewportSize({ width: 560, height: 480 })
+  const words = Array.from({ length: 40 }, (_, at) => `word${at}`).join(' ')
+  const long = `its login was refused: ${words}`
   const shown = await heldFor(page, 'account', { because: long, bare: true })
-  await expect(shown.chief.locator('.terminal-status')).toContainText('x'.repeat(280))
-  const within = await shown.chief.evaluate((card) => {
-    const status = card.querySelector('.terminal-status').getBoundingClientRect()
+  const status = shown.chief.locator('.terminal-status')
+  await expect(status).toContainText('Unavailable: its login was refused: word0 word1')
+  const said = await status.innerText()
+  expect(said).toContain('…')
+  expect(said).not.toContain('word39')
+  // Cut at a word: the last one before the dots is whole, and the way back follows.
+  expect(said).toMatch(/ word\d+…\. Logged in again, or paid\? Press Try again now$/)
+  // The lane (the member's row and the staff list) says them all.
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    `Unavailable: ${long}`,
+  )
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toContainText('word39')
+  // Nothing of the card is clipped: its Try again and the terminal below it.
+  const box = await shown.chief.evaluate((card) => {
     const frame = card.getBoundingClientRect()
-    return status.right <= frame.right + 1
+    const button = card.querySelector('.try-again').getBoundingClientRect()
+    const host = card.querySelector('.terminal-host').getBoundingClientRect()
+    return { buttonBelow: button.bottom - frame.bottom, host: host.height }
   })
-  expect(within).toBe(true)
+  expect(box.buttonBelow).toBeLessThanOrEqual(0)
+  expect(box.host).toBeGreaterThan(40)
 })
 
 test('a member held for its billing says billing, in the harness’s words', async ({ page }) => {
