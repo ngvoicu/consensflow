@@ -1025,7 +1025,8 @@ fn a_slow_resize_holds_nothing_of_another_window_the_page_the_journal_or_an_ackn
         .recv_timeout(Duration::from_secs(10))
         .expect("the native resize began");
     // Each of these must finish while the resize is blocked.
-    let tries: Vec<(&str, Box<dyn FnOnce() + Send>)> = vec![
+    type Try = Box<dyn FnOnce() + Send>;
+    let tries: Vec<(&str, Try)> = vec![
         ("a key of another window", {
             let (table, other) = (Arc::clone(&rig.table), other.clone());
             Box::new(move || table.write(&other, b"k").map(|_| ()).unwrap())
