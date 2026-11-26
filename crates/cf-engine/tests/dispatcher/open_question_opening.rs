@@ -109,7 +109,6 @@ impl Board {
                 .contains(&format!("m-{id} was left unanswered")));
             assert_ne!(self.c.message(*id).state, "cancelled");
         }
-        eprintln!("task=done result=m-{} state=delivered begins=1 confirmations=1 closed={closed:?} answered={answered:?}", delivered.id);
         delivered.clone()
     }
     fn finish(&self) {
@@ -202,7 +201,6 @@ fn physical_crash_show_and_task_resume_require_the_new_turn() {
     assert_eq!(b.state(), "paused");
     assert!(b.results().is_empty());
     let before_resume = worker_pastes_since(&b, before);
-    eprintln!("worker crashed: task={state_after_exit}; Show: task={}, previous final item {final_id} retained, project state marker unchanged at {mark:?}, worker pastes={before_resume:?}, result rows={}", b.state(), b.results().len());
     assert!(before_resume.is_empty());
 
     b.c.resume_task(b.project, 1, "Finish on the new run.");
@@ -210,11 +208,6 @@ fn physical_crash_show_and_task_resume_require_the_new_turn() {
     let resumed = worker_pastes_since(&b, before);
     assert_eq!(resumed.len(), 1, "{resumed:?}");
     assert_eq!(b.c.message(resumed[0]).state, "delivered");
-    eprintln!(
-        "task Resume: worker pastes={resumed:?}, task={}, result rows={}",
-        b.state(),
-        b.results().len()
-    );
     assert_eq!(b.state(), "waiting");
     assert!(b.results().is_empty());
 
@@ -225,11 +218,6 @@ fn physical_crash_show_and_task_resume_require_the_new_turn() {
     assert_eq!(results.len(), 1);
     assert!(results[0].body.contains("Completed on the new run."));
     assert_eq!(b.c.message(first.id).state, "cancelled");
-    eprintln!(
-        "fresh turn: task=done, result begins {:?}, old question m-{} closed",
-        results[0].body.lines().next(),
-        first.id
-    );
 }
 
 #[test]
@@ -239,7 +227,6 @@ fn fresh_conversation_needs_a_paste_of_its_own() {
     b.answer(second.id, "JSON");
     passes(&b.c, 2);
     let mark = project_mark(&b);
-    let old_session = b.c.adapter.agent("zeus").native;
     b.c.adapter.answer("zeus", DONE);
     let before = b.events().last().unwrap().id;
     b.c.adapter.switch_to("zeus", "native-review-fresh");
@@ -258,11 +245,6 @@ fn fresh_conversation_needs_a_paste_of_its_own() {
     assert_eq!(b.state(), "waiting");
     assert!(b.results().is_empty());
     assert_eq!(b.c.message(first.id).state, "delivered");
-    eprintln!(
-        "fresh conversation from {old_session}: project marker={mark:?}, task={}, result rows={}",
-        b.state(),
-        b.results().len()
-    );
     let new_words = tell_and_paste(&b, "Use JSON on the current conversation.");
     b.finish();
     b.result(&[first.id], &[second.id]);
@@ -290,7 +272,6 @@ fn returning_to_a_conversation_does_not_publish_the_stored_turn() {
     drain_chief(&b);
     let pastes = worker_pastes_since(&b, from);
     let result = b.results();
-    eprintln!("returned to {previous}: old final item {final_id}, project marker={mark:?}, worker pastes={pastes:?}, task={}, results={:?}", b.state(), result.iter().map(|m| (&m.state, &m.body)).collect::<Vec<_>>());
     assert!(b
         .c
         .adapter
@@ -312,7 +293,7 @@ fn returning_to_a_conversation_does_not_publish_the_stored_turn() {
 #[test]
 fn an_empty_following_turn_does_not_close_an_open_question() {
     let b = Board::new(true);
-    let (first, second) = b.asked_two();
+    let (_first, second) = b.asked_two();
     b.answer(second.id, "JSON");
     passes(&b.c, 2);
     assert_eq!(b.state(), "waiting");
@@ -323,16 +304,6 @@ fn an_empty_following_turn_does_not_close_an_open_question() {
     passes(&b.c, 4);
     drain_chief(&b);
     let result = b.results();
-    eprintln!(
-        "empty complete turn: question m-{} {}, task={}, result={:?}",
-        first.id,
-        b.c.message(first.id).state,
-        b.state(),
-        result
-            .iter()
-            .map(|m| (&m.state, &m.body))
-            .collect::<Vec<_>>()
-    );
     assert!(
         result.is_empty(),
         "the new path requires the worker to end with words"
@@ -376,14 +347,6 @@ fn a_new_pane_of_a_held_task_does_not_take_its_previous_panes_turn() {
     assert_eq!(mark, project_mark(&b));
     let pastes = worker_pastes_since(&b, from);
     let result = b.results();
-    eprintln!(
-        "held worker reopened with Show: worker pastes={pastes:?}, task={}, results={:?}",
-        b.state(),
-        result
-            .iter()
-            .map(|m| (&m.state, &m.body))
-            .collect::<Vec<_>>()
-    );
     assert!(pastes.is_empty(), "{pastes:?}");
     assert!(result.is_empty());
 }
@@ -427,7 +390,6 @@ fn a_real_hold_route_and_show_do_not_take_the_pre_exit_turn() {
     b.c.advance(10_000);
     let ended = cf_base::time::iso(b.c.time.wall_ms());
     b.c.adapter.ends_its_own_turn("zeus", DONE, &ended);
-    let old_final = b.c.adapter.agent("zeus").items.last().unwrap().id.clone();
     let from = b.events().last().unwrap().id;
     b.c.host
         .exits_showing(Some(9), None, Some(&["stand-in crash"]));
@@ -447,10 +409,6 @@ fn a_real_hold_route_and_show_do_not_take_the_pre_exit_turn() {
         .filter(|&id| b.c.message(id).recipient_id == b.worker_id)
         .collect::<Vec<_>>();
     let result = b.results();
-    eprintln!("ended {ended} item {old_final} before worker crash, hold {resets_at}, project events since final={:?}, new worker pastes={pastes:?}, task={}, question m-{} {}, results={:?}",
-        events.iter().filter(|e| e.id > from && e.kind == "project.state").map(|e| e.id).collect::<Vec<_>>(),
-        b.state(), first.id, b.c.message(first.id).state,
-        result.iter().map(|m| (&m.state, &m.body)).collect::<Vec<_>>());
     assert!(pastes.is_empty(), "{pastes:?}");
     assert!(
         result.is_empty(),
@@ -487,8 +445,6 @@ fn a_paste_written_before_the_last_unanswered_question_does_not_qualify() {
     b.finish();
     drain_chief(&b);
     let result = b.results();
-    eprintln!("answer wrote at {written}, open question written at {asked}, answer pasted at {pasted}, results={:?}",
-        result.iter().map(|m| (&m.state, &m.body)).collect::<Vec<_>>());
     assert!(
         result.is_empty(),
         "the brief says the message must also have been written after the open question"
