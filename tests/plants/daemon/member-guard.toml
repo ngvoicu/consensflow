@@ -100,3 +100,13 @@ replace = "        if std::fs::metadata(entry.path())?.is_file() {"
 file = "crates/cf-daemon/src/member_guard.rs"
 find = "    let found = std::fs::symlink_metadata(file).ok()?;"
 replace = "    let found = std::fs::metadata(file).ok()?;"
+
+[[plant]]
+name = "member-guard: another folder is put before the guard's, so the first program is not the stand-in"
+meant = "pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reached"
+runs = ["guard-cf"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = "        self.path = format!(\"{}{delimiter}{}\", folder.display(), self.path);"
+replace = "        self.path = format!(\"/usr/bin{delimiter}{}{delimiter}{}\", folder.display(), self.path);"

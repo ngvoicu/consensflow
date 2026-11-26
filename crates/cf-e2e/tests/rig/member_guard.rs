@@ -1,10 +1,12 @@
 //! The commands that end every program by its name (`pkill`, `killall`) are refused in a member's
 //! window (T-2213): the folder of ConsensFlow's stand-ins is first on the PATH of every window the
 //! daemon opens, whatever its harness. The stand-ins of Claude Code, Codex and Devin are windows
-//! of the real daemon and pane host here; Pi has no stand-in in the rig (its window's environment
-//! is the daemon's alike: `WindowEnv`, held by its unit tests), and Muse Code's case is the
-//! kit's. The windows run scripts, so this is Unix's; `cf/tests/member_guard.rs` holds
-//! Windows's.
+//! of the real daemon and pane host here, and so is Muse Code's, on Muse's own echo model where
+//! the machine has Muse (the case is skipped, in plain words, where it has none: CI's). Pi has
+//! no stand-in in the rig, so no Pi window can be opened here; its window's environment is the
+//! daemon's alike (`WindowEnv::env` builds every harness's from the same strings, held by
+//! `cf-daemon`'s `member_guard` unit tests, `every_window_has_the_guards_folder_first_on_its_path_before_the_bundle`).
+//! The windows run scripts, so this is Unix's; `cf/tests/member_guard.rs` holds Windows's.
 //!
 //! No case here runs a command by its name (the kit refuses to): it finds the program the window's
 //! PATH names first and shows it is the `cf` of the bundle that comes next on it, which the other cases run under those names.
@@ -27,6 +29,9 @@ use crate::{config, secs, Outcome};
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 #[cfg(unix)]
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
+/// The rig's Muse on Windows runs the machine's; here it is the program that stands for it.
+#[cfg(unix)]
+const MUSE_STAND_IN: &str = env!("CARGO_BIN_EXE_muse-stand-in");
 
 #[cfg(unix)]
 /// The program `name` first on the PATH of the window opened as `frame`.
@@ -63,10 +68,19 @@ fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and
     rig.wait_for("the chief and three members' windows", secs(120), || {
         Ok(rig.open_frames().len() >= 4)
     })?;
-    let guard = rig.home().join("member-guard");
     let frames = rig.open_frames();
     assert!(frames.iter().any(|frame| frame["id"] == chief["id"]));
-    for frame in &frames {
+    every_window_finds_the_guard_first(&rig, &frames)?;
+    rig.close()?;
+    Ok(())
+}
+
+/// Each of `frames` finds the guard's folder first for both names, the bundle's `cf` as what
+/// they are, and (on a Mac) the guard's root as its `PATH_HELPER_ROOT`.
+#[cfg(unix)]
+fn every_window_finds_the_guard_first(rig: &Rig, frames: &[Value]) -> Outcome {
+    let guard = rig.home().join("member-guard");
+    for frame in frames {
         // A Mac's login shells keep the folder first through the root their `path_helper`
         // reads; nothing else of the person's shell is touched.
         if cfg!(target_os = "macos") {
@@ -111,6 +125,32 @@ fn every_harnesss_window_finds_the_guards_pkill_and_killall_before_any_other_and
             );
         }
     }
+    Ok(())
+}
+
+/// A Muse Code window, on Muse's echo model, has the same: the guard's root and the guard's
+/// folder first for both names.
+#[cfg(unix)]
+#[test]
+fn a_muse_code_window_finds_the_guards_pkill_and_killall_before_any_other_and_the_helper_root(
+) -> Outcome {
+    if cf_e2e::muse::runner_has_no_muse() {
+        eprintln!("SKIPPED: no Muse Code on this machine");
+        return Ok(());
+    }
+    let install = cf_e2e::muse::echo_required()?;
+    let rig = Rig::start(config().muse(install.through(MUSE_STAND_IN), 1_000))?;
+    let project = cf_e2e::muse::members::project(&rig, &cf_e2e::muse::members::echo_worker())?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: MUSE_DONE",
+    )?;
+    rig.wait_for(
+        "the chief's and the Muse member's windows",
+        secs(120),
+        || Ok(rig.open_frames().len() >= 2),
+    )?;
+    every_window_finds_the_guard_first(&rig, &rig.open_frames())?;
     rig.close()?;
     Ok(())
 }

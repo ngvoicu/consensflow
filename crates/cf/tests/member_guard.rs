@@ -25,6 +25,12 @@ mod common;
 const OWNERS_WORDS: &str = "isn't run in member windows. It ends every program whose name \
      matches, other members' and the owner's among them. End a program you started";
 
+/// Nothing run under it can signal a program that is not itself.
+#[cfg(target_os = "macos")]
+const SANDBOX: &str = "(version 1)(allow default)(deny signal)(allow signal (target self))";
+#[cfg(not(target_os = "macos"))]
+const SANDBOX: &str = "";
+
 struct Window {
     home: PathBuf,
     recorder: PathBuf,
@@ -56,6 +62,9 @@ impl Window {
             )
             .unwrap();
         }
+        std::fs::create_dir_all(home.join("work")).unwrap();
+        #[cfg(windows)]
+        poison_startup_files(&home);
         let system_folder = if cfg!(windows) {
             system.join("System32")
         } else {
@@ -90,9 +99,15 @@ impl Window {
     fn given<'a>(&self, command: &'a mut Command) -> &'a mut Command {
         command.env("PATH", &self.path);
         if cfg!(windows) {
+            // Nothing inherited moves a lookup: no startup file of Git Bash's, no search of
+            // the current folder, which is a scratch one besides.
             command
                 .env("SystemRoot", &self.system)
-                .env("windir", &self.system);
+                .env("windir", &self.system)
+                .env_remove("BASH_ENV")
+                .env_remove("ENV")
+                .env("NoDefaultCurrentDirectoryInExePath", "1")
+                .current_dir(self.home.join("work"));
         }
         command
     }
@@ -105,10 +120,18 @@ impl Window {
     /// `line` run by the window's shell on its PATH: its exit code, standard output and error.
     fn run(&self, line: &str) -> (Option<i32>, String, String) {
         let mut shell = if cfg!(windows) {
+            // `/d`: no AutoRun command of the machine's or the person's.
             let mut shell = Command::new("cmd");
-            shell.args(["/c", line]);
+            shell.args(["/d", "/c", line]);
+            shell
+        } else if cfg!(target_os = "macos") {
+            // Nothing a Mac's shell runs here can signal a program that is not itself.
+            let mut shell = Command::new("/usr/bin/sandbox-exec");
+            shell.args(["-p", SANDBOX, "/bin/sh", "-c", line]);
             shell
         } else {
+            // Linux has no `sandbox-exec`; the window's system folder is scratch and empty,
+            // so no bare name can reach a real utility.
             let mut shell = Command::new("/bin/sh");
             shell.args(["-c", line]);
             shell
@@ -130,6 +153,38 @@ impl Drop for Window {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.home);
     }
+}
+
+/// When the runner asks (`CF_GUARD_TEST_POISON` is set), the startup inputs a shell reads by
+/// itself are set to a file that puts a second scratch folder, holding harmless programs of
+/// the guarded names, first on PATH: the test must still resolve to its own, or fail before
+/// any call.
+#[cfg(windows)]
+fn poison_startup_files(home: &Path) {
+    if std::env::var_os("CF_GUARD_TEST_POISON").is_none() {
+        return;
+    }
+    let folder = home.join("poison");
+    std::fs::create_dir_all(&folder).unwrap();
+    for program in ["taskkill.exe", "tskill.exe"] {
+        std::fs::copy(std::env::current_exe().unwrap(), folder.join(program)).unwrap();
+    }
+    let file = home.join("poison.sh");
+    std::fs::write(
+        &file,
+        format!("PATH=\"$(cygpath -u '{}'):$PATH\"\n", folder.display()),
+    )
+    .unwrap();
+    let file = file.display().to_string().replace('\\', "/");
+    std::env::set_var("BASH_ENV", &file);
+    std::env::set_var("ENV", &file);
+}
+
+/// Whether two paths name the same file as Windows spells them: case and slashes aside.
+#[cfg(windows)]
+fn same_path(found: &str, wanted: &Path) -> bool {
+    let norm = |text: &str| text.trim().replace('/', "\\").to_lowercase();
+    norm(found) == norm(&wanted.display().to_string())
 }
 
 /// Git for Windows's `bash.exe`, where it installs.
@@ -174,7 +229,9 @@ fn record(folder: &Path, command: &str) {
 #[test]
 fn pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reached() {
     let window = Window::new("mac", &["pkill", "killall"]);
-    let guard = folder_of(&window);
+    // The expected programs are the stand-ins' own, known here without the PATH under test:
+    // the folder the daemon made under the window's home.
+    let guard = cf_daemon::member_guard::folder(&window.home);
     for (line, command) in [
         ("pkill -f x", "pkill"),
         ("pkill", "pkill"),
@@ -199,12 +256,6 @@ fn pkill_and_killall_in_a_window_are_refused_and_the_real_command_is_never_reach
     }
 }
 
-/// The guard's folder of `window`, the first on its PATH.
-#[cfg(unix)]
-fn folder_of(window: &Window) -> PathBuf {
-    PathBuf::from(window.path.split(':').next().unwrap())
-}
-
 /// Whether a call reached the program standing for the real `taskkill` or `tskill`: this
 /// test's own executable, which takes the call's words for filters of its tests (`running 0
 /// tests`) or refuses them as options of its own, and says so either way. A refused call is
@@ -220,6 +271,43 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_one_the_sys
     // The window's system folder is the scratch one from its first case on: every shell below
     // is given it as `SystemRoot`, so what a call reaches is the test's own executable.
     let window = Window::new("win", &["taskkill", "tskill"]);
+    // Before any case issues a guarded name, each shell is asked what the name resolves to,
+    // and the test fails unless it is the guard's own stand-in (whose real program is the
+    // scratch one): nothing inherited has moved the lookup.
+    let bash = git_bash();
+    for name in ["taskkill", "tskill"] {
+        let wanted = window.home.join("member-guard").join(format!("{name}.exe"));
+        let (_, out, said) = window.run(&format!("for %i in ({name}.exe) do @echo %~$PATH:i"));
+        assert!(same_path(&out, &wanted), "cmd {name}: {out} {said}");
+        let ran = window
+            .given(Command::new(&bash).args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                &format!("cygpath -w \"$(type -P {name})\""),
+            ]))
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&ran.stdout);
+        assert!(same_path(&out, &wanted), "Git Bash {name}: {out}");
+        for shell in ["powershell.exe", "pwsh.exe"] {
+            let scratch = window.system.display();
+            let call = format!(
+                "$env:SystemRoot='{scratch}'; $env:windir='{scratch}'; \
+                 (Get-Command {name} -CommandType Application).Source"
+            );
+            let ran = Command::new(shell)
+                .args(["-NoProfile", "-NonInteractive", "-Command", &call])
+                .env("PATH", &window.path)
+                .output();
+            let Ok(ran) = ran else {
+                assert!(shell == "pwsh.exe", "{shell} did not start");
+                continue;
+            };
+            let out = String::from_utf8_lossy(&ran.stdout);
+            assert!(same_path(&out, &wanted), "{shell} {name}: {out}");
+        }
+    }
     for line in [
         "taskkill /IM x.exe",
         "taskkill /F /im x.exe",
@@ -276,7 +364,6 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_one_the_sys
     // Git Bash, which Claude Code, Pi and Devin run commands in: it turns `/PID` into a
     // path before a program reads it, so `//PID` is its spelling, and every other call is
     // refused. A call counts as passed only when the program the system has received it.
-    let bash = git_bash();
     for (line, goes_through) in [
         ("taskkill //PID 123", true),
         ("taskkill -PID 123 //F", true),
