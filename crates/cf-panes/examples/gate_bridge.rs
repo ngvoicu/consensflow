@@ -9,7 +9,9 @@
 //! (`cf_panes::page`), under the page identity the app's `InputQueue` keeps: its start
 //! (prepare, activate), its subscription, its pulls, their end, its acknowledgements and its
 //! sizes; a navigation ends the page as the app's does. Every message the sink takes is printed
-//! as a line.
+//! as a line. What a page answers for the program goes in through the real `InputQueue`
+//! (`reply`: its page, pane, generation and number are checked as the app's command checks
+//! them), and the program keeps what reaches its input in a file (`received`).
 // A test tool: a failed command stops the run, which is the report.
 #![allow(
     clippy::unwrap_used,
@@ -23,12 +25,13 @@
 mod bridge {
     use std::collections::HashMap;
     use std::io::{BufRead, Write};
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     use cf_panes::arbiter::{EnterTiming, InputArbiter};
-    use cf_panes::input_queue::InputQueue;
+    use cf_panes::input_queue::{InputQueue, InputWork};
     use cf_panes::journal::Journal;
     use cf_panes::output_hub::{OutputHub, PaneOutputMessage};
     use cf_panes::page;
@@ -37,15 +40,21 @@ mod bridge {
     use serde_json::{json, Value};
 
     const PROGRAM: &str = r#"
-import os, sys, tty
+import os, select, sys, tty
 tty.setraw(1)
 fd = os.open(sys.argv[1], os.O_RDWR)
+got = os.open(sys.argv[1] + '.in', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
 buf = b''
 def out(data):
     v = memoryview(data)
     while v:
         v = v[os.write(1, v):]
 while True:
+    ready = select.select([fd, 0], [], [])[0]
+    if 0 in ready:
+        os.write(got, os.read(0, 1 << 16))
+    if fd not in ready:
+        continue
     d = os.read(fd, 1 << 20)
     if not d:
         sys.exit(0)
@@ -74,6 +83,8 @@ while True:
         key: PaneKey,
         journal: Arc<Journal>,
         fifo: std::fs::File,
+        /// What reached the program's input, as the program wrote it down.
+        received: PathBuf,
     }
 
     pub(super) fn main() {
@@ -81,10 +92,13 @@ while True:
         panes.keep_journals();
         let hub = Arc::new(OutputHub::new());
         let stdout = Arc::new(Mutex::new(std::io::stdout()));
-        let inputs = InputQueue::new(
-            Arc::clone(&panes),
-            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
-        );
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
+        // Every wait of the gate is bounded; so is this one's (the gate's, in seconds).
+        let wait: u64 = std::env::var("CF_GATE_WAIT_S")
+            .ok()
+            .and_then(|seconds| seconds.parse().ok())
+            .unwrap_or(180);
         let mut alive = Arc::new(AtomicBool::new(true));
         let mut windows: HashMap<String, Window> = HashMap::new();
         let scratch = std::env::temp_dir().join(format!("cf-gate-{}", std::process::id()));
@@ -134,6 +148,8 @@ while True:
                         )
                         .unwrap();
                     let journal = program.journal.clone().unwrap();
+                    arbiter.register(&key).unwrap();
+                    inputs.open(&key).unwrap();
                     {
                         let (journal, hub) = (Arc::clone(&journal), Arc::clone(&hub));
                         std::thread::spawn(move || {
@@ -141,7 +157,15 @@ while True:
                         });
                     }
                     let fifo = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-                    windows.insert(name, Window { key, journal, fifo });
+                    windows.insert(
+                        name,
+                        Window {
+                            key,
+                            journal,
+                            fifo,
+                            received: PathBuf::from(format!("{}.in", path.display())),
+                        },
+                    );
                     json!({"generation": generation})
                 }
                 "emit" => {
@@ -167,13 +191,17 @@ while True:
                     let want = command["n"].as_u64().unwrap();
                     let say = say.clone();
                     std::thread::spawn(move || {
-                        let deadline = Instant::now() + Duration::from_secs(180);
+                        let deadline = Instant::now() + Duration::from_secs(wait);
                         while journal.published_to() < want {
-                            assert!(
-                                Instant::now() < deadline,
-                                "sync {want}: at {}",
-                                journal.published_to()
-                            );
+                            if Instant::now() >= deadline {
+                                // The gate reports it and ends: no reader may hang on a program
+                                // that stopped at its room.
+                                say(json!({"re": re, "error": format!(
+                                    "the program's output stopped at {} of {want} bytes ({wait} s)",
+                                    journal.published_to()
+                                )}));
+                                return;
+                            }
                             std::thread::sleep(Duration::from_millis(1));
                         }
                         say(json!({"re": re, "end": journal.end()}));
@@ -260,6 +288,36 @@ while True:
                     ),
                     command["at"].as_u64(),
                 )}),
+                "reply" => {
+                    // The page's answer to a question, admitted as the app's command admits it.
+                    let bytes: Vec<u8> = (0..command["hex"].as_str().unwrap().len() / 2)
+                        .map(|i| {
+                            u8::from_str_radix(
+                                &command["hex"].as_str().unwrap()[i * 2..i * 2 + 2],
+                                16,
+                            )
+                            .unwrap()
+                        })
+                        .collect();
+                    let key = PaneKey::new(
+                        command["id"].as_str().unwrap(),
+                        command["generation"].as_u64().unwrap(),
+                    );
+                    match inputs.enqueue_page(
+                        command["page"].as_str().unwrap(),
+                        key,
+                        command["sequence"].as_u64().unwrap(),
+                        InputWork::Reply(bytes),
+                        false,
+                    ) {
+                        Ok(ticket) => json!({"answer": {"ok": true, "ticket": ticket}}),
+                        Err(error) => json!({"answer": {"ok": false, "error": error}}),
+                    }
+                }
+                "received" => {
+                    let window = &windows[&name];
+                    json!({"hex": hex(&std::fs::read(&window.received).unwrap_or_default())})
+                }
                 "size" => {
                     let window = &windows[&name];
                     let (rows, cols) = panes.terminal_size(&window.key).unwrap();

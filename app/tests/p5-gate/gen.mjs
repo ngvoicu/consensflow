@@ -224,6 +224,20 @@ export function namedCases() {
       true,
     )
   }
+  // T-2284's finding 10: what the journal holds after 257 sizes is still all there.
+  add(
+    'T-2284 finding 10: KEPT after 257 sizes',
+    80,
+    24,
+    [e('HEADER'), ...Array.from({ length: 257 }, (_, i) => ({ resize: [81 + (i % 2), 24] })), e('KEPT'), { reload: true }, e('X')],
+  )
+  // T-2284's finding 14: after a cut history a question is answered as the program asked it.
+  add(
+    'T-2284 finding 14: a cursor report after a cut',
+    80,
+    24,
+    [e('HEADER'), ...Array.from({ length: 257 }, (_, i) => ({ resize: [81 + (i % 2), 24] })), { reload: true }, e(C2 + '4;6H' + C2 + '6n'), e(C2 + '?6n')],
+  )
   return cs
 }
 export function reviewCases(cases) {
