@@ -913,31 +913,66 @@ fn a_report_as_the_first_thing_in_a_window_leaves_the_transcript_as_empty_as_it_
     }
 }
 
-/// Another command's records between a command's output and its report do not displace the
-/// output: the report is a child of any command record read since a turn last opened. After
-/// a turn opened, the older output is forgotten and a report under it opens a turn as before.
+/// A `/context` report that arrives while a turn is under way, with a piece of the model's
+/// answer between the command's output and its report: the report is still known by its
+/// parent, dropped, and the answer's end ends the turn. The two recordings are the
+/// repository's (`typed-line-shell.jsonl`, `typed-line-context.jsonl`); only their
+/// interleaving is constructed (nothing records a `/context` typed during a turn).
 #[test]
-fn a_report_is_known_by_its_parent_among_every_command_record_since_the_last_turn_opened() {
+fn a_report_under_way_through_a_turn_with_the_models_answer_between_leaves_the_turn_as_it_was() {
+    let shell = recorded("shell");
     let context = recorded("context");
     let at = at_rest().len();
-    let usage = recorded("usage");
-    let mut records = context[..at + 2].to_vec();
-    records.extend(usage[at..].iter().cloned().map(|mut row| {
-        // Another command's pair, typed after the first's output.
-        row["uuid"] = json!(format!("other-{}", row["uuid"].as_str().unwrap()));
-        row["parentUuid"] = json!(format!(
-            "other-{}",
-            row["parentUuid"].as_str().unwrap_or("x")
-        ));
-        row
-    }));
+    let typed_shell = &shell[at..];
+    let answer = typed_shell
+        .iter()
+        .position(|record| record["type"] == "assistant")
+        .unwrap();
+    let mut records = shell[..at].to_vec();
+    records.extend_from_slice(&typed_shell[..answer]);
+    // The command's echo and output, then the answer's record, then the report.
+    records.extend_from_slice(&context[at..at + 2]);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.push(typed_shell[answer].clone());
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
     records.push(context[at + 2].clone());
+    records.extend_from_slice(&typed_shell[answer + 1..]);
     assert_eq!(settlement_of(&records), Settlement::Settled);
-    // A turn opened after the output: the output is no parent any more.
-    let mut later = context[..at + 2].to_vec();
-    later.push(user("u2", json!("n1"), json!("Hello again")));
-    later.push(context[at + 2].clone());
-    assert_eq!(settlement_of(&later), Settlement::InFlight);
+    let record = record_of(&records);
+    assert!(
+        record.items.iter().any(|item| item.role
+            == crate::shared::record::reading::Role::Assistant
+            && item.complete),
+        "the shell turn's answer completed"
+    );
+}
+
+/// The command records remembered are the last 64: the 65th forgets the first. A report whose
+/// parent was forgotten reads as it did before the rule (a prompt, in flight: the stated
+/// limit); one under any remembered record, the latest or not, is a report and at rest.
+#[test]
+fn a_report_is_known_by_its_parent_among_the_last_64_command_records() {
+    let at = at_rest().len();
+    let context = recorded("context");
+    let report_under = |parent: &str| {
+        let mut records = at_rest();
+        for n in 0..65 {
+            records.push(printed_by_the_system(&format!("cmd-{n}"), "d1", "x"));
+        }
+        let mut report = context[at + 2].clone();
+        report["parentUuid"] = json!(parent);
+        report["uuid"] = json!("report-1");
+        records.push(report);
+        settlement_of(&records)
+    };
+    assert_eq!(report_under("cmd-0"), Settlement::InFlight, "forgotten");
+    for n in [1, 2, 30, 63, 64] {
+        assert_eq!(
+            report_under(&format!("cmd-{n}")),
+            Settlement::Settled,
+            "cmd-{n}"
+        );
+    }
 }
 
 /// The `/context` report with its parent, its marks and its flags changed by `fields`, in

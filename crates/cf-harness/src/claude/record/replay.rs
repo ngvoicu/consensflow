@@ -16,6 +16,11 @@ use crate::shared::quota::{busy_quota, exhausted_quota, unavailable_quota};
 use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
+/// How many of the latest command records' uuids a transcript remembers (`is_a_report`): a
+/// report's parent is one exact uuid, never used twice, so an old one matches nothing by
+/// mistake; the bound is for memory alone.
+const REMEMBERED_COMMANDS: usize = 64;
+
 impl Transcript {
     /// The record at `seq` among the transcript's, with its `place` in the
     /// tree when it has one.
@@ -42,6 +47,9 @@ impl Transcript {
             Projected::User(user) => self.user(user, place, seq)?,
             Projected::Output(printed) => {
                 if let Some(uuid) = &printed.uuid {
+                    if self.printed_by_the_system.len() == REMEMBERED_COMMANDS {
+                        self.printed_by_the_system.remove(0);
+                    }
                     self.printed_by_the_system.push(Arc::clone(uuid));
                 }
                 if let Some(parent) = &printed.ends {
@@ -163,7 +171,6 @@ impl Transcript {
             }
         }
         self.turn_open = true;
-        self.printed_by_the_system.clear();
         self.terminal = None;
         if !record.refused {
             self.failure = None;
@@ -467,7 +474,6 @@ impl Transcript {
             self.refused_uuid = None;
         }
         self.turn_open = true;
-        self.printed_by_the_system.clear();
         self.candidate = None;
         self.terminal = None;
         Ok(())

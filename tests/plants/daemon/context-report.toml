@@ -100,7 +100,7 @@ replace = '''        if self.is_a_report(record) {
 
 [[plant]]
 name = "context report: only the latest command record is remembered, and another command displaces the report's parent"
-meant = "a_report_is_known_by_its_parent_among_every_command_record_since_the_last_turn_opened"
+meant = "a_report_is_known_by_its_parent_among_the_last_64_command_records"
 runs = ["context-report-reader"]
 
 [[plant.edit]]
@@ -108,3 +108,18 @@ file = "crates/cf-harness/src/claude/record/replay.rs"
 find = '''                    self.printed_by_the_system.push(Arc::clone(uuid));'''
 replace = '''                    self.printed_by_the_system.clear();
                     self.printed_by_the_system.push(Arc::clone(uuid));'''
+
+[[plant]]
+name = "context report: a turn that opens forgets the command records, and a report inside it opens a turn again"
+meant = "a_report_under_way_through_a_turn_with_the_models_answer_between_leaves_the_turn_as_it_was"
+runs = ["context-report-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''        self.turn_open = true;
+        self.terminal = None;
+        if !record.refused {'''
+replace = '''        self.turn_open = true;
+        self.printed_by_the_system.clear();
+        self.terminal = None;
+        if !record.refused {'''
