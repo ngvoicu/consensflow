@@ -64,12 +64,16 @@ meant = "finished_questions::a_pending_question_reminder_cannot_stack_even_after
 runs = ["pending"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/waiting_questions.rs"
-find = '''        if last != previous
+find = '''            return remind_closed(store, project, id, previous, new_note);
+        };
+        if last != previous
             || state
                 .as_deref()
                 .is_some_and(|state| matches!(state, "queued" | "gated" | "delivering"))
         {'''
-replace = '''        if last != previous && state.is_none() {'''
+replace = '''            return remind_closed(store, project, id, previous, new_note);
+        };
+        if last != previous && state.is_none() {'''
 
 [[plant]]
 name = "waiting question: a handed reminder returned after an answer is sent again"

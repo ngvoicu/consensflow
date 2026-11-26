@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 45] = [
+pub const MIGRATIONS: [&str; 47] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -58,6 +58,8 @@ pub const MIGRATIONS: [&str; 45] = [
     include_str!("../migrations/0043.sql"),
     include_str!("../migrations/0044.sql"),
     include_str!("../migrations/0045.sql"),
+    include_str!("../migrations/0046.sql"),
+    include_str!("../migrations/0047.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -165,7 +167,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 45] = [
+        const SHIPPED: [&str; 47] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -211,6 +213,7 @@ mod tests {
             "1cf8ebe2c486a4327f449110753c1e4d3eea6d56cb99f77f214a1c90f0ec0fe6",
             "7eb6abb166c8dc0e37ed5f7fb978343abb2fab804aea2b53f142380bd89dc0a8",
             "a733637c0a5acbda6529cd096eda2031e220c367883ff7cf2a5ee2bb834c2122",
+            "bac6231d6dee99aff8f1ca06f9a58fe2a4041d9c610b04b91438271d3384c823",
             "4b2ed94816eebc76a0a722d9b1ff28ae0142aa9d35dc0f030a81cae751059372",
         ];
         // A migration added with no hash would pass by the zip below unpinned.

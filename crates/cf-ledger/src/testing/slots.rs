@@ -20,6 +20,9 @@ pub fn seat_in_slot(
     Ok(())
 }
 
+/// The update to the slots' number among [`crate::MIGRATIONS`].
+const SLOTS: usize = 45;
+
 impl crate::Ledger {
     /// [`crate::Ledger::add_member`] into a slot another member holds, as the update leaves a
     /// slot several hold: for a kit staff whose subject is not its slots.
@@ -64,18 +67,18 @@ impl Drop for SlotRuleOff {
     }
 }
 
-/// Opens `file` as a version without the slots opens it: the update to the slots (the last
-/// migration) is left out, by taking the file through every earlier one and marking the last
-/// as applied, and every line of [`crate::open_ledger`] after it is the product's. The gate of
-/// `architecture/staff-slots.md` 9.5 compares what the update leaves with this.
+/// Opens `file` as a version without the slots opens it: the update to the slots (0045) is
+/// left out, by taking the file through every earlier migration and marking that one as
+/// applied; the later ones, and every line of [`crate::open_ledger`] after it, are the
+/// product's. The gate of `architecture/staff-slots.md` 9.5 compares what the update leaves
+/// with this.
 pub fn open_ledger_without_the_slots_update(
     file: &std::path::Path,
     options: crate::Options,
 ) -> Result<crate::Ledger, crate::LedgerError> {
     let db = rusqlite::Connection::open(file)?;
-    let earlier = &crate::MIGRATIONS[..crate::MIGRATIONS.len() - 1];
-    crate::migrate(&db, earlier)?;
-    db.pragma_update(None, "user_version", crate::SCHEMA_VERSION as i64)?;
+    crate::migrate(&db, &crate::MIGRATIONS[..SLOTS - 1])?;
+    db.pragma_update(None, "user_version", SLOTS as i64)?;
     drop(db);
     crate::open_ledger(file, options)
 }

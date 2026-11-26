@@ -119,7 +119,7 @@ meant = "the_write_itself_refuses_a_count_past_two"
 runs = ["n35-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0047.sql"
 find = "CHECK (turn_retries BETWEEN 0 AND 2)"
 replace = "CHECK (turn_retries >= 0)"
 
@@ -388,7 +388,7 @@ meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_ear
 runs = ["n35-model"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0047.sql"
 find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
 replace = "NEW.state IN ('failed') AND OLD.state != NEW.state"
 
@@ -398,7 +398,7 @@ meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_ear
 runs = ["n35-model"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0047.sql"
 find = "NEW.state IN ('delivered', 'read'))"
 replace = "NEW.state IN ('read'))"
 
@@ -528,7 +528,7 @@ meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_ear
 runs = ["n35-model"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0047.sql"
 find = "NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state"
 replace = "NEW.state IN ('cancelled') AND OLD.state != NEW.state"
 
@@ -538,6 +538,6 @@ meant = "t_2305_finding_12_a_delivered_retry_cancelled_at_its_carrier_s_take_bac
 runs = ["n35-model"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0045.sql"
+file = "crates/cf-ledger/migrations/0047.sql"
 find = "AND OLD.state != NEW.state)"
 replace = "AND OLD.state NOT IN ('delivered', 'read') AND OLD.state != NEW.state)"

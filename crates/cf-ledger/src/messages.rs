@@ -59,9 +59,9 @@ pub use delivery::GivenUp;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
     confirm_sent_by_hand, confirm_unproven, delivery_begun_at, delivery_begun_ms, fail_delivery,
-    first_received, give_up_delivery, given_back_because, handed_over, in_flight, last_given,
-    last_pasted, last_pastes, next_delivery, next_delivery_of, note_since, paste_into, pasted_into,
-    received_of, retry_delivery, with_work,
+    first_received, give_up_delivery, given_back_because, handed_over, handed_over_condition,
+    in_flight, last_given, last_pasted, last_pastes, next_delivery, next_delivery_of, note_since,
+    paste_into, pasted_into, received_of, retry_delivery, with_work,
 };
 pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
@@ -757,6 +757,33 @@ pub(crate) fn inbox(
         ),
         params![participant_id, limit],
     )
+}
+
+/// [`inbox`] less the reminders withheld from their recipient, the newest
+/// `limit` of what is left: they are filtered before they are counted, so none of
+/// them hides an older message.
+pub(crate) fn readable_inbox(
+    store: &Store,
+    participant_id: i64,
+    limit: usize,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let ids: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT id FROM message WHERE recipient_id = ? AND state != 'gated' ORDER BY id DESC",
+        )?
+        .query_map([participant_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut shown = Vec::new();
+    for id in ids {
+        if shown.len() == limit {
+            break;
+        }
+        if crate::waiting_questions::withheld(store, id)?.is_none() {
+            shown.push(known_message(store, id)?);
+        }
+    }
+    Ok(shown)
 }
 
 /// The newest note ConsensFlow itself left the participant (one with no sender) whose

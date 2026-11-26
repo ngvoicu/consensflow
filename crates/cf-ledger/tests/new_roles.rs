@@ -89,7 +89,7 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .filter(|column: &String| table != "project" || column != "own_hands")
-        // The count of a task's tries in a row (0045) is not in the ledger this one is made to be.
+        // The count of a task's tries in a row (0047) is not in the ledger this one is made to be.
         .filter(|column: &String| {
             table != "task"
                 || !["turn_retries", "retry_hold", "turn_retry_at"].contains(&column.as_str())
@@ -193,7 +193,8 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
-    cf_ledger::testing::undo_migration_0045(&raw).unwrap();
+    cf_ledger::testing::undo_migration_0047(&raw).unwrap();
+    cf_ledger::testing::undo_migration_0046(&raw).expect("closed waits undone");
     cf_ledger::testing::undo_migration_0044(&raw).expect("holding bounds undone");
     cf_ledger::testing::undo_migration_0043(&raw).expect("question boundaries undone");
     cf_ledger::testing::undo_migration_0042(&raw).expect("reminders undone");
@@ -264,6 +265,10 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
                     "question_binding_wait",
                     "message_questions_for_chief",
                     "message_answers_by_question",
+                    "question_wait",
+                    "question_wait_note",
+                    "question_wait_reminder",
+                    "question_reminder_sent",
                 ]
                 .contains(&name.as_str())
                 && name != "question_resume_anchor"

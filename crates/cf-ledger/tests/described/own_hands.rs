@@ -41,7 +41,7 @@ fn migration_0038_keeps_the_0037_ledger_and_defaults_every_project_off() {
             .collect::<Vec<_>>()
     );
     assert_eq!(&latest[2..3], &after[2..3]);
-    // Every task also gains the count of its tries in a row (0045), reading zero, and no
+    // Every task also gains the count of its tries in a row (0047), reading zero, and no
     // retry hold.
     assert_eq!(
         latest[3],

@@ -108,8 +108,8 @@ pub use slots::{
 };
 pub use staff_rules::undo_migration_0026;
 
-/// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0045.
-pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+/// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0047.
+pub fn undo_migration_0047(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
         "DROP INDEX event_confirmed_index;
          DROP TRIGGER turn_retry_message_moved;
@@ -118,6 +118,11 @@ pub fn undo_migration_0045(db: &rusqlite::Connection) -> rusqlite::Result<()> {
          ALTER TABLE task DROP COLUMN turn_retries;
          DROP INDEX turn_retry_by_message; DROP INDEX turn_retry_by_task; DROP TABLE turn_retry",
     )
+}
+
+/// Remove the closed questions' waits when a fixture reconstructs a ledger before 0046.
+pub fn undo_migration_0046(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("DROP TABLE question_wait; DROP TABLE question_reminder_sent")
 }
 
 /// Remove the holdings' bounds when a fixture reconstructs a ledger before 0044.
@@ -270,6 +275,8 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             "question_binding",
             "question_handover",
             "question_reminder",
+            "question_wait",
+            "question_reminder_sent",
             "turn_retry",
         ])
         .collect();
@@ -341,6 +348,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_binding_wait"
             && entry["name"] != "question_handover"
             && entry["name"] != "question_reminder"
+            && entry["name"] != "question_wait"
+            && entry["name"] != "question_wait_note"
+            && entry["name"] != "question_wait_reminder"
+            && entry["name"] != "question_reminder_sent"
             && entry["name"] != "question_reminder_by_message"
             && entry["name"] != "turn_retry"
             && entry["name"] != "turn_retry_by_task"

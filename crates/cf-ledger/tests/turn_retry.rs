@@ -793,9 +793,9 @@ fn the_migration_keeps_every_row_and_every_older_task_reads_zero() {
         .expect("told");
     ledger.close().expect("closed");
     let file = dir.path().join("ledger.db");
-    // As a build before 0045 left it: no count, no table, the version before.
+    // As a build before 0047 left it: no count, no table, the version before.
     let raw = rusqlite::Connection::open(&file).expect("raw");
-    cf_ledger::testing::undo_migration_0045(&raw).expect("0045 undone");
+    cf_ledger::testing::undo_migration_0047(&raw).expect("0047 undone");
     raw.execute_batch(&format!(
         "PRAGMA user_version = {}",
         cf_ledger::SCHEMA_VERSION - 1

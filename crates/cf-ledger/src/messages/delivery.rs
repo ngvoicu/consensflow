@@ -670,6 +670,18 @@ pub(crate) fn confirm_sent_by_hand(
     })
 }
 
+/// The one decision that a message is its recipient's already, written for the
+/// message row `alias`: its hand-over has begun at the window and is not over.
+/// [`handed_over`] lists by it, and a hold that keeps a message from its recipient
+/// ([`crate::meeting::is_held`]) lets one it says is handed be read and received.
+pub(crate) fn handed_over_condition(alias: &str) -> String {
+    format!(
+        "(({alias}.state = 'delivering' AND {alias}.handed_at IS NOT NULL)
+          OR ({alias}.state = 'queued'
+              AND ({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)))"
+    )
+}
+
 /// The messages of a project whose hand-over has begun at their window and is not
 /// over: one on its way that its transport let go ([`admit`]), and an answer a
 /// question's door claimed for its harness (`claim_answer`). Every other message
@@ -677,13 +689,11 @@ pub(crate) fn confirm_sent_by_hand(
 pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
     Ok(store
         .db
-        .prepare(
-            "SELECT id FROM message
-             WHERE project_id = ?
-               AND ((state = 'delivering' AND handed_at IS NOT NULL)
-                    OR (state = 'queued' AND (handed_at IS NOT NULL OR claimed_at IS NOT NULL)))
-             ORDER BY id",
-        )?
+        .prepare(&format!(
+            "SELECT m.id FROM message m
+             WHERE m.project_id = ? AND {} ORDER BY m.id",
+            handed_over_condition("m")
+        ))?
         .query_map([project_id], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?)
 }

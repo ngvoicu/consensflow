@@ -148,6 +148,9 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
     if message.kind == "question" && message.recipient_role == "chief" && !message.urgent {
         crate::waiting_questions::read_early(store, message.id)?;
     }
+    if message.kind == "note" {
+        crate::waiting_questions::note_read_early(store, message.id)?;
+    }
     Ok(())
 }
 
@@ -542,6 +545,13 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
+            // What a hold keeps from its recipient is not received by a read of it: a
+            // reminder it is not shown, a message a meeting or a Close holds. A read changes nothing.
+            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?
+            {
+                continue;
+            }
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
                 received += read_part(store, &message, 1, 1, cf)?;

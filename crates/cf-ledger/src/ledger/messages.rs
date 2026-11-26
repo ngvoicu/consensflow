@@ -321,6 +321,14 @@ impl Ledger {
         crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
     }
 
+    /// Why `message`, a reminder, is not shown to its recipient now: not listed,
+    /// served or received ([`Ledger::readable_inbox`], [`Ledger::receive_read`]).
+    /// None for a reminder it is shown, and for any other message. Asking changes
+    /// nothing.
+    pub fn reminder_withheld(&self, message: i64) -> Result<Option<crate::Withheld>, LedgerError> {
+        crate::waiting_questions::withheld(&self.store, message)
+    }
+
     /// One message, or none.
     pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
         self.store.message(id)
@@ -1308,5 +1316,15 @@ impl Ledger {
     /// A participant's messages, newest first, at most `limit` (Node's default: 100).
     pub fn inbox(&self, participant_id: i64, limit: i64) -> Result<Vec<MessageView>, LedgerError> {
         messages::inbox(&self.store, participant_id, limit)
+    }
+
+    /// [`Ledger::inbox`] as its owner reads it: no reminder it is not shown
+    /// ([`Ledger::reminder_withheld`]), and `limit` counts what is shown.
+    pub fn readable_inbox(
+        &self,
+        participant_id: i64,
+        limit: usize,
+    ) -> Result<Vec<MessageView>, LedgerError> {
+        crate::messages::readable_inbox(&self.store, participant_id, limit)
     }
 }
