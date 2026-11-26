@@ -7994,7 +7994,11 @@ test('shows the staff in its slots, each member once with what it runs on in its
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   // The slots are the staff (T-2341): its members, each once, and none of their sessions.
-  expect(await membersShown(dialog)).toEqual(['@zeus', '@diana', '@hera'])
+  expect(await holdersShown(dialog)).toEqual([
+    ['worker:standard', 'zeus'],
+    ['worker:light', 'diana'],
+    ['reviewer:critical', 'hera'],
+  ])
   // Each member's part says its tier and its harness, and what it runs only where its name does
   // not (zeus is named for no model): its model's id and its effort.
   const zeus = await openPart(dialog, '@zeus')
@@ -8935,7 +8939,7 @@ test('Edit member moves a member to another model, effort and tier its harness l
     ["Light work: the light worker slot is @diana's", true],
   ])
   // Cancel: nothing is sent, and the form shuts until a slot or an Edit opens it.
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await add.getByRole('button', { name: 'Cancel this form', exact: true }).click()
   await expect(add).toBeHidden()
   expect(await calls(page, 'member.edit')).toEqual([])
   // Another model and tier, saved.
@@ -9166,8 +9170,10 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
   ])
   // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
   // A member with two roles is one member, in its two slots (T-1847, T-2341).
-  expect(await membersShown(made.dialog)).toEqual(['claude-sonnet-5'])
-  await expect(made.staff.locator('table.slots .slot-holder')).toHaveCount(2)
+  expect(await holdersShown(made.dialog)).toEqual([
+    ['worker:standard', '1'],
+    ['reviewer:standard', '1'],
+  ])
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -9359,7 +9365,7 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
   await expect(made.chief.model).toHaveValue('gpt-6-astra')
   await expect(made.specs.mode).toHaveValue('on')
   await expect(made.specs.folder).toHaveValue('../elsewhere')
-  expect(await membersShown(made.dialog)).toEqual(['claude-sonnet-5'])
+  expect(await holdersShown(made.dialog)).toEqual([['worker:standard', '1']])
   // Nothing was started: the project shown is the one that was, and the status line says nothing.
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(page.locator('#status')).toHaveText('')
@@ -10026,6 +10032,8 @@ test("offers a new project's chief only the harnesses installed here, and its st
     ['Pi', false],
     ['Muse Code', false],
   ])
+  // Only the member on Codex, which is installed: the first the draft numbers.
+  expect(await holdersShown(dialog)).toEqual([['worker:light', '1']])
   expect(await membersShown(dialog)).toEqual(['gpt-5.6-luna'])
   expect(await offered(dialog.locator('[name="memberHarness"]'))).toEqual([
     ['Pick a harness', true],
@@ -10052,6 +10060,7 @@ test("starts a new project's staff on the model as its harness's list names it, 
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
+  expect(await holdersShown(dialog)).toEqual([['worker:light', '1']])
   expect(await membersShown(dialog)).toEqual(['swe-2'])
   const part = await openPart(dialog, 'swe-2')
   await expect(part.locator('.slot-part-about .member-meta')).toHaveText('Devin · max · light')
@@ -12957,7 +12966,12 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Specs',
     'Computer use',
   ])
-  await expect.poll(() => membersShown(dialog)).toEqual(['@zeus', '@diana'])
+  await expect
+    .poll(() => holdersShown(dialog))
+    .toEqual([
+      ['worker:standard', 'zeus'],
+      ['worker:light', 'diana'],
+    ])
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
   // Left, it gives the keyboard back to the project it was asked of.
   await dialog.getByRole('button', { name: 'Close' }).click()
@@ -12977,7 +12991,7 @@ test('project menu: Project settings… on a project the board does not show sho
   await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'false')
   // The dialog is foundry's, not harbour's: its calls were read, its staff is in it, and it acts on it.
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
-  await expect.poll(() => membersShown(dialog)).toEqual(['@athena'])
+  await expect.poll(() => holdersShown(dialog)).toEqual([['worker:light', 'athena']])
   await dialog
     .getByRole('group', { name: 'Human approval', exact: true })
     .getByRole('checkbox')
@@ -12989,7 +13003,7 @@ test('project menu: Project settings… on a project the board does not show sho
   await expect(projectButton(page, 2)).toBeFocused()
   // And the board's own button opens the same dialog for the project shown now, without that asked again.
   await page.getByRole('button', { name: 'Project settings' }).click()
-  await expect.poll(() => membersShown(dialog)).toEqual(['@athena'])
+  await expect.poll(() => holdersShown(dialog)).toEqual([['worker:light', 'athena']])
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Project settings' })).toBeFocused()
 })
@@ -13010,7 +13024,7 @@ test('project menu: Project settings… on a project while the board of another 
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog).toBeVisible()
   await expect(page.locator('#project-title')).toHaveText('foundry')
-  await expect.poll(() => membersShown(dialog)).toEqual(['@athena'])
+  await expect.poll(() => holdersShown(dialog)).toEqual([['worker:light', 'athena']])
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
 })
 
@@ -14528,7 +14542,12 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   )
   await expect(slotCell(dialog, 'reviewer:standard')).toContainText('claude-sonnet-5')
   await expect(slotCell(dialog, 'worker:light')).toContainText('gpt-5.6-lunaCodex · low')
-  expect(await membersShown(dialog)).toEqual(['gpt-6-astra', 'claude-sonnet-5', 'gpt-5.6-luna'])
+  expect(await holdersShown(dialog)).toEqual([
+    ['worker:critical', '3'],
+    ['worker:standard', '1'],
+    ['worker:light', '2'],
+    ['reviewer:standard', '1'],
+  ])
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
   // A member as a slot's Add picks one: a harness, a model it lists, in the slot's role and tier.
@@ -14553,7 +14572,13 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
   await expect(drawing.locator('.member-meta')).toHaveText('Codex')
   await dialog.getByRole('button', { name: 'Remove Worker gpt-5.6-luna' }).click()
   await dialog.getByRole('button', { name: 'Remove gpt-5.6-luna', exact: true }).click()
-  expect(await membersShown(dialog)).toHaveLength(4)
+  expect(await holdersShown(dialog)).toEqual([
+    ['worker:critical', '3'],
+    ['worker:standard', '1'],
+    ['advisor:light', '4'],
+    ['reviewer:standard', '1'],
+    ['designer', '5'],
+  ])
   await dialog.getByRole('button', { name: 'Start project' }).click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -14682,7 +14707,10 @@ test('New project asks no tier of a role whose one slot has none, and a member t
   )
   await page.getByRole('button', { name: 'New project' }).click()
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
-  expect(await membersShown(dialog)).toEqual(['claude-sonnet-5'])
+  expect(await holdersShown(dialog)).toEqual([
+    ['worker:complex', '1'],
+    ['scout', '1'],
+  ])
   await expect(slotCell(dialog, 'scout').locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
   await expect(slotCell(dialog, 'worker:complex').locator('.slot-holder')).toHaveText([
     /claude-sonnet-5/,
@@ -18771,7 +18799,10 @@ test('BKV settings places one backup under its member and offers no backup of a 
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   // The backup holds no slot: its member's slot says it, and its member's part has it.
-  expect(await membersShown(dialog)).toEqual(['@zeus', '@diana'])
+  expect(await holdersShown(dialog)).toEqual([
+    ['worker:standard', 'zeus'],
+    ['worker:light', 'diana'],
+  ])
   await expect(slotCell(dialog, 'worker:standard')).toContainText('backup @hera')
   const zeus = await openPart(dialog, '@zeus')
   await expect(zeus.locator('.backup-part')).toContainText('backup of @zeus')
@@ -18979,7 +19010,7 @@ test('BKV New project leaves out a backup on a missing harness and keeps its mem
   await open(page, data)
   await page.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
-  expect(await membersShown(dialog)).toEqual(['claude-sonnet-5'])
+  expect(await holdersShown(dialog)).toEqual([['worker:standard', '30']])
   const part = await openPart(dialog, 'claude-sonnet-5')
   await expect(part.getByText('backup of claude-sonnet-5')).toHaveCount(0)
   await expect(part.getByRole('button', { name: 'Add backup for claude-sonnet-5' })).toBeVisible()
@@ -21087,7 +21118,7 @@ async function openPart(dialog, name) {
   if (await part.isVisible()) return part
   await dialog
     .locator('table.slots')
-    .getByRole('button', { name: new RegExp(`^${literally(name)}: `) })
+    .getByRole('button', { name: openerName(name) })
     .first()
     .click()
   await expect(part).toBeVisible()
@@ -21341,7 +21372,11 @@ test('D8 the same model at a second tier makes a second member, in both orders, 
     await fresh.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
     await expect(slotCell(fresh, `worker:${tier}`)).toContainText('claude-sonnet-5')
   }
-  await expect(slotGrid(fresh).locator('.slot-holder')).toHaveCount(3)
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:complex', '2'],
+    ['worker:standard', '1'],
+    ['worker:light', '3'],
+  ])
   await fresh.getByRole('button', { name: 'Start project' }).click()
   await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
   const staff = (await calls(page, 'project.open')).at(-1).staff
@@ -21423,7 +21458,7 @@ test('D8 a draft changed twice is drawn again each time', async ({ page }) => {
   await expect(part.locator('.slot-part-about .member-meta')).toHaveText('Codex · complex')
 })
 
-test('D8 an Add for a held slot is refused in the form, and so is a slot-taken from the ledger after another edit took the slot', async ({
+test('D8 an Add whose slot is given meanwhile closes and says why, and a slot-taken from the ledger is said in the form', async ({
   page,
 }) => {
   const data = staffOf(model(), staffLane(3, 'hera', ['reviewer'], 'standard'))
@@ -21432,14 +21467,17 @@ test('D8 an Add for a held slot is refused in the form, and so is a slot-taken f
   await page.getByRole('button', { name: 'New project' }).click()
   const fresh = page.getByRole('dialog', { name: 'New project' })
   await addToSlot(fresh, 'Add a standard worker', { harness: 'Codex', model: 'gpt-5.6-luna' })
-  // Meanwhile the slot is given to the draft's reviewer: the form's Add is refused, in the
-  // ledger's words, and the draft is as it was.
+  // Meanwhile the slot is given to the draft's reviewer: the form closes, the line under the
+  // slot's row says why (T-2341, round 2), nothing is added, and the one member holds both slots.
   await fresh.getByRole('button', { name: 'Give the standard worker slot to gpt-6-astra' }).click()
-  await fresh.locator('.staff-add').getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(fresh.locator('.staff-add .staff-hint')).toHaveText(
-    "the standard worker slot is gpt-6-astra's: a role and tier holds one member. Pick another tier",
+  await expect(fresh.locator('.staff-add')).toBeHidden()
+  await expect(fresh.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    "The standard worker slot is gpt-6-astra's now, so its Add was closed. Nothing was added.",
   )
-  expect(await membersShown(fresh)).toEqual(['gpt-6-astra'])
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:standard', '30'],
+    ['reviewer:standard', '30'],
+  ])
   await fresh.getByRole('button', { name: 'Cancel' }).last().click()
   // Project settings says the ledger's refusal where the human picked.
   await page.getByRole('button', { name: 'Project settings' }).click()
@@ -21639,7 +21677,10 @@ test('D8 a member in two slots far apart has one set of its controls and one bac
   await expect(slotCell(fresh, 'integrator:complex').locator('.slot-holder')).toHaveText([
     /gpt-6-astra/,
   ])
-  expect(await membersShown(fresh)).toEqual(['gpt-6-astra'])
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:complex', '30'],
+    ['integrator:complex', '30'],
+  ])
   const members = await openPart(fresh, 'gpt-6-astra')
   await expect(members.locator('.slot-part-slots')).toHaveText(
     'One member in two slots: Worker and Integrator. What you change here changes it in both.',
@@ -21763,7 +21804,11 @@ test("D8 New project asks before a member's last role goes, and keeps it and its
   // A role of a member that holds another goes at once: the member stays.
   await fresh.getByRole('button', { name: 'Remove Reviewer gpt-5.6-luna' }).click()
   await expect(slotCell(fresh, 'reviewer:complex').locator('.slot-holder')).toHaveCount(0)
-  expect(await membersShown(fresh)).toHaveLength(3)
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:complex', '31'],
+    ['worker:standard', '30'],
+    ['worker:standard', '32'],
+  ])
   // Its last role asks first, in the slot, and says its backup goes with it.
   await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
   await expect(cell).toContainText(
@@ -21772,7 +21817,9 @@ test("D8 New project asks before a member's last role goes, and keeps it and its
   await cell.getByRole('button', { name: 'Keep gpt-6-astra' }).click()
   await expect(backups).toHaveText(['backup claude-sonnet-5'])
   await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-6-astra/])
-  expect(await membersShown(fresh)).toHaveLength(3)
+  expect(new Set((await holdersShown(fresh)).map(([, key]) => key))).toEqual(
+    new Set(['30', '31', '32']),
+  )
   await expect(cell.locator('.slot-holder', { hasText: 'gpt-6-astra' })).toContainText(
     'on Vacation',
   )
@@ -21780,7 +21827,10 @@ test("D8 New project asks before a member's last role goes, and keeps it and its
   await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
   await cell.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
   await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/])
-  expect(await membersShown(fresh)).toHaveLength(2)
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:complex', '31'],
+    ['worker:standard', '30'],
+  ])
   await expect(backups).toHaveCount(0)
   // A member with no backup is asked of alone.
   await cell.getByRole('button', { name: 'Remove Worker claude-sonnet-5' }).click()
@@ -22080,9 +22130,14 @@ test('T-2341 shots: both staff screens with the owner’s staff, and each operat
 
 /** Words as a pattern that matches them as they are. */
 const literally = (words) => words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * What the button in a slot that opens its holder's own things is named by: the holder's name, its
+ * tier where another goes by that name, the slot where it holds several, then what its part holds.
+ */
+const openerName = (name) => new RegExp(`^${literally(name)}( at [A-Z]\\w+)?(, [^:]+ slot)?: `)
 /** The button in a slot that opens its holder's own things: its Edit, Vacation and backup. */
 const memberOpener = (dialog, slot, name) =>
-  slotCell(dialog, slot).getByRole('button', { name: new RegExp(`^${literally(name)}: `) })
+  slotCell(dialog, slot).getByRole('button', { name: openerName(name) })
 /** A member's own things, open under the slot they were opened from. */
 const memberPanel = (dialog, name) => dialog.getByRole('region', { name, exact: true })
 /** The role whose row the open row of a dialog's slots follows, read from the table. */
@@ -22106,7 +22161,7 @@ test('T-2341 Project settings: Edit, Vacation and the backup open from a member�
   await expect(settings.getByRole('table', { name: 'On the staff' })).toHaveCount(0)
   await expect(settings.getByRole('button', { name: 'Edit @zeus' })).toHaveCount(0)
   const opener = memberOpener(settings, 'worker:standard', '@zeus')
-  await expect(opener).toHaveAccessibleName('@zeus: Edit, Vacation and backup')
+  await expect(opener).toHaveAccessibleName('@zeus, Worker slot: Edit, Vacation and backup')
   await expect(opener).toHaveAttribute('aria-expanded', 'false')
   await opener.click()
   const panel = memberPanel(settings, '@zeus')
@@ -22246,7 +22301,7 @@ test('T-2341 New project: Edit, Bring back and the backup open from a member’s
   await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
   await expect(fresh.getByRole('table', { name: 'Members for the staff' })).toHaveCount(0)
   const sonnet = memberOpener(fresh, 'tester:standard', 'claude-sonnet-5')
-  await expect(sonnet).toHaveAccessibleName('claude-sonnet-5: Edit and backup')
+  await expect(sonnet).toHaveAccessibleName('claude-sonnet-5, Tester slot: Edit and backup')
   await expect(memberOpener(fresh, 'worker:complex', 'gpt-5.6-luna')).toHaveAccessibleName(
     'gpt-5.6-luna: Edit, Vacation and backup',
   )
@@ -22256,7 +22311,7 @@ test('T-2341 New project: Edit, Bring back and the backup open from a member’s
   expect(await openRowFollows(fresh)).toBe('tester')
   await expect(panel).toContainText('backup of claude-sonnet-5')
   // The backup's Vacation ends; it is changed, removed and added again.
-  await panel.getByRole('button', { name: 'Bring gpt-6-astra back from Vacation' }).click()
+  await panel.getByRole('button', { name: 'Bring backup gpt-6-astra back from Vacation' }).click()
   await expect(panel).not.toContainText('on Vacation')
   await panel.getByRole('button', { name: 'Change backup for claude-sonnet-5' }).click()
   await expect(
@@ -22457,4 +22512,543 @@ test('T-2341 a refused Remove backup is said in the member’s part, beside it, 
   await expect.poll(() => calls(page, 'backup.remove')).toHaveLength(2)
   await expect(part.locator('.backup-part [role="alert"]')).toHaveCount(0)
   await expect(part.getByRole('button', { name: 'Add backup for @zeus' })).toBeVisible()
+})
+
+// T-2341, round 2 (the review T-2346): a member with no slot, forms whose subject went, names.
+
+/** The cards the slots show, each as its slot and its member's key, in the slots' order. */
+const holdersShown = (dialog) =>
+  dialog
+    .locator('table.slots .slot-holder')
+    .evaluateAll((cards) =>
+      cards.map((card) => [card.closest('[data-slot]').dataset.slot, card.dataset.member]),
+    )
+
+test('T-2341 a member that holds no slot has a row of its own, its part with Edit, Vacation and backup, and an Edit that gives it a tier seats it, on both screens', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'legacy', ['worker'], null, { vacationSince: at(30) }),
+    staffLane(4, 'zeus', ['worker'], 'standard', SONNET),
+  )
+  data.lastStaff = [lastOf(30, ['worker'], null, {}, { vacationSince: at(30) })]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const none = slotCell(settings, 'none')
+  await expect(slotGrid(settings).locator('tr[data-role="none"] th')).toHaveText('No slot')
+  await expect(none).toContainText(
+    'A member here holds no slot: none of its roles has a slot at its tier. Edit it to give it one.',
+  )
+  expect(await holdersShown(settings)).toEqual([
+    ['worker:standard', 'zeus'],
+    ['none', 'legacy'],
+  ])
+  await expect(none).toContainText('on Vacation')
+  await memberOpener(settings, 'none', '@legacy').click()
+  const part = memberPanel(settings, '@legacy')
+  expect(await openRowFollows(settings)).toBe('none')
+  for (const name of [
+    'Edit @legacy',
+    'Bring @legacy back from Vacation',
+    'Add backup for @legacy',
+  ]) {
+    await expect(part.getByRole('button', { name, exact: true })).toBeVisible()
+  }
+  await part.getByRole('button', { name: 'Edit @legacy' }).click()
+  await expect(part.locator('[name="memberTier"]')).toBeVisible()
+  expect(await offered(part.locator('[name="memberTier"]'))).toEqual([
+    ['Pick a tier', true],
+    ['Critical work', false],
+    ['Complex work', false],
+    ["Standard work: the standard worker slot is @zeus's", true],
+    ['Light work', false],
+  ])
+  await part.locator('[name="memberTier"]').selectOption('light')
+  await part.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(async () => (await calls(page, 'member.edit')).at(-1))
+    .toMatchObject({ member: 'legacy', tier: 'light' })
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  // New project: the copied member with no tier, the same row, and seated by its Edit.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  expect(await holdersShown(fresh)).toEqual([['none', '30']])
+  await memberOpener(fresh, 'none', 'gpt-6-astra').click()
+  const draft = memberPanel(fresh, 'gpt-6-astra')
+  for (const name of [
+    'Edit gpt-6-astra',
+    'Bring gpt-6-astra back from Vacation',
+    'Add backup for gpt-6-astra',
+  ]) {
+    await expect(draft.getByRole('button', { name, exact: true })).toBeVisible()
+  }
+  await draft.getByRole('button', { name: 'Edit gpt-6-astra' }).click()
+  await expect(draft.locator('[name="memberModel"]')).toBeEnabled()
+  await draft.locator('[name="memberTier"]').selectOption('complex')
+  await draft.getByRole('button', { name: 'Save member' }).click()
+  expect(await holdersShown(fresh)).toEqual([['worker:complex', '30']])
+  await expect(slotGrid(fresh).locator('tr[data-role="none"]')).toHaveCount(0)
+})
+
+test('T-2341 every member the daemon sends is on the screen: each its cards, each backup on its owner’s, on both screens', async ({
+  page,
+}) => {
+  const data = model()
+  const scout = {
+    id: 'scout',
+    name: 'field scout',
+    label: 'Field scout',
+    article: 'a',
+    tiered: true,
+    tiers: ['standard', 'light'],
+    imageAgent: false,
+  }
+  data.roles = [...ROLES, scout]
+  const drawing = { harness: 'codex', model: null, modelName: null, effort: null, designer: true }
+  // Seated in two slots; no tier; a role the daemon no longer names; a tier its role has no slot
+  // at; an image designer; and backups of three of them.
+  const sent = [
+    staffLane(3, 'zeus', ['worker', 'reviewer'], 'standard', SONNET),
+    staffLane(4, 'legacy', ['worker'], null),
+    staffLane(5, 'courier', ['courier'], 'light', LUNA),
+    staffLane(6, 'ranger', ['scout'], 'critical'),
+    staffLane(7, 'codex-default', ['designer'], 'light', drawing),
+    staffLane(8, 'hera', ['worker', 'reviewer'], 'standard', { backupOf: 3 }),
+    staffLane(9, 'ares', ['worker'], null, { backupOf: 4 }),
+    staffLane(10, 'iris', ['scout'], 'critical', { backupOf: 6 }),
+  ]
+  staffOf(data, ...sent)
+  data.lastStaff = sent.map(({ participant: one }) => ({
+    ...lastOf(one.id + 20, one.roles, one.tier, {
+      harness: one.harness,
+      model: one.model,
+      modelName: one.modelName,
+      effort: one.effort,
+      designer: one.designer,
+    }),
+    ...(one.backupOf ? { backupOf: one.backupOf + 20 } : {}),
+  }))
+  await open(page, data)
+  const primaries = sent.filter(({ participant }) => !participant.backupOf)
+  const backups = sent.filter(({ participant }) => participant.backupOf)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const shown = await holdersShown(settings)
+  expect(new Set(shown.map(([, key]) => key))).toEqual(
+    new Set(primaries.map(({ participant }) => participant.handle)),
+  )
+  expect(shown).toEqual([
+    ['worker:standard', 'zeus'],
+    ['reviewer:standard', 'zeus'],
+    ['designer', 'codex-default'],
+    ['none', 'legacy'],
+    ['none', 'courier'],
+    ['none', 'ranger'],
+  ])
+  for (const { participant } of backups) {
+    const owner = sent.find((one) => one.participant.id === participant.backupOf).participant
+    await expect(
+      settings.locator(`table.slots .slot-holder[data-member="${owner.handle}"]`).first(),
+    ).toContainText(`backup @${participant.handle}`)
+  }
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const picked = await holdersShown(fresh)
+  expect(new Set(picked.map(([, key]) => key))).toEqual(
+    new Set(primaries.map(({ participant }) => String(participant.id + 20))),
+  )
+  expect(picked.filter(([slot]) => slot === 'none').map(([, key]) => key)).toEqual([
+    '24',
+    '25',
+    '26',
+  ])
+})
+
+test('T-2341 an Edit whose member another window removed closes, says why, and sends nothing', async ({
+  page,
+}) => {
+  await open(page, staffOf(model(), staffLane(3, 'zeus', ['worker'], 'standard', SONNET)))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@zeus')
+  await part.getByRole('button', { name: 'Edit @zeus' }).click()
+  const form = settings.locator('.staff-add')
+  await form.locator('[name="memberHarness"]').selectOption({ label: 'Codex' })
+  await expect(form.locator('[name="memberModel"]')).toBeEnabled()
+  await form.locator('[name="memberModel"]').selectOption('gpt-5.6-luna')
+  await changed(page, () => {
+    const board = window.__model.boards[1]
+    board.lanes = board.lanes.filter((lane) => lane.participant.handle !== 'zeus')
+  })
+  await expect(slotCell(settings, 'worker:standard')).toContainText('empty')
+  await expect(form).toBeHidden()
+  const why = settings.locator('tr.slot-form-gone[data-role="worker"]')
+  await expect(why).toHaveText('@zeus left the staff, so its Edit was closed. Nothing was saved.')
+  await expect(why.getByRole('status')).toBeVisible()
+  expect(await calls(page, 'member.edit')).toEqual([])
+  // The next form opened takes the line away.
+  await settings.getByRole('button', { name: 'Add a standard worker', exact: true }).click()
+  await expect(settings.locator('tr.slot-form-gone')).toHaveCount(0)
+})
+
+test('T-2341 an Add whose slot another window filled closes, says why, and adds nothing', async ({
+  page,
+}) => {
+  await open(page, staffOf(model()))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await addToSlot(settings, 'Add a standard worker', { harness: 'Codex', model: 'gpt-5.6-luna' })
+  const form = settings.locator('.staff-add')
+  await form.locator('[name="memberModel"]').focus()
+  await changed(
+    page,
+    (lane) => {
+      window.__model.boards[1].lanes.push(lane)
+    },
+    staffLane(3, 'other-window', ['worker'], 'standard'),
+  )
+  await expect(slotCell(settings, 'worker:standard')).toContainText('@other-window')
+  await expect(form).toBeHidden()
+  const why = settings.locator('tr.slot-form-gone[data-role="worker"]')
+  await expect(why).toHaveText(
+    "The standard worker slot is @other-window's now, so its Add was closed. Nothing was added.",
+  )
+  // The keyboard is on the line, where the form was.
+  await expect(why.locator('td')).toBeFocused()
+  expect(await calls(page, 'member.add')).toEqual([])
+})
+
+test('T-2341 a Change backup whose backup another window replaced closes, says why, and changes nothing', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(4, 'old', ['worker'], 'standard', { ...LUNA, backupOf: 3 }),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@zeus')
+  await part.getByRole('button', { name: 'Change backup for @zeus' }).click()
+  const form = settings.locator('.staff-add')
+  await expect(form.getByRole('button', { name: 'Save backup' })).toBeVisible()
+  await changed(
+    page,
+    (replacement) => {
+      const lanes = window.__model.boards[1].lanes
+      lanes[lanes.findIndex((lane) => lane.participant.handle === 'old')] = replacement
+    },
+    staffLane(5, 'new', ['worker'], 'standard', { backupOf: 3 }),
+  )
+  await expect(part.locator('.backup-part')).toContainText('@new')
+  await expect(form).toBeHidden()
+  await expect(settings.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    "@zeus's backup is @new now, not @old, so Change backup was closed. Nothing was saved.",
+  )
+  expect(await calls(page, 'backup.change')).toEqual([])
+  // Removed meanwhile, the same: a Change opened on @new, and @new taken away.
+  await part.getByRole('button', { name: 'Change backup for @zeus' }).click()
+  await expect(settings.locator('tr.slot-form-gone')).toHaveCount(0)
+  await changed(page, () => {
+    const board = window.__model.boards[1]
+    board.lanes = board.lanes.filter((lane) => lane.participant.handle !== 'new')
+  })
+  await expect(form).toBeHidden()
+  await expect(settings.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    '@zeus has no backup now, so Change backup was closed. Nothing was saved.',
+  )
+})
+
+test('T-2341 a draft Edit closes when its member leaves by the person’s own last-role Remove, and says why', async ({
+  page,
+}) => {
+  const data = staffOf(model())
+  data.lastStaff = [lastOf(30, ['worker'], 'standard', {})]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const part = await openPart(fresh, 'gpt-6-astra')
+  await part.getByRole('button', { name: 'Edit gpt-6-astra' }).click()
+  await expect(fresh.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  const cell = slotCell(fresh, 'worker:standard')
+  await cell.getByRole('button', { name: 'Remove Worker gpt-6-astra' }).click()
+  await cell.getByRole('button', { name: 'Remove gpt-6-astra', exact: true }).click()
+  await expect(cell).toContainText('empty')
+  await expect(fresh.locator('.staff-add')).toBeHidden()
+  await expect(fresh.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    'gpt-6-astra left the staff, so its Edit was closed. Nothing was saved.',
+  )
+})
+
+test('T-2341 the person’s own save, answered after the board redrew it, closes the form with no line', async ({
+  page,
+}) => {
+  const data = staffOf(model(), staffLane(3, 'zeus', ['worker'], 'standard', SONNET))
+  data.editRenames = true
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@zeus')
+  await part.getByRole('button', { name: 'Edit @zeus' }).click()
+  const form = settings.locator('.staff-add')
+  await form.locator('[name="memberHarness"]').selectOption({ label: 'Codex' })
+  await expect(form.locator('[name="memberModel"]')).toBeEnabled()
+  await form.locator('[name="memberModel"]').selectOption('gpt-5.6-luna')
+  // The daemon renames the member and the board says so before the edit's own answer comes.
+  await hold(page, 'member.edit')
+  await form.getByRole('button', { name: 'Save member' }).click()
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((one) => one.participant.handle === 'zeus')
+    lane.participant.handle = 'gpt-5-6-luna'
+  })
+  await letGo(page, 'member.edit')
+  await expect(form).toBeHidden()
+  await expect(settings.locator('tr.slot-form-gone')).toHaveCount(0)
+})
+
+test('T-2341 a card whose opening role was removed closes its part on one activation', async ({
+  page,
+}) => {
+  await open(page, staffOf(model(), staffLane(3, 'zeus', ['worker', 'tester'], 'standard', SONNET)))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await memberOpener(settings, 'tester:standard', '@zeus').click()
+  await slotCell(settings, 'tester:standard')
+    .getByRole('button', { name: 'Remove Tester @zeus' })
+    .click()
+  const fallback = memberOpener(settings, 'worker:standard', '@zeus')
+  await expect(fallback).toHaveAttribute('aria-expanded', 'true')
+  await fallback.click()
+  await expect(fallback).toHaveAttribute('aria-expanded', 'false')
+  await expect(settings.locator('.slot-part')).toHaveCount(0)
+})
+
+test('T-2341 no two different controls in a staff dialog share a name', async ({ page }) => {
+  const data = staffOf(model(), staffLane(3, 'zeus', ['worker', 'tester'], 'standard', SONNET))
+  data.lastStaff = [
+    lastOf(30, ['worker'], 'standard', {}, { vacationSince: at(20) }),
+    lastOf(31, ['worker'], 'light', {}),
+    lastOf(32, ['worker'], 'standard', {}, { backupOf: 30, vacationSince: at(20) }),
+  ]
+  await open(page, data)
+  /** Each name that two buttons or fields of the dialog share, as a screen reader is told it. */
+  const shared = (dialog) =>
+    dialog.evaluate((node) => {
+      const named = (control) =>
+        control.getAttribute('aria-label') ??
+        (control.tagName === 'SELECT'
+          ? (control.closest('label')?.firstChild?.textContent ?? '')
+          : control.textContent
+        ).trim()
+      const names = [...node.querySelectorAll('button, select')]
+        .filter((control) => control.getClientRects().length > 0)
+        .map(named)
+      return names.filter((name, at) => names.indexOf(name) !== at)
+    })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(memberOpener(settings, 'worker:standard', '@zeus')).toHaveAccessibleName(
+    '@zeus, Worker slot: Edit, Vacation and backup',
+  )
+  await expect(memberOpener(settings, 'tester:standard', '@zeus')).toHaveAccessibleName(
+    '@zeus, Tester slot: Edit, Vacation and backup',
+  )
+  await memberOpener(settings, 'worker:standard', '@zeus').click()
+  await settings.getByRole('button', { name: 'Edit @zeus' }).click()
+  expect(await shared(settings)).toEqual([])
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await expect(
+    slotCell(fresh, 'worker:standard').getByRole('button', { name: /^Remove / }),
+  ).toHaveAccessibleName('Remove Worker gpt-6-astra at Standard')
+  await expect(
+    slotCell(fresh, 'worker:light').getByRole('button', { name: /^Remove / }),
+  ).toHaveAccessibleName('Remove Worker gpt-6-astra at Light')
+  await memberOpener(fresh, 'worker:standard', 'gpt-6-astra').click()
+  const part = memberPanel(fresh, 'gpt-6-astra')
+  await expect(
+    part.getByRole('button', { name: 'Bring gpt-6-astra back from Vacation', exact: true }),
+  ).toHaveCount(1)
+  await expect(
+    part.getByRole('button', { name: 'Bring backup gpt-6-astra back from Vacation', exact: true }),
+  ).toHaveCount(1)
+  await part.getByRole('button', { name: 'Edit gpt-6-astra' }).click()
+  await expect(fresh.locator('.staff-add [name="memberCancel"]')).toHaveAccessibleName(
+    'Cancel this form',
+  )
+  expect(await shared(fresh)).toEqual([])
+})
+
+test('T-2341 a row that comes or goes above an open form leaves the form where it is, with the keyboard', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(4, 'diana', ['worker'], 'standard', LUNA),
+    staffLane(5, 'atlas', ['tester'], 'standard'),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(settings.locator('.slot-words[data-role="worker"]')).toHaveCount(1)
+  const part = await openPart(settings, '@atlas')
+  await part.getByRole('button', { name: 'Edit @atlas' }).click()
+  const form = settings.locator('.staff-add')
+  await expect(form.locator('[name="memberModel"]')).toBeEnabled()
+  await form.locator('[name="memberTier"]').focus()
+  await form.evaluate((node) => {
+    window.__formPlace = node.parentElement
+    window.__formBlurs = 0
+    node.addEventListener('focusout', () => {
+      window.__formBlurs += 1
+    })
+  })
+  // diana moves to another tier: the worker row's words above the form go.
+  await changed(page, () => {
+    window.__model.boards[1].lanes.find((l) => l.participant.handle === 'diana').participant.tier =
+      'complex'
+  })
+  await expect(settings.locator('.slot-words[data-role="worker"]')).toHaveCount(0)
+  // And come back: a row above the form again.
+  await changed(page, () => {
+    window.__model.boards[1].lanes.find((l) => l.participant.handle === 'diana').participant.tier =
+      'standard'
+  })
+  await expect(settings.locator('.slot-words[data-role="worker"]')).toHaveCount(1)
+  await expect(form.locator('[name="memberTier"]')).toBeFocused()
+  expect(
+    await form.evaluate((node) => ({
+      same: node.parentElement === window.__formPlace,
+      blurs: window.__formBlurs,
+    })),
+  ).toEqual({ same: true, blurs: 0 })
+})
+
+test('T-2341 a refusal that comes after its form was left is said on the status line, not in the next form', async ({
+  page,
+}) => {
+  await open(
+    page,
+    staffOf(
+      model(),
+      staffLane(3, 'zeus', ['worker'], 'standard', SONNET),
+      staffLane(4, 'diana', ['worker'], 'light', LUNA),
+    ),
+  )
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const zeus = await openPart(settings, '@zeus')
+  await zeus.getByRole('button', { name: 'Edit @zeus' }).click()
+  await expect(settings.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  await hold(page, 'member.edit')
+  await settings.locator('.staff-add').getByRole('button', { name: 'Save member' }).click()
+  await expect.poll(async () => (await calls(page, 'member.edit')).length).toBe(1)
+  // The person goes on to diana's Edit while zeus's save is on its way, and it is refused.
+  const diana = await openPart(settings, '@diana')
+  await diana.getByRole('button', { name: 'Edit @diana' }).click()
+  await expect(settings.locator('.staff-add legend')).toHaveText('Edit @diana')
+  await page.evaluate(() => {
+    window.__model.memberRefusal = "@zeus's edit was refused"
+  })
+  await letGo(page, 'member.edit')
+  await expect(page.locator('#status')).toHaveText("@zeus's edit was refused")
+  await expect(settings.locator('.staff-add .staff-hint')).toBeHidden()
+  await expect(settings.locator('.staff-add legend')).toHaveText('Edit @diana')
+  await expect(settings.locator('.staff-add')).toBeVisible()
+})
+
+test('T-2341 shots, round 2: a member with no slot, and a form closed under the person with its line', async ({
+  page,
+}) => {
+  const dir = process.env.CF_T2341_SHOTS
+  test.skip(!dir, 'CF_T2341_SHOTS names where the shots go')
+  test.setTimeout(90_000)
+  mkdirSync(dir, { recursive: true })
+  await page.setViewportSize({ width: 1280, height: 2600 })
+  /** The rows of a role from its own down to the last under it, across the staff section. */
+  const around = async (name, dialog, role, last = 'tr.slot-open-row, tr.slot-form-gone') => {
+    await page.waitForTimeout(400)
+    const row = dialog.locator(`tr.slot-row[data-role="${role}"]`)
+    await row.evaluate((node) => node.scrollIntoView({ block: 'start' }))
+    await page.waitForTimeout(200)
+    const top = await row.boundingBox()
+    const under = dialog.locator(`${last}`).last()
+    const bottom = (await under.count()) > 0 ? await under.boundingBox() : top
+    const box = await dialog.locator('.project-section').first().boundingBox()
+    await page.screenshot({
+      path: join(dir, `${name}.png`),
+      clip: {
+        x: box.x,
+        y: top.y - 8,
+        width: box.width,
+        height: bottom.y + bottom.height - top.y + 16,
+      },
+    })
+  }
+  const data = ownersStaff()
+  data.boards[1].lanes.push(
+    staffLane(30, 'claude-sonnet-5-5-low', ['tester'], null, {
+      harness: 'claude-code',
+      model: 'claude-sonnet-5-5',
+      modelName: 'claude-sonnet-5-5',
+      effort: 'low',
+      vacationSince: at(60),
+    }),
+  )
+  data.lastStaff.push(
+    lastOf(60, ['tester'], null, {
+      harness: 'claude-code',
+      model: 'claude-sonnet-5-5',
+      modelName: 'claude-sonnet-5-5',
+      effort: 'low',
+    }),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await memberOpener(settings, 'none', '@claude-sonnet-5-5-low').click()
+  await around('r2-settings-no-slot', settings, 'designer')
+  // An Edit whose member another window removed.
+  await memberOpener(settings, 'worker:complex', '@gpt-6-2-sol-high').click()
+  await settings.getByRole('button', { name: 'Edit @gpt-6-2-sol-high' }).click()
+  await expect(settings.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  await changed(page, () => {
+    const board = window.__model.boards[1]
+    board.lanes = board.lanes.filter((lane) => lane.participant.id !== 4)
+  })
+  await around('r2-closed-edit-member-removed', settings, 'worker', 'tr.slot-form-gone')
+  // An Add whose slot another window filled.
+  await settings.getByRole('button', { name: 'Add a light tester', exact: true }).click()
+  await changed(
+    page,
+    (lane) => {
+      window.__model.boards[1].lanes.push(lane)
+    },
+    staffLane(31, 'gpt-6-astra', ['tester'], 'light'),
+  )
+  await around('r2-closed-add-slot-filled', settings, 'tester', 'tr.slot-form-gone')
+  // A Change backup whose backup another window replaced.
+  await memberOpener(settings, 'worker:critical', '@claude-opus-5-5-xhigh').click()
+  await settings.getByRole('button', { name: 'Change backup for @claude-opus-5-5-xhigh' }).click()
+  await expect(settings.locator('.staff-add [name="memberModel"]')).toBeEnabled()
+  await changed(
+    page,
+    (replacement) => {
+      const lanes = window.__model.boards[1].lanes
+      lanes[lanes.findIndex((lane) => lane.participant.id === 10)] = replacement
+    },
+    staffLane(32, 'gpt-6-2-sol-max-2', ['worker', 'frontend'], 'critical', { backupOf: 3 }),
+  )
+  await around('r2-closed-change-backup-replaced', settings, 'worker', 'tr.slot-form-gone')
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const made = page.getByRole('dialog', { name: 'New project' })
+  await memberOpener(made, 'none', 'claude-sonnet-5-5').click()
+  await around('r2-new-project-no-slot', made, 'designer')
 })

@@ -22,9 +22,11 @@ import {
   tiersOf,
 } from './roles.js'
 import {
+  anchorOf,
   crowded,
   holdersOf,
   inTheWay,
+  NO_SLOT,
   slotHead,
   slotName,
   slotRows,
@@ -159,6 +161,44 @@ const changeBackup = (owner, action) =>
   button('Change backup', 'quiet-button', action, `Change backup for ${owner}`)
 const removeBackup = (owner, action) =>
   button('Remove backup', 'quiet-button', action, `Remove backup for ${owner}`)
+
+/**
+ * Why the member form is to be shut, as a staff dialog's staff is now (T-2341, round 2), or none
+ * where what it was opened for is as it was: the empty slot of its Add is held, the member of its
+ * backup's form left or its backup is another (or none, or one now) than the form was opened on,
+ * or the member it edits left or was renamed. `look` reads the staff: `holder(role, tier)`,
+ * `member(key)`, `backup(ownerKey)` (the key of its backup, or null), `backupName(key)` and
+ * `renamed(key)` (the words for a member that is another by now, or none).
+ */
+function formGoneWords(form, look) {
+  if (form.slot !== null) {
+    const held = look.holder(form.slot.role, form.slot.tier)
+    return held
+      ? `The ${slotName(form.slot.role, form.slot.tier)} slot is ${held.name}'s now, so its Add was closed. Nothing was added.`
+      : null
+  }
+  if (form.backup !== null) {
+    const { owner, changing, of, ofName } = form.backup
+    const what = changing ? 'Change backup' : 'Add backup'
+    if (!look.member(owner.key)) {
+      return `${owner.label} left the staff, so ${what} was closed. Nothing was saved.`
+    }
+    const now = look.backup(owner.key)
+    if (now === of) return null
+    if (now === null)
+      return `${owner.label} has no backup now, so ${what} was closed. Nothing was saved.`
+    return of === null
+      ? `${owner.label} has a backup now, ${look.backupName(now)}, so Add backup was closed. Nothing was saved.`
+      : `${owner.label}'s backup is ${look.backupName(now)} now, not ${ofName}, so Change backup was closed. Nothing was saved.`
+  }
+  if (form.editing !== null && !look.member(form.editing)) {
+    return (
+      look.renamed?.(form.editing) ??
+      `${form.editingName} left the staff, so its Edit was closed. Nothing was saved.`
+    )
+  }
+  return null
+}
 
 /**
  * Draws a staff dialog's slots, the member form in the place a slot's row has for it (T-2341):
@@ -697,8 +737,18 @@ class MemberPicker {
   #lists
   /** The member being edited, by handle: none while the form adds one. */
   editing = null
-  /** The owner and whether this form is replacing its backup; null for a member. */
+  /** What the member being edited is called, as the form's name says it. */
+  editingName = null
+  /**
+   * The owner, whether this form is replacing its backup, and the backup it was opened on (`of`,
+   * its handle, or none for an Add backup); null for a member.
+   */
   backup = null
+  /**
+   * Which opening of the form this is: each opening and each reset makes a new one, so that an
+   * answer to a save the person left behind acts on the form no more (T-2341, round 2).
+   */
+  generation = 0
   /** The slot the form adds a member in, `{ role, tier }`: none while it edits or is shut. */
   slot = null
   /** The name of the button that opened the form with the keyboard on it: it has the keyboard back at a Cancel. */
@@ -813,15 +863,21 @@ class MemberPicker {
     again?.focus()
   }
 
+  /** The form's name, its legend. */
+  #name(words) {
+    this.#legend.textContent = words
+  }
+
   /** The form shut, as it is until a slot's Add, an Edit or a backup opens it: nothing picked. */
   reset(missing) {
+    this.generation += 1
     this.#fillRoles()
     this.#missing = missing
     this.editing = null
     this.backup = null
     this.slot = null
     this.#editedRoles = null
-    this.#legend.textContent = 'Add a member'
+    this.#name('Add a member')
     this.#role.disabled = false
     this.#submit.textContent = this.#adds
     this.#fillTiers([])
@@ -842,7 +898,7 @@ class MemberPicker {
     this.#role.value = role
     this.#fillTiers(tier === null ? [] : [tier])
     this.#tier.value = tier ?? ''
-    this.#legend.textContent = `Add the ${slotName(role, tier)}`
+    this.#name(`Add the ${slotName(role, tier)}`)
     this.#fillHarnesses()
     this.#reveal()
   }
@@ -869,14 +925,19 @@ class MemberPicker {
   /** Reuse the member's harness, model and effort picker for its backup. */
   async backupFor(owner, current = null) {
     this.reset(this.#missing)
-    this.backup = { owner, changing: current !== null }
+    this.backup = {
+      owner,
+      changing: current !== null,
+      of: current?.handle ?? null,
+      ofName: current && (current.label ?? `@${current.handle}`),
+    }
     if (current !== null) {
       await this.edit({ ...current, roles: ['worker'] })
       if (this.backup?.owner !== owner) return
     } else {
       this.#fillHarnesses(null)
     }
-    this.#legend.textContent = `${current ? 'Change' : 'Add'} backup for ${owner.label}`
+    this.#name(`${current ? 'Change' : 'Add'} backup for ${owner.label}`)
     this.#tier.closest('label').hidden = true
     this.#submit.textContent = current ? 'Save backup' : 'Add backup'
     this.#cancel.hidden = false
@@ -909,14 +970,16 @@ class MemberPicker {
    * picked.
    */
   async edit(member, blocked = new Map()) {
+    this.generation += 1
     this.#fillRoles()
     this.editing = member.handle
+    this.editingName = member.label ?? `@${member.handle}`
     this.slot = null
     this.#editedRoles = member.roles
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
     this.#origin = null
     this.#fillTiers(tiersFor(member.roles), blocked)
-    this.#legend.textContent = `Edit ${member.label ?? `@${member.handle}`}`
+    this.#name(`Edit ${member.label ?? `@${member.handle}`}`)
     this.#role.disabled = true
     this.#submit.textContent = 'Save member'
     this.#cancel.hidden = false
@@ -1126,6 +1189,8 @@ export class NewProjectDialog {
   #crowdSaid = false
   /** The draft's member whose part is open, by its number, and the role of the slot it was opened from. */
   #opened = null
+  /** Why a form was closed under the person, under the row it was open in: `{ role, words }`. */
+  #closedWhy = null
 
   /**
    * `page.onStart(project)` is told of the project the daemon opened. `page.daemon` asks the
@@ -1162,7 +1227,10 @@ export class NewProjectDialog {
       this.#form,
       lists,
       () => {},
-      () => this.#draw(),
+      () => {
+        this.#closedWhy = null
+        this.#draw()
+      },
     )
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
@@ -1195,6 +1263,7 @@ export class NewProjectDialog {
     this.#member.reset(missing)
     this.#removing = null
     this.#opened = null
+    this.#closedWhy = null
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
@@ -1451,11 +1520,12 @@ export class NewProjectDialog {
 
   #draw() {
     const members = this.#members()
+    const closing = this.#formGone(members)
     const slot = this.#member.slot
-    // A part whose member left the draft is shut.
-    if (this.#opened && !members.some((member) => member.key === this.#opened.key)) {
-      this.#opened = null
-    }
+    // A part whose member left the draft is shut; one whose slot went is drawn, and shut, at the
+    // slot it is drawn under.
+    const anchor = anchorOf(members, this.#opened)
+    this.#opened = anchor && { key: anchor.member.key, role: anchor.role }
     this.#slotHead.replaceChildren(slotHead())
     drawSlots(
       this.#slots,
@@ -1483,6 +1553,7 @@ export class NewProjectDialog {
         confirm: (holder) => this.#removeMember(holder.key),
         confirmWords: (holder) => this.#removeWords(holder),
         opened: this.#opened,
+        gone: this.#closedWhy,
         formHere: this.#member.open && slot === null,
         open: (role, holder) => this.#open(role, holder.key),
         shut: () => this.#shut(),
@@ -1490,6 +1561,7 @@ export class NewProjectDialog {
       }),
       this.#member.fieldset,
     )
+    if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
     // A crowded slot's words beside Start follow the slot: the slot as it is now, or none.
     if (this.#crowdSaid) {
       const crowd = this.#crowded()
@@ -1497,6 +1569,31 @@ export class NewProjectDialog {
       this.#crowdSaid = crowd !== null
     }
     this.#drawComputerUse()
+  }
+
+  /**
+   * The form shut where what it was opened for is gone or changed (T-2341, round 2): the member
+   * its Edit is for left the draft, the empty slot of its Add is held, or the backup its Change
+   * was opened on is not its member's now. The line under the row it was open in says why, and
+   * nothing was saved. Says whether the form had the keyboard, which the line takes.
+   */
+  #formGone(members) {
+    const form = this.#member
+    if (!form.open) return false
+    const why = formGoneWords(form, {
+      holder: (role, tier) => holdersOf(members, role, tier)[0],
+      member: (key) => members.find((member) => String(member.key) === String(key)),
+      backup: (key) => {
+        const backup = this.#backupOf(Number(key))
+        return backup ? String(backup._id) : null
+      },
+      backupName: (key) => modelShown(this.#draft.find((one) => String(one._id) === key) ?? {}),
+    })
+    if (why === null) return false
+    const had = form.fieldset.contains(document.activeElement)
+    this.#closedWhy = { role: form.slot?.role ?? this.#opened?.role ?? NO_SLOT, words: why }
+    form.reset(this.#missing)
+    return had
   }
 
   /** The part of the draft's member `key`, opened from its slot of `role`; open there already, it shuts. */
@@ -1578,13 +1675,18 @@ export class NewProjectDialog {
       ? []
       : [
           changeBackup(name, () => {
-            void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) })
+            void this.#member.backupFor(owner, {
+              ...backup,
+              handle: String(backup._id),
+              label: modelShown(backup),
+            })
             this.#draw()
           }),
         ]
     if (backup.vacationSince) {
       backupActs.push(
-        vacationButton(shown, true, () => {
+        // Said as the backup's: its member may run on the same model, and its Bring back is apart.
+        vacationButton(`backup ${shown}`, true, () => {
           backup.vacationSince = null
           this.#draw()
         }),
@@ -1748,6 +1850,13 @@ export class ProjectSettingsDialog {
    * was opened from (T-2341).
    */
   #opened = null
+  /** Why a form was closed under the person, under the row it was open in: `{ role, words }`. */
+  #closedWhy = null
+  /**
+   * The opening of the member form whose save is on its way (its `generation`): a redraw before
+   * its answer is the person's own change, which shuts no form.
+   */
+  #saving = null
   /**
    * What the daemon refused of a slot the person changed (a give, a Remove), said under its
    * role's row until the next change of a slot (`{ role, words }`): the status line is behind
@@ -1833,7 +1942,10 @@ export class ProjectSettingsDialog {
       (kind) => {
         void this.#markGone([kind])
       },
-      () => this.#draw(),
+      () => {
+        this.#closedWhy = null
+        this.#draw()
+      },
     )
     this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
@@ -1852,6 +1964,11 @@ export class ProjectSettingsDialog {
       const editing = this.#member.editing
       const backup = this.#member.backup
       const slot = this.#member.slot
+      // Its answer is this opening's: one that comes once the person has left the form, or opened
+      // it for another, shuts nothing and says nothing there (the status line says a refusal).
+      const asked = this.#member.generation
+      const mine = () => this.#member.generation === asked
+      this.#saving = asked
       const after = page.act(async () => {
         try {
           if (backup !== null) {
@@ -1861,7 +1978,7 @@ export class ProjectSettingsDialog {
               ...picked,
             })
             page.note(`${backup.owner.label}'s backup is @${member.handle}.`)
-            this.#member.reset(this.#missing)
+            if (mine()) this.#member.reset(this.#missing)
             return
           }
           if (editing !== null) {
@@ -1876,7 +1993,7 @@ export class ProjectSettingsDialog {
                 ? `@${editing} runs ${modelName} from its next window.`
                 : `@${editing} is @${member.handle} now, and runs ${modelName} from its next window.`,
             )
-            this.#member.reset(this.#missing)
+            if (mine()) this.#member.reset(this.#missing)
             return
           }
           if (slot === null) return
@@ -1888,15 +2005,16 @@ export class ProjectSettingsDialog {
             roles: [slot.role],
           })
           page.note(`@${member.handle} joined the staff as ${roleLabel(slot.role)}.`)
-          this.#member.reset(this.#missing)
+          if (mine()) this.#member.reset(this.#missing)
         } catch (refused) {
           // The daemon's words go where the human picked, as well as on the status line.
-          this.#member.say(refused instanceof Error ? refused.message : String(refused))
+          if (mine()) this.#member.say(refused instanceof Error ? refused.message : String(refused))
           throw refused
         }
       })
       // Saved, the keyboard is back on what opened the form, in the member's part.
-      void Promise.resolve(after).then(() => {
+      void Promise.resolve(after).finally(() => {
+        if (this.#saving === asked) this.#saving = null
         if (dialog.open && !this.#member.open) this.#member.refocus(dialog)
       })
     })
@@ -1940,6 +2058,8 @@ export class ProjectSettingsDialog {
     this.#board = board
     this.#removing = null
     this.#opened = null
+    this.#closedWhy = null
+    this.#saving = null
     this.#slotRefusal = null
     this.#vacationErrors.clear()
     this.#backupErrors.clear()
@@ -2030,9 +2150,12 @@ export class ProjectSettingsDialog {
         .map((member) => [member.backupOf, member]),
     )
     const holders = primaries.map((member) => this.#slotMember(member, backups.get(member.id)))
-    // A part whose member left the staff is shut; one renamed by an Edit stays open.
+    const closing = this.#formGone(primaries, backups, holders)
+    // A part whose member left the staff is shut; one renamed by an Edit stays open, and one whose
+    // slot went is drawn, and shut, at the slot it is drawn under.
     const opened = primaries.find((member) => member.id === this.#opened?.id)
-    if (!opened) this.#opened = null
+    const anchor = opened && anchorOf(holders, { key: opened.handle, role: this.#opened.role })
+    this.#opened = anchor ? { id: opened.id, role: anchor.role } : null
     const slot = this.#member.slot
     this.#slotHead.replaceChildren(slotHead())
     drawSlots(
@@ -2056,7 +2179,8 @@ export class ProjectSettingsDialog {
           this.#draw()
         },
         confirm: (holder) => this.#removeMember(holder.key, this.#removing?.role),
-        opened: opened ? { key: opened.handle, role: this.#opened.role } : null,
+        opened: this.#opened && { key: opened.handle, role: this.#opened.role },
+        gone: this.#closedWhy,
         formHere: this.#member.open && slot === null,
         open: (role, holder) => this.#open(role, holder.key),
         shut: () => this.#shut(),
@@ -2067,9 +2191,40 @@ export class ProjectSettingsDialog {
       }),
       this.#member.fieldset,
     )
+    if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
     this.#computerUse.draw(harnessesOf(board))
+  }
+
+  /**
+   * The form shut where what it was opened for is gone or changed, by another window (T-2341,
+   * round 2): the member its Edit is for left the staff or was renamed, the empty slot of its Add
+   * is held, or the backup its Change was opened on is not its member's now. The line under the
+   * row it was open in says why, and nothing was saved. The person's own save on its way shuts
+   * nothing: what it changed is theirs. Says whether the form had the keyboard, which the line takes.
+   */
+  #formGone(primaries, backups, holders) {
+    const form = this.#member
+    if (!form.open || form.generation === this.#saving) return false
+    const byHandle = (handle) => primaries.find((member) => member.handle === handle)
+    const why = formGoneWords(form, {
+      holder: (role, tier) => holdersOf(holders, role, tier)[0],
+      member: byHandle,
+      backup: (handle) => backups.get(byHandle(handle)?.id)?.handle ?? null,
+      backupName: (handle) => `@${handle}`,
+      renamed: (handle) => {
+        const now = primaries.find((member) => member.id === this.#opened?.id)
+        return now && now.handle !== handle
+          ? `@${handle} is @${now.handle} now, so its Edit was closed. Nothing was saved.`
+          : null
+      },
+    })
+    if (why === null) return false
+    const had = form.fieldset.contains(document.activeElement)
+    this.#closedWhy = { role: form.slot?.role ?? this.#opened?.role ?? NO_SLOT, words: why }
+    form.reset(this.#missing)
+    return had
   }
 
   /** The part of the member `handle`, opened from its slot of `role`; open there already, it shuts. */

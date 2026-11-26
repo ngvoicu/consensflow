@@ -236,13 +236,13 @@
         <fieldset class="staff-add" hidden>
           <legend>Add a member</legend>
           <label hidden>Role<select name="role"></select></label>
-          <label>Harness<select name="memberHarness"></select></label>
-          <label>Model<select name="memberModel" disabled></select></label>
-          <label>Effort<select name="memberEffort" disabled></select></label>
-          <label>Tier<select name="memberTier"></select></label>
-          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
+          <label>Harness<select name="memberHarness" aria-label="Harness for the member"></select></label>
+          <label>Model<select name="memberModel" aria-label="Model for the member" disabled></select></label>
+          <label>Effort<select name="memberEffort" aria-label="Effort for the member" disabled></select></label>
+          <label>Tier<select name="memberTier" aria-label="Tier for the member"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh" aria-label="Refresh models for the member">Refresh models</button>
           <button class="primary-button" type="button" name="memberAdd">Add</button>
-          <button class="quiet-button" type="button" name="memberCancel">Cancel</button>
+          <button class="quiet-button" type="button" name="memberCancel" aria-label="Cancel this form">Cancel</button>
           <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="new-project-hint" hidden></p>
         </fieldset>
@@ -314,13 +314,13 @@
         <fieldset class="staff-add" hidden>
           <legend>Add a member</legend>
           <label hidden>Role<select name="role"></select></label>
-          <label>Harness<select name="memberHarness"></select></label>
-          <label>Model<select name="memberModel" disabled></select></label>
-          <label>Effort<select name="memberEffort" disabled></select></label>
-          <label>Tier<select name="memberTier"></select></label>
-          <button class="quiet-button" type="button" name="memberRefresh">Refresh models</button>
+          <label>Harness<select name="memberHarness" aria-label="Harness for the member"></select></label>
+          <label>Model<select name="memberModel" aria-label="Model for the member" disabled></select></label>
+          <label>Effort<select name="memberEffort" aria-label="Effort for the member" disabled></select></label>
+          <label>Tier<select name="memberTier" aria-label="Tier for the member"></select></label>
+          <button class="quiet-button" type="button" name="memberRefresh" aria-label="Refresh models for the member">Refresh models</button>
           <button class="primary-button" type="submit" name="memberAdd">Add to staff</button>
-          <button class="quiet-button" type="button" name="memberCancel">Cancel</button>
+          <button class="quiet-button" type="button" name="memberCancel" aria-label="Cancel this form">Cancel</button>
           <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
