@@ -1002,7 +1002,7 @@ fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
         user(
             "s1",
             json!("r1"),
-            json!("Base directory for this skill: /x"),
+            json!("Helper notes for the model: the helper lives in /x"),
         ),
         json!({ "isMeta": true, "sourceToolUseID": "t1" }),
     ));
@@ -1015,7 +1015,11 @@ fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
         "type": "system", "subtype": "scheduled_task_fire", "uuid": "f1", "parentUuid": "d1",
     })));
     fired.push(having(
-        user("p1", json!("f1"), json!("CHECK the board every 20 minutes")),
+        user(
+            "p1",
+            json!("f1"),
+            json!("Look at the board and report what moved"),
+        ),
         json!({ "isMeta": true, "rowSource": "recorded" }),
     ));
     assert_eq!(settlement_of(&fired), Settlement::InFlight);
@@ -1025,7 +1029,7 @@ fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
         user(
             "p1",
             json!("d1"),
-            json!("The previous response failed to produce a valid tool call. Please retry."),
+            json!("Your last call was not understood. Call again."),
         ),
         json!({ "isMeta": true }),
     ));
