@@ -458,3 +458,13 @@ builds = true
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = """        self.items.push(id, Role::Custom, &hook.text, at, seq);"""
 replace = """        self.items.push(id, Role::User, &hook.text, at, seq);"""
+
+[[plant]]
+name = "first message: the first handoff takes no last look"
+meant = "a_reopened_workers_first_resume_words_wait_if_it_starts_a_turn_while_it_is_made_ready"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """        if let Some(why) = self.first_still_at_rest(record, frontier).await? {"""
+replace = """        if let Some(why) = self.first_still_at_rest(record, frontier).await?.filter(|_| false) {"""

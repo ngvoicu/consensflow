@@ -531,6 +531,17 @@ impl Shared {
                     });
                 }
             }
+            // The key that empties the box a stale paste is in goes with the paste, as its
+            // `clearFirst` (N17), and is a press as `pane.input`'s are (N5).
+            if frame["kind"] == "req" && frame["op"] == "pane.write_paste" {
+                if let Some(keys) = frame["body"]["clearFirst"].as_str() {
+                    seen.presses.push(Press {
+                        pane: frame["body"]["id"].as_str().unwrap_or_default().to_owned(),
+                        bytes: keys.as_bytes().to_vec(),
+                        at_ms: jiff::Timestamp::now().as_millisecond(),
+                    });
+                }
+            }
             // An Enter of a delivery that is not a paste's first goes as `pane.enter` (N17): the
             // key it presses, once the host has checked the look it was licensed by.
             if frame["kind"] == "req" && frame["op"] == "pane.enter" {
@@ -878,6 +889,33 @@ mod tests {
             .iter()
             .all(|press| (before..=after).contains(&press.at_ms)));
         assert!(seen.presses[0].at_ms <= seen.presses[2].at_ms);
+    }
+
+    /// N5: the key that empties a box a stale paste is in goes with the paste, as its
+    /// `clearFirst`; the rig counts it as the key it presses, as it does `pane.input`'s.
+    #[test]
+    fn the_key_that_goes_with_a_paste_as_its_clear_first_is_kept_as_a_press() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _) = sinks();
+        for body in [
+            json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
+            json!({"id":"p1-zeus","generation":1,"body":"words"}),
+        ] {
+            let line = json!({"v":1,"id":"n-3","kind":"req","op":"pane.write_paste","body":body})
+                .to_string();
+            shared.route_daemon(&line, &host, &daemon);
+            assert_eq!(
+                host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+                line
+            );
+        }
+        let seen = shared.seen();
+        let kept: Vec<(&str, &[u8])> = seen
+            .presses
+            .iter()
+            .map(|press| (press.pane.as_str(), press.bytes.as_slice()))
+            .collect();
+        assert_eq!(kept, [("p1-zeus", &[3][..])], "one press, of the paste that had a key");
     }
 
     #[test]

@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use crate::at_work::OnWork;
 use crate::delivery_text::{is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
-use crate::pacing::Pace;
+use crate::pacing::{Frontier, Pace};
 use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
@@ -1037,6 +1037,7 @@ impl Dispatcher {
     pub(crate) async fn hand_first(
         self: &Rc<Self>,
         record: &Rc<Record>,
+        frontier: &Frontier,
     ) -> Result<(), EngineError> {
         let Some((first, text)) = self.owed_first(record) else {
             return Ok(());
@@ -1114,6 +1115,20 @@ impl Dispatcher {
                 .is_none_or(|(owed, _)| owed.message != first.message)
         {
             return Ok(());
+        }
+        // The last look every delivery takes before its paste: a window that began a turn while
+        // it was made ready is handed nothing. The words stay owed, and go at its next rest.
+        if let Some(why) = self.first_still_at_rest(record, frontier).await? {
+            if self.forgotten(record)
+                || record.window.borrow().pane.as_ref() != Some(&pane)
+                || self
+                    .owed_first(record)
+                    .is_none_or(|(owed, _)| owed.message != first.message)
+            {
+                return Ok(());
+            }
+            let reason = format!("the window is not ready for its first message: {why}");
+            return self.held_once(record, first.message, &reason).await;
         }
         {
             let mut part = record.delivery.borrow_mut();

@@ -42,7 +42,7 @@ use crate::background::leaving;
 use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
-use crate::pacing;
+use crate::pacing::{self, Frontier};
 use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
@@ -1887,8 +1887,11 @@ impl Dispatcher {
             if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
-                self.act(record, async move { this.hand_first(&held).await })
-                    .await;
+                let frontier = Frontier::of(&observed);
+                self.act(record, async move {
+                    this.hand_first(&held, &frontier).await
+                })
+                .await;
             }
             return Ok(());
         }

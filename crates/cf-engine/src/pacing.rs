@@ -92,7 +92,7 @@ pub(crate) struct Frontier {
 }
 
 impl Frontier {
-    fn of(observed: &Observed) -> Self {
+    pub(crate) fn of(observed: &Observed) -> Self {
         let items = observed.items();
         Self {
             last: items
@@ -444,6 +444,41 @@ impl Dispatcher {
             .pending(record.id)?
             .iter()
             .any(|waiting| waiting.urgent && waiting.state == "queued"))
+    }
+
+    /// The last look before a launch's first message is handed to its window: the one every
+    /// other delivery takes ([`Dispatcher::still_at_rest`]), with the rest the look that let it
+    /// go read (`frontier`). The window must still read settled, from a record that was read,
+    /// not waiting on a question, not at work by its harness's word, on the same last item.
+    /// Where it does not, nothing is handed over, the message stays owed, and the wait says why.
+    /// A first message keeps `settled` and not `takes_words`, as its first look does (T-1985).
+    pub(crate) async fn first_still_at_rest(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        frontier: &Frontier,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(participant) = self.participant_of(record)? else {
+            return Ok(Some("its participant is gone".to_owned()));
+        };
+        let fresh = self.observe(&participant, record).await;
+        let at_work = record
+            .window
+            .borrow()
+            .window
+            .as_ref()
+            .is_some_and(|window| window.at_work());
+        Ok(match fresh {
+            Err(_) => Some("a look at it failed as its first message was to go".to_owned()),
+            Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
+            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())
+            }
+            Ok(fresh) if Frontier::of(&fresh) != *frontier => {
+                Some("its record changed as its first message was to go".to_owned())
+            }
+            Ok(_) if at_work => Some(AT_WORK.to_owned()),
+            Ok(_) => None,
+        })
     }
 
     /// The fresh look just before `message`'s paste: the window must read at rest, from

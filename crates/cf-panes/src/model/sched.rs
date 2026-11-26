@@ -225,7 +225,12 @@ impl Sched {
 fn park(shared: &Arc<Shared>, index: usize, stands: Stands) {
     let mut core = shared.core.lock().unwrap();
     core.stands[index] = stands;
-    core.running = None;
+    // Only the actor that holds the word ends its step by parking: a thread that parks at its
+    // start after the schedule has already given the word to another actor must not end that
+    // actor's step, or two run at once (N1).
+    if core.running == Some(index) {
+        core.running = None;
+    }
     shared.changed.notify_all();
     let _core = shared
         .changed

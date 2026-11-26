@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_engine::delivery_text::marker_of;
-use cf_engine::testing::{Context, TRUST_PROMPT, TRUST_QUESTION};
+use cf_engine::testing::{Context, Made, TRUST_PROMPT, TRUST_QUESTION};
 use cf_engine::SwitchWhen;
 use cf_harness::contract::{FirstMessage, Held, Readiness};
 use cf_harness::records::{End, Monitor, Notice, Pending, Role, Source};
@@ -1211,4 +1211,138 @@ fn a_first_message_that_names_a_picture_behind_a_brief_that_names_none_is_confir
         assert_ne!(context.task(project, 1).task.state, "failed");
         context.close();
     }
+}
+
+/// The first words to a reopened window take the last look every delivery takes (T-2345, finding
+/// 2): a worker that begins a turn of its own while it is made ready is handed nothing.
+#[test]
+fn a_reopened_workers_first_resume_words_wait_if_it_starts_a_turn_while_it_is_made_ready() {
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    context.adapter.first.set(FirstMessage::Delivered);
+    context.adapter.resumes_records.set(true);
+    let (project, _) = briefed(&context);
+    passes(&context, 3);
+    assert_eq!(context.task(project, 1).task.state, "working");
+    let half = context
+        .adapter
+        .item(Role::Assistant, "partial earlier answer");
+    context.adapter.with("zeus", |a| {
+        a.items.push(half);
+        a.settled = false;
+    });
+    context.close_project(project).unwrap();
+
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsaid))));
+    context.resume_project(project).unwrap();
+    context.adapter.with("zeus", |a| a.settled = true);
+    passes(&context, 3);
+    let launch = context.adapter.agent("zeus").launch;
+    let before = context.recorder.calls(SEAM, &["deliver"]).len();
+    let has_begun = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&has_begun);
+    let adapter = Rc::downgrade(&context.adapter);
+    // Hold only this worker. Changing its state after the first rest observation
+    // but before ready returns mirrors the busy status in the real-adapter probe.
+    let worker_ready = context
+        .adapter
+        .ready_holds
+        .hold(crate::work_in_flight::looks_at(launch.clone()));
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        if flag.replace(false) {
+            let adapter = adapter.upgrade().unwrap();
+            let shell = adapter.item(Role::User, "<bash-input>echo hi</bash-input>");
+            adapter.with("zeus", |a| a.items.push(shell));
+            adapter.busy("zeus");
+        }
+        Ok(Readiness::Ready)
+    }));
+    context.pass().unwrap();
+    context.settle();
+    let in_ready = context
+        .recorder
+        .calls(SEAM, &["ready"])
+        .into_iter()
+        .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+        .count();
+    assert!(in_ready > 0);
+    assert!(context.adapter.agent("zeus").settled);
+    has_begun.set(true);
+    worker_ready.open();
+    context.settle();
+    let handed: Vec<String> = context
+        .recorder
+        .calls(SEAM, &["deliver"])
+        .into_iter()
+        .skip(before)
+        .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+        .filter_map(|(_, args)| args[0]["text"].as_str().map(str::to_owned))
+        .collect();
+    assert!(!context.adapter.agent("zeus").settled);
+    context.close();
+    assert!(
+        handed.is_empty(),
+        "the first words of a Resume went into a window whose turn began after the first look: {handed:?}"
+    );
+}
+
+/// The same worker, once its turn is over and it rests again: the words go in, once.
+#[test]
+fn a_reopened_workers_first_resume_words_go_once_when_its_own_turn_has_ended() {
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    context.adapter.first.set(FirstMessage::Delivered);
+    context.adapter.resumes_records.set(true);
+    let (project, _) = briefed(&context);
+    passes(&context, 3);
+    let half = context
+        .adapter
+        .item(Role::Assistant, "partial earlier answer");
+    context.adapter.with("zeus", |a| {
+        a.items.push(half);
+        a.settled = false;
+    });
+    context.close_project(project).unwrap();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsaid))));
+    context.resume_project(project).unwrap();
+    context.adapter.with("zeus", |a| a.settled = true);
+    passes(&context, 3);
+    let launch = context.adapter.agent("zeus").launch;
+    let before = context.recorder.calls(SEAM, &["deliver"]).len();
+    let begins = Rc::new(Cell::new(true));
+    let flag = Rc::clone(&begins);
+    let adapter = Rc::downgrade(&context.adapter);
+    let worker_ready = context
+        .adapter
+        .ready_holds
+        .hold(crate::work_in_flight::looks_at(launch.clone()));
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        if flag.replace(false) {
+            let adapter = adapter.upgrade().unwrap();
+            adapter.busy("zeus");
+        }
+        Ok(Readiness::Ready)
+    }));
+    context.pass().unwrap();
+    context.settle();
+    worker_ready.open();
+    context.settle();
+    let handed = |context: &Context| {
+        context
+            .recorder
+            .calls(SEAM, &["deliver"])
+            .into_iter()
+            .skip(before)
+            .filter(|(_, args)| args[0]["launch"]["launchId"] == launch.as_str())
+            .count()
+    };
+    assert_eq!(handed(&context), 0, "its turn is under way");
+    context.adapter.with("zeus", |a| a.settled = true);
+    passes(&context, 6);
+    assert_eq!(handed(&context), 1, "the words went in, once, at its rest");
+    context.close();
 }
