@@ -245,13 +245,13 @@ fn taskkill_by_name_in_a_window_is_refused_and_by_number_goes_to_the_one_the_sys
     // PowerShell 7 where the machine has it. (`Stop-Process -Name` is a cmdlet: out of reach.)
     for shell in ["powershell.exe", "pwsh.exe"] {
         for line in ["taskkill /IM x.exe", "tskill notepad"] {
-            let ran = window
-                .given(Command::new(shell).args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    line,
-                ]))
+            // PowerShell needs the machine's own `SystemRoot` to start: the scratch one is
+            // set inside it, before the call, which is what the stand-in then looks in.
+            let scratch = window.system.display();
+            let call = format!("$env:SystemRoot='{scratch}'; $env:windir='{scratch}'; {line}");
+            let ran = Command::new(shell)
+                .args(["-NoProfile", "-NonInteractive", "-Command", &call])
+                .env("PATH", &window.path)
                 .output();
             let ran = match ran {
                 Ok(ran) => ran,
