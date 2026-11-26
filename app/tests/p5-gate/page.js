@@ -166,11 +166,17 @@
   /** What the emulator sends for a paste of two lines, as the person's own: brackets where the program asked. */
   P5.sends = (emulator) => {
     const sent = []
+    // The measuring paste is the gate's own: it goes to no input number of the page (the link
+    // hears every human emission), so that no reply parks behind a hole the gate made. The
+    // control `paste-through-link` puts it back.
+    const listeners = emulator.humanListeners
+    if (window.__fault !== 'paste-through-link') emulator.humanListeners = new Set()
     const sub = emulator.onData((data) => sent.push(data))
     const stdin = emulator.terminal.options.disableStdin
     emulator.terminal.options.disableStdin = false
     emulator.paste('A\nB')
     emulator.terminal.options.disableStdin = stdin
+    emulator.humanListeners = listeners
     sub.dispose()
     return sent.join('')
   }

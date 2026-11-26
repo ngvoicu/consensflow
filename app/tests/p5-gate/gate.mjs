@@ -127,6 +127,8 @@ const results = {
   answers: 0,
   truncated: 0,
   pulls: 0,
+  limited: 0,
+  sameSize: 0,
   done: 0,
   forgotten: 0,
 }
@@ -140,6 +142,7 @@ function standIn(fault) {
   // The blank page between two cases is none of the app's.
   if (!location.protocol.startsWith('http')) return
   window.__pending = 0
+  window.__fault = fault
   window.__pulled = 0
   window.__errors = []
   window.__listeners = {}
@@ -221,7 +224,7 @@ function standIn(fault) {
         text,
       })
     }
-    if (command === 'pane_input_enqueue') return { ok: true, ticket: 't' }
+    if (command === 'pane_input_enqueue') return ask(command, args)
     if (command.startsWith('pane_')) return ask(command, args)
     return { ok: true }
   }
@@ -391,6 +394,8 @@ await app.exposeFunction('gateCall', async (command, args) => {
       return answer
     }
     if (here.arm !== null && args.id === here.win) {
+      // The control `late-resize`: the page's call reaches the gate long after the gate's bound.
+      if (fault === 'late-resize') await new Promise((done) => setTimeout(done, WAIT * 3000))
       const arm = here.arm
       here.arm = null
       return new Promise((answered) => {
@@ -403,6 +408,12 @@ await app.exposeFunction('gateCall', async (command, args) => {
     }
     return forward()
   }
+  if (command === 'pane_input_enqueue') {
+    // The gate sends no typing to the host: every number it spends here is a hole in the page's
+    // input, which a reply behind it would wait for.
+    here.holes.push({ page: args.pageId, sequence: args.sequence })
+    return { ok: true, ticket: 't' }
+  }
   if (command === 'pane_reply_enqueue') {
     // Admitted as the app's command admits it: a reply the host refuses is refused here.
     const { answer } = await host.call('reply', args.id, {
@@ -413,6 +424,12 @@ await app.exposeFunction('gateCall', async (command, args) => {
       epoch: args.epoch,
       hex: Buffer.from(args.text).toString('hex'),
     })
+    if (answer.ok)
+      here.tickets.set(answer.ticket, {
+        page: args.pageId,
+        sequence: args.sequence,
+        text: args.text,
+      })
     if (answer.ok) (args.id === here.win ? here.answers : here.otherAnswers).push(args.text)
     else
       here.refused.push(
@@ -435,6 +452,70 @@ function emptied(frameHex) {
   const size = Buffer.alloc(4)
   size.writeUInt32LE(rewritten.length)
   return Buffer.concat([size, rewritten]).toString('hex')
+}
+
+/**
+ * Whether a terminal that has been given the first `end` bytes of `bytes` is at a rest point (xterm's parser
+ * in its ground state, between whole characters): true, false, or null where the scan cannot tell (a C1 control,
+ * which UTF-8 or the 8-bit forms may carry, or bytes that are no UTF-8).
+ */
+function restAt(bytes, end) {
+  let state = 'ground'
+  let pending = 0
+  for (let i = 0; i < end; i++) {
+    const b = bytes[i]
+    if (pending > 0) {
+      if ((b & 0xc0) !== 0x80) return null
+      pending--
+      continue
+    }
+    if (b === 0x18 || b === 0x1a) {
+      state = 'ground'
+      continue
+    }
+    if (b >= 0x80) {
+      if (state !== 'ground' && state !== 'string') return null
+      if (b >= 0xc2 && b <= 0xdf) {
+        if (b === 0xc2 && bytes[i + 1] >= 0x80 && bytes[i + 1] <= 0x9f) return null
+        pending = 1
+      } else if (b >= 0xe0 && b <= 0xef) pending = 2
+      else if (b >= 0xf0 && b <= 0xf4) pending = 3
+      else return null
+      continue
+    }
+    switch (state) {
+      case 'ground':
+        if (b === 0x1b) state = 'esc'
+        break
+      case 'esc':
+        if (b === 0x5b) state = 'csi'
+        else if (b === 0x5d || b === 0x50 || b === 0x58 || b === 0x5e || b === 0x5f)
+          state = 'string'
+        else if (b === 0x1b) state = 'esc'
+        else if (b >= 0x20 && b <= 0x2f) state = 'esc'
+        else if (b >= 0x30 && b <= 0x7e) state = 'ground'
+        break
+      case 'csi':
+        if (b === 0x1b) state = 'esc'
+        else if (b >= 0x40 && b <= 0x7e) state = 'ground'
+        break
+      case 'string':
+        if (b === 0x07) state = 'ground'
+        else if (b === 0x1b) state = 'stringEsc'
+        break
+      case 'stringEsc':
+        state = b === 0x5c ? 'ground' : b === 0x1b ? 'stringEsc' : 'esc'
+        if (state === 'esc') {
+          // ESC followed by another introducer starts a new sequence.
+          if (b === 0x5b) state = 'csi'
+          else if (b === 0x5d || b === 0x50 || b === 0x58 || b === 0x5e || b === 0x5f)
+            state = 'string'
+          else if (b >= 0x30 && b <= 0x7e) state = 'ground'
+        }
+        break
+    }
+  }
+  return state === 'ground' && pending === 0
 }
 
 /** The control `short-boundary`: the host ends its history, bytes and boundary, one byte before the bytes it handed to the page before. */
@@ -462,6 +543,11 @@ function caseState(win, generation, cols, rows) {
     last: false,
     /** What the host refused of the page's calls (a reply, an acknowledgement). */
     refused: [],
+    /** The input numbers the gate spent without telling the host, and the replies the host admitted, by ticket. */
+    holes: [],
+    tickets: new Map(),
+    /** The replies the host cut behind an input that had not come, where the gate made no hole (the limit). */
+    limited: new Set(),
     answers: [],
     otherAnswers: [],
     acked: new Map(),
@@ -472,6 +558,8 @@ function caseState(win, generation, cols, rows) {
     /** The first answer of a page whose history was cut: from it on a cursor's place is the
      * terminal's own (a cut history keeps no cursor, limit 4). */
     cutFrom: Infinity,
+    /** How much had been printed when this load's page went (or was about to). */
+    leftAt: null,
     /** How many answers the page had made when this load began. */
     loadStart: 0,
     /** What the program printed, in order, and how much. */
@@ -488,14 +576,58 @@ function caseState(win, generation, cols, rows) {
       if (mine.total > 8.5 * MIB) return true
       return mine.total <= 8 * MIB && mine.changes <= 256 ? false : null
     },
-    /** The journal's end when the last size that could start it again was taken (past 256 sizes, a size tries to). */
-    startLimit: 0,
+    /** Each size that changed the terminal's: where the journal ended, and whether everything was drawn by then. */
+    sizeEvents: [],
+    /** A held size is being let go: what the page had drawn by then is not known. */
+    releasing: false,
     sized: (at, cols, rows) => {
       if (mine.size[0] === cols && mine.size[1] === rows) return
       mine.size = [cols, rows]
       mine.changes++
-      if (mine.changes > 256) mine.startLimit = mine.total
+      mine.sizeEvents.push({
+        end: mine.total,
+        drawn: !mine.gone && !mine.held && !mine.releasing,
+      })
       mine.sizes.push({ at: at ?? mine.total, cols, rows })
+    },
+    /**
+     * Where the journal may start, worked out here from what was printed and sized (the host's rule,
+     * rule 6 of P5-B, read from the design, not from the host): with more than 256 sizes held, each new
+     * size tries to start the journal again at its end, if everything is drawn by then and the parser
+     * is at rest there; a start empties the sizes held. Whatever the schedule cannot settle (a page
+     * that had not drawn it all, a parser the scan cannot read) leaves both outcomes possible. A list
+     * of [first, last] a start may be at.
+     */
+    possibleStarts: () => {
+      let states = [{ lo: 0, hi: 0, held: 0 }]
+      for (const event of mine.sizeEvents) {
+        const next = new Map()
+        const add = (state) => next.set(`${state.lo}:${state.hi}:${state.held}`, state)
+        for (const state of states) {
+          const held = state.held + 1
+          if (held <= 256) {
+            add({ ...state, held })
+            continue
+          }
+          const rest = restAt(mine.printed(), event.end)
+          const cutPossible = rest !== false
+          const cutSure = event.drawn && rest === true
+          if (cutPossible) add({ lo: event.end, hi: event.end, held: 0 })
+          if (!cutSure) add({ ...state, held })
+          // Past 1 MiB there are marks, and a start may land on any of them up to what is drawn.
+          if (event.end >= MIB) add({ lo: state.lo, hi: event.end, held: 0 })
+        }
+        states = [...next.values()]
+        if (states.length > 200)
+          states = [
+            {
+              lo: Math.min(...states.map((x) => x.lo)),
+              hi: Math.max(...states.map((x) => x.hi)),
+              held: 0,
+            },
+          ]
+      }
+      return states
     },
     printed: () => {
       if (mine.chunks.length > 1) mine.chunks = [Buffer.concat(mine.chunks)]
@@ -535,11 +667,17 @@ function caseState(win, generation, cols, rows) {
           mine.problems.push(`the history is cut at ${header.from}, though all of it is promised`)
         if (cut === true && !header.truncated)
           mine.problems.push('the history is not cut, though more was printed than it holds')
-        // Past 256 sizes the journal may start again, but never later than the end it had when the last size
-        // that could start it was taken, and never at all before 8 MiB are printed otherwise.
-        if (cut === null && mine.total <= 8 * MIB && header.from > mine.startLimit)
+        // Where the schedule leaves the start (past 256 sizes it may start again), and whether it is cut.
+        if (cut === null && mine.total <= 8 * MIB) {
+          const states = mine.possibleStarts()
+          if (!states.some((state) => header.from >= state.lo && header.from <= state.hi))
+            mine.problems.push(
+              `the history starts at ${header.from}, where the sizes taken allow ${states.map((state) => (state.lo === state.hi ? state.lo : `${state.lo} to ${state.hi}`)).join(' or ')}: printed bytes the journal still holds are left out, or it holds what it was to let go`,
+            )
+        }
+        if (header.truncated !== header.from > 0)
           mine.problems.push(
-            `the history starts at ${header.from}, past ${mine.startLimit}: printed bytes the journal still holds are left out`,
+            `the history starts at ${header.from} and says it is ${header.truncated ? '' : 'not '}cut`,
           )
         if (
           header.truncated &&
@@ -591,7 +729,9 @@ async function runCase(c) {
   const letGo = async () => {
     const { release, point } = holding
     holding = null
+    mine.releasing = true
     const answer = await release()
+    mine.releasing = false
     const taken = point === 'p1' || point === 'p2'
     if (taken ? !answer.ok : answer.error !== 'pane-input-stale-page')
       differences.push(`a size let go at ${point} was answered ${JSON.stringify(answer)}`)
@@ -616,10 +756,27 @@ async function runCase(c) {
     })
   }
   const differences = []
+  /**
+   * The host owns the outcome of each reply it admitted. A reply cut because the page went before it was
+   * written is the limit (a reply waits behind an earlier input that has not arrived; the program gets none)
+   * only where no input number below its own was left unsent by the gate: where the gate made the hole, it
+   * is the gate's failure.
+   */
   const settleReplies = async () => {
     const { pending, lost } = await host.call('replies_settled', '')
     if (pending) differences.push(`${pending} admitted replies were not written`)
-    for (const error of lost) differences.push(`an admitted reply was lost: ${error}`)
+    for (const { ticket, error } of lost) {
+      const reply = mine.tickets.get(ticket)
+      const hole = mine.holes.find((h) => h.page === reply?.page && h.sequence < reply.sequence)
+      if (reply && hole) {
+        differences.push(
+          `the reply ${JSON.stringify(reply.text)} (input number ${reply.sequence}) was cut behind input number ${hole.sequence}, which the gate spent and never sent to the host: ${error}`,
+        )
+      } else if (reply) {
+        mine.limited.add(ticket)
+        results.limited++
+      } else differences.push(`an admitted reply was lost: ${error}`)
+    }
   }
   const lostAnswers = new Set()
   const settle = async () => {
@@ -645,7 +802,23 @@ async function runCase(c) {
     )
   /** Whether the host cut this load's history. */
   const hostCut = () => mine.pieces.some((piece) => piece.truncated)
+  /**
+   * The load that is leaving: what its page answered is what an xterm built from the host's frame answers
+   * to the questions printed while that page was there, cursor reports with their places. It is read
+   * here, before the next load drops its frame and where its answers start.
+   */
+  const checkDeparting = async () => {
+    if (mine.pieces.length === 0 || !hostCut()) return
+    const built = await builtFromFrame(mine.leftAt ?? mine.total)
+    const answered = mine.answers.slice(mine.loadStart)
+    if (JSON.stringify(built.owed) !== JSON.stringify(answered))
+      differences.push(
+        `answers of the load that left: expected ${JSON.stringify(built.owed)} got ${JSON.stringify(answered)}`,
+      )
+  }
   const load = async (reload, after) => {
+    await checkDeparting()
+    mine.leftAt = null
     mine.pieces = []
     mine.loadStart = mine.answers.length
     // A size held for a point in the replay goes before a pull is answered: the first (p3), after
@@ -663,8 +836,9 @@ async function runCase(c) {
     mine.held = false
     mine.gone = false
     // The host owns the outcome of each reply it admitted: a reload cuts what is not yet written.
-    await settleReplies()
     await host.call('navigate', '')
+    // What the host cut with the page's going is known now, not before: an immediate reload.
+    await settleReplies()
     mine.page = null
     if (reload) await app.reload()
     else await app.goto(`${ui.origin}/index.html`)
@@ -746,18 +920,18 @@ async function runCase(c) {
    * size, seed and the sizes it gave), then what the program printed from the piece's offset, with
    * the sizes the host has taken since at their offsets.
    */
-  const builtFromFrame = async () => {
+  const builtFromFrame = async (upto = Number.POSITIVE_INFINITY) => {
     const first = mine.pieces.find((piece) => piece.reset)
     const given = mine.pieces.flatMap((piece) => piece.resizes)
     const sizes = [...given.map((s) => ({ at: s.at, cols: s.cols, rows: s.rows }))]
     const boundary = mine.pieces.at(-1).boundary
-    sizes.push(...mine.sizes.filter((s) => s.at > boundary))
+    sizes.push(...mine.sizes.filter((s) => s.at > boundary && s.at <= upto))
     sizes.sort((x, y) => x.at - y.at)
     // The boundary is where the live part begins: what the xterm answers from there on is what the page owes.
     const live = sizes.findIndex((s) => s.at > boundary)
     sizes.splice(live < 0 ? sizes.length : live, 0, { at: boundary, mark: true })
     return refPage.evaluate(
-      async ([from, size, seed, sizes]) => {
+      async ([from, size, seed, sizes, upto]) => {
         P5.exp?.emulator.dispose()
         P5.exp?.host.remove()
         P5.exp = P5.reference('exp', size.cols, size.rows)
@@ -770,6 +944,7 @@ async function runCase(c) {
           offset += chunk.length
         }
         P5.stream = [whole]
+        length = Math.min(length, upto)
         const emulator = P5.exp.emulator
         if (seed.length) await emulator.write(Uint8Array.from(seed))
         let at = from
@@ -784,7 +959,7 @@ async function runCase(c) {
         if (at < length) await emulator.write(whole.subarray(at))
         return { state: P5.state(emulator), owed: P5.exp.answers.slice(owed) }
       },
-      [first.from, first.size, first.seed, sizes],
+      [first.from, first.size, first.seed, sizes, Number.isFinite(upto) ? upto : 1e15],
     )
   }
   /** What the program prints, to the reference first; `settle`: waits for the page to draw it. */
@@ -852,11 +1027,23 @@ async function runCase(c) {
         else differences.push(`a size of the current page was refused: ${JSON.stringify(answer)}`)
       }
     } else if (op.hold) {
+      const [nowCols, nowRows] = await R(() => [
+        P5.ref.emulator.terminal.cols,
+        P5.ref.emulator.terminal.rows,
+      ])
+      if (nowCols === op.hold[0] && nowRows === op.hold[1]) {
+        // A size the terminal already has is no size: the page sends none, and none is waited for.
+        results.sameSize++
+        continue
+      }
       const captured = new Promise((got) => {
         mine.arm = { captured: got }
       })
       await app.evaluate(([cols, rows]) => window.__emu.terminal.resize(cols, rows), op.hold)
-      holding = { release: await captured, point: op.point }
+      holding = {
+        release: await within(captured, "the page's held resize, which never reached the host"),
+        point: op.point,
+      }
       // Taken (let go before the page goes): the continuous xterm takes it here too.
       if (op.point === 'p1' || op.point === 'p2')
         await R(([s]) => P5.ref.emulator.terminal.resize(s[0], s[1]), [op.hold])
@@ -864,8 +1051,10 @@ async function runCase(c) {
     } else if (op.gone) {
       await host.call('gone', win)
       mine.gone = true
+      mine.leftAt ??= mine.total
     } else if (op.depart) {
       mine.held = true
+      mine.leftAt ??= mine.total
     } else if (op.reload) {
       results.reloads++
       if (holding?.point === 'p2') await letGo()
@@ -894,7 +1083,10 @@ async function runCase(c) {
   // What the program was given is what the host admitted for it, in order: nothing was admitted
   // that the program did not read, and nothing the program read was refused.
   await settleReplies()
-  const wanted = mine.answers.join('')
+  const wanted = [...mine.tickets]
+    .filter(([ticket]) => !mine.limited.has(ticket))
+    .map(([, reply]) => reply.text)
+    .join('')
   const given = await programReceived(win, wanted.length)
   if (given !== wanted)
     differences.push(
@@ -1118,6 +1310,6 @@ console.log(
   }),
 )
 await host.close()
-await browser.close()
-await ui.close()
+await within(browser.close(), 'closing the browser')
+await within(ui.close(), 'closing the page server')
 process.exitCode = results.failed > 0 ? 1 : 0

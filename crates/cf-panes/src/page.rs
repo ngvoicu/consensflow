@@ -70,6 +70,7 @@ pub fn history(
 pub fn history_done(
     inputs: &InputQueue,
     panes: &PaneTable,
+    hub: &OutputHub,
     page_id: &str,
     id: &str,
     generation: u64,
@@ -80,7 +81,11 @@ pub fn history_done(
         Err(error) => return refused(&error),
     };
     match inputs.with_current_page(page_id, || panes.forget_consumed_journal(&key, consumed)) {
-        Ok(true) => ok(),
+        // The window's journal is gone, and with it what the hub handed of it for a page to come.
+        Ok(true) => {
+            hub.forget(&key);
+            ok()
+        }
         Ok(false) => json!({"ok":false}),
         Err(error) => refused(&error),
     }

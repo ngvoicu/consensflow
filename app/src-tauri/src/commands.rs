@@ -540,11 +540,15 @@ pub async fn pane_history_done<R: Runtime>(
     consumed: u64,
 ) -> Value {
     crate::panics::settled("pane_history_done", async move {
-        let (panes, inputs) = {
+        let (panes, inputs, hub) = {
             let state = app.state::<AppRuntime>();
-            (Arc::clone(&state.panes), Arc::clone(&state.inputs))
+            (
+                Arc::clone(&state.panes),
+                Arc::clone(&state.inputs),
+                Arc::clone(&state.output),
+            )
         };
-        page::history_done(&inputs, &panes, &page_id, &id, generation, consumed)
+        page::history_done(&inputs, &panes, &hub, &page_id, &id, generation, consumed)
     })
     .await
 }

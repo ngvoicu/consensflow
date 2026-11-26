@@ -201,8 +201,11 @@ export function randomCase(seed) {
   }
   if (g.r() < 0.6) ops.push({ reload: true })
   // A size on its way as the page reloads, let go at one of the five points (T-2269).
-  if (g.r() < 0.1)
-    ops.push(...heldSize(g.pick([0, 3, 255, 256]), g.pick(HOLD_POINTS), cols, rows, C + '5n'))
+  if (g.r() < 0.1) {
+    // From the size the terminal has by then: a held resize to the size it has brings none.
+    const [nowCols, nowRows] = ops.findLast((op) => op.resize)?.resize ?? [cols, rows]
+    ops.push(...heldSize(g.pick([0, 3, 255, 256]), g.pick(HOLD_POINTS), nowCols, nowRows, `${C}5n`))
+  }
   ops.push({ emit: utf8(g.pick(['X', 'Z\r\n', 'ABCDE', '界', C + '6n', '—'])) })
   return { name: 'random', seed, cols, rows, ops }
 }
@@ -494,6 +497,72 @@ export function namedCases() {
     { reload: true },
     e(C2 + '4;6H' + C2 + '6n'),
     e(C2 + '?6n'),
+  ])
+  // T-2355's findings: what the gate must hold that it once let by.
+  const widths257 = Array.from({ length: 257 }, (_, i) => ({ resize: [81 + (i % 2), 24] }))
+  add('T-2355 finding 18: KEPT after 257 widths and two more', 80, 24, [
+    e('HEADER'),
+    ...widths257,
+    e('KEPT'),
+    { resize: [82, 24] },
+    { resize: [81, 24] },
+    { reload: true },
+  ])
+  add('T-2355 finding 19: a held resize', 80, 24, [
+    e('HI'),
+    { hold: [82, 24], point: 'p1' },
+    { reload: true },
+    e('X'),
+  ])
+  // Stock seed 3440 held a resize to the size the terminal already had: no resize comes.
+  add('T-2355 finding 19: a held resize to the present size', 80, 24, [
+    e('HI'),
+    { resize: [51, 4] },
+    { hold: [51, 4], point: 'p1' },
+    { reload: true },
+    e('X'),
+  ])
+  // Stock seed 3440 as the generator once made it (T-2355): its last held resize is to the size the terminal has.
+  add('T-2355 finding 19: stock seed 3440', 49, 4, [
+    { emit: [27, 91, 63] },
+    { emit: [50, 48, 48, 52] },
+    { resize: [49, 6] },
+    {
+      emit: [
+        36, 112, 27, 72, 27, 91, 55, 109, 27, 91, 63, 50, 48, 48, 52, 36, 112, 27, 91, 54, 59, 49,
+        50, 114, 27, 91, 53, 110, 27, 61, 27, 91, 55,
+      ],
+    },
+    { emit: [50] },
+    { resize: [77, 26] },
+    { resize: [18, 4] },
+    { resize: [18, 6] },
+    { resize: [51, 26] },
+    { resize: [51, 26] },
+    { resize: [51, 4] },
+    { emit: [71, 27, 91, 63, 49, 48, 48, 48, 104, 27, 91, 72] },
+    { emit: [194, 147] },
+    { reload: true },
+    { hold: [51, 4], point: 'p1' },
+    { gone: true },
+    { emit: [27, 91, 53, 110, 84, 65, 73, 76] },
+    { reload: true },
+    { emit: [90, 13, 10] },
+  ])
+  add('T-2355 finding 20: replies before a second reload', 80, 24, [
+    e('HEADER'),
+    ...widths257,
+    { reload: true },
+    e(`${C2}4;6H${C2}6n`),
+    e(`${C2}?6n`),
+    { reload: true },
+  ])
+  add('T-2355 finding 23: a reply across an immediate reload', 80, 24, [
+    e('Q'),
+    { reload: true },
+    e(`${C2}5n`),
+    { reload: true },
+    e('END'),
   ])
   return cs
 }

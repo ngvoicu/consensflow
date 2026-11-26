@@ -105,7 +105,7 @@ while True:
         let mut windows: HashMap<String, Window> = HashMap::new();
         // The replies admitted and not yet written, and the outcomes that failed.
         let owed = Arc::new((
-            Mutex::new((0usize, Vec::<String>::new())),
+            Mutex::new((0usize, Vec::<(String, String)>::new())),
             std::sync::Condvar::new(),
         ));
         let scratch = std::env::temp_dir().join(format!("cf-gate-{}", std::process::id()));
@@ -279,6 +279,7 @@ while True:
                 "done" => json!({"answer": page::history_done(
                     &inputs,
                     &panes,
+                    &hub,
                     command["page"].as_str().unwrap(),
                     command["id"].as_str().unwrap(),
                     command["generation"].as_u64().unwrap(),
@@ -334,12 +335,13 @@ while True:
                             {
                                 owed.0.lock().unwrap().0 += 1;
                                 let owed = Arc::clone(&owed);
+                                let ticket = ticket.clone();
                                 std::thread::spawn(move || {
                                     let outcome = futures_executor::block_on(done.receiver.clone());
                                     let mut state = owed.0.lock().unwrap();
                                     state.0 -= 1;
                                     if let Err(error) = outcome {
-                                        state.1.push(error.to_string());
+                                        state.1.push((ticket, error.to_string()));
                                     }
                                     owed.1.notify_all();
                                 });
@@ -359,7 +361,10 @@ while True:
                             .unwrap()
                             .0;
                     }
-                    let lost = std::mem::take(&mut state.1);
+                    let lost: Vec<Value> = std::mem::take(&mut state.1)
+                        .into_iter()
+                        .map(|(ticket, error)| json!({"ticket": ticket, "error": error}))
+                        .collect();
                     json!({"pending": state.0, "lost": lost})
                 }
                 "received" => {

@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url'
 
 const browser = process.argv[2] ?? 'chromium'
 const gate = resolve(dirname(fileURLToPath(import.meta.url)), 'gate.mjs')
-const WAIT = 20
 const controls = [
   { name: 'finding 10, clean', only: 'finding 10', exit: 0 },
   {
@@ -18,7 +17,7 @@ const controls = [
     only: 'finding 10',
     fault: 'empty-frame',
     exit: 1,
-    cause: /history starts at \d+, past/,
+    cause: /history starts at \d+, where the sizes taken allow/,
   },
   {
     name: 'finding 10, a history and boundary one byte short of what the page before was handed',
@@ -41,6 +40,45 @@ const controls = [
     fault: 'wrong-cpr-place',
     exit: 1,
     cause: /answers/,
+  },
+  { name: 'finding 18, clean', only: 'finding 18', exit: 0 },
+  {
+    name: 'finding 18, an empty frame after 257 widths and two more',
+    only: 'finding 18',
+    fault: 'empty-frame',
+    exit: 1,
+    cause: /history starts at \d+, where the sizes taken allow/,
+  },
+  { name: 'finding 19, a held resize, clean', only: 'finding 19: a held resize$', exit: 0 },
+  {
+    name: 'finding 19, a held resize to the size the terminal has, clean',
+    only: 'finding 19: a held resize to the present size',
+    exit: 0,
+  },
+  {
+    name: "finding 19, the page's resize never comes",
+    only: 'finding 19: a held resize$',
+    fault: 'late-resize',
+    wait: 5,
+    exit: 1,
+    cause: /did not finish within 5 s/,
+  },
+  { name: 'finding 19, stock seed 3440, clean', only: 'finding 19: stock seed 3440', exit: 0 },
+  { name: 'finding 20, clean', only: 'finding 20', exit: 0 },
+  {
+    name: 'finding 20, a report for another place before a second reload',
+    only: 'finding 20',
+    fault: 'wrong-cpr-place',
+    exit: 1,
+    cause: /answers of the load that left/,
+  },
+  { name: 'finding 23, a reply across an immediate reload, clean', only: 'finding 23', exit: 0 },
+  {
+    name: 'finding 23, the measuring paste spends an input number the host never hears of',
+    only: 'finding 23',
+    fault: 'paste-through-link',
+    exit: 1,
+    cause: /input number/,
   },
   { name: 'lane, clean', only: 'a lane that leaves', exit: 0 },
   {
@@ -74,7 +112,7 @@ for (const control of controls) {
         ...process.env,
         CF_GATE_ONLY: control.only,
         CF_GATE_FAULT: control.fault ?? '',
-        CF_GATE_WAIT_S: String(WAIT),
+        CF_GATE_WAIT_S: String(control.wait ?? 20),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -86,7 +124,7 @@ for (const control of controls) {
         text += '\nSELFTEST: the gate was still running after its limit\n'
         child.kill('SIGKILL')
       },
-      (4 * WAIT + 60) * 1000,
+      (4 * (control.wait ?? 20) + 60) * 1000,
     )
     child.on('exit', (code, signal) => {
       clearTimeout(limit)

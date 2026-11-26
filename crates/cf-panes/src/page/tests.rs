@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use super::*;
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::journal::{Journal, Resize};
-use crate::pty::PaneKey;
+use crate::output_hub::PaneOutputMessage;
+use crate::pty::{PaneKey, PaneOutput};
 
 /// A frame's header, its seed and its bytes, as the page reads one.
 fn read_frame(frame: &[u8]) -> (Value, Vec<u8>, Vec<u8>) {
@@ -117,8 +118,9 @@ fn an_ended_windows_history_is_forgotten_only_where_the_page_took_all_of_it() {
     let key = host.ended("w", 10);
     host.inputs.begin_page("page").unwrap();
     host.subscribe("page");
-    let done =
-        |page: &str, consumed| history_done(&host.inputs, &host.panes, page, "w", 1, consumed);
+    let done = |page: &str, consumed| {
+        history_done(&host.inputs, &host.panes, &host.hub, page, "w", 1, consumed)
+    };
     assert_eq!(done("page", 9), json!({"ok":false}));
     assert_eq!(done("gone", 10)["error"], "pane-input-stale-page");
     assert!(
@@ -127,4 +129,39 @@ fn an_ended_windows_history_is_forgotten_only_where_the_page_took_all_of_it() {
     );
     assert_eq!(done("page", 10), json!({"ok":true}));
     assert!(host.panes.history("page", &key, None).is_err());
+}
+
+/// With the journal on, an ended window's delivery record (what the hub handed of it, for a page that
+/// comes back) goes with its journal when the page has consumed it, not at the next subscription
+/// (T-2355's finding 22).
+#[cfg(unix)]
+#[test]
+fn an_ended_windows_delivery_record_goes_when_its_journal_is_consumed() {
+    let host = host();
+    let key = host.ended("w", 10);
+    host.inputs.begin_page("page").unwrap();
+    host.subscribe("page");
+    host.hub.publish(PaneOutputMessage::at_offset(
+        PaneOutput {
+            key: key.clone(),
+            seq: 1,
+            bytes: vec![b'a'; 10],
+        },
+        0,
+    ));
+    assert_eq!(host.hub.handed_windows(), 1);
+    assert_eq!(
+        history_done(&host.inputs, &host.panes, &host.hub, "page", "w", 1, 9),
+        json!({"ok":false})
+    );
+    assert_eq!(
+        host.hub.handed_windows(),
+        1,
+        "a journal not consumed keeps its record"
+    );
+    assert_eq!(
+        history_done(&host.inputs, &host.panes, &host.hub, "page", "w", 1, 10),
+        json!({"ok":true})
+    );
+    assert_eq!(host.hub.handed_windows(), 0);
 }
