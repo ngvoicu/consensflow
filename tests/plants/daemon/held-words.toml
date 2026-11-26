@@ -63,8 +63,8 @@ runs = ["held-words-proto"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/hold.rs"
-find = "status: status.and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == status)),"
-replace = "status: status.and_then(|status| u16::try_from(status).ok()),"
+find = ".and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == status)),"
+replace = ".and_then(|status| u16::try_from(status).ok()),"
 
 [[plant]]
 name = "held words: a hold's form is looked up by any member's hold of that end"
