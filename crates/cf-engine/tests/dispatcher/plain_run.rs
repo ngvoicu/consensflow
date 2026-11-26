@@ -41,13 +41,19 @@ fn rows(context: &Context, project: i64) -> Value {
     json!({ "events": events, "messages": messages })
 }
 
-/// Hold apart only the paced kit's look on a delivery's beginning. The recorded
-/// run was made without pacing; the shared replay normalizer also removes other
-/// fields, so apply it only to these events.
+/// Hold apart only the paced kit's look on a delivery's beginning, and the words an account's
+/// refusal keeps with its hold (`because`, T-2010). The recorded run was made without pacing
+/// and before a hold kept its words; the shared replay normalizer also removes other fields,
+/// so apply it only to these events.
 fn hold_apart_paced_delivery_looks(rows: &mut Value) {
     for event in rows["events"].as_array_mut().expect("the recorded events") {
         if event["kind"] == "delivery.begun" {
             cf_ledger::testing::hold_apart_what_node_never_logs(std::slice::from_mut(event));
+        }
+        if event["kind"] == "member.out" {
+            if let Some(data) = event["data"].as_object_mut() {
+                data.remove("because");
+            }
         }
     }
 }
@@ -58,6 +64,7 @@ fn only_the_paced_delivery_look_is_held_apart() {
         "events": [
             {"kind": "delivery.begun", "data": {"message": 2, "look": {"status": "idle"}, "other": "kept"}},
             {"kind": "delivery.failed", "data": {"look": {"status": "kept"}}},
+            {"kind": "member.out", "data": {"handle": "zeus", "because": "its login was refused: 401"}},
             {"kind": "task.state", "data": {"to": "paused", "stop": 5}}
         ],
         "messages": {"zeus": [{"look": "kept", "body": "unchanged"}]}
@@ -69,6 +76,7 @@ fn only_the_paced_delivery_look_is_held_apart() {
             "events": [
                 {"kind": "delivery.begun", "data": {"message": 2, "other": "kept"}},
                 {"kind": "delivery.failed", "data": {"look": {"status": "kept"}}},
+                {"kind": "member.out", "data": {"handle": "zeus"}},
                 {"kind": "task.state", "data": {"to": "paused", "stop": 5}}
             ],
             "messages": {"zeus": [{"look": "kept", "body": "unchanged"}]}
