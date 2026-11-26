@@ -103,6 +103,11 @@ while True:
             .unwrap_or(180);
         let mut alive = Arc::new(AtomicBool::new(true));
         let mut windows: HashMap<String, Window> = HashMap::new();
+        // The replies admitted and not yet written, and the outcomes that failed.
+        let owed = Arc::new((
+            Mutex::new((0usize, Vec::<String>::new())),
+            std::sync::Condvar::new(),
+        ));
         let scratch = std::env::temp_dir().join(format!("cf-gate-{}", std::process::id()));
         std::fs::create_dir_all(&scratch).unwrap();
         let say = {
@@ -320,9 +325,42 @@ while True:
                         InputWork::Reply(bytes),
                         false,
                     ) {
-                        Ok(ticket) => json!({"answer": {"ok": true, "ticket": ticket}}),
+                        Ok(ticket) => {
+                            // The host owns the outcome of what it admitted: a page that is cut
+                            // before it is written is told it was lost. `replies_settled` waits
+                            // for every outcome, so that the gate cuts the page only after.
+                            if let Ok(done) =
+                                inputs.page_completion(command["page"].as_str().unwrap(), &ticket)
+                            {
+                                owed.0.lock().unwrap().0 += 1;
+                                let owed = Arc::clone(&owed);
+                                std::thread::spawn(move || {
+                                    let outcome = futures_executor::block_on(done.receiver.clone());
+                                    let mut state = owed.0.lock().unwrap();
+                                    state.0 -= 1;
+                                    if let Err(error) = outcome {
+                                        state.1.push(error.to_string());
+                                    }
+                                    owed.1.notify_all();
+                                });
+                            }
+                            json!({"answer": {"ok": true, "ticket": ticket}})
+                        }
                         Err(error) => json!({"answer": {"ok": false, "error": error}}),
                     }
+                }
+                "replies_settled" => {
+                    let deadline = Instant::now() + Duration::from_secs(wait);
+                    let mut state = owed.0.lock().unwrap();
+                    while state.0 > 0 && Instant::now() < deadline {
+                        state = owed
+                            .1
+                            .wait_timeout(state, Duration::from_millis(50))
+                            .unwrap()
+                            .0;
+                    }
+                    let lost = std::mem::take(&mut state.1);
+                    json!({"pending": state.0, "lost": lost})
                 }
                 "received" => {
                     let window = &windows[&name];

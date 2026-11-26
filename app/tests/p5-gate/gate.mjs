@@ -616,6 +616,11 @@ async function runCase(c) {
     })
   }
   const differences = []
+  const settleReplies = async () => {
+    const { pending, lost } = await host.call('replies_settled', '')
+    if (pending) differences.push(`${pending} admitted replies were not written`)
+    for (const error of lost) differences.push(`an admitted reply was lost: ${error}`)
+  }
   const lostAnswers = new Set()
   const settle = async () => {
     await chain
@@ -657,6 +662,8 @@ async function runCase(c) {
     }
     mine.held = false
     mine.gone = false
+    // The host owns the outcome of each reply it admitted: a reload cuts what is not yet written.
+    await settleReplies()
     await host.call('navigate', '')
     mine.page = null
     if (reload) await app.reload()
@@ -886,6 +893,7 @@ async function runCase(c) {
   await retire()
   // What the program was given is what the host admitted for it, in order: nothing was admitted
   // that the program did not read, and nothing the program read was refused.
+  await settleReplies()
   const wanted = mine.answers.join('')
   const given = await programReceived(win, wanted.length)
   if (given !== wanted)
