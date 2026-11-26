@@ -73,12 +73,19 @@ function patch(parent, nodes) {
   for (const [at, node] of nodes.entries()) {
     const shown = parent.children[at]
     if (shown === undefined) parent.append(node)
-    else if (shown.isEqualNode(node)) continue
+    else if (shown.isEqualNode(node) || kept(shown, node)) continue
     else if (opens(shown, node)) patch(shown, [...node.children])
     else shown.replaceWith(node)
   }
   while (parent.children.length > nodes.length) parent.lastElementChild.remove()
 }
+
+/**
+ * A place the page fills itself (`data-keep`), such as the member form a dialog moves into a
+ * slot's row: drawn again with the same mark, it is left as it is, whatever it holds by then.
+ */
+const kept = (shown, node) =>
+  shown.dataset?.keep !== undefined && shown.dataset.keep === node.dataset?.keep
 
 const opens = (shown, node) =>
   shown.tagName === node.tagName &&

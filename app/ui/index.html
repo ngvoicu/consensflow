@@ -225,13 +225,14 @@
       </fieldset>
       <fieldset class="project-section staff-pick">
         <legend>Staff</legend>
-        <p class="dialog-help">Every slot of the staff is here: a role at a tier, which holds one member. Add fills an empty one with a new member, on a harness, one of its models and an effort; a member may also be given an empty slot of its own tier. The last project's staff is here already.</p>
+        <p class="dialog-help">Every slot of the staff is here: a role at a tier, which holds one member. Add fills an empty one with a new member, on a harness, one of its models and an effort; a member may also be given an empty slot of its own tier. A member's name in its slot opens its Edit, its Vacation and its backup. The last project's staff is here already.</p>
         <!-- The slots (core/slots.js), drawn from the daemon's roles and the draft. -->
         <table class="slots" aria-label="Slots">
           <thead></thead>
           <tbody id="new-project-slots"></tbody>
         </table>
-        <!-- A member as a slot's Add, Edit or a backup opens it (core/dialogs.js, MemberPicker). -->
+        <!-- A member as a slot's Add, Edit or a backup opens it (core/dialogs.js, MemberPicker):
+             put in the slot's row it was opened from, and back here when it shuts. -->
         <fieldset class="staff-add" hidden>
           <legend>Add a member</legend>
           <label hidden>Role<select name="role"></select></label>
@@ -245,12 +246,6 @@
           <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="new-project-hint" hidden></p>
         </fieldset>
-        <table class="staff" aria-label="Members for the staff">
-          <thead>
-            <tr><th>Member</th><th>Slots</th><th></th></tr>
-          </thead>
-          <tbody id="new-project-staff"></tbody>
-        </table>
       </fieldset>
       <div data-project-sections></div>
       <p class="dialog-refusal" role="alert" hidden></p>
@@ -307,14 +302,15 @@
       <h2 id="project-settings-title">Project settings</h2>
       <fieldset class="project-section staff-section">
         <legend>Staff</legend>
-        <p class="dialog-help">A role at a tier is a slot, and holds one member: the chief names the role and the tier a task needs, and ConsensFlow gives the task a new window of that slot's member. A task whose slot is empty goes to the nearest held slot of its role, never into Critical, and waits only when no slot of its role is held. Every role has a slot at each tier but the image designer, which draws on Codex and takes no other role. A worker does the work, a frontend designer designs and builds how the product looks, an architect designs the software before it is built, a researcher finds what the chief asks for and changes no file, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks, and an integrator brings accepted work together and lands it. Add fills an empty slot with a new member: a harness, one of its models and an effort, named by the model's id and the effort. A member has one tier and may hold several roles at it: give it an empty slot of its tier. Edit one to another model, effort or tier, and it takes the new name. Each member but an image designer may have one backup, another model on any harness, which takes over a task the member cannot run.</p>
+        <p class="dialog-help">A role at a tier is a slot, and holds one member: the chief names the role and the tier a task needs, and ConsensFlow gives the task a new window of that slot's member. A task whose slot is empty goes to the nearest held slot of its role, never into Critical, and waits only when no slot of its role is held. Every role has a slot at each tier but the image designer, which draws on Codex and takes no other role. A worker does the work, a frontend designer designs and builds how the product looks, an architect designs the software before it is built, a researcher finds what the chief asks for and changes no file, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks, and an integrator brings accepted work together and lands it. Add fills an empty slot with a new member: a harness, one of its models and an effort, named by the model's id and the effort. A member has one tier and may hold several roles at it: give it an empty slot of its tier. Edit one to another model, effort or tier, and it takes the new name. Each member but an image designer may have one backup, another model on any harness, which takes over a task the member cannot run. A member's name in its slot opens its Edit, its Vacation and its backup.</p>
         <!-- The slots (core/slots.js), drawn from the daemon's roles and the project's staff. -->
         <table class="slots" aria-label="Slots">
           <thead></thead>
           <tbody id="staff-slots"></tbody>
         </table>
         <!-- Add member, Edit member and a backup (core/dialogs.js, MemberPicker): a model its
-             harness lists of itself, at an effort it lists, in the slot's tier (T-1143). -->
+             harness lists of itself, at an effort it lists, in the slot's tier (T-1143); put in
+             the slot's row it was opened from, and back here when it shuts. -->
         <fieldset class="staff-add" hidden>
           <legend>Add a member</legend>
           <label hidden>Role<select name="role"></select></label>
@@ -328,12 +324,6 @@
           <p class="dialog-help member-help" role="status" hidden></p>
           <p class="staff-hint" id="staff-hint" hidden></p>
         </fieldset>
-        <table class="staff" aria-label="On the staff">
-          <thead>
-            <tr><th>Member</th><th>Slots</th><th></th></tr>
-          </thead>
-          <tbody id="staff-members"></tbody>
-        </table>
       </fieldset>
       <div data-project-sections></div>
       <div class="dialog-actions">

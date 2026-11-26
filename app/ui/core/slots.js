@@ -1,4 +1,4 @@
-import { button, element, iconButton } from '../dom.js'
+import { button, element, icon, iconButton } from '../dom.js'
 import {
   aRole,
   isImageAgentRole,
@@ -17,10 +17,17 @@ import {
  * update left to several members with each of them and the rule. The page keeps no list of roles
  * or tiers of its own.
  *
- * A member here is `{ key, name, runs, roles, tier, marks }`: `key` tells it from the others (a
- * handle, or a draft's own number), `name` is what it is called (`@hera`, or a draft's model),
- * `runs` what it runs on where its name does not say, and `marks` its state in a few words
- * (`{ text, tone }`).
+ * A member here is `{ key, name, runs, roles, tier, marks, backup, opens }`: `key` tells it from
+ * the others (a handle, or a draft's own number), `name` is what it is called (`@hera`, or a
+ * draft's model), `runs` what it runs on where its name does not say, `marks` its state in a few
+ * words (`{ text, tone }`), `backup` its backup's name or none, and `opens` what its own part
+ * holds, in words ("Edit, Vacation and backup"; empty where it holds nothing to do).
+ *
+ * Every operation on a member starts from its own slot (T-2341, the owner: "can we have all the
+ * operations from here?"): its holder's card opens the member's own part in a row under the
+ * slot's row, its Edit, its Vacation and its backup, with the member form there when one of them
+ * opens it. An empty slot's Add opens the form in the same place. One part is open at a time, and
+ * a member in several slots is one member from any of them: its other slots are lit with it.
  */
 
 /** Every slot the daemon's roles name, in their order: a role at each of its tiers, or alone. */
@@ -66,7 +73,8 @@ export const takenWords = (role, tier, name) =>
     : `the ${slotName(role, tier)} slot is ${name}'s: a role and tier holds one member. Pick another tier`
 
 const COUNT = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
-const together = (names) =>
+/** Words said together: "Edit, Vacation and backup". */
+export const together = (names) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 
 /**
@@ -132,6 +140,17 @@ function takerName(member, members) {
 }
 
 const CROSS = ['M6 6l12 12', 'M18 6 6 18']
+const CHEVRON = ['M7 10l5 5 5-5']
+
+/** A slot's key, as its cell names it: `worker:standard`, or `designer`. */
+const slotKey = (role, tier) => (tier === null ? role : `${role}:${tier}`)
+
+/** What the member form's place in a slot's row is marked by: a redraw leaves it as it is. */
+const formPlace = (key) => {
+  const place = element('div', 'slot-form-place')
+  place.dataset.keep = `member-form ${key}`
+  return place
+}
 
 /** The head of the slots: a column for the roles, then one a tier, most critical first. */
 export function slotHead() {
@@ -154,11 +173,16 @@ export function slotHead() {
  * and `confirm(member)` and the ask's words (`confirmWords(member)`, a staff's own where none is
  * given); `refusal` is the `{ role, words }` of what the daemon refused of a slot of a role, said
  * under that role's row; `picking` is the slot the form is open for; `draft` says the words a
- * draft says.
+ * draft says. A member's own part: `opened` is the `{ key, role }` of the member whose part is
+ * open and of the slot it was opened from, `open(role, member)` opens it there (or shuts it, open
+ * there already), `shut()` shuts it, `part(member)` is what it holds (its state, its acts and its
+ * backup), `formHere` says the member form is open in it, and `id` names it in its dialog.
  */
 export function slotRows(members, hooks) {
   const columns = tierColumns()
   const rows = []
+  const anchor = anchorOf(members, hooks.opened)
+  const drawn = { ...hooks, anchor }
   for (const role of roleIds()) {
     const row = element('tr', 'slot-row')
     row.dataset.role = role
@@ -167,16 +191,27 @@ export function slotRows(members, hooks) {
     row.append(head)
     const tiers = tiersOf(role)
     if (tiers.length === 0) {
-      const cell = slotCell(members, role, null, hooks)
+      const cell = slotCell(members, role, null, drawn)
       cell.colSpan = Math.max(columns.length, 1)
       row.append(cell)
     } else {
       for (const tier of columns) {
-        if (tiers.includes(tier)) row.append(slotCell(members, role, tier, hooks))
+        if (tiers.includes(tier)) row.append(slotCell(members, role, tier, drawn))
         else row.append(element('td', 'slot-none'))
       }
     }
     rows.push(row)
+    // What a slot of this row opened, right under it: its member's own part, or the form of its Add.
+    if (anchor?.role === role) {
+      rows.push(openRow(role, anchor.tier, [memberPart(anchor.member, hooks)]))
+    } else {
+      const adding = (tiers.length === 0 ? [null] : tiers).find(
+        (tier) => hooks.picking === slotKey(role, tier),
+      )
+      if (adding !== undefined) {
+        rows.push(openRow(role, adding, [formPlace(`slot ${slotKey(role, adding)}`)]))
+      }
+    }
     const crowds = (tiers.length === 0 ? [null] : tiers)
       .map((tier) => ({ tier, holders: holdersOf(members, role, tier) }))
       .filter(({ holders }) => holders.length > 1)
@@ -217,9 +252,85 @@ export function slotRows(members, hooks) {
   return rows
 }
 
+/**
+ * Where the open member's part goes: under the row of the slot it was opened from, or, where the
+ * member holds that role no more, under the first of the slots it holds. None where it left.
+ */
+function anchorOf(members, opened) {
+  if (!opened) return null
+  const member = members.find((one) => one.key === opened.key)
+  if (!member) return null
+  const role = member.roles.includes(opened.role)
+    ? opened.role
+    : roleIds().find((held) => member.roles.includes(held))
+  if (role === undefined) return null
+  return { member, role, tier: tiersOf(role).length === 0 ? null : member.tier }
+}
+
+/**
+ * A row under a role's row, for what one of its slots opened: as wide as the slots, its caret at
+ * the slot's column (`--column`), or along the row where the slot spans it.
+ */
+function openRow(role, tier, nodes) {
+  const columns = tierColumns()
+  const row = element('tr', 'slot-open-row')
+  row.dataset.role = role
+  const cell = element('td')
+  cell.colSpan = columns.length + 1
+  const column = tier === null ? -1 : columns.indexOf(tier)
+  cell.dataset.column = column < 0 ? 'all' : String(column)
+  cell.style.setProperty('--column', String(Math.max(column, 0)))
+  cell.style.setProperty('--columns', String(Math.max(columns.length, 1)))
+  cell.append(...nodes)
+  row.append(cell)
+  return row
+}
+
+/**
+ * A member's own part, under the slot it was opened from: its name and its Hide, what the dialog
+ * puts in it (first what it runs on and its state, then its acts and its backup) with the slots it
+ * holds after its first, where it holds several (what is changed here is changed in each), and
+ * the member form where one of its acts opened it.
+ */
+function memberPart(member, hooks) {
+  const part = element('div', 'slot-part')
+  part.id = `${hooks.id}-member`
+  part.setAttribute('role', 'region')
+  part.setAttribute('aria-label', member.name)
+  const head = element('div', 'slot-part-head')
+  head.append(
+    element('span', 'member-name', member.name),
+    iconButton(
+      CROSS,
+      'Hide',
+      () => hooks.shut(),
+      `Hide ${member.name}'s ${member.opens}`,
+      'slot-part-close',
+    ),
+  )
+  // What it runs on first, as its card says it, then the slots it holds where it holds several.
+  const [about, ...rest] = hooks.part(member)
+  part.append(head, about)
+  const held = roleIds().filter((role) => member.roles.includes(role))
+  if (held.length > 1) {
+    const count = COUNT[held.length] ?? String(held.length)
+    part.append(
+      element(
+        'p',
+        'slot-part-slots',
+        `One member in ${count} slots: ${together(held.map(roleLabel))}. What you change here changes it in ${held.length === 2 ? 'both' : `all ${count}`}.`,
+      ),
+    )
+  }
+  part.append(...rest)
+  // The member form, where its Edit or its backup opened it.
+  if (hooks.formHere) part.append(formPlace(`member ${member.key}`))
+  return part
+}
+
 /** One slot: its holders, or empty, with its Add and the members it could be given to. */
 function slotCell(members, role, tier, hooks) {
-  const key = tier === null ? role : `${role}:${tier}`
+  const key = slotKey(role, tier)
   const cell = element('td', 'slot')
   cell.dataset.slot = key
   const holders = holdersOf(members, role, tier)
@@ -277,7 +388,10 @@ function slotCell(members, role, tier, hooks) {
   return cell
 }
 
-/** A holder of a slot: its name, what it runs on, its state and the role's Remove, or the ask before its last role goes. */
+/**
+ * A holder of a slot: its name, what it runs on, its state and its backup, which open the member's
+ * own part, and the role's Remove; or the ask before its last role goes.
+ */
 function holderPart(member, role, hooks) {
   const part = element('div', 'slot-holder')
   part.dataset.member = String(member.key)
@@ -298,9 +412,37 @@ function holderPart(member, role, hooks) {
     part.append(actions)
     return part
   }
-  const top = element('div', 'slot-holder-top')
-  top.append(
-    element('span', 'member-name', member.name),
+  const open = hooks.anchor?.member.key === member.key
+  if (open) part.dataset.lit = hooks.anchor.role === role ? 'open' : 'same'
+  const about = [element('span', 'member-name', member.name)]
+  if (member.runs) about.push(element('span', 'member-meta', member.runs))
+  for (const mark of member.marks ?? []) {
+    const said = element('span', 'slot-mark', mark.text)
+    said.dataset.tone = mark.tone
+    about.push(said)
+  }
+  if (member.backup) {
+    const backup = element('span', 'slot-backup')
+    backup.append(element('span', 'slot-backup-kind', 'backup'), ` ${member.backup}`)
+    about.push(backup)
+  }
+  if (member.opens) {
+    // The card opens the member's own part: its Edit, its Vacation and its backup.
+    const opener = element('button', 'slot-open')
+    opener.type = 'button'
+    opener.setAttribute('aria-label', `${member.name}: ${member.opens}`)
+    opener.setAttribute('aria-expanded', open && hooks.anchor.role === role ? 'true' : 'false')
+    if (open && hooks.anchor.role === role)
+      opener.setAttribute('aria-controls', `${hooks.id}-member`)
+    opener.addEventListener('click', () => hooks.open(role, member))
+    opener.append(...about, icon(CHEVRON))
+    part.append(opener)
+  } else {
+    const plain = element('div', 'slot-about')
+    plain.append(...about)
+    part.append(plain)
+  }
+  part.append(
     iconButton(
       CROSS,
       `Remove the ${roleName(role)} role`,
@@ -309,12 +451,5 @@ function holderPart(member, role, hooks) {
       'slot-remove',
     ),
   )
-  part.append(top)
-  if (member.runs) part.append(element('span', 'member-meta', member.runs))
-  for (const mark of member.marks ?? []) {
-    const said = element('span', 'slot-mark', mark.text)
-    said.dataset.tone = mark.tone
-    part.append(said)
-  }
   return part
 }
