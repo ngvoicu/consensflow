@@ -1,0 +1,72 @@
+# A login a harness refused is a failed turn first (T-2367): tried again by the same tries and on
+# the same count as any failed turn, and the member held for its account only where the last try is
+# refused for login too. Every name holds `login retry`, so `cargo xtask plants daemon "login retry"`
+# runs them all.
+#
+# Not planted: the chief's own window (`participant.role == "chief"`): a chief has no task to hold,
+# and `failed_end` refuses one itself.
+
+[run]
+login-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "login_retries"]
+login-model = ["env", "CF_N35_SEEDS=400", "cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
+login-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "a_refused_login_is_told_from_billing"]
+
+[[plant]]
+name = "login retry: a login refusal is held at once"
+meant = "a_login_refused_once_holds_nobody_and_the_task_goes_on_after_its_try"
+runs = ["login-dispatcher", "login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" || true {"
+
+[[plant]]
+name = "login retry: a billing refusal is tried again"
+meant = "a_billing_refusal_holds_the_member_at_once_with_no_try"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" {"
+
+[[plant]]
+name = "login retry: the last try's refusal fails the task and holds no member"
+meant = "a_login_refused_at_every_try_holds_the_member_for_its_account_and_the_task_reaches_its_backup"
+runs = ["login-dispatcher", "login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(said) => {\n                self.fail_task(project, participant.id, &thread.task, &said, \"login\")?;\n                Ok(true)\n            }"
+
+[[plant]]
+name = "login retry: the refusal is not marked as acted on"
+meant = "a_login_refused_once_holds_nobody_and_the_task_goes_on_after_its_try"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                self.handled(record);\n                record.held.borrow_mut().reset();\n                let delivering"
+replace = "                record.held.borrow_mut().reset();\n                let delivering"
+
+[[plant]]
+name = "login retry: a billing reason reads as a login"
+meant = "a_refused_login_is_told_from_billing_by_the_reader_s_own_lead_and_never_by_its_words"
+runs = ["login-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/form.rs"
+find = "    refusal_lead(because).is_some_and(|(kind, _)| kind == \"login\")"
+replace = "    refusal_lead(because).is_some()"
+
+[[plant]]
+name = "login retry: the other windows of the member are stopped"
+meant = "the_other_window_of_a_member_goes_on_while_one_is_tried_again"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                let delivering = record.delivery.borrow_mut().delivering.take();\n                if let Some(delivering) = delivering {\n                    self.give_back(delivering.message, \"its login was refused and is tried again\")?;\n                }\n                Ok(true)"
+replace = "                let delivering = record.delivery.borrow_mut().delivering.take();\n                if let Some(delivering) = delivering {\n                    self.give_back(delivering.message, \"its login was refused and is tried again\")?;\n                }\n                let member = participant.member_id.unwrap_or(participant.id);\n                let until = cf_base::time::iso(self.now() + 120_000);\n                self.seams.ledger.borrow_mut().mark_out_with_kind(member, &until, \"plant\", cf_ledger::HoldKind::Quota)?;\n                Ok(true)"

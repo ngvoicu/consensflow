@@ -3,6 +3,7 @@
 use cf_proto::hold::{BILLING_CODES, CODES, KINDS, LOGIN_CODES, STATUSES};
 
 use super::*;
+use crate::shared::quota::{unavailable_quota, Quota, Refusal};
 
 fn form(because: &str) -> Option<(&'static str, Option<u16>, Option<&'static str>)> {
     hold_form(because).map(|form| (form.kind(), form.status(), form.code()))
@@ -114,4 +115,40 @@ fn whatever_the_words_say_each_value_of_the_form_is_a_literal_of_the_lists() {
         }
     }
     assert_eq!(seen, texts.len() * 2);
+}
+
+#[test]
+fn a_refused_login_is_told_from_billing_by_the_reader_s_own_lead_and_never_by_its_words() {
+    // What each harness's reader says of an account that refused: Claude Code and Pi through the
+    // shared `unavailable_quota`, Muse by its two fixed sentences and the shared lead, Codex by
+    // its typed `unauthorized` (its lead is the same).
+    for (because, login) in [
+        (
+            unavailable_quota(0.0, Refusal::Credentials, "401 token expired").unwrap(),
+            true,
+        ),
+        (
+            unavailable_quota(0.0, Refusal::Billing, "401 token expired").unwrap(),
+            false,
+        ),
+    ]
+    .map(|(quota, login)| {
+        let Quota::Unavailable { because, .. } = quota else {
+            panic!("an account's refusal");
+        };
+        (because, login)
+    }) {
+        assert_eq!(login_refused(&because), login, "{because}");
+    }
+    for (because, login) in [
+        (crate::muse::record::LOGIN_REFUSED, true),
+        (crate::muse::record::NO_ALLOWANCE, false),
+        ("its login was refused: You've hit your usage limit.", true),
+        ("its billing was refused: 402 login required", false),
+        // A reason that is no account's refusal is neither, whatever words it carries.
+        ("its model moved: 401 the login expired", false),
+        ("", false),
+    ] {
+        assert_eq!(login_refused(because), login, "{because}");
+    }
 }

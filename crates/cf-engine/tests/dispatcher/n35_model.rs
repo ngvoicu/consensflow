@@ -30,6 +30,7 @@ use super::n35_hold::{fail, next_turn_opens, resumes, retrying, working};
 use cf_engine::testing::{Context, Restarted};
 use cf_harness::records::Quota;
 use cf_harness::seams::Time;
+use cf_ledger::HoldKind;
 
 const RENEWAL_MS: i64 = 30 * 60 * 1000;
 const STEPS: usize = 18;
@@ -67,6 +68,9 @@ enum Phase {
         until: i64,
         busy: bool,
     },
+    /// The member is held for its account (a login refused at the last try): its task is held
+    /// with its window for no time, and only the human's Try again now ends it.
+    Account,
     /// A numbered retry's delivery was given up for good: the task is paused, held by nothing.
     Paused,
     Failed,
@@ -76,6 +80,8 @@ enum Phase {
 #[derive(Debug, Clone, Copy)]
 enum Step {
     Fail,
+    /// The harness refuses the window's login: a failed turn first (T-2367).
+    Login,
     DueQueued,
     DueDelivered,
     Deliver,
@@ -88,6 +94,8 @@ enum Step {
     Reopen,
     QuotaStart(bool),
     QuotaEnd,
+    /// The human's Try again now on a member held for its account.
+    AccountBack,
     Move,
     Restart,
     Forward,
@@ -256,6 +264,8 @@ impl<'a> Model<'a> {
                     Fail,
                     Fail,
                     Fail,
+                    Login,
+                    Login,
                     ChiefWord,
                     QuotaStart(false),
                     QuotaStart(true),
@@ -283,6 +293,7 @@ impl<'a> Model<'a> {
                 steps.extend([PersonResume, PersonResume]);
             }
             Phase::Quota { .. } => steps.extend([QuotaEnd]),
+            Phase::Account => steps.extend([AccountBack, AccountBack]),
             Phase::Failed | Phase::Done => steps.extend([Reopen, Reopen]),
         }
         steps
@@ -354,6 +365,8 @@ impl<'a> Model<'a> {
             }
             Step::Restart => self.restart(),
             Step::Fail => self.fail(),
+            Step::Login => self.login(),
+            Step::AccountBack => self.account_back(),
             Step::DueQueued => self.due(false),
             Step::DueDelivered => self.due(true),
             Step::Deliver => self.deliver(),
@@ -384,6 +397,16 @@ impl<'a> Model<'a> {
 
     /// The turn at work fails. The rule decides what the ledger must do.
     fn fail(&mut self) {
+        self.ends_badly(false);
+    }
+
+    /// The window's login is refused: the same count and the same tries as a failed turn's; where
+    /// the tries are used the member is held for its account, and no task fails for it.
+    fn login(&mut self) {
+        self.ends_badly(true);
+    }
+
+    fn ends_badly(&mut self, login: bool) {
         let c = self.c;
         let window = self.window.clone();
         // A failed end is later than the paste that opened its turn.
@@ -395,7 +418,28 @@ impl<'a> Model<'a> {
             );
             self.woke = false;
         }
-        fail(c, &window);
+        if login {
+            // A refusal is dated by its harness after the paste that opened its turn, as a failed
+            // end is: a clock put back is no business of its date (a limit of the driver).
+            let dated = self.now().max(self.pasted + 1);
+            if dated > self.now() {
+                c.advance(dated - self.now());
+            }
+            // A clock put back below a refusal's date would date the next refusal as that one.
+            self.floor = self.floor.max(dated);
+            let at = Some(cf_base::time::iso(dated));
+            c.adapter.refuse(
+                &window,
+                Quota::Unavailable {
+                    at,
+                    because: "its login was refused: 401 authentication_error".into(),
+                },
+            );
+        } else {
+            // The turn's own end: an earlier refusal is not read into it.
+            c.adapter.with(&window, |agent| agent.quota = None);
+            fail(c, &window);
+        }
         self.passes(3);
         let now = self.now();
         // The renewal by time: 30 minutes or more after the last moment anything happened to a
@@ -428,6 +472,21 @@ impl<'a> Model<'a> {
             assert_eq!(retry.which, self.count + 1, "the try the hold is for");
             let due = ms(task.held_until.as_deref().expect("a time"));
             self.phase = Phase::Held { due };
+        } else if login {
+            assert_ne!(
+                task.state, "failed",
+                "a login refused at the last try holds the member, and fails no task"
+            );
+            let member = self.t.id("zeus");
+            assert_eq!(
+                self.c.ledger.borrow().hold_kind(member).unwrap(),
+                Some(HoldKind::Account),
+                "the member is held for its account"
+            );
+            // The member is marked out now: a clock put back below it would date a refusal before
+            // the mark, which is no business of the retry count.
+            self.floor = self.floor.max(self.now());
+            self.phase = Phase::Account;
         } else {
             assert_eq!(
                 task.state, "failed",
@@ -435,6 +494,32 @@ impl<'a> Model<'a> {
             );
             self.phase = Phase::Failed;
         }
+    }
+
+    /// The human's Try again now: the member is back and its task goes on in its window, with
+    /// main's own Resume, which is neither a numbered retry nor a reset.
+    fn account_back(&mut self) {
+        let c = self.c;
+        let window = self.window.clone();
+        c.back_from_quota(self.t.project.id, "zeus").unwrap();
+        let before = resumes(c, "zeus");
+        for _ in 0..8 {
+            self.pass();
+            if resumes(c, "zeus") > before {
+                break;
+            }
+        }
+        assert!(
+            resumes(c, "zeus") > before,
+            "the task goes on in its window: {:#?}",
+            self.log
+        );
+        c.adapter.with(&window, |agent| agent.quota = None);
+        next_turn_opens(c, &window);
+        self.passes(2);
+        self.floor = self.floor.max(self.now());
+        self.phase = Phase::Working;
+        self.given = resumes(c, "zeus");
     }
 
     fn due_time(&self) -> i64 {

@@ -20,11 +20,20 @@
 //!
 //! **Nothing reads why.** No code, no kind and no words of the failure decide: a missing model
 //! gets the same two tries.
+//!
+//! **A login refused is a failed turn first.** A window whose harness refused its login (a token
+//! that had merely expired, which the harness renews by itself before its next request) is not
+//! held for its account at once: its task is held for a try, on the same count as any failed turn
+//! (`login_tried_again`). Only where the two tries are used and the last is refused for login too
+//! is the member held for its account, as before. A refusal for billing is held at once, as no
+//! retry mends an unpaid account. Which of the two a refusal is comes from the reader's own lead
+//! (`login_refused`), never from the harness's words. A chief's window has no task to hold: it is
+//! held as before.
 
 use std::rc::Rc;
 
 use cf_harness::contract::Observed;
-use cf_harness::records::{Quota, Reading, Settlement};
+use cf_harness::records::{login_refused, Quota, Reading, Settlement};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, RetryFact, RetryHold, RetryPlan};
 use cf_proto::ledger::TaskView;
 
@@ -135,6 +144,57 @@ impl Dispatcher {
         }
         self.changed();
         Ok(Tried::Held)
+    }
+
+    /// A window whose harness refused its login, where its task has a try left: the refusal is a
+    /// failed turn, and the task is held for the try as any failed turn's is (`failed_end`: the
+    /// same count, the same 30 seconds and 2 minutes, the same note to whoever gave the task),
+    /// with the member left as it is and the refusal acted on. True where the refusal was
+    /// answered so. False, and nothing written, for anything else: a chief, a refusal for billing
+    /// or for anything but login, a window with no task at work, and a task whose tries are
+    /// used (the member is then held for its account, and its task goes where a hold sends it).
+    /// Other windows of the member go on: only the window that was refused holds its task.
+    pub(crate) async fn login_tried_again(
+        self: &Rc<Self>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+    ) -> Result<bool, EngineError> {
+        let reported = record.quota.borrow().reported.clone();
+        let Some(Quota::Unavailable { because, .. }) = reported.as_deref() else {
+            return Ok(false);
+        };
+        if participant.role == "chief" || !login_refused(because) {
+            return Ok(false);
+        }
+        // What the window was receiving arrived if its record shows it (the refusal answered
+        // it), as a refusal's hold does first.
+        self.confirm_arrival(record, observed)?;
+        let thread = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, true)?
+            .filter(|thread| matches!(thread.task.state.as_str(), "queued" | "working"));
+        let Some(thread) = thread else {
+            return Ok(false);
+        };
+        match self.failed_end(project, participant, &thread.task, because, "login")? {
+            Tried::Fails(_) => Ok(false),
+            Tried::Held => {
+                self.handled(record);
+                record.held.borrow_mut().reset();
+                let delivering = record.delivery.borrow_mut().delivering.take();
+                if let Some(delivering) = delivering {
+                    self.give_back(
+                        delivering.message,
+                        "its login was refused and is tried again",
+                    )?;
+                }
+                Ok(true)
+            }
+        }
     }
 
     /// A count at its limit is no refusal of a turn: where the turn ended with a proven final

@@ -28,7 +28,7 @@ mod reset;
 mod tests;
 mod zone;
 
-pub use form::hold_form;
+pub use form::{hold_form, login_refused};
 pub(crate) use zone::time_zone;
 
 use cf_base::js;

@@ -1807,6 +1807,14 @@ impl Dispatcher {
         // chief has no task to hold and try again, and a hold would lose its turn unheard.
         let chief_busy = participant.role == "chief" && busy_turn(&observed);
         if !chief_busy && self.refused_here(record, &owner) {
+            // A login refused is a failed turn first: tried again as any failed turn is, and the
+            // member held for its account only when the last try is refused too (`turn_retry`).
+            if self
+                .login_tried_again(project, participant, record, &observed)
+                .await?
+            {
+                return Ok(());
+            }
             // A count at its limit with the turn's proven answer: the answer is collected
             // first, then main's hold (`turn_retry`).
             self.keep_proven_answer(project, participant, record, &observed)
