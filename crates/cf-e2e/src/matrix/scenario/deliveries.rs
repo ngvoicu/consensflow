@@ -379,7 +379,7 @@ pub fn deliveries() -> Vec<Scenario> {
                     restarts: false,
                     name: "the chief answers it in a turn of its own",
                     asks: |_| "Work for half a minute on the plan in your head. Our worker will ask you a question meanwhile: answer it with `cf answer` and the word JSON, without waiting for it to be typed to you. Tell me in one line when its result is back.".to_owned(),
-                    stand_in: |_| "SLEEP 30 CF answer m-2 :: JSON".to_owned(),
+                    stand_in: |bindings| format!("SLEEP 30 CF answer m-{} :: JSON", bindings.next_message.max(1)),
                     reached: |snapshot, bindings| answered(snapshot, bindings, "A", 0),
                 },
                 Step {

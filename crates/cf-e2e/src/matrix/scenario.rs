@@ -416,6 +416,7 @@ mod tests {
                 .iter()
                 .map(|(name, number)| (*name, vec![*number]))
                 .collect::<BTreeMap<_, _>>(),
+            ..Bindings::default()
         }
     }
 

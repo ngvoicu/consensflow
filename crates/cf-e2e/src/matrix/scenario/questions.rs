@@ -290,6 +290,7 @@ mod tests {
         let seating = Seating::stand_ins();
         let bindings = Bindings {
             found: BTreeMap::from([("A", vec![1])]),
+            ..Bindings::default()
         };
         exchange_checks(
             &Judged {
@@ -318,6 +319,7 @@ mod tests {
         assert!(failed(&snapshot, false).is_empty());
         let bindings = Bindings {
             found: BTreeMap::from([("A", vec![1])]),
+            ..Bindings::default()
         };
         assert!(exchange_reached(&snapshot, &bindings));
         snapshot.events.swap(3, 4);
@@ -363,6 +365,7 @@ mod tests {
             .push(json!({"kind":"task.state","data":{"task":1,"from":"working","to":"waiting"}}));
         let bindings = Bindings {
             found: BTreeMap::from([("A", vec![1])]),
+            ..Bindings::default()
         };
         assert!(exchange_reached(&snapshot, &bindings));
         assert!(failed(&snapshot, true).is_empty());

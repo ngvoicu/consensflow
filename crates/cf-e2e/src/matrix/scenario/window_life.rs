@@ -619,7 +619,7 @@ pub fn window_life() -> Vec<Scenario> {
                         snapshot.chief_inbox.iter().any(|message| message["kind"] == "question" && message["taskNumber"] == number)
                     }) && crate::matrix::run::settled(snapshot)
                 ),
-                run!("answer and cancel", "answer m-2 :: Use the new grammar\ntask cancel {A}", |snapshot, bindings| {
+                run!("answer and cancel", "answer m-{q} :: Use the new grammar\ntask cancel {A}", |snapshot, bindings| {
                     is(snapshot, bindings, "A", 0, &["cancelled"]) && crate::matrix::run::settled(snapshot)
                 }),
                 human(
@@ -645,7 +645,17 @@ pub fn window_life() -> Vec<Scenario> {
             |judged| {
                 vec![
                     Check::new("chief", "the new chief was told it is the chief", chief_given(judged, "You are the chief now") >= 1, "its record"),
-                    Check::new("chief", "it was sent to answer no question of a cancelled task", chief_given(judged, "cf answer m-2") == 0, "its record"),
+                    {
+                        // The question is the one the chief's inbox holds, whatever number the
+                        // board's own notes left it.
+                        let question = judged.snapshot.chief_question();
+                        Check::new(
+                            "chief",
+                            "it was sent to answer no question of a cancelled task",
+                            question.is_some_and(|id| chief_given(judged, &format!("cf answer m-{id}")) == 0),
+                            format!("question {question:?}, its record"),
+                        )
+                    },
                 ]
             },
             &[],
