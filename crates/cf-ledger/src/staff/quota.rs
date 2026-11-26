@@ -85,6 +85,8 @@ pub(crate) fn mark_out_kind(
     };
     let until = until.as_str();
     model::require_text(reason, "reason", 1000)?;
+    // The hold's own state: the closed form as JSON, with the hold (T-2353).
+    let stored = form.map(|form| json!(form).to_string());
     store.write(|store| {
         let member = store.participant_row(participant_id)?;
         let now = store.at();
@@ -93,8 +95,8 @@ pub(crate) fn mark_out_kind(
         if out && out_until.is_some_and(|until| until >= reset) {
             if out_until == Some(reset) && member.out_kind.is_none() && kind.is_some() {
                 store.db.execute(
-                    "UPDATE participant SET out_kind = ? WHERE id = ?",
-                    params![kind.map(HoldKind::as_str), member.id],
+                    "UPDATE participant SET out_kind = ?, out_form = ? WHERE id = ?",
+                    params![kind.map(HoldKind::as_str), stored, member.id],
                 )?;
                 return participant_view(&store.participant_row(member.id)?);
             }
@@ -106,8 +108,8 @@ pub(crate) fn mark_out_kind(
             Some(now)
         };
         store.db.execute(
-            "UPDATE participant SET out_until = ?, out_since = ?, out_kind = ? WHERE id = ?",
-            params![until, since, kind.map(HoldKind::as_str), member.id],
+            "UPDATE participant SET out_until = ?, out_since = ?, out_kind = ?, out_form = ? WHERE id = ?",
+            params![until, since, kind.map(HoldKind::as_str), stored, member.id],
         )?;
         let mut event = json!({ "handle": member.handle, "until": until, "reason": reason });
         if let Some(form) = form {
@@ -121,42 +123,42 @@ pub(crate) fn mark_out_kind(
     })
 }
 
-/// The closed form of the account hold the member is under now: that of the `member.out` event
-/// of the mark that set the end it keeps, the member's by its id (an event of an older build
-/// names the member by its handle alone). An event without the form, an older build's or one
-/// whose reason had none, gives none, and no earlier event's form stands in for it. Whatever the
-/// event holds is read back through the lists of [`HoldForm::checked`]: a value that is in none
-/// is no value.
-pub(crate) fn hold_form(
-    store: &Store,
-    project_id: i64,
-    participant: i64,
-    handle: &str,
-    until: &str,
-) -> Result<Option<HoldForm>, LedgerError> {
-    let found: Option<(Option<String>, Option<i64>, Option<String>)> = store
+/// The closed form of the account hold the member is under now: the hold's own state (the
+/// `out_form` column its statement wrote with it, and every statement that clears it or makes
+/// another hold clears), never looked up from an event. Read back through the lists of
+/// [`HoldForm::checked`]: a value that is not JSON, not a form, or outside a list reads as no
+/// form (T-2353).
+pub(crate) fn hold_form(store: &Store, participant: i64) -> Result<Option<HoldForm>, LedgerError> {
+    let stored: Option<String> = store
         .db
         .query_row(
-            "SELECT json_extract(data, '$.form.kind'), json_extract(data, '$.form.status'),
-                    json_extract(data, '$.form.code')
-             FROM event
-             WHERE project_id = ?1 AND kind = 'member.out' AND json_valid(data)
-               AND json_extract(data, '$.until') = ?4
-               AND (json_extract(data, '$.participant') = ?2
-                    OR (json_extract(data, '$.participant') IS NULL
-                        AND json_extract(data, '$.handle') = ?3))
-             ORDER BY id DESC LIMIT 1",
-            params![project_id, participant, handle, until],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            "SELECT out_form FROM participant WHERE id = ?",
+            [participant],
+            |row| row.get(0),
         )
-        .optional()?;
-    Ok(found.and_then(|(kind, status, code)| {
-        HoldForm::checked(
-            kind.as_deref()?,
-            status.and_then(|status| u64::try_from(status).ok()),
-            code.as_deref(),
-        )
-    }))
+        .optional()?
+        .flatten();
+    Ok(stored.as_deref().and_then(read_form))
+}
+
+/// A stored form as [`HoldForm::checked`] lets it be, and only whole: none for anything that is
+/// not JSON, has no kind of the list, or carries a status or a code the lists do not name (a
+/// value outside them is no form, never a form with the value dropped).
+fn read_form(stored: &str) -> Option<HoldForm> {
+    let value: serde_json::Value = serde_json::from_str(stored).ok()?;
+    let given = |field: &str| value.get(field).filter(|found| !found.is_null());
+    let status = match given("status") {
+        None => None,
+        Some(status) => Some(status.as_u64()?),
+    };
+    let code = match given("code") {
+        None => None,
+        Some(code) => Some(code.as_str()?),
+    };
+    let form = HoldForm::checked(value.get("kind")?.as_str()?, status, code)?;
+    // `checked` drops a value that is in no list: a form that lost one is not the stored one.
+    (status.is_none() == form.status().is_none() && code.is_none() == form.code().is_none())
+        .then_some(form)
 }
 
 /// A member out of quota is back before its reset: one of its windows
@@ -180,7 +182,7 @@ pub(crate) fn mark_back(
             return participant_view(&member);
         }
         store.db.execute(
-            "UPDATE participant SET out_until = NULL, out_since = ?, out_kind = NULL WHERE id = ?",
+            "UPDATE participant SET out_until = NULL, out_since = ?, out_kind = NULL, out_form = NULL WHERE id = ?",
             params![now, member.id],
         )?;
         store.db.execute(

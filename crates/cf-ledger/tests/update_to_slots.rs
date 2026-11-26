@@ -42,14 +42,16 @@ fn rows(db: &Connection, table: &str, skip: &[&str]) -> Vec<Vec<String>> {
 const TRIES: [&str; 3] = ["turn_retries", "retry_hold", "turn_retry_at"];
 
 /// What the update must leave exactly as it was: every task, message, need and conversation,
-/// and every participant but its tier (assignee, `member_id`, `backup_of` included).
+/// and every participant but its tier (assignee, `member_id`, `backup_of` included) and the closed
+/// form of an account hold (0048), which this update does not write and a ledger opened by this
+/// build gains.
 fn kept(db: &Connection) -> Vec<Vec<Vec<String>>> {
     vec![
         rows(db, "task", &TRIES),
         rows(db, "message", &[]),
         rows(db, "task_need", &[]),
         rows(db, "conversation", &[]),
-        rows(db, "participant", &["tier"]),
+        rows(db, "participant", &["tier", "out_form"]),
     ]
 }
 

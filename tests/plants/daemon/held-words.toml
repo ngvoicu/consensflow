@@ -15,6 +15,7 @@ held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi:
 held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests"]
 held-words-form = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::form"]
 held-words-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "hold::"]
+held-words-proto-doc = ["cargo", "test", "--offline", "-p", "cf-proto", "--doc"]
 
 [[plant]]
 name = "held words: the hold keeps no form"
@@ -67,24 +68,94 @@ find = ".and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == st
 replace = ".and_then(|status| u16::try_from(status).ok()),"
 
 [[plant]]
-name = "held words: a hold's form is looked up by any member's hold of that end"
-meant = "a_member_that_takes_the_handle_another_left_says_its_own_form_when_held_after_it"
-runs = ["held-words-ledger"]
+name = "held words: the hold's form can be built outside its type"
+meant = "hold::HoldForm (line 56) - compile fail"
+runs = ["held-words-proto-doc"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "AND (json_extract(data, '$.participant') = ?2"
-replace = "AND (?2 IS NOT NULL"
+file = "crates/cf-proto/src/hold.rs"
+find = """pub struct HoldForm {
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,"""
+replace = """pub struct HoldForm {
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,"""
 
 [[plant]]
-name = "held words: a hold without a form says an earlier hold's form"
-meant = "a_hold_without_a_form_says_none_and_never_an_earlier_hold_s_form"
+name = "held words: mark_back leaves the hold's form"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
 runs = ["held-words-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = "ORDER BY id DESC LIMIT 1"
-replace = "AND json_extract(data, '$.form') IS NOT NULL ORDER BY id DESC LIMIT 1"
+find = "out_kind = NULL, out_form = NULL WHERE id = ?"
+replace = "out_kind = NULL WHERE id = ?"
+
+[[plant]]
+name = "held words: a hold of another kind keeps the form it replaced"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "out_kind = ?, out_form = ? WHERE id = ?\","
+replace = "out_kind = ?, out_form = coalesce(?, out_form) WHERE id = ?\","
+
+[[plant]]
+name = "held words: the chief's switch leaves the hold's form"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = "out_kind = NULL, out_form = NULL, needs_edit = 0"
+replace = "out_kind = NULL, needs_edit = 0"
+
+[[plant]]
+name = "held words: a stored form with a value outside the lists reads as a form"
+meant = "a_form_outside_the_lists_or_not_a_form_reads_as_no_form_and_the_board_loads"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "(status.is_none() == form.status().is_none() && code.is_none() == form.code().is_none())"
+replace = "(status.is_none() == status.is_none())"
+
+[[plant]]
+name = "held words: invalid_grant makes a login refusal over a refusal for a moment"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "            && !busy_refusal(text, status) =>"
+replace = "            && true =>"
+
+[[plant]]
+name = "held words: invalid_grant is matched inside a longer word"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'compile(r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))")'
+replace = 'compile(r"(?i-u:invalid_grant)")'
+
+[[plant]]
+name = "held words: the form names a code inside a longer word"
+meant = "tells_which_was_refused_its_status_and_its_provider_s_error_type"
+runs = ["held-words-form"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/form.rs"
+find = '("invalid_grant", r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))"),'
+replace = '("invalid_grant", r"(?i-u:invalid_grant)"),'
 
 [[plant]]
 name = "held words: a reader cuts an account's refusal short of the base's 300 characters"

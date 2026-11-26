@@ -196,6 +196,7 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // member by its model's id, and 0034, which named the compaction column for every member).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0048(&db).expect("0048 undone");
         cf_ledger::testing::undo_migration_0047(&db).unwrap();
         cf_ledger::testing::undo_migration_0046(&db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(&db).expect("holding bounds undone");

@@ -359,3 +359,345 @@ fn a_member_that_takes_the_handle_another_left_says_its_own_form_when_held_after
 fn a_member_that_takes_the_handle_another_left_says_its_own_form_when_held_before_it() {
     two_holds_one_handle(true);
 }
+
+/// What the participant row keeps as the hold's form: the column itself.
+fn column(ledger: &Ledger, member: i64) -> Option<String> {
+    ledger
+        .sqlite()
+        .query_row(
+            "SELECT out_form FROM participant WHERE id = ?",
+            [member],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn pi_member(made: &ProjectView) -> i64 {
+    made.participants
+        .iter()
+        .find(|p| p.harness.as_deref() == Some("pi"))
+        .unwrap()
+        .id
+}
+
+const FOREVER: &str = "9999-12-31T23:59:59.998Z";
+
+#[test]
+fn the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let made = project(&mut ledger);
+    let member = pi_member(&made);
+    let held = |ledger: &mut Ledger, member: i64| {
+        ledger
+            .mark_out_with_form(
+                member,
+                FOREVER,
+                "account unavailable",
+                login(Some(401), Some("authentication_error")),
+            )
+            .unwrap();
+        assert!(column(ledger, member).is_some(), "the hold wrote its form");
+    };
+    // 1. The hold's own statement writes it, as the closed form's JSON.
+    held(&mut ledger, member);
+    assert_eq!(
+        serde_json::from_str::<Value>(&column(&ledger, member).unwrap()).unwrap(),
+        json!({ "kind": "login", "status": 401, "code": "authentication_error" })
+    );
+    // 2. mark_back (the human's Try again now, a window's answer, an edit that lifts it).
+    ledger.mark_back(member, "the human logged in").unwrap();
+    assert_eq!(column(&ledger, member), None, "mark_back");
+    // 3. A hold that changes kind, here an account's form replaced by a moved model's hold.
+    held(&mut ledger, member);
+    ledger
+        .mark_out_with_kind(
+            member,
+            "9999-12-31T23:59:59.999Z",
+            "model moved",
+            HoldKind::Moved,
+        )
+        .unwrap();
+    assert_eq!(
+        column(&ledger, member),
+        None,
+        "an account's hold replaced by another kind"
+    );
+    ledger.mark_back(member, "back").unwrap();
+    // ... a quota hold and a busy hold, and an account hold with no form of its own.
+    for (until, reason, kind) in [
+        ("9999-12-31T23:59:59.997Z", "out of quota", HoldKind::Quota),
+        ("9999-12-31T23:59:59.997Z", "model busy", HoldKind::Busy),
+    ] {
+        held(&mut ledger, member);
+        ledger.mark_back(member, "back").unwrap();
+        ledger
+            .mark_out_with_kind(member, until, reason, kind)
+            .unwrap();
+        assert_eq!(column(&ledger, member), None, "{reason}");
+        ledger.mark_back(member, "back").unwrap();
+    }
+    held(&mut ledger, member);
+    ledger.mark_back(member, "back").unwrap();
+    ledger
+        .mark_out_with_form(member, FOREVER, "account unavailable", None)
+        .unwrap();
+    assert_eq!(
+        column(&ledger, member),
+        None,
+        "a hold with no form writes none"
+    );
+    ledger.mark_back(member, "back").unwrap();
+    // 4. A hold made before the kind was kept, given its kind and form on the same end.
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET out_until = ?, out_since = ?, out_kind = NULL, out_form = NULL WHERE id = ?",
+            rusqlite::params![FOREVER, "2026-11-26T12:00:00.000Z", member],
+        )
+        .unwrap();
+    ledger
+        .mark_out_with_form(
+            member,
+            FOREVER,
+            "account unavailable",
+            login(None, Some("invalid_grant")),
+        )
+        .unwrap();
+    assert!(
+        column(&ledger, member).is_some(),
+        "the kind and the form set together"
+    );
+    ledger.mark_back(member, "back").unwrap();
+    // 5. The chief's switch: the chief held, then switched to another harness.
+    let chief = made
+        .participants
+        .iter()
+        .find(|p| p.handle == "chief")
+        .unwrap()
+        .id;
+    held(&mut ledger, chief);
+    ledger
+        .switch_chief(
+            made.id,
+            &cf_ledger::ChiefSwitch {
+                harness: "pi".into(),
+                model: "claude-fable-5-2".into(),
+                effort: None,
+                model_name: None,
+                cut: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(column(&ledger, chief), None, "the chief's switch");
+    // 6. An edit that keeps the hold keeps it; one that lifts it clears it.
+    held(&mut ledger, member);
+    let handle = ledger
+        .board(made.id)
+        .map(|b| serde_json::to_value(b).unwrap())
+        .unwrap()["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["participant"]["id"] == member)
+        .unwrap()["participant"]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    ledger
+        .edit_member(
+            made.id,
+            &handle,
+            &cf_ledger::MemberEdit {
+                harness: "pi".into(),
+                model: Some("claude-fable-5-2".into()),
+                effort: Some("high".into()),
+                model_name: None,
+                tier: "standard".into(),
+            },
+        )
+        .unwrap();
+    assert!(
+        column(&ledger, member).is_some(),
+        "an edit that keeps the hold keeps its form"
+    );
+}
+
+#[test]
+fn a_form_outside_the_lists_or_not_a_form_reads_as_no_form_and_the_board_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let made = project(&mut ledger);
+    let member = pi_member(&made);
+    ledger
+        .mark_out_with_form(
+            member,
+            FOREVER,
+            "account unavailable",
+            login(Some(401), None),
+        )
+        .unwrap();
+    for stored in [
+        r#"{"kind":"login","status":"401"}"#,
+        r#"{"kind":"login","status":499}"#,
+        r#"{"kind":"login","code":"owner@example.invalid"}"#,
+        r#"{"kind":"login","code":7}"#,
+        r#"{"kind":"billing","code":"authentication_error"}"#,
+        r#"{"kind":"moved"}"#,
+        r#"{"kind":5}"#,
+        r#"{"status":401}"#,
+        r#"[]"#,
+        "not json at all",
+        "",
+    ] {
+        ledger
+            .sqlite()
+            .execute(
+                "UPDATE participant SET out_form = ? WHERE id = ?",
+                rusqlite::params![stored, member],
+            )
+            .unwrap();
+        let said = lane_of(&ledger.board(made.id).unwrap(), member);
+        assert!(said.get("outForm").is_none(), "{stored}: {said}");
+        assert_eq!(
+            said["outKind"], "account",
+            "the hold itself stands: {stored}"
+        );
+    }
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET out_form = ? WHERE id = ?",
+            rusqlite::params![
+                r#"{"kind":"login","status":401,"code":"invalid_grant"}"#,
+                member
+            ],
+        )
+        .unwrap();
+    let said = lane_of(&ledger.board(made.id).unwrap(), member);
+    assert_eq!(
+        said["outForm"],
+        json!({ "kind": "login", "status": 401, "code": "invalid_grant" })
+    );
+}
+
+/// The check's two sequences of finding 21 (T-2364): the form is the hold's own state, so a
+/// later hold with none, or another member's, can neither bring a cleared form back nor hide a
+/// present one.
+#[test]
+fn a_cleared_form_never_comes_back_and_another_member_s_event_never_hides_a_present_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let (made, a, b) = two_members(&mut ledger);
+    let billing = HoldForm::checked("billing", Some(402), Some("insufficient_quota"));
+    // First: a billing hold cleared, a hold with no form, an effort-only rename.
+    ledger
+        .mark_out_with_form(a, FOREVER, "account unavailable", billing)
+        .unwrap();
+    ledger.mark_back(a, "paid").unwrap();
+    ledger
+        .mark_out_with_kind(a, FOREVER, "account unavailable", HoldKind::Account)
+        .unwrap();
+    effort_of(&mut ledger, made.id, a, "high");
+    let said = lane_of(&ledger.board(made.id).unwrap(), a);
+    assert_eq!(said["outKind"], "account");
+    assert!(
+        said.get("outForm").is_none(),
+        "a cleared form came back: {said}"
+    );
+    // Second: a held member's form stays while another takes its freed handle and is held
+    // with no form.
+    ledger.mark_back(a, "back").unwrap();
+    ledger
+        .mark_out_with_form(a, FOREVER, "account unavailable", login(Some(401), None))
+        .unwrap();
+    let freed = effort_of(&mut ledger, made.id, b, "xhigh");
+    assert_eq!(freed.id, b);
+    effort_of(&mut ledger, made.id, a, "low");
+    ledger
+        .mark_out_with_kind(b, FOREVER, "account unavailable", HoldKind::Account)
+        .unwrap();
+    let board = ledger.board(made.id).unwrap();
+    assert_eq!(
+        lane_of(&board, a)["outForm"],
+        json!({ "kind": "login", "status": 401 })
+    );
+    assert!(lane_of(&board, b).get("outForm").is_none());
+}
+
+/// A ledger a build before 0048 left, with holds in it: every row kept, the column NULL, the
+/// holds say the generic sentence (no form), and a second open writes nothing. An older build
+/// never reads the column: it refuses a ledger of a newer version before it reads anything.
+#[test]
+fn a_ledger_with_holds_from_before_the_column_gains_it_null_keeps_every_row_and_a_second_open_writes_nothing(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("ledger.db");
+    let mut ledger = open_ledger(&file, Options::default()).unwrap();
+    let made = project(&mut ledger);
+    let member = pi_member(&made);
+    ledger
+        .mark_out_with_form(
+            member,
+            FOREVER,
+            "account unavailable",
+            login(Some(401), None),
+        )
+        .unwrap();
+    ledger.close().unwrap();
+    // As the build before 0048 left it.
+    let raw = rusqlite::Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0048(&raw).unwrap();
+    raw.execute_batch(&format!(
+        "PRAGMA user_version = {}",
+        cf_ledger::SCHEMA_VERSION - 1
+    ))
+    .unwrap();
+    let rows = |db: &rusqlite::Connection| -> Vec<String> {
+        let mut out = Vec::new();
+        for table in ["participant", "event", "project", "task", "message"] {
+            let columns: Vec<String> = db
+                .prepare(&format!(
+                    "SELECT name FROM pragma_table_info('{table}') WHERE name != 'out_form' ORDER BY cid"
+                ))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let select = columns
+                .iter()
+                .map(|c| format!("quote(\"{c}\")"))
+                .collect::<Vec<_>>()
+                .join("||'|'||");
+            out.extend(
+                db.prepare(&format!(
+                    "SELECT '{table}:'||{select} FROM {table} ORDER BY rowid"
+                ))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap),
+            );
+        }
+        out
+    };
+    let before = rows(&raw);
+    drop(raw);
+    let mut ledger = open_ledger(&file, Options::default()).unwrap();
+    assert_eq!(rows(ledger.sqlite()), before, "every row kept");
+    assert_eq!(
+        column(&ledger, member),
+        None,
+        "a hold from before has no form"
+    );
+    let said = lane_of(&ledger.board(made.id).unwrap(), member);
+    assert_eq!(said["outKind"], "account");
+    assert!(said.get("outForm").is_none(), "{said}");
+    ledger.close().unwrap();
+    let ledger = open_ledger(&file, Options::default()).unwrap();
+    ledger.close().unwrap();
+    let again = rusqlite::Connection::open(&file).unwrap();
+    assert_eq!(rows(&again), before, "a second open writes no row");
+}
