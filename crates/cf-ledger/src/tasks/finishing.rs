@@ -73,25 +73,6 @@ pub(crate) fn record_result(
     )
 }
 
-/// The window's turn ended with its result past questions of its task that are still open
-/// (`turn_end`'s `went_past`): the result as [`record_result`] takes it, and each question still
-/// open is closed with it and named in its words.
-pub(crate) fn record_result_past_questions(
-    store: &mut Store,
-    project_id: i64,
-    number: i64,
-    body: &str,
-) -> Result<TaskMoved, LedgerError> {
-    record(
-        store,
-        project_id,
-        number,
-        body,
-        &ACTIVE_TASK_STATES,
-        Finishing::PastQuestions,
-    )
-}
-
 /// The chief or the human takes what the worker said last as the result (Finish):
 /// of a task at work, or of a paused one, whose worker's turn ended with its
 /// answer after the tell that paused it (`turn_end`'s paused answer). The pause
@@ -151,8 +132,6 @@ const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 enum Finishing {
     /// The window's own word (`cf task done`).
     Own,
-    /// The engine's reading of a turn's end, past questions of the task still open.
-    PastQuestions,
     /// The chief or the human, with the jobs and agents the window was counted running.
     Word { left: (usize, usize) },
 }
@@ -228,32 +207,23 @@ fn record(
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
-        // The chief may explicitly take a raised question as the result.
-        // That withdraws unanswered questions without ending the holding or
-        // withdrawing an answer already accepted for its window.
-        if finished_by_word {
+        // The chief or the human takes the words as the result while questions of the task are
+        // still open (T-2197): they close with it, however they were tracked and whether its
+        // window stays, and the result names each. That withdraws unanswered questions without
+        // ending the holding or withdrawing an answer already accepted for its window.
+        let mut body = body.to_owned();
+        if let (true, Some(window)) = (finished_by_word, task.assignee_id) {
+            let left = open_questions(store, task.id, window)?;
+            close_by_the_result(store, &task, &left)?;
+            for question in left {
+                body.push_str(&format!(
+                    "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`.)"
+                ));
+            }
             withdraw_open_questions(store, &task, "was finished")?;
         }
-        // The window's result past questions of its task: they close with it, however they
-        // were tracked and whether its window stays, and the result names each.
-        let mut body = body.to_owned();
-        let mut closed = finished_by_word;
-        if let (Finishing::PastQuestions, "waiting", Some(window)) =
-            (how, task.state.as_str(), task.assignee_id)
-        {
-            let left = open_questions(store, task.id, window)?;
-            if !left.is_empty() {
-                closed = true;
-                close_by_the_result(store, &task, &left)?;
-                for question in left {
-                    body.push_str(&format!(
-                        "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`.)"
-                    ));
-                }
-            }
-        }
         let body = body.as_str();
-        if closed {
+        if finished_by_word {
             crate::waiting_questions::end_for_task(store, task.id, task.assignee_id)?;
         }
         let message_id = queue(

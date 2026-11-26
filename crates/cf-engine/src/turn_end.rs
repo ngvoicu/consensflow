@@ -84,7 +84,9 @@ use std::sync::Arc;
 use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{Command, Item, Monitor, Pending, Reading, Role, Source};
-use cf_ledger::{NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread};
+use cf_ledger::{
+    NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread, TURN_ON_OPEN_QUESTION,
+};
 use cf_proto::ledger::MessageView;
 use serde_json::Value;
 
@@ -408,24 +410,65 @@ impl Dispatcher {
         Ok(released)
     }
 
-    /// Whether the message last pasted into the task's window went into the pane that is the
-    /// window's now: a turn ended in an earlier opening (a window that crashed, was held for
-    /// quota, shown again, or restarted) is never a result of this one.
-    fn pasted_in_this_opening(
+    /// A waiting task's window ended a turn with words while a question of its task is open:
+    /// the requester is told those words once, with how to take them as the result if they are
+    /// (T-2197). The engine never takes them as the result itself. Whether the turn is one to
+    /// tell is the ledger's alone (`questions_to_report`): a message of the task was pasted
+    /// after the newest open question, and no such note was sent since.
+    fn report_turn_on_open_question(
         &self,
-        record: &Record,
-        participant: i64,
-        task: i64,
-    ) -> Result<bool, EngineError> {
-        let Some(pasted) = self.seams.ledger.borrow().last_pasted(participant, task)? else {
-            return Ok(false);
+        project: &ProjectView,
+        participant: &ParticipantView,
+        thread: &TaskThread,
+        observed: &Observed,
+        watching: Watching,
+    ) -> Result<(), EngineError> {
+        let items = observed.items();
+        let from = items
+            .iter()
+            .rposition(|item| item.role == Role::User && !item.compaction)
+            .map_or(0, |at| at + 1);
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+        let Some(answers) = answers_to_the_task(&items[from..], &replacements)
+            .filter(|answers| answers.last.is_some_and(|last| last.complete))
+        else {
+            return Ok(());
         };
-        let window = record.window.borrow();
-        Ok(window
-            .pasted_in
-            .as_ref()
-            .zip(window.pane.as_ref())
-            .is_some_and(|((message, was), now)| *message == pasted.id && was == now))
+        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {
+            return Ok(());
+        }
+        let open = self
+            .seams
+            .ledger
+            .borrow()
+            .questions_to_report(participant.id, thread.task.id)?;
+        let Some((last, rest)) = open.split_last() else {
+            return Ok(());
+        };
+        let names = if rest.is_empty() {
+            format!("m-{last}")
+        } else {
+            let rest: Vec<String> = rest.iter().map(|id| format!("m-{id}")).collect();
+            format!("s {} and m-{last}", rest.join(", "))
+        };
+        let number = thread.task.number;
+        let handle = &participant.handle;
+        let body = format!(
+            "{}\n\n(ConsensFlow: @{handle}'s {TURN_ON_OPEN_QUESTION}{} still open. If they are its result: `cf task finish T-{number}`.)",
+            words_of(&answers.final_run),
+            if rest.is_empty() { format!(" {names}") } else { names },
+        );
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: Some(participant.handle.clone()),
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
@@ -481,29 +524,17 @@ impl Dispatcher {
             }
             _ => false,
         };
-        // A task waiting on a question its window then went past: a message came into the
-        // window after every open question was asked, and its turn ended settled with no
-        // question of its own. That end is the result, whichever question is still open.
-        let went_past = match &task {
-            Some(thread)
-                if thread.task.state == "waiting"
-                    && observed.settled
-                    && !observed.failed
-                    && !observed.shared =>
-            {
-                self.pasted_in_this_opening(record, participant.id, thread.task.id)?
-                    && !self
-                        .seams
-                        .ledger
-                        .borrow()
-                        .left_open_before_the_turn(participant.id, thread.task.id)?
-                        .is_empty()
-            }
-            _ => false,
-        };
-        let Some(thread) =
-            task.filter(|thread| (thread.task.state == "working" || went_past) && !waiting)
-        else {
+        // A waiting task's turn that ended with words past an open question is told to the
+        // requester, never taken as the result (T-2197).
+        if let Some(thread) = task.as_ref().filter(|thread| {
+            thread.task.state == "waiting"
+                && observed.settled
+                && !observed.failed
+                && !observed.shared
+        }) {
+            self.report_turn_on_open_question(project, participant, thread, observed, watching)?;
+        }
+        let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {
             record.held.borrow_mut().drop_hold();
             if observed.failed {
                 self.tell_failed_turn(project, participant, record, observed)
@@ -574,11 +605,6 @@ impl Dispatcher {
             self.tell_lost(project, participant, record, &thread, lost)?;
             return Ok(Turn::Open);
         };
-        // A turn with no words past a question still open is no result: the placeholder is
-        // for a task that was working, and this one waits (T-2197).
-        if thread.task.state == "waiting" && !has_words(&answers.final_run) {
-            return Ok(Turn::Open);
-        }
         let pending = pending_after_look(observed, watching);
         // A line lost in the turn is said with its words, held or not: the hold's note is
         // where the requester chooses between waiting and Finish (Calliope's P3 (b), T-624).
@@ -758,7 +784,7 @@ impl Dispatcher {
         self.seams
             .ledger
             .borrow_mut()
-            .record_result_past_questions(project.id, thread.task.number, &body)?;
+            .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Turn::Answered)
     }

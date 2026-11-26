@@ -30,11 +30,7 @@ impl Dispatcher {
         }
         // Its window took work: it came up, whatever its record showed before (CHF-06).
         if let Some(record) = self.record(message.recipient_id) {
-            let mut window = record.window.borrow_mut();
-            window.took = true;
-            if message.task_number.is_some() {
-                window.pasted_in = window.pane.clone().map(|pane| (message.id, pane));
-            }
+            record.window.borrow_mut().took = true;
         }
         Ok(())
     }

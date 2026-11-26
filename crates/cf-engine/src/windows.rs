@@ -318,11 +318,6 @@ pub(crate) struct WindowPart {
     /// window came up and took work. A chief's window that ends before is a launch its
     /// harness may have refused (CHF-06); the history a resumed record shows is no sign.
     pub(crate) took: bool,
-    /// The task message last confirmed pasted into this record's window, and the pane it was
-    /// pasted into: what a turn ending with a question of its task open is held to, that it
-    /// ended in the opening of the window the message went into (`went_past`, T-2197). A
-    /// restart, a close, a Show or a relaunch makes a new pane, and a record born anew has none.
-    pub(crate) pasted_in: Option<(i64, Pane)>,
     /// It printed, then held still: its screen is drawn.
     pub(crate) drawn: bool,
     /// It named its first conversation.
@@ -445,7 +440,6 @@ impl Default for WindowPart {
             gone: None,
             starts_given_up: 0,
             took: false,
-            pasted_in: None,
             drawn: false,
             named: false,
             trust: Trusting::Past,

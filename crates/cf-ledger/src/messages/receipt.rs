@@ -265,84 +265,67 @@ pub(crate) fn open_questions(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// The questions `window` left open on `task` when the turn that just ended is past them, so
-/// that turn's words are the task's result (T-2197): a message was pasted into the window after
-/// every open question was written, in the window's present conversation, and nothing of the
-/// task is on its way to the window. Empty otherwise. That the paste went into the window's
-/// present pane is the engine's to say (`pasted_in_this_opening`).
-///
-/// "After" is when each was written, by the ledger's own order: the question's `message.sent`
-/// event against the pasted message's, never when it was pasted and never the messages' ids
-/// (an answer written before a question existed says nothing of that question, though it is
-/// pasted after it). A question or a message with no such event is placed by its id.
-pub(crate) fn left_open_before_the_turn(
+/// What ConsensFlow's note of a turn that ended with a question open says it is, so that the
+/// ledger can tell it was sent (`questions_to_report`): the note's words hold it.
+pub const TURN_ON_OPEN_QUESTION: &str = "turn ended on these words with its question";
+
+/// The questions `window` has open on `task` that the turn which just ended should be reported
+/// on (T-2197): a message of the task was pasted into the window after the newest of them was
+/// asked, the window's `delivery.begun` after the question's `message.sent`, and no note of
+/// this report was sent since that paste. Empty otherwise. Read from the ledger alone: the
+/// note's own `message.sent` after the paste is what binds it to once for a turn.
+pub(crate) fn questions_to_report(
     store: &Store,
     task: i64,
     window: i64,
 ) -> Result<Vec<i64>, LedgerError> {
     let open = open_questions(store, task, window)?;
-    // Words on their way are for the turn after them.
-    if store
-        .db
-        .prepare(
-            "SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2
-               AND state IN ('queued', 'gated', 'delivering')",
-        )?
-        .exists(params![task, window])?
-    {
-        return Ok(Vec::new());
-    }
-    let Some(pasted) = super::delivery::last_pasted(store, window, task)? else {
+    let Some(newest) = open.last() else {
         return Ok(Vec::new());
     };
-    let place = |kind: &str, message: i64| -> Result<Option<i64>, LedgerError> {
-        Ok(store.db.query_row(
-            "SELECT max(id) FROM event
-              WHERE project_id = ?1 AND kind = ?2 AND json_extract(data, '$.message') = ?3",
-            params![pasted.project_id, kind, message],
-            |row| row.get::<_, Option<i64>>(0),
-        )?)
+    let project: i64 = store.db.query_row(
+        "SELECT project_id FROM message WHERE id = ?",
+        [newest],
+        |row| row.get(0),
+    )?;
+    let event_of = |kind: &str, message: &str| -> String {
+        format!(
+            "SELECT max(e.id) FROM event e WHERE e.project_id = ?1 AND e.kind = '{kind}'
+               AND json_extract(e.data, '$.message') IN ({message})"
+        )
     };
-    let paste = place("delivery.begun", pasted.id)?;
-    // A paste before the window's conversation changed (a new one, a switch away and back)
-    // went into another opening of it.
-    if let Some(paste) = paste {
-        if conversation_changed_since(store, window, pasted.project_id, paste)? {
-            return Ok(Vec::new());
-        }
+    let asked: Option<i64> = store.db.query_row(
+        &event_of("message.sent", "?2"),
+        params![project, newest],
+        |row| row.get(0),
+    )?;
+    let pasted: Option<i64> = store.db.query_row(
+        &event_of(
+            "delivery.begun",
+            "SELECT id FROM message WHERE task_id = ?2 AND recipient_id = ?3 AND state IN ('delivered', 'read')",
+        ),
+        params![project, task, window],
+        |row| row.get(0),
+    )?;
+    let (Some(asked), Some(pasted)) = (asked, pasted) else {
+        return Ok(Vec::new());
+    };
+    if pasted < asked {
+        return Ok(Vec::new());
     }
-    let written = place("message.sent", pasted.id)?;
-    for question in &open {
-        let after = match (place("message.sent", *question)?, written) {
-            (Some(asked), Some(written)) => asked > written,
-            _ => *question > pasted.id,
-        };
-        if after {
-            return Ok(Vec::new());
-        }
+    let reported: Option<i64> = store.db.query_row(
+        &event_of(
+            "message.sent",
+            "SELECT id FROM message WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'note'
+               AND instr(body, ?4) > 0",
+        ),
+        params![project, task, window, TURN_ON_OPEN_QUESTION],
+        |row| row.get(0),
+    )?;
+    if reported.is_some_and(|reported| reported > pasted) {
+        return Ok(Vec::new());
     }
     Ok(open)
-}
-
-/// Whether the conversation of `window` was started, followed onto another or ended after the
-/// event `since`.
-fn conversation_changed_since(
-    store: &Store,
-    window: i64,
-    project: i64,
-    since: i64,
-) -> Result<bool, LedgerError> {
-    Ok(store
-        .db
-        .prepare(
-            "SELECT 1 FROM event e WHERE e.project_id = ?1 AND e.id > ?2 AND (
-                 (e.kind IN ('conversation.started', 'conversation.followed')
-                    AND json_extract(e.data, '$.participant') = (SELECT handle FROM participant WHERE id = ?3))
-              OR (e.kind = 'conversation.ended'
-                    AND json_extract(e.data, '$.conversation') IN (SELECT id FROM conversation WHERE participant_id = ?3)))
-             LIMIT 1",
-        )?
-        .exists(params![project, since, window])?)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:
