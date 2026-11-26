@@ -57,10 +57,16 @@ pub(super) fn left_behind(pids_file: &Path, within: Duration, program: &str) -> 
 /// not tell it: the file's last note is the latest window's, and a program that took the
 /// number of a window that ended before another window noted its own began before that note
 /// (a chief opened again, CI run 41973700452: `sort.exe` held the first chief's number), as
-/// one that began within the slack does. Where the command cannot be read, the process is
-/// taken for a window's.
+/// one that began within the slack does. Where the command cannot be read (none, or an empty
+/// one, which is what a process the machine would not open says), the process is taken for a
+/// window's.
 fn runs_another(pid: u32, program: &str) -> bool {
-    command(pid).is_some_and(|command| !names(&command, program))
+    another_than(command(pid).as_deref(), program)
+}
+
+/// Whether the command line `command`, where it was read, runs another program than `program`.
+fn another_than(command: Option<&str>, program: &str) -> bool {
+    command.is_some_and(|command| !command.is_empty() && !names(command, program))
 }
 
 /// Whether the command line `command` runs `program`: a word of it whose file name is

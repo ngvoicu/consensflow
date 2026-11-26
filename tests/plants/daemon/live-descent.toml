@@ -14,7 +14,7 @@ ld-recorded = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mem
 ld-tests = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests"]
 ld-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::native"]
 ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_"]
-ld-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests::"]
+ld-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left::tests::"]
 ld-later = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::a_process_chosen_by_a_later_look"]
 
 [[plant]]
@@ -212,7 +212,7 @@ replace = '''            if false {'''
 [[plant]]
 name = "live descent: a number too large for a process is cut to one in the system's table"
 meant = "a_cut_short_or_looping_system_table_ends_where_it_is_unsound_and_makes_up_nothing"
-runs = ["ld-table"]
+runs = ["ld-tests"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
@@ -222,7 +222,7 @@ replace = """                    pid: word(at + entry::PID, 8)? as u32,"""
 [[plant]]
 name = "live descent: the system's table says a process began where it says its creator"
 meant = "the_systems_process_table_is_read_by_where_each_field_of_an_entry_is"
-runs = ["ld-table"]
+runs = ["ld-tests"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
@@ -230,19 +230,19 @@ find = "    pub const CREATED: usize = 32;"
 replace = "    pub const CREATED: usize = 88;"
 
 [[plant]]
-name = "live descent: a process whose handle says another creation time than the table is listed"
+name = "live descent: a process whose handle says a creation time a unit from the table's is listed"
 meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
-runs = ["ld-table"]
+runs = ["ld-tests"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = "            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {"
-replace = "            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < u64::MAX => {"
+find = "            Ok(Some(opened)) if opened.created == process.identity.started => {"
+replace = "            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < 10 => {"
 
 [[plant]]
 name = "live descent: a process that cannot be opened is taken for one whose number proves its parent"
 meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
-runs = ["ld-table"]
+runs = ["ld-tests"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
@@ -261,3 +261,23 @@ platforms = ["windows"]
 file = "crates/cf-e2e/src/live/members/descent/native.rs"
 find = "                    process.command = handle.command_line().unwrap_or_default();"
 replace = "                    process.command = String::new();"
+
+[[plant]]
+name = "live descent: a command line the kernel places outside its buffer is read"
+meant = "the_text_of_a_command_line_the_kernel_places_outside_its_buffer_is_no_command_line"
+runs = ["ld-tests"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "    (length % 2 == 0 && offset >= header && offset % 2 == 0 && end <= size)"
+replace = "    (length % 2 == 0 && offset >= header && offset % 2 == 0 && end <= size + 64)"
+
+[[plant]]
+name = "live descent: an empty command line is another program's in the rig's leftover check"
+meant = "a_command_that_was_not_read_or_is_empty_is_no_other_program_and_one_that_names_another_is"
+runs = ["ld-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "    command.is_some_and(|command| !command.is_empty() && !names(command, program))"
+replace = "    command.is_some_and(|command| !names(command, program))"

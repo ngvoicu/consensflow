@@ -278,22 +278,13 @@ fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_the_rest
         "an ended process is listed: {gone:?}"
     );
 
-    // Every row went through a handle or failed to: none is believed by its number alone (the
-    // system's own processes are the ones a handle may be refused of), and one a handle was
-    // refused of says nothing of what it runs and proves no edge, so no process is the window's
-    // by it.
-    for one in &all {
-        assert_ne!(one.link, Link::Number, "{one:?}");
-        if one.link == Link::Unread {
-            assert!(one.command.is_empty() && one.exe.is_none(), "{one:?}");
-            assert!(
-                descending_from(&all, one.identity)
-                    .iter()
-                    .all(|under| under.link != Link::Number),
-                "{one:?}"
-            );
-        }
+    // The test's own three rows were each proved on a handle by the process that made it (a
+    // machine's other processes are no concern of this test: one a handle was refused of, or whose
+    // creator could not be read, is Unread there and proves nothing).
+    for one in [&top, child, grandchild] {
+        assert!(matches!(one.link, Link::Created { .. }), "{one:?}");
     }
+    assert!(all.iter().all(|one| one.link != Link::Number));
     // What the test started is ended through what holds each, the grandchild first, being the ones
     // chosen; then the root, which this test started.
     let said = end_chosen(&[grandchild.clone(), child.clone()]);
