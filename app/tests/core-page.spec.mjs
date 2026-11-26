@@ -20831,8 +20831,9 @@ test('UTF-8 cut random malformed streams match an uncut xterm', async ({ page })
  * pane host that says what the real one says to a page's pull and keeps what was asked of it
  * (`__asked`). `plan` says how it answers: `history` (text kept before the reload, by pane id),
  * `refreshAt` (the command at which the board changes once, before it answers: a refresh that
- * draws lanes early), `holdPull` (pane ids whose pull waits for `__release[id]`) and
- * `parked` (messages printed at the subscription, by pane id).
+ * draws lanes early), `holdPull` (pane ids whose pull waits for `__release[id]`),
+ * `parked` (messages printed at the subscription, by pane id) and `cut` (where the host's history
+ * begins, by pane id, for a history it kept only from there on: its piece is truncated).
  */
 const paneHost = async (page, plan) =>
   page.addInitScript((plan) => {
@@ -20850,16 +20851,16 @@ const paneHost = async (page, plan) =>
       out.set(bytes, 4 + head.length)
       return out.buffer
     }
-    const piece = (text) =>
+    const piece = (text, from = 0) =>
       frame(
         {
           ok: true,
           reset: true,
-          truncated: false,
-          from: 0,
+          truncated: from > 0,
+          from,
           size: { rows: 24, cols: 80 },
           resizes: [],
-          boundary: text.length,
+          boundary: from + text.length,
           done: true,
           seedLength: 0,
         },
@@ -20905,9 +20906,10 @@ const paneHost = async (page, plan) =>
         if (!active) return frame({ ok: false, error: 'pane-input-stale-page' })
         if (!subscribed) return frame({ ok: false, error: 'pane-not-subscribed' })
         const text = plan.history?.[args.id] ?? ''
-        if (!(plan.holdPull ?? []).includes(args.id)) return piece(text)
+        const from = plan.cut?.[args.id]
+        if (!(plan.holdPull ?? []).includes(args.id)) return piece(text, from)
         return new Promise((done) => {
-          window.__pull[args.id] = () => done(piece(text))
+          window.__pull[args.id] = () => done(piece(text, from))
         })
       }
       if (command === 'pane_history_done') return { ok: false }
@@ -20984,6 +20986,183 @@ test('a lane that leaves while its history is on its way settles every message i
   )
   await expect.poll(async () => (await acked(page, 'p1-zeus')).at(-1)).toBe(129)
   expect(await asked(page, 'pane_history_done', 'p1-zeus')).toEqual([])
+})
+
+/** Where a cut history begins, as the host keeps it: 1 MiB into what the window printed. */
+const CUT_AT = 1 << 20
+/** What the host kept of the chief's window: a build's last 80 lines. */
+const BUILD_LOG = `${Array.from({ length: 80 }, (_, n) => `   Compiling crate-${n + 1} v3.0.7`).join('\r\n')}\r\n`
+
+/**
+ * Where the chief's rows and its cut notice are, and what of its card the person sees: inside its
+ * border, and inside the window. `underPointer`: at the last row's first cell, the pointer is on
+ * the terminal and nothing lies over it. `room`: the height the host leaves its terminal.
+ */
+const chiefRows = (page) =>
+  page.evaluate(() => {
+    const card = document.querySelector('#stage [data-handle="chief"]')
+    const host = card.querySelector('.terminal-host')
+    const rows = [...host.querySelectorAll('.xterm-rows > div')]
+    const notice = card.querySelector('.terminal-truncated')?.getBoundingClientRect()
+    const frame = card.getBoundingClientRect()
+    const border = getComputedStyle(card)
+    const first = rows[0].getBoundingClientRect()
+    const last = rows.at(-1).getBoundingClientRect()
+    const hit = document.elementFromPoint(last.left + 4, (last.top + last.bottom) / 2)
+    const pad = getComputedStyle(host)
+    return {
+      rows: rows.length,
+      lastText: rows.at(-1).textContent.trim(),
+      top: frame.top + parseFloat(border.borderTopWidth),
+      bottom: Math.min(frame.bottom - parseFloat(border.borderBottomWidth), innerHeight),
+      noticeTop: notice?.top ?? null,
+      noticeBottom: notice?.bottom ?? null,
+      firstTop: first.top,
+      lastTop: last.top,
+      lastBottom: last.bottom,
+      lastLeft: last.left,
+      cell: last.height,
+      room:
+        host.getBoundingClientRect().height -
+        parseFloat(pad.paddingTop) -
+        parseFloat(pad.paddingBottom),
+      underPointer: host.querySelector('.xterm-screen').contains(hit),
+    }
+  })
+
+/**
+ * The board with the chief's window drawn again from what `plan` says the host kept, at `size`,
+ * once its terminal has taken its card's size: the host was told the rows it shows (the history
+ * was 24 rows, which no card here holds).
+ */
+async function openChief(page, size, plan) {
+  await page.setViewportSize(size)
+  await paneHost(page, plan)
+  await open(page, { ...model(), realTerminals: true })
+  await sizedChief(page)
+}
+async function sizedChief(page) {
+  await page.evaluate(() => document.fonts.ready)
+  await expect(page.locator('#stage [data-handle="chief"] .xterm-rows')).toContainText('crate-80')
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const sent = window.__calls
+          .filter(([command, args]) => command === 'pane_resize' && args.id === 'p1-chief')
+          .at(-1)?.[1]
+        const rows = document.querySelectorAll('#stage [data-handle="chief"] .xterm-rows > div')
+        return sent !== undefined && sent.rows === rows.length
+      }),
+    )
+    .toBe(true)
+}
+/** The same board at another height of the window, from a reload. */
+async function chiefAtHeight(page, height) {
+  await page.setViewportSize({ width: page.viewportSize().width, height })
+  await page.reload()
+  await sizedChief(page)
+}
+
+/** The program's prompt on the terminal's last row: what it prints first at `offset`. */
+async function promptAt(page, offset) {
+  await page.evaluate((offset) => {
+    const bytes = [...new TextEncoder().encode('\x1b[999;1H\x1b[2KPROMPT> ')]
+    window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, offset, bytes })
+  }, offset)
+  await expect(page.locator('#stage [data-handle="chief"] .xterm-rows')).toContainText('PROMPT>')
+}
+
+/** What the person typed into window `id`, as the page handed it to the host. */
+const typedTo = (page, id) =>
+  page.evaluate(
+    (id) =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_input_enqueue' && args.id === id)
+        .map(([, args]) => String.fromCharCode(...args.bytes))
+        .join(''),
+    id,
+  )
+
+/**
+ * A window whose history the host kept only in part says so above its terminal, and covers none
+ * of it (T-2229's finding 6: the notice sat over the last row and hid the live prompt in WebKit,
+ * since the fit counted the host's padding as the terminal's room). Every row is inside the card,
+ * below the notice; at the prompt on the last row the terminal is under the pointer, and a click
+ * there and keys reach the program, with nothing dismissed. In a laptop's window, in the smallest
+ * window the app allows (560 by 480), and in a terminal of four rows.
+ */
+for (const [where, size] of [
+  ["at a laptop's size", { width: 1280, height: 820 }],
+  ['in the smallest window the app allows', { width: 560, height: 480 }],
+  ['in a terminal of four rows', { width: 560, height: 480, rows: 4 }],
+]) {
+  test(`a window whose history was cut says so above its terminal, and every row and its prompt are in view and typed at, ${where}`, async ({
+    page,
+  }) => {
+    await openChief(page, size, { history: { 'p1-chief': BUILD_LOG }, cut: { 'p1-chief': CUT_AT } })
+    if (size.rows !== undefined) {
+      // A window as tall as leaves the terminal half a row more than `rows`: a narrow window's
+      // dock is 42% of it.
+      const { room, cell } = await chiefRows(page)
+      await chiefAtHeight(page, size.height + Math.round(((size.rows + 0.5) * cell - room) / 0.42))
+    }
+    const notice = page.locator('#stage [data-handle="chief"] .terminal-truncated')
+    await expect(notice).toBeVisible()
+    await promptAt(page, CUT_AT + BUILD_LOG.length)
+    const at = await chiefRows(page)
+    expect(at.lastText, 'the prompt is on the last row').toBe('PROMPT>')
+    expect(at.noticeTop, 'the notice is inside the card').toBeGreaterThanOrEqual(at.top)
+    expect(at.noticeBottom, 'the notice is above the first row').toBeLessThanOrEqual(at.firstTop)
+    expect(
+      at.lastBottom,
+      'the last row is whole inside the card and the window',
+    ).toBeLessThanOrEqual(at.bottom)
+    expect(at.underPointer, 'at the prompt the pointer is on the terminal').toBe(true)
+    if (size.rows !== undefined) expect(at.rows).toBe(size.rows)
+    await expect(page.locator('#stage')).toHaveAttribute('data-input', 'open')
+    await page.mouse.click(at.lastLeft + 4, (at.lastTop + at.lastBottom) / 2)
+    await page.keyboard.type('ok')
+    await expect.poll(() => typedTo(page, 'p1-chief')).toBe('ok')
+    // It says what is missing and where what is shown begins.
+    await expect(notice).toContainText('Earlier output was not kept')
+    await expect(notice).toContainText('history starts at the top of the scrollback')
+    // A notice of lost typing over the page is above the cut notice and the terminal alike.
+    await owes(page, [windowNotice(1, { id: 'p1-chief', generation: 5 })])
+    const lost = page.locator('.input-notices .input-notice')
+    await expect(lost).toBeVisible()
+    const box = await lost.boundingBox()
+    expect(
+      await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.closest('.input-notices') !== null,
+        [box.x + box.width / 2, box.y + box.height / 2],
+      ),
+      'the notice of lost typing is on top where it is',
+    ).toBe(true)
+    await expect(notice).toBeVisible()
+  })
+}
+
+/**
+ * The fit counts only the room inside the host's padding, whole history or cut: where that room
+ * is 5 px short of a whole row, which the padding (6 px) would make up, the last row is still
+ * whole inside the card (the fit took the padding as the terminal's: the row went 3 px under the
+ * card's edge).
+ */
+test("a window's last row is whole inside its card where its host's padding would make up a row", async ({
+  page,
+}) => {
+  await openChief(page, { width: 1280, height: 820 }, { history: { 'p1-chief': BUILD_LOG } })
+  // A wide window's dock is its height less the same room above, pixel for pixel.
+  const { room, cell } = await chiefRows(page)
+  const target = (Math.floor(room / cell) - 1) * cell + cell - 5
+  await chiefAtHeight(page, 820 + Math.round(target - room))
+  const sized = await chiefRows(page)
+  expect(Math.abs(sized.room - target), 'the room is 5 px short of a row').toBeLessThan(1)
+  await promptAt(page, BUILD_LOG.length)
+  const at = await chiefRows(page)
+  expect(at.lastText).toBe('PROMPT>')
+  expect(at.lastBottom, 'the last row is whole inside the card').toBeLessThanOrEqual(at.bottom)
+  expect(at.underPointer, 'at the prompt the pointer is on the terminal').toBe(true)
 })
 
 /** The board with a session of zeus whose terminal the human has not asked to see. */

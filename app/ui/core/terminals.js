@@ -1,4 +1,4 @@
-import { button, element, iconButton, redraw } from '../dom.js'
+import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
@@ -6,6 +6,13 @@ import { DockStrip } from './dock-strip.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
+/** Scissors: what a window printed first was cut from its history. */
+const CUT = [
+  'M8.5 7a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
+  'M8.5 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
+  'M8.1 8.4 20 17',
+  'M8.1 15.6 20 7',
+]
 
 /** What a window's chip in the dock's map says: the chief, a session by its name, a member by its handle. */
 const chipLabel = (participant) =>
@@ -667,19 +674,21 @@ export class TerminalsView {
 
   /**
    * The window's history begins after what it printed first (the host keeps the last of it): a
-   * line at the top of the window says what scrolled off before is not shown.
+   * band across the top of the window says that, and where what it shows begins. It takes the
+   * room of no row: the terminal fits under it.
    */
   #truncated(pane) {
     const host = this.#cards.get(paneKey(pane))?.host
     if (host === undefined || host.querySelector('.terminal-truncated') !== null) return
     host.dataset.truncated = 'true'
-    host.prepend(
-      element(
-        'div',
-        'terminal-truncated',
-        'What this window printed before this is not shown. Only the last part of it is kept.',
-      ),
+    const notice = element('div', 'terminal-truncated')
+    notice.setAttribute('role', 'note')
+    notice.append(
+      icon(CUT),
+      element('span', 'terminal-truncated-what', 'Earlier output was not kept: '),
+      element('span', 'terminal-truncated-where', 'history starts at the top of the scrollback'),
     )
+    host.prepend(notice)
   }
 
   /** The chief's card while its window is down: its head, and no terminal. */

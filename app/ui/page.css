@@ -1304,22 +1304,36 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
-.terminal-host { position: relative; min-height: 0; padding: 4px 2px 2px 6px; }
-/* A window whose history begins after its start says so on a line of its own at the top: the
-   room it takes is the terminal's no more, so a fit counts it. */
+/* The terminal's room is the host's content box: xterm's fit reads its parent's `height` and
+   `width`, which under border-box take in the padding, and so did the rows (T-2229's finding 6:
+   the last row went under the card's edge, the live prompt with it). */
+.terminal-host { position: relative; min-height: 0; padding: 4px 2px 2px 6px; box-sizing: content-box; }
+/* A window whose history begins after its start says so in a band across the top of its well,
+   in the host's padding: the terminal's rows start under the band's dashed edge, which is where
+   the history the person can scroll to begins, and no row is under the band. Nothing to dismiss:
+   the pointer goes through it to the host, as through the padding. */
 .terminal-host[data-truncated="true"] { padding-top: 22px; }
 .terminal-truncated {
   position: absolute;
-  top: 4px;
-  left: 6px;
-  right: 2px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
   overflow: hidden;
+  border-bottom: 1px dashed var(--line);
+  background: var(--panel);
   color: var(--muted);
-  font: 11px var(--mono);
-  text-overflow: ellipsis;
+  font: 11px/1 var(--mono);
   white-space: nowrap;
   pointer-events: none;
 }
+.terminal-truncated .icon { width: 12px; height: 12px; stroke-width: 2; }
+.terminal-truncated-what { flex: none; color: var(--text); }
+.terminal-truncated-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
    would otherwise hide the last of them with no sign they are there. */
