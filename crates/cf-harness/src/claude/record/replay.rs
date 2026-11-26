@@ -41,8 +41,8 @@ impl Transcript {
             Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
             Projected::User(user) => self.user(user, place, seq)?,
             Projected::Output(printed) => {
-                if printed.uuid.is_some() {
-                    self.printed_by_the_system.clone_from(&printed.uuid);
+                if let Some(uuid) = &printed.uuid {
+                    self.printed_by_the_system.push(Arc::clone(uuid));
                 }
                 if let Some(parent) = &printed.ends {
                     self.output(parent);
@@ -163,6 +163,7 @@ impl Transcript {
             }
         }
         self.turn_open = true;
+        self.printed_by_the_system.clear();
         self.terminal = None;
         if !record.refused {
             self.failure = None;
@@ -400,10 +401,10 @@ impl Transcript {
         }
         // What a command the harness answered by itself leaves for the model's next turn
         // (`/context`'s report, a child of the system's record of its output) asks nothing
-        // of the model: an item of the harness's, and the turn is as it was, open or at rest.
+        // of the model: it changes nothing the look reads, neither the turn (open or at
+        // rest) nor the items (an item would make a window that has had no turn no longer
+        // empty, and the adapter takes an empty transcript for a window at its prompt).
         if self.is_a_report(record) {
-            let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
-            self.items.push(id, Role::Custom, &record.text, at, seq);
             return Ok(());
         }
         let ends = record
@@ -466,6 +467,7 @@ impl Transcript {
             self.refused_uuid = None;
         }
         self.turn_open = true;
+        self.printed_by_the_system.clear();
         self.candidate = None;
         self.terminal = None;
         Ok(())
@@ -476,10 +478,11 @@ impl Transcript {
     /// `local_command` record last read, which is the command's output. A record with the same
     /// marks anywhere else (a companion of a prompt) is no report: it may be asked about.
     fn is_a_report(&self, record: &User) -> bool {
-        record
-            .report_of
-            .as_deref()
-            .is_some_and(|parent| self.printed_by_the_system.as_deref() == Some(parent))
+        record.report_of.as_deref().is_some_and(|parent| {
+            self.printed_by_the_system
+                .iter()
+                .any(|uuid| &**uuid == parent)
+        })
     }
 
     /// `lateAncestor`: whether the user record at `place` is one of the

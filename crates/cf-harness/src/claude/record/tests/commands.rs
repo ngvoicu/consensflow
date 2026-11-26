@@ -887,6 +887,59 @@ fn a_context_typed_at_an_idle_prompt_calls_no_model_and_is_at_rest() {
     assert_eq!(settlement_of(&next), Settlement::Settled);
 }
 
+/// A report as the first thing a window has: no turn ended before it, so the transcript has
+/// no item and no turn. The report adds nothing the look reads: still no items (the adapter
+/// takes an empty transcript for a window at its prompt), nothing in flight, whatever the
+/// start: the recorded rows, a root echo with a null parent, or another command's pair first.
+#[test]
+fn a_report_as_the_first_thing_in_a_window_leaves_the_transcript_as_empty_as_it_was() {
+    let usage = recorded("usage");
+    let context = recorded("context");
+    let typed = |rows: &[Value]| rows[at_rest().len()..].to_vec();
+    let mut root = typed(&context);
+    root[0]["parentUuid"] = Value::Null;
+    let mut after_usage = typed(&usage);
+    after_usage.extend(typed(&context));
+    for (name, records) in [
+        ("as recorded", typed(&context)),
+        ("root echo", root),
+        ("usage first", after_usage),
+    ] {
+        for upto in 1..=records.len() {
+            let record = record_of(&records[..upto]);
+            assert!(record.items.is_empty(), "{name}, {upto} records");
+            assert_ne!(record.settlement, Settlement::InFlight, "{name}, {upto}");
+        }
+    }
+}
+
+/// Another command's records between a command's output and its report do not displace the
+/// output: the report is a child of any command record read since a turn last opened. After
+/// a turn opened, the older output is forgotten and a report under it opens a turn as before.
+#[test]
+fn a_report_is_known_by_its_parent_among_every_command_record_since_the_last_turn_opened() {
+    let context = recorded("context");
+    let at = at_rest().len();
+    let usage = recorded("usage");
+    let mut records = context[..at + 2].to_vec();
+    records.extend(usage[at..].iter().cloned().map(|mut row| {
+        // Another command's pair, typed after the first's output.
+        row["uuid"] = json!(format!("other-{}", row["uuid"].as_str().unwrap()));
+        row["parentUuid"] = json!(format!(
+            "other-{}",
+            row["parentUuid"].as_str().unwrap_or("x")
+        ));
+        row
+    }));
+    records.push(context[at + 2].clone());
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+    // A turn opened after the output: the output is no parent any more.
+    let mut later = context[..at + 2].to_vec();
+    later.push(user("u2", json!("n1"), json!("Hello again")));
+    later.push(context[at + 2].clone());
+    assert_eq!(settlement_of(&later), Settlement::InFlight);
+}
+
 /// The `/context` report with its parent, its marks and its flags changed by `fields`, in
 /// place of the recorded one (the third record of the line).
 fn context_with(fields: Value) -> Vec<Value> {
@@ -912,7 +965,7 @@ fn a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn() {
         .unwrap()
         .remove("rowSource");
     assert_eq!(settlement_of(&without_row_source), Settlement::InFlight);
-    // Another row source: the harness's own or the recorded one.
+    // Another row source value (constructed variations on the recorded report).
     for row_source in ["recorded", "harness"] {
         assert_eq!(
             settlement_of(&context_with(json!({ "rowSource": row_source }))),
@@ -925,19 +978,21 @@ fn a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn() {
         settlement_of(&context_with(json!({ "isMeta": false }))),
         Settlement::InFlight
     );
-    // Local and meta, as the image companion of a prompt is, but a child of a user's record.
+    // Only the parent changed (constructed): a child of a user's record.
     let mut companion = recorded("context");
     let n = companion.len();
     companion[n - 1]["parentUuid"] = json!("u1");
     assert_eq!(settlement_of(&companion), Settlement::InFlight);
-    // A child of a system record that is no command's output.
-    let mut scheduled = recorded("context");
-    let n = scheduled.len();
-    scheduled[n - 1]["parentUuid"] = json!("d1");
-    assert_eq!(settlement_of(&scheduled), Settlement::InFlight);
+    // Only the parent changed (constructed): a child of a system record that is no command's
+    // output, the turn's duration.
+    let mut under_a_duration = recorded("context");
+    let n = under_a_duration.len();
+    under_a_duration[n - 1]["parentUuid"] = json!("d1");
+    assert_eq!(settlement_of(&under_a_duration), Settlement::InFlight);
 }
 
-/// A report of this shape that the model is called after: the turn begins at the first record
+/// A report of this shape that the model is called after (constructed: no recording shows a
+/// command that does it): the turn begins at the first record
 /// that shows the call, as for any other, and ends as any turn does. Until that record the
 /// reader reads rest (Claude's own status covers that gap, see the window tests).
 #[test]
@@ -973,16 +1028,16 @@ fn a_report_of_a_command_followed_by_the_model_is_in_flight_from_the_models_reco
     assert_eq!(settlement_of(&records), Settlement::Settled);
 }
 
-/// The kinds of meta `user` record Claude Code writes that the model is asked after, each in
-/// the shape its records have in the sessions of this repository and of a real board: all
-/// stay in flight from the record itself. A skill's text (`sourceToolUseID`, a child of the
-/// tool result that loaded it, inside a turn), the prompt a scheduled task fires (a child of
-/// the system's `scheduled_task_fire`), the nudge after a call that was no valid call, and
-/// the caveat before a typed command's echo (a child of the turn's last record, with the
-/// command that may ask the model after it).
+/// The kinds of meta `user` record that the model is asked after, each stays in flight from
+/// the record itself. **Constructed, not recorded:** the skill's text (`sourceToolUseID`, a
+/// child of the tool result that loaded it), the prompt a scheduled task fires (a child of
+/// the system's `scheduled_task_fire`) and the retry nudge are shapes no fixture of this
+/// repository shows; the words are made up. The caveat before a typed command is recorded in
+/// fixtures (`compact-cancelled.jsonl`, `v268-clear.jsonl`), but its `/plan` sequence here is
+/// assembled.
 #[test]
 fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
-    // A skill's text, inside a turn under way.
+    // A skill's text, inside a turn under way (constructed, not recorded).
     let mut skill = vec![
         hello(),
         assistant(
@@ -1009,7 +1064,7 @@ fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
     assert_eq!(settlement_of(&skill), Settlement::InFlight);
     skill.extend([answer("a2", "s1"), duration("d2", "a2")]);
     assert_eq!(settlement_of(&skill), Settlement::Settled);
-    // A scheduled task's prompt, at rest before it.
+    // A scheduled task's prompt, at rest before it (constructed, not recorded).
     let mut fired = at_rest();
     fired.push(of_session(json!({
         "type": "system", "subtype": "scheduled_task_fire", "uuid": "f1", "parentUuid": "d1",
@@ -1023,7 +1078,7 @@ fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
         json!({ "isMeta": true, "rowSource": "recorded" }),
     ));
     assert_eq!(settlement_of(&fired), Settlement::InFlight);
-    // The nudge after a call that was no call.
+    // The nudge after a call that was no call (constructed, not recorded).
     let mut retry = at_rest();
     retry.push(having(
         user(

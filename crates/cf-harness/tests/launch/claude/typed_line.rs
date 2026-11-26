@@ -202,3 +202,60 @@ fn an_empty_enter_writes_nothing_and_leaves_the_window_at_rest() {
     let observed = window_after(&at_rest());
     assert!(observed.settled && observed.takes_words);
 }
+
+/// A window opened fresh, its status idle and no turn ended before, then the recorded
+/// `/context` (and the starts a first command can have: a root echo with no parent, and
+/// another command's pair before it). A record that opens no turn changes nothing about
+/// whether a window takes words: it took them before the report, it takes them after every
+/// record of it (T-2345's probe, with the fixture's rows as recorded).
+#[test]
+fn a_first_command_in_a_fresh_window_leaves_it_taking_words_after_every_record() {
+    for mode in ["as-recorded", "root-echo", "usage-first"] {
+        let home = Home::new();
+        let plan = prepare(
+            &home.adapter(),
+            &Request {
+                message: None,
+                ..Request::default()
+            },
+        )
+        .unwrap();
+        let id = plan.native_session.unwrap();
+        let window = plan.window;
+        let mut lines: Vec<String> = Vec::new();
+        home.status(&id, &json!({ "status": "idle" }), me());
+        home.transcript(&id, &lines);
+        let rows = |fixture: &str| -> Vec<String> {
+            fixture
+                .lines()
+                .map(|row| format!("{}\n", row.replace("$SESSION", &id)))
+                .collect()
+        };
+        if mode == "usage-first" {
+            lines.extend(rows(include_str!(
+                "../../fixtures/claude/typed-line-usage.jsonl"
+            )));
+            home.transcript(&id, &lines);
+        }
+        let mut context = rows(include_str!(
+            "../../fixtures/claude/typed-line-context.jsonl"
+        ));
+        if mode == "root-echo" {
+            let mut first: Value = serde_json::from_str(&context[0]).unwrap();
+            first["parentUuid"] = Value::Null;
+            context[0] = format!("{first}\n");
+        }
+        let before = look(&window);
+        assert!(before.settled && before.takes_words, "{mode}: before");
+        for (at, row) in context.iter().enumerate() {
+            lines.push(row.clone());
+            home.transcript(&id, &lines);
+            let observed = look(&window);
+            assert!(
+                observed.settled && observed.takes_words && observed.at_prompt,
+                "{mode}: after record {} of the command",
+                at + 1
+            );
+        }
+    }
+}

@@ -44,8 +44,14 @@ runs = ["context-report-reader", "context-report-window"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '''            .is_some_and(|parent| self.printed_by_the_system.as_deref() == Some(parent))'''
-replace = '''            .is_some_and(|_| true)'''
+find = '''        record.report_of.as_deref().is_some_and(|parent| {
+            self.printed_by_the_system
+                .iter()
+                .any(|uuid| &**uuid == parent)'''
+replace = '''        record.report_of.as_deref().is_some_and(|parent| {
+            self.printed_by_the_system
+                .iter()
+                .any(|uuid| &**uuid == parent || true)'''
 
 [[plant]]
 name = "context report: the command's output is never remembered, so no report is tied to it"
@@ -54,8 +60,8 @@ runs = ["context-report-reader", "context-report-window"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '''                if printed.uuid.is_some() {'''
-replace = '''                if false {'''
+find = '''                if let Some(uuid) = &printed.uuid {'''
+replace = '''                if let Some(uuid) = printed.uuid.as_ref().filter(|_| false) {'''
 
 [[plant]]
 name = "context report: a report still opens a turn"
@@ -77,3 +83,28 @@ file = "crates/cf-harness/src/claude/record/keep.rs"
 find = '''    ("rowSource", &Keep::Scalar),
 '''
 replace = ""
+
+[[plant]]
+name = "context report: the report becomes an item of the harness's own, and a window that had no turn is no longer empty"
+meant = "a_first_command_in_a_fresh_window_leaves_it_taking_words_after_every_record"
+runs = ["context-report-reader", "context-report-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''        if self.is_a_report(record) {
+            return Ok(());'''
+replace = '''        if self.is_a_report(record) {
+            let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
+            self.items.push(id, Role::Custom, &record.text, at, seq);
+            return Ok(());'''
+
+[[plant]]
+name = "context report: only the latest command record is remembered, and another command displaces the report's parent"
+meant = "a_report_is_known_by_its_parent_among_every_command_record_since_the_last_turn_opened"
+runs = ["context-report-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''                    self.printed_by_the_system.push(Arc::clone(uuid));'''
+replace = '''                    self.printed_by_the_system.clear();
+                    self.printed_by_the_system.push(Arc::clone(uuid));'''

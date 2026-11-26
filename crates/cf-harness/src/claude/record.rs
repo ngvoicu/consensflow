@@ -255,9 +255,10 @@ struct Transcript {
     /// The bare `/compact` that began the turn, while nothing has moved it since:
     /// what a cancel of the compaction ends.
     typed_compact: Option<TypedCompact>,
-    /// The uuid of the latest system `local_command` record of the main conversation: what
-    /// the report a command leaves for the model is a child of (`replay::is_a_report`).
-    printed_by_the_system: Option<Arc<str>>,
+    /// The uuids of the system `local_command` records of the main conversation read since
+    /// a turn last opened: what the report a command leaves for the model is a child of
+    /// (`replay::is_a_report`). Another command's records between do not displace it.
+    printed_by_the_system: Vec<Arc<str>>,
     /// The turn ended at such a cancel, and Claude Code put the `/compact` back in
     /// its input box (`Lines::put_back`), until a record moves the turn again.
     put_back: bool,
@@ -343,7 +344,7 @@ impl Transcript {
             relaunch: relaunched_at.map(|at| Relaunch { at, reached: false }),
             last_at: None,
             typed_compact: None,
-            printed_by_the_system: None,
+            printed_by_the_system: Vec::new(),
             put_back: false,
             compacted_from: None,
         }
