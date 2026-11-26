@@ -714,7 +714,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
-find = '''            format!("--reporter=list,{reporter}"),'''
+find = '''        format!("--reporter=list,{reporter}"),'''
 replace = '''            format!("--reporter=list{}", &reporter[..0]),'''
 
 [[plant]]
@@ -2550,7 +2550,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
-find = '''            "--retries=0".to_owned(),'''
+find = '''        "--retries=0".to_owned(),'''
 replace = ""
 
 [[plant]]
@@ -3169,7 +3169,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
-find = '''            "--repeat-each=1".to_owned(),
+find = '''        "--repeat-each=1".to_owned(),
 '''
 replace = ""
 
