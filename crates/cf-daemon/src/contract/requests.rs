@@ -70,6 +70,7 @@ async fn serving() -> (Rig, Api, i64) {
     let project = rig.open_project(&["zeus"]).await;
     rig.give(project.id, "zeus", "Parser");
     rig.passes(2).await;
+    rig.until_working(project.id, 1).await;
     assert_eq!(rig.task_state(project.id, 1), "working");
     rig.mark();
     let api = Api::start(
@@ -300,6 +301,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
     pass.await.expect("a pass");
     rig.quiet().await;
     rig.passes(1).await;
+    rig.until_working(project.id, 1).await;
     assert_eq!(rig.task_state(project.id, 1), "working");
     rig.mark();
     let zeus = rig

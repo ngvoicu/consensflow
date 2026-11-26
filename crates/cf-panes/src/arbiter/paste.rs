@@ -13,9 +13,10 @@ pub(super) fn characters_in(text: &[u8]) -> usize {
 }
 
 /// Where the human's input stands in a bracketed paste, across the writes it comes in. The
-/// page sends input in chunks of 32 KiB (`app/ui/terminal-link.js`), so a big paste is
-/// several writes, with its opening marker in the first and its closing marker in the last,
-/// and a chunk can end inside a marker. It keeps the characters of the paste now open,
+/// page sends what the emulator emits at once as one call (`app/ui/terminal-link.js`), up to
+/// 4 MiB, but the program's terminal takes a big write in several, so a paste can be several
+/// writes, with its opening marker in the first and its closing marker in the last, and a
+/// write can end inside a marker. It keeps the characters of the paste now open,
 /// counted from after its opening marker to its closing one over all the writes it takes,
 /// and the last bytes of the writes so far when they could begin the marker looked for next.
 /// Those bytes are scan state alone: they went to the window with their write, and are

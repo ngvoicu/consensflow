@@ -14,12 +14,12 @@
 // leaves while its program runs. The gate exits with a failure where any stream differed.
 //   node gate.mjs <webkit|chromium> <random cases> <first seed> [past-cap cases] [out.jsonl]
 import { spawn } from 'node:child_process'
-import { createInterface } from 'node:readline'
-import { writeFileSync, appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { open, pageScript, tree } from './lib.mjs'
-import { randomCase, pastCapCase, namedCases, reviewCases } from './gen.mjs'
+import { createInterface } from 'node:readline'
 import { cases as review51 } from './cases51.mjs'
+import { namedCases, pastCapCase, randomCase, reviewCases } from './gen.mjs'
+import { open, pageScript, tree } from './lib.mjs'
 
 const [browserName = 'chromium', randomCount = '50', firstSeed = '1', pastCount = '0', out = ''] =
   process.argv.slice(2)
@@ -38,8 +38,14 @@ function stop(cause) {
   if (stopped) return
   stopped = true
   console.log(`GATE STOPPED: ${cause}`)
-  if (out) appendFileSync(out, JSON.stringify({ browser: browserName, name: 'the gate', differences: [cause] }) + '\n')
-  try { hostChild?.kill('SIGKILL') } catch {}
+  if (out)
+    appendFileSync(
+      out,
+      JSON.stringify({ browser: browserName, name: 'the gate', differences: [cause] }) + '\n',
+    )
+  try {
+    hostChild?.kill('SIGKILL')
+  } catch {}
   process.exit(1)
 }
 /** `promise`, or the gate's failure if it has not settled within the bound. */
@@ -198,7 +204,12 @@ function standIn(fault) {
       let text = new TextDecoder().decode(decode(args.bytes))
       // The controls: what the page sends is changed on its way out.
       if (fault === 'wrong-cpr-place')
-        text = text.replace(/^\x1b\[(\??)(\d+);(\d+)R$/, (_, q, row, col) => `\x1b[${q}${Number(row) + 1};${col}R`)
+        text = text.replace(
+          // biome-ignore lint/suspicious/noControlCharactersInRegex: the escape byte is what is matched
+          /^\x1b\[(\??)(\d+);(\d+)R$/,
+          (_, q, row, col) => `\x1b[${q}${Number(row) + 1};${col}R`,
+        )
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the escape byte is what is matched
       if (fault === 'private-cpr') text = text.replace(/^\x1b\[(\d+;\d+R)$/, '\x1b[?$1')
       const generation = args.generation + (fault === 'wrong-reply-generation' ? 1 : 0)
       return ask(command, {
@@ -206,6 +217,7 @@ function standIn(fault) {
         id: args.id,
         generation,
         sequence: args.sequence,
+        epoch: args.epoch,
         text,
       })
     }
@@ -310,9 +322,13 @@ await app.exposeFunction('gateBoard', (operation) => {
 await app.exposeFunction('gateCall', async (command, args) => {
   const here = current
   if (command === 'pane_page_prepare')
-    return (await host.call('page_prepare', '', { page: args.pageId }))
+    return await host.call('page_prepare', '', { page: args.pageId, nonce: args.nonce })
   if (command === 'pane_page_activate')
-    return (await host.call('page_activate', '', { page: args.pageId }))
+    return await host.call('page_activate', '', {
+      page: args.pageId,
+      nonce: args.nonce,
+      epoch: args.epoch,
+    })
   if (command === 'subscribe_output') {
     here.page = args.pageId
     return (await host.call('subscribe', here.win, { page: args.pageId })).answer
@@ -348,7 +364,9 @@ await app.exposeFunction('gateCall', async (command, args) => {
     if (fault === 'no-retired-ack' && args.id === here.retired) return { ok: true }
     const { answer } = await host.call('ack', here.win, {
       id: args.id,
-      generation: args.generation + (fault === 'wrong-last-ack' && args.id === here.retired && here.last ? 1 : 0),
+      generation:
+        args.generation +
+        (fault === 'wrong-last-ack' && args.id === here.retired && here.last ? 1 : 0),
       seq: args.seq,
     })
     // What the host took is what was acknowledged; one it refused is a failure of the page's or the gate's.
@@ -392,6 +410,7 @@ await app.exposeFunction('gateCall', async (command, args) => {
       id: args.id,
       generation: args.generation,
       sequence: args.sequence,
+      epoch: args.epoch,
       hex: Buffer.from(args.text).toString('hex'),
     })
     if (answer.ok) (args.id === here.win ? here.answers : here.otherAnswers).push(args.text)
@@ -427,7 +446,9 @@ function shortened(frameHex) {
   const rewritten = Buffer.from(JSON.stringify({ ...header, boundary: header.boundary - 1 }))
   const size = Buffer.alloc(4)
   size.writeUInt32LE(rewritten.length)
-  return Buffer.concat([size, rewritten, frame.subarray(4 + length, frame.length - 1)]).toString('hex')
+  return Buffer.concat([size, rewritten, frame.subarray(4 + length, frame.length - 1)]).toString(
+    'hex',
+  )
 }
 
 /** A window of the case, as the page under test and the host see it. */
@@ -476,7 +497,10 @@ function caseState(win, generation, cols, rows) {
       if (mine.changes > 256) mine.startLimit = mine.total
       mine.sizes.push({ at: at ?? mine.total, cols, rows })
     },
-    printed: () => (mine.chunks.length > 1 ? (mine.chunks = [Buffer.concat(mine.chunks)]) : mine.chunks)[0] ?? Buffer.alloc(0),
+    printed: () => {
+      if (mine.chunks.length > 1) mine.chunks = [Buffer.concat(mine.chunks)]
+      return mine.chunks[0] ?? Buffer.alloc(0)
+    },
     piece: (frameHex) => {
       const frame = Buffer.from(frameHex, 'hex')
       const length = frame.readUInt32LE(0)
@@ -488,11 +512,20 @@ function caseState(win, generation, cols, rows) {
       mine.pieces.push({ ...header, seed: [...seed], length: bytes.length })
       // One piece follows the last without a gap, and what the host calls the end of the history is its boundary.
       if (before && header.from !== before.from + before.length)
-        mine.problems.push(`the piece from ${header.from} does not follow the one before it, which ends at ${before.from + before.length}`)
+        mine.problems.push(
+          `the piece from ${header.from} does not follow the one before it, which ends at ${before.from + before.length}`,
+        )
       if (header.done && header.from + bytes.length !== header.boundary)
-        mine.problems.push(`the history ends at ${header.from + bytes.length}, not at its boundary ${header.boundary}`)
+        mine.problems.push(
+          `the history ends at ${header.from + bytes.length}, not at its boundary ${header.boundary}`,
+        )
       // The retained bytes are the printed ones, whatever the page does with them.
-      if (!mine.printed().subarray(header.from, header.from + bytes.length).equals(bytes))
+      if (
+        !mine
+          .printed()
+          .subarray(header.from, header.from + bytes.length)
+          .equals(bytes)
+      )
         mine.problems.push(`the piece from ${header.from} is not what was printed there`)
       if (header.from > header.boundary)
         mine.problems.push(`a piece from ${header.from} past its boundary ${header.boundary}`)
@@ -505,9 +538,17 @@ function caseState(win, generation, cols, rows) {
         // Past 256 sizes the journal may start again, but never later than the end it had when the last size
         // that could start it was taken, and never at all before 8 MiB are printed otherwise.
         if (cut === null && mine.total <= 8 * MIB && header.from > mine.startLimit)
-          mine.problems.push(`the history starts at ${header.from}, past ${mine.startLimit}: printed bytes the journal still holds are left out`)
-        if (header.truncated && mine.changes <= 256 && header.boundary - header.from < Math.min(header.boundary, 4 * MIB))
-          mine.problems.push(`only ${header.boundary - header.from} bytes are kept before ${header.boundary}`)
+          mine.problems.push(
+            `the history starts at ${header.from}, past ${mine.startLimit}: printed bytes the journal still holds are left out`,
+          )
+        if (
+          header.truncated &&
+          mine.changes <= 256 &&
+          header.boundary - header.from < Math.min(header.boundary, 4 * MIB)
+        )
+          mine.problems.push(
+            `only ${header.boundary - header.from} bytes are kept before ${header.boundary}`,
+          )
       }
     },
   }
@@ -527,20 +568,21 @@ async function programReceived(win, length) {
 
 /** The app page's replay of the window is over: it has pulled, and the emulator takes typing. */
 const replayed = () =>
-  app.waitForFunction(
-    () => window.__pulled > 0 && window.__emu && !window.__emu.replaying,
-    null,
-    { timeout: WAIT * 1000 },
-  )
+  app.waitForFunction(() => window.__pulled > 0 && window.__emu && !window.__emu.replaying, null, {
+    timeout: WAIT * 1000,
+  })
 
 async function runCase(c) {
   const win = 'w' + ++windowNo
-  await R(([c]) => {
-    P5.ref?.emulator.dispose()
-    P5.ref?.host.remove()
-    P5.ref = P5.reference('ref', c.cols, c.rows)
-    P5.stream = []
-  }, [c])
+  await R(
+    ([c]) => {
+      P5.ref?.emulator.dispose()
+      P5.ref?.host.remove()
+      P5.ref = P5.reference('ref', c.cols, c.rows)
+      P5.stream = []
+    },
+    [c],
+  )
   const { generation } = await host.call('open', win, { rows: c.rows, cols: c.cols })
   const mine = caseState(win, generation, c.cols, c.rows)
   current = mine
@@ -593,7 +635,9 @@ async function runCase(c) {
     if (left.status) differences.push(`the page said ${JSON.stringify(left.status)}`)
   }
   const noticeShown = () =>
-    app.evaluate(() => document.querySelector('#stage .terminal-host')?.dataset.truncated === 'true')
+    app.evaluate(
+      () => document.querySelector('#stage .terminal-host')?.dataset.truncated === 'true',
+    )
   /** Whether the host cut this load's history. */
   const hostCut = () => mine.pieces.some((piece) => piece.truncated)
   const load = async (reload, after) => {
@@ -674,14 +718,20 @@ async function runCase(c) {
       // questions, cursor reports with their places.
       const answered = mine.answers.slice(mine.loadStart)
       if (JSON.stringify(built.owed) !== JSON.stringify(answered))
-        d.push(`answers since this load: expected ${JSON.stringify(built.owed)} got ${JSON.stringify(answered)}`)
+        d.push(
+          `answers since this load: expected ${JSON.stringify(built.owed)} got ${JSON.stringify(answered)}`,
+        )
     }
     if ((await noticeShown()) !== cut)
-      d.push(`the notice ${cut ? 'is missing from' : 'shows over'} a history the host ${cut ? 'cut' : 'did not cut'}`)
+      d.push(
+        `the notice ${cut ? 'is missing from' : 'shows over'} a history the host ${cut ? 'cut' : 'did not cut'}`,
+      )
     const sizes = await host.call('size', win)
     const emulator = await app.evaluate(() => window.__emu.size())
     if (sizes.cols !== emulator.cols || sizes.rows !== emulator.rows)
-      d.push(`the terminal is ${sizes.cols}x${sizes.rows}, the emulator ${emulator.cols}x${emulator.rows}`)
+      d.push(
+        `the terminal is ${sizes.cols}x${sizes.rows}, the emulator ${emulator.cols}x${emulator.rows}`,
+      )
     return d
   }
   /**
@@ -699,33 +749,36 @@ async function runCase(c) {
     // The boundary is where the live part begins: what the xterm answers from there on is what the page owes.
     const live = sizes.findIndex((s) => s.at > boundary)
     sizes.splice(live < 0 ? sizes.length : live, 0, { at: boundary, mark: true })
-    return refPage.evaluate(async ([from, size, seed, sizes]) => {
-      P5.exp?.emulator.dispose()
-      P5.exp?.host.remove()
-      P5.exp = P5.reference('exp', size.cols, size.rows)
-      let length = 0
-      for (const chunk of P5.stream) length += chunk.length
-      const whole = new Uint8Array(length)
-      let offset = 0
-      for (const chunk of P5.stream) {
-        whole.set(chunk, offset)
-        offset += chunk.length
-      }
-      P5.stream = [whole]
-      const emulator = P5.exp.emulator
-      if (seed.length) await emulator.write(Uint8Array.from(seed))
-      let at = from
-      let owed = 0
-      for (const s of sizes) {
-        const upto = Math.min(Math.max(s.at, at), length)
-        if (upto > at) await emulator.write(whole.subarray(at, upto))
-        at = upto
-        if (s.mark) owed = P5.exp.answers.length
-        else emulator.resizeTo(s.cols, s.rows)
-      }
-      if (at < length) await emulator.write(whole.subarray(at))
-      return { state: P5.state(emulator), owed: P5.exp.answers.slice(owed) }
-    }, [first.from, first.size, first.seed, sizes])
+    return refPage.evaluate(
+      async ([from, size, seed, sizes]) => {
+        P5.exp?.emulator.dispose()
+        P5.exp?.host.remove()
+        P5.exp = P5.reference('exp', size.cols, size.rows)
+        let length = 0
+        for (const chunk of P5.stream) length += chunk.length
+        const whole = new Uint8Array(length)
+        let offset = 0
+        for (const chunk of P5.stream) {
+          whole.set(chunk, offset)
+          offset += chunk.length
+        }
+        P5.stream = [whole]
+        const emulator = P5.exp.emulator
+        if (seed.length) await emulator.write(Uint8Array.from(seed))
+        let at = from
+        let owed = 0
+        for (const s of sizes) {
+          const upto = Math.min(Math.max(s.at, at), length)
+          if (upto > at) await emulator.write(whole.subarray(at, upto))
+          at = upto
+          if (s.mark) owed = P5.exp.answers.length
+          else emulator.resizeTo(s.cols, s.rows)
+        }
+        if (at < length) await emulator.write(whole.subarray(at))
+        return { state: P5.state(emulator), owed: P5.exp.answers.slice(owed) }
+      },
+      [first.from, first.size, first.seed, sizes],
+    )
   }
   /** What the program prints, to the reference first; `settle`: waits for the page to draw it. */
   async function print(op, settled = true) {
@@ -733,29 +786,32 @@ async function runCase(c) {
     const count = op.repeat ? op.count : 1
     const len = bytes.length * count
     const before = await R(() => P5.ref.answers.length)
-    await R(async ([b, n]) => {
-      const emulator = P5.ref.emulator
-      let left = n
-      const per = Math.max(1, Math.floor(60000 / b.length))
-      // xterm that fails on a write never calls back: the stream is the reference's failure, not the page's.
-      const failed = new Promise((_, no) => {
-        P5.ref.fail = (e) => no(new Error('xterm failed: ' + e.message))
-      })
-      const listener = (e) => P5.ref.fail(e)
-      window.addEventListener('error', listener)
-      try {
-        while (left > 0) {
-          const k = Math.min(per, left)
-          const chunk = new Uint8Array(k * b.length)
-          for (let i = 0; i < k; i++) chunk.set(b, i * b.length)
-          P5.stream.push(chunk)
-          await Promise.race([emulator.write(chunk), failed])
-          left -= k
+    await R(
+      async ([b, n]) => {
+        const emulator = P5.ref.emulator
+        let left = n
+        const per = Math.max(1, Math.floor(60000 / b.length))
+        // xterm that fails on a write never calls back: the stream is the reference's failure, not the page's.
+        const failed = new Promise((_, no) => {
+          P5.ref.fail = (e) => no(new Error('xterm failed: ' + e.message))
+        })
+        const listener = (e) => P5.ref.fail(e)
+        window.addEventListener('error', listener)
+        try {
+          while (left > 0) {
+            const k = Math.min(per, left)
+            const chunk = new Uint8Array(k * b.length)
+            for (let i = 0; i < k; i++) chunk.set(b, i * b.length)
+            P5.stream.push(chunk)
+            await Promise.race([emulator.write(chunk), failed])
+            left -= k
+          }
+        } finally {
+          window.removeEventListener('error', listener)
         }
-      } finally {
-        window.removeEventListener('error', listener)
-      }
-    }, [bytes, count])
+      },
+      [bytes, count],
+    )
     const after = await R(() => P5.ref.answers.length)
     mine.chunks.push(Buffer.alloc(len, Buffer.from(bytes)))
     mine.total += len
@@ -833,11 +889,16 @@ async function runCase(c) {
   const wanted = mine.answers.join('')
   const given = await programReceived(win, wanted.length)
   if (given !== wanted)
-    differences.push(`the program received ${JSON.stringify(given)}, the host admitted ${JSON.stringify(wanted)}`)
+    differences.push(
+      `the program received ${JSON.stringify(given)}, the host admitted ${JSON.stringify(wanted)}`,
+    )
   const refAnswers = await R(() => P5.ref.answers.slice())
   const placed = (answers) =>
     answers.map((answer, i) =>
-      i >= mine.cutFrom ? answer.replace(/^\x1b\[(\??)[\d;]+R$/, '\x1b[$1a cursor report R') : answer,
+      i >= mine.cutFrom
+        ? // biome-ignore lint/suspicious/noControlCharactersInRegex: the escape byte is what is matched
+          answer.replace(/^\x1b\[(\??)[\d;]+R$/, '\x1b[$1a cursor report R')
+        : answer,
     )
   const expected = refAnswers.filter((_, i) => !lostAnswers.has(i))
   if (JSON.stringify(placed(expected)) !== JSON.stringify(placed(mine.answers)))
@@ -872,7 +933,10 @@ async function laneCase() {
     24,
   )
   current = mine
-  const second = { win: other, generation: (await host.call('open', other, { rows: 24, cols: 80 })).generation }
+  const second = {
+    win: other,
+    generation: (await host.call('open', other, { rows: 24, cols: 80 })).generation,
+  }
   mine.second = second
   const lastSeq = new Map()
   host.onMessage = (m) => {
@@ -880,8 +944,16 @@ async function laneCase() {
     lastSeq.set(m.id, m.seq)
     app
       .evaluate((m) => {
-        const bytes = Uint8Array.from({ length: m.hex.length >> 1 }, (_, i) => parseInt(m.hex.substr(i * 2, 2), 16))
-        window.__output.onmessage({ id: m.id, generation: m.generation, seq: m.seq, offset: m.offset, bytes })
+        const bytes = Uint8Array.from({ length: m.hex.length >> 1 }, (_, i) =>
+          parseInt(m.hex.substr(i * 2, 2), 16),
+        )
+        window.__output.onmessage({
+          id: m.id,
+          generation: m.generation,
+          seq: m.seq,
+          offset: m.offset,
+          bytes,
+        })
       }, m)
       .catch(() => {})
   }
@@ -920,7 +992,8 @@ async function laneCase() {
     differences.push(`the lane that left answered: ${JSON.stringify(mine.otherAnswers)}`)
   // Its program read the one reply it was given while docked, and nothing after.
   const read = await programReceived(other, 4)
-  if (read !== '\x1b[0n') differences.push(`the program of the lane that left received ${JSON.stringify(read)}`)
+  if (read !== '\x1b[0n')
+    differences.push(`the program of the lane that left received ${JSON.stringify(read)}`)
   differences.push(...mine.refused)
   await app.goto('about:blank')
   await host.call('close', other)
@@ -940,25 +1013,46 @@ const started = Date.now()
 /** The stream through one xterm alone, no host: where xterm itself fails on a stream, that is not the host's difference. */
 async function refAlone(c) {
   try {
-    return await R(async ([c]) => {
-      const solo = P5.reference('solo', c.cols, c.rows)
-      const errors = []
-      const listener = (e) => errors.push(e.message)
-      window.addEventListener('error', listener)
-      try {
-        for (const op of c.ops) {
-          if (op.emit || op.repeat) {
-            const b = op.emit ?? op.repeat
-            const n = op.repeat ? op.count : 1
-            const chunk = new Uint8Array(b.length * n)
-            for (let i = 0; i < n; i++) chunk.set(b, i * b.length)
-            await Promise.race([solo.emulator.write(chunk), new Promise((_, no) => { const t = setInterval(() => { if (errors.length) { clearInterval(t); no(new Error(errors[0])) } }, 5) })])
-          } else if (op.resize) solo.emulator.terminal.resize(op.resize[0], op.resize[1])
+    return await R(
+      async ([c]) => {
+        const solo = P5.reference('solo', c.cols, c.rows)
+        const errors = []
+        const listener = (e) => errors.push(e.message)
+        window.addEventListener('error', listener)
+        try {
+          for (const op of c.ops) {
+            if (op.emit || op.repeat) {
+              const b = op.emit ?? op.repeat
+              const n = op.repeat ? op.count : 1
+              const chunk = new Uint8Array(b.length * n)
+              for (let i = 0; i < n; i++) chunk.set(b, i * b.length)
+              await Promise.race([
+                solo.emulator.write(chunk),
+                new Promise((_, no) => {
+                  const t = setInterval(() => {
+                    if (errors.length) {
+                      clearInterval(t)
+                      no(new Error(errors[0]))
+                    }
+                  }, 5)
+                }),
+              ])
+            } else if (op.resize) solo.emulator.terminal.resize(op.resize[0], op.resize[1])
+          }
+          return null
+        } catch (error) {
+          return error.message
+        } finally {
+          window.removeEventListener('error', listener)
+          solo.emulator.dispose()
+          solo.host.remove()
         }
-        return null
-      } catch (error) { return error.message } finally { window.removeEventListener('error', listener); solo.emulator.dispose(); solo.host.remove() }
-    }, [c])
-  } catch (error) { return error.message }
+      },
+      [c],
+    )
+  } catch (error) {
+    return error.message
+  }
 }
 if (!only || only.test('a lane that leaves')) {
   results.cases++
@@ -978,12 +1072,20 @@ if (!only || only.test('a lane that leaves')) {
 for (const c of all) {
   results.cases++
   let differences
-  try { differences = await runCase(c) } catch (error) {
+  try {
+    differences = await runCase(c)
+  } catch (error) {
     differences = [`ERROR ${error.message}`]
     await app.goto('about:blank')
     await host.call('close', 'w' + windowNo)
     const alone = await refAlone(c)
-    if (alone) { results.xtermFailed = (results.xtermFailed ?? 0) + 1; differences = []; console.log(`XTERM FAILS ALONE ${c.name} seed ${c.seed}: ${alone.slice(0, 200)}`); if (out) appendFileSync(out + '.xterm', JSON.stringify({ name: c.name, seed: c.seed, alone }) + '\n') }
+    if (alone) {
+      results.xtermFailed = (results.xtermFailed ?? 0) + 1
+      differences = []
+      console.log(`XTERM FAILS ALONE ${c.name} seed ${c.seed}: ${alone.slice(0, 200)}`)
+      if (out)
+        appendFileSync(out + '.xterm', JSON.stringify({ name: c.name, seed: c.seed, alone }) + '\n')
+    }
   }
   if (differences.length) {
     results.failed++
@@ -992,9 +1094,21 @@ for (const c of all) {
     if (out) appendFileSync(out, JSON.stringify(row) + '\n')
     console.log(`FAIL ${c.name} seed ${c.seed}: ${differences.join(' | ').slice(0, 400)}`)
   }
-  if (results.cases % 50 === 0) console.log(`... ${results.cases}/${all.length} cases, ${results.failed} failed, ${Math.round((Date.now() - started) / 1000)} s`)
+  if (results.cases % 50 === 0)
+    console.log(
+      `... ${results.cases}/${all.length} cases, ${results.failed} failed, ${Math.round((Date.now() - started) / 1000)} s`,
+    )
 }
-console.log(JSON.stringify({ browser: browserName, fixed: nFixed, random: Number(randomCount), pastCap: Number(pastCount), firstSeed: Number(firstSeed), ...results }))
+console.log(
+  JSON.stringify({
+    browser: browserName,
+    fixed: nFixed,
+    random: Number(randomCount),
+    pastCap: Number(pastCount),
+    firstSeed: Number(firstSeed),
+    ...results,
+  }),
+)
 await host.close()
 await browser.close()
 await ui.close()

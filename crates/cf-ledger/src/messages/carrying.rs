@@ -400,11 +400,11 @@ pub(crate) fn transfer(
         ),
         params![task.id, window.id],
     )?;
+    let before_slots = crate::tasks::brief_before_slots(task);
     let mut said = String::new();
-    for row in rows
-        .iter()
-        .filter(|row| !(row.kind == "task" && row.body == brief))
-    {
+    for row in rows.iter().filter(|row| {
+        !(row.kind == "task" && (row.body == brief || before_slots.as_deref() == Some(&row.body)))
+    }) {
         let from = row
             .sender
             .as_ref()

@@ -17,7 +17,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::disallowed_methods
+    clippy::disallowed_methods,
+    clippy::print_stderr
 )]
 
 // A fifo is its program's input: Unix only.
@@ -41,6 +42,7 @@ mod bridge {
 
     const PROGRAM: &str = r#"
 import os, select, sys, tty
+owner = os.getppid()
 tty.setraw(1)
 fd = os.open(sys.argv[1], os.O_RDWR)
 got = os.open(sys.argv[1] + '.in', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -56,7 +58,7 @@ while True:
     if fd not in ready:
         continue
     d = os.read(fd, 1 << 20)
-    if not d:
+    if not d or os.getppid() != owner:
         sys.exit(0)
     buf += d
     while b'\n' in buf:
@@ -208,12 +210,19 @@ while True:
                     });
                     continue;
                 }
-                "page_prepare" => match inputs.prepare_page(command["page"].as_str().unwrap()) {
-                    Ok(()) => json!({"ok":true}),
+                "page_prepare" => match inputs.prepare_page(
+                    command["page"].as_str().unwrap(),
+                    command["nonce"].as_str().unwrap(),
+                ) {
+                    Ok(epoch) => json!({"ok":true,"epoch":epoch,"nonce":command["nonce"]}),
                     Err(error) => json!({"ok":false,"error":error}),
                 },
-                "page_activate" => match inputs.activate_page(command["page"].as_str().unwrap()) {
-                    Ok(()) => json!({"ok":true}),
+                "page_activate" => match inputs.activate_page(
+                    command["page"].as_str().unwrap(),
+                    command["nonce"].as_str().unwrap(),
+                    command["epoch"].as_u64().unwrap(),
+                ) {
+                    Ok(_) => json!({"ok":true,"epoch":command["epoch"],"notices":[]}),
                     Err(error) => json!({"ok":false,"error":error}),
                 },
                 "navigate" => {
@@ -305,6 +314,7 @@ while True:
                     );
                     match inputs.enqueue_page(
                         command["page"].as_str().unwrap(),
+                        command["epoch"].as_u64().unwrap(),
                         key,
                         command["sequence"].as_u64().unwrap(),
                         InputWork::Reply(bytes),
@@ -331,6 +341,7 @@ while True:
                     if let Some(mut window) = windows.remove(&name) {
                         let _ = writeln!(window.fifo, "q");
                         let _ = panes.kill(&window.key);
+                        panes.forget_consumed_journal(&window.key, window.journal.end());
                     }
                     json!({})
                 }
@@ -348,7 +359,14 @@ while True:
     }
 }
 
+// The window's program writes on a fifo, which only Unix has: elsewhere the tool says so and stops.
+#[cfg(not(unix))]
 fn main() {
-    #[cfg(unix)]
+    eprintln!("gate_bridge drives a window through a fifo: it runs on Unix only");
+    std::process::exit(2);
+}
+
+#[cfg(unix)]
+fn main() {
     bridge::main();
 }

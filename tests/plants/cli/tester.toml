@@ -64,5 +64,5 @@ runs = ["board-goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.rs"
-find = "(with --advice for an advisor, --review for a reviewer or --test for a tester; or,"
-replace = "(with --advice for an advisor or --review for a reviewer; or,"
+find = "--advice for an advisor, --review for a reviewer or --test for a tester:"
+replace = "--advice for an advisor or --review for a reviewer:"

@@ -19,10 +19,70 @@ pub struct PlanTask {
     pub before: Vec<String>,
 }
 
-/// Names and numbers in the order the plan gave them, and whether it was a retry.
+/// One section's answer: its name and task number, the tier it went to (its effective tier,
+/// kept with the key, so `cf` never calls a Complex request that fell to Standard Complex),
+/// and, where it fell, the tier asked and the members of the tier it went to. An answer an
+/// earlier version kept has the name and the number alone.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanSection {
+    pub name: String,
+    pub number: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asked: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held_by: Vec<String>,
+}
+
+/// A saved answer, in the form it was kept: `[name, number]` before the slots, an object since.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SavedSection {
+    Old((String, i64)),
+    #[serde(rename_all = "camelCase")]
+    New {
+        name: String,
+        number: i64,
+        tier: Option<String>,
+        asked: Option<String>,
+        #[serde(default)]
+        held_by: Vec<String>,
+    },
+}
+
+impl From<SavedSection> for PlanSection {
+    fn from(saved: SavedSection) -> Self {
+        match saved {
+            SavedSection::Old((name, number)) => Self {
+                name,
+                number,
+                tier: None,
+                asked: None,
+                held_by: Vec::new(),
+            },
+            SavedSection::New {
+                name,
+                number,
+                tier,
+                asked,
+                held_by,
+            } => Self {
+                name,
+                number,
+                tier,
+                asked,
+                held_by,
+            },
+        }
+    }
+}
+
+/// The sections in the order the plan gave them, and whether it was a retry.
 #[derive(Debug)]
 pub struct PlanCreated {
-    pub tasks: Vec<(String, i64)>,
+    pub tasks: Vec<PlanSection>,
     pub repeated: bool,
 }
 
@@ -36,6 +96,57 @@ fn section(name: &str, error: LedgerError) -> LedgerError {
     }
 }
 
+/// The ledger's fingerprint of a plan: its sections as read and the file's own.
+fn plan_fingerprint(tasks: &[PlanTask], fingerprint: &str) -> Result<String, LedgerError> {
+    let encoded = serde_json::to_vec(&(tasks, fingerprint))?;
+    Ok(format!("{:x}", Sha256::digest(encoded)))
+}
+
+/// The answer saved under `key`, replayed for the same plan; a different plan under it is
+/// `key-used`; none where the key is new.
+fn saved_plan(
+    store: &Store,
+    project: i64,
+    key: &str,
+    fingerprint: &str,
+) -> Result<Option<PlanCreated>, LedgerError> {
+    let existing: Option<(String, String)> = store
+        .db
+        .query_row(
+            "SELECT fingerprint, tasks FROM task_plan_key WHERE project_id = ? AND key = ?",
+            params![project, key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((saved, answer)) = existing else {
+        return Ok(None);
+    };
+    if saved != fingerprint {
+        return Err(LedgerError::refused_with(
+            "key-used",
+            format!("key {key} was already used for a different plan"),
+            409,
+        ));
+    }
+    let saved: Vec<SavedSection> = serde_json::from_str(&answer)?;
+    Ok(Some(PlanCreated {
+        tasks: saved.into_iter().map(PlanSection::from).collect(),
+        repeated: true,
+    }))
+}
+
+/// The answer a plan's key holds, looked up before any rule of now is checked: the same plan
+/// replays it, a different one is `key-used`, a new key is none.
+pub(crate) fn replayed_plan(
+    store: &Store,
+    project: i64,
+    tasks: &[PlanTask],
+    key: &str,
+    fingerprint: &str,
+) -> Result<Option<PlanCreated>, LedgerError> {
+    saved_plan(store, project, key, &plan_fingerprint(tasks, fingerprint)?)
+}
+
 /// The same single-task operations, nested in one outer write. The key and its
 /// answer commit with the tasks: a retry cannot see a partial plan.
 pub(crate) fn create_plan(
@@ -45,22 +156,14 @@ pub(crate) fn create_plan(
     key: Option<&str>,
     fingerprint: &str,
 ) -> Result<PlanCreated, LedgerError> {
-    let encoded = serde_json::to_vec(&(tasks, fingerprint))?;
-    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     store.write_batch(|store| {
         if let Some(key) = key {
             if key.is_empty() || key.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) || key.len() > 256 {
                 return Err(LedgerError::refused("invalid-key", "--key takes one word of at most 256 bytes"));
             }
-            let existing: Option<(String, String)> = store.db.query_row(
-                "SELECT fingerprint, tasks FROM task_plan_key WHERE project_id = ? AND key = ?",
-                params![project, key], |row| Ok((row.get(0)?, row.get(1)?)),
-            ).optional()?;
-            if let Some((saved, answer)) = existing {
-                if saved != fingerprint {
-                    return Err(LedgerError::refused_with("key-used", format!("key {key} was already used for a different plan"), 409));
-                }
-                return Ok(PlanCreated { tasks: serde_json::from_str(&answer)?, repeated: true });
+            if let Some(saved) = saved_plan(store, project, key, &fingerprint)? {
+                return Ok(saved);
             }
         }
         if tasks.is_empty() {
@@ -95,7 +198,7 @@ pub(crate) fn create_plan(
                 }
             }
         }
-        let mut made: Vec<Option<i64>> = vec![None; tasks.len()];
+        let mut made: Vec<Option<PlanSection>> = vec![None; tasks.len()];
         for _ in 0..tasks.len() {
             let Some(index) = (0..tasks.len()).find(|&index| made[index].is_none() && needs[index].iter().all(|&need| made[need].is_some())) else {
                 let index = made.iter().position(Option::is_none).unwrap_or_default();
@@ -103,14 +206,24 @@ pub(crate) fn create_plan(
             };
             let mut request = tasks[index].task.clone();
             for &need in &needs[index] {
-                let number = made[need].ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))?;
+                let number = made[need].as_ref().map(|section| section.number).ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))?;
                 let number = u64::try_from(number).map_err(|_| LedgerError::refused("invalid-needs", "not a task number"))?;
                 if !request.needs.contains(&number) { request.needs.push(number); }
             }
             let created = create_task(store, project, &request).map_err(|error| section(&tasks[index].name, error))?;
-            made[index] = Some(created.task.number);
+            let held_by = match (&created.asked, created.task.pool.as_deref(), created.task.tier.as_deref()) {
+                (Some(_), Some(pool), Some(tier)) => crate::staff::holders_of_tier(store, project, pool, tier)?,
+                _ => Vec::new(),
+            };
+            made[index] = Some(PlanSection {
+                name: tasks[index].name.clone(),
+                number: created.task.number,
+                tier: created.task.tier.clone(),
+                asked: created.asked.clone(),
+                held_by,
+            });
         }
-        let answer: Vec<(String, i64)> = tasks.iter().zip(made).map(|(task, number)| number.map(|number| (task.name.clone(), number)).ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))).collect::<Result<_, _>>()?;
+        let answer: Vec<PlanSection> = made.into_iter().map(|section| section.ok_or_else(|| LedgerError::refused("circular-needs", "a plan has no circles of needs"))).collect::<Result<_, _>>()?;
         if let Some(key) = key {
             store.db.execute(
                 "INSERT INTO task_plan_key (project_id, key, fingerprint, tasks) VALUES (?, ?, ?, ?)",

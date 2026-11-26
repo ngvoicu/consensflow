@@ -1,0 +1,582 @@
+# The staff as slots (`architecture/staff-slots.md`, section 7): the twelve plants of the build, and
+# one for each of the review's four amendments (T-1897) and each of main's faults the build mends
+# (a purpose accepted at any tier, Edit member leaving a backup's windows at the old tier, an image
+# designer's backup read as a worker). A plant puts back the behaviour of main, or takes the fix
+# out, and a test of the staff as slots fails for it. Every name holds `staff slots`, so
+# `cargo xtask plants daemon "staff slots"` runs them all.
+
+[run]
+ss-ledger-slots = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "slots"]
+ss-ledger-roles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "roles::"]
+ss-ledger-update = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "update_to_slots"]
+ss-ledger-messages = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "update_keeps_messages"]
+ss-ledger-briefs = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "brief_before_slots"]
+ss-engine-tier = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "tier_fallback::"]
+ss-engine-router = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slot_router::"]
+ss-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
+ss-daemon-routes-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tasks"]
+ss-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
+
+[[plant]]
+name = "staff slots: the free-slot check lets a second member into a slot"
+meant = "each_write_is_refused_in_the_words_of_the_rule"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/slots.rs"
+find = '''
+        if let Some((_, handle)) = holders(store, project_id, role.id, at, except)?.first() {
+'''
+replace = '''
+        if let Some((_, handle)) = holders(store, project_id, role.id, at, except)?.first().filter(|_| false) {
+'''
+
+[[plant]]
+name = "staff slots: the placement lets a task take Critical with no purpose"
+meant = "a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical_holder"
+runs = ["ss-engine-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''
+        && (tier != "critical" || purpose.is_some_and(|purpose| PURPOSES.contains(&purpose)))
+'''
+replace = '''
+        && true
+'''
+
+[[plant]]
+name = "staff slots: Critical is a destination of a fall"
+meant = "a_task_goes_to_its_slot_else_the_nearest_held_one_never_into_critical_for_every_role"
+runs = ["ss-engine-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''
+        .filter(|(_, other)| *other != "critical" && crate::roles::offers(pool, other))
+'''
+replace = '''
+        .filter(|(_, other)| crate::roles::offers(pool, other))
+'''
+
+[[plant]]
+name = "staff slots: a waiting task is given to its Critical holder"
+meant = "a_task_asked_at_critical_that_lost_its_purpose_is_never_given_to_the_critical_holder"
+runs = ["ss-engine-tier"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                self.tell_wait(project, &task, &critical_only_words(&task, &critical))?;
+                continue;
+            }
+'''
+replace = '''
+                self.tell_wait(project, &task, &critical_only_words(&task, &critical))?;
+            }
+'''
+
+[[plant]]
+name = "staff slots: a task from before takes no home tier"
+meant = "a_task_from_before_with_no_tier_takes_its_roles_home_tier_and_goes_to_its_slot_or_falls"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        let asked = task.tier.as_deref().unwrap_or(home).to_owned();
+'''
+replace = '''
+        let asked = task.tier.as_deref().unwrap_or("critical").to_owned();
+'''
+
+[[plant]]
+name = "staff slots: the update reads light as a choice"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+     AND (p.tier IS NULL OR p.tier = 'light')
+'''
+replace = '''
+     AND p.tier IS NULL
+'''
+
+[[plant]]
+name = "staff slots: the sweep hands a task to a backup that may not take it"
+meant = "a_tier_moved_while_a_task_is_held_keeps_it_in_its_members_window_and_ends_no_pass"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .is_err()
+'''
+replace = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .is_err()
+                        && false
+'''
+
+[[plant]]
+name = "staff slots: a Critical backup takes work that is not critical's"
+meant = "critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+    if tiered
+        && member.tier.as_deref() == Some("critical")
+'''
+replace = '''
+    if false
+        && tiered
+        && member.tier.as_deref() == Some("critical")
+'''
+
+[[plant]]
+name = "staff slots: a wait note withdrawn before the chief had it counts as told"
+meant = "a_wait_note_withdrawn_before_the_chief_had_it_is_told_again_once"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                .is_some_and(|message| message.state == "cancelled"),
+'''
+replace = '''
+                .is_some_and(|message| message.state == "cancelled" && false),
+'''
+
+[[plant]]
+name = "staff slots: the note of where a task fell is left to the assignment's withdrawal"
+meant = "the_note_of_where_a_task_fell_stays_queued_through_the_assignment_that_follows_it"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+    let fell = format!("T-{} asked for ", task.number);
+'''
+replace = '''
+    let fell = format!("T-{} never asked for ", task.number);
+'''
+
+[[plant]]
+name = "staff slots: a plan section's fall is left out of its answer"
+meant = "a_plans_saved_answer_is_looked_up_before_its_sections_and_carries_the_tier_each_went_to"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''
+                asked: created.asked.clone(),
+'''
+replace = '''
+                asked: None,
+'''
+
+[[plant]]
+name = "staff slots: Critical's rule goes by the stored tier of an image designer"
+meant = "critical_goes_by_the_roles_effective_slot_so_an_old_image_designer_keeps_its_drawings"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+    let tiered = task
+        .pool
+        .as_deref()
+        .and_then(roles::find)
+        .is_some_and(roles::Role::tiered);
+'''
+replace = '''
+    let tiered = true;
+'''
+
+[[plant]]
+name = "staff slots: a plan's sections are checked for their tier before its key is looked up"
+meant = "a_keyed_plan_an_earlier_version_took_with_a_tier_the_staff_now_refuses_still_replays"
+runs = ["ss-daemon-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::read_json(value, false)
+'''
+replace = '''
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::from_json(value)
+'''
+
+[[plant]]
+name = "staff slots: a plan section's answer says the tier asked in place of the tier it went to"
+meant = "a_plans_answer_carries_each_sections_tier_and_a_replay_gives_it_again_after_the_holder_moved"
+runs = ["ss-daemon-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''
+                tier: created.task.tier.clone(),
+'''
+replace = '''
+                tier: created.asked.clone().or(created.task.tier.clone()),
+'''
+
+[[plant]]
+name = "staff slots: a purpose edit rewrites a queued brief and not a gated one"
+meant = "a_purpose_edit_rewrites_the_critical_line_of_a_queued_and_of_a_gated_brief_and_the_window_gets_it"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+                   AND state IN ('queued', 'gated')'''
+replace = '''
+                   AND state IN ('queued')'''
+
+[[plant]]
+name = "staff slots: project.open reads an image designer's backup as a worker"
+meant = "a_project_opened_from_a_staff_with_an_image_designer_and_its_backup_keeps_the_pair"
+runs = ["ss-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''
+                    if draws {
+'''
+replace = '''
+                    if false && draws {
+'''
+
+[[plant]]
+name = "staff slots: the chief's staff table lists a member's backup"
+meant = "lists_the_members_without_their_backups"
+runs = ["ss-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''
+                && member.backup_of.is_none()
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "staff slots: a purpose is taken at any tier when a task is added"
+meant = "a_purpose_is_taken_only_with_critical_at_add_as_at_edit"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        if tier != "critical" && self.purpose.is_some() {
+'''
+replace = '''
+        if false && tier != "critical" && self.purpose.is_some() {
+'''
+
+[[plant]]
+name = "staff slots: Edit member leaves its backup's open windows at the old tier"
+meant = "edit_member_carries_the_new_tier_to_its_backups_open_windows"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+                                            WHERE backup_of = ?2 AND left_at IS NULL))",
+'''
+replace = '''
+                     OR 0",
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves the windows of a backup that was replaced"
+meant = "edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+                                            WHERE backup_of = ?2 AND left_at IS NULL))",
+'''
+replace = '''
+                     OR member_id IN (SELECT id FROM participant
+                                       WHERE backup_of = ?2)",
+'''
+
+[[plant]]
+name = "staff slots: the update moves a replaced backup of a member it moves (step 1)"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+     AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+INSERT INTO event (project_id, at, kind, data)
+  SELECT p.project_id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.unsettled',
+         json_object('handle', p.handle, 'reason', 'the role list is not JSON')
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief') AND NOT json_valid(p.roles)
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+      OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+'''
+replace = '''
+     AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+INSERT INTO event (project_id, at, kind, data)
+  SELECT p.project_id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.unsettled',
+         json_object('handle', p.handle, 'reason', 'the role list is not JSON')
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief') AND NOT json_valid(p.roles)
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+      OR p.backup_of = s.id
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id));
+'''
+
+[[plant]]
+name = "staff slots: the architect's critical line forbids its own work"
+meant = "the_architect_s_critical_lead_allows_its_documents_and_every_other_role_keeps_the_rule"
+runs = ["ss-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''
+                Some(role) if role.id == roles::ARCHITECT.id => format!(" {ARCHITECT_RULE}"),
+'''
+replace = '''
+                Some(role) if role.id == roles::ARCHITECT.id && false => format!(" {ARCHITECT_RULE}"),
+'''
+
+[[plant]]
+name = "staff slots: a worker's critical brief forbids it a file"
+meant = "a_critical_brief_of_a_role_that_writes_files_does_not_forbid_it_a_file"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''
+                Some(role) if role.changes_files => String::new(),
+'''
+replace = '''
+                Some(role) if role.changes_files && false => String::new(),
+'''
+
+[[plant]]
+name = "staff slots: a worker has no Critical slot"
+meant = "the_staff_is_thirty_three_slots_and_every_tiered_role_offers_all_four_tiers"
+runs = ["ss-ledger-roles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''
+    id: "worker",
+    name: "worker",
+    article: "a",
+    switch: None,
+    tiers: ALL_TIERS,
+'''
+replace = '''
+    id: "worker",
+    name: "worker",
+    article: "a",
+    switch: None,
+    tiers: &["complex", "standard", "light"],
+'''
+
+# Round 4 (T-2013, review T-2004): the key before the rules, closed windows as history, the
+# update's first delivery of a brief written before it, and the sweep's pass.
+
+[[plant]]
+name = "staff slots: a plan's key is looked up only after the rules of now"
+meant = "a_keyed_plan_alpha_13_took_with_a_null_tier_for_a_role_that_had_none_still_replays"
+runs = ["ss-daemon-routes-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''
+    let replayed = match key {
+'''
+replace = '''
+    let replayed = match None::<&str> {
+'''
+
+[[plant]]
+name = "staff slots: the update moves a closed window of a member it moves"
+meant = "alpha_13s_closed_windows_keep_their_tier_and_the_open_ones_move_with_their_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+'''
+replace = '''
+      ON p.id = s.id OR p.member_id = s.id
+'''
+
+[[plant]]
+name = "staff slots: the update moves a closed window of a current backup"
+meant = "a_built_ledger_gains_each_members_home_tier_and_moves_no_critical_member"
+runs = ["ss-ledger-update"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+'''
+replace = '''
+      OR (1
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves the member's closed windows"
+meant = "a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+              WHERE id = ?2 OR (member_id = ?2 AND left_at IS NULL)",
+'''
+replace = '''
+              WHERE id = ?2 OR member_id = ?2",
+'''
+
+[[plant]]
+name = "staff slots: Edit member moves a closed window of its current backup"
+meant = "edit_member_leaves_a_replaced_backup_and_its_closed_window_at_the_tier_they_had"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+                     OR (left_at IS NULL
+                         AND member_id IN (SELECT id FROM participant
+'''
+replace = '''
+                     OR (1
+                         AND member_id IN (SELECT id FROM participant
+'''
+
+[[plant]]
+name = "staff slots: a window that comes back keeps the tier it closed with"
+meant = "a_closed_window_keeps_its_tier_through_edit_and_takes_the_members_when_it_comes_back"
+runs = ["ss-ledger-slots"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = '''
+                tier = COALESCE((SELECT m.tier FROM participant m
+                                  WHERE m.id = participant.member_id), tier)
+'''
+replace = '''
+                tier = tier
+'''
+
+[[plant]]
+name = "staff slots: the sweep's refusal of a backup ends the pass"
+meant = "critical_takes_only_critical_work_when_the_sweep_hands_a_task_to_a_backup"
+runs = ["ss-engine-router"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .is_err()
+                    {
+                        continue;
+                    }
+'''
+replace = '''
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .map(|_| false)?
+                    {
+                        continue;
+                    }
+'''
+
+[[plant]]
+name = "staff slots: a role list that is no JSON stops the update"
+meant = "a_role_list_that_is_no_json_on_a_member_the_update_would_settle_stops_nothing"
+runs = ["ss-ledger-messages"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+     AND CASE WHEN json_valid(p.roles)
+              THEN json_array_length(p.roles) > 0
+'''
+replace = '''
+     AND CASE WHEN 1
+              THEN json_array_length(p.roles) > 0
+'''
+
+[[plant]]
+name = "staff slots: a move says a brief of before the slots twice"
+meant = "a_reassign_before_the_saved_brief_arrived_gives_the_next_window_the_work_once"
+runs = ["ss-ledger-briefs"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+        !(row.kind == "task" && (row.body == brief || before_slots.as_deref() == Some(&row.body)))
+'''
+replace = '''
+        !(row.kind == "task" && (row.body == brief || before_slots.is_none() && false))
+'''
+
+[[plant]]
+name = "staff slots: an edit misses a brief of before the slots"
+meant = "an_edit_of_the_queued_saved_brief_is_what_the_window_is_given"
+runs = ["ss-ledger-briefs"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = '''
+        let renewed = [Some(&old), before_slots.as_ref()]
+'''
+replace = '''
+        let renewed = [Some(&old), before_slots.as_ref().filter(|_| false)]
+'''
+
+[[plant]]
+name = "staff slots: the update rewrites a queued Critical brief"
+meant = "every_older_ledger_opens_twice_and_the_update_changes_no_message"
+runs = ["ss-ledger-messages"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0045.sql"
+find = '''
+DROP TABLE settled;
+'''
+replace = '''
+DROP TABLE settled;
+UPDATE message SET body = replace(body, ' It changes no project file: return analysis, evidence and recommendations to the chief.', '')
+ WHERE kind = 'task' AND state = 'queued' AND body LIKE 'Critical work:%';
+'''
+

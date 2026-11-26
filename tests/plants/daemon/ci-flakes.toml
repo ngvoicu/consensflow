@@ -139,13 +139,11 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().keep("exit 0");
 '''
 replace = '''
         std::thread::sleep(Duration::from_millis(1_000));
-        self.errors.log().info("exit 0");
-        (self.exit)(0);
+        self.errors.log().keep("exit 0");
 '''
 
 [[plant]]
@@ -166,11 +164,11 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
+        let _ = self.errors.log().written(log_within);
         (self.exit)(0);
 '''
 replace = '''
-        self.errors.log().info("exit 0");
+        let _ = self.errors.log().written(log_within);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(0);
 '''
@@ -183,11 +181,11 @@ runs = ["stop-program"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors.log().info("exit 0");
+        let _ = self.errors.log().written(log_within);
         (self.exit)(0);
 '''
 replace = '''
-        self.errors.log().info("exit 0");
+        let _ = self.errors.log().written(log_within);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(0);
 '''
@@ -231,15 +229,11 @@ runs = ["daemon-lib-stop-open"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-            self.api.drop_connections();
-        }
-        self.tail();
+        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));
 '''
 replace = '''
-            self.api.drop_connections();
-        }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        self.tail();
+        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));
 '''
 
 [[plant]]

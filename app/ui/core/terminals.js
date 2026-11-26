@@ -2,9 +2,18 @@ import { button, element, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
+import { DockStrip } from './dock-strip.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
+
+/** What a window's chip in the dock's map says: the chief, a session by its name, a member by its handle. */
+const chipLabel = (participant) =>
+  participant.role === 'chief'
+    ? 'Chief'
+    : participant.member
+      ? participant.session
+      : `@${participant.handle}`
 
 /**
  * What the chief is doing, then what it runs on: the line under its name on
@@ -75,6 +84,13 @@ export class TerminalsView {
   #gone = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
+  /**
+   * The card lit as the window typed into: the one last brought into view, until the keyboard
+   * goes into another's terminal (a click there, Ctrl+Tab, the dock's map).
+   */
+  #lit = null
+  /** The person's way along the row: its gestures, keys and map. */
+  #strip
   /** The number the next card to come into the dock takes: the dock keeps its cards in that order. */
   #arrivals = 0
   /**
@@ -85,10 +101,13 @@ export class TerminalsView {
    * terminal alone, and Show terminal brings a session's back.
    */
   #showing = new Set()
+  /** The host's notices of typing that may be missing, one row for each, above the dock. */
+  #noticeList
 
   constructor(
     stage,
     {
+      map = null,
       invoke,
       pageId,
       report,
@@ -103,6 +122,11 @@ export class TerminalsView {
     },
   ) {
     this.#stage = stage
+    this.#noticeList = element('ul', 'input-notices')
+    this.#noticeList.setAttribute('aria-label', 'Typing that may not have arrived')
+    this.#noticeList.setAttribute('role', 'status')
+    this.#noticeList.hidden = true
+    stage.parentElement?.insertBefore(this.#noticeList, stage)
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
@@ -125,9 +149,124 @@ export class TerminalsView {
       onTruncated: (pane) => this.#truncated(pane),
       // A window the person sees is one whose card is in the dock.
       shown: (pane) => this.#cards.get(paneKey(pane))?.card.parentElement === this.#stage,
+      notices: { draw: (owed) => this.#drawNotices(owed) },
+      // Until this document's epoch is acknowledged, the terminals are visibly read-only.
+      onGate: (open) => {
+        this.#stage.dataset.input = open ? 'open' : 'closed'
+        if (open) delete this.#stage.dataset.reconnecting
+        else this.#stage.dataset.reconnecting = 'Reconnecting: typing is paused'
+      },
     })
     this.#invoke = invoke
     this.#report = report
+    this.#strip = new DockStrip(stage, map, {
+      focus: (card) => {
+        const entry = this.#windowOf(card)
+        if (entry !== undefined) this.#registry.get(entry.pane)?.terminal?.focus()
+      },
+    })
+    // The window typed into is lit: the keyboard going into a terminal lights its card.
+    stage.addEventListener('focusin', (event) => {
+      if (!event.target?.closest?.('.terminal-host')) return
+      const entry = this.#windowOf(event.target.closest('.terminal-card'))
+      if (entry === undefined || entry.key === this.#lit) return
+      this.#lit = entry.key
+      for (const other of this.#cards.values()) {
+        if (other.card.isConnected) other.card.dataset.focused = String(other === entry)
+      }
+      this.#strip.redraw()
+    })
+  }
+
+  /** This document's activation was answered with its epoch: the terminals take input. */
+  open(epoch) {
+    this.#link.open(epoch)
+  }
+
+  /** A place among what is typed in `pane`, taken where a drop is made; null (and said) while the terminals are read-only. */
+  holdPlace(pane) {
+    return this.#link.holdPlace(pane)
+  }
+
+  /** A place a drop did not use: its number is let go. */
+  releasePlace(place) {
+    this.#link.releasePlace(place)
+  }
+
+  /** What the host owes the person (at activation or by a pull of its list): drawn, until dismissed. */
+  receive(owed) {
+    this.#link.receive(owed)
+  }
+
+  /** Ask the host what it owes the person. */
+  pull() {
+    return this.#link.pull()
+  }
+
+  /**
+   * The host's list as rows, one for each notice, by the host's id. A row is drawn once and its
+   * words never change (the host replaces a notice that says something else, under a new id);
+   * a row that is not on the list any more (replaced, folded) goes, and one the person
+   * dismissed is not drawn again. Order is the list's.
+   */
+  #drawNotices(owed) {
+    const ids = new Set(owed.map((notice) => String(notice.id)))
+    for (const row of [...this.#noticeList.children]) {
+      if (row.dataset.notice !== undefined && !ids.has(row.dataset.notice)) row.remove()
+    }
+    for (const notice of owed) {
+      const { row, created } = this.#row(`notice:${notice.id}`)
+      if (created) {
+        row.dataset.notice = String(notice.id)
+        row.dataset.state = notice.kind === 'window' && notice.closed ? 'closed' : 'open'
+        if (notice.kind === 'window') row.dataset.generation = String(notice.generation)
+        row.firstElementChild.textContent = this.#noticeWords(notice)
+      }
+    }
+    this.#noticeList.hidden = this.#noticeList.children.length === 0
+  }
+
+  /** What a notice says, from what the host knew when it made it: the window by name and generation. */
+  #noticeWords(notice) {
+    if (notice.kind === 'folded') {
+      const places = notice.count === 1 ? 'place' : 'places'
+      return `Input was also lost in ${notice.count} more ${places}. Check what appeared in your other windows.`
+    }
+    const called = notice.name ?? `Window ${notice.window}`
+    if (notice.closed && notice.dropped) {
+      return `${called} has closed. A file you dropped into it just before may not have arrived.`
+    }
+    if (notice.closed) {
+      return `${called} (window ${notice.generation}) has closed. Typing sent to it just before may not have arrived.`
+    }
+    if (notice.dropped) {
+      return `${called}: A file you dropped here was not typed. Drop it again.`
+    }
+    if (notice.failed) {
+      return `${called}: Check whether your last typing appeared, then restart the project before typing again.`
+    }
+    return `${called}: Some of your typing may not have reached this window. Check what appeared.`
+  }
+
+  /** The row for `window`, made if it is not there: whether it was made now, and the row. */
+  #row(window) {
+    let row = [...this.#noticeList.children].find((item) => item.dataset.window === window)
+    let created = false
+    if (row === undefined) {
+      created = true
+      row = element('li', 'input-notice')
+      row.dataset.window = window
+      const words = element('span', 'input-notice-text')
+      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+        const id = Number(row.dataset.notice)
+        row.remove()
+        this.#noticeList.hidden = this.#noticeList.children.length === 0
+        if (Number.isSafeInteger(id)) this.#link.dismiss(id)
+      })
+      row.append(words, dismiss)
+      this.#noticeList.append(row)
+    }
+    return { row, created }
   }
 
   /**
@@ -223,10 +362,11 @@ export class TerminalsView {
    * keyboard is the window's after it, so what the human types next follows.
    * False where the window has closed since, and nothing is typed.
    */
-  pasteInto(pane, text, { focus }) {
+  pasteInto(pane, text, { focus, place = null }) {
     const emulator = this.#registry.get(pane)
     if (emulator === null) return false
-    emulator.paste(text)
+    if (place !== null) this.#link.withPlace(place, () => emulator.paste(text))
+    else emulator.paste(text)
     if (focus) emulator.terminal?.focus()
     return true
   }
@@ -353,18 +493,35 @@ export class TerminalsView {
     const wanted = [...windowless, ...cards.map((entry) => entry.card)]
     if (wanted.length === 0) {
       this.#stage.replaceChildren(element('p', 'stage-empty', 'No terminal is open yet.'))
+      this.#strip.update([])
       return
     }
     this.#place(wanted)
+    this.#strip.update([
+      ...windowless.map((card) => ({
+        card,
+        name: laneName(chief.participant),
+        label: chipLabel(chief.participant),
+      })),
+      ...cards.map((entry) => ({
+        card: entry.card,
+        name: laneName(entry.participant),
+        label: chipLabel(entry.participant),
+      })),
+    ])
     // With no terminal in the dock, there is none to bring into view.
     if (cards.length === 0) return
     const shown = cards.find((entry) => entry.handle === focused) ?? cards[0]
-    for (const entry of cards) entry.card.dataset.focused = String(entry === shown)
+    const fresh = shown.key !== this.#shownKey
+    if (fresh) this.#lit = shown.key
+    const lit = cards.find((entry) => entry.key === this.#lit) ?? shown
+    for (const entry of cards) entry.card.dataset.focused = String(entry === lit)
     for (const { pane } of cards) this.#registry.fit(pane)
     // A redraw follows the board every few seconds: scrolling and focusing
     // on each one would drag the human back from a card they scrolled to.
-    if (shown.key === this.#shownKey) return
+    if (!fresh) return
     this.#shownKey = shown.key
+    this.#strip.halt()
     shown.card.scrollIntoView({ inline: 'nearest', block: 'nearest' })
     requestAnimationFrame(() => this.#registry.get(shown.pane)?.terminal?.focus())
   }
@@ -552,6 +709,10 @@ export class TerminalsView {
     const now = Date.now()
     // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
+    // The chief's card while its window is down has no window to name.
+    if (entry.pane !== undefined) {
+      this.#link.nameWindow(entry.pane, name)
+    }
     entry.meeting = Boolean(board.project?.meeting)
     entry.ownHands = board.project?.ownHands === true
     const history = button(

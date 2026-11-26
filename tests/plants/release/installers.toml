@@ -34,7 +34,7 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''        0:*) refuse "the signature of $version's SHA256SUMS does not hold: ${checked#refused: }" ;;'''
-replace = '''        0:*) expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
+replace = '''        0:*) expected=$("$awk" -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
 
 [[plant]]
 name = "installers: install.sh does not check the trusted comment's signature"
@@ -156,7 +156,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    codesign --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||'''
+find = '''    "$codesign" --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||'''
 replace = '''    true 2>"$tmp/codesign.txt" ||'''
 
 [[plant]]
@@ -167,8 +167,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    codesign --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||'''
-replace = '''    codesign --verify "$1" 2>"$tmp/codesign.txt" ||'''
+find = '''    "$codesign" --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||'''
+replace = '''    "$codesign" --verify "$1" 2>"$tmp/codesign.txt" ||'''
 
 [[plant]]
 name = "installers: install.sh installs an app Gatekeeper refuses"
@@ -214,7 +214,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then'''
+find = '''    if [ "$("$sysctl" -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then'''
 replace = '''    if false; then'''
 
 [[plant]]
@@ -225,19 +225,66 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''            refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."'''
-replace = '''            kill -KILL $(processes_of "$1") 2>/dev/null || true'''
+find = '''        open) refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;'''
+replace = '''        open) return 0 ;;'''
 
 [[plant]]
 name = "installers: install.sh asks the ConsensFlow it runs inside to quit"
-meant = "that the install runs inside is not asked to quit: the install is refused"
-runs = [["node", "--test", "--test-name-pattern", "runs inside", "tests/install-sh.test.mjs"]]
+meant = "a shell with the pane host marker is refused before any quit where a copy runs from the app, and without it the same install goes on"
+runs = [["node", "--test", "--test-name-pattern", "pane host marker", "tests/install-sh.test.mjs"]]
 platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''        if printf '%s\n' "$running" | grep -qx "$pid"; then'''
-replace = '''        if false; then'''
+find = '''    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+replace = '''    if false; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+
+[[plant]]
+name = "installers: install.sh refuses a marked shell where nothing would be quit"
+meant = "a marked window in one running copy upgrades a closed copy in another folder, and no quit is asked"
+runs = [["node", "--test", "--test-name-pattern", "marked window in one running copy", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+replace = '''        refuse "$inside"'''
+
+[[plant]]
+name = "installers: install.sh asks a marked shell's destination to quit once it counts none"
+meant = "a copy opened after the marked install counted none is never asked to quit: the last look refuses"
+runs = [["node", "--test", "--test-name-pattern", "opened after the marked install", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"
+        return 0'''
+replace = '''        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"'''
+
+[[plant]]
+name = "installers: install.sh calls a system tool by its name"
+meant = "every system tool is called by its path: stand-ins that fail for each of them first on PATH change nothing"
+runs = [["node", "--test", "--test-name-pattern", "every system tool is called by its path", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    system=$("$uname" -s)'''
+replace = '''    system=$(uname -s)'''
+
+[[plant]]
+name = "installers: install.sh tells a folder by the GNU stat"
+meant = "GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through"
+runs = [["node", "--test", "--test-name-pattern", "GNU stat first on PATH", "tests/install-sh.test.mjs"]]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "install/install.sh"
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$("$stat" -f %d "$1")" = "$("$stat" -L -f %d "$2")" ]'''
+replace = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
 
 [[plant]]
 name = "installers: install.sh leaves its folder behind"
@@ -248,9 +295,9 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''    if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
-        rm -rf -x "$tmp"'''
+        "$rm" -rf -x "$tmp"'''
 replace = '''    if false; then
-        rm -rf -x "$tmp"'''
+        "$rm" -rf -x "$tmp"'''
 
 [[plant]]
 name = "installers: install.sh tries a folder that is not the user's"
@@ -272,7 +319,7 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''    if [ -n "$previous" ]; then
-        rm -rf -x "$previous"
+        "$rm" -rf -x "$previous"
         previous=""
     fi'''
 replace = '''    previous=""'''
@@ -406,14 +453,14 @@ replace = "    if ($false) {"
 
 [[plant]]
 name = "installers: install.ps1 stops an open ConsensFlow that does not close"
-meant = "install.ps1 in Windows PowerShell › on Windows › an open ConsensFlow › that stays open is never stopped, and nothing is installed"
+meant = "install.ps1 in Windows PowerShell › on Windows › an open ConsensFlow › is never closed or stopped: the install stops, asks the person to quit it, and installs nothing"
 runs = ["ps1"]
 platforms = ["windows"]
 
 [[plant.edit]]
 file = "install/install.ps1"
-find = '''                Stop-CfInstall "ConsensFlow in $dir is still open after $($quitWait)s. Close it and run this again."'''
-replace = '''                Get-CfOpen $dir | Stop-Process -Force'''
+find = '''        Stop-CfInstall "ConsensFlow is open. Quit it, then run this installer again. Running from ${dir}: $names"'''
+replace = '''        Get-CfOpen $dir | Stop-Process -Force'''
 
 [[plant]]
 name = "installers: install.ps1 asks the ConsensFlow it runs inside to close"
@@ -783,11 +830,11 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
-        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then'''
-replace = '''    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
-        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null) || true; then
-        [ "$checked" = ok ] && checked="ok $(awk -v name="$dmg" 'NF == 2 && $2 == name { print $1 }' "$tmp/SHA256SUMS")"'''
+find = '''    if checked=$("$osascript" -l JavaScript "$tmp/verify.js" "$key" "$("$cat" "$tmp/SHA256SUMS.sig")" \
+        "$("$od" -An -tx1 -v "$tmp/SHA256SUMS" | "$tr" -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then'''
+replace = '''    if checked=$("$osascript" -l JavaScript "$tmp/verify.js" "$key" "$("$cat" "$tmp/SHA256SUMS.sig")" \
+        "$("$od" -An -tx1 -v "$tmp/SHA256SUMS" | "$tr" -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null) || true; then
+        [ "$checked" = ok ] && checked="ok $("$awk" -v name="$dmg" 'NF == 2 && $2 == name { print $1 }' "$tmp/SHA256SUMS")"'''
 
 [[plant]]
 name = "installers: install.sh reads the DMG's hash from SHA256SUMS again, after its signature was checked"
@@ -798,7 +845,7 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''        "0:ok "*) expected=${checked#ok } ;;'''
-replace = '''        "0:ok "*) expected=$(awk -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
+replace = '''        "0:ok "*) expected=$("$awk" -v name="$dmg" 'NF == 2 && ($2 == name || $2 == "*" name) { print $1 }' "$tmp/SHA256SUMS") ;;'''
 
 [[plant]]
 name = "installers: install.sh's check takes the first of two lines that name the DMG"
@@ -843,7 +890,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    if [ -n "$(processes_of "$dest")" ]; then'''
+find = '''    if [ "$(open_copies "$dest")" != 0 ]; then'''
 replace = '''    if false; then'''
 
 [[plant]]
@@ -857,7 +904,7 @@ file = "install/install.sh"
 find = '''    placed=1
 '''
 replace = '''    placed=1
-    if [ -n "$previous" ]; then rm -rf "$previous"; previous=""; fi
+    if [ -n "$previous" ]; then "$rm" -rf "$previous"; previous=""; fi
 '''
 
 [[plant]]
@@ -1190,10 +1237,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    # writer in this folder could change in between; none excludes it.
+find = '''    # between; none excludes it.
     check_app "$stage" "the copy of the app made in $dir"
 '''
-replace = '''    # writer in this folder could change in between; none excludes it.
+replace = '''    # between; none excludes it.
 '''
 
 [[plant]]
@@ -1217,11 +1264,11 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''        if [ ! -e "$dest" ]; then
-            mv "$previous" "$dest"
+            "$mv" "$previous" "$dest"
         elif [ -z "${placed:-}" ]; then
-            rm -rf -x "$previous"
+            "$rm" -rf -x "$previous"
         fi'''
-replace = '''        mv "$previous" "$dest"'''
+replace = '''        "$mv" "$previous" "$dest"'''
 
 [[plant]]
 name = "installers: install.sh's Ed25519 takes the cofactored equation"
@@ -1266,10 +1313,10 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    dest="$dir/ConsensFlow.app"
+find = '''    fi
     remove_leftovers
 '''
-replace = '''    dest="$dir/ConsensFlow.app"
+replace = '''    fi
 '''
 
 [[plant]]
@@ -1354,8 +1401,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''                elif mv "$leftover" "$dest"; then'''
-replace = '''                elif rm -rf -x "$leftover"; then'''
+find = '''                elif "$mv" "$leftover" "$dest"; then'''
+replace = '''                elif "$rm" -rf -x "$leftover"; then'''
 
 [[plant]]
 name = "installers: install.sh holds the installed app to the release's version before it removes the app moved aside"
@@ -1593,9 +1640,9 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;
+find = '''        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | "$sed" -n '1s/^consensflow: //p' ;;
         *) echo "it says no version" ;;'''
-replace = '''        *) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;'''
+replace = '''        *) (check_app "$1" "$2" "$own") 2>&1 | "$sed" -n '1s/^consensflow: //p' ;;'''
 
 [[plant]]
 name = "installers: install.sh removes a copy with rm -rf, across a volume mounted under it"
@@ -1606,9 +1653,9 @@ platforms = ["macos"]
 [[plant.edit]]
 file = "install/install.sh"
 find = '''            if [ "$kind" = installing ]; then
-                if rm -rf -x "$leftover"; then'''
+                if "$rm" -rf -x "$leftover"; then'''
 replace = '''            if [ "$kind" = installing ]; then
-                if rm -rf "$leftover"; then'''
+                if "$rm" -rf "$leftover"; then'''
 
 [[plant]]
 name = "installers: install.sh removes the app moved aside with rm -rf, across a volume mounted under it"
@@ -1618,8 +1665,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''                elif rm -rf -x "$leftover"; then'''
-replace = '''                elif rm -rf "$leftover"; then'''
+find = '''                elif "$rm" -rf -x "$leftover"; then'''
+replace = '''                elif "$rm" -rf "$leftover"; then'''
 
 [[plant]]
 name = "installers: install.sh takes a volume mounted at a leftover's name for the leftover"
@@ -1629,7 +1676,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$("$stat" -f %d "$1")" = "$("$stat" -L -f %d "$2")" ]'''
 replace = '''    [ ! -L "$1" ] && [ -d "$1" ]'''
 
 [[plant]]
@@ -1640,8 +1687,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
-replace = '''    [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]'''
+find = '''    [ ! -L "$1" ] && [ -d "$1" ] && [ "$("$stat" -f %d "$1")" = "$("$stat" -L -f %d "$2")" ]'''
+replace = '''    [ -d "$1" ] && [ "$("$stat" -f %d "$1")" = "$("$stat" -L -f %d "$2")" ]'''
 
 [[plant]]
 name = "installers: install.sh takes a pid of six digits for a process's"
@@ -1700,7 +1747,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''        if mount | grep -qF " on $stale/volume ("; then'''
+find = '''        if "$mount" | "$grep" -qF " on $stale/volume ("; then'''
 replace = '''        if false; then'''
 
 [[plant]]
@@ -1711,8 +1758,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''            if hdiutil detach -quiet "$stale/volume" >/dev/null 2>&1; then'''
-replace = '''            if hdiutil detach -quiet -force "$stale/volume" >/dev/null 2>&1; then'''
+find = '''            if "$hdiutil" detach -quiet "$stale/volume" >/dev/null 2>&1; then'''
+replace = '''            if "$hdiutil" detach -quiet -force "$stale/volume" >/dev/null 2>&1; then'''
 
 [[plant]]
 name = "installers: install.sh takes the folder of another user in TMPDIR"
@@ -1722,7 +1769,7 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = '''        if [ "$(stat -f %u "$stale")" != "$(id -u)" ]; then'''
+find = '''        if [ "$("$stat" -f %u "$stale")" != "$("$id" -u)" ]; then'''
 replace = '''        if false; then'''
 
 [[plant]]
@@ -1877,17 +1924,6 @@ replace = '''if (!process.env.CI) {'''
 # --- T-850 (T-847's last P3s): the site by its branch tips, a link for an install folder, Windows parity ---
 
 [[plant]]
-name = "installers: install.sh reads the install folder with lstat, so a link to another volume never sweeps"
-meant = "an install folder that is a link to another volume is swept as any: its leftovers are the folder's own"
-runs = [["node", "--test", "--test-name-pattern", "removed with care", "tests/install-sh.test.mjs"]]
-platforms = ["macos"]
-
-[[plant.edit]]
-file = "install/install.sh"
-find = '''"$(stat -L -f %d "$2")"'''
-replace = '''"$(stat -f %d "$2")"'''
-
-[[plant]]
 name = "installers: to-site --check reads the installers branch no more than HEAD"
 meant = "is satisfied by the installers branch's tip when it holds the two, the checkout holding none"
 runs = [["node", "--test", "tests/to-site.test.mjs"]]
@@ -2022,5 +2058,5 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "install/install.sh"
-find = "hdiutil attach -nobrowse -readonly"
-replace = "hdiutil attach -readonly -nobrowse"
+find = "\"$hdiutil\" attach -nobrowse -readonly"
+replace = "\"$hdiutil\" attach -readonly -nobrowse"

@@ -159,6 +159,8 @@ fn a_backup_takes_nothing_while_its_member_is_on_vacation_and_free() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     let backup = backup_of(&context, &tiers, "zeus");
+    // As a ledger of the version before had it, the update run over it.
+    context.reopen_as_before_the_update();
     context.send_on_vacation(tiers.project.id, "zeus").unwrap();
     tiers.open();
     context.pass().unwrap();

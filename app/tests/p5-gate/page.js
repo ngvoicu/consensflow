@@ -12,7 +12,8 @@
 // ({ ok, reset, truncated, from, size: { rows, cols }, seed, resizes, bytes, boundary, done },
 // seed and bytes as number arrays); this script frames it as the app's command does.
 ;(() => {
-  const P5 = (window.P5 = { windows: {}, errors: [] })
+  const P5 = { windows: {}, errors: [] }
+  window.P5 = P5
   window.addEventListener('error', (event) => P5.errors.push(event.message))
   window.addEventListener('unhandledrejection', (event) => P5.errors.push(String(event.reason)))
   const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -191,7 +192,10 @@
    * answers from `invoke`. `replayed` settles once the link has gone live (it unmutes the
    * emulator then, whether it wrote all of the history or none).
    */
-  P5.window = (name, { cols, rows, invoke, pageId = `page-${name}`, pane = { id: 'w', generation: 1 } }) => {
+  P5.window = (
+    name,
+    { cols, rows, invoke, pageId = `page-${name}`, pane = { id: 'w', generation: 1 } },
+  ) => {
     const host = document.body.appendChild(document.createElement('div'))
     const win = {
       name,
@@ -281,7 +285,12 @@
    * it (so it is history for the next, not parked) and has gone.
    */
   P5.history = async (host, bytes) => {
-    const earlier = P5.window(`earlier-${host.seq}`, { cols: 80, rows: 24, invoke: host.invoke, pageId: `earlier-${host.seq}` })
+    const earlier = P5.window(`earlier-${host.seq}`, {
+      cols: 80,
+      rows: 24,
+      invoke: host.invoke,
+      pageId: `earlier-${host.seq}`,
+    })
     host.subscribe((m) => earlier.link.output(m, () => earlier.emulator))
     earlier.start()
     await earlier.replayed
@@ -351,7 +360,9 @@
     answers.push(...cur.answers)
     compare('at the end')
     if (JSON.stringify(ref.answers) !== JSON.stringify(answers))
-      differences.push(`answers: expected ${JSON.stringify(ref.answers)} got ${JSON.stringify(answers)}`)
+      differences.push(
+        `answers: expected ${JSON.stringify(ref.answers)} got ${JSON.stringify(answers)}`,
+      )
     cur.dispose()
     ref.emulator.dispose()
     ref.host.remove()
@@ -384,7 +395,13 @@
       stale: new Set(),
     }
     const messageOf = (bytes) => {
-      const message = { id: 'w', generation: 1, seq: ++host.seq, offset: host.printed.length, bytes }
+      const message = {
+        id: 'w',
+        generation: 1,
+        seq: ++host.seq,
+        offset: host.printed.length,
+        bytes,
+      }
       host.printed.push(...bytes)
       return message
     }
@@ -459,7 +476,12 @@
           size: reset ? host.first : { rows: 0, cols: 0 },
           seed: [],
           resizes: host.sizes
-            .filter((size) => size.at <= end && (reset ? size.at >= 0 : size.at > from) && size.at <= page.boundary)
+            .filter(
+              (size) =>
+                size.at <= end &&
+                (reset ? size.at >= 0 : size.at > from) &&
+                size.at <= page.boundary,
+            )
             .map((size) => ({ at: size.at, rows: size.rows, cols: size.cols })),
           bytes: host.printed.slice(from, end),
           boundary: page.boundary,
