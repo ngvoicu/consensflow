@@ -2,12 +2,12 @@
 //! page or the headless helper's peer, and what a pane prints while there is
 //! none waits for the next.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-use crate::pty::PaneOutput;
+use crate::pty::{PaneKey, PaneOutput};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,7 +15,40 @@ pub struct PaneOutputMessage {
     id: String,
     generation: u64,
     seq: u64,
+    /// The offset of the first byte, where the window keeps a journal ([`crate::journal`]):
+    /// the count of bytes the program had printed before it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) offset: Option<u64>,
     pub(crate) bytes: Vec<u8>,
+}
+
+impl PaneOutputMessage {
+    /// The message's sequence, which the page acknowledges.
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// The bytes the message carries.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// A message of bytes the window's journal holds from `offset` on.
+    pub(crate) fn at_offset(output: PaneOutput, offset: u64) -> Self {
+        Self {
+            offset: Some(offset),
+            ..Self::from(output)
+        }
+    }
+
+    fn handed_to(&self) -> Option<(PaneKey, u64)> {
+        self.offset.map(|offset| {
+            (
+                PaneKey::new(&self.id, self.generation),
+                offset + self.bytes.len() as u64,
+            )
+        })
+    }
 }
 
 impl From<PaneOutput> for PaneOutputMessage {
@@ -24,6 +57,7 @@ impl From<PaneOutput> for PaneOutputMessage {
             id: output.key.id,
             generation: output.key.generation,
             seq: output.seq,
+            offset: None,
             bytes: output.bytes,
         }
     }
@@ -32,6 +66,10 @@ impl From<PaneOutput> for PaneOutputMessage {
 struct OutputHubState {
     sink: Option<OutputSink>,
     pending: VecDeque<PaneOutputMessage>,
+    /// For each window that keeps a journal, how far its bytes have been handed to a sink that
+    /// took them: the offset a new page's history ends at ([`OutputHub::attach_page`]). Set
+    /// under the lock the sink is called under, so a byte is handed to a page or it is not.
+    handed: HashMap<PaneKey, u64>,
 }
 
 /// Where one pane's bytes go. `false` means the destination is gone, and the
@@ -50,6 +88,7 @@ impl OutputHub {
             state: Mutex::new(OutputHubState {
                 sink: None,
                 pending: VecDeque::new(),
+                handed: HashMap::new(),
             }),
         }
     }
@@ -61,17 +100,36 @@ impl OutputHub {
     /// The hub exists so `register_pane_handlers` need not know which of the
     /// two it is feeding — that is what lets the window and the helper share
     /// one set of handlers instead of two that drift.
-    pub fn register_sink(&self, sink: OutputSink) {
+    pub(crate) fn register_sink(&self, sink: OutputSink) {
         self.attach(sink);
     }
 
     fn attach(&self, sink: OutputSink) {
+        self.attach_page(sink);
+    }
+
+    /// [`OutputHub::register_sink`], and what had been handed to a page for each window that
+    /// keeps a journal, read in the one hold of the lock that swaps the sink and before what
+    /// was parked is delivered to the new one: the new page's history ends there, and what
+    /// was parked is the first of its live messages.
+    pub(crate) fn attach_page(&self, sink: OutputSink) -> HashMap<PaneKey, u64> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let boundaries = state.handed.clone();
         state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
+        boundaries
+    }
+
+    /// Forget the windows `keep` does not name: a window that is gone has no boundary.
+    pub(crate) fn retain_handed(&self, keep: impl Fn(&PaneKey) -> bool) {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .handed
+            .retain(|key, _| keep(key));
     }
 
     fn deliver_or_park(state: &mut OutputHubState, message: PaneOutputMessage) {
@@ -80,6 +138,9 @@ impl OutputHub {
             .as_ref()
             .is_some_and(|sink| sink(message.clone()))
         {
+            if let Some((key, end)) = message.handed_to() {
+                state.handed.insert(key, end);
+            }
             return;
         }
         state.sink = None;
@@ -115,6 +176,7 @@ mod tests {
             id: "p1-zeus".into(),
             generation: 1,
             seq: 1,
+            offset: None,
             bytes: vec![65],
         });
         assert_eq!(*seen.lock().unwrap(), vec!["p1-zeus"]);
@@ -134,6 +196,7 @@ mod tests {
                 id: id.into(),
                 generation: 1,
                 seq: 1,
+                offset: None,
                 bytes: vec![65],
             });
         }
@@ -153,6 +216,7 @@ mod tests {
             id: "p1-chief".into(),
             generation: 1,
             seq,
+            offset: None,
             bytes: vec![65],
         };
         let gone = Arc::new(Mutex::new(Vec::new()));

@@ -266,18 +266,20 @@ replace = '            let pool = asked.filter(|role| role.id != "tester").unwra
 
 [[plant]]
 name = "tester page: Project settings does not offer the tester among the roles"
-meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or gives a member the tester slot of its tier, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '    for (const role of roleIds()) {'
-replace = '''    for (const role of roleIds().filter((role) => role !== 'tester')) {'''
+file = "app/ui/core/slots.js"
+find = '''  for (const role of roleIds()) {
+    const row = element('tr', 'slot-row')'''
+replace = '''  for (const role of roleIds().filter((role) => role !== 'tester')) {
+    const row = element('tr', 'slot-row')'''
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"
-meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or gives a member the tester slot of its tier, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
@@ -288,7 +290,7 @@ replace = '''export const roleLabel = (id) => (id === 'tester' ? undefined : rol
 
 [[plant]]
 name = "tester page: Project settings does not say what a tester is for"
-meant = "adds a member as a tester, or as one more role of a member, in the place a tester has among the roles"
+meant = "adds a member as a tester, or gives a member the tester slot of its tier, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 

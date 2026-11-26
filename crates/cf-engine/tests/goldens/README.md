@@ -364,3 +364,10 @@ role-text tests; this golden has no researcher row.
 With these texts, the measured one-read fixture bounds are 138 / 162 / none / 26
 rows on Mac and 134 / 159 / none / 23 on Windows PowerShell, in the same order;
 the two-part Mac boundary stays at 295 rows, with three parts at 296.
+
+The chief's text, in the same fourteen rows, has the staff as slots (`architecture/staff-slots.md`):
+the commands of `cf task add` for the worker, the frontend designer, the architect, the
+researcher and the integrator say their `--tier`, the line of `cf task edit` takes `--purpose`,
+the line of `cf staff` says the slots come first, and the paragraph of "Choose the role, not the
+member" says a role at a tier is a slot, where a task falls and that Critical takes only
+critical work. Changed by hand, in those words alone (`skill/core/chief.md`).

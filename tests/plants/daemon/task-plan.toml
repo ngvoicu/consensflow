@@ -12,9 +12,9 @@ runs = ["plan-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/plan.rs"
-find = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+find = '''    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     store.write_batch(|store| {'''
-replace = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+replace = '''    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     (|store: &mut Store| {'''
 
 [[plant.edit]]
@@ -33,8 +33,8 @@ runs = ["plan-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/plan.rs"
-find = "                if saved != fingerprint {"
-replace = "                if false && saved != fingerprint {"
+find = "    if saved != fingerprint {"
+replace = "    if false && saved != fingerprint {"
 
 [[plant]]
 name = "task plan: the ledger drops the dependency between sections"
@@ -84,7 +84,7 @@ runs = ["plan-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/plan.rs"
-find = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+find = '''    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     store.write_batch(|store| {'''
-replace = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+replace = '''    let fingerprint = plan_fingerprint(tasks, fingerprint)?;
     store.write(|store| {'''

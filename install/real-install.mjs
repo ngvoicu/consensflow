@@ -16,7 +16,7 @@
 // First, from the mirror, a copy of the DMG or installer with one byte changed
 // must be refused, with nothing installed. With --upgrade, the release before it
 // is installed first (from the mirror), opened (unless --no-open), and the
-// install of the new one must ask it to quit and upgrade it where it is. Each
+// install of the new one must ask it to quit (a Mac) or stop and ask the person to (Windows), and upgrade it where it is. Each
 // install is then held to the version: the app's own (Info.plist, Windows'
 // uninstall entry) and the `cf` inside it. With --downgrade, the feed's release
 // is installed (from the mirror), a feed naming the release before it must be
@@ -395,19 +395,32 @@ try {
       if (first.status !== 0) fail(`the install of ${previous} failed`)
       expectInstalled(dir, previous)
       if (!options['no-open']) await openApp(dir)
-      const second = await runScript(copy, {
-        ...installEnv,
-        CONSENSFLOW_RELEASES_URL: `${local.url}/releases`,
-        CONSENSFLOW_CHANNEL: options.channel,
-        CONSENSFLOW_VERSION: '',
-      })
+      const upgrade = () =>
+        runScript(copy, {
+          ...installEnv,
+          CONSENSFLOW_RELEASES_URL: `${local.url}/releases`,
+          CONSENSFLOW_CHANNEL: options.channel,
+          CONSENSFLOW_VERSION: '',
+        })
+      if (!options['no-open'] && !mac) {
+        // Windows' installer asks the person to quit an open ConsensFlow and installs nothing.
+        const refused = await upgrade()
+        if (
+          refused.status === 0 ||
+          !/ConsensFlow is open\. Quit it, then run this installer again\./.test(refused.out)
+        )
+          fail('the install did not stop for the open app and ask for it to be quit')
+        expectInstalled(dir, previous)
+        closeApp(dir)
+      }
+      const second = await upgrade()
       if (second.status !== 0) fail(`the upgrade from ${previous} to ${version} failed`)
-      if (!options['no-open'] && !/is open: asking it to (quit|close)/.test(second.out))
+      if (!options['no-open'] && mac && !/was asked to quit/.test(second.out))
         fail('the upgrade did not ask the open app to quit')
       if (running(dir).length > 0) fail('the app still runs after the upgrade')
       expectInstalled(dir, version)
       say(
-        `${previous} was upgraded to ${version} where it was${options['no-open'] ? '' : ', once the open app had quit when asked'}`,
+        `${previous} was upgraded to ${version} where it was${options['no-open'] ? '' : `, once the open app had quit when asked${mac ? '' : ' (Windows: the install stopped for it first)'}`}`,
       )
     } finally {
       await local.close()

@@ -577,6 +577,8 @@ async fn a_project_opened_with_a_member_whose_roles_have_no_tier_keeps_it_in_the
                 refused,
                 json!({ "ok": false, "error": "a field scout takes no tier: its tasks have none" })
             );
+            // Two scouts hold the one slot of a role with no tier, as the update could leave it.
+            let _off = cf_ledger::testing::slot_rule_off();
             let answer = ask(
                 &held.app,
                 "project.open",

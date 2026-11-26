@@ -43,6 +43,7 @@ mod shared;
 
 pub use devin::forget_kept;
 pub use shared::launch_files::{forget_launch, sweep_launches, NotRemoved};
+pub use shared::off_thread::{late_step, launch_wanted, while_wanted};
 pub use shared::specmint::bundled_specmint;
 
 // Fakes other crates' tests compile too: a failure in one is the test's.

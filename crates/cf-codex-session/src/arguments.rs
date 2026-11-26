@@ -4,7 +4,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use cf_base::env::{Env, GUARD_ROOT, PATH_HELPER_ROOT};
+use cf_base::env::{Env, GUARD_ROOT, PANE_OWNER, PATH_HELPER_ROOT};
 use cf_proto::codex::agent_types::AgentType;
 
 /// The flag that opens Codex in full-permission mode.
@@ -108,10 +108,12 @@ pub(crate) fn children(file: &Path, kinds: &[&AgentType]) -> Vec<OsString> {
 /// given the guard's (a root the person has of their own is left to their policy), to be set
 /// explicitly in Codex's shell policy: a
 /// user policy of `inherit = "core"` keeps only a handful of names, and a
-/// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_NODE` has a
-/// `cf` that reaches nothing. Everything else stays as the user's policy says.
-/// Each `CONSENSFLOW_` variable that has a value, with it, in name order. The
-/// broker gives them to each thread in its `config`, never a command line: the
+/// window whose commands lose `CONSENSFLOW_URL`, `_TOKEN` and `_PARTICIPANT` has a
+/// `cf` that reaches nothing, and one whose commands lose the window's mark
+/// ([`PANE_OWNER`], macOS) starts programs a close and an installer cannot tell
+/// for the window's. Everything else stays as the user's policy says. Each
+/// `CONSENSFLOW_` variable and the mark that has a value, with it, in name order.
+/// The broker gives them to each thread in its `config`, never a command line: the
 /// token is a secret, and every user of the machine reads a command line.
 pub(crate) fn consensflow_variables(env: &Env) -> Vec<(String, String)> {
     let mut named: Vec<(String, String)> = env
@@ -122,7 +124,7 @@ pub(crate) fn consensflow_variables(env: &Env) -> Vec<(String, String)> {
                 value.to_string_lossy().into_owned(),
             ))
         })
-        .filter(|(name, _)| is_consensflow_variable(name))
+        .filter(|(name, _)| is_consensflow_variable(name) || name == PANE_OWNER)
         .collect();
     if let (Some(root), Some(ours)) = (env.os(PATH_HELPER_ROOT), env.os(GUARD_ROOT)) {
         if root == ours {

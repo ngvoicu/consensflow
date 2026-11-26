@@ -1,12 +1,14 @@
 //! A window's output: what its program prints, read and sent on within what the page has
 //! acknowledged.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use super::{output_end, Pane, PaneError, PaneKey, PaneOutput, PaneTable};
+use crate::journal::{Journal, Piece};
+use crate::output_hub::{OutputHub, OutputSink};
 
 pub(super) struct OutputFlow {
     backlog_bytes: usize,
@@ -104,6 +106,111 @@ impl PaneTable {
                 seq,
                 highest_issued,
             })
+    }
+
+    /// Windows opened from now on keep a journal of their output and resizes
+    /// ([`crate::journal`]). A table that does not call this (the headless helper's) keeps
+    /// main's flow, and its messages carry no offset.
+    pub fn keep_journals(&self) {
+        self.journals
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// A page subscribes. Its sink becomes the hub's destination, and, in the one step that
+    /// swaps it, the boundary of every window that keeps a journal is fixed: what had been
+    /// handed to a page before it. The new page's history is the journal before the
+    /// boundary, which it replays muted; every byte from it on, including what was parked for
+    /// this page, comes on the sink. The room the old page left unacknowledged is settled, as
+    /// on main. Call this under [`crate::input_queue::InputQueue::with_current_page`].
+    pub fn attach_page(&self, hub: &OutputHub, sink: OutputSink) -> HashMap<PaneKey, u64> {
+        let boundaries = hub.attach_page(sink);
+        let journals = self.journals_held();
+        for (key, journal) in &journals {
+            journal.begin_page(boundaries.get(key).copied().unwrap_or(0));
+        }
+        // Looked up as each key is judged, under the hub's lock: a window that opened since the
+        // snapshot above has its entry kept.
+        hub.retain_handed(|key| self.journal_of(key).is_some());
+        self.ack_all();
+        boundaries
+    }
+
+    /// One piece of a window's history for the page now subscribed, from `from` (`None`: the
+    /// page has nothing), of a window that runs or one that has ended and is not forgotten.
+    /// Call this under [`crate::input_queue::InputQueue::with_current_page`].
+    pub fn history(&self, key: &PaneKey, from: Option<u64>) -> Result<Piece, PaneError> {
+        let journal = self
+            .journal_of(key)
+            .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+        Ok(journal.piece(from))
+    }
+
+    fn journals_held(&self) -> Vec<(PaneKey, Arc<Journal>)> {
+        let mut held: Vec<_> = self
+            .panes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .filter_map(|(key, pane)| Some((key.clone(), pane.journal.clone()?)))
+            .collect();
+        held.extend(
+            self.ended_journals
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .iter()
+                .cloned(),
+        );
+        held
+    }
+
+    fn journal_of(&self, key: &PaneKey) -> Option<Arc<Journal>> {
+        if let Some(journal) = self
+            .panes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(key)
+            .and_then(|pane| pane.journal.clone())
+        {
+            return Some(journal);
+        }
+        self.ended_journals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .find(|(kept, _)| kept == key)
+            .map(|(_, journal)| Arc::clone(journal))
+    }
+
+    /// A window that has ended keeps its journal for its page to pull, the latest sixteen,
+    /// until [`PaneTable::forget_ended_journal`].
+    pub(crate) fn keep_ended_journal(&self, key: PaneKey, journal: Arc<Journal>) {
+        let mut kept = self
+            .ended_journals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        kept.push_back((key, journal));
+        while kept.len() > super::ENDED_JOURNALS_KEPT {
+            kept.pop_front();
+        }
+    }
+
+    /// The page has what it needs of an ended window, or has retired it: its journal is
+    /// forgotten. Until then, whichever page asks gets its pieces again (a page that reloaded
+    /// before it took the last one), and the sixteenth after it makes room.
+    pub fn forget_ended_journal(&self, key: &PaneKey) {
+        self.ended_journals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .retain(|(held, _)| held != key);
+    }
+
+    /// How many journals of ended windows the table holds.
+    #[cfg(test)]
+    pub(crate) fn ended_journals_held(&self) -> usize {
+        self.ended_journals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .len()
     }
 
     /// Every pane's output so far, acknowledged: a page that has gone never

@@ -174,7 +174,7 @@ fn start_daemon(
             Error::Daemon(format!("{failed}: {logged}"))
         }
     })?;
-    let start_line = daemon_log::assert_started(&files::read_string(&log)?, daemon.id())?;
+    let start_line = daemon_log::assert_started_in(|| files::read_string(&log), daemon.id())?;
     let on_loopback = handle["url"]
         .as_str()
         .is_some_and(|url| pattern::once(&URL, r"^http://127\.0\.0\.1:\d+/$").is_match(url));

@@ -969,3 +969,33 @@ fn every_start_resume_and_fork_is_given_the_guards_path_helper_root_for_its_comm
         );
     }
 }
+
+/// The window's mark (`CF_PANE_PROCESS_OWNER`) is not named `CONSENSFLOW_`, so a user
+/// policy that drops inherited variables would lose it in a thread's commands; every start,
+/// resume and fork is given it from the environment the supervisor was started in. Names
+/// only are said, never a value.
+#[test]
+fn every_start_resume_and_fork_is_given_the_windows_mark_in_its_config() {
+    const NAME: &str = "shell_environment_policy.set.CF_PANE_PROCESS_OWNER";
+    let env = cf_base::env::Env::from_vars([
+        ("CF_PANE_PROCESS_OWNER", "mark"),
+        ("CF_CODEX_TUI_TOKEN", "internal"),
+        ("HOME", "/home/user"),
+    ]);
+    let mut selection = Selection::new(false, None, crate::arguments::consensflow_variables(&env));
+    selection.ready();
+    let mut requests = Requests::default();
+    for message in [
+        start(1),
+        resume(2, B),
+        json!({ "id": 3, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
+    ] {
+        let method = message["method"].as_str().unwrap().to_owned();
+        let sent = selection.tui_said(TUI, &mut requests, &message).rewritten;
+        let given = sent
+            .as_ref()
+            .and_then(|sent| sent["params"]["config"].get(NAME))
+            .and_then(Value::as_str);
+        assert!(given == Some("mark"), "{method} sets no {NAME}");
+    }
+}

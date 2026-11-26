@@ -23,7 +23,7 @@ fn project_of(context: &Context, directory: &str, members: &[(&str, &str)]) -> i
         })
         .collect();
     context
-        .open_project(json!({
+        .open_project_overflowing(json!({
             "directory": directory,
             "name": directory.trim_start_matches("/work/"),
             "chief": { "harness": "claude-code", "model": "claude-opus-5" },
@@ -251,7 +251,7 @@ fn a_wait_names_for_a_renewal_only_the_members_out_now() {
     context
         .ledger
         .borrow_mut()
-        .add_member(
+        .add_member_overflowing(
             project,
             &NewMember {
                 model: Some("muse-spark".to_owned()),

@@ -28,8 +28,26 @@ const TURN_MS: u64 = 500;
 /// (`output_too_large` at 16,385, none at 16,384; plain words and JSON alike).
 const MUSE_HOOK_OUTPUT_LIMIT: usize = 16_384;
 
-/// The members of the staff of the largest project: 25, each with two roles.
-const STAFF: usize = 25;
+/// The largest staff a project can have where each member holds two roles: a role at a tier holds
+/// one member, so a member and its roles are a pair of slots of one tier (the architect, the
+/// researcher, the advisor, the reviewer and the tester have a Critical slot, the others do not):
+/// 2 pairs at Critical and 4 at each of the other three tiers. Each member is at the tier of its pair.
+const STAFF: [(&str, [&str; 2]); 14] = [
+    ("critical", ["architect", "researcher"]),
+    ("critical", ["advisor", "reviewer"]),
+    ("complex", ["worker", "frontend"]),
+    ("complex", ["architect", "researcher"]),
+    ("complex", ["advisor", "reviewer"]),
+    ("complex", ["tester", "integrator"]),
+    ("standard", ["worker", "frontend"]),
+    ("standard", ["architect", "researcher"]),
+    ("standard", ["advisor", "reviewer"]),
+    ("standard", ["tester", "integrator"]),
+    ("light", ["worker", "frontend"]),
+    ("light", ["architect", "researcher"]),
+    ("light", ["advisor", "reviewer"]),
+    ("light", ["tester", "integrator"]),
+];
 
 /// A rig whose Muse windows run the machine's Muse, or why there is none.
 fn muse_rig() -> Result<Config, String> {
@@ -72,8 +90,8 @@ fn the_most_rules() -> String {
     rules
 }
 
-/// The project of the largest chief a Muse window is given: a staff of [`STAFF`] who each hold
-/// two roles, its specs on, and the most rules for the staff, the chief's window opened after
+/// The project of the largest chief a Muse window is given: the staff of [`STAFF`], each member
+/// holding two roles, its specs on, and the most rules for the staff, the chief's window opened after
 /// them so that its text has them all. The roster names the chief on Muse and its staff on the
 /// stand-in `claude`.
 fn largest_chiefs_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
@@ -81,10 +99,11 @@ fn largest_chiefs_project(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
         "id": "chief", "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal"
     })];
     let mut staff = Vec::new();
-    for at in 0..STAFF {
+    for (at, (tier, roles)) in STAFF.iter().enumerate() {
         let name = format!("member-{at:02}");
-        agents.push(json!({ "id": name, "kind": "claude-code", "model": "fake" }));
-        staff.push(json!({ "agent": name, "roles": ["worker", "reviewer"] }));
+        agents
+            .push(json!({ "id": name, "kind": "claude-code", "model": "fake", "workTier": tier }));
+        staff.push(json!({ "agent": name, "roles": roles }));
     }
     rig.stand_ins(&json!({ "schemaVersion": 1, "agents": agents }))?;
     let project = Project::open(
@@ -320,7 +339,7 @@ fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outco
         role.len()
     );
     assert!(role.contains("## This project's specs"), "specs on");
-    assert!(role.contains("member-24"), "all of the staff");
+    assert!(role.contains("member-13"), "all of the staff");
     // Every hook ended well. (Before T-1246 the one hook ended `failed`: `output_too_large:
     // hook stdout exceeded its 16384-byte ceiling; the process tree was terminated and no
     // stream was parsed`.)

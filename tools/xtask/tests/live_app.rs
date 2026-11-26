@@ -275,6 +275,7 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
             r#"spawnSync('reg', ['delete', installerTestKey(TEST_KEYS, work), '/f'])"#,
             r#""$run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru","#,
             r#"const running = spawn(program(at, 'ConsensFlow.exe'), ['-n', '60', '127.0.0.1'], {"#,
+            r#"const other = spawn(program(at, 'helper.exe'), ['-n', '60', '127.0.0.1'], {"#,
             r#"reopened = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })"#,
             r#"decoy = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })"#,
             r#"const child = spawn(process.execPath, ['-e', ''])"#,
@@ -319,6 +320,7 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
             r#"spawnSync( '/usr/libexec/PlistBuddy',"#,
             r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
             r#"const child = spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' })"#,
+            r#"spawnSync('hdiutil', ['detach', '-quiet', '-force', mounted])"#,
         ],
     ),
     (

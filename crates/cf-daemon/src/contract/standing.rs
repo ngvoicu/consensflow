@@ -35,6 +35,22 @@ impl Standing {
         ))
     }
 
+    /// Waits, while the engine's work goes on, until `count` looks have been asked: how many
+    /// turns the engine takes to ask them is its own, and a slow machine takes more.
+    pub async fn asked(&self, count: usize) {
+        for _ in 0..5_000 {
+            if self.asked.borrow().len() >= count {
+                return;
+            }
+            tokio::task::yield_now().await;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!(
+            "{count} looks were asked of the records, {} are",
+            self.asked.borrow().len()
+        );
+    }
+
     /// Lets the next `count` looks go, each answered from its own thread, and
     /// waits until every one of them has answered: when this returns the
     /// answers are all there, and nothing has run.

@@ -16,7 +16,8 @@ use serde_json::{json, Value};
 use crate::arbiter::{ArbiterSnapshot, InputArbiter, OutputClock};
 use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
-use crate::output_hub::OutputHub;
+use crate::journal::Journal;
+use crate::output_hub::{OutputHub, PaneOutputMessage};
 use crate::pty::{
     validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneOutput, PaneTable,
     StreamedPane,
@@ -584,6 +585,34 @@ fn forward_output(
     }
 }
 
+/// A window that keeps a journal: [`forward_output`], with each read taken into the journal
+/// as it is into the screen, and each message stamped with the offset of its first byte, then
+/// handed to the hub. A mark is taken at a message's end, never inside one. The hub records
+/// how far bytes have been handed to a page, in the step that hands them
+/// ([`OutputHub::attach_page`]).
+pub fn forward_journaled(
+    stream: &mpsc::Receiver<PaneOutput>,
+    journal: &Journal,
+    hub: &OutputHub,
+    mut feed: impl FnMut(&[u8]),
+) {
+    let mut offset = journal.end();
+    forward_output(
+        stream,
+        |bytes| {
+            feed(bytes);
+            journal.append(bytes);
+        },
+        |message| {
+            let at = offset;
+            offset += message.bytes.len() as u64;
+            journal.settle();
+            hub.publish(PaneOutputMessage::at_offset(message, at));
+            journal.note_published(offset);
+        },
+    );
+}
+
 /// A pane's output, on to the page and into its screen, and its end, which is
 /// for good (`pty`'s `output_end`): `pane.exit`, which says how the program
 /// ended and what the screen showed last, once the program is proven gone (one
@@ -605,17 +634,26 @@ fn stream_to_page(
             pid,
             output: stream,
             screen,
+            journal,
             ended,
             // Paid, with this thread's end, once the exit is told.
             owed: _owed,
             #[cfg(target_os = "macos")]
             tree,
         } = streamed;
-        forward_output(
-            &stream,
-            |bytes| took_in(&screen, &printed, bytes),
-            |message| output.publish(message.into()),
-        );
+        if let Some(journal) = journal {
+            forward_journaled(&stream, &journal, &output, |bytes| {
+                took_in(&screen, &printed, bytes);
+            });
+            journal.finish();
+            panes.keep_ended_journal(key.clone(), journal);
+        } else {
+            forward_output(
+                &stream,
+                |bytes| took_in(&screen, &printed, bytes),
+                |message| output.publish(message.into()),
+            );
+        }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
         // that follows ends it.
@@ -1088,6 +1126,99 @@ mod tests {
         assert_eq!(
             done, 9,
             "the Enter went while a read was still being taken in"
+        );
+    }
+
+    /// One flood through the consumer as main takes it (`journaled` false) or with the journal
+    /// (true): the consumer thread's CPU time for a read of 8,190 bytes of screen erases on the
+    /// biggest screen, the eight reads after the first (T-2083's flood, N17's `tiny_read_the_enter`).
+    #[cfg(unix)]
+    fn flood_cpu_per_erase_read(journaled: bool) -> f64 {
+        fn cpu() -> u64 {
+            let mut now = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            // SAFETY: a valid timespec, for this thread's own CPU clock.
+            unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut now) };
+            now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64
+        }
+        let arbiter = Arc::new(InputArbiter::new(crate::arbiter::EnterTiming::fixed(0)));
+        let key = PaneKey::new("flood", 1);
+        let printed = arbiter.register(&key).expect("register clock");
+        let (sender, stream) = std::sync::mpsc::channel();
+        let heavy = b"\x1b[J".repeat(2730);
+        let mut reads: Vec<&[u8]> = vec![b"\x1b7echo"];
+        reads.extend((0..8).map(|_| heavy.as_slice()));
+        for (seq, bytes) in reads.iter().enumerate() {
+            sender
+                .send(PaneOutput {
+                    key: key.clone(),
+                    seq: seq as u64 + 1,
+                    bytes: bytes.to_vec(),
+                })
+                .unwrap();
+        }
+        drop(sender);
+        thread::spawn(move || {
+            let screen = PaneScreen::new(400, 1000);
+            let hub = OutputHub::new();
+            hub.register_sink(Arc::new(|_: PaneOutputMessage| true));
+            let started = cpu();
+            if journaled {
+                let journal = Journal::new((400, 1000));
+                forward_journaled(&stream, &journal, &hub, |bytes| {
+                    took_in(&screen, &printed, bytes);
+                });
+            } else {
+                forward_output(
+                    &stream,
+                    |bytes| took_in(&screen, &printed, bytes),
+                    |message| hub.publish(message.into()),
+                );
+            }
+            (cpu() - started) as f64 / 9e6
+        })
+        .join()
+        .unwrap()
+    }
+
+    /// The paired measure (T-2126): eight floods each, main's consumer and the journal's,
+    /// alternating which goes first. Prints each run and the means and medians.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "a measure, optimized builds only: cargo test --release -p cf-panes --lib -- --ignored flood_paired --nocapture"]
+    fn flood_paired_measure() {
+        let (mut main, mut journal) = (Vec::new(), Vec::new());
+        for round in 0..8 {
+            let order = if round % 2 == 0 {
+                [false, true]
+            } else {
+                [true, false]
+            };
+            for journaled in order {
+                let per_read = flood_cpu_per_erase_read(journaled);
+                println!(
+                    "{} cpu_per_read_ms={per_read:.3}",
+                    if journaled { "journal" } else { "main   " }
+                );
+                if journaled { &mut journal } else { &mut main }.push(per_read);
+            }
+        }
+        let mean = |runs: &[f64]| runs.iter().sum::<f64>() / runs.len() as f64;
+        let median = |runs: &[f64]| {
+            let mut sorted = runs.to_vec();
+            sorted.sort_by(f64::total_cmp);
+            (sorted[(sorted.len() - 1) / 2] + sorted[sorted.len() / 2]) / 2.0
+        };
+        println!(
+            "mean main {:.3} journal {:.3} ({:+.2}%); median main {:.3} journal {:.3} ({:+.2}%)",
+            mean(&main),
+            mean(&journal),
+            (mean(&journal) / mean(&main) - 1.0) * 100.0,
+            median(&main),
+            median(&journal),
+            (median(&journal) / median(&main) - 1.0) * 100.0
         );
     }
 

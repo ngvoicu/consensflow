@@ -49,12 +49,12 @@ file = "crates/cf-engine/src/windows.rs"
 find = '''                return self.launch_failed(record, project, participant, failing, &said);
             }
         };
-        // Boxed, so'''
+        // The stops the plan read as it began'''
 replace = '''                let _ = (&said, failing);
                 return Ok(());
             }
         };
-        // Boxed, so'''
+        // The stops the plan read as it began'''
 
 [[plant]]
 name = "purge-entropy: a launch with no token from the system ends with no word to anyone"

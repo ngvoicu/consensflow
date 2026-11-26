@@ -6,7 +6,7 @@
 use std::sync::mpsc;
 
 use cf_e2e::daemon::Home;
-use cf_e2e::daemon_log::assert_started;
+use cf_e2e::daemon_log::assert_started_in;
 use cf_e2e::wire;
 use regex::Regex;
 use serde_json::json;
@@ -20,7 +20,7 @@ fn keeps_the_handle_line_first_then_answers_a_ping_frame_then_exits_on_eof() -> 
     let home = Home::new()?;
     let mut daemon = home.daemon()?;
     let handle = daemon.handle(secs(10))?;
-    assert_started(&home.log(), daemon.id())?;
+    assert_started_in(|| Ok(home.log()), daemon.id())?;
     let url = handle["url"].as_str().unwrap_or_default();
     assert!(!url.is_empty());
     assert!(

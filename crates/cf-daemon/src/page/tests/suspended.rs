@@ -96,6 +96,9 @@ fn passes(context: &Context) {
 
 #[tokio::test]
 async fn each_section_saves_for_a_closed_project_and_nothing_starts_or_goes_until_it_is_resumed() {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     LocalSet::new()
         .run_until(async {
             let held = closed();
