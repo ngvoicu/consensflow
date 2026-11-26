@@ -21817,9 +21817,12 @@ test("D8 New project asks before a member's last role goes, and keeps it and its
   await cell.getByRole('button', { name: 'Keep gpt-6-astra' }).click()
   await expect(backups).toHaveText(['backup claude-sonnet-5'])
   await expect(cell.locator('.slot-holder')).toHaveText([/claude-sonnet-5/, /gpt-6-astra/])
-  expect(new Set((await holdersShown(fresh)).map(([, key]) => key))).toEqual(
-    new Set(['30', '31', '32']),
-  )
+  // Every card in every slot as it was: no member twice, none elsewhere (T-2341, round 3).
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:complex', '31'],
+    ['worker:standard', '30'],
+    ['worker:standard', '32'],
+  ])
   await expect(cell.locator('.slot-holder', { hasText: 'gpt-6-astra' })).toContainText(
     'on Vacation',
   )
@@ -22539,7 +22542,7 @@ test('T-2341 a member that holds no slot has a row of its own, its part with Edi
   const none = slotCell(settings, 'none')
   await expect(slotGrid(settings).locator('tr[data-role="none"] th')).toHaveText('No slot')
   await expect(none).toContainText(
-    'A member here holds no slot: none of its roles has a slot at its tier. Edit it to give it one.',
+    'These members hold no slot. Open one to see why, and what to do.',
   )
   expect(await holdersShown(settings)).toEqual([
     ['worker:standard', 'zeus'],
@@ -22665,6 +22668,21 @@ test('T-2341 every member the daemon sends is on the screen: each its cards, eac
     '25',
     '26',
   ])
+  // Each copied backup on its owner's cards, and on no other member's (T-2341, round 3).
+  const backupsShown = await fresh
+    .locator('table.slots .slot-holder:has(.slot-backup)')
+    .evaluateAll((cards) => [
+      ...new Set(
+        cards.map(
+          (card) => `${card.dataset.member} ${card.querySelector('.slot-backup').textContent}`,
+        ),
+      ),
+    ])
+  expect(backupsShown.sort()).toEqual(
+    backups
+      .map(({ participant }) => `${participant.backupOf + 20} backup ${participant.modelName}`)
+      .sort(),
+  )
 })
 
 test('T-2341 an Edit whose member another window removed closes, says why, and sends nothing', async ({
@@ -23051,4 +23069,163 @@ test('T-2341 shots, round 2: a member with no slot, and a form closed under the 
   const made = page.getByRole('dialog', { name: 'New project' })
   await memberOpener(made, 'none', 'claude-sonnet-5-5').click()
   await around('r2-new-project-no-slot', made, 'designer')
+})
+
+// T-2341, round 3 (the check T-2349).
+
+test('T-2341 an Edit is bound to its member by id: renamed, with a new member on its old name, it closes and sends nothing', async ({
+  page,
+}) => {
+  await open(page, staffOf(model(), staffLane(3, 'gpt-6-astra', ['worker'], 'standard')))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@gpt-6-astra')
+  await part.getByRole('button', { name: 'Edit @gpt-6-astra' }).click()
+  const form = settings.locator('.staff-add')
+  await expect(form.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await form.locator('[name="memberTier"]').selectOption('light')
+  // Another window renames it, and a new member takes its old name, in one board read.
+  await changed(
+    page,
+    (next) => {
+      const lanes = window.__model.boards[1].lanes
+      Object.assign(lanes.find((lane) => lane.participant.id === 3).participant, {
+        handle: 'gpt-5-6-luna',
+        model: 'gpt-5.6-luna',
+        modelName: 'gpt-5.6-luna',
+      })
+      lanes.push(next)
+    },
+    staffLane(4, 'gpt-6-astra', ['reviewer'], 'complex'),
+  )
+  await expect(slotCell(settings, 'reviewer:complex')).toContainText('@gpt-6-astra')
+  await expect(form).toBeHidden()
+  await expect(settings.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    '@gpt-6-astra is @gpt-5-6-luna now, so its Edit was closed. Nothing was saved.',
+  )
+  expect(await calls(page, 'member.edit')).toEqual([])
+})
+
+test('T-2341 a refused save is judged again: a Change backup whose backup was replaced meanwhile closes, and cannot be sent again', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'zeus', ['worker'], 'standard', SONNET),
+    staffLane(4, 'old', ['worker'], 'standard', { ...LUNA, backupOf: 3 }),
+  )
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@zeus')
+  await part.getByRole('button', { name: 'Change backup for @zeus' }).click()
+  const form = settings.locator('.staff-add')
+  await form.locator('[name="memberHarness"]').selectOption({ label: 'Codex' })
+  await expect(form.locator('[name="memberModel"]')).toBeEnabled()
+  await form.locator('[name="memberModel"]').selectOption('gpt-6-astra')
+  await hold(page, 'backup.change')
+  await form.getByRole('button', { name: 'Save backup' }).click()
+  await expect.poll(async () => (await calls(page, 'backup.change')).length).toBe(1)
+  // Another window replaces the backup while the save is on its way; then the save is refused.
+  await changed(
+    page,
+    (replacement) => {
+      const lanes = window.__model.boards[1].lanes
+      lanes[lanes.findIndex((lane) => lane.participant.handle === 'old')] = replacement
+    },
+    staffLane(5, 'new', ['worker'], 'standard', { backupOf: 3 }),
+  )
+  await page.evaluate(() => {
+    window.__model.backupRefusal = 'This model read expired'
+  })
+  await letGo(page, 'backup.change')
+  await expect(page.locator('#status')).toHaveText('This model read expired')
+  await expect(form).toBeHidden()
+  await expect(settings.locator('tr.slot-form-gone[data-role="worker"]')).toHaveText(
+    "@zeus's backup is @new now, not @old, so Change backup was closed. Nothing was saved.",
+  )
+  expect(await calls(page, 'backup.change')).toHaveLength(1)
+})
+
+test('T-2341 the last member of No slot leaving still says why its form closed, and keeps the keyboard', async ({
+  page,
+}) => {
+  await open(page, staffOf(model(), staffLane(3, 'legacy', ['worker'], null)))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(settings, '@legacy')
+  await part.getByRole('button', { name: 'Edit @legacy' }).click()
+  const form = settings.locator('.staff-add')
+  await expect(form.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await form.locator('[name="memberModel"]').focus()
+  await changed(page, () => {
+    const board = window.__model.boards[1]
+    board.lanes = board.lanes.filter((lane) => lane.participant.id !== 3)
+  })
+  await expect(slotCell(settings, 'none')).toHaveCount(0)
+  await expect(form).toBeHidden()
+  const why = settings.locator('tr.slot-form-gone[data-role="none"]')
+  await expect(why).toHaveText('@legacy left the staff, so its Edit was closed. Nothing was saved.')
+  await expect(why.locator('td')).toBeFocused()
+})
+
+test('T-2341 a member whose role ConsensFlow no longer has says so, promises no Edit, and is removed from its part, on both screens', async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'courier', ['courier'], null, { vacationSince: at(30) }),
+    staffLane(4, 'old-backup', ['courier'], null, { ...LUNA, backupOf: 3 }),
+  )
+  data.lastStaff = [
+    lastOf(30, ['courier'], null, {}),
+    lastOf(31, ['courier'], null, LUNA, { backupOf: 30 }),
+    lastOf(32, ['worker'], 'standard', SONNET),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const none = slotCell(settings, 'none')
+  await expect(none.locator('.slot-holder')).toContainText('its role is gone')
+  const opener = memberOpener(settings, 'none', '@courier')
+  await expect(opener).toHaveAccessibleName('@courier: Vacation, backup and Remove')
+  await opener.click()
+  const part = memberPanel(settings, '@courier')
+  await expect(part.locator('.slot-part-apart')).toHaveText(
+    'ConsensFlow no longer has its role, courier, so it can take no slot. Remove it, and fill a slot with Add.',
+  )
+  await expect(part.getByRole('button', { name: /^Edit/ })).toHaveCount(0)
+  await expect(part.getByRole('button', { name: /^(Add|Change) backup/ })).toHaveCount(0)
+  await expect(part.getByRole('button', { name: 'Remove backup for @courier' })).toBeVisible()
+  // Its Remove asks first, in its card, as a last role's does.
+  await part.getByRole('button', { name: 'Remove @courier from the staff' }).click()
+  await expect(none).toContainText('Remove @courier? Its open tasks are cancelled.')
+  await none.getByRole('button', { name: 'Keep @courier' }).click()
+  expect(await calls(page, 'member.remove')).toEqual([])
+  await part.getByRole('button', { name: 'Remove @courier from the staff' }).click()
+  await none.getByRole('button', { name: 'Remove @courier', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'courier' }])
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  // New project: told before Start why it can't start, and removed from its part.
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  const refusal = fresh.locator('.dialog-refusal')
+  await expect(refusal).toHaveText(
+    'gpt-6-astra holds only a role ConsensFlow no longer has (courier): remove it, under No slot, and the project can start.',
+  )
+  expect(await calls(page, 'project.open')).toEqual([])
+  await memberOpener(fresh, 'none', 'gpt-6-astra').click()
+  await memberPanel(fresh, 'gpt-6-astra')
+    .getByRole('button', { name: 'Remove gpt-6-astra from the staff' })
+    .click()
+  await slotCell(fresh, 'none')
+    .getByRole('button', { name: 'Remove gpt-6-astra', exact: true })
+    .click()
+  await expect(slotGrid(fresh).locator('tr[data-role="none"]')).toHaveCount(0)
+  await expect(refusal).toBeHidden()
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  expect((await calls(page, 'project.open')).at(-1).staff[0].roles).toEqual(['worker'])
 })

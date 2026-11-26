@@ -63,6 +63,15 @@ export const seatsOf = (member) =>
 /** The members that hold no slot, in the staff's order. */
 const unseated = (members) => members.filter((member) => seatsOf(member).length === 0)
 
+/**
+ * The roles of `member` that ConsensFlow no longer has, where it has no other: such a member can
+ * take no slot, and is removed (T-2341, round 3). None for a member with a role the daemon names.
+ */
+export const goneRoles = (member) =>
+  member.roles.length > 0 && member.roles.every((role) => !roleIds().includes(role))
+    ? member.roles
+    : []
+
 /** The members that hold a slot, in the staff's order. */
 export const holdersOf = (members, role, tier) =>
   members.filter((member) => member.roles.includes(role) && (tier === null || member.tier === tier))
@@ -247,16 +256,8 @@ export function slotRows(members, hooks) {
       words.append(cell)
       rows.push(words)
     }
-    if (hooks.refusal?.role === role) {
-      // Said where the person acted, in the dialog: not behind it on the board's status line.
-      const refused = keyed(element('tr', 'slot-refusal'), 'refusal', role)
-      refused.dataset.role = role
-      const cell = element('td', null, hooks.refusal.words)
-      cell.colSpan = columns.length + 1
-      cell.setAttribute('role', 'alert')
-      refused.append(cell)
-      rows.push(refused)
-    }
+    // Said where the person acted, in the dialog: not behind it on the board's status line.
+    if (hooks.refusal?.role === role) rows.push(refusalRow(role, hooks.refusal.words))
   }
   const apart = unseated(members)
   if (apart.length > 0) {
@@ -275,14 +276,29 @@ export function slotRows(members, hooks) {
       element(
         'p',
         'slot-apart-words',
-        'A member here holds no slot: none of its roles has a slot at its tier. Edit it to give it one.',
+        'These members hold no slot. Open one to see why, and what to do.',
       ),
       cards,
     )
     row.append(head, cell)
     rows.push(row, ...opened(NO_SLOT, [null], anchor, hooks))
+    if (hooks.refusal?.role === NO_SLOT) rows.push(refusalRow(NO_SLOT, hooks.refusal.words))
+  } else if (hooks.gone?.role === NO_SLOT) {
+    // Its last member left with a form open: the line still says why, where the row was.
+    rows.push(...opened(NO_SLOT, [null], null, hooks))
   }
   return rows
+}
+
+/** What the daemon refused of a slot of `role`, said under its row, in the dialog. */
+function refusalRow(role, words) {
+  const refused = keyed(element('tr', 'slot-refusal'), 'refusal', role)
+  refused.dataset.role = role
+  const cell = element('td', null, words)
+  cell.colSpan = tierColumns().length + 1
+  cell.setAttribute('role', 'alert')
+  refused.append(cell)
+  return refused
 }
 
 /** A row marked with what it is and its role, which a redraw tells it from the others by. */
@@ -390,6 +406,21 @@ function memberPart(member, hooks) {
       ),
     )
   }
+  if (seatsOf(member).length === 0) {
+    // Why it holds no slot, and what to do: an Edit that gives it a tier, or, where ConsensFlow
+    // no longer has its role, its Remove, among its acts (asked first in its card, as a last
+    // role's is).
+    const gone = goneRoles(member)
+    part.append(
+      element(
+        'p',
+        'slot-part-apart',
+        gone.length === 0
+          ? 'It holds no slot: none of its roles has a slot at its tier. Edit it to give it one.'
+          : `ConsensFlow no longer has its ${gone.length > 1 ? 'roles' : 'role'}, ${together(gone)}, so it can take no slot. Remove it, and fill a slot with Add.`,
+      ),
+    )
+  }
   part.append(...rest)
   // The member form, where its Edit or its backup opened it.
   if (hooks.formHere) part.append(formPlace(`member ${member.key}`))
@@ -484,7 +515,11 @@ function holderPart(member, role, hooks) {
   if (open) part.dataset.lit = hooks.anchor.role === role ? 'open' : 'same'
   const about = [element('span', 'member-name', member.name)]
   if (member.runs) about.push(element('span', 'member-meta', member.runs))
-  for (const mark of member.marks ?? []) {
+  const marks = [...(member.marks ?? [])]
+  if (role === NO_SLOT && goneRoles(member).length > 0) {
+    marks.unshift({ text: 'its role is gone', tone: 'out' })
+  }
+  for (const mark of marks) {
     const said = element('span', 'slot-mark', mark.text)
     said.dataset.tone = mark.tone
     about.push(said)

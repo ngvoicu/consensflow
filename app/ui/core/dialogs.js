@@ -24,6 +24,7 @@ import {
 import {
   anchorOf,
   crowded,
+  goneRoles,
   holdersOf,
   inTheWay,
   NO_SLOT,
@@ -84,8 +85,19 @@ const inRoleOrder = (roles) => [...roles].sort((a, b) => rank(roleIds(), a) - ra
  * Edit where it has one, its Vacation where it has one to change, and its backup where it may
  * have one or has one. An image designer has no Edit, and is offered no backup.
  */
-const opensSaid = ({ edit, vacation, backup }) =>
-  together([edit && 'Edit', vacation && 'Vacation', backup && 'backup'].filter(Boolean))
+const opensSaid = ({ edit, vacation, backup, remove }) =>
+  together(
+    [edit && 'Edit', vacation && 'Vacation', backup && 'backup', remove && 'Remove'].filter(
+      Boolean,
+    ),
+  )
+
+/**
+ * A member's Remove in its part, where no slot's cross reaches it (its role is gone): asked first
+ * in its card, as a last role's Remove is.
+ */
+const removeMember = (name, action) =>
+  button('Remove from the staff', 'quiet-button', action, `Remove ${name} from the staff`)
 
 /**
  * The first lines of a member's part, or of its backup's, under its name: what it runs on, its
@@ -163,12 +175,13 @@ const removeBackup = (owner, action) =>
   button('Remove backup', 'quiet-button', action, `Remove backup for ${owner}`)
 
 /**
- * Why the member form is to be shut, as a staff dialog's staff is now (T-2341, round 2), or none
- * where what it was opened for is as it was: the empty slot of its Add is held, the member of its
- * backup's form left or its backup is another (or none, or one now) than the form was opened on,
- * or the member it edits left or was renamed. `look` reads the staff: `holder(role, tier)`,
- * `member(key)`, `backup(ownerKey)` (the key of its backup, or null), `backupName(key)` and
- * `renamed(key)` (the words for a member that is another by now, or none).
+ * Why the member form is to be shut, as a staff dialog's staff is now (T-2341, rounds 2 and 3), or
+ * none where what it was opened for is as it was: the empty slot of its Add is held, the member
+ * its Edit or its backup's form is for left or is called otherwise now, or that member's backup is
+ * another (or none, or one now) than the form was opened on. The member is the one the form
+ * opened on, by its id: one that took its name meanwhile is not it. `look` reads the staff:
+ * `holder(role, tier)`, `now(id)` (what the member of that id is called now, or null where it
+ * left), `backup(id)` (the key of its backup, or null) and `backupName(key)`.
  */
 function formGoneWords(form, look) {
   if (form.slot !== null) {
@@ -177,13 +190,18 @@ function formGoneWords(form, look) {
       ? `The ${slotName(form.slot.role, form.slot.tier)} slot is ${held.name}'s now, so its Add was closed. Nothing was added.`
       : null
   }
+  /** Where the member of `id`, called `name` as the form opened, left or is called otherwise. */
+  const gone = (id, name, what) => {
+    const now = look.now(id)
+    if (now === null) return `${name} left the staff, so ${what} was closed. Nothing was saved.`
+    return now === name ? null : `${name} is ${now} now, so ${what} was closed. Nothing was saved.`
+  }
   if (form.backup !== null) {
     const { owner, changing, of, ofName } = form.backup
     const what = changing ? 'Change backup' : 'Add backup'
-    if (!look.member(owner.key)) {
-      return `${owner.label} left the staff, so ${what} was closed. Nothing was saved.`
-    }
-    const now = look.backup(owner.key)
+    const left = gone(owner.id, owner.label, what)
+    if (left !== null) return left
+    const now = look.backup(owner.id)
     if (now === of) return null
     if (now === null)
       return `${owner.label} has no backup now, so ${what} was closed. Nothing was saved.`
@@ -191,12 +209,7 @@ function formGoneWords(form, look) {
       ? `${owner.label} has a backup now, ${look.backupName(now)}, so Add backup was closed. Nothing was saved.`
       : `${owner.label}'s backup is ${look.backupName(now)} now, not ${ofName}, so Change backup was closed. Nothing was saved.`
   }
-  if (form.editing !== null && !look.member(form.editing)) {
-    return (
-      look.renamed?.(form.editing) ??
-      `${form.editingName} left the staff, so its Edit was closed. Nothing was saved.`
-    )
-  }
+  if (form.editing !== null) return gone(form.editingId, form.editingName, 'its Edit')
   return null
 }
 
@@ -740,6 +753,11 @@ class MemberPicker {
   /** What the member being edited is called, as the form's name says it. */
   editingName = null
   /**
+   * The member being edited, by the id it had as the form opened (a draft's number): a member
+   * that takes its name meanwhile is another (T-2341, round 3).
+   */
+  editingId = null
+  /**
    * The owner, whether this form is replacing its backup, and the backup it was opened on (`of`,
    * its handle, or none for an Add backup); null for a member.
    */
@@ -974,6 +992,7 @@ class MemberPicker {
     this.#fillRoles()
     this.editing = member.handle
     this.editingName = member.label ?? `@${member.handle}`
+    this.editingId = member.id ?? member._id ?? null
     this.slot = null
     this.#editedRoles = member.roles
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
@@ -1355,9 +1374,21 @@ export class NewProjectDialog {
     if (refused !== null) this.#say(refused)
   }
 
-  /** The words of the slots the draft names several members for, or none. */
+  /**
+   * The words of what holds the start back, or none: the slots the draft names several members
+   * for, and each member that holds only roles ConsensFlow no longer has, which the ledger would
+   * refuse (T-2341, round 3).
+   */
   #crowded() {
-    const words = crowded(this.#members(), true).map((slot) => slot.words)
+    const members = this.#members()
+    const words = crowded(members, true).map((slot) => slot.words)
+    for (const member of members) {
+      const gone = goneRoles(member)
+      if (gone.length === 0) continue
+      words.push(
+        `${member.name} holds only ${gone.length > 1 ? 'roles' : 'a role'} ConsensFlow no longer has (${together(gone)}): remove it, under No slot, and the project can start.`,
+      )
+    }
     return words.length === 0 ? null : words.join(' ')
   }
 
@@ -1415,6 +1446,8 @@ export class NewProjectDialog {
       .map((member) => {
         const designer = member.designer || member.roles.some(isImageAgentRole)
         const backup = this.#backupOf(member._id)
+        // A member whose role ConsensFlow no longer has is removed, not edited (T-2341, round 3).
+        const gone = goneRoles(member).length > 0
         return {
           key: member._id,
           name: modelShown(member),
@@ -1426,9 +1459,10 @@ export class NewProjectDialog {
           backup: backup ? modelShown(backup) : null,
           // A draft's member can only be brought back from a Vacation it was copied with.
           opens: opensSaid({
-            edit: !designer,
+            edit: !designer && !gone,
             vacation: Boolean(member.vacationSince),
-            backup: !designer || Boolean(backup),
+            backup: (!designer && !gone) || Boolean(backup),
+            remove: gone,
           }),
         }
       })
@@ -1582,9 +1616,14 @@ export class NewProjectDialog {
     if (!form.open) return false
     const why = formGoneWords(form, {
       holder: (role, tier) => holdersOf(members, role, tier)[0],
-      member: (key) => members.find((member) => String(member.key) === String(key)),
-      backup: (key) => {
-        const backup = this.#backupOf(Number(key))
+      // A draft's member is its number, called otherwise only by the person's own Edit, which
+      // shuts the form first.
+      now: (id) =>
+        members.some((one) => one.key === id)
+          ? (form.backup?.owner.label ?? form.editingName)
+          : null,
+      backup: (id) => {
+        const backup = this.#backupOf(id)
         return backup ? String(backup._id) : null
       },
       backupName: (key) => modelShown(this.#draft.find((one) => String(one._id) === key) ?? {}),
@@ -1627,8 +1666,12 @@ export class NewProjectDialog {
     const id = member._id
     const name = holder.name
     const designer = holder.designer
+    // What it keeps, with no Edit and no backup to add or change: an image designer's, and one's
+    // whose role ConsensFlow no longer has, which its Remove takes out of the draft.
+    const gone = goneRoles(member).length > 0
+    const kept = designer || gone
     const acts = []
-    if (!designer) {
+    if (!kept) {
       acts.push(
         button(
           'Edit',
@@ -1653,12 +1696,20 @@ export class NewProjectDialog {
         }),
       )
     }
+    if (gone) {
+      acts.push(
+        removeMember(name, () => {
+          this.#removing = { key: id, role: NO_SLOT }
+          this.#draw()
+        }),
+      )
+    }
     const nodes = [aboutLines(runsLabel(member, false), { resting: Boolean(member.vacationSince) })]
     if (acts.length > 0) nodes.push(actsOf(acts))
     const backup = this.#backupOf(id)
     // An image designer is offered no backup: one it has from before is shown, to keep or remove.
-    if (designer && !backup) return nodes
-    const owner = { key: id, label: name }
+    if (kept && !backup) return nodes
+    const owner = { key: id, label: name, id }
     if (!backup) {
       nodes.push(
         backupPart(name, null, null, [
@@ -1671,7 +1722,7 @@ export class NewProjectDialog {
       return nodes
     }
     const shown = modelShown(backup)
-    const backupActs = designer
+    const backupActs = kept
       ? []
       : [
           changeBackup(name, () => {
@@ -2010,11 +2061,14 @@ export class ProjectSettingsDialog {
           // The daemon's words go where the human picked, as well as on the status line.
           if (mine()) this.#member.say(refused instanceof Error ? refused.message : String(refused))
           throw refused
+        } finally {
+          // Answered, refused or not: the redraw that follows judges the form against the staff
+          // as it is then, as any redraw does (T-2341, round 3).
+          if (this.#saving === asked) this.#saving = null
         }
       })
       // Saved, the keyboard is back on what opened the form, in the member's part.
       void Promise.resolve(after).finally(() => {
-        if (this.#saving === asked) this.#saving = null
         if (dialog.open && !this.#member.open) this.#member.refocus(dialog)
       })
     })
@@ -2207,18 +2261,14 @@ export class ProjectSettingsDialog {
   #formGone(primaries, backups, holders) {
     const form = this.#member
     if (!form.open || form.generation === this.#saving) return false
-    const byHandle = (handle) => primaries.find((member) => member.handle === handle)
     const why = formGoneWords(form, {
       holder: (role, tier) => holdersOf(holders, role, tier)[0],
-      member: byHandle,
-      backup: (handle) => backups.get(byHandle(handle)?.id)?.handle ?? null,
-      backupName: (handle) => `@${handle}`,
-      renamed: (handle) => {
-        const now = primaries.find((member) => member.id === this.#opened?.id)
-        return now && now.handle !== handle
-          ? `@${handle} is @${now.handle} now, so its Edit was closed. Nothing was saved.`
-          : null
+      now: (id) => {
+        const member = primaries.find((one) => one.id === id)
+        return member ? `@${member.handle}` : null
       },
+      backup: (id) => backups.get(id)?.handle ?? null,
+      backupName: (handle) => `@${handle}`,
     })
     if (why === null) return false
     const had = form.fieldset.contains(document.activeElement)
@@ -2266,6 +2316,7 @@ export class ProjectSettingsDialog {
     const out = lane ? outWords(lane, Date.now()) : null
     if (out !== null) marks.push({ text: out.split(/; |: /)[0], tone: 'out' })
     const designer = Boolean(member.designer)
+    const gone = goneRoles(member).length > 0
     return {
       key: member.handle,
       name: `@${member.handle}`,
@@ -2280,7 +2331,12 @@ export class ProjectSettingsDialog {
       designer,
       marks,
       backup: backup ? `@${backup.handle}` : null,
-      opens: opensSaid({ edit: !designer, vacation: true, backup: !designer || Boolean(backup) }),
+      opens: opensSaid({
+        edit: !designer && !gone,
+        vacation: true,
+        backup: (!designer && !gone) || Boolean(backup),
+        remove: gone,
+      }),
     }
   }
 
@@ -2446,8 +2502,12 @@ export class ProjectSettingsDialog {
    */
   #part(member, backup) {
     const name = `@${member.handle}`
-    // An image designer has nothing to edit: Codex's own model, no effort, no tier.
-    const edit = member.designer
+    // An image designer has nothing to edit: Codex's own model, no effort, no tier. A member whose
+    // role ConsensFlow no longer has can take no slot: it is removed, not edited (T-2341, round 3).
+    // Neither is given a backup to add or change.
+    const gone = goneRoles(member).length > 0
+    const kept = Boolean(member.designer) || gone
+    const edit = kept
       ? []
       : [
           button(
@@ -2468,10 +2528,18 @@ export class ProjectSettingsDialog {
         ]
     const about = this.#about(member)
     if (this.#modelGone(member)) about.dataset.modelGone = member.model
-    const nodes = [about, actsOf([...edit, this.#vacation(member)])]
+    const remove = gone
+      ? [
+          removeMember(name, () => {
+            this.#removing = { key: member.handle, role: NO_SLOT }
+            this.#draw()
+          }),
+        ]
+      : []
+    const nodes = [about, actsOf([...edit, this.#vacation(member), ...remove])]
     // An image designer is offered no backup: one it has from before is shown, to keep or remove.
-    if (member.designer && !backup) return nodes
-    const owner = { key: member.handle, label: name }
+    if (kept && !backup) return nodes
+    const owner = { key: member.handle, label: name, id: member.id }
     if (!backup) {
       nodes.push(
         backupPart(name, null, null, [
@@ -2484,7 +2552,7 @@ export class ProjectSettingsDialog {
       return nodes
     }
     // An image designer's backup (an earlier version's) has nothing to change: it is kept or removed.
-    const change = member.designer
+    const change = kept
       ? []
       : [
           changeBackup(name, () => {
