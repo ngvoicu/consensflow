@@ -22338,10 +22338,11 @@ test('T-2341 the member form opens under the slot it was opened from, in sight, 
   await expect(slotCell(settings, 'reviewer:critical')).toBeInViewport()
   await form.getByRole('button', { name: 'Cancel' }).click()
   await expect(edit).toBeFocused()
-  await page.keyboard.press('Shift+Tab')
-  await expect(
-    settings.getByRole('button', { name: "Hide @gpt-6-2-sol-max's Edit, Vacation and backup" }),
-  ).toBeFocused()
+  // Its Hide, named for its member, gives the keyboard back to the card it was opened from. (Tab
+  // reaches buttons in WebKit only where macOS's own keyboard navigation is on: focused here.)
+  await settings
+    .getByRole('button', { name: "Hide @gpt-6-2-sol-max's Edit, Vacation and backup" })
+    .focus()
   await page.keyboard.press('Enter')
   await expect(opener).toBeFocused()
   // Another slot's Add while a member's part is open: the part shuts, the form goes there.
