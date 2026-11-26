@@ -139,17 +139,11 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
-        (self.exit)(code);
+        self.errors.log().keep(&format!("exit {code}"));
 '''
 replace = '''
         std::thread::sleep(Duration::from_millis(1_000));
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
-        (self.exit)(code);
+        self.errors.log().keep(&format!("exit {code}"));
 '''
 
 [[plant]]
@@ -170,15 +164,11 @@ runs = ["stop-busy"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
+        let _ = self.errors.log().written(log_within);
         (self.exit)(code);
 '''
 replace = '''
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
+        let _ = self.errors.log().written(log_within);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(code);
 '''
@@ -191,15 +181,11 @@ runs = ["stop-program"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
 find = '''
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
+        let _ = self.errors.log().written(log_within);
         (self.exit)(code);
 '''
 replace = '''
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
+        let _ = self.errors.log().written(log_within);
         std::thread::sleep(Duration::from_millis(1_000));
         (self.exit)(code);
 '''
@@ -248,17 +234,9 @@ runs = ["daemon-lib-stop-open"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = '''
-            self.api.drop_connections();
-        }
-        self.tail(self.code(why));
-'''
-replace = '''
-            self.api.drop_connections();
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        self.tail(self.code(why));
-'''
+find = '''        let code = self.code(why);'''
+replace = '''        tokio::time::sleep(Duration::from_millis(100)).await;
+        let code = self.code(why);'''
 
 [[plant]]
 name = "ci flakes: a stop waits 300 ms for what is open, and not the second the app allows"

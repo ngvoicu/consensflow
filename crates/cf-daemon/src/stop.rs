@@ -14,9 +14,11 @@
 //!   to finish. What is open at the deadline is dropped. The app ends the
 //!   daemon 2 s after asking it to stop, and its own exit hooks must run
 //!   first.
-//! - **The tail** waits for one thing only, the thread that writes the trace, a quarter
-//!   of a second at most, and lets the home go (the ledger is closed) only once it
-//!   has: past that it exits with the ledger still held, so that the writer ends with the
+//! - **The tail** waits for the thread that writes the trace, a quarter of a second at most,
+//!   and for the log's, last: what is left of the stop's deadline, a quarter of a second at
+//!   least, so that the log holds what it was given, then the count of what it dropped, then
+//!   the stop's line and the exit's (T-2263). It lets the home go (the ledger is closed)
+//!   only once the trace is written: past that it exits with the ledger still held, so that the writer ends with the
 //!   process and no daemon that takes the home meanwhile has lines written behind it.
 //!   The children are forced to end without
 //!   waiting (each group looked at once more, at once, for what it started as
@@ -136,15 +138,15 @@ pub struct Stopping {
 impl Stopping {
     /// The stop, for `why`: ends with the process's exit.
     pub async fn run(&self, why: &str) {
-        // The deadline of the waiting starts here, before any log: the log is written off
-        // the runtime from now on (the halt is set), and a log that is held (another
-        // process has its lock) is waited for a moment and let go, never for good.
+        // The deadline of the waiting starts here, before any log: a line of the stop goes to
+        // the log's own thread, which a log that is held (another process has its lock) keeps
+        // from stopping anything, and the tail waits for it only what the deadline has left.
         let deadline = Instant::now() + DEADLINE;
         (self.fence)();
         let size = rss().map_or(0, megabytes);
         self.errors
             .log()
-            .info_within(&format!("stop: {why}; rss {size} MB"), SETTLE);
+            .keep(&format!("stop: {why}; rss {size} MB"));
         let waiting = async {
             let passes = async {
                 if let Some(passes) = self.passes.get() {
@@ -162,7 +164,11 @@ impl Stopping {
             // settled at the next start.
             self.api.drop_connections();
         }
-        self.tail(self.code(why));
+        let code = self.code(why);
+        let log_within = deadline
+            .saturating_duration_since(Instant::now())
+            .max(SETTLE);
+        self.tail_within(code, log_within);
     }
 
     /// How the process ends: 74 for a ledger that cannot save, wherever the stop began.
@@ -177,6 +183,11 @@ impl Stopping {
     /// What is left to do, with no wait in it. Each step is its own: one that
     /// fails or panics leaves the rest, and the process ends with `code`.
     pub(crate) fn tail(&self, code: i32) {
+        self.tail_within(code, SETTLE);
+    }
+
+    /// [`Stopping::tail`], waiting `log_within` at most for the log.
+    fn tail_within(&self, code: i32, log_within: Duration) {
         let code = if self.halt.broke() {
             crate::broken::EXIT
         } else {
@@ -207,9 +218,9 @@ impl Stopping {
                 SETTLE,
             );
         }
-        self.errors
-            .log()
-            .info_within(&format!("exit {code}"), SETTLE);
+        self.errors.log().keep(&format!("exit {code}"));
+        // What was said is written before the process goes, if the log's file lets it in time.
+        let _ = self.errors.log().written(log_within);
         (self.exit)(code);
     }
 }

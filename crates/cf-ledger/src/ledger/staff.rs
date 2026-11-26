@@ -114,16 +114,15 @@ impl Ledger {
         staff::edit_member(&mut self.store, project_id, handle, edit)
     }
 
-    /// A member's roles change in place; a role it gains must fit it, and its tier follows
-    /// them: one with tiers gained by a member given none comes with `tier`.
+    /// A member's roles change in place; a role it gains must fit it, be offered at its tier
+    /// and have its slot free. Its tier stays: only Edit changes one.
     pub fn set_roles<S: AsRef<str>>(
         &mut self,
         project_id: i64,
         handle: &str,
         roles: &[S],
-        tier: Option<&str>,
     ) -> Result<ParticipantView, LedgerError> {
-        staff::set_roles(&mut self.store, project_id, handle, roles, tier)
+        staff::set_roles(&mut self.store, project_id, handle, roles)
     }
 
     /// A member leaves the staff, its open tasks cancelled.

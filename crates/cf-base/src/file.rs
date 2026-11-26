@@ -35,7 +35,7 @@ pub use errno::{errno_name, error_code, is_missing, known_code, uv_words};
 pub use error::FileError;
 pub use promises::{read_file, rename, rm_force};
 pub use sync::{make_temporary_folder, read_file_sync, remove_all};
-pub use write::{make_folder, write_file, write_whole, Mkdir};
+pub use write::{make_folder, write_file, write_in_place, write_new_in_place, write_whole, Mkdir};
 
 /// Which file an open file is, whatever its path: its device and inode on
 /// Unix, its volume and file index on Windows (Node's `stat` calls the

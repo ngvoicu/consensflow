@@ -688,8 +688,8 @@ runs = ["paste-enter-replies"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = "            InputWork::Reply(_) => &route.replies,"
-replace = "            InputWork::Reply(_) => &route.sender,"
+find = "            InputWork::Reply(_) => &self.replies,"
+replace = "            InputWork::Reply(_) => &self.sender,"
 
 [[plant]]
 name = "paste enter: the pane host takes the bridge's pane.reply for the daemon's keys"

@@ -523,8 +523,8 @@ find = "    this.#member = new MemberPicker(this.#form, lists, () => {})"
 replace = "    this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})"
 
 [[plant]]
-name = "live models: Settings reads only what its form was left on"
-meant = "Settings reads every installed harness as it opens again, whatever role was left picked (A4-28, review 4)"
+name = "live models: Settings reads only what its form was left open for"
+meant = "Settings reads every installed harness as it opens again, whatever slot the form was left open for (A4-28, review 4)"
 runs = ["lm-page"]
 
 [[plant.edit]]
@@ -571,8 +571,8 @@ runs = ["lm-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      if (named !== null && member.read === undefined) member.read = named"
-replace = "      void named"
+find = '''      if (named !== null) entry.read = named'''
+replace = '''      void named'''
 
 [[plant]]
 name = "live models: an edit that changes nothing says nothing"

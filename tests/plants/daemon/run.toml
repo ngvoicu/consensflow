@@ -256,8 +256,9 @@ find = '''
         announce(true);
         log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
-    started'''
-replace = "    started"
+'''
+replace = '''
+'''
 
 # Only a process has signals of its own: the daemon of a test is told to stop.
 [[plant]]

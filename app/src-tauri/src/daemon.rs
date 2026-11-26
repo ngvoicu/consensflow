@@ -2607,13 +2607,20 @@ mod tests {
             let _ = told.send(event.payload().to_string());
         });
 
-        assert_eq!(
-            crate::commands::pane_page_prepare(app.handle().clone(), "test-page".into()),
-            json!({"ok":true})
+        let prepared = crate::commands::pane_page_prepare(
+            app.handle().clone(),
+            "test-page".into(),
+            "nonce".into(),
         );
+        assert_eq!(prepared["ok"], true);
         assert_eq!(
-            crate::commands::pane_page_activate(app.handle().clone(), "test-page".into()),
-            json!({"ok":true})
+            crate::commands::pane_page_activate(
+                app.handle().clone(),
+                "test-page".into(),
+                "nonce".into(),
+                prepared["epoch"].as_u64().expect("an epoch")
+            )["ok"],
+            true
         );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(
             app.handle().clone(),

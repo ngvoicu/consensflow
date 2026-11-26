@@ -251,7 +251,7 @@ impl Rig {
             // A machine with no computer use: no launch here is told of it.
             computer_use: Rc::new(crate::computer_use::MachineComputerUse::granting(
                 env.clone(),
-                Rc::new(|| None),
+                std::sync::Arc::new(|| None),
             )),
             limits: Limits::default(),
         };
@@ -372,6 +372,19 @@ impl Rig {
             self.serve_until(|| pass.ended()).await;
             pass.await.expect("a pass");
             self.quiet().await;
+        }
+    }
+
+    /// Passes, a turn of real time between them, until task `number` is at work: a launch's steps
+    /// after the pane's open are made on threads of their own (T-2232), so a slow machine has the
+    /// task at work a few turns later than the open's answer. Never more than ten seconds.
+    pub async fn until_working(&mut self, project: i64, number: i64) {
+        for _ in 0..400 {
+            if self.task_state(project, number) == "working" {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            self.passes(1).await;
         }
     }
 

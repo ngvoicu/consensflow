@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_e2e::daemon::{Daemon, Home};
-use cf_e2e::daemon_log::{assert_started, lines_of};
+use cf_e2e::daemon_log::{assert_started_in, lines_of};
 use cf_e2e::wire::{self, Pending};
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
@@ -113,7 +113,7 @@ impl OverBridge {
             );
         }
         // The daemon that answers is the native one: its log's start line says so.
-        assert_started(&home.log(), daemon.id())?;
+        assert_started_in(|| Ok(home.log()), daemon.id())?;
         Ok(Self {
             daemon,
             home,

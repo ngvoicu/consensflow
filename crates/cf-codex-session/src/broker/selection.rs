@@ -40,13 +40,16 @@
 //! Codex whose TUI changed how it starts a thread does not leave a window on its
 //! own instructions unseen.
 //!
-//! ConsensFlow's own variables (`CONSENSFLOW_URL`, `_TOKEN` and the rest) go to
+//! ConsensFlow's own variables (`CONSENSFLOW_URL`, `_TOKEN` and the rest, and the
+//! window's mark `CF_PANE_PROCESS_OWNER`, which only macOS sets) go to
 //! every thread the TUI starts, resumes or forks, in its `config`
 //! (`shell_environment_policy.set.<NAME>`), so that a user policy of
 //! `inherit = "core"` keeps them for the thread's commands: they are on no
 //! command line (the token is a secret). Probed on Codex 0.164.0 with
 //! `thread/shellCommand`: such a thread's commands have them, on a start and on a
-//! resume, and the user's own `exclude` still holds.
+//! resume. Codex sets them after the user's `exclude` and before the user's
+//! `include_only` (`protocol/src/shell_environment.rs`, 0.171.0), so a policy whose
+//! `include_only` leaves their names out drops them.
 
 use std::collections::HashMap;
 
@@ -140,7 +143,7 @@ pub(crate) struct Selection {
     /// resume and main fork of a thread Codex says is top-level: its role. None for a
     /// window given none.
     role: Option<String>,
-    /// ConsensFlow's own variables, each name with its value, which every thread
+    /// ConsensFlow's own variables and the window's mark, each name with its value, which every thread
     /// the TUI starts, resumes or forks is given for its commands.
     shell_env: Vec<(String, String)>,
     /// Whether the window has said that a start could not be told.

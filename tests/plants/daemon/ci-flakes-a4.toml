@@ -182,10 +182,6 @@ runs = ["a4-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = '''            self.api.drop_connections();
-        }
-        self.tail(self.code(why));'''
-replace = '''            self.api.drop_connections();
-        }
-        tokio::time::sleep(Duration::from_millis(1_400)).await;
-        self.tail(self.code(why));'''
+find = '''        let code = self.code(why);'''
+replace = '''        tokio::time::sleep(Duration::from_millis(1_400)).await;
+        let code = self.code(why);'''

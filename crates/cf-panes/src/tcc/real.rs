@@ -1,6 +1,7 @@
 //! The reader of the system's log as it runs on a Mac: `log stream` started through
 //! cf-process, the window table it asks, and the events it sends the daemon.
 
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::mpsc;
@@ -26,6 +27,18 @@ const START_WITHIN: Duration = Duration::from_secs(10);
 /// The system's log reader.
 const LOG: &str = "/usr/bin/log";
 
+// The shell owns the only background job. Its input comes from the host, never from the log:
+// EOF means the host has gone, including SIGKILL. Close the shell's own copies of the output so
+// the host also sees EOF if the log ends first (notably when access is refused). On an ordinary
+// stop the host asks the shell to end; its trap takes the same path. A job spec is resolved by
+// the shell against its own jobs, so an already-reaped child's recycled PID is never signalled.
+const WATCH_LOG: &str = r#"trap 'kill -KILL %1 2>/dev/null; wait %1 2>/dev/null; exit' TERM HUP INT
+"$@" </dev/null 2>&1 &
+exec 1>&- 2>&-
+while IFS= read -r line; do :; done
+kill -KILL %1 2>/dev/null
+wait %1 2>/dev/null"#;
+
 /// What `log stream` is asked: the dialogs raised (`AUTHREQ_PROMPTING`), and who asked each
 /// (`AUTHREQ_ATTRIBUTION`, of the requests in the name of the process `app` alone, so that the
 /// rest of the machine's requests are not even read).
@@ -41,7 +54,7 @@ pub(crate) fn predicate(app: u32) -> String {
 pub(crate) fn log_arguments(app: u32) -> Vec<OsString> {
     [
         "-c",
-        "exec \"$@\" 2>&1",
+        WATCH_LOG,
         "sh",
         LOG,
         "stream",
@@ -60,6 +73,34 @@ pub(crate) fn log_arguments(app: u32) -> Vec<OsString> {
 enum Said {
     Line(String),
     End,
+}
+
+/// A watcher must get an ordinary end even if its reader thread unwinds. Dropping the raw
+/// cf-process child would force the shell before it could end its own log.
+struct LogChild {
+    child: cf_process::Child,
+    asked: Cell<bool>,
+}
+
+impl LogChild {
+    fn new(child: cf_process::Child) -> Self {
+        Self {
+            child,
+            asked: Cell::new(false),
+        }
+    }
+
+    fn end(&self) {
+        if !self.asked.replace(true) {
+            self.child.terminate(Ending::Asked);
+        }
+    }
+}
+
+impl Drop for LogChild {
+    fn drop(&mut self) {
+        self.end();
+    }
 }
 
 /// A program running beside this one, read a line at a time, on a thread of its own.
@@ -123,26 +164,30 @@ fn read_to_the_end(
                 return;
             }
         };
+        let child = LogChild::new(child);
         let _ = started.send(Ok(()));
         loop {
             tokio::select! {
-                line = child.read_line(LINE_LIMIT) => match line {
+                line = child.child.read_line(LINE_LIMIT) => match line {
                     Ok(Some(line)) => {
                         // Nobody reads any more: the supervisor is gone.
                         if said.send(Said::Line(line)).is_err() {
-                            child.terminate(Ending::Asked);
+                            child.end();
                             break;
                         }
                     }
-                    Ok(None) | Err(_) => break,
+                    Ok(None) | Err(_) => {
+                        child.end();
+                        break;
+                    }
                 },
                 _ = &mut ended => {
-                    child.terminate(Ending::Asked);
+                    child.end();
                     break;
                 }
             }
         }
-        child.ended().await;
+        child.child.ended().await;
         let _ = said.send(Said::End);
     });
 }

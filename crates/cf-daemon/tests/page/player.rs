@@ -148,7 +148,7 @@ impl Player {
             computer_use: page::ComputerUsePage {
                 machine: Rc::new(cf_daemon::computer_use::MachineComputerUse::granting(
                     self.world.env(),
-                    Rc::new(|| None),
+                    std::sync::Arc::new(|| None),
                 )),
                 open: Rc::new(|_| {
                     Box::pin(async { Err("the trace player opens nothing".to_owned()) })

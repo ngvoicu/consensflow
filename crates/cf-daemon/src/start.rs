@@ -194,6 +194,7 @@ pub(crate) struct Parts {
     pub(crate) api_kick: Rc<dyn Fn()>,
     pub(crate) home: std::path::PathBuf,
     pub(crate) spawn: Rc<DaemonSpawn>,
+    pub(crate) log: Rc<Log>,
 }
 
 impl Daemon {
@@ -263,7 +264,7 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     trace
         .started()
         .map_err(|failed| StartError::System(failed.to_string()))?;
-    let log = Rc::new(Log::new(&home));
+    let log = Rc::new(Log::off_thread(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
     // The start's first line is said once the ledger is open and the home marked; a start that
     // is refused before says it with its exit, within the bound of a write of a stop.
@@ -301,6 +302,9 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
         announce(true);
         log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
+    // What the start said is in the log before the start is over, if the file lets it in time:
+    // a start that failed ends the process.
+    let _ = log.written(SETTLE);
     started
 }
 
@@ -391,8 +395,7 @@ async fn run(
     // The stop's latch, and the bridge as far as building it goes: it hears
     // and says nothing until it is polled, after the handle line.
     let latch = Latch::new();
-    // Every effect and the log read the one halt of the latch.
-    log.ends_with(latch.halt());
+    // Every effect reads the one halt of the latch; the log has a thread of its own.
     trace.ends_with(latch.halt());
     let console = Rc::new(Console::to(options.stderr, {
         let latch = Rc::clone(&latch);
@@ -683,6 +686,7 @@ async fn run(
             api_kick: Rc::clone(&context.kick),
             home,
             spawn,
+            log,
         },
     })
 }

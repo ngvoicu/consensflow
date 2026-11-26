@@ -44,7 +44,8 @@ fn system() -> &'static str {
 /// there is one), for that folder: Claude Code keeps its switch by folder, and what the page
 /// is told is what a project of that folder would be told. `permissions` is null where the
 /// system keeps no grants, and `grantsOf` names the app they are of where it is not
-/// ConsensFlow (null where it is).
+/// ConsensFlow (null where it is). A check the system gave no answer to is null too: the page
+/// says it cannot tell, never that it is off.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = match (body.get("project"), body.get("directory")) {
         (None, Some(Value::String(folder))) if !folder.trim().is_empty() => folder.clone(),
@@ -58,21 +59,35 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         }
     };
     let machine = &page.computer_use.machine;
-    let permissions = machine.permissions().map_or(Value::Null, |granted| {
-        json!({
+    // Each is a wait on the system's own answer: together, so that a system that does not
+    // answer holds the page for the one limit, not three (T-2203).
+    let (permissions, claude, codex) = futures_util::future::join3(
+        machine.permissions(),
+        machine.claude(&directory),
+        machine.codex(),
+    )
+    .await;
+    // A check that got no answer in its time is unknown, null, and never off (T-2232): the
+    // page says it cannot tell. `permissions` itself stays null only where the system keeps none.
+    let permissions = match permissions {
+        Ok(None) => Value::Null,
+        Ok(Some(granted)) => json!({
             "accessibility": granted.accessibility,
             "screenRecording": granted.screen_recording,
-        })
+        }),
+        Err(_) => json!({ "accessibility": null, "screenRecording": null }),
+    };
+    let (claude_on, claude_folder) = claude.map_or((None, directory.clone()), |claude| {
+        (Some(claude.on), claude.folder)
     });
-    let claude = machine.claude(&directory);
-    let codex = machine.codex();
+    let codex_set_up = codex.ok().map(|codex| codex.set_up);
     merged(json!({
         "system": system(),
         "permissions": permissions,
         "grantsOf": page.computer_use.grants_of,
         "harnesses": {
-            "claude-code": { "on": claude.on, "folder": claude.folder },
-            "codex": { "setUp": codex.set_up },
+            "claude-code": { "on": claude_on, "folder": claude_folder },
+            "codex": { "setUp": codex_set_up },
         },
     }))
 }
