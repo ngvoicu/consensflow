@@ -1272,3 +1272,349 @@ mod normal {
         restart("human");
     }
 }
+
+/// T-2268's probes of findings 6 to 8: the routes that took a stored turn as the result.
+mod reviewed {
+    use super::*;
+    use cf_harness::records::{Quota, Role};
+    use cf_harness::seams::Time;
+
+    fn project_mark(b: &Board) -> Option<i64> {
+        b.events()
+            .iter()
+            .rfind(|e| e.kind == "project.state")
+            .map(|e| e.id)
+    }
+
+    fn worker_pastes_since(b: &Board, from: i64) -> Vec<i64> {
+        b.events()
+            .into_iter()
+            .filter(|e| e.id > from && e.kind == "delivery.begun")
+            .filter_map(|e| e.data["message"].as_i64())
+            .filter(|&id| b.c.message(id).recipient_id == b.worker_id)
+            .collect()
+    }
+
+    fn tell_and_paste(b: &Board, body: &str) -> MessageView {
+        let m =
+            b.c.ledger
+                .borrow_mut()
+                .tell_queued(b.project, 1, "chief", body)
+                .unwrap();
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(m.id).state, "delivered");
+        m
+    }
+
+    fn drain_chief(b: &Board) {
+        for _ in 0..4 {
+            b.c.adapter.answer("chief", "I read the board.");
+            passes(&b.c, 2);
+        }
+    }
+
+    #[test]
+    fn physical_crash_show_and_task_resume_require_the_new_turn() {
+        let b = Board::new(true);
+        b.c.adapter.resumes_records.set(true);
+        let (first, second) = b.asked_two();
+        b.c.ledger
+            .borrow_mut()
+            .write_raw(&format!(
+                "DELETE FROM question_binding WHERE question_id = {}",
+                first.id
+            ))
+            .unwrap();
+        let prior = b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(prior.id).state, "delivered");
+        assert_eq!(b.state(), "waiting");
+        let old_pane = b.c.host.last("zeus").unwrap().pane;
+        let mark = project_mark(&b);
+        b.c.adapter.answer("zeus", DONE);
+        let final_id = b.c.adapter.agent("zeus").items.last().unwrap().id.clone();
+        let before = b.events().last().unwrap().id;
+
+        b.c.host
+            .exits_showing(Some(9), None, Some(&["stand-in crash"]));
+        b.c.exit("zeus");
+        let state_after_exit = b.state();
+        assert_eq!(state_after_exit, "paused");
+        assert!(b.results().is_empty());
+
+        b.c.open_window(b.project, &b.worker).unwrap();
+        passes(&b.c, 5);
+        let new_pane = b.c.host.last("zeus").unwrap().pane;
+        assert_ne!(new_pane, old_pane);
+        assert_eq!(project_mark(&b), mark);
+        assert!(b
+            .c
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .any(|item| item.id == final_id));
+        assert_eq!(b.c.message(first.id).state, "delivered");
+        assert_eq!(b.state(), "paused");
+        assert!(b.results().is_empty());
+        let before_resume = worker_pastes_since(&b, before);
+        assert!(before_resume.is_empty());
+
+        b.c.resume_task(b.project, 1, "Finish on the new run.");
+        passes(&b.c, 5);
+        let resumed = worker_pastes_since(&b, before);
+        assert_eq!(resumed.len(), 1, "{resumed:?}");
+        assert_eq!(b.c.message(resumed[0]).state, "delivered");
+        assert_eq!(b.state(), "waiting");
+        assert!(b.results().is_empty());
+
+        b.c.adapter.answer("zeus", "Completed on the new run.");
+        passes(&b.c, 4);
+        b.nothing_taken(&[first.id]);
+        assert_eq!(b.notes().len(), 1);
+        b.take();
+        passes(&b.c, 4);
+        assert_eq!(b.state(), "done");
+        let results = b.results();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].body.contains("Completed on the new run."));
+        assert_eq!(b.c.message(first.id).state, "cancelled");
+    }
+
+    #[test]
+    fn fresh_conversation_needs_a_paste_of_its_own() {
+        let b = Board::new(true);
+        let (first, second) = b.asked_two();
+        b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        let mark = project_mark(&b);
+        b.c.adapter.answer("zeus", DONE);
+        let before = b.events().last().unwrap().id;
+        b.c.adapter.switch_to("zeus", "native-review-fresh");
+        passes(&b.c, 5);
+        assert_eq!(project_mark(&b), mark);
+        assert!(b
+            .c
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .all(|item| !item.text.contains(DONE)));
+        b.c.adapter
+            .answer("zeus", "This turn answers only the new conversation.");
+        passes(&b.c, 4);
+        assert_eq!(b.state(), "waiting");
+        assert!(b.results().is_empty());
+        assert_eq!(b.c.message(first.id).state, "delivered");
+        let new_words = tell_and_paste(&b, "Use JSON on the current conversation.");
+        b.finish();
+        assert_eq!(
+            b.notes().len(),
+            2,
+            "the turn of the new conversation, then the turn after the tell"
+        );
+        b.take_whatever_was_told();
+        b.delivered(&[first.id], &[second.id]);
+        let pastes = worker_pastes_since(&b, before);
+        assert!(pastes.contains(&new_words.id));
+    }
+
+    #[test]
+    fn returning_to_a_conversation_does_not_publish_the_stored_turn() {
+        let b = Board::new(true);
+        let (_first, second) = b.asked_two();
+        b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        let mark = project_mark(&b);
+        let previous = b.c.adapter.agent("zeus").native;
+        b.c.adapter.answer("zeus", DONE);
+        let final_id = b.c.adapter.agent("zeus").items.last().unwrap().id.clone();
+        let from = b.events().last().unwrap().id;
+        b.c.adapter.switch_to("zeus", "native-review-fresh");
+        passes(&b.c, 5);
+        assert!(b.results().is_empty());
+        b.c.adapter.switch_to("zeus", &previous);
+        passes(&b.c, 5);
+        assert_eq!(project_mark(&b), mark);
+        drain_chief(&b);
+        let pastes = worker_pastes_since(&b, from);
+        let result = b.results();
+        assert!(b
+            .c
+            .adapter
+            .agent("zeus")
+            .items
+            .iter()
+            .any(|item| item.id == final_id));
+        let task_pastes: Vec<_> = pastes
+            .into_iter()
+            .filter(|&id| b.c.message(id).task_number == Some(1))
+            .collect();
+        assert!(
+            task_pastes.is_empty(),
+            "task received a new paste: {task_pastes:?}"
+        );
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn an_empty_following_turn_does_not_close_an_open_question() {
+        let b = Board::new(true);
+        let (_first, second) = b.asked_two();
+        b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        assert_eq!(b.state(), "waiting");
+        let tool_result = b.c.adapter.item(Role::Tool, "Test command exited 0.");
+        b.c.adapter
+            .with("zeus", |agent| agent.items.push(tool_result));
+        b.c.adapter.answer("zeus", "");
+        passes(&b.c, 4);
+        drain_chief(&b);
+        let result = b.results();
+        assert!(
+            result.is_empty(),
+            "the new path requires the worker to end with words"
+        );
+        assert_eq!(b.state(), "waiting");
+    }
+
+    #[test]
+    fn a_new_pane_of_a_held_task_does_not_take_its_previous_panes_turn() {
+        let b = Board::new(true);
+        b.c.adapter.resumes_records.set(true);
+        let (first, second) = b.asked_two();
+        b.c.ledger
+            .borrow_mut()
+            .write_raw(&format!(
+                "DELETE FROM question_binding WHERE question_id = {}",
+                first.id
+            ))
+            .unwrap();
+        let prior = b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(prior.id).state, "delivered");
+        let mark = project_mark(&b);
+        let old_pane = b.c.host.last("zeus").unwrap().pane;
+        let from = b.events().last().unwrap().id;
+
+        // User input can start an untracked turn in a worker's own window.
+        let user = b.c.adapter.item(Role::User, "Continue the parser work.");
+        b.c.adapter.with("zeus", |agent| agent.items.push(user));
+        b.c.adapter.answer("zeus", DONE);
+        b.c.hold_task(b.project, 1);
+        b.c.exit("zeus");
+        assert_eq!(b.state(), "paused");
+        assert!(b.results().is_empty());
+        b.c.open_window(b.project, &b.worker).unwrap();
+        passes(&b.c, 5);
+        drain_chief(&b);
+
+        let new_pane = b.c.host.last("zeus").unwrap().pane;
+        assert_ne!(new_pane, old_pane);
+        assert_eq!(mark, project_mark(&b));
+        let pastes = worker_pastes_since(&b, from);
+        let result = b.results();
+        assert!(pastes.is_empty(), "{pastes:?}");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn a_real_hold_route_and_show_do_not_take_the_pre_exit_turn() {
+        let b = Board::new(true);
+        b.c.adapter.resumes_records.set(true);
+        let (first, second) = b.asked_two();
+        b.c.ledger
+            .borrow_mut()
+            .write_raw(&format!(
+                "DELETE FROM question_binding WHERE question_id = {}",
+                first.id
+            ))
+            .unwrap();
+        let prior = b.answer(second.id, "JSON");
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(prior.id).state, "delivered");
+        let before_pane = b.c.host.last("zeus").unwrap().pane;
+
+        let at = cf_base::time::iso(b.c.time.wall_ms());
+        let resets_at = cf_base::time::iso(b.c.time.wall_ms() + 7_200_000);
+        b.c.adapter.refuse(
+            "zeus",
+            Quota::Exhausted {
+                at: Some(at),
+                resets_at: Some(resets_at.clone()),
+            },
+        );
+        passes(&b.c, 2);
+        let held = b.c.task(b.project, 1).task;
+        assert_eq!(held.state, "paused");
+        assert_eq!(held.held_until.as_deref(), Some(resets_at.as_str()));
+        assert!(b.results().is_empty());
+
+        b.c.advance(60_000);
+        let began = cf_base::time::iso(b.c.time.wall_ms());
+        b.c.adapter
+            .begins_its_own_turn("zeus", "Continue the parser work.", &began);
+        b.c.advance(10_000);
+        let ended = cf_base::time::iso(b.c.time.wall_ms());
+        b.c.adapter.ends_its_own_turn("zeus", DONE, &ended);
+        let from = b.events().last().unwrap().id;
+        b.c.host
+            .exits_showing(Some(9), None, Some(&["stand-in crash"]));
+        b.c.exit("zeus");
+        assert_eq!(b.state(), "paused");
+        assert!(b.results().is_empty());
+        b.c.open_window(b.project, &b.worker).unwrap();
+        passes(&b.c, 5);
+        drain_chief(&b);
+
+        assert_ne!(b.c.host.last("zeus").unwrap().pane, before_pane);
+        let events = b.events();
+        let pastes = events
+            .iter()
+            .filter(|e| e.id > from && e.kind == "delivery.begun")
+            .filter_map(|e| e.data["message"].as_i64())
+            .filter(|&id| b.c.message(id).recipient_id == b.worker_id)
+            .collect::<Vec<_>>();
+        let result = b.results();
+        assert!(pastes.is_empty(), "{pastes:?}");
+        assert!(
+            result.is_empty(),
+            "a new pane must not collect the historical turn"
+        );
+    }
+
+    #[test]
+    fn a_paste_written_before_the_last_unanswered_question_does_not_qualify() {
+        let b = Board::new(false);
+        b.c.adapter.busy("zeus");
+        let first = b.ask("Which grammar?");
+        passes(&b.c, 1);
+        let answer = b.answer(first.id, "PEG");
+        passes(&b.c, 1);
+        assert_eq!(b.c.message(answer.id).state, "queued");
+        let second = b.ask("Which format?");
+        passes(&b.c, 1);
+        b.c.adapter.answer("zeus", "I asked which format.");
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(answer.id).state, "delivered");
+        let events = b.events();
+        let event = |kind, message| {
+            events
+                .iter()
+                .find(|e| e.kind == kind && e.data["message"].as_i64() == Some(message))
+                .unwrap()
+                .id
+        };
+        let written = event("message.sent", answer.id);
+        let asked = event("message.sent", second.id);
+        let pasted = event("delivery.begun", answer.id);
+        assert!(written < asked && asked < pasted);
+        b.finish();
+        drain_chief(&b);
+        let result = b.results();
+        assert!(
+            result.is_empty(),
+            "the brief says the message must also have been written after the open question"
+        );
+    }
+}
