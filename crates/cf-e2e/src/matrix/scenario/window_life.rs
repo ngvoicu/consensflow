@@ -530,12 +530,14 @@ pub fn window_life() -> Vec<Scenario> {
             &[],
         )
         .with_vars(&[("CF_TEST_SLOW_START", "matrix-worker 8000")], &[]),
-        // dip-agentos #4: a failure says the harness's reason, the words its provider gave.
+        // dip-agentos #4: a failure says the harness's reason, the words its provider gave. A
+        // failed turn is tried again twice (a hold of 30 s, then of 2 min; D3's N35) before its
+        // task fails, so the turn fails three times: the first try and both retries.
         scenario(
             "field-failure-reason",
             vec![run!(
                 "A",
-                "task add --tier standard :: MODEL-GONE",
+                "task add --tier standard :: FAIL-TURNS 3",
                 |snapshot, bindings| is(snapshot, bindings, "A", 0, &["failed"]) && crate::matrix::run::settled(snapshot)
             )],
             A,
@@ -554,7 +556,8 @@ pub fn window_life() -> Vec<Scenario> {
             &[],
             &[],
         )
-        .ending(&["A"]),
+        .ending(&["A"])
+        .waiting(std::time::Duration::from_secs(160)),
         // a-stop-closed-a-window-whose-turn-was-over: a worker's turn leaves agents and a job
         // running; the chief pauses it with a question; the stop takes one Escape, the window
         // stays, its work is not ended, and its answer reaches the chief. The name is historic.

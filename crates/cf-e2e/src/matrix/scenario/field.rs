@@ -76,7 +76,7 @@ fn a_fails_in_a_turn_with_a_waiter() -> Vec<Step> {
         }),
         run!(
             "A needs X, B needs A",
-            "task add --tier standard --needs {X} :: MODEL-GONE\ntask add --test --tier standard --needs {X+1} :: Reply with exactly: B_DONE",
+            "task add --tier standard --needs {X} :: FAIL-TURNS 3\ntask add --test --tier standard --needs {X+1} :: Reply with exactly: B_DONE",
             |snapshot, bindings| {
                 bindings.nth("A", 0).is_some() && bindings.nth("B", 0).is_some() && answered(snapshot, bindings, "X", 0)
             }
@@ -302,6 +302,7 @@ pub fn field() -> Vec<Scenario> {
         )
         .ending(&["A"]),
         // 5: A fails in a turn with B waiting on it; the chief is told of the failure once, first.
+        // The turn fails three times, the first try and both retries (D3's N35), as the task fails.
         scenario(
             "field5-notices",
             a_fails_in_a_turn_with_a_waiter(),
@@ -348,7 +349,8 @@ pub fn field() -> Vec<Scenario> {
             &[],
             &[],
         )
-        .ending(&["A"]),
+        .ending(&["A"])
+        .waiting(std::time::Duration::from_secs(160)),
         // 7: B's window never begins its brief (still in its prompt's hooks).
         scenario(
             "field7-never-began",
