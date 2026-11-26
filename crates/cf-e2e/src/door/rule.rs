@@ -672,18 +672,6 @@ const WAIVERS: &[(&str, &str, Class, &str)] = &[
         "an offline fixture's own script, started through `Run::fixture_script`",
     ),
     (
-        "src/process/pid.rs",
-        "when_started",
-        Class::Operation,
-        "a script of the kit's own or a fixture's, started through `Run::script_in`",
-    ),
-    (
-        "src/live/members/descent.rs",
-        "table_run",
-        Class::Operation,
-        "a script of the kit's own or a fixture's, started through `Run::script_in`",
-    ),
-    (
         "tests/live_terminal.rs",
         "console_hosts",
         Class::Operation,

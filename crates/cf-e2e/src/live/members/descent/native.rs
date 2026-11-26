@@ -307,17 +307,22 @@ mod mac {
 mod win {
     use std::io;
 
-    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows_sys::Wdk::System::SystemInformation::NtQuerySystemInformation;
+    use windows_sys::Wdk::System::Threading::{
+        NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
+    };
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, WAIT_OBJECT_0,
+        CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
     };
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS,
-        PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        PROCESS_TERMINATE,
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        WaitForSingleObject, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     };
 
-    use super::super::{refined_by_handle, with_cygwin_parents, Identity, Opened, Running};
+    use super::super::{
+        refined_by_handle, table_of_system, with_cygwin_parents, Identity, Opened, Running,
+    };
     use crate::process::Run;
     use crate::{Error, Result};
 
@@ -330,7 +335,7 @@ mod win {
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
         let held: std::cell::RefCell<std::collections::HashMap<u32, Handle>> =
             std::cell::RefCell::new(std::collections::HashMap::new());
-        let listed = refined_by_handle(super::super::table()?, |pid| {
+        let listed = refined_by_handle(system_table()?, |pid| {
             match open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)? {
                 Some(handle) => {
                     let opened = handle.opened()?;
@@ -340,7 +345,20 @@ mod win {
                 None => Ok(None),
             }
         });
-        // The handles are still open: each says its creation time again, after `ps -W` was read.
+        // The handles are still open: each says what its image is and what it was started with
+        // (the table says neither), and, after `ps -W` was read, its creation time again. A
+        // process that cannot be opened has neither: it is none the window's own, which no
+        // command it runs can be told by.
+        let listed = listed
+            .into_iter()
+            .map(|mut process| {
+                if let Some(handle) = held.borrow().get(&process.identity.pid) {
+                    process.exe = handle.image_path();
+                    process.command = handle.command_line().unwrap_or_default();
+                }
+                process
+            })
+            .collect();
         let rows = with_cygwin_parents(listed, cygwin_ps, |pid| {
             held.borrow()
                 .get(&pid)
@@ -348,6 +366,55 @@ mod win {
         });
         drop(held);
         Ok(rows)
+    }
+
+    /// The class `SystemProcessInformation` of `NtQuerySystemInformation`.
+    const SYSTEM_PROCESS_INFORMATION: i32 = 5;
+    /// `STATUS_INFO_LENGTH_MISMATCH` and `STATUS_BUFFER_TOO_SMALL`: the room was not enough.
+    const TOO_SMALL: [i32; 2] = [0xC000_0004_u32 as i32, 0xC000_0023_u32 as i32];
+
+    /// Every process of the machine as the system's own table says it (number, creator, creation
+    /// time), in one call and with no program started: read in a buffer that grows to what the
+    /// system says it needs (the table grows between two calls, so room is added to it).
+    fn system_table() -> Result<Vec<Running>> {
+        let mut room = 1usize << 20;
+        for _ in 0..8 {
+            // Words, so that the entries laid over it are aligned.
+            let mut buffer = vec![0u64; room.div_ceil(8)];
+            let mut needed = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: the buffer is writable for the size passed with it.
+            let status = unsafe {
+                NtQuerySystemInformation(
+                    SYSTEM_PROCESS_INFORMATION,
+                    buffer.as_mut_ptr().cast(),
+                    u32::try_from(buffer.len() * 8).unwrap_or(u32::MAX),
+                    &mut needed,
+                )
+            };
+            if status >= 0 {
+                // SAFETY of the view: the buffer is initialised, and its bytes are read at their
+                // length.
+                #[allow(unsafe_code)]
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), buffer.len() * 8)
+                };
+                return Ok(table_of_system(bytes));
+            }
+            if !TOO_SMALL.contains(&status) {
+                return Err(Error::Program {
+                    action: "list the processes with",
+                    program: "NtQuerySystemInformation".to_owned(),
+                    source: io::Error::other(format!("status {status:#x}")),
+                });
+            }
+            room = room.max(needed as usize).saturating_add(1 << 18);
+        }
+        Err(Error::Program {
+            action: "list the processes with",
+            program: "NtQuerySystemInformation".to_owned(),
+            source: io::Error::other("the table kept growing"),
+        })
     }
 
     /// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin
@@ -467,6 +534,80 @@ mod win {
                 .then(|| u32::try_from(information.InheritedFromUniqueProcessId).ok())
                 .flatten();
             Ok(Some(Opened { created, creator }))
+        }
+
+        /// The whole path the process's program runs from, as the system keeps it: none where it
+        /// will not say.
+        fn image_path(&self) -> Option<String> {
+            // The path a program may have is longer than the one most have.
+            for room in [1_024usize, 32_768] {
+                let mut path = vec![0u16; room];
+                let mut length = u32::try_from(room).ok()?;
+                #[allow(unsafe_code)]
+                // SAFETY: the buffer is writable for `length` units, which the system lowers to
+                // the units it wrote.
+                let read = unsafe {
+                    QueryFullProcessImageNameW(
+                        self.0,
+                        PROCESS_NAME_WIN32,
+                        path.as_mut_ptr(),
+                        &mut length,
+                    )
+                };
+                if read != 0 {
+                    return Some(String::from_utf16_lossy(&path[..length as usize]));
+                }
+            }
+            None
+        }
+
+        /// The command line the process was started with, as the system keeps it and says it to
+        /// a handle with the right to query: no memory of the process is read. None where it
+        /// will not say.
+        fn command_line(&self) -> Option<String> {
+            let mut needed = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: no buffer and no room for one: the call only says how much it needs.
+            unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessCommandLineInformation,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut needed,
+                )
+            };
+            if (needed as usize) < std::mem::size_of::<UNICODE_STRING>() {
+                return None;
+            }
+            // Words, so that the string laid over it is aligned.
+            let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+            #[allow(unsafe_code)]
+            // SAFETY: the buffer is writable for the size passed with it.
+            let status = unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessCommandLineInformation,
+                    buffer.as_mut_ptr().cast(),
+                    u32::try_from(buffer.len() * 8).ok()?,
+                    &mut needed,
+                )
+            };
+            if status < 0 {
+                return None;
+            }
+            let text = buffer.as_ptr().cast::<UNICODE_STRING>();
+            #[allow(unsafe_code)]
+            // SAFETY: on success the buffer holds a UNICODE_STRING whose text follows it in the
+            // same buffer: `Length` bytes of UTF-16 at `Buffer`.
+            let units = unsafe {
+                let (bytes, chars) = ((*text).Length as usize, (*text).Buffer);
+                if chars.is_null() {
+                    return None;
+                }
+                std::slice::from_raw_parts(chars, bytes / std::mem::size_of::<u16>())
+            };
+            Some(String::from_utf16_lossy(units))
         }
 
         /// Ends the process, through this handle: one that exited meanwhile is ended.

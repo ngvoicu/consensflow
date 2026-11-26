@@ -84,34 +84,57 @@ fn ps_says_each_process_with_its_number_its_parent_when_it_began_and_its_command
     assert_eq!(when("Fri Okt 16 04:44:46 2026"), None);
 }
 
+/// One entry of what `NtQuerySystemInformation(SystemProcessInformation)` writes, as a 64-bit
+/// Windows lays it out: `size` bytes, the next entry that far on (0 at the last one).
+fn system_entry(pid: u64, ppid: u64, created: u64, size: usize, last: bool) -> Vec<u8> {
+    let mut bytes = vec![0xAAu8; size];
+    let mut put = |at: usize, whole: u64, width: usize| {
+        bytes[at..at + width].copy_from_slice(&whole.to_le_bytes()[..width]);
+    };
+    put(0, if last { 0 } else { size as u64 }, 4);
+    put(32, created, 8);
+    put(80, pid, 8);
+    put(88, ppid, 8);
+    bytes
+}
+
 #[test]
-fn windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process() {
-    // Read as lines, an argument that held `7777 4800 cf-mark` on a line of its own made up a
-    // process 7777 of the window 4800, and a check ended it (Astra on the B1 fix, the
-    // second look).
-    let script = table_script("");
-    assert!(script.ends_with("| ConvertTo-Json -Compress"), "{script}");
-    assert!(
-        table_script(" -Filter 'ProcessId=12'").contains("Win32_Process -Filter 'ProcessId=12' |")
-    );
-    let listing = r#"[{"pid":0,"ppid":0,"started":0,"command":null},{"pid":4800,"ppid":1,"started":133000000000000000,"command":"devin.exe --config c.json"},{"pid":5120,"ppid":4800,"started":133000000000000100,"command":"node.exe -e \"x\"\n7777 4800 cf-mark\nmore"}]"#;
-    let read = table_of(listing).unwrap();
-    let pids: Vec<u32> = read.iter().map(|one| one.identity.pid).collect();
-    assert_eq!(pids, [0, 4800, 5120]);
+fn the_systems_process_table_is_read_by_where_each_field_of_an_entry_is() {
+    // Entries of different sizes (each is followed by its threads), the last one saying no next.
+    let mut buffer = system_entry(0, 0, 0, 256, false);
+    buffer.extend(system_entry(4800, 1, 133_000_000_000_000_000, 400, false));
+    buffer.extend(system_entry(5120, 4800, 133_000_000_000_000_100, 256, true));
+    let read = table_of_system(&buffer);
     assert_eq!(
-        read[2].command,
-        "node.exe -e \"x\"\n7777 4800 cf-mark\nmore"
+        read,
+        [
+            running(0, 0, 0, ""),
+            running(4800, 133_000_000_000_000_000, 1, ""),
+            running(5120, 133_000_000_000_000_100, 4800, ""),
+        ]
     );
-    assert_eq!(read[0].command, "");
-    // One process alone is an object, none is nothing, and a byte order mark is passed over.
-    let one = format!(
-        "{}{}",
-        char::from_u32(0xFEFF).unwrap(),
-        r#"{"pid":12,"ppid":4,"started":5,"command":"x"}"#
-    );
-    assert_eq!(table_of(&one).unwrap(), [running(12, 5, 4, "x")]);
-    assert!(table_of("  \r\n").unwrap().is_empty());
-    assert!(table_of("12 4 x").is_err(), "lines are no table");
+    assert!(read
+        .iter()
+        .all(|row| row.exe.is_none() && row.link == Link::Number));
+    // Room left over after the last entry (the buffer is larger than what was written) is no row.
+    buffer.extend(vec![0u8; 4096]);
+    assert_eq!(table_of_system(&buffer).len(), 3);
+    assert!(table_of_system(&[]).is_empty());
+}
+
+#[test]
+fn a_cut_short_or_looping_system_table_ends_where_it_is_unsound_and_makes_up_nothing() {
+    // An entry cut off before its creator's number is no row, and nothing after it is read.
+    let whole = system_entry(7, 1, 5, 256, true);
+    assert!(table_of_system(&whole[..90]).is_empty());
+    // A next offset that points outside the buffer ends the table after the row before it.
+    let mut outside = system_entry(7, 1, 5, 256, false);
+    outside.truncate(256);
+    assert_eq!(table_of_system(&outside), [running(7, 5, 1, "")]);
+    // A number too large for a process number is no row (a read of other bytes), the rest is read.
+    let mut odd = system_entry(1 << 40, 1, 5, 256, false);
+    odd.extend(system_entry(8, 1, 6, 256, true));
+    assert_eq!(table_of_system(&odd), [running(8, 6, 1, "")]);
 }
 
 #[test]
@@ -843,18 +866,6 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         let after = repaired.iter().find(|one| one.identity.pid == pid).unwrap();
         assert_eq!(before, after, "{pid}");
     }
-}
-
-/// The PowerShell that lists Windows' processes is given what one takes to start on a loaded
-/// machine, not the 30 s of a verb of `cf`: ended there under the load of a whole test program,
-/// it left a check unable to say what its window ran (CI, 2026-11-03, T-1161). Built here as on
-/// Windows, where it runs.
-#[test]
-fn the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_loaded_machine() {
-    assert_eq!(
-        table_run().limit_given(),
-        Some(crate::process::POWERSHELL_LIMIT)
-    );
 }
 
 /// The programs a Unix has and Windows has not (outside Git Bash): `ps` and its kin, the

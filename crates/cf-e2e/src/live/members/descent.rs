@@ -21,18 +21,20 @@
 //! When a process began is read to the microsecond on macOS (`proc_pidinfo`), to the
 //! 100 ns on Windows (the process's own handle), and to the second on Linux (`ps`'s
 //! `lstart`, in the C locale). The machine's list is `ps` on macOS and Linux, and on
-//! Windows, which has none, the process table through PowerShell, as JSON: a command
-//! line of many lines is one string there, where read as lines it could make up a
-//! process. On macOS and Windows each process listed is read again where it is held, for
-//! when it began ([`refined_by_bsd`], [`refined_by_handle`]).
+//! Windows, which has none, the system's own process table
+//! (`NtQuerySystemInformation`, no program started: a PowerShell took 20 to 30 s to start on a
+//! machine with many modules, T-2363); the image's path and the command line, which a command
+//! line of many lines keeps as one string, are read on each process's own handle.
+//! On macOS and Windows each process listed is read again where it
+//! is held, for when it began ([`refined_by_bsd`], [`refined_by_handle`]).
 
 use std::io;
 
-#[cfg(any(windows, test))]
-use serde_json::Value;
-
+#[cfg(unix)]
 use crate::process::Run;
-use crate::{Error, Result};
+#[cfg(unix)]
+use crate::Error;
+use crate::Result;
 
 mod native;
 #[cfg(test)]
@@ -856,75 +858,61 @@ fn started(lstart: &[&str]) -> Option<u64> {
     Some(((((year * 100 + month) * 100 + day) * 100 + hour) * 100 + minute) * 100 + second)
 }
 
-/// What Windows' process table is asked, through PowerShell, for the processes `which`
-/// selects (` -Filter 'ProcessId=N'`, or nothing for all): each as an object of its
-/// number, its parent's, its start as a file time (none for the system's own) and its
-/// command line, all of them as JSON, in UTF-8.
+/// Where the fields of one entry of what `NtQuerySystemInformation(SystemProcessInformation)`
+/// writes are, on a 64-bit Windows (x64 and arm64 alike; the layout `SYSTEM_PROCESS_INFORMATION`
+/// has had since Windows 7): the offset of the next entry (0 at the last), the creation time (the
+/// 100 ns since 1601 that `GetProcessTimes` says, 0 for the system's own Idle), the number of the
+/// process and the number of the one that created it.
 #[cfg(any(windows, test))]
-fn table_script(which: &str) -> String {
-    format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process{which} | ForEach-Object {{ [pscustomobject]@{{ pid = $_.ProcessId; ppid = $_.ParentProcessId; exe = $_.ExecutablePath; started = $(if ($_.CreationDate) {{ $_.CreationDate.ToFileTimeUtc() }} else {{ 0 }}); command = $_.CommandLine }} }} | ConvertTo-Json -Compress"
-    )
+mod entry {
+    pub const NEXT: usize = 0;
+    pub const CREATED: usize = 32;
+    pub const PID: usize = 80;
+    pub const CREATOR: usize = 88;
 }
 
-/// The PowerShell that lists Windows' process table, given what one takes to start on a
-/// loaded machine ([`crate::process::POWERSHELL_LIMIT`]): ended at a verb of `cf`'s 30 s
-/// under the load of a whole test program, it left a check unable to say what its window
-/// ran (T-1161).
+/// The processes of what `NtQuerySystemInformation(SystemProcessInformation)` wrote into `buffer`:
+/// each by its number, its creator's and when it began, which is all that call says (the path of
+/// its image and its command line are read where a process is held, [`refined_by_handle`] and
+/// the caller's). An entry that is cut short, or that points outside the buffer, ends the table:
+/// what was read before it is kept, and nothing is made up of what is not there. (A next offset
+/// is at least 1, so each entry is further on than the last and the read ends.)
 #[cfg(any(windows, test))]
-fn table_run() -> Run {
-    Run::script_in("powershell", &["-NoProfile", "-Command"], table_script(""))
-        .limit(crate::process::POWERSHELL_LIMIT)
-}
-
-/// What Windows' process table says of every process.
-#[cfg(windows)]
-fn table() -> Result<Vec<Running>> {
-    let ran = table_run().run()?;
-    if ran.code != Some(0) {
-        return Err(Error::Program {
-            action: "list the processes with",
-            program: "powershell".to_owned(),
-            source: io::Error::other(ran.to_string()),
-        });
-    }
-    table_of(&ran.stdout)
-}
-
-/// The processes of what [`table_script`] printed: a list of them, one alone, or nothing
-/// for none, a byte order mark before it where PowerShell writes one.
-#[cfg(any(windows, test))]
-fn table_of(listing: &str) -> Result<Vec<Running>> {
-    let listing = listing
-        .trim_start_matches(|letter: char| u32::from(letter) == 0xFEFF)
-        .trim();
-    if listing.is_empty() {
-        return Ok(Vec::new());
-    }
-    let parsed: Value = serde_json::from_str(listing)
-        .map_err(|failed| Error::Daemon(format!("Windows' process table is no JSON: {failed}")))?;
-    let entries = match parsed {
-        Value::Array(entries) => entries,
-        one => vec![one],
+fn table_of_system(buffer: &[u8]) -> Vec<Running> {
+    let word = |at: usize, size: usize| -> Option<u64> {
+        let bytes = buffer.get(at..at.checked_add(size)?)?;
+        let mut whole = [0u8; 8];
+        whole[..size].copy_from_slice(bytes);
+        Some(u64::from_le_bytes(whole))
     };
-    Ok(entries
-        .iter()
-        .filter_map(|entry| {
+    let mut listed = Vec::new();
+    let mut at = 0usize;
+    loop {
+        let row = (|| {
             Some(Running {
                 identity: Identity {
-                    pid: u32::try_from(entry["pid"].as_u64()?).ok()?,
-                    started: entry["started"].as_u64()?,
+                    pid: u32::try_from(word(at + entry::PID, 8)?).ok()?,
+                    started: word(at + entry::CREATED, 8)?,
                 },
-                ppid: u32::try_from(entry["ppid"].as_u64()?).ok()?,
-                command: entry["command"].as_str().unwrap_or_default().to_owned(),
-                exe: entry["exe"]
-                    .as_str()
-                    .filter(|exe| !exe.is_empty())
-                    .map(str::to_owned),
+                ppid: u32::try_from(word(at + entry::CREATOR, 8)?).ok()?,
+                command: String::new(),
+                exe: None,
                 link: Link::Number,
             })
-        })
-        .collect())
+        })();
+        listed.extend(row);
+        let Some(next) = word(at + entry::NEXT, 4).filter(|next| *next != 0) else {
+            break;
+        };
+        let Some(after) = usize::try_from(next)
+            .ok()
+            .and_then(|next| at.checked_add(next))
+        else {
+            break;
+        };
+        at = after;
+    }
+    listed
 }
 
 #[cfg(test)]

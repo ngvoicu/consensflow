@@ -181,7 +181,19 @@ fn win_rows_by(
     git: &str,
     held: impl Fn(u32) -> Option<u64>,
 ) -> Vec<Running> {
-    let listed = table_of(&serde_json::Value::Array(table.to_vec()).to_string()).unwrap();
+    let listed = table
+        .iter()
+        .map(|row| Running {
+            identity: Identity {
+                pid: row["pid"].as_u64().unwrap() as u32,
+                started: row["started"].as_u64().unwrap(),
+            },
+            ppid: row["ppid"].as_u64().unwrap() as u32,
+            command: row["command"].as_str().unwrap().to_owned(),
+            exe: row["exe"].as_str().map(str::to_owned),
+            link: Link::Number,
+        })
+        .collect();
     let opened = refined_by_handle(listed, |pid| {
         Ok(table
             .iter()

@@ -11,8 +11,6 @@
 # - a window whose own question dialog is open is a window waiting (no-waiting-for-input-marker);
 # - the Pi extension sends a message id it settled no more (pi-extension-double-send);
 # - a queue removal names the message whose envelope has other attributes (results-held-at-the-gate);
-# - the PowerShell that says when a process began is given time (stand-in-detached-job-dies-on-the-
-#   windows-runner), a Windows plant;
 # - a page of a list is cut at half a frame (state-list-grows-toward-frame-cap);
 # - a terminal takes a size once it has held, and its card is its own width (terminal-resize-cascade);
 # - what the router keeps of a window is bounded (the-rigs-capture-is-unbounded);
@@ -45,8 +43,6 @@ rest-record-state = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", 
 rest-pi-message = ["node", "--test", "--test-reporter=tap", "tests/pi-message.test.mjs"]
 # Claude's record read across the queue's operations.
 rest-claude-queues = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::queues::"]
-# The rig case of a job the agent detached from its shell, on the machine's own processes.
-rest-rig-detached-job = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_the_agent_detached_from_its_shell"]
 # What a page of a list holds of a frame, in the ledger and over the bridge.
 rest-ledger-page-reads = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "page_reads::tests::"]
 rest-daemon-history = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history::"]
@@ -194,28 +190,6 @@ runs = ["rest-claude-queues"]
 file = "crates/cf-harness/src/claude/record/text.rs"
 find = "    queued == removed || envelope(queued) == envelope(removed)"
 replace = "    queued == removed"
-
-# --- the start time of a process on Windows (stand-in-detached-job-dies-on-the-windows-runner) ---
-#
-# The PowerShell that says when a process began took 11 to 17 s on GitHub's Windows runner and was
-# ended at the 30 s a program is given under a suite's load: a job that ran was said to be none. A
-# plant cannot put the old 30 s back, which is a bound met only on a loaded machine; it gives the
-# PowerShell no time at all, which says of every process that it began never. A Windows machine's
-# plant (`cargo xtask windows --machine zeewin2 -- cargo xtask plants daemon "held-rest: the
-# PowerShell"`), skipped elsewhere.
-
-[[plant]]
-name = "held-rest: the PowerShell that says when a process began is given no time to start"
-meant = "a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it"
-platforms = ["windows"]
-runs = ["rest-rig-detached-job"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/process/pid.rs"
-find = '''    .limit(super::POWERSHELL_LIMIT)
-'''
-replace = '''    .limit(std::time::Duration::from_millis(1))
-'''
 
 # --- the page's bound (state-list-grows-toward-frame-cap) ---
 #

@@ -14,6 +14,7 @@ ld-recorded = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mem
 ld-tests = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests"]
 ld-native = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::native"]
 ld-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::what_"]
+ld-table = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::tests::"]
 ld-later = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::tests::a_process_chosen_by_a_later_look"]
 
 [[plant]]
@@ -200,3 +201,76 @@ runs = ["ld-recorded"]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''            if twice(&|row| row.identity.pid == parent.identity.pid) {'''
 replace = '''            if false {'''
+
+# --- Windows lists processes through the system's own table, with no program (T-2366) ---
+#
+# A PowerShell took 20 to 30 s to start on a machine with many modules. The table is now what
+# `NtQuerySystemInformation` writes, read by where each field of an entry is; the image and the
+# command line are read on each process's held handle. A process the handle cannot be had of keeps
+# what the table says and proves nothing.
+
+[[plant]]
+name = "live descent: a number too large for a process is cut to one in the system's table"
+meant = "a_cut_short_or_looping_system_table_ends_where_it_is_unsound_and_makes_up_nothing"
+runs = ["ld-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = """                    pid: u32::try_from(word(at + entry::PID, 8)?).ok()?,"""
+replace = """                    pid: word(at + entry::PID, 8)? as u32,"""
+
+[[plant]]
+name = "live descent: the system's table says a process began where it says its creator"
+meant = "the_systems_process_table_is_read_by_where_each_field_of_an_entry_is"
+runs = ["ld-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "    pub const CREATED: usize = 32;"
+replace = "    pub const CREATED: usize = 88;"
+
+[[plant]]
+name = "live descent: a process whose handle says another creation time than the table is listed"
+meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
+runs = ["ld-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {"
+replace = "            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < u64::MAX => {"
+
+[[plant]]
+name = "live descent: a process that cannot be opened is taken for one whose number proves its parent"
+meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
+runs = ["ld-table"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = """            Err(_) => {
+                process.link = Link::Unread;"""
+replace = """            Err(_) => {
+                process.link = Link::Number;"""
+
+[[plant]]
+name = "live descent: Windows' real listing says nothing of what a process was started with"
+meant = "windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open"
+runs = ["ld-native"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/native.rs"
+find = "                    process.command = handle.command_line().unwrap_or_default();"
+replace = "                    process.command = String::new();"
+
+[[plant]]
+name = "live descent: Windows' real listing proves the system's own process a parent"
+meant = "windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open"
+runs = ["ld-native"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = """            Err(_) => {
+                process.link = Link::Unread;"""
+replace = """            Err(_) => {
+                process.link = Link::Number;"""

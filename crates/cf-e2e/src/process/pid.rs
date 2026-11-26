@@ -259,50 +259,49 @@ pub fn end_all(pids: &[u32]) {
     let _ = taskkill.run();
 }
 
-/// When the process `pid` began, in the words the system says it in (the 100 ns
-/// since 1601 that PowerShell's `StartTime` is): the same for the same process, and
-/// others for one that took its number after it. None where it is not there or the
-/// system will not say. A PowerShell takes its time to start: 11 to 17 s on GitHub's
-/// Windows runner (2026-10-15), and more under a suite's load, past the limit a
-/// program is given by default, which ended it, and a process that ran was said
-/// to be none ([`super::POWERSHELL_LIMIT`]).
+/// When the process `pid` began, in the words the system says it in (the 100 ns since 1601 that
+/// a file time of its creation is): the same for the same process, and others for one that took
+/// its number after it. None where it is not there or the system will not say. Read on a handle
+/// to the process, with no program started: a PowerShell took 20 to 30 s to start on a machine
+/// with many modules (T-2363), and one that said nothing made a process that ran be said to be
+/// none.
 #[cfg(windows)]
 pub fn started(pid: u32) -> Option<String> {
-    // On GitHub's runner a PowerShell asked of a process that ran said nothing once,
-    // and the next one asked answered (2026-10-15): one that says nothing is asked
-    // again while the process is there.
-    for _ in 0..STARTED_TRIES {
-        if let Some(said) = asked_when_started(pid) {
-            return Some(said);
-        }
-        if !is_alive(pid) {
-            return None;
-        }
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE,
+    };
+
+    #[allow(unsafe_code)]
+    // SAFETY: OpenProcess takes plain values and returns a handle or null.
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        )
+    };
+    if handle.is_null() {
+        return None;
     }
-    None
-}
-
-/// How many PowerShells [`started`] asks of a process that is there.
-#[cfg(windows)]
-const STARTED_TRIES: usize = 3;
-
-/// The PowerShell that says when the process `pid` began, given what one takes to
-/// start on a loaded machine ([`super::POWERSHELL_LIMIT`]).
-#[cfg(any(windows, test))]
-pub(super) fn when_started(pid: u32) -> Run {
-    let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
-    Run::script_in(
-        "powershell",
-        &["-NoProfile", "-NonInteractive", "-Command"],
-        &script,
-    )
-    .limit(super::POWERSHELL_LIMIT)
-}
-
-/// What one PowerShell says of when the process `pid` began, or none.
-#[cfg(windows)]
-fn asked_when_started(pid: u32) -> Option<String> {
-    let ran = when_started(pid).run().ok()?;
-    let said = ran.stdout.trim();
-    (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
+    let (mut created, mut ended, mut kernel, mut user) = (
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+    );
+    #[allow(unsafe_code)]
+    // SAFETY: the handle is open with the rights to wait on it and read its times, the four
+    // structures are writable, and the handle is closed once, here.
+    let said = unsafe {
+        // A process that has exited keeps its number only while someone holds it: it is no
+        // process that is there.
+        let there = WaitForSingleObject(handle, 0) != WAIT_OBJECT_0;
+        let read = GetProcessTimes(handle, &mut created, &mut ended, &mut kernel, &mut user);
+        CloseHandle(handle);
+        (there && read != 0)
+            .then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+    };
+    said.map(|time| time.to_string())
 }

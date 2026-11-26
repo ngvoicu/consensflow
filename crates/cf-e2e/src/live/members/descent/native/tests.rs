@@ -182,3 +182,110 @@ fn a_child_of_the_tests_own_process_is_in_the_tree_of_the_tests_own_process() {
         "the test's own child is not in its tree: {child:?}; named: {named:?}"
     );
 }
+
+/// What Windows' listing says of processes the test started and holds, read with no program
+/// between (T-2363: a PowerShell took 20 to 30 s to start on a machine with many modules): a
+/// parent, its child and a grandchild each place as the table that listing replaced placed them,
+/// by their numbers and when each began, with the image each runs and the command line each was
+/// started with; a process that has ended is not listed as itself; and one that cannot be opened
+/// (the system's own) is listed and proves no edge, so that no process is the window's by it.
+#[cfg(windows)]
+#[test]
+fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_one_it_cannot_open() {
+    use super::super::descending_from;
+
+    // `cmd` runs a `cmd` that runs `ping`: the root, its child, and the child's own.
+    let mut root = Run::new("cmd")
+        .args(["/c", "cmd /c ping -n 31 127.0.0.1"])
+        .closed_input()
+        .spawn()
+        .expect("the program starts");
+    // A process that is there now and ended before the listing.
+    let mut ended = waiting();
+    let gone = ThisMachine
+        .identity(ended.id())
+        .unwrap()
+        .expect("it is there");
+    ended.kill();
+    let root_identity = ThisMachine
+        .identity(root.id())
+        .unwrap()
+        .expect("the root is there");
+
+    // The test waits on what the listing says of the grandchild, as the case above does.
+    let mut found = None;
+    for _ in 0..100 {
+        let all = ThisMachine.processes().unwrap();
+        let tree = descending_from(&all, root_identity);
+        if tree.iter().any(|one| one.command.contains("ping -n 31")) {
+            found = Some((all, tree));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let (all, tree) = found.expect("the root's tree holds its grandchild");
+
+    let row = |pid: u32| all.iter().find(|one| one.identity.pid == pid).cloned();
+    let me = row(std::process::id()).expect("this process is listed");
+    let top = row(root.id()).expect("the root is listed");
+    // Its creator is this process, proved on its own handle; its time is the handle's.
+    assert_eq!(top.ppid, me.identity.pid, "{top:?}");
+    assert_eq!(top.identity, root_identity, "{top:?}");
+    assert!(
+        matches!(top.link, Link::Created { by, .. } if by == me.identity.pid),
+        "{top:?}"
+    );
+    assert!(
+        top.exe
+            .as_deref()
+            .is_some_and(|exe| exe.to_ascii_lowercase().ends_with("cmd.exe")),
+        "{top:?}"
+    );
+    assert!(top.command.contains("cmd /c ping -n 31"), "{top:?}");
+    // The child is the root's, the grandchild the child's: three generations, each once.
+    let child = tree
+        .iter()
+        .find(|one| one.ppid == top.identity.pid && one.command.contains("ping -n 31"))
+        .expect("the root's child is in its tree");
+    let grandchild = tree
+        .iter()
+        .find(|one| {
+            one.ppid == child.identity.pid
+                && one
+                    .exe
+                    .as_deref()
+                    .is_some_and(|exe| exe.to_ascii_lowercase().ends_with("ping.exe"))
+        })
+        .expect("the child's own is in the tree");
+    assert!(
+        matches!(grandchild.link, Link::Created { by, .. } if by == child.identity.pid),
+        "{grandchild:?}"
+    );
+    assert!(
+        grandchild.identity.started >= child.identity.started,
+        "{grandchild:?} {child:?}"
+    );
+    assert_eq!(
+        tree.iter()
+            .filter(|one| one.identity == grandchild.identity)
+            .count(),
+        1
+    );
+
+    // The ended process is not listed as the process it was.
+    assert!(
+        all.iter().all(|one| one.identity != gone),
+        "an ended process is listed: {gone:?}"
+    );
+
+    // The system's own process cannot be opened: it is listed with what the table says, proves
+    // nothing, and no process is the window's by it.
+    let system = row(4).expect("the system is listed");
+    assert_eq!(system.link, Link::Unread, "{system:?}");
+    assert!(
+        system.command.is_empty() && system.exe.is_none(),
+        "{system:?}"
+    );
+    assert!(descending_from(&all, system.identity).is_empty());
+    root.kill();
+}
