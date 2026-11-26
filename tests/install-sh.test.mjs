@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -41,7 +42,10 @@ import {
 const mac = process.platform === 'darwin'
 const REQUIREMENT =
   'requirement="anchor apple generic and identifier \\"dev.ngvoicu.consensflow\\" and certificate leaf[subject.OU] = \\"$team\\""'
-const AD_HOC = `requirement='identifier "dev.ngvoicu.consensflow"'`
+// Every fixture carries this identifier, never the release's: the script is told it through
+// CONSENSFLOW_TEST_APP_ID, and its signature check is replaced by one for it.
+const TEST_ID = 'dev.ngvoicu.consensflow-test-app'
+const AD_HOC = `requirement='identifier "${TEST_ID}"'`
 const SPCTL = 'spctl=/usr/sbin/spctl'
 
 // A launcher: a program that runs its arguments as its child and answers its status, which a
@@ -68,7 +72,7 @@ const dmgs = {}
  * A fake ConsensFlow.app of `version` in `dir`, signed ad hoc as `identifier`, with `extra`
  * among its resources where it is given (another build of the same version).
  */
-function fakeApp(dir, version, { identifier = 'dev.ngvoicu.consensflow', extra } = {}) {
+function fakeApp(dir, version, { identifier = TEST_ID, extra } = {}) {
   const app = path.join(dir, 'ConsensFlow.app')
   mkdirSync(path.join(app, 'Contents/MacOS'), { recursive: true })
   writeFileSync(
@@ -170,19 +174,34 @@ function publish(version, options = {}, artifacts = { [dmgName(version)]: dmgs[v
 // The script checks the DMG's SHA-256 against the signed SHA256SUMS before it attaches it, which
 // that check adds nothing to, so each test copy attaches without it (T-1161). The script itself
 // keeps it, and install/real-install.mjs runs the script as it is.
-const NO_VERIFY = ['hdiutil attach -nobrowse', 'hdiutil attach -noverify -nobrowse']
+const NO_VERIFY = ['"$hdiutil" attach -nobrowse', '"$hdiutil" attach -noverify -nobrowse']
 
 /** A fresh case: its own folders, and a test copy made with `replacements`, attaching unverified. */
+// The script names each system tool by its path (a block between two marker lines). A case's copy
+// names them bare instead, so a stand-in first on PATH is the one that runs, except where the case
+// asks for the full paths (`fullPaths`: the script as it ships).
+const SYSTEM_TOOLS = [
+  ...readFileSync(INSTALL_SH, 'utf8')
+    .split('# system tools: begin\n')[1]
+    .split('# system tools: end')[0]
+    .matchAll(/\b(\w+)=(\/\S+)/g),
+]
+  .filter(([, name]) => name !== 'spctl' && name !== 'plistbuddy')
+  .map(([whole, name]) => [whole, `${name}=${name}`])
+
 function freshCase(
   replacements = [
     [REQUIREMENT, AD_HOC],
     [SPCTL, `spctl=${path.join(work, 'spctl')}`],
     ['quit_wait=120', 'quit_wait=4'],
   ],
+  { fullPaths = false } = {},
 ) {
-  const dir = mkdtempSync(path.join(work, 'case-'))
+  // The installer works on the folder's resolved name, as /var is /private/var here.
+  const dir = realpathSync(mkdtempSync(path.join(work, 'case-')))
   const script = testCopy(INSTALL_SH, path.join(dir, 'install.sh'), key.keyLine, [
     ...replacements,
+    ...(fullPaths ? [] : SYSTEM_TOOLS),
     NO_VERIFY,
   ])
   mkdirSync(path.join(dir, 'tmp'))
@@ -191,13 +210,15 @@ function freshCase(
 }
 
 /** Runs a case's script with `args` (and `env`) under `shell`, started by `launcher` where one is given. */
-function install(at, args = [], { env = {}, shell = '/bin/sh', launcher } = {}) {
+function install(at, args = [], { env = {}, shell = '/bin/sh', launcher, cwd, onChild } = {}) {
   return new Promise((resolve) => {
     const [program, words] = launcher
       ? [launcher, [shell, at.script, ...args]]
       : [shell, [at.script, ...args]]
     const child = spawn(program, words, {
+      cwd,
       env: {
+        CONSENSFLOW_TEST_APP_ID: TEST_ID,
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         HOME: at.dir,
         TMPDIR: at.tmp,
@@ -206,6 +227,7 @@ function install(at, args = [], { env = {}, shell = '/bin/sh', launcher } = {}) 
         ...env,
       },
     })
+    onChild?.(child)
     let out = ''
     child.stdout.on('data', (chunk) => {
       out += chunk
@@ -213,7 +235,7 @@ function install(at, args = [], { env = {}, shell = '/bin/sh', launcher } = {}) 
     child.stderr.on('data', (chunk) => {
       out += chunk
     })
-    child.on('close', (status) => resolve({ status, out }))
+    child.on('close', (status, signal) => resolve({ status, signal, out }))
   })
 }
 
@@ -246,13 +268,27 @@ function assertInstalled(at, ran, version) {
   run('codesign', ['--verify', '--deep', '--strict', path.join(at.apps, 'ConsensFlow.app')])
 }
 
-/** A stay-open AppleScript applet as `dir`/ConsensFlow.app, which quits when asked unless `refuses`. */
-function applet(dir, refuses) {
-  const source = refuses
-    ? 'on idle\nreturn 1\nend idle\non quit\nend quit'
-    : 'on idle\nreturn 1\nend idle'
-  const app = path.join(dir, 'ConsensFlow.app')
+/** The bundle identifier of the test applets: never the release's. */
+const APPLET_ID = TEST_ID
+
+/**
+ * A stay-open AppleScript applet as `dir`/`name`.app, which quits when asked unless `refuses`
+ * (and writes `record` when it is asked to, where one is given), under `id`.
+ */
+function applet(dir, refuses, { name = 'ConsensFlow', id = APPLET_ID, record } = {}) {
+  const asked = record ? `do shell script "echo asked >> ${record}"\n` : ''
+  const source =
+    refuses || record
+      ? `on idle\nreturn 1\nend idle\non quit\n${asked}${refuses ? '' : 'continue quit\n'}end quit`
+      : 'on idle\nreturn 1\nend idle'
+  const app = path.join(dir, `${name}.app`)
   run('osacompile', ['-s', '-o', app, '-e', source])
+  run('/usr/libexec/PlistBuddy', [
+    '-c',
+    `Add :CFBundleIdentifier string ${id}`,
+    path.join(app, 'Contents/Info.plist'),
+  ])
+  run('codesign', ['--force', '--sign', '-', app])
   return app
 }
 
@@ -320,7 +356,8 @@ test('install.sh orders versions as SemVer does', {
   const from = lines.indexOf('# version order: begin')
   const to = lines.indexOf('# version order: end')
   assert.ok(from >= 0 && to > from, 'install.sh marks its order of versions')
-  const order = lines.slice(from + 1, to).join('\n')
+  // The part is cut out of main, where the system tools are named: awk is the one it calls.
+  const order = `awk=/usr/bin/awk\n${lines.slice(from + 1, to).join('\n')}`
   for (const [a, b, newer] of VERSION_ORDER) {
     const ran = spawnSync('/bin/sh', ['-c', `${order}\nnewer_than "$1" "$2"`, 'sh', a, b])
     assert.equal(ran.status === 0, newer, `${a} after ${b}`)
@@ -330,7 +367,7 @@ test('install.sh orders versions as SemVer does', {
 test('the official download follows a redirect to https only', () => {
   const fetch = readFileSync(INSTALL_SH, 'utf8')
     .split('\n')
-    .filter((line) => line.includes('curl '))
+    .filter((line) => line.includes('"$curl" '))
   assert.ok(
     fetch.some((line) => line.includes("--proto '=https' --proto-redir '=https' --tlsv1.2")),
     fetch.join('\n'),
@@ -845,7 +882,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
         assert.equal(ran.status, 1, ran.out)
         assert.match(ran.out, /the copy of the app made in .* is not signed/)
-        assert.doesNotMatch(ran.out, /asking it to quit/)
+        assert.doesNotMatch(ran.out, /was asked to quit/)
         assert.ok(processesOf(app).length > 0, 'it still runs, never asked')
       } finally {
         for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
@@ -854,10 +891,11 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
 
     test('an app opened again between the quit and the swap is refused, and the installed one kept', async () => {
       const at = freshCase()
-      const installed = fakeApp(at.apps, '3.0.7-alpha.1')
-      const count = path.join(at.dir, 'ps-count')
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      // The look just before the swap (count) finds one running; the quit's own look finds none.
       const PATH = standIns(at, {
-        ps: `if [ "$1" = "-axo" ]; then\nn=$(cat "${count}" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${count}"\n/bin/ps "$@"\n[ "$n" -ge 2 ] && echo "99999 ${installed}/Contents/MacOS/app"\nexit 0\nfi\nexec /bin/ps "$@"`,
+        osascript:
+          'case " $* " in *" count "*) echo 1; exit 0 ;; esac\nexec /usr/bin/osascript "$@"',
       })
       assertKept(
         at,
@@ -910,7 +948,7 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       try {
         const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
         assert.equal(ran.status, 1, ran.out)
-        assert.match(ran.out, /asking it to quit/)
+        assert.match(ran.out, /was asked to quit/)
         assert.match(ran.out, /the code signature of the copy of the app made in .* does not hold/)
         assert.match(ran.out, /nothing was installed/)
         assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'no copy is left beside it')
@@ -1338,7 +1376,10 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
         assert.doesNotMatch(ran.out, /on the volume of/)
         assert.match(
           ran.out,
-          new RegExp(`removed ${exact(path.join(link, `.ConsensFlow.app.installing.${dead}`))}`),
+          // The installer names the folder it resolved, not the link to it.
+          new RegExp(
+            `removed ${exact(path.join(realpathSync(real), `.ConsensFlow.app.installing.${dead}`))}`,
+          ),
         )
         assert.ok(!existsSync(leftover), 'the leftover is gone')
         assert.equal(
@@ -1567,7 +1608,6 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       await waitFor(() => processesOf(app).length > 0, 'the applet starting')
       const ran = await install(at, ['--version', '3.0.7'])
       assertInstalled(at, ran, '3.0.7')
-      assert.match(ran.out, /ConsensFlow is open: asking it to quit/)
     })
 
     test('that stays open is never stopped, and nothing is installed', async () => {
@@ -1588,17 +1628,357 @@ describe('install.sh', { skip: !mac && "the Mac's installer runs on macOS" }, ()
       }
     })
 
-    test('that the install runs inside is not asked to quit: the install is refused', async () => {
+    test('is found by its identifier and its bundle, never by a number: another app that holds an old number is not asked to quit', async () => {
       const at = freshCase()
-      const app = fakeApp(at.apps, '3.0.7-alpha.1')
-      const launcher = path.join(app, 'Contents/MacOS/launcher')
+      const record = path.join(at.dir, 'asked')
+      const other = applet(at.dir, true, {
+        name: 'Other',
+        id: 'dev.example.other-test-applet',
+        record,
+      })
+      run('open', ['-g', '-j', other])
+      await waitFor(() => processesOf(other).length > 0, 'the other app starting')
+      try {
+        // What the old way read: a list that gave this app's number to a ConsensFlow's path.
+        const PATH = standIns(at, {
+          ps: `if [ "$1" = "-axo" ]; then\nn=$(cat "${path.join(at.dir, 'ps-count')}" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${path.join(at.dir, 'ps-count')}"\n[ "$n" -le 1 ] && echo "${processesOf(other)[0]} ${at.apps}/ConsensFlow.app/Contents/MacOS/app"\nexit 0\nfi\nexec /bin/ps "$@"`,
+        })
+        const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+        assertInstalled(at, ran, '3.0.7')
+        assert.ok(!existsSync(record), 'the other app was never asked to quit')
+        assert.ok(processesOf(other).length > 0, 'it still runs')
+      } finally {
+        for (const pid of processesOf(other)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('an app of the same identifier at another path is not asked to quit', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'asked')
+      const elsewhere = mkdtempSync(path.join(work, 'elsewhere-'))
+      const app = applet(elsewhere, true, { record })
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the app starting')
+      try {
+        assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
+        assert.ok(!existsSync(record), 'it was never asked to quit')
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('two copies running from the app are refused, named, and neither is asked to quit', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'asked')
+      const app = applet(at.apps, false, { record })
+      run('open', ['-g', '-j', app])
+      run('open', ['-n', '-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 1, 'both copies starting')
+      try {
+        const ran = await install(at, ['--version', '3.0.7'])
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /2 copies of ConsensFlow are running from .*ConsensFlow\.app/)
+        assert.match(ran.out, /nothing was installed/)
+        assert.ok(!existsSync(record), 'neither was asked')
+        assert.equal(processesOf(app).length, 2)
+        assert.notEqual(installedVersion(at), '3.0.7')
+        assert.deepEqual(readdirSync(at.tmp), [])
+      } finally {
+        for (const pid of processesOf(app)) process.kill(pid, 'SIGKILL')
+      }
+    })
+
+    test('where the look at the running apps fails, nothing is installed and the words say to quit it', async () => {
+      const at = freshCase()
+      const PATH = standIns(at, {
+        osascript: 'case " $* " in *" quit "*) exit 1 ;; esac\nexec /usr/bin/osascript "$@"',
+      })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assertRefused(at, ran, /could not ask the open ConsensFlow at .* to quit\. Quit it/)
+    })
+
+    test('a relative install folder is found as the folder it is: the open app is asked to quit', async () => {
+      const at = freshCase()
+      const app = applet(at.apps, false)
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        cwd: at.dir,
+        env: { CONSENSFLOW_INSTALL_DIR: 'Applications' },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /was asked to quit/)
+    })
+
+    test('a linked install folder is found as the folder it is: the open app is asked to quit', async () => {
+      const at = freshCase()
+      const link = path.join(at.dir, 'linked')
+      symlinkSync(at.apps, link)
+      const app = applet(at.apps, false)
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        env: { CONSENSFLOW_INSTALL_DIR: link },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /was asked to quit/)
+    })
+
+    test('the open app is found when the install folder is spelled in another capitalization', async (t) => {
+      const at = freshCase()
+      const other = path.join(path.dirname(at.apps), path.basename(at.apps).toLowerCase())
+      if (!existsSync(other)) return t.skip('this volume tells capitals apart')
+      const app = applet(at.apps, false)
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        env: { CONSENSFLOW_INSTALL_DIR: other },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /was asked to quit/)
+    })
+
+    test('a CDPATH in the environment does not move a relative install folder', async () => {
+      const at = freshCase()
+      const search = path.join(at.dir, 'search')
+      mkdirSync(path.join(search, 'Applications'), { recursive: true })
+      const ran = await install(at, ['--version', '3.0.7'], {
+        cwd: at.dir,
+        env: { CONSENSFLOW_INSTALL_DIR: 'Applications', CDPATH: search },
+      })
+      assertInstalled(at, ran, '3.0.7')
+      assert.deepEqual(readdirSync(path.join(search, 'Applications')), [])
+    })
+
+    test('a ConsensFlow.app that is a link is refused, with where it points', async () => {
+      const at = freshCase()
+      const real = fakeApp(mkdtempSync(path.join(work, 'real-')), '3.0.7-alpha.1')
+      symlinkSync(real, path.join(at.apps, 'ConsensFlow.app'))
+      const ran = await install(at, ['--version', '3.0.7'])
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(ran.out, /ConsensFlow\.app is a link to .*real-.*ConsensFlow\.app/)
+      assert.match(ran.out, /nothing was installed/)
+      assert.equal(readlinkSync(path.join(at.apps, 'ConsensFlow.app')), real)
+    })
+
+    test('the last look at the running apps is after every check of the copy that goes in', async () => {
+      const at = freshCase()
+      const log = path.join(at.dir, 'order')
+      const PATH = standIns(at, {
+        osascript: `case " $* " in *" count "*) echo count >> "${log}" ;; *) echo quit >> "${log}" ;; esac\nexec /usr/bin/osascript "$@"`,
+        codesign: `echo codesign >> "${log}"\nexec /usr/bin/codesign "$@"`,
+        mv: `echo mv >> "${log}"\nexec /bin/mv "$@"`,
+      })
+      assertInstalled(at, await install(at, ['--version', '3.0.7'], { env: { PATH } }), '3.0.7')
+      const order = readFileSync(log, 'utf8').trim().split('\n')
+      const swap = order.indexOf('mv')
+      assert.ok(order.includes('codesign') && swap > 0, order.join(' '))
+      assert.equal(
+        order[swap - 1],
+        'count',
+        `the look comes right before the move: ${order.join(' ')}`,
+      )
+    })
+
+    // A window of ConsensFlow's pane host has CF_PANE_PROCESS_OWNER in its environment: that, and
+    // nothing about the shell's ancestors, tells the install runs inside a ConsensFlow. It is
+    // refused where a copy runs from the app the install would replace (a quit would follow).
+    const MARKER = { CF_PANE_PROCESS_OWNER: 'pane-host-1' }
+    const asked = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '')
+    const SHOW_MODE = (log) =>
+      // The quit lookup's own arguments: -l JavaScript -e <script> <mode> <id> <app> <wait>.
+      `case "$4" in *ObjC*) echo "$5" >> "${log}" ;; esac\nexec /usr/bin/osascript "$@"`
+    const recorder = (at, log) => standIns(at, { osascript: SHOW_MODE(log) })
+    /** Starts a stay-open copy of the test app in `dir`, and waits for it to run. */
+    async function startCopy(dir, record) {
+      const app = applet(dir, false, record ? { record } : {})
+      run('open', ['-g', '-j', app])
+      await waitFor(() => processesOf(app).length > 0, 'the applet starting')
+      return app
+    }
+    test('a shell with the pane host marker is refused before any quit where a copy runs from the app, and without it the same install goes on', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'applet-asked')
+      const app = await startCopy(at.apps, record)
+      const log = path.join(at.dir, 'osascript')
+      const PATH = recorder(at, log)
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      assert.equal(ran.status, 1, ran.out)
+      assert.match(
+        ran.out,
+        /This shell runs inside ConsensFlow, and quitting ConsensFlow would end the install too\. Run this from Terminal or another terminal app\./,
+      )
+      assert.match(ran.out, /nothing was installed/)
+      assert.ok(!/quit/.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
+      assert.ok(!existsSync(record), 'the app was never asked')
+      assert.ok(processesOf(app).length > 0, 'the app still runs')
+      assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'])
+      assert.deepEqual(readdirSync(at.tmp), [])
+      assertInstalled(at, await install(at, ['--version', '3.0.7'], { env: { PATH } }), '3.0.7')
+      assert.match(asked(log), /quit/, 'without the marker it asks the copy to quit')
+    })
+
+    test('a marked window in one running copy upgrades a closed copy in another folder, and no quit is asked', async () => {
+      const at = freshCase()
+      // The running copy is another case's; that case's own install ends it at the end.
+      const running = freshCase()
+      const record = path.join(running.dir, 'applet-asked')
+      const other = await startCopy(running.apps, record)
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const log = path.join(at.dir, 'osascript')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        env: { PATH: recorder(at, log), ...MARKER },
+      })
+      try {
+        assertInstalled(at, ran, '3.0.7')
+        assert.doesNotMatch(ran.out, /runs inside ConsensFlow/)
+        // The lookup for a copy of this destination runs and finds none; nobody is asked.
+        assert.ok(!existsSync(record), 'the running copy was never asked to quit')
+        assert.ok(processesOf(other).length > 0, 'the running copy still runs')
+      } finally {
+        assertInstalled(running, await install(running, ['--version', '3.0.7']), '3.0.7')
+      }
+    })
+
+    test('the marker is read whatever runs the shell: a launcher reached through a link', async () => {
+      const at = freshCase()
+      const app = await startCopy(at.apps)
+      const tools = mkdtempSync(path.join(work, 'launcher-'))
+      const launcher = path.join(tools, 'launcher')
       writeFileSync(path.join(work, 'launcher.c'), LAUNCHER)
       run('cc', ['-o', launcher, path.join(work, 'launcher.c')])
-      const ran = await install(at, ['--version', '3.0.7'], { launcher })
+      const entry = path.join(at.dir, 'entry')
+      symlinkSync(tools, entry)
+      const log = path.join(at.dir, 'osascript')
+      const ran = await install(at, ['--version', '3.0.7'], {
+        launcher: path.join(entry, 'launcher'),
+        env: { PATH: recorder(at, log), ...MARKER },
+      })
       assert.equal(ran.status, 1, ran.out)
-      assert.match(ran.out, /this shell runs inside the ConsensFlow at .*Run this from Terminal/)
-      assert.equal(installedVersion(at), '3.0.7-alpha.1')
-      assert.deepEqual(readdirSync(at.tmp), [])
+      assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
+      assert.ok(!/quit/.test(asked(log)), `nothing was asked to quit: ${asked(log)}`)
+      assert.ok(processesOf(app).length > 0, 'the app still runs')
+      // Without the marker the install asks it to quit, which ends it.
+      assertInstalled(at, await install(at, ['--version', '3.0.7']), '3.0.7')
+    })
+
+    test('a copy opened after the marked install counted none is never asked to quit: the last look refuses', async () => {
+      const at = freshCase()
+      const record = path.join(at.dir, 'applet-asked')
+      const app = applet(at.apps, false, { record })
+      // The first count answers none; then the destination's copy is opened, and the install
+      // is let go on (the stand-in waits until it runs).
+      const first = path.join(at.dir, 'counted')
+      const stand = [
+        'case "$5" in count)',
+        `  if [ ! -e "${first}" ]; then`,
+        `    : > "${first}"`,
+        '    out=$(/usr/bin/osascript "$@"); status=$?',
+        `    /usr/bin/open -g -j "${app}"`,
+        '    for i in $(seq 1 100); do',
+        `      /bin/ps -axo comm= | /usr/bin/grep -qF "${app}/Contents/" && break`,
+        '      /bin/sleep 0.1',
+        '    done',
+        '    echo "$out"; exit $status',
+        '  fi ;;',
+        'esac',
+        'exec /usr/bin/osascript "$@"',
+      ].join('\n')
+      const log = path.join(at.dir, 'osascript')
+      const PATH = standIns(at, { osascript: `${SHOW_MODE(log).split('\n')[0]}\n${stand}` })
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      try {
+        assert.equal(ran.status, 1, ran.out)
+        assert.match(ran.out, /This shell runs inside ConsensFlow[\s\S]*Run this from Terminal/)
+        assert.ok(!/quit/.test(asked(log)), `no quit lookup at all: ${asked(log)}`)
+        assert.ok(!existsSync(record), 'the copy was never asked to quit')
+        assert.ok(processesOf(app).length > 0, 'the copy still runs')
+        assert.deepEqual(readdirSync(at.apps), ['ConsensFlow.app'], 'nothing was swapped or left')
+      } finally {
+        // Ended by the install of its own folder, without the marker.
+        await install(at, ['--version', '3.0.7'])
+      }
+    })
+
+    test('GNU stat first on PATH changes nothing: the marker still refuses, and an install still goes through', async () => {
+      const gnu =
+        'case "$1" in -f) echo "stat: cannot read file system information for \'$2\'" >&2; exit 1 ;; esac\nexec /usr/bin/stat "$@"'
+      const at = freshCase(undefined, { fullPaths: true })
+      // The script calls the system's osascript by its path, so no recorder on PATH sees it:
+      // the applet's own receipt tells whether it was asked to quit.
+      const record = path.join(at.dir, 'applet-asked')
+      const app = await startCopy(at.apps, record)
+      const PATH = standIns(at, { stat: gnu })
+      const refused = await install(at, ['--version', '3.0.7'], { env: { PATH, ...MARKER } })
+      assert.equal(refused.status, 1, refused.out)
+      assert.match(refused.out, /This shell runs inside ConsensFlow/)
+      assert.ok(!existsSync(record), 'the app was never asked to quit')
+      assert.ok(processesOf(app).length > 0, 'the app still runs')
+      // And a copy an earlier run left is told a folder by the system's stat, not the GNU one.
+      const dead = Number(run('/bin/sh', ['-c', 'echo $$']).trim())
+      const left = path.join(at.apps, `.ConsensFlow.app.installing.${dead}`)
+      mkdirSync(left)
+      const ran = await install(at, ['--version', '3.0.7'], { env: { PATH } })
+      assertInstalled(at, ran, '3.0.7')
+      assert.match(ran.out, /removed .*\.ConsensFlow\.app\.installing\.\d+/)
+      assert.ok(!existsSync(left))
+      assert.ok(existsSync(record), 'without the marker the app was asked to quit')
+    })
+
+    test('every system tool is called by its path: stand-ins that fail for each of them first on PATH change nothing', async () => {
+      const at = freshCase(undefined, { fullPaths: true })
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const broken = Object.fromEntries(
+        SYSTEM_TOOLS.map(([, tool]) => [tool.split('=')[0], 'echo "$0 was run" >&2; exit 99']),
+      )
+      const PATH = standIns(at, broken)
+      assertInstalled(at, await install(at, ['--version', '3.0.7'], { env: { PATH } }), '3.0.7')
+    })
+
+    test('a host that quits under the install, with no marker to tell, ends it before the swap and leaves the installed app as it was', async () => {
+      const at = freshCase()
+      fakeApp(at.apps, '3.0.7-alpha.1')
+      const waiting = path.join(at.dir, 'waiting')
+      // The quit lookup is where the install waits for ConsensFlow to quit. The stand-in says it
+      // is waiting by writing a file and then waits (bounded); the test ends the install it
+      // started, by its own handle, as the host going down would.
+      const quit = [
+        'case " $* " in *" quit "*)',
+        `  : > "${waiting}"`,
+        '  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50; do /bin/sleep 0.1; done',
+        '  exit 1 ;;',
+        'esac',
+        'exec /usr/bin/osascript "$@"',
+      ].join('\n')
+      const PATH = standIns(at, { osascript: quit })
+      let child
+      const running = install(at, ['--version', '3.0.7'], {
+        env: { PATH },
+        onChild: (started) => {
+          child = started
+        },
+      })
+      try {
+        await waitFor(() => existsSync(waiting), 'the install waiting for the quit')
+        const waited = existsSync(waiting)
+        child.kill('SIGKILL')
+        const ran = await running
+        assert.ok(waited, 'the stand-in was waiting when the signal was sent')
+        assert.equal(ran.signal, 'SIGKILL', `the install was ended by the signal: ${ran.out}`)
+        assert.equal(installedVersion(at), '3.0.7-alpha.1', 'the installed app is as it was')
+        assert.ok(
+          !readdirSync(at.apps).some((name) => name.startsWith('.ConsensFlow.app.previous.')),
+          `nothing was moved aside: ${readdirSync(at.apps)}`,
+        )
+        assert.doesNotMatch(ran.out, /is installed in/)
+      } finally {
+        child?.kill('SIGKILL')
+        await running
+        for (const mounted of attached(at))
+          spawnSync('hdiutil', ['detach', '-quiet', '-force', mounted])
+        for (const name of readdirSync(at.tmp))
+          rmSync(path.join(at.tmp, name), { recursive: true, force: true })
+      }
     })
   })
 

@@ -29,7 +29,12 @@ pub fn numbers(list: &[Value]) -> impl Iterator<Item = Cow<'_, str>> {
 /// JavaScript printed it.
 pub fn a_pool(pool: Option<&Value>, tier: Option<&Value>) -> String {
     match pool {
-        Some(Value::String(pool)) if cf_ledger::roles::untiered(pool) => {
+        // A role with no tier, or a task from before the roles had tiers: said by its name.
+        Some(Value::String(pool))
+            if cf_ledger::roles::untiered(pool)
+                || (cf_ledger::roles::is_role(pool)
+                    && matches!(tier, None | Some(Value::Null))) =>
+        {
             cf_ledger::roles::a_pool(Some(pool), None)
         }
         pool => format!(

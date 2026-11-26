@@ -38,6 +38,9 @@ pub(crate) enum Why {
     HostSilent,
     /// ConsensFlow has no adapter for the harness: its own fixed words, with the harness's name.
     NoAdapter,
+    /// A step of the launch's plan did not end in its time (T-2232): the step is one of
+    /// `cf_harness`'s own fixed words, with the seconds it was given.
+    Late(&'static str, u64),
     /// Words of an adapter or of a harness that no note carries.
     Unsaid,
 }
@@ -67,6 +70,9 @@ impl Startup {
             Why::HostRefused => format!("{stage}: the host would not open it"),
             Why::HostSilent => format!("{stage}: the host did not answer in time"),
             Why::NoAdapter => format!("{stage}: ConsensFlow cannot open {who} windows"),
+            Why::Late(step, seconds) => {
+                format!("{stage}: {step} took more than {seconds} s")
+            }
             Why::Unsaid => format!("{stage} (its cause is in ConsensFlow's log)"),
         }
     }
@@ -88,6 +94,10 @@ mod tests {
         assert_eq!(
             Startup::new(Stage::Prepare, Why::Unsaid).words("Pi"),
             "the launch failed (its cause is in ConsensFlow's log)"
+        );
+        assert_eq!(
+            Startup::new(Stage::Prepare, Why::Late("writing the launch's files", 60)).words("Pi"),
+            "the launch failed: writing the launch's files took more than 60 s"
         );
         assert_eq!(
             Startup::new(Stage::Prepare, Why::NoAdapter).words("Pi"),

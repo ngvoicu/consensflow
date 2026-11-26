@@ -82,7 +82,7 @@ use cf_proto::panes::PossiblyLeft;
 use native::process;
 pub(crate) use native::{awake_start, clocks};
 
-pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
+pub(crate) const OWNER_ENV: &str = cf_base::env::PANE_OWNER;
 
 /// How many times a look that must read all of the tree is made where a process was born
 /// while it looked ([`ProcessTree::readable_members`]).

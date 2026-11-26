@@ -50,7 +50,7 @@ use crate::app_settings::{settings_path, SettingsFile};
 use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
-use crate::files::{Log, Trace};
+use crate::files::{Log, Trace, SETTLE};
 use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
 use crate::machine;
 use crate::models::ModelLists;
@@ -155,6 +155,7 @@ pub(crate) struct Parts {
     pub(crate) api_kick: Rc<dyn Fn()>,
     pub(crate) home: std::path::PathBuf,
     pub(crate) spawn: Rc<DaemonSpawn>,
+    pub(crate) log: Rc<Log>,
 }
 
 impl Daemon {
@@ -196,7 +197,7 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     trace
         .started()
         .map_err(|failed| StartError::System(failed.to_string()))?;
-    let log = Rc::new(Log::new(&home));
+    let log = Rc::new(Log::off_thread(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
     log.info(&format!(
         "start pid {} rust {VERSION} home {}",
@@ -207,6 +208,9 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     if started.is_err() {
         log.info("exit 1");
     }
+    // What the start said is in the log before the start is over, if the file lets it in time:
+    // a start that failed ends the process.
+    let _ = log.written(SETTLE);
     started
 }
 
@@ -530,6 +534,7 @@ async fn run(
             api_kick: Rc::clone(&context.kick),
             home,
             spawn,
+            log,
         },
     })
 }

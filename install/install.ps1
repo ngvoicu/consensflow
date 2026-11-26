@@ -24,11 +24,12 @@
 # release, and one installed for all users of the PC is never joined by a
 # second, per-user one. The installer is held open from before its hash is
 # taken until it has run, so nothing can write or delete it in between. An open
-# ConsensFlow is asked to close its window, as closing it by hand would, and
-# the install waits for it; one that stays open is never stopped, and nothing
-# is installed. Right before the installer starts, nothing may run from the
-# app's folder; Tauri's quiet installer itself closes a ConsensFlow that is
-# opened in that last moment. `cf` comes inside the app: nothing else is set
+# ConsensFlow stops the install, with words that ask the person to quit it:
+# the installer asks no window to close and ends no process, because Windows
+# gives it no way to ask one particular running copy without a gap. Right before the installer starts, nothing may run from the
+# app's folder. If you open ConsensFlow in the moment between the installer's
+# last check and the setup's copy, the setup closes it (Tauri's quiet installer
+# itself closes a ConsensFlow that is opened in that last moment). `cf` comes inside the app: nothing else is set
 # up. ConsensFlow is made for x64 Windows and Apple silicon Macs only.
 #
 # Options, as variables set before the command (irm | iex takes no arguments):
@@ -67,7 +68,6 @@
     # ConsensFlow's update key (minisign, as app/src-tauri/tauri.conf.json
     # holds it inside its own base64).
     $key = 'RWTirTrEjU6epgN2c8yV2aIfRHzcCHVBi9zddieRVM5SahwhDFJlFd7Q'
-    $quitWait = 120
 
     # Refuses: `$why` written as words, then the error that stops the run, which
     # says `$last` alone.
@@ -410,10 +410,12 @@ remove everything.
             })
     }
 
-    # Asks the ConsensFlow that runs from $dir to close, as closing its window
-    # does, and waits for every process of it to end. It is never stopped: one
-    # that stays open ends the install.
-    function Close-CfOpen([string]$dir) {
+    # Stops the install, saying so, while any program runs from the folder $dir.
+    # Windows gives an installer no way to ask one particular running copy to
+    # quit without a gap (a window's handle or a process number can pass to
+    # another program between the look and the request), so it asks the person
+    # to quit ConsensFlow, and closes and stops nothing itself.
+    function Stop-IfCfOpen([string]$dir) {
         $open = Get-CfOpen $dir
         if ($open.Count -eq 0) { return }
         $parents = @{}
@@ -423,22 +425,13 @@ remove everything.
         $seen = @{}
         while ($at -and -not $seen.ContainsKey($at)) {
             if ($ids -contains $at) {
-                Stop-CfInstall "this PowerShell runs inside the ConsensFlow in $dir, and closing it to upgrade would end the install too. Run this from Windows Terminal or another PowerShell window."
+                Stop-CfInstall "this PowerShell runs inside the ConsensFlow in $dir, and quitting it to upgrade would end the install too. Run this from Windows Terminal or another PowerShell window."
             }
             $seen[$at] = $true
             $at = $parents[$at]
         }
-        Write-Host 'consensflow: ConsensFlow is open: asking it to close, as closing its window would...'
-        foreach ($process in $open) {
-            if ($process.MainWindowHandle -ne [IntPtr]::Zero) { [void]$process.CloseMainWindow() }
-        }
-        $deadline = (Get-Date).AddSeconds($quitWait)
-        while ((Get-CfOpen $dir).Count -gt 0) {
-            if ((Get-Date) -gt $deadline) {
-                Stop-CfInstall "ConsensFlow in $dir is still open after $($quitWait)s. Close it and run this again."
-            }
-            Start-Sleep -Seconds 1
-        }
+        $names = ($open | ForEach-Object { $_.Path } | Sort-Object -Unique) -join ', '
+        Stop-CfInstall "ConsensFlow is open. Quit it, then run this installer again. Running from ${dir}: $names"
     }
 
     # version order: begin
@@ -625,7 +618,7 @@ remove everything.
             Write-Host "consensflow: $installer has the SHA-256 the signed SHA256SUMS lists"
 
             $dir = if ($before -and $before.InstallLocation) { $before.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA 'ConsensFlow' }
-            Close-CfOpen $dir
+            Stop-IfCfOpen $dir
             if ((Get-CfOpen $dir).Count -gt 0) {
                 Stop-CfInstall "ConsensFlow in $dir was opened again while the install waited. Close it and run this again."
             }

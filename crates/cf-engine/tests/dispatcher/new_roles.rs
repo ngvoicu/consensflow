@@ -23,7 +23,7 @@ fn project_of(context: &Context, roles: &[(&str, &str, &str)]) -> ProjectView {
         json!({ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "light" }),
     ];
     staff.extend(roles.iter().map(
-        |(role, agent, _)| json!({ "agent": agent, "harness": "claude-code", "roles": [role] }),
+        |(role, agent, _)| json!({ "agent": agent, "harness": "claude-code", "roles": [role], "tier": "standard" }),
     ));
     context
         .open_project(json!({
@@ -43,6 +43,7 @@ fn open(context: &Context, project: &ProjectView, pool: &str, body: &str) -> i64
             NewTask {
                 from: "chief".to_owned(),
                 pool: Some(pool.to_owned()),
+                tier: Some("standard".to_owned()),
                 body: body.to_owned(),
                 ..NewTask::default()
             },
@@ -62,7 +63,7 @@ fn a_task_of_each_new_role_goes_to_its_member_in_a_window_of_its_role_and_its_re
         let task = context.task(project.id, number).task;
         assert_eq!(
             (task.pool.as_deref(), task.tier.as_deref()),
-            (Some(role), None),
+            (Some(role), Some("standard")),
             "{role}"
         );
         assert!(
@@ -130,7 +131,7 @@ fn a_task_of_a_new_role_nobody_holds_any_more_waits_and_says_it_by_the_roles_nam
         assert_eq!(
             waits,
             [format!(
-                "T-{number} waits for a free {named}: no {named} is on the staff (ask the human for one, in your terminal)."
+                "T-{number} waits for a free standard {named}: no {named} is on the staff (ask the human for one, in your terminal)."
             )],
             "{role}"
         );

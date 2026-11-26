@@ -63,8 +63,8 @@ fn each_assigned_brief_of_a_plan_waits_for_its_own_approval() {
             "hash",
         )
         .unwrap();
-    let first = w.assign(plan.tasks[0].1, "zeus");
-    let second = w.assign(plan.tasks[1].1, "diana");
+    let first = w.assign(plan.tasks[0].number, "zeus");
+    let second = w.assign(plan.tasks[1].number, "diana");
     let first = first.message.unwrap();
     let second = second.message.unwrap();
     assert_ne!(first.id, second.id);
@@ -76,7 +76,7 @@ fn each_assigned_brief_of_a_plan_waits_for_its_own_approval() {
 fn a_later_refusal_leaves_no_task_or_key_and_the_key_can_be_tried_again() {
     let mut w = world();
     let mut invalid = section("second");
-    invalid.task.pool = Some("advisor".into());
+    invalid.task.tier = Some("huge".into());
     let failure = w
         .ledger
         .create_plan(w.project, &[section("first"), invalid], Some("key"), "bad")
@@ -131,7 +131,7 @@ fn a_refused_plan_does_not_trace_events_that_were_rolled_back() {
     }));
     events.borrow_mut().clear();
     let mut invalid = section("second");
-    invalid.task.pool = Some("advisor".into());
+    invalid.task.tier = Some("huge".into());
     assert!(w
         .ledger
         .create_plan(w.project, &[section("first"), invalid], None, "")
@@ -152,7 +152,13 @@ fn a_refused_plan_does_not_trace_events_that_were_rolled_back() {
     events.borrow_mut().clear();
     assert!(w
         .ledger
-        .decide_tasks(w.project, &[made.tasks[0].1, 999], "chief", "cancel", "")
+        .decide_tasks(
+            w.project,
+            &[made.tasks[0].number, 999],
+            "chief",
+            "cancel",
+            ""
+        )
         .is_err());
     assert!(
         events.borrow().is_empty(),

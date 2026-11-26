@@ -601,9 +601,21 @@ fn edit(
         None | Some(Value::Null) => None,
         Some(tier) => Some(cf_ledger::model::parse_tier(Some(tier))?.to_owned()),
     };
+    let purpose = match request.get("purpose") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(purpose)) => Some(purpose.clone()),
+        Some(_) => {
+            return Err(Failure::refuse(
+                400,
+                "invalid-purpose",
+                "a purpose is one of the words critical work names",
+            ))
+        }
+    };
     let edit = TaskEdit {
         body: words,
         tier,
+        purpose,
         needs: links(request.get("needs"), "needs")?,
         before: links(request.get("before"), "before")?,
     };
@@ -616,7 +628,11 @@ fn edit(
         .as_deref()
         .is_none_or(|words| js::trim(words).is_empty());
     if let Some(title) = title.filter(|_| {
-        no_words && edit.tier.is_none() && edit.needs.is_none() && edit.before.is_none()
+        no_words
+            && edit.tier.is_none()
+            && edit.purpose.is_none()
+            && edit.needs.is_none()
+            && edit.before.is_none()
     }) {
         let retitled = ledger.retitle_task(project, number, by, title)?;
         drop(ledger);

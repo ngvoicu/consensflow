@@ -3,7 +3,7 @@
 //! staff and assigned by the daemon to a new session of a member; and a task
 //! taken back to the board for another member of its tier.
 
-use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased, TaskRetiered};
+use cf_proto::ledger::{TaskCreated, TaskMoved, TaskPlaced, TaskReleased, TaskRetiered};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
@@ -15,8 +15,8 @@ use crate::model::{
 use crate::queue::{queue, send, Queued, Sent};
 use crate::roles::{self, a_pool, pool_name, Role};
 use crate::staff::{
-    follow_up_session, has_members_of_tier, holders_of_tier, nearest_tier, require_free,
-    require_member_row, start_session, Giving,
+    follow_up_session, holders_of_tier, may_take_slot, place, require_free, require_member_row,
+    start_session, Giving, Placed,
 };
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
@@ -65,6 +65,37 @@ impl NewTask {
     /// it; who gives it, a participant by name and the task followed up are
     /// the caller's, given as text and a number.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
+        let task = Self::read_json(value, true)?;
+        task.check_given()?;
+        Ok(task)
+    }
+
+    /// A plan's section as every earlier version read it for its key's fingerprint: its fields,
+    /// with no rule of the staff applied, a tier taken as the text it is (an earlier version's
+    /// `"tier": null`, for a role that had no tier then, is no tier). A plan's key is looked up
+    /// with this before any rule is checked ([`check_plan_section`](Self::check_plan_section)),
+    /// so a plan an earlier version took still replays its saved answer. Wherever the rules
+    /// take a section, it reads the same as [`from_json`](Self::from_json) reads it.
+    pub fn from_json_for_plan(value: &Value) -> Result<Self, LedgerError> {
+        Self::read_json(value, false)
+    }
+
+    /// The rules of now for a plan's section whose key is new: its tier as a tier is read; its
+    /// role, tier and purpose are checked against the staff where the task is given
+    /// (`create_task`).
+    pub fn check_plan_section(value: &Value) -> Result<(), LedgerError> {
+        Self::read_json(value, true).map(|_| ())
+    }
+
+    /// The tier and purpose said, as `create_task` checks them, for a task that names its work.
+    fn check_given(&self) -> Result<(), LedgerError> {
+        if self.tier.is_some() || self.to.is_some() || self.after.is_some() {
+            self.check_work()?;
+        }
+        Ok(())
+    }
+
+    fn read_json(value: &Value, tier_read: bool) -> Result<Self, LedgerError> {
         let body = model::parse_text(value.get("body"), "body", MAX_BODY)?;
         let numbers = |field: &str| match value.get(field) {
             None => Ok(Vec::new()),
@@ -81,7 +112,14 @@ impl NewTask {
             if !pool.and_then(Value::as_str).is_some_and(roles::is_role) {
                 return Err(invalid_pool(&cf_base::js::text(pool)));
             }
-            if !pool.and_then(Value::as_str).is_some_and(roles::untiered) {
+            // A tier that is said is read here as it always was. One that is left out is the
+            // ledger's to ask for where the task is given (`check_work`), after a plan's key is
+            // looked up: a plan an earlier version took under a key (a section of a role that
+            // had no tier) still replays its saved answer.
+            if tier_read
+                && value.get("tier").is_some()
+                && !pool.and_then(Value::as_str).is_some_and(roles::untiered)
+            {
                 tier = Some(model::parse_tier(value.get("tier"))?.to_string());
             }
         }
@@ -96,7 +134,6 @@ impl NewTask {
             needs,
             before,
         };
-        task.check_work()?;
         Ok(task)
     }
 
@@ -115,6 +152,12 @@ impl NewTask {
             return Ok(None);
         }
         let tier = model::parse_tier(self.tier.as_deref().map(Value::from).as_ref())?;
+        if tier != "critical" && self.purpose.is_some() {
+            return Err(LedgerError::refused(
+                "purpose-without-critical",
+                "a purpose comes with --tier critical",
+            ));
+        }
         if tier == "critical"
             && !self
                 .purpose
@@ -162,7 +205,7 @@ pub fn asked_role(request: &Map<String, Value>) -> Result<Option<&'static Role>,
             );
         }
     }
-    if let Some(role) = role.filter(|role| !role.tiered) {
+    if let Some(role) = role.filter(|role| !role.tiered()) {
         let switches: Vec<&str> = [("tier", "--tier"), ("purpose", "--purpose")]
             .into_iter()
             .filter(|(field, _)| given(field))
@@ -352,22 +395,15 @@ pub(crate) fn create_task(
                 }
                 all
             });
-        // A tier nobody on the staff holds goes to the nearest one somebody does,
-        // the next one up first: light work with only critical members still goes.
-        let tier = match assignee {
-            None => nearest_tier(store, project_id, pool, asked.as_deref())?,
-            Some(_) => asked.clone(),
+        // Where the task goes: its slot, else the nearest held one outside Critical (the
+        // chief is told whose); else it waits, and the dispatcher tells the way on.
+        let tier = match (assignee.as_ref(), asked.as_deref()) {
+            (None, Some(asked)) => Some(match place(store, project_id, pool, Some(asked), request.purpose.as_deref())? {
+                Placed::Fell(to) => to,
+                Placed::Stays(_) | Placed::Waits { .. } => asked.to_owned(),
+            }),
+            _ => asked.clone(),
         };
-        if assignee.is_none() && !has_members_of_tier(store, project_id, pool, tier.as_deref())? {
-            return Err(LedgerError::refused_with(
-                "no-member-of-tier",
-                format!(
-                    "no {} is on the staff: ask the human for one, in your terminal",
-                    roles::name_of(pool)
-                ),
-                409,
-            ));
-        }
         // A task given by name waits on the board too while what it needs is
         // not yet accepted; it goes to its window then.
         let mut blocked = false;
@@ -585,6 +621,72 @@ pub(super) fn upstream(store: &Store, task_id: i64, other_id: i64) -> Result<boo
         .exists(params![task_id, other_id])?)
 }
 
+/// Whether `participant_id` may take task `number` in a new window: what `assign_task` asks
+/// of its member, but not that the task is open. A member of the task's role (at the task's
+/// tier where the task has one) that is not on Vacation; and a member at Critical takes only a
+/// task at Critical with its purpose, in every assignment. Critical's rule goes by the role's
+/// effective slot: the image designer's has no tier, whatever tier an old ledger stored for it.
+/// The sweep asks it before it releases a held task to a backup.
+pub(crate) fn check_taker(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    participant_id: i64,
+) -> Result<(), LedgerError> {
+    let task = store.task_row(project_id, number)?;
+    check_taker_row(store, project_id, &task, participant_id).map(|_| ())
+}
+
+fn check_taker_row(
+    store: &Store,
+    project_id: i64,
+    task: &TaskRow,
+    participant_id: i64,
+) -> Result<ParticipantRow, LedgerError> {
+    let member = require_member_row(store, participant_id, "takes a task")?;
+    require_available_for_new_task(store, &member)?;
+    let roles: Vec<String> = serde_json::from_str(&member.roles)?;
+    let candidate = member.left_at.is_none()
+        && member.project_id == project_id
+        && task.pool.as_ref().is_some_and(|pool| roles.contains(pool))
+        && (task.tier.is_none() || member.tier == task.tier);
+    if !candidate {
+        return Err(LedgerError::refused_with(
+            "not-a-candidate",
+            format!(
+                "@{} is not {} on this staff",
+                member.handle,
+                a_pool(task.pool.as_deref(), task.tier.as_deref())
+            ),
+            409,
+        ));
+    }
+    let tiered = task
+        .pool
+        .as_deref()
+        .and_then(roles::find)
+        .is_some_and(roles::Role::tiered);
+    if tiered
+        && member.tier.as_deref() == Some("critical")
+        && !(task.tier.as_deref() == Some("critical")
+            && may_take_slot(
+                task.pool.as_deref().unwrap_or_default(),
+                "critical",
+                task.purpose.as_deref(),
+            ))
+    {
+        return Err(LedgerError::refused_with(
+            "critical-takes-critical-work",
+            format!(
+                "@{} holds a critical slot, which takes only critical work given with its purpose",
+                member.handle
+            ),
+            409,
+        ));
+    }
+    Ok(member)
+}
+
 /// The daemon's choice for an open task: a new session of that member,
 /// which the task is queued for from here on. What its requester was told of
 /// the task's wait (that it was taken back, that it waits for a free member)
@@ -599,24 +701,7 @@ pub(crate) fn assign_task(
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["open"], "assign")?;
-        let member = require_member_row(store, participant_id, "takes a task")?;
-        require_available_for_new_task(store, &member)?;
-        let roles: Vec<String> = serde_json::from_str(&member.roles)?;
-        let candidate = member.left_at.is_none()
-            && member.project_id == project_id
-            && task.pool.as_ref().is_some_and(|pool| roles.contains(pool))
-            && (task.tier.is_none() || member.tier == task.tier);
-        if !candidate {
-            return Err(LedgerError::refused_with(
-                "not-a-candidate",
-                format!(
-                    "@{} is not {} on this staff",
-                    member.handle,
-                    a_pool(task.pool.as_deref(), task.tier.as_deref())
-                ),
-                409,
-            ));
-        }
+        let member = check_taker_row(store, project_id, &task, participant_id)?;
         let pool = task.pool.as_deref().unwrap_or_default();
         let session = start_session(store, project_id, &member, pool)?;
         leave_pause_notes(
@@ -660,48 +745,67 @@ pub(crate) fn assign_task(
     })
 }
 
-/// An open task whose tier nobody on the staff holds any more (the last member
-/// of it left, or its tier moved with the catalog, after the task was given)
-/// goes to the nearest tier somebody does, the next one up first, as a task
-/// given now would: the same rule, kept for as long as the task is open. Says
-/// which tier it was for, which it is for now, and who holds it; none when the
-/// task is not open, has no tier, or its tier is held, or no tier of its role
-/// is held at all (that is for the board to say, as it waits).
+/// Where an open task stands at a dispatcher pass: the placement. A task from before the
+/// roles had tiers (no tier, for a role that has them now) takes its role's home tier
+/// first (`task.retiered`). Then, as a task given now would be placed: it stays in its slot
+/// where a member holds it and the task may take it; else it falls to the nearest held slot
+/// of its role outside Critical, the next one up before the next one down (its tier becomes
+/// that slot's, and `Fell` says which it was for, which it is for and who holds it); else it
+/// waits, and `Waits` says who holds the Critical slot, which takes only critical work. A
+/// task that is not open, or given by name, stays.
 pub(crate) fn retier_open_task(
     store: &mut Store,
     project_id: i64,
     number: i64,
-) -> Result<Option<TaskRetiered>, LedgerError> {
+) -> Result<TaskPlaced, LedgerError> {
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
-        let (true, Some(pool), Some(asked)) = (
-            task.state == "open",
-            task.pool.as_deref(),
-            task.tier.as_deref(),
-        ) else {
-            return Ok(None);
+        let (true, Some(pool)) = (task.state == "open", task.pool.as_deref()) else {
+            return Ok(TaskPlaced::Stays);
         };
-        let Some(tier) = nearest_tier(store, project_id, pool, Some(asked))? else {
-            return Ok(None);
-        };
-        if tier == asked || !has_members_of_tier(store, project_id, pool, Some(&tier))? {
-            return Ok(None);
+        if !roles::find(pool).is_some_and(roles::Role::tiered) {
+            return Ok(TaskPlaced::Stays);
         }
+        let home = roles::find(pool).map_or("standard", |role| role.home);
+        let asked = task.tier.as_deref().unwrap_or(home).to_owned();
         let at = store.at();
-        store.db.execute(
-            "UPDATE task SET tier = ?, updated_at = ? WHERE id = ?",
-            params![tier, at, task.id],
-        )?;
-        store.log(
+        if task.tier.is_none() {
+            store.db.execute(
+                "UPDATE task SET tier = ?, updated_at = ? WHERE id = ?",
+                params![asked, at, task.id],
+            )?;
+            store.log(
+                project_id,
+                "task.retiered",
+                json!({ "task": number, "from": null, "to": asked }),
+            )?;
+        }
+        match place(
+            store,
             project_id,
-            "task.retiered",
-            json!({ "task": number, "from": asked, "to": tier }),
-        )?;
-        Ok(Some(TaskRetiered {
-            from: asked.to_owned(),
-            holders: holders_of_tier(store, project_id, pool, &tier)?,
-            to: tier,
-        }))
+            pool,
+            Some(&asked),
+            task.purpose.as_deref(),
+        )? {
+            Placed::Stays(_) => Ok(TaskPlaced::Stays),
+            Placed::Waits { critical } => Ok(TaskPlaced::Waits { critical }),
+            Placed::Fell(tier) => {
+                store.db.execute(
+                    "UPDATE task SET tier = ?, updated_at = ? WHERE id = ?",
+                    params![tier, at, task.id],
+                )?;
+                store.log(
+                    project_id,
+                    "task.retiered",
+                    json!({ "task": number, "from": asked, "to": tier }),
+                )?;
+                Ok(TaskPlaced::Fell(TaskRetiered {
+                    from: asked,
+                    holders: holders_of_tier(store, project_id, pool, &tier)?,
+                    to: tier,
+                }))
+            }
+        }
     })
 }
 

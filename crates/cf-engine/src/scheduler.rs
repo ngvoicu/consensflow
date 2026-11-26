@@ -16,7 +16,7 @@ use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
     BackupCandidate, Candidate, HeldTask, HoldKind, LedgerError, MemberView, NewNote,
-    ParticipantView, ProjectView, TaskCard, TaskThread, TaskView, RESUME_WORDS,
+    ParticipantView, ProjectView, TaskCard, TaskPlaced, TaskThread, TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -188,7 +188,9 @@ pub(crate) enum News<'a> {
 /// the time its participant was marked out.
 #[derive(Debug, Default)]
 pub(crate) struct SchedulerState {
-    waiting_noted: RefCell<HashMap<i64, i64>>,
+    /// The open tasks whose requester was told they wait: each with its project and the
+    /// note it was told by. A note withdrawn before the requester had it is no telling.
+    waiting_noted: RefCell<HashMap<i64, (i64, Option<i64>)>>,
     out_noted: RefCell<HashSet<(i64, String)>>,
     /// The members held for no time whose human was told why, each with the time it was
     /// marked out: apart from `out_noted`, whose mark a member out for a 429 with a message
@@ -502,18 +504,31 @@ impl Dispatcher {
             if !task.blocked_by.is_empty() {
                 continue;
             }
-            // A tier nobody on the staff holds any more (its last member left, or its
-            // model moved to another tier) goes to the nearest one somebody does, as at
-            // `cf task add`: its requester is told once which.
-            let retiered = self
+            // The placement: the task stays in its slot, falls to the nearest held one
+            // outside Critical (its requester is told once whose), or waits where no slot
+            // of its role is held but Critical's, which takes only critical work.
+            let placed = self
                 .seams
                 .ledger
                 .borrow_mut()
                 .retier_open_task(project.id, task.number)?;
             let mut task = task;
-            if let Some(moved) = retiered {
-                self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
-                task.tier = Some(moved.to);
+            let mut critical_only = None;
+            match placed {
+                TaskPlaced::Stays => {}
+                TaskPlaced::Fell(moved) => {
+                    self.tell_retiered(project, &task, &moved.from, &moved.to, &moved.holders)?;
+                    task.tier = Some(moved.to);
+                }
+                TaskPlaced::Waits { critical } if !critical.is_empty() => {
+                    critical_only = Some(critical);
+                }
+                TaskPlaced::Waits { .. } => {}
+            }
+            if let Some(critical) = critical_only {
+                // Given to nobody, even where Critical is held: told once the way on.
+                self.tell_wait(project, &task, &critical_only_words(&task, &critical))?;
+                continue;
             }
             let candidates = self
                 .seams
@@ -535,11 +550,7 @@ impl Dispatcher {
                 }
                 self.changed();
                 assigned = true;
-            } else if !self.scheduler.waiting_noted.borrow().contains_key(&task.id) {
-                self.scheduler
-                    .waiting_noted
-                    .borrow_mut()
-                    .insert(task.id, project.id);
+            } else if self.wait_needs_telling(&task)? {
                 let pool = cf_ledger::roles::pool_name(task.pool.as_deref(), task.tier.as_deref());
                 let mut why: Vec<String> = Vec::new();
                 for (member, verdict) in candidates.iter().zip(&verdicts) {
@@ -589,20 +600,12 @@ impl Dispatcher {
                 if let Some(first) = self.earliest_reset(&candidates) {
                     renewed.push_str(&format!(" The earliest reset is {first}."));
                 }
-                self.seams.ledger.borrow_mut().note(
-                    project.id,
-                    &NewNote {
-                        from: None,
-                        to: task.requester.clone(),
-                        task: Some(task.number),
-                        body: format!(
-                            "T-{} waits for a free {pool}: {}.{renewed}",
-                            task.number,
-                            why.join("; ")
-                        ),
-                    },
-                )?;
-                self.changed();
+                let words = format!(
+                    "T-{} waits for a free {pool}: {}.{renewed}",
+                    task.number,
+                    why.join("; ")
+                );
+                self.tell_wait(project, &task, &words)?;
             }
         }
         Ok(assigned)
@@ -689,6 +692,18 @@ impl Dispatcher {
                         .borrow()
                         .get(&task.id)
                         .is_none_or(|tries| *tries <= BUSY_BACKOFF_MS.len())
+                    {
+                        continue;
+                    }
+                    // The backup must be able to take the task: where it may not, the task
+                    // stays in its member's window, held (a tier moved while it held it, or a
+                    // Critical backup and work that is not critical's).
+                    if self
+                        .seams
+                        .ledger
+                        .borrow()
+                        .check_taker(project.id, task.number, backup.member.id)
+                        .is_err()
                     {
                         continue;
                     }
@@ -850,6 +865,50 @@ impl Dispatcher {
 
     /// Tells a task's requester, once, that the tier it asked went to the nearest
     /// one somebody holds, and whose it is.
+    /// Whether the requester of a waiting task is yet to be told it waits: no note was sent
+    /// while the daemon ran, or the one sent was withdrawn before the requester had it (the
+    /// Resume of a waiting task the person paused withdraws it), which is no telling.
+    fn wait_needs_telling(&self, task: &TaskView) -> Result<bool, EngineError> {
+        let noted = self.scheduler.waiting_noted.borrow().get(&task.id).copied();
+        Ok(match noted {
+            None => true,
+            Some((_, None)) => false,
+            Some((_, Some(note))) => self
+                .seams
+                .ledger
+                .borrow()
+                .message(note)?
+                .is_some_and(|message| message.state == "cancelled"),
+        })
+    }
+
+    /// Tells the requester of a waiting task `words`, once: the mark keeps the note it sent.
+    fn tell_wait(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        words: &str,
+    ) -> Result<(), EngineError> {
+        if !self.wait_needs_telling(task)? {
+            return Ok(());
+        }
+        let note = self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(task.number),
+                body: words.to_owned(),
+            },
+        )?;
+        self.scheduler
+            .waiting_noted
+            .borrow_mut()
+            .insert(task.id, (project.id, Some(note.id)));
+        self.changed();
+        Ok(())
+    }
+
     fn tell_retiered(
         &self,
         project: &ProjectView,
@@ -2112,12 +2171,30 @@ impl Dispatcher {
         self.scheduler
             .waiting_noted
             .borrow_mut()
-            .retain(|_, noted| *noted != project);
+            .retain(|_, (noted, _)| *noted != project);
         self.scheduler
             .backup_noted
             .borrow_mut()
             .retain(|_, noted| *noted != project);
     }
+}
+
+/// What a task given to nobody says of its wait where no slot of its role is held but the
+/// critical one, which takes only critical work: and the way on.
+fn critical_only_words(task: &TaskView, critical: &[String]) -> String {
+    let pool = task.pool.as_deref();
+    let role = cf_ledger::roles::name_of(pool.unwrap_or("member"));
+    let who: Vec<String> = critical.iter().map(|handle| format!("@{handle}")).collect();
+    let holds = if who.len() == 1 { "holds" } else { "hold" };
+    format!(
+        "T-{n} waits for {a}: no {role} slot is held but the critical one, which takes only critical work. To go on: if it is critical work, cf task edit T-{n} --tier critical --purpose <purpose> ({who} {holds} it); else ask the human for {art} {role}, in your terminal.",
+        n = task.number,
+        a = cf_ledger::roles::a_pool(pool, task.tier.as_deref()),
+        who = who.join(", "),
+        art = pool
+            .and_then(cf_ledger::roles::find)
+            .map_or("a", |role| role.article),
+    )
 }
 
 /// Who of the free members takes a task: one it was taken from goes last;

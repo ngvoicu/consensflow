@@ -27,10 +27,23 @@
 # not yours to write to (never through sudo), and an installed ConsensFlow is
 # upgraded where it is. An installed ConsensFlow newer than the release is
 # never replaced by it, unless --version names that release. An open
-# ConsensFlow is asked to quit, as Quit in its menu would, and the install waits
-# for it; one that stays open is never stopped, and nothing is installed. The
+# ConsensFlow is asked to quit, as Quit in its menu would: it is found once among
+# the running applications (by its bundle identifier and the bundle this install
+# replaces, never by a process number), asked through that same object, and
+# waited for through it; two copies, a refusal or one that stays open end the
+# install, and one opened again before the swap too, and none is ever stopped, and nothing is installed. The
 # installed app is deleted only once the new one is in place and says its
-# version. `cf` comes inside the app: nothing else is set up. ConsensFlow is
+# version. If you open ConsensFlow in the moment between the installer's last
+# check and its swap, the install replaces it while it starts. A shell inside
+# ConsensFlow (every window its pane host opens has CF_PANE_PROCESS_OWNER in its
+# environment) never asks for a quit: it only counts the copies that run from the
+# app it would replace, refuses where one does (quitting ConsensFlow would end the
+# install too), and goes on where none does; its last look before the swap refuses
+# with the same words if one runs by then. A shell inside ConsensFlow that has cleared its environment isn't
+# recognized. Quitting ConsensFlow then ends the install before it changes
+# anything. Every system tool is called by its path, so a tool earlier on PATH
+# (Homebrew's GNU ones among them) changes nothing. `cf` comes inside
+# the app: nothing else is set up. ConsensFlow is
 # made for Apple silicon Macs and Windows only.
 #
 # A run that is killed (SIGKILL, a power cut: no trap runs) leaves in the folder
@@ -50,8 +63,11 @@
 # runs nothing. It writes only in a folder of its own under TMPDIR, removed at
 # the end, and in the folder the app goes to.
 
+# A search path for `cd` would send a relative folder elsewhere and print where.
+unset CDPATH
+
 usage() {
-    cat <<'HELP'
+    "$cat" <<'HELP'
 Install ConsensFlow on this Mac.
 
     curl -fsSL https://consensflow.ngvoicu.dev/install.sh | sh
@@ -90,15 +106,10 @@ refuse() {
 # Downloads $1 into $2.
 fetch() {
     if [ "$releases" = "$official" ]; then
-        curl --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -fsL "$1" -o "$2"
+        "$curl" --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -fsL "$1" -o "$2"
     else
-        curl --retry 3 -fsL "$1" -o "$2"
+        "$curl" --retry 3 -fsL "$1" -o "$2"
     fi
-}
-
-# The processes running from the app at $1, one pid a line.
-processes_of() {
-    ps -axo pid=,comm= | awk -v inside="$1/Contents/" 'index($0, inside) { print $1 }'
 }
 
 # version order: begin
@@ -107,7 +118,7 @@ processes_of() {
 # fields one by one (numbers by value, below words; words by their bytes), and
 # a build's +metadata counts for nothing.
 newer_than() {
-    LC_ALL=C awk -v a="$1" -v b="$2" '
+    LC_ALL=C "$awk" -v a="$1" -v b="$2" '
         function numeric(x) { return x ~ /^[0-9]+$/ }
         function field(x, y) {
             if (numeric(x) && numeric(y)) return (x + 0 > y + 0) - (x + 0 < y + 0)
@@ -135,38 +146,76 @@ newer_than() {
 }
 # version order: end
 
-# The pids of this shell and the processes it runs under.
-ancestry() {
-    pid=$$
-    while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
-        echo "$pid"
-        pid=$(ps -o ppid= -p "$pid" | tr -d ' ')
-    done
+# The one JavaScript (osascript -l JavaScript) that looks at the running apps. It
+# takes the mode (quit or count), the bundle identifier, the folder of the app
+# and the seconds to wait, and answers with one word and what follows it: `none`,
+# `many` (and how many), `ended`, `refused` or `open` (quit mode); the count
+# (count mode). The apps it names are the ones of that identifier whose bundle is
+# that folder (told by device and inode, never by spelling), found once among the
+# running applications as the system lists them. In quit mode the one it found is asked to quit through that same object
+# and watched through it until it has ended: no process number is read or used,
+# so a number another program has taken since can never reach it.
+# shellcheck disable=SC2016 # JavaScript for osascript: nothing in it is for the shell
+quit_script='
+ObjC.import("AppKit");
+ObjC.import("Foundation");
+function run(argv) {
+    const mode = argv[0], id = argv[1], wait = Number(argv[3]);
+    const manager = $.NSFileManager.defaultManager;
+    const identity = (p) => {
+        const attributes = manager.attributesOfItemAtPathError(p, $());
+        if (attributes.isNil()) return "";
+        return attributes.objectForKey("NSFileSystemNumber").js + ":" + attributes.objectForKey("NSFileSystemFileNumber").js;
+    };
+    const folder = identity(argv[2]);
+    if (folder === "") return mode === "count" ? "0" : "none";
+    const list = $.NSWorkspace.sharedWorkspace.runningApplications;
+    const found = [];
+    for (let i = 0; i < list.count; i++) {
+        const app = list.objectAtIndex(i);
+        if (app.bundleIdentifier.isNil() || app.bundleURL.isNil()) continue;
+        if (app.bundleIdentifier.js === id && identity(app.bundleURL.path.js) === folder) found.push(app);
+    }
+    if (mode === "count") return String(found.length);
+    if (found.length === 0) return "none";
+    if (found.length > 1) return "many " + found.length;
+    const app = found[0];
+    if (!app.terminate) return "refused";
+    const until = Date.now() + wait * 1000;
+    while (!app.terminated) {
+        if (Date.now() > until) return "open";
+        $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.1));
+    }
+    return "ended";
+}'
+
+# How many ConsensFlows run from the app at $1.
+open_copies() {
+    "$osascript" -l JavaScript -e "$quit_script" count "$running_id" "$1" 0 2>/dev/null || echo unknown
 }
 
 # Asks the ConsensFlow that runs from $1 to quit, the way Quit in its menu
-# does, and waits for every process of it to end. It is never stopped: one that
-# stays open ends the install.
+# does, and waits for that one instance to end. It is never stopped: one that
+# stays open, or refuses, ends the install.
 quit_open_app() {
-    running=$(processes_of "$1")
-    [ -n "$running" ] || return 0
-    for pid in $(ancestry); do
-        if printf '%s\n' "$running" | grep -qx "$pid"; then
-            refuse "this shell runs inside the ConsensFlow at $1, and quitting it to upgrade would end the install too. Run this from Terminal or another terminal app."
-        fi
-    done
-    say "ConsensFlow is open: asking it to quit, as Quit in its menu would..."
-    for pid in $running; do
-        osascript -l JavaScript -e "ObjC.import('AppKit'); const app = \$.NSRunningApplication.runningApplicationWithProcessIdentifier($pid); if (!app.isNil()) app.terminate;" >/dev/null 2>&1 || true
-    done
-    waited=0
-    while [ -n "$(processes_of "$1")" ]; do
-        if [ "$waited" -ge "$quit_wait" ]; then
-            refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
+    # Every window ConsensFlow's pane host opens has its marker in the environment. A marked
+    # install never asks for a quit, on any path: it only counts. A copy running from $1
+    # (a count that fails is taken as one) ends it; none, and it goes on to the last look.
+    if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+        [ "$(open_copies "$1")" = 0 ] || refuse "$inside"
+        return 0
+    fi
+    answer=$("$osascript" -l JavaScript -e "$quit_script" quit "$running_id" "$1" "$quit_wait" 2>/dev/null) ||
+        refuse "could not ask the open ConsensFlow at $1 to quit. Quit it (ConsensFlow > Quit ConsensFlow) and run this again."
+    case "$answer" in
+        none) return 0 ;;
+        many*) refuse "${answer#many } copies of ConsensFlow are running from $1, and the installer will not guess which to quit. Quit them (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        ended) say "ConsensFlow was open: it was asked to quit, as Quit in its menu would, and has quit." ;;
+        refused) refuse "ConsensFlow at $1 did not accept the request to quit. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        open) refuse "ConsensFlow at $1 is still open after ${quit_wait}s. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+        *) refuse "could not tell whether ConsensFlow at $1 is open. Quit it (ConsensFlow > Quit ConsensFlow) and run this again." ;;
+    esac
+    return 0
 }
 
 # Whether $1 is a pid as a process here has one: one to five digits, no leading
@@ -201,9 +250,9 @@ is_suffix() {
 # run's, whose pid this one was given again.
 install_goes_on() {
     [ "$1" != "$$" ] || return 1
-    program=$(ps -o comm= -p "$1" 2>/dev/null || true)
+    program=$("$ps" -o comm= -p "$1" 2>/dev/null || true)
     [ -n "$program" ] || return 1
-    commandline=$(ps -o command= -p "$1" 2>/dev/null || true)
+    commandline=$("$ps" -o command= -p "$1" 2>/dev/null || true)
     case "$commandline" in
         *install.sh*) return 0 ;;
     esac
@@ -219,7 +268,7 @@ install_goes_on() {
 # -L): an install folder that is a link to another volume is that volume's, and
 # its leftovers are the folder's own.
 plain_folder() {
-    [ ! -L "$1" ] && [ -d "$1" ] && [ "$(stat -f %d "$1")" = "$(stat -L -f %d "$2")" ]
+    [ ! -L "$1" ] && [ -d "$1" ] && [ "$("$stat" -f %d "$1")" = "$("$stat" -L -f %d "$2")" ]
 }
 
 # Why the app at $1 ($2 in the words) is not a whole, checked ConsensFlow of the
@@ -228,7 +277,7 @@ unsound() {
     # A plist that is not there is answered with "File Doesn't Exist, Will Create": no version.
     own=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
     case "$own" in
-        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | sed -n '1s/^consensflow: //p' ;;
+        [0-9]*) (check_app "$1" "$2" "$own") 2>&1 | "$sed" -n '1s/^consensflow: //p' ;;
         *) echo "it says no version" ;;
     esac
 }
@@ -256,7 +305,7 @@ remove_leftovers() {
                 continue
             fi
             if [ "$kind" = installing ]; then
-                if rm -rf -x "$leftover"; then
+                if "$rm" -rf -x "$leftover"; then
                     say "removed $leftover, the copy of the app an earlier install was making (no install runs as process $owner)."
                 else
                     say "could not remove $leftover, the copy of the app an earlier install was making."
@@ -265,7 +314,7 @@ remove_leftovers() {
                 problem=$(unsound "$leftover" "the app an earlier install moved aside")
                 if [ -n "$problem" ]; then
                     say "left $leftover alone: it is not a whole, checked ConsensFlow ($problem), so it is not put back as $dest."
-                elif mv "$leftover" "$dest"; then
+                elif "$mv" "$leftover" "$dest"; then
                     say "put $leftover back as $dest: an earlier install was stopped after it moved that app aside, and nothing was in its place."
                 else
                     say "could not put $leftover back as $dest."
@@ -275,7 +324,7 @@ remove_leftovers() {
                 problem=$(unsound "$dest" "the ConsensFlow in $dir")
                 if [ -n "$problem" ]; then
                     say "left $leftover alone: the ConsensFlow in $dest is not a whole, checked app ($problem), and this may be the only whole one."
-                elif rm -rf -x "$leftover"; then
+                elif "$rm" -rf -x "$leftover"; then
                     say "removed $leftover, the app an earlier install moved aside: $dest is whole, and checked (version $have)."
                 else
                     say "could not remove $leftover, the app an earlier install moved aside."
@@ -307,7 +356,7 @@ remove_stale_runs() {
             say "left $stale alone: an install makes a folder there, on the volume of $physical, and this is not one."
             continue
         fi
-        if [ "$(stat -f %u "$stale")" != "$(id -u)" ]; then
+        if [ "$("$stat" -f %u "$stale")" != "$("$id" -u)" ]; then
             say "left $stale alone: it is not yours."
             continue
         fi
@@ -315,15 +364,15 @@ remove_stale_runs() {
             say "left $stale alone: process $owner may be an install that is still going on."
             continue
         fi
-        if mount | grep -qF " on $stale/volume ("; then
-            if hdiutil detach -quiet "$stale/volume" >/dev/null 2>&1; then
+        if "$mount" | "$grep" -qF " on $stale/volume ("; then
+            if "$hdiutil" detach -quiet "$stale/volume" >/dev/null 2>&1; then
                 say "detached $stale/volume, the DMG an earlier install attached (no install runs as process $owner)."
             else
                 say "could not detach $stale/volume, the DMG an earlier install attached: left $stale alone."
                 continue
             fi
         fi
-        if rm -rf -x "$stale"; then
+        if "$rm" -rf -x "$stale"; then
             say "removed $stale, the folder an earlier install worked in (no install runs as process $owner)."
         else
             say "could not remove $stale, the folder an earlier install worked in."
@@ -339,23 +388,23 @@ remove_stale_runs() {
 # moved: moved into the new app's place it would land inside its bundle.
 cleanup() {
     if [ -n "${mounted:-}" ]; then
-        hdiutil detach -quiet "$mounted" >/dev/null 2>&1 || hdiutil detach -quiet -force "$mounted" >/dev/null 2>&1 || true
+        "$hdiutil" detach -quiet "$mounted" >/dev/null 2>&1 || "$hdiutil" detach -quiet -force "$mounted" >/dev/null 2>&1 || true
     fi
     if [ -n "${stage:-}" ] && [ -e "$stage" ]; then
-        rm -rf -x "$stage"
+        "$rm" -rf -x "$stage"
     fi
     if [ -n "${placed:-}" ] && [ -e "$dest" ]; then
-        rm -rf -x "$dest"
+        "$rm" -rf -x "$dest"
     fi
     if [ -n "${previous:-}" ] && [ -e "$previous" ]; then
         if [ ! -e "$dest" ]; then
-            mv "$previous" "$dest"
+            "$mv" "$previous" "$dest"
         elif [ -z "${placed:-}" ]; then
-            rm -rf -x "$previous"
+            "$rm" -rf -x "$previous"
         fi
     fi
     if [ -n "${tmp:-}" ] && [ -d "$tmp" ]; then
-        rm -rf -x "$tmp"
+        "$rm" -rf -x "$tmp"
     fi
 }
 
@@ -367,9 +416,22 @@ main() {
     key=RWTirTrEjU6epgN2c8yV2aIfRHzcCHVBi9zddieRVM5SahwhDFJlFd7Q
     team=3K53U2H749
     requirement="anchor apple generic and identifier \"dev.ngvoicu.consensflow\" and certificate leaf[subject.OU] = \"$team\""
-    spctl=/usr/sbin/spctl
+    # Every system tool by its path, so that a tool earlier on PATH (Homebrew's GNU
+    # ones among them) changes nothing. The tests' copy swaps this block for names.
+    # system tools: begin
+    cat=/bin/cat mkdir=/bin/mkdir mv=/bin/mv ps=/bin/ps rm=/bin/rm
+    awk=/usr/bin/awk codesign=/usr/bin/codesign curl=/usr/bin/curl ditto=/usr/bin/ditto
+    grep=/usr/bin/grep hdiutil=/usr/bin/hdiutil head=/usr/bin/head id=/usr/bin/id
+    mktemp=/usr/bin/mktemp od=/usr/bin/od osascript=/usr/bin/osascript
+    readlink=/usr/bin/readlink sed=/usr/bin/sed shasum=/usr/bin/shasum
+    stat=/usr/bin/stat tr=/usr/bin/tr uname=/usr/bin/uname
+    mount=/sbin/mount sysctl=/usr/sbin/sysctl spctl=/usr/sbin/spctl
     plistbuddy=/usr/libexec/PlistBuddy
+    # system tools: end
     quit_wait=120
+    inside="This shell runs inside ConsensFlow, and quitting ConsensFlow would end the install too. Run this from Terminal or another terminal app."
+    # The bundle identifier of the app to quit; the tests give their own stand-in's.
+    running_id="${CONSENSFLOW_TEST_APP_ID:-dev.ngvoicu.consensflow}"
 
     official=https://github.com/ngvoicu/consensflow/releases
     releases="${CONSENSFLOW_RELEASES_URL:-$official}"
@@ -408,20 +470,20 @@ main() {
         esac
     fi
 
-    system=$(uname -s)
+    system=$("$uname" -s)
     case "$system" in
         Darwin) ;;
         Linux) refuse "ConsensFlow is made for macOS and Windows only; there is no Linux build." ;;
         *) refuse "ConsensFlow is made for macOS and Windows only, not $system. On Windows, run in PowerShell: irm https://consensflow.ngvoicu.dev/install.ps1 | iex" ;;
     esac
-    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then
+    if [ "$("$sysctl" -n hw.optional.arm64 2>/dev/null || echo 0)" != 1 ]; then
         refuse "ConsensFlow for Mac is made for Apple silicon (M1 and later); this Mac has an Intel processor."
     fi
-    for tool in curl shasum od osascript hdiutil codesign ditto awk stat mount; do
-        command -v "$tool" >/dev/null 2>&1 || refuse "this Mac has no $tool, which the install needs."
+    for tool in "$curl" "$shasum" "$od" "$osascript" "$hdiutil" "$codesign" "$ditto" "$awk" "$stat" "$mount"; do
+        command -v "$tool" >/dev/null 2>&1 || refuse "this Mac has no ${tool##*/}, which the install needs."
     done
 
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/consensflow-install.$$.XXXXXX")
+    tmp=$("$mktemp" -d "${TMPDIR:-/tmp}/consensflow-install.$$.XXXXXX")
     mounted=""
     stage=""
     placed=""
@@ -442,16 +504,23 @@ main() {
     else
         dir="$HOME/Applications"
     fi
-    mkdir -p "$dir" 2>/dev/null || refuse "could not make the folder $dir."
+    "$mkdir" -p "$dir" 2>/dev/null || refuse "could not make the folder $dir."
     [ -w "$dir" ] || refuse "$dir is not yours to write to. Run this as a user who can, or with CONSENSFLOW_INSTALL_DIR=$HOME/Applications; it never uses sudo itself."
+    # One destination for everything below: absolute, its folders' links resolved,
+    # so the count and the quit
+    # compare against the same path whatever the folder was spelled as.
+    dir=$(cd "$dir" >/dev/null 2>&1 && pwd -P) || refuse "could not read the folder $dir."
     dest="$dir/ConsensFlow.app"
+    if [ -L "$dest" ]; then
+        refuse "$dest is a link to $("$readlink" "$dest"). Replace the link with the app (or install into the folder it points to) and run this again."
+    fi
     remove_leftovers
     remove_stale_runs
 
     if [ -z "$version" ]; then
         feed="$releases/download/feed-$channel/latest.json"
         fetch "$feed" "$tmp/latest.json" || refuse "could not read the $channel update feed at $feed."
-        version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
+        version=$("$sed" -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | "$head" -n 1)
         case "$version" in
             [0-9]*) ;;
             *) refuse "the $channel update feed at $feed names no version." ;;
@@ -476,8 +545,8 @@ main() {
         refuse "ConsensFlow $version has no signed SHA256SUMS, so its files cannot be checked here: releases before 3.0.7-alpha.1 have none. Download it from $releases/tag/v$version; releases from 3.0.7-alpha.1 on install from here."
     # The check reads SHA256SUMS once, and answers the hash it lists for the DMG
     # from the very bytes whose signature it checked; it must end well and say so.
-    if checked=$(osascript -l JavaScript "$tmp/verify.js" "$key" "$(cat "$tmp/SHA256SUMS.sig")" \
-        "$(od -An -tx1 -v "$tmp/SHA256SUMS" | tr -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then
+    if checked=$("$osascript" -l JavaScript "$tmp/verify.js" "$key" "$("$cat" "$tmp/SHA256SUMS.sig")" \
+        "$("$od" -An -tx1 -v "$tmp/SHA256SUMS" | "$tr" -d ' \n')" "$signed" "$dmg" 2>&1 </dev/null); then
         status=0
     else
         status=$?
@@ -495,7 +564,7 @@ main() {
     say "SHA256SUMS is signed by ConsensFlow's update key, for $version"
     say "downloading $dmg"
     fetch "$release/$dmg" "$tmp/$dmg" || refuse "could not download $release/$dmg."
-    got=$(shasum -a 256 "$tmp/$dmg" | awk '{ print $1 }')
+    got=$("$shasum" -a 256 "$tmp/$dmg" | "$awk" "{ print \$1 }")
     [ "$got" = "$expected" ] || refuse "$dmg was changed: its SHA-256 is $got, and the signed SHA256SUMS says $expected."
     say "$dmg has the SHA-256 the signed SHA256SUMS lists"
 
@@ -504,8 +573,8 @@ main() {
     # in it, and of the copy that goes in, bound what could get in that way to
     # another notarized ConsensFlow of this version under ConsensFlow's team;
     # checking again narrows such a race, it does not exclude it.
-    mkdir "$tmp/volume"
-    hdiutil attach -nobrowse -readonly -noautoopen -quiet -mountpoint "$tmp/volume" "$tmp/$dmg" </dev/null >/dev/null ||
+    "$mkdir" "$tmp/volume"
+    "$hdiutil" attach -nobrowse -readonly -noautoopen -quiet -mountpoint "$tmp/volume" "$tmp/$dmg" </dev/null >/dev/null ||
         refuse "could not open $dmg."
     mounted="$tmp/volume"
     [ -d "$mounted/ConsensFlow.app" ] || refuse "$dmg holds no ConsensFlow.app."
@@ -515,30 +584,34 @@ main() {
     # there: what is moved into place is what was checked, whatever happened to
     # the DMG once it was hashed.
     stage="$dir/.ConsensFlow.app.installing.$$"
-    ditto "$mounted/ConsensFlow.app" "$stage" || refuse "could not copy the app into $dir."
+    "$ditto" "$mounted/ConsensFlow.app" "$stage" || refuse "could not copy the app into $dir."
     check_app "$stage" "the copy of the app made in $dir"
     say "the app is ConsensFlow's, signed (team $team) and notarized"
 
     quit_open_app "$dest"
-    if [ -n "$(processes_of "$dest")" ]; then
+    # The copy is checked whole again now, after the wait for the open app; and the
+    # app put in place is checked whole once more while the one it replaces can
+    # still be put back. Each narrows what a writer in this folder could change in
+    # between; none excludes it.
+    check_app "$stage" "the copy of the app made in $dir"
+    # The last look, after every check of the copy and right before the move.
+    if [ "$(open_copies "$dest")" != 0 ]; then
+        if [ -n "${CF_PANE_PROCESS_OWNER:-}" ]; then
+            refuse "$inside"
+        fi
         refuse "ConsensFlow at $dest was opened again while the install waited. Quit it and run this again."
     fi
-    # The copy is checked whole again now, after the wait for the open app, as near
-    # its move as a shell gets; and the app put in place is checked whole once
-    # more while the one it replaces can still be put back. Each narrows what a
-    # writer in this folder could change in between; none excludes it.
-    check_app "$stage" "the copy of the app made in $dir"
     if [ -e "$dest" ]; then
         previous="$dir/.ConsensFlow.app.previous.$$"
-        mv "$dest" "$previous" || { previous=""; refuse "could not move the installed ConsensFlow aside in $dir."; }
+        "$mv" "$dest" "$previous" || { previous=""; refuse "could not move the installed ConsensFlow aside in $dir."; }
     fi
     placed=1
-    mv "$stage" "$dest" || refuse "could not put the new ConsensFlow in $dir."
+    "$mv" "$stage" "$dest" || refuse "could not put the new ConsensFlow in $dir."
     stage=""
     check_app "$dest" "the app put in $dir"
     placed=""
     if [ -n "$previous" ]; then
-        rm -rf -x "$previous"
+        "$rm" -rf -x "$previous"
         previous=""
     fi
     say "ConsensFlow $version is installed in $dest. Open it from there or with: open \"$dest\""
@@ -552,10 +625,10 @@ check_app() {
     shown=$("$plistbuddy" -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null || true)
     want=${3-$version}
     [ "$shown" = "$want" ] || refuse "$2 is version '$shown', not $want."
-    codesign --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||
-        refuse "the code signature of $2 does not hold: $(cat "$tmp/codesign.txt")"
-    codesign --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||
-        refuse "$2 is not signed by ConsensFlow's Developer ID (team $team): $(cat "$tmp/codesign.txt")"
+    "$codesign" --verify --deep --strict "$1" 2>"$tmp/codesign.txt" ||
+        refuse "the code signature of $2 does not hold: $("$cat" "$tmp/codesign.txt")"
+    "$codesign" --verify -R="$requirement" "$1" 2>"$tmp/codesign.txt" ||
+        refuse "$2 is not signed by ConsensFlow's Developer ID (team $team): $("$cat" "$tmp/codesign.txt")"
     assessed=$("$spctl" --assess --type execute -vv "$1" 2>&1) ||
         refuse "Gatekeeper refuses $2: $assessed"
     case "$assessed" in
@@ -566,7 +639,7 @@ check_app() {
 
 # The check of the signed SHA256SUMS, written into the run's folder by main.
 write_verifier() {
-    cat > "$1" <<'VERIFIER'
+    "$cat" > "$1" <<'VERIFIER'
 // The check of a release's signed SHA256SUMS, run by macOS's own JavaScript
 // (`osascript -l JavaScript`): minisign's "ED" signature, Ed25519 (RFC 8032)
 // over the BLAKE2b-512 (RFC 7693) of the file, and its global signature over

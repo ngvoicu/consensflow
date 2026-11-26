@@ -176,7 +176,7 @@ async function keyed(id, paths, harness, invoke) {
  * stay with, as Windows Terminal found); a drop typed after the human went on
  * elsewhere takes neither.
  */
-async function type(target, { id, paths }, { invoke, focus, dock, report, still }) {
+async function type(target, { id, paths }, { invoke, focus, dock, report, still, place = null }) {
   if (target === null) return
   if (target.missed !== undefined) {
     report(`Nothing was typed: ${target.missed}.`)
@@ -198,7 +198,7 @@ async function type(target, { id, paths }, { invoke, focus, dock, report, still 
     return
   }
   const focused = still()
-  if (!dock.pasteInto(target.pane, droppedText(typed.paths, WINDOWS), { focus: focused })) {
+  if (!dock.pasteInto(target.pane, droppedText(typed.paths, WINDOWS), { focus: focused, place })) {
     report(`Nothing was typed: ${target.name}'s window has closed.`)
     return
   }
@@ -251,7 +251,19 @@ export async function listenForFileDrops({ listen, invoke, focus, dock, report }
     if (payload.paths.length === 0) return
     const asOf = acts
     const still = () => acts === asOf
-    const dropped = () => type(target, payload, { invoke, focus, dock, report, still })
-    typing = typing.then(dropped).catch(report)
+    // The drop is a gesture, like a key: it takes its place among what is typed where it is
+    // made, before the lookup of its paths, or is refused while the terminals are read-only.
+    let place = null
+    if (target?.pane !== undefined) {
+      place = dock.holdPlace(target.pane)
+      if (place === null) return
+    }
+    const dropped = () => type(target, payload, { invoke, focus, dock, report, still, place })
+    typing = typing
+      .then(dropped)
+      .catch(report)
+      .finally(() => {
+        if (place !== null) dock.releasePlace(place)
+      })
   })
 }

@@ -70,7 +70,7 @@ runs = ["daemon-computer-use"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/computer_use.rs"
-find = "\"codex\": { \"setUp\": codex.set_up },"
+find = "\"codex\": { \"setUp\": codex_set_up },"
 replace = "\"codex\": { \"setUp\": false },"
 
 # --- what the page shows ---

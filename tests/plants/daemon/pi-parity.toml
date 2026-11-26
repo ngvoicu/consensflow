@@ -20,8 +20,8 @@ runs = ["harness-launch-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
-find = '''            let appended = paths::append_system_prompt(&self.env, launch.directory);'''
-replace = '''            let appended = paths::append_system_prompt(&self.env, launch.directory).filter(|_| false);'''
+find = '''            let appended = paths::append_system_prompt(env, launch.directory);'''
+replace = '''            let appended = paths::append_system_prompt(env, launch.directory).filter(|_| false);'''
 
 [[plant]]
 name = "pi parity: the user's APPEND_SYSTEM.md is given where the project has its own"

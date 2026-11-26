@@ -222,7 +222,8 @@ fn a_task_open_behind_one_that_failed_or_was_called_off_is_the_chiefs_to_settle(
                 harness: "claude-code".to_owned(),
                 designer: false,
                 roles: vec!["worker".to_owned()],
-                tier: "standard".to_owned(),
+                // A second worker holds another slot: a role and tier holds one member.
+                tier: "complex".to_owned(),
             },
         )
         .expect("a second member");
@@ -310,7 +311,7 @@ fn work_on_its_way_in_another_project_holds_nothing_back() {
     w.move_a_task();
     let other = w
         .ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/other".to_owned(),
             name: "other".to_owned(),
             chief: NewChief {
@@ -485,7 +486,7 @@ fn a_taskless_windows_answer_keeps_the_wake_ups_old_subject_path() {
                 harness: "claude-code".into(),
                 designer: false,
                 roles: vec!["worker".into()],
-                tier: "standard".into(),
+                tier: "complex".into(),
             },
         )
         .unwrap();

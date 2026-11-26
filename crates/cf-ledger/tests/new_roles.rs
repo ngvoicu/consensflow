@@ -48,7 +48,7 @@ fn project_in(
     prompt_suggestion: bool,
 ) -> ProjectView {
     ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: format!("/work/{name}"),
             name: name.into(),
             chief: NewChief {
@@ -354,13 +354,13 @@ fn a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone() {
         let created = ledger
             .create_task(
                 project.id,
-                &task(role, None, &format!("Work for the {role}")),
+                &task(role, Some("light"), &format!("Work for the {role}")),
             )
             .expect("a task of the pool");
         assert_eq!(
             (created.task.pool.as_deref(), created.task.tier.as_deref()),
-            (Some(role), None),
-            "a task of the {role}'s pool has no tier"
+            (Some(role), Some("light")),
+            "a task of the {role}'s pool has the tier its slot has"
         );
         let candidates = ledger
             .candidates(project.id, number)
@@ -387,13 +387,13 @@ fn a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone() {
             "only a member of the {role}'s role may take it"
         );
     }
-    // A tier the ledger is handed with a task of a role with none is not kept, as the image
-    // designer's is not (Node's traces hand it one: ledger-tiered-004). `POST /api/tasks`
-    // refuses one asked there, in the role's name (T-1453).
+    // The integrator has slots now: a task for a tier nobody holds goes to the nearest one
+    // held, and says which it asked.
     let given = ledger
         .create_task(project.id, &task("integrator", Some("standard"), "Land it"))
         .expect("an integrator's task");
-    assert_eq!(given.task.tier, None);
+    assert_eq!(given.task.tier.as_deref(), Some("light"));
+    assert_eq!(given.asked.as_deref(), Some("standard"));
 }
 
 #[test]
@@ -429,8 +429,7 @@ fn tier_of(project: &ProjectView, handle: &str) -> Option<String> {
 }
 
 #[test]
-fn a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one_that_drops_them_is_kept_in_the_lowest(
-) {
+fn a_member_gaining_a_role_keeps_its_tier_and_only_edit_changes_one() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger =
         open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
@@ -441,64 +440,27 @@ fn a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one
             member("zeus", &["worker", "integrator"], "complex"),
         ],
     );
-    // An integrator alone was given no tier: a worker's work has one, which it must be given.
-    let refused = ledger
-        .set_roles(project.id, "janus", &["integrator", "worker"], None)
-        .expect_err("a worker's tier is the human's choice");
-    assert_eq!(
-        (refused.code(), refused.to_string()),
-        (
-            Some("tier-required"),
-            "janus has no tier: a worker's tasks have one, so its tier comes with the role"
-                .to_owned()
-        )
-    );
-    let unchanged = ledger.project(project.id).unwrap().unwrap();
-    assert_eq!(tier_of(&unchanged, "janus").as_deref(), Some("light"));
-
-    // A member that keeps a role with tiers keeps its tier; one left with none has the lowest.
-    ledger
-        .set_roles(project.id, "zeus", &["integrator"], None)
-        .expect("zeus only integrates");
-    let now = ledger.project(project.id).unwrap().unwrap();
-    assert_eq!(tier_of(&now, "zeus").as_deref(), Some("light"));
-
-    // With its tier the worker comes, and a later change of roles keeps it.
+    // The role comes at the tier the member has: no tier is asked, and none is taken.
     let given = ledger
-        .set_roles(
-            project.id,
-            "janus",
-            &["integrator", "worker"],
-            Some("standard"),
-        )
-        .expect("a worker at standard");
+        .set_roles(project.id, "janus", &["integrator", "worker"])
+        .expect("a worker at light");
     assert_eq!(
         (given.roles.clone(), given.tier.as_deref()),
         (
             vec!["integrator".to_owned(), "worker".to_owned()],
-            Some("standard")
+            Some("light")
         )
     );
+    // A member that drops a role keeps its tier.
+    ledger
+        .set_roles(project.id, "zeus", &["integrator"])
+        .expect("zeus only integrates");
+    let now = ledger.project(project.id).unwrap().unwrap();
+    assert_eq!(tier_of(&now, "zeus").as_deref(), Some("complex"));
     let kept = ledger
-        .set_roles(
-            project.id,
-            "janus",
-            &["worker", "integrator", "reviewer"],
-            None,
-        )
+        .set_roles(project.id, "janus", &["worker", "integrator", "reviewer"])
         .expect("a reviewer too");
-    assert_eq!(kept.tier.as_deref(), Some("standard"));
-    let moved = ledger
-        .set_roles(project.id, "janus", &["worker"], Some("complex"))
-        .expect("a worker at complex");
-    assert_eq!(moved.tier.as_deref(), Some("complex"));
-    // A word that is no tier is refused before anything changes.
-    let refused = ledger
-        .set_roles(project.id, "janus", &["worker"], Some("huge"))
-        .expect_err("no such tier");
-    assert_eq!(refused.code(), Some("invalid-tier"));
-    let after = ledger.project(project.id).unwrap().unwrap();
-    assert_eq!(tier_of(&after, "janus").as_deref(), Some("complex"));
+    assert_eq!(kept.tier.as_deref(), Some("light"));
 }
 
 fn member_id(project: &ProjectView, handle: &str) -> i64 {
@@ -530,7 +492,7 @@ fn a_follow_up_for_a_role_goes_only_to_a_window_of_that_role_whose_member_still_
         ],
     );
     ledger
-        .create_task(project.id, &task("architect", None, "The frame"))
+        .create_task(project.id, &task("architect", Some("light"), "The frame"))
         .expect("an architect's task");
     ledger
         .assign_task(project.id, 1, member_id(&project, "daedalus"))
@@ -571,7 +533,7 @@ fn a_follow_up_for_a_role_goes_only_to_a_window_of_that_role_whose_member_still_
     // The member gives the role up: its window, begun an architect's, stays one, and is no
     // architect's to continue for the architect's work.
     ledger
-        .set_roles(project.id, "daedalus", &["researcher"], None)
+        .set_roles(project.id, "daedalus", &["researcher"])
         .expect("the member's roles changed");
     let session_role = |ledger: &Ledger| {
         ledger

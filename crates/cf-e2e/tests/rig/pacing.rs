@@ -20,7 +20,6 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
         "agents": [
             { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
-            { "id": "worker-b", "kind": "claude-code", "model": "fake" },
         ],
     });
     rig.stand_ins(&roster)
@@ -51,7 +50,6 @@ fn two_results_that_come_together_go_in_one_at_a_time_each_once_a_settle_after_t
     let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
     let first = project.add_member("worker")?;
-    project.add_member("worker-b")?;
     let tier = first["member"]["tier"]
         .as_str()
         .unwrap_or_default()

@@ -35,7 +35,7 @@ fn member(agent: &str, roles: &[&str], tier: &str) -> NewMember {
 /// A project at /work/app with apollo for its chief and `staff`.
 fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
     ledger
-        .create_project(&NewProject {
+        .create_project_overflowing(&NewProject {
             directory: "/work/app".into(),
             name: "app".into(),
             chief: NewChief {
@@ -180,20 +180,20 @@ fn a_member_may_hold_the_tester_role_beside_another_or_lead_with_it() {
     assert!(handles("tester", &ledger).is_empty());
 
     let beside = ledger
-        .set_roles(project.id, "zeus", &["worker", "tester"], None)
+        .set_roles(project.id, "zeus", &["worker", "tester"])
         .expect("a worker may test too");
     assert_eq!((beside.role.as_str(), beside.roles.len()), ("worker", 2));
     assert_eq!(handles("tester", &ledger), ["zeus"]);
     assert_eq!(handles("worker", &ledger), ["zeus"]);
 
     let leading = ledger
-        .set_roles(project.id, "zeus", &["tester", "worker"], None)
+        .set_roles(project.id, "zeus", &["tester", "worker"])
         .expect("and may lead with it");
     assert_eq!(leading.role, "tester", "the first role leads");
 }
 
 #[test]
-fn an_image_agent_is_no_tester_and_a_pool_nobody_holds_is_refused_by_name() {
+fn an_image_agent_is_no_tester_and_a_pool_nobody_holds_waits() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
     let project = project(&mut ledger, vec![member("zeus", &["worker"], "standard")]);
@@ -212,15 +212,17 @@ fn an_image_agent_is_no_tester_and_a_pool_nobody_holds_is_refused_by_name() {
         )
     );
 
-    let refused = ledger
+    // Nobody tests: the task is not refused for want of a member, it waits for one.
+    let waiting = ledger
         .create_task(project.id, &for_testers("standard", "Run the suite"))
-        .expect_err("nobody on the staff tests");
+        .expect("a task waits for a tester");
     assert_eq!(
-        (refused.code(), refused.to_string()),
         (
-            Some("no-member-of-tier"),
-            "no tester is on the staff: ask the human for one, in your terminal".to_owned()
-        )
+            waiting.task.state.as_str(),
+            waiting.task.tier.as_deref(),
+            waiting.asked
+        ),
+        ("open", Some("standard"), None)
     );
 }
 

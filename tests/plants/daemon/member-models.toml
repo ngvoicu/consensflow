@@ -74,21 +74,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "member models: a second Add of a model a member runs makes another member"
-meant = "a_member_added_by_model_holds_it_is_named_by_it_and_carries_the_tier_the_human_chose"
-runs = ["mm-daemon"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/page/staff.rs"
-find = '''
-            && member_now.designer == member.designer
-    })?;'''
-replace = '''
-            && member_now.designer == member.designer
-            && false
-    })?;'''
-
-[[plant]]
 name = "member models: Edit member leaves the member on the model it ran"
 meant = "edit_member_moves_a_member_to_another_model_in_the_tier_chosen"
 runs = ["mm-daemon"]
@@ -124,32 +109,26 @@ find = "    const options = answer.listing.models.map((model) => {"
 replace = "    const options = answer.listing.models.slice(0, 1).map((model) => {"
 
 [[plant]]
-name = "member models: Add member saves a member with no tier"
-meant = "Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort"
+name = "member models: a slot's Add leaves the slot's tier unpicked"
+meant = "Add member saves nothing until a harness and a model are picked, and adds in its slot's tier, which it does not ask"
 runs = ["mm-page"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    if (tiered && this.#tier.value === '') {"
-replace = "    if (tiered && this.#tier.value === 'never') {"
+find = "    this.#tier.value = tier ?? ''"
+replace = "    this.#tier.value = ''"
 
 [[plant]]
-name = "member models: the tier select starts on a tier the human did not pick"
-meant = "Add member saves nothing until a tier is picked: the tier starts empty, whatever the model and its effort"
+name = "member models: Edit's tier picker starts on a tier the member is not in"
+meant = "Edit member moves a member to another model, effort and tier its harness lists, and Cancel leaves it as it was"
 runs = ["mm-page"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''
-    this.#tier.value = ''
-    this.#current = null
-'''
-replace = '''
-    this.#tier.value = 'standard'
-    this.#current = null
-'''
+find = "    this.#tier.value = member.tier ?? ''"
+replace = "    this.#tier.value = 'light'"
 
 [[plant]]
 name = "member models: the effort select offers efforts the model does not list"

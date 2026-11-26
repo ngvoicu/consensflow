@@ -1,43 +1,54 @@
--- The fact of a hold made for a retry (D3's N35): a turn that failed holds its task and main's
--- own Resume tries it again. One row for each such hold, written with the hold and never
--- changed but for the message that carried its Resume, once. The tries a task has used in a
--- row are a number on the task, `turn_retries`: it goes up by one in the write that queues a
--- numbered Resume and back to zero on exactly three things: a person's or the chief's action
--- on the task, its result, and a failure 30 minutes or more after `turn_retry_at`, the last
--- moment anything happened to a numbered retry of the task. Every task that exists reads zero.
-CREATE TABLE turn_retry (
-  id INTEGER PRIMARY KEY,
-  task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-  session_id INTEGER NOT NULL REFERENCES participant(id) ON DELETE CASCADE,
-  -- What turn it was for: `failed` (`refused` is D3's R2).
-  kind TEXT NOT NULL CHECK (kind IN ('failed', 'refused')),
-  -- Which try the hold is for: 1 or 2.
-  try INTEGER NOT NULL CHECK (try BETWEEN 1 AND 2),
-  -- What the turn said and why it failed, as the engine read it.
-  said TEXT NOT NULL,
-  cause TEXT NOT NULL,
-  -- The message that carried its Resume, once main's pass resumed the task.
-  message_id INTEGER REFERENCES message(id) ON DELETE SET NULL
-);
-CREATE INDEX turn_retry_by_task ON turn_retry (task_id, id);
-CREATE INDEX turn_retry_by_message ON turn_retry (message_id);
-ALTER TABLE task ADD COLUMN turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2);
--- The retry hold the task is in now: the `turn_retry.id` written with it, none once it ends.
--- It names the hold itself; no time says which hold a Resume belongs to.
-ALTER TABLE task ADD COLUMN retry_hold INTEGER;
--- The last moment anything happened to a numbered retry of the task: one was charged (queued),
--- delivered or withdrawn (a message of it changed into cancelled or failed, from any state). Written in the same write as its cause, and by nothing else: the
--- charge writes it in the ledger's code, a delivery of the message that carries a numbered Resume
--- writes it through the trigger below with the time of its delivery, and a withdrawal with an
--- empty mark, settled to the write's own time when the write ends, whichever path moves the message.
-ALTER TABLE task ADD COLUMN turn_retry_at TEXT;
-CREATE TRIGGER turn_retry_message_moved AFTER UPDATE OF state ON message
-WHEN (OLD.state NOT IN ('delivered', 'read') AND NEW.state IN ('delivered', 'read'))
-  OR (NEW.state IN ('cancelled', 'failed') AND OLD.state != NEW.state)
-BEGIN
-  UPDATE task SET turn_retry_at = CASE WHEN NEW.state IN ('delivered', 'read') THEN COALESCE(NEW.delivered_at, '') ELSE '' END
-   WHERE id IN (SELECT task_id FROM turn_retry WHERE message_id = NEW.id);
-END;
--- The order the ledger confirmed deliveries in is its own sequence of events, never a clock:
--- the last paste into a window is found by the latest `delivery.confirmed` event of a message.
-CREATE INDEX event_confirmed_index ON event (CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END) WHERE kind = 'delivery.confirmed';
+-- The staff as slots (architecture/staff-slots.md, section 3). It changes members' tiers and
+-- logs each change, and nothing else: it makes no table, rests nobody, removes nobody, and writes
+-- no task, message, need, conversation, assignee, session link or backup link. Every message an
+-- earlier version saved stays as it was saved. It keeps its own copy of this version's role ids,
+-- so a later change to the registry does not change what it did.
+--
+-- A member whose roles all had no tier (the frontend designer, the architect, the researcher,
+-- the integrator) is given a home tier where it has none (NULL, or the `light` nobody chose):
+-- complex where it holds the architect role, else standard. A tier stored for such a member
+-- other than `light` is kept. No Critical member is moved: every role offers every tier.
+--
+-- A member whose role list is no JSON (a value an earlier version accepted) is kept as it is, not
+-- settled, and logged as `member.unsettled`: no value an earlier version accepted stops the opening.
+--
+-- Each change moves the member, its open windows, its current backup and that backup's open
+-- windows (a closed window, and a backup that was replaced with the windows it left, are
+-- history and keep their tier), and is logged as `member.settled` (handle, from, to, step 1).
+CREATE TEMP TABLE settled AS
+  SELECT p.id AS id, p.project_id AS project, p.handle AS handle, p.tier AS old,
+         CASE WHEN json_valid(p.roles)
+                   AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = 'architect')
+              THEN 'complex' ELSE 'standard' END AS new,
+         1 AS step, NULL AS emptied
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief')
+     AND CASE WHEN json_valid(p.roles)
+              THEN json_array_length(p.roles) > 0
+                   AND NOT EXISTS (SELECT 1 FROM json_each(p.roles) r
+                                    WHERE r.value NOT IN ('frontend', 'architect', 'researcher', 'integrator'))
+              ELSE 0 END
+     AND (p.tier IS NULL OR p.tier = 'light')
+   ORDER BY p.id;
+INSERT INTO event (project_id, at, kind, data)
+  SELECT p.project_id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.unsettled',
+         json_object('handle', p.handle, 'reason', 'the role list is not JSON')
+    FROM participant p
+   WHERE p.member_id IS NULL AND p.backup_of IS NULL AND p.left_at IS NULL
+     AND p.role NOT IN ('human', 'chief') AND NOT json_valid(p.roles)
+   ORDER BY p.id;
+CREATE TEMP TABLE settled_rows AS
+  SELECT s.id AS settled, s.new AS tier, p.id AS id FROM settled s JOIN participant p
+      ON p.id = s.id OR (p.member_id = s.id AND p.left_at IS NULL)
+      OR (p.backup_of = s.id AND p.left_at IS NULL)
+      OR (p.left_at IS NULL
+          AND p.member_id IN (SELECT b.id FROM participant b WHERE b.backup_of = s.id AND b.left_at IS NULL));
+UPDATE participant SET tier = (SELECT r.tier FROM settled_rows r WHERE r.id = participant.id LIMIT 1)
+ WHERE id IN (SELECT id FROM settled_rows);
+INSERT INTO event (project_id, at, kind, data)
+  SELECT project, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'member.settled',
+         json_object('handle', handle, 'from', old, 'to', new, 'step', step)
+    FROM settled ORDER BY rowid;
+DROP TABLE settled_rows;
+DROP TABLE settled;

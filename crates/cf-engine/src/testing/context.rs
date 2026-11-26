@@ -396,7 +396,9 @@ impl Context {
             .iter()
             .map(|agent| member(agent, "worker", "standard"))
             .collect();
-        self.open_project(app(staff))
+        // Several standard workers hold one slot, as the update leaves a slot several hold:
+        // all take work until the person meets the rule (the tests stand them in for one another).
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(app(staff)))
             .expect("a project with its staff")
             .expect("the project, not deleted")
     }
@@ -413,9 +415,19 @@ impl Context {
             member("calliope", "reviewer", "standard"),
             member("astraeus", "reviewer", "standard"),
         ]);
-        self.open_project(app(staff))
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(app(staff)))
             .expect("a project with its tiers")
             .expect("the project, not deleted")
+    }
+
+    /// [`Context::open_project`] for a staff that seats several members in one slot, as the
+    /// update leaves a slot several hold: the ledger refuses such a list now, and the router
+    /// still ranks the members of one (all take work until the person meets the rule).
+    pub fn open_project_overflowing(
+        &self,
+        request: Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
+        cf_ledger::testing::without_the_slot_rule(|| self.open_project(request))
     }
 
     /// The project as the ledger has it now.
@@ -488,6 +500,104 @@ impl Context {
         *ledger = open_ledger(&self.file, ledger_options(&self.time, &self.recorder))
             .expect("the ledger opens again");
         ledger.keep_test_file_owner(Rc::clone(&self._dir));
+    }
+
+    /// The ledger as the version before the staff as slots left it, and opened as a start
+    /// opens it: every row the ledger holds now is copied, table by table and column by
+    /// column where the earlier schema has them, into a ledger of that schema (the
+    /// migrations before the update), and the file is opened again, so the update runs
+    /// over it as it runs over a person's. For a test that seats a staff the slot rule now
+    /// refuses (members several to a slot) and must find it whole after the update.
+    pub fn reopen_as_before_the_update(&self) {
+        let seated = || -> Vec<String> {
+            let ledger = self.ledger.borrow();
+            let mut read = ledger
+                .sqlite()
+                .prepare(
+                    "SELECT quote(id) || quote(project_id) || quote(handle) || quote(backup_of)
+                            || quote(member_id) || quote(left_at)
+                       FROM participant ORDER BY id",
+                )
+                .expect("the staff read");
+            read.query_map([], |row| row.get(0))
+                .expect("the staff")
+                .map(Result::unwrap)
+                .collect()
+        };
+        let before = seated();
+        assert!(!before.is_empty(), "a staff to carry over the update");
+        self.edit_ledger(|file| {
+            use rusqlite::Connection;
+            let earlier = file.with_file_name("before-the-update.db");
+            let _ = std::fs::remove_file(&earlier);
+            let new = Connection::open(&earlier).expect("the earlier ledger");
+            cf_ledger::migrate(&new, &cf_ledger::MIGRATIONS[..43]).expect("the earlier schema");
+            new.execute_batch("PRAGMA foreign_keys = OFF")
+                .expect("keys off");
+            new.execute(
+                "ATTACH DATABASE ?1 AS now",
+                [file.to_str().expect("a path")],
+            )
+            .expect("the ledger as it is");
+            let tables: Vec<String> = new
+                .prepare(
+                    "SELECT name FROM main.sqlite_master WHERE type = 'table'
+                        AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let columns = |schema: &str, table: &str| -> Vec<String> {
+                new.prepare(&format!("PRAGMA {schema}.table_info(\"{table}\")"))
+                    .unwrap()
+                    .query_map([], |row| row.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect()
+            };
+            for table in tables {
+                let held = columns("now", &table);
+                let shared: Vec<String> = columns("main", &table)
+                    .into_iter()
+                    .filter(|column| held.contains(column))
+                    .collect();
+                if shared.is_empty() {
+                    continue;
+                }
+                let list = shared
+                    .iter()
+                    .map(|column| format!("\"{column}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                new.execute_batch(&format!(
+                    "INSERT INTO main.\"{table}\" ({list}) SELECT {list} FROM now.\"{table}\""
+                ))
+                .unwrap_or_else(|failed| panic!("{table} copied to the earlier ledger: {failed}"));
+            }
+            new.execute_batch("DETACH DATABASE now").expect("detached");
+            drop(new);
+            for suffix in ["", "-wal", "-shm"] {
+                let name = format!("{}{suffix}", file.display());
+                let _ = std::fs::remove_file(&name);
+            }
+            std::fs::rename(&earlier, file).expect("the earlier ledger in place");
+        });
+        assert_eq!(
+            self.ledger
+                .borrow()
+                .sqlite()
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("the schema"),
+            cf_ledger::SCHEMA_VERSION as i64,
+            "the update ran"
+        );
+        assert_eq!(
+            seated(),
+            before,
+            "the update keeps every member, session and backup where it was"
+        );
     }
 
     /// The test is over: nothing may have failed unseen, and the engine and
