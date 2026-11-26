@@ -143,6 +143,7 @@ async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_th
         settle().await;
         // Zeus's look was asked before hera's, and the worker answers both
         // before the engine's thread looks at either.
+        standing.asked(2).await;
         standing.answer(2);
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;
