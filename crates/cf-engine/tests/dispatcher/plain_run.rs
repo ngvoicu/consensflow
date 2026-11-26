@@ -53,6 +53,7 @@ fn hold_apart_paced_delivery_looks(rows: &mut Value) {
         if event["kind"] == "member.out" {
             if let Some(data) = event["data"].as_object_mut() {
                 data.remove("because");
+                data.remove("participant");
             }
         }
     }
@@ -64,7 +65,7 @@ fn only_the_paced_delivery_look_is_held_apart() {
         "events": [
             {"kind": "delivery.begun", "data": {"message": 2, "look": {"status": "idle"}, "other": "kept"}},
             {"kind": "delivery.failed", "data": {"look": {"status": "kept"}}},
-            {"kind": "member.out", "data": {"handle": "zeus", "because": "its login was refused: 401"}},
+            {"kind": "member.out", "data": {"handle": "zeus", "because": "its login was refused: 401", "participant": 3}},
             {"kind": "task.state", "data": {"to": "paused", "stop": 5}}
         ],
         "messages": {"zeus": [{"look": "kept", "body": "unchanged"}]}
