@@ -1944,6 +1944,7 @@ impl Dispatcher {
                     part.for_human = None;
                     part.unsent = false;
                     part.unproven = false;
+                    part.settling_since = None;
                 }
             }
             if let Some(next) = next {

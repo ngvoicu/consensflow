@@ -253,8 +253,8 @@ fn a_paste_over_the_count_waits_for_a_second_of_a_still_screen() {
         answer["screenQuietMs"] = ms;
         paste_on(&look(&answer))
     };
-    assert_eq!(quiet(json!(999)), PasteLicence::Wait(Held::Unproven));
-    assert_eq!(quiet(Value::Null), PasteLicence::Wait(Held::Unproven));
+    assert_eq!(quiet(json!(999)), PasteLicence::Wait(Held::Settling));
+    assert_eq!(quiet(Value::Null), PasteLicence::Wait(Held::Settling));
     assert!(matches!(
         quiet(json!(1_000)),
         PasteLicence::Go {
@@ -404,13 +404,57 @@ fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
         PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, None, "an empty box"),
         other => panic!("{other:?}"),
     }
-    // A box the reader does not read holds the paste: the key would be blind.
+    // A box the reader does not read, with no key of the person's counted: the words in it are
+    // ours, put back by our own stop, and the blind clear goes with the paste (N6).
     let mut unread = snapshot("", false, None);
     unread["bottom"] = json!(["⏺ 4"]);
+    unread["typed"] = json!(0);
+    match licence_paste(&look(&unread), Harness::Claude, stale, CLEAR) {
+        PasteLicence::Go {
+            clear_first,
+            read_empty,
+            ..
+        } => {
+            assert_eq!(clear_first, Some(CLEAR), "the blind clear goes with the paste");
+            assert_eq!(read_empty, None);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// N6: what is held where the box does not read and our words are in it. A key of the person's
+/// counted since the window opened (any key: an arrow can recall their own words into a box,
+/// and leaves the unsent count at zero) means the words may not be ours, so the clear is not
+/// blind: the message waits, and the words never say "what you typed" while nothing is unsent.
+#[test]
+fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons_was_counted() {
+    let stale = BoxState { stale_paste: true };
+    let mut unread = snapshot("", false, None);
+    unread["bottom"] = json!(["⏺ 4"]);
+    // `typed` is 4 here: the person pressed keys, none left unsent.
+    match licence_paste(&look(&unread), Harness::Claude, stale, CLEAR) {
+        PasteLicence::Wait(Held::ForHuman(words)) => {
+            assert!(!words.contains("typed"), "{words}");
+            assert!(words.contains("Enter"), "{words}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // The count above zero holds as it did, and says so.
+    let mut unsent = snapshot("", true, None);
+    unsent["bottom"] = json!(["⏺ 4"]);
+    unsent["typed"] = json!(0);
     assert_eq!(
-        licence_paste(&look(&unread), Harness::Claude, stale, CLEAR),
+        licence_paste(&look(&unsent), Harness::Claude, stale, CLEAR),
         PasteLicence::Wait(Held::Unsent)
     );
+    // No put-back of ours: a box the reader does not read is the person's, as it was.
+    let mut unread = snapshot("", false, None);
+    unread["bottom"] = json!(["⏺ 4"]);
+    unread["typed"] = json!(0);
+    assert!(matches!(
+        licence_paste(&look(&unread), Harness::Claude, BoxState::default(), CLEAR),
+        PasteLicence::Go { clear_first: None, .. }
+    ));
 }
 
 #[test]

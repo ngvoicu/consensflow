@@ -1236,7 +1236,7 @@ fn t2255_a_screen_that_never_holds_still_keeps_the_paste_until_ctrl_u() {
             *kept_answer.lock().unwrap() = Some((licence, before, held_pasted));
         });
         let (licence, taken_before, held_before) = answer.lock().unwrap().take().expect("asked");
-        assert_eq!(licence, PasteLicence::Wait(Held::Unproven), "{harness:?}");
+        assert_eq!(licence, PasteLicence::Wait(Held::Settling), "{harness:?}");
         assert_eq!((taken_before, held_before), (0, 0), "{harness:?}");
         assert_eq!(
             case.taken(),
@@ -1328,6 +1328,83 @@ fn the_limit_two_keys_typed_into_a_stalled_dialog() {
         assert!(
             case.world.check().is_err(),
             "{harness:?}: the limit is closed: take it out of the design and the limit list"
+        );
+        case.end();
+    });
+}
+
+// ---- N6 -------------------------------------------------------------------------------------
+
+/// N6: our own stop put our message back in a box that no reader reads, and no key of the
+/// person's has been counted in the window: the words in the box are ours, so the clear and the
+/// paste go as they did before N17, whether or not the box can be read.
+#[test]
+fn n6_our_put_back_with_no_key_of_the_persons_is_cleared_and_pasted_though_the_box_does_not_read() {
+    each_harness(|harness| {
+        for readable in [false, true] {
+            let case = run_script(harness, move |world| {
+                world.put_back(readable);
+                settled(&world);
+                a_while(&world);
+                world.pass(false);
+            });
+            case.rules();
+            assert_eq!(
+                case.taken(),
+                [1],
+                "{harness:?}, box readable {readable}: {:?}",
+                case.world.log.lock().unwrap()
+            );
+            case.end();
+        }
+    });
+}
+
+/// N6: the same put-back with one key of the person's counted in the window (their `a` is
+/// unsent): nothing is cleared and nothing is pasted.
+#[test]
+fn n6_our_put_back_with_a_key_of_the_persons_unsent_is_held() {
+    each_harness(|harness| {
+        for readable in [false, true] {
+            let case = run_script(harness, move |world| {
+                world.put_back(readable);
+                settled(&world);
+                types(&world, b"a");
+                settled(&world);
+                a_while(&world);
+                world.pass(false);
+            });
+            case.rules();
+            assert!(
+                case.held().is_empty() && case.taken().is_empty(),
+                "{harness:?}, box readable {readable}: {:?}",
+                case.world.log.lock().unwrap()
+            );
+            case.end();
+        }
+    });
+}
+
+/// N6, a pinned limit: a key of the person's was counted and left nothing unsent (typed, then
+/// erased), and the box is one no reader reads with our words in it. The words may be their own
+/// (an arrow recalls them without changing the count), so the message waits; nothing the person
+/// can press here frees it. No `rules()`: rule 4 would call it lost.
+#[test]
+fn the_limit_a_key_of_the_persons_was_counted_and_our_put_back_sits_in_a_box_that_does_not_read() {
+    each_harness(|harness| {
+        let case = run_script(harness, |world| {
+            world.put_back(false);
+            settled(&world);
+            types(&world, b"a");
+            types(&world, b"\x7f");
+            settled(&world);
+            a_while(&world);
+            world.pass(false);
+        });
+        assert!(
+            case.held().is_empty() && case.taken().is_empty(),
+            "{harness:?}: {:?}",
+            case.world.log.lock().unwrap()
         );
         case.end();
     });

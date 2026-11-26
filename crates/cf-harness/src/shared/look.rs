@@ -345,23 +345,30 @@ pub fn licence_paste(
         };
         // A window draws a dialog's end and the keys typed ahead of it in two frames, a moment
         // apart, and a look between them reads the box empty. A screen that never holds still
-        // keeps the words that say what to press.
+        // keeps the message until Ctrl+U: the engine says so once the wait has lasted.
         if look
             .screen_quiet_ms()
             .is_none_or(|quiet| quiet < SETTLED_MS)
         {
-            return PasteLicence::Wait(Held::Unproven);
+            return PasteLicence::Wait(Held::Settling);
         }
         Some(evidence)
     } else {
         None
     };
-    // A stale paste of ours is in the box where it holds anything: the paste empties it first,
-    // from a box that reads. One the screen does not show holds the paste, as the human's own
-    // words do.
+    // A stale paste of ours is in the box where it holds anything: the paste empties it first.
+    // A box the screen does not show is cleared blind, with the paste, only where the host has
+    // counted no key of the person's in this window (N6): nobody has typed, so the words in it
+    // are the ones our own stop put back. Any key since, an arrow that recalls their own words
+    // among them, leaves it held, and the words say what is in the box, never "what you typed".
     let stale = state.stale_paste && !over_count;
-    if stale && reads == BoxReading::Unread {
-        return PasteLicence::Wait(Held::Unsent);
+    if stale && reads == BoxReading::Unread && look.at().typed > 0 {
+        // Said as what is in the box and what lifts the hold: Enter sends it, and the record
+        // then no longer shows it put back. Nothing here says "typed", for nothing is unsent.
+        return PasteLicence::Wait(Held::ForHuman(
+            "its input box holds a message ConsensFlow put back there: press Enter in this window to send it"
+                .to_owned(),
+        ));
     }
     if !over_count && !stale && reads == BoxReading::Holds {
         return PasteLicence::Wait(Held::Unsent);

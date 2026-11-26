@@ -111,6 +111,10 @@ pub(crate) struct Program {
     /// A window that has fallen behind on its input: what it has not taken waits here, in the
     /// order it came, and is all taken together when it goes on (the checks' assumption).
     stalled: Option<Vec<u8>>,
+    /// The box holds a message of ours the window's own stop put back (N6).
+    ours: bool,
+    /// The window's box is one no reader reads: the screen draws no box at all (N6).
+    boxless: bool,
 }
 
 impl Program {
@@ -130,7 +134,17 @@ impl Program {
             dialog: false,
             picker: None,
             stalled: None,
+            ours: false,
+            boxless: false,
         }
+    }
+
+    /// The window's own stop put our message back in its box (N6): the box holds it as a paste
+    /// the window drew, and where `readable` is false the screen draws no box a reader knows.
+    pub(crate) fn put_back(&mut self, readable: bool) {
+        self.ours = true;
+        self.boxless = !readable;
+        self.emit(self.frame());
     }
 
     /// The window stops taking its input; it goes on printing.
@@ -231,6 +245,10 @@ impl Program {
             );
             return bytes;
         }
+        if self.boxless {
+            bytes.extend(format!("\x1b[1;1HThe conversation\x1b[{BOX};1H⏺ 4").as_bytes());
+            return bytes;
+        }
         bytes.extend(format!("\x1b[1;1HThe conversation\x1b[{};1H{top}", BOX - 1).as_bytes());
         bytes.extend(format!("\x1b[{};1H{rule}", BOX + 1).as_bytes());
         bytes.extend(format!("\x1b[{};1H{status}", BOX + 2).as_bytes());
@@ -240,8 +258,11 @@ impl Program {
 
     /// The box's line as it is now, and the cursor where it is.
     fn box_line(&self) -> Vec<u8> {
+        if self.boxless {
+            return format!("\x1b[{BOX};1H\x1b[2K⏺ 4").into_bytes();
+        }
         let mark = self.mark();
-        let (body, column) = if !self.held.is_empty() {
+        let (body, column) = if !self.held.is_empty() || self.ours {
             ("[Pasted text #1]".to_owned(), 3 + 16)
         } else if self.draft.is_empty() && self.hint {
             (format!("\x1b[2m{}\x1b[0m", self.hint_words()), 3)
@@ -441,6 +462,11 @@ impl Program {
                 self.draft
             ));
         }
+        if self.ours {
+            self.violations.push(format!(
+                "a paste of m-{id} went in over the words our own stop put back, which it did not clear"
+            ));
+        }
         if self.held.contains(&id) {
             self.violations
                 .push(format!("m-{id} is in the window's box twice"));
@@ -474,6 +500,7 @@ impl Program {
 
     /// The key that empties the box.
     fn cleared(&mut self) {
+        self.ours = false;
         self.held.clear();
         self.draft.clear();
         self.emit(self.box_line());

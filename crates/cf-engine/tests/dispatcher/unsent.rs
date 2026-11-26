@@ -457,3 +457,46 @@ fn a_message_held_for_keys_nothing_shows_are_gone_says_to_press_ctrl_u() {
     context.pass().unwrap();
     assert!(!context.dispatcher.holding_unproven(chief).unwrap());
 }
+
+/// N4: a wait for a screen that changed a moment ago is the wait for what the person typed
+/// ("send or erase"), where Ctrl+U would help nothing: only a screen that never holds still, and
+/// so keeps the message, says what to press, once the wait has lasted five seconds.
+#[test]
+fn a_wait_for_a_still_screen_says_to_press_ctrl_u_only_once_it_has_lasted() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let held = Rc::new(Cell::new(true));
+    let asked = Rc::clone(&held);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        Ok(if asked.get() {
+            Readiness::Held(Held::Settling)
+        } else {
+            Readiness::Ready
+        })
+    }));
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    assert!(context.dispatcher.holding(chief).unwrap());
+    assert!(
+        !context.dispatcher.holding_unproven(chief).unwrap(),
+        "a second of a changing screen: nothing to press"
+    );
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert!(!context.dispatcher.holding_unproven(chief).unwrap());
+    context.advance(4_000);
+    context.pass().unwrap();
+    assert!(
+        context.dispatcher.holding_unproven(chief).unwrap(),
+        "a screen that has not held still for five seconds: Ctrl+U"
+    );
+    held.set(false);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(!context.dispatcher.holding_unproven(chief).unwrap());
+}

@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{
-    Admission, Held, HostError, Observed, Over, Pane, PaneHost, Readiness, Work,
+    Admission, Held, HostError, Observed, Over, Pane, PaneHost, Readiness, Work, SETTLING_WORDS_MS,
 };
 use cf_harness::records::{Reading, Role};
 use cf_harness::PasteLicence;
@@ -125,6 +125,18 @@ pub struct HeldBack {
     pub traced: bool,
 }
 
+/// Whether the board says what to press for `held`: a wait for the person's keys with nothing
+/// to show where they went, or a wait for a still screen that has lasted
+/// [`SETTLING_WORDS_MS`] (N4). Keeps when a wait for a still screen began.
+fn unproven_words(part: &mut DeliveryPart, held: Option<&Held>, now: i64) -> bool {
+    if held != Some(&Held::Settling) {
+        part.settling_since = None;
+        return held == Some(&Held::Unproven);
+    }
+    let since = *part.settling_since.get_or_insert(now);
+    now - since >= SETTLING_WORDS_MS
+}
+
 /// The record's delivery part.
 #[derive(Debug, Default)]
 pub(crate) struct DeliveryPart {
@@ -135,8 +147,11 @@ pub(crate) struct DeliveryPart {
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
     pub(crate) unsent: bool,
-    /// That wait is for [`Held::Unproven`].
+    /// That wait is for [`Held::Unproven`], or for [`Held::Settling`] and has lasted
+    /// [`SETTLING_WORDS_MS`]: the board says to press Ctrl+U.
     pub(crate) unproven: bool,
+    /// Since when the wait has been for [`Held::Settling`], with no other hold between.
+    pub(crate) settling_since: Option<i64>,
     /// A message waits for what only the human can do in the window, in the window's words
     /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
     /// asked again at every look.
@@ -666,9 +681,10 @@ impl Dispatcher {
         };
         // Held for what the human typed and has not sent: the board says so.
         {
+            let now = self.now();
             let mut part = record.delivery.borrow_mut();
             part.unsent = held.as_ref().is_some_and(Held::for_typing);
-            part.unproven = held == Some(Held::Unproven);
+            part.unproven = unproven_words(&mut part, held.as_ref(), now);
             part.for_human = match &held {
                 Some(Held::ForHuman(words)) => Some(words.clone()),
                 _ => None,
@@ -1047,9 +1063,10 @@ impl Dispatcher {
             Readiness::Held(held) => {
                 let unsent = held.for_typing();
                 {
+                    let now = self.now();
                     let mut part = record.delivery.borrow_mut();
                     part.unsent = unsent;
-                    part.unproven = held == Held::Unproven;
+                    part.unproven = unproven_words(&mut part, Some(&held), now);
                     part.for_human = match &held {
                         Held::ForHuman(words) => Some(words.clone()),
                         _ => None,
@@ -1466,14 +1483,25 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let was = record.delivery.borrow().held.clone();
         let held = match was.filter(|held| held.message == message) {
-            Some(held) if held.reason == reason && held.traced => held,
+            Some(mut held) if held.reason == reason && held.traced => {
+                // A wait for a still screen that has lasted says what to press (N4).
+                let unproven = by == Some(&Held::Unproven)
+                    || (by == Some(&Held::Settling) && record.delivery.borrow().unproven);
+                if held.unproven != unproven {
+                    held.unproven = unproven;
+                    record.delivery.borrow_mut().held = Some(held.clone());
+                }
+                held
+            }
             was => {
                 let held = HeldBack {
                     message,
                     reason: reason.to_owned(),
                     since_ms: was.map_or_else(|| self.now(), |was| was.since_ms),
                     unsent: by.is_some_and(Held::for_typing),
-                    unproven: by == Some(&Held::Unproven),
+                    unproven: by == Some(&Held::Unproven)
+                        || (by == Some(&Held::Settling)
+                            && record.delivery.borrow().unproven),
                     traced: true,
                 };
                 record.delivery.borrow_mut().held = Some(held.clone());

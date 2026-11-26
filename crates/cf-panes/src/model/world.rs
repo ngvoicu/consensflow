@@ -181,6 +181,8 @@ pub(crate) struct World {
     /// What each pass of the engine decided, for a failure to say.
     pub(crate) log: Mutex<Vec<String>>,
     stop: AtomicBool,
+    /// The window's box holds a message of ours its own stop put back (the adapter's word).
+    stale: AtomicBool,
     /// The scenario's producers are done: the window is left to settle.
     pub(crate) settled: AtomicBool,
     settled_at: Mutex<Option<Duration>>,
@@ -238,6 +240,7 @@ impl World {
             violations,
             log: Mutex::new(Vec::new()),
             stop: AtomicBool::new(false),
+            stale: AtomicBool::new(false),
             settled: AtomicBool::new(false),
             settled_at: Mutex::new(None),
         })
@@ -453,6 +456,13 @@ impl World {
         }
     }
 
+    /// The window's own stop puts a message of ours back in its box, and the adapter says so
+    /// (N6). `readable`: the screen draws a box a reader reads; without it, none.
+    pub(crate) fn put_back(&self, readable: bool) {
+        self.program.lock().unwrap().put_back(readable);
+        self.stale.store(true, Ordering::SeqCst);
+    }
+
     /// One pass of the engine: the arrival of a message pasted, and the paste of the next.
     /// `blind` is a look that fails (the host did not answer).
     pub(crate) fn pass(&self, blind: bool) {
@@ -521,7 +531,12 @@ impl World {
         let look = match looked(self) {
             // A window whose screen shows no box shows a dialog or a picker, which the
             // engine's dialog reader holds the window for.
-            Ok(look) if look.reads(self.harness) == BoxReading::Unread => return,
+            Ok(look)
+                if look.reads(self.harness) == BoxReading::Unread
+                    && !self.stale.load(Ordering::SeqCst) =>
+            {
+                return
+            }
             Ok(look) => look,
             Err(no_look) => {
                 self.log
@@ -531,7 +546,9 @@ impl World {
                 return;
             }
         };
-        let state = BoxState::default();
+        let state = BoxState {
+            stale_paste: self.stale.load(Ordering::SeqCst),
+        };
         let licence = licence_paste(&look, self.harness, state, &[3]);
         self.log.lock().unwrap().push(format!(
             "{now:?}: {licence:?}, box {:?}, lines {:?}",
@@ -562,6 +579,7 @@ impl World {
                     .unwrap()
                     .push(format!("{now:?}: m-{id} pasted"));
                 self.set(id, State::Pasted(self.clock.elapsed()));
+                self.stale.store(false, Ordering::SeqCst);
             }
             // The look was no longer true, or the human typed: nothing was written, and no attempt
             // is spent.
@@ -636,7 +654,7 @@ impl World {
         };
         matches!(
             licence_paste(&look, self.harness, BoxState::default(), &[3]),
-            PasteLicence::Wait(Held::Unsent | Held::Unproven)
+            PasteLicence::Wait(Held::Unsent | Held::Unproven | Held::Settling)
         )
     }
 

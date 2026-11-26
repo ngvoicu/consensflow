@@ -730,3 +730,23 @@ replace = """        let changed = screen.feed(bytes);
         crate::sync::point("feed.noted");
         printed.counts().drew(bytes.len());
         kept(bytes);"""
+
+[[plant]]
+name = "output clock: our put-back in a box that does not read holds the message with no key of the person's counted"
+meant = "n6_our_put_back_with_no_key_of_the_persons_is_cleared_and_pasted_though_the_box_does_not_read"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 {"""
+replace = """    if stale && reads == BoxReading::Unread {"""
+
+[[plant]]
+name = "output clock: our put-back in a box that does not read is cleared blind after a key of the person's"
+meant = "the_limit_a_key_of_the_persons_was_counted_and_our_put_back_sits_in_a_box_that_does_not_read"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 {"""
+replace = """    if stale && reads == BoxReading::Unread && look.at().typed > 0 && false {"""

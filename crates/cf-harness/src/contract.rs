@@ -1035,6 +1035,11 @@ pub enum Over {
     Held,
 }
 
+/// How long a wait for a still screen ([`Held::Settling`]) has lasted before the board says what
+/// to press: a screen that never holds still (a clock the person configured) keeps the message
+/// until Ctrl+U, and says so. A clock on words only; nothing goes or holds by it.
+pub const SETTLING_WORDS_MS: i64 = 5_000;
+
 /// Why a delivery waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Held {
@@ -1043,6 +1048,11 @@ pub enum Held {
     /// The box reads empty, the host counts keys of the person's as left unsent, and nothing
     /// shows where they went ([`crate::Look::evidence`]): the board says so, and what to do.
     Unproven,
+    /// The box reads empty over the host's count, with evidence, and the screen changed within
+    /// the last second: a window draws a dialog's end and the keys typed ahead of it in two
+    /// frames. The board says what any wait for the person's typing says, and only a wait that
+    /// lasts ([`SETTLING_WORDS_MS`]) says what to press (N4).
+    Settling,
     /// The window shows another conversation than its launch's.
     ShowsAnother,
     /// A harness that said no more than "not yet" (Devin's `false`).
@@ -1059,7 +1069,7 @@ impl Held {
     /// Whether what holds the delivery is what the person typed in the window: the engine
     /// spends no launch's time waiting for it, and the board says so.
     pub fn for_typing(&self) -> bool {
-        matches!(self, Held::Unsent | Held::Unproven)
+        matches!(self, Held::Unsent | Held::Unproven | Held::Settling)
     }
 
     /// The sentence the engine says it in.
@@ -1067,6 +1077,7 @@ impl Held {
         match self {
             Held::Unsent => "you have typed in this window and not sent it",
             Held::Unproven => "ConsensFlow can't tell that what you typed in this window is gone",
+            Held::Settling => "its screen changed a moment ago and the keys you typed may not be drawn yet",
             Held::ShowsAnother => "the window shows another conversation",
             Held::Unsaid => "a paste is on its way",
             Held::Because(reason) | Held::ForHuman(reason) => reason,
