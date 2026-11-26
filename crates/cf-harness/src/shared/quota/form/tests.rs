@@ -44,6 +44,11 @@ fn tells_which_was_refused_its_status_and_its_provider_s_error_type() {
         // Muse's fixed sentences say which, and nothing else.
         (crate::muse::record::NO_ALLOWANCE, ("billing", None, None)),
         (crate::muse::record::LOGIN_REFUSED, ("login", None, None)),
+        // A code inside a longer word is no code.
+        (
+            r#"its login was refused: 401 {"error":{"code":"previous_invalid_grant_pending"}}"#,
+            ("login", Some(401), None),
+        ),
         // A status the form does not name, a code of the other kind.
         (
             r#"its login was refused: 429 {"error":{"code":"insufficient_quota"}}"#,

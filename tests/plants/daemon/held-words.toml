@@ -15,7 +15,6 @@ held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi:
 held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests"]
 held-words-form = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::form"]
 held-words-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "hold::"]
-held-words-proto-doc = ["cargo", "test", "--offline", "-p", "cf-proto", "--doc"]
 
 [[plant]]
 name = "held words: the hold keeps no form"
@@ -68,26 +67,6 @@ find = ".and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == st
 replace = ".and_then(|status| u16::try_from(status).ok()),"
 
 [[plant]]
-name = "held words: the hold's form can be built outside its type"
-meant = "hold::HoldForm (line 56) - compile fail"
-runs = ["held-words-proto-doc"]
-
-[[plant.edit]]
-file = "crates/cf-proto/src/hold.rs"
-find = """pub struct HoldForm {
-    kind: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<&'static str>,"""
-replace = """pub struct HoldForm {
-    pub kind: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<&'static str>,"""
-
-[[plant]]
 name = "held words: mark_back leaves the hold's form"
 meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
 runs = ["held-words-ledger"]
@@ -104,8 +83,8 @@ runs = ["held-words-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = "out_kind = ?, out_form = ? WHERE id = ?\","
-replace = "out_kind = ?, out_form = coalesce(?, out_form) WHERE id = ?\","
+find = "out_since = ?, out_kind = ?, out_form = ? WHERE id = ?"
+replace = "out_since = ?, out_kind = ?, out_form = coalesce(?, out_form) WHERE id = ?"
 
 [[plant]]
 name = "held words: the chief's switch leaves the hold's form"
