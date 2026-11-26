@@ -11,6 +11,8 @@ fn journal() -> Journal {
 /// One message: the read appended, then settled, as the consumer does.
 fn take(journal: &Journal, bytes: &[u8]) {
     journal.append(bytes);
+    // A page that keeps up has drawn it.
+    journal.acknowledged(journal.end());
     journal.settle();
 }
 
@@ -661,4 +663,20 @@ fn the_rows_of_a_late_size_decide_which_settings_were_refused() {
     let (_, pieces) = pulled(&journal);
     assert_eq!(String::from_utf8_lossy(&pieces[0].seed), "\x1b[2;9r");
     assert_eq!(pieces[0].size, (40, 80));
+}
+
+/// T-2229 finding 7: the host accepts 4,096 rows and xterm can use every one, so a region whose
+/// top is at row 1,024, 2,000 or 4,095 is as much the program's as one near the top: past the
+/// cap the seed restores it.
+#[test]
+fn a_region_far_down_the_tallest_screen_is_restored_past_the_cap() {
+    let rows = 4096;
+    for top in [1024, 2000, 4095] {
+        let opening = format!("\x1b[{top};{rows}r");
+        assert_eq!(
+            seed_at((rows, 8), opening.as_bytes()),
+            opening,
+            "top {top} of a {rows}-row screen"
+        );
+    }
 }

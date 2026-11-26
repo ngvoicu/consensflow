@@ -50,7 +50,7 @@
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
-use cf_base::file::{make_folder, write_file, Mkdir};
+use cf_base::file::{make_folder, write_in_place, Mkdir};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
 use cf_base::path;
@@ -145,7 +145,7 @@ pub(super) fn write(env: &Env, launch: &LaunchId, text: &str) -> Result<(String,
     let file = path::join(&[&folder, FILE]);
     let said = |error: cf_base::file::FileError| error.to_string();
     make_folder(Path::new(&folder), 0o700, Mkdir::Promise).map_err(said)?;
-    write_file(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
+    write_in_place(Path::new(&file), text.as_bytes(), 0o600).map_err(said)?;
     Ok((ROLE_VARIABLE.to_owned(), file))
 }
 
@@ -169,7 +169,7 @@ pub(super) fn write_children(
         "developer_instructions = {}\n",
         toml_string(&texts.children)
     );
-    write_file(Path::new(&file), configuration.as_bytes(), 0o600).map_err(said)?;
+    write_in_place(Path::new(&file), configuration.as_bytes(), 0o600).map_err(said)?;
     Ok(vec![
         (SUBAGENT_VARIABLE.to_owned(), file),
         (SUBAGENT_TYPES_VARIABLE.to_owned(), texts.kinds.join(",")),

@@ -40,9 +40,9 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
 find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
 replace = '''         AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
 
 [[plant]]
 name = "waiting notes: a take-over withdraws a note the chief wrote"
@@ -62,9 +62,9 @@ runs = ["waiting-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
 find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
 replace = '''         AND state = 'queued' AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",'''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"

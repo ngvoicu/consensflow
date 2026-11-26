@@ -141,7 +141,11 @@ struct AckRequest {
     seq: u64,
 }
 
-fn default_backlog_bytes() -> usize {
+/// The room of a window whose `pane.open` names none: how much of its output may be handed to a
+/// page and not yet acknowledged before the program waits on its terminal. Every table's, with
+/// journals or without: a window can then never print past what its journal still holds of a
+/// page that has not yet pulled it ([`crate::journal`]).
+pub fn default_backlog_bytes() -> usize {
     DEFAULT_BACKLOG_BYTES
 }
 
@@ -825,6 +829,8 @@ fn stream_to_page(
         if let Some(journal) = journal {
             journal.finish();
             panes.keep_ended_journal(key.clone(), journal);
+        } else {
+            output.forget(&key);
         }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
@@ -1627,7 +1633,7 @@ mod tests {
             Arc::clone(&panes),
             clock,
             inputs,
-            output,
+            Arc::clone(&output),
         );
 
         let mut reader = BufReader::new(peer);
@@ -1639,6 +1645,12 @@ mod tests {
                 break;
             }
         }
+        // T-2269: a window with no journal leaves nothing of what it was handed behind it.
+        assert_eq!(
+            output.handed_windows(),
+            0,
+            "the hub forgot the ended window"
+        );
         let messages: Vec<_> = received.try_iter().collect();
         let mut bytes = Vec::new();
         let mut sequences = Vec::new();

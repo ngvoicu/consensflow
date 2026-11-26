@@ -673,7 +673,12 @@ fn a_reader_held_at_the_credit_is_behind_and_the_unsent_count_holds_a_paste() {
         refused.is_err(),
         "the paste went over the person's unsent key"
     );
-    window.panes.ack_all();
+    // The page takes what it was sent and acknowledges it: that frees the room.
+    let mut last = 0;
+    while let Ok(message) = window._published.try_recv() {
+        last = last.max(message.seq());
+    }
+    window.panes.ack(&window.key, last).unwrap();
     let current = window.until(|snapshot| {
         snapshot["bottom"].to_string().contains('X') && snapshot["outputCaughtUp"] == true
     });
@@ -720,8 +725,8 @@ fn a_feed_that_panics_leaves_the_journal_whole_and_handed_on() {
         String::from_utf8_lossy(&handed).contains("JOURNAL-MARKER"),
         "the page now subscribed has it"
     );
-    window.panes.attach_page(&window.hub, Arc::new(|_| true));
-    let piece = window.panes.history(&window.key, None).expect("kept");
+    window.panes.attach_page("page", &window.hub, Arc::new(|_| true));
+    let piece = window.panes.history("page", &window.key, None).expect("kept");
     assert!(
         String::from_utf8_lossy(&piece.bytes).contains("JOURNAL-MARKER"),
         "a later page's pull holds it"

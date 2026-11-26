@@ -11,6 +11,7 @@ pub(crate) mod launch_files;
 pub(crate) mod left_open;
 pub mod look;
 pub(crate) mod net;
+pub(crate) mod off_thread;
 pub(crate) mod one_shot;
 pub(crate) mod pane;
 pub(crate) mod paths;

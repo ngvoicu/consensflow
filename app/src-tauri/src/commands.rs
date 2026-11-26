@@ -11,11 +11,10 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, NoticeBody, PageInputCompletion, PendingNotices};
 use cf_panes::output_hub::PaneOutputMessage;
-use cf_panes::validation::{
-    decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
-};
+use cf_panes::page;
+use cf_panes::validation::{decode_page_bytes, pane_key, validate_text};
 
 pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
@@ -59,13 +58,16 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
         Ok(completion) => completion,
         Err(error) => return json!({"ok":false,"error":error}),
     };
-    match completion.receiver.await {
+    match completion.receiver.clone().await {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({
             "ok":false,
             "error":error.to_string(),
             "uncertain":error.is_uncertain(),
             "failedUntilRestart":error.failed_until_restart(),
+            // The host recorded this call's outcome itself: the page confirms its number once
+            // it has said so.
+            "loss":completion.loss(),
         }),
     }
 }
@@ -88,20 +90,136 @@ fn page_input_finished(
     result
 }
 
+/// A page announces itself with a nonce of its document's own; the host answers with its
+/// epoch for this document, and the page echoes that exact pair to activate.
 #[tauri::command]
-pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String, nonce: String) -> Value {
     let state = app.state::<AppRuntime>();
-    match state.inputs.prepare_page(&page_id) {
+    match state.inputs.prepare_page(&page_id, &nonce) {
+        Ok(epoch) => json!({"ok":true,"epoch":epoch,"nonce":nonce}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// The event that tells the page that is current that typing may not have reached a
+/// window: its `id` and `generation`, and the `loss` number the page confirms.
+pub(crate) const PANE_INPUT_LOST_EVENT: &str = "pane-input-lost";
+
+/// Tells the page what the host gives up on of its input: the windows whose typing may
+/// not have arrived, and a line for the app's log.
+pub(crate) struct PageInputObserver<R: Runtime>(pub AppHandle<R>);
+
+impl<R: Runtime> cf_panes::input_queue::InputObserver for PageInputObserver<R> {
+    fn lost(&self, key: &cf_panes::pty::PaneKey, loss: u64) {
+        if let Err(error) = self.0.emit(
+            PANE_INPUT_LOST_EVENT,
+            json!({"id":key.id,"generation":key.generation,"loss":loss}),
+        ) {
+            crate::diag::say(format!(
+                "could not tell the page its typing was lost: {error}"
+            ));
+        }
+    }
+
+    fn say(&self, line: &str) {
+        crate::diag::say(line);
+    }
+}
+
+fn notices_json(notices: &PendingNotices) -> Value {
+    json!({
+        "notices":notices.iter().map(|notice| match &notice.body {
+            NoticeBody::Window { key, name, closed, failed, dropped } => json!({
+                "id":notice.id,
+                "kind":"window",
+                "window":key.id,
+                "generation":key.generation,
+                "name":name,
+                "closed":closed,
+                "failed":failed,
+                "dropped":dropped,
+            }),
+            NoticeBody::Folded { count } => json!({
+                "id":notice.id,
+                "kind":"folded",
+                "count":count,
+            }),
+        }).collect::<Vec<_>>(),
+    })
+}
+
+/// The person dismissed the notice with this id: it goes if it is still outstanding under that
+/// id, on the current page of the current epoch. A notice the host replaced has a new id.
+#[tauri::command]
+pub fn pane_lost_dismiss<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: u64,
+) -> Value {
+    let state = app.state::<AppRuntime>();
+    match state.inputs.dismiss_notice(&page_id, epoch, id) {
+        Ok(removed) => json!({"ok":true,"removed":removed}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// The page says what a window is called, so that a notice of a window that has closed names it.
+#[tauri::command]
+pub fn pane_window_name<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    name: String,
+) -> Value {
+    if name.is_empty() || name.len() > 200 {
+        return json!({"ok":false,"error":"invalid window name"});
+    }
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state.inputs.name_window(&page_id, epoch, &key, &name) {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
 
+/// What the host still owes the person, for the page that is current to show. The page asks at
+/// its activation, after its board loads, on a timer and when it comes into view.
 #[tauri::command]
-pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+pub fn pane_lost_pull<R: Runtime>(app: AppHandle<R>, page_id: String, epoch: u64) -> Value {
     let state = app.state::<AppRuntime>();
-    match state.inputs.activate_page(&page_id) {
-        Ok(()) => json!({"ok":true}),
+    match state.inputs.pending_losses(&page_id, epoch) {
+        Ok(notices) => {
+            let mut answer = notices_json(&notices);
+            answer["ok"] = true.into();
+            answer
+        }
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// The page becomes current, echoing the epoch and nonce its preparation was answered. The
+/// windows whose typing may not have reached them come back, for it to say so.
+#[tauri::command]
+pub fn pane_page_activate<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    nonce: String,
+    epoch: u64,
+) -> Value {
+    let state = app.state::<AppRuntime>();
+    match state.inputs.activate_page(&page_id, &nonce, epoch) {
+        Ok(notices) => {
+            let mut answer = notices_json(&notices);
+            answer["ok"] = true.into();
+            answer["epoch"] = epoch.into();
+            answer
+        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -109,6 +227,7 @@ pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Val
 /// What a page call says of itself: its page, pane and number.
 struct PageCall {
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -126,7 +245,28 @@ fn enqueue_page_text<R: Runtime>(
 ) -> Value {
     match decode_page_bytes(length, text) {
         Ok(bytes) => enqueue_page_call(app, call, bytes, reply),
-        Err(error) => json!({"ok":false,"error":error}),
+        Err(error) => {
+            // A refusal is final for its number: the page goes on with the next, so the
+            // order must not wait for this one.
+            if let Ok(key) = pane_key(&call.id, call.generation) {
+                let state = app.state::<AppRuntime>();
+                match state.inputs.refuse_page_sequence(
+                    &call.page_id,
+                    call.epoch,
+                    &key,
+                    call.sequence,
+                ) {
+                    Ok(loss) => return json!({"ok":false,"error":error,"loss":loss}),
+                    // Its number cannot be spent yet (the page's slots are full): the page skips
+                    // it until the host has, and never takes this for a final refusal.
+                    Err(pending) if pending == cf_panes::input_queue::SKIP_PENDING => {
+                        return json!({"ok":false,"error":error,"spent":false});
+                    }
+                    Err(_) => {}
+                }
+            }
+            json!({"ok":false,"error":error})
+        }
     }
 }
 
@@ -149,18 +289,26 @@ fn enqueue_page_call<R: Runtime>(
     } else {
         InputWork::Typed(bytes)
     };
-    match inputs.enqueue_page(&call.page_id, key, call.sequence, work, !reply) {
+    match inputs.enqueue_page_told(&call.page_id, call.epoch, key, call.sequence, work, !reply) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
-        Err(error) => json!({"ok":false,"error":error}),
+        Err(refusal) => match refusal.loss {
+            Some(loss) => {
+                json!({"ok":false,"error":refusal.error,"loss":loss,"spent":refusal.spent})
+            }
+            None => json!({"ok":false,"error":refusal.error}),
+        },
     }
 }
 
 /// What the human types or pastes, in one call: the bytes of a key, or of a
 /// paste whole with its markers.
 #[tauri::command]
+// The page names each argument; a command cannot take them as one value.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -169,6 +317,7 @@ pub fn pane_input_enqueue<R: Runtime>(
 ) -> Value {
     let call = PageCall {
         page_id,
+        epoch,
         id,
         generation,
         sequence,
@@ -177,9 +326,12 @@ pub fn pane_input_enqueue<R: Runtime>(
 }
 
 #[tauri::command]
+// The page names each argument; a command cannot take them as one value.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -188,6 +340,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
 ) -> Value {
     let call = PageCall {
         page_id,
+        epoch,
         id,
         generation,
         sequence,
@@ -201,6 +354,7 @@ pub fn pane_reply_enqueue<R: Runtime>(
 pub fn pane_input_skip<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
+    epoch: u64,
     id: String,
     generation: u64,
     sequence: u64,
@@ -210,8 +364,67 @@ pub fn pane_input_skip<R: Runtime>(
         Err(error) => return json!({"ok":false,"error":error}),
     };
     let state = app.state::<AppRuntime>();
-    match state.inputs.skip_page_sequence(&page_id, &key, sequence) {
+    match state
+        .inputs
+        .skip_page_sequence(&page_id, epoch, &key, sequence)
+    {
+        Ok(loss) => json!({"ok":true,"loss":loss}),
+        // Its number cannot be spent yet: the page asks again, and the skip stays pending.
+        Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
+            json!({"ok":false,"error":error,"retry":true})
+        }
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// A drop took this number at its gesture, before it looked up its path: the host holds the
+/// place, and says so itself if the page reloads before the path is typed.
+#[tauri::command]
+pub fn pane_input_place<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    sequence: u64,
+) -> Value {
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state
+        .inputs
+        .place_page_sequence(&page_id, epoch, &key, sequence)
+    {
         Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+/// A number the page took for a gesture and never used is let go: spent, and nothing told.
+#[tauri::command]
+pub fn pane_input_release<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    epoch: u64,
+    id: String,
+    generation: u64,
+    sequence: u64,
+) -> Value {
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state
+        .inputs
+        .release_page_sequence(&page_id, epoch, &key, sequence)
+    {
+        Ok(()) => json!({"ok":true}),
+        Err(error) if error == cf_panes::input_queue::SKIP_PENDING => {
+            json!({"ok":false,"error":error,"retry":true})
+        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -263,32 +476,79 @@ pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, page_id: String, ticket:
 }
 
 #[tauri::command]
+// A command's parameters are its arguments, so it takes as many as the page sends.
+#[allow(clippy::too_many_arguments)]
 pub async fn pane_resize<R: Runtime>(
     app: AppHandle<R>,
     id: String,
     generation: u64,
     cols: u16,
     rows: u16,
+    page_id: Option<String>,
+    at: Option<u64>,
 ) -> Value {
     crate::panics::settled("pane_resize", async move {
-        if let Err(error) = validate_size(cols, rows) {
-            return json!({"ok":false,"error":error});
-        }
-        let key = match pane_key(&id, generation) {
-            Ok(key) => key,
-            Err(error) => return json!({"ok":false,"error":error}),
-        };
-        let panes = {
+        let (panes, inputs) = {
             let state = app.state::<AppRuntime>();
-            Arc::clone(&state.panes)
+            (Arc::clone(&state.panes), Arc::clone(&state.inputs))
         };
         run_blocking("pane_resize", move || {
-            match panes.resize(&key, rows, cols) {
-                Ok(()) => json!({"ok":true}),
-                Err(error) => json!({"ok":false,"error":error.to_string()}),
-            }
+            page::resize(
+                &inputs,
+                &panes,
+                page_id.as_deref(),
+                &id,
+                generation,
+                (cols, rows),
+                at,
+            )
         })
         .await
+    })
+    .await
+}
+
+/// A window's history for the page now subscribed, from `from` (none: the page has nothing):
+/// raw bytes, not a list of numbers ([`cf_panes::page::history`]).
+#[tauri::command]
+pub async fn pane_history<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    id: String,
+    generation: u64,
+    from: Option<u64>,
+) -> tauri::ipc::Response {
+    let (panes, inputs) = {
+        let state = app.state::<AppRuntime>();
+        (Arc::clone(&state.panes), Arc::clone(&state.inputs))
+    };
+    let frame = tauri::async_runtime::spawn_blocking(move || {
+        page::history(&inputs, &panes, &page_id, &id, generation, from)
+    })
+    .await
+    .unwrap_or_else(|_| page::history_refusal(&crate::panics::failed("pane_history")));
+    tauri::ipc::Response::new(frame)
+}
+
+/// The page's emulator has taken all of the history it pulled ([`cf_panes::page::history_done`]).
+#[tauri::command]
+pub async fn pane_history_done<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    id: String,
+    generation: u64,
+    consumed: u64,
+) -> Value {
+    crate::panics::settled("pane_history_done", async move {
+        let (panes, inputs, hub) = {
+            let state = app.state::<AppRuntime>();
+            (
+                Arc::clone(&state.panes),
+                Arc::clone(&state.inputs),
+                Arc::clone(&state.output),
+            )
+        };
+        page::history_done(&inputs, &panes, &hub, &page_id, &id, generation, consumed)
     })
     .await
 }
@@ -301,21 +561,11 @@ pub async fn pane_ack<R: Runtime>(
     seq: u64,
 ) -> Value {
     crate::panics::settled("pane_ack", async move {
-        if let Err(error) = validate_seq(seq) {
-            return json!({"ok":false,"error":error});
-        }
-        let key = match pane_key(&id, generation) {
-            Ok(key) => key,
-            Err(error) => return json!({"ok":false,"error":error}),
-        };
         let panes = {
             let state = app.state::<AppRuntime>();
             Arc::clone(&state.panes)
         };
-        match panes.ack(&key, seq) {
-            Ok(()) => json!({"ok":true}),
-            Err(error) => json!({"ok":false,"error":error.to_string()}),
-        }
+        page::ack(&panes, &id, generation, seq)
     })
     .await
 }
@@ -435,7 +685,8 @@ pub async fn daemon_request<R: Runtime>(
 /// page acknowledges; sends to a page that has gone still succeed (a
 /// channel's send is a script the webview runs), so those bytes stayed owed,
 /// and a pane printing faster than the page drew at the reload never printed
-/// again, its harness waiting on its terminal for good.
+/// again, its harness waiting on its terminal for good. Only what the page
+/// before was handed is settled: what waits for this page stays charged.
 ///
 /// And it is when a new page hears where the daemon stands: what was told
 /// before it listened (a first start that failed while the page loaded) is
@@ -456,19 +707,20 @@ pub async fn subscribe_output<R: Runtime>(
                 Arc::clone(&state.daemon),
             )
         };
-        if let Err(error) = inputs.with_current_page(&page_id, || {
-            // Once the new page listens: everything sent before it went to the old. The pane
-            // table swaps the sink and settles the room in one step, and tells the journals of
-            // windows that keep them where the new page's history ends.
-            panes.attach_page(
-                &output,
-                Arc::new(move |message| on_output.send(message).is_ok()),
-            );
-        }) {
-            return json!({"ok":false,"error":error});
+        // Once the new page listens: everything sent before it went to the old. The pane table
+        // swaps the sink and settles what the page before was handed in one step, and tells the
+        // journals of windows that keep them where the new page's history ends.
+        let answer = page::subscribe(
+            &inputs,
+            &panes,
+            &output,
+            &page_id,
+            Arc::new(move |message| on_output.send(message).is_ok()),
+        );
+        if answer["ok"] == true {
+            daemon.tell_again();
         }
-        daemon.tell_again();
-        json!({"ok":true})
+        answer
     })
     .await
 }
@@ -515,13 +767,81 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 mod tests {
     use super::*;
 
+    /// The three commands of a reload as the page calls them, over the app's own state: a pull
+    /// before the page has subscribed is refused, one after it is answered, and the history is
+    /// asked to be let go only with the whole of it taken.
+    #[test]
+    fn a_reloading_pages_commands_subscribe_pull_and_settle_the_history() {
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+        inputs.begin_page("page").unwrap();
+        let pulled = || {
+            let response = tauri::async_runtime::block_on(pane_history(
+                handle.clone(),
+                "page".into(),
+                "w".into(),
+                1,
+                None,
+            ));
+            let body = tauri::ipc::IpcResponse::body(response).unwrap();
+            let tauri::ipc::InvokeResponseBody::Raw(frame) = body else {
+                panic!("pane_history answers raw bytes");
+            };
+            let length = u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize;
+            serde_json::from_slice::<Value>(&frame[4..4 + length]).unwrap()
+        };
+        assert_eq!(pulled()["error"], "pane-not-subscribed");
+        let subscribed = tauri::async_runtime::block_on(subscribe_output(
+            handle.clone(),
+            "page".into(),
+            Channel::new(|_| Ok(())),
+        ));
+        assert_eq!(subscribed, json!({"ok":true}));
+        assert_eq!(pulled()["error"], "pane-not-found");
+        let done = tauri::async_runtime::block_on(pane_history_done(
+            handle.clone(),
+            "page".into(),
+            "w".into(),
+            1,
+            0,
+        ));
+        assert_eq!(done, json!({"ok":false}), "there is no journal to forget");
+        drop(app);
+    }
+
     /// A page call as the page makes it: the command's JSON arguments, with the
     /// bytes as base64 text and their length. A test may give a list of bytes
     /// and have both made, or give its own `length` and `bytes` text.
+    /// An answer without the number of the loss the host recorded for it: it counts the notices
+    /// the host has made so far, which a test of something else does not.
+    #[cfg(unix)]
+    fn without_loss(mut answer: Value) -> Value {
+        if let Some(object) = answer.as_object_mut() {
+            assert!(
+                object.get("loss").is_none_or(Value::is_u64),
+                "a loss is a number: {answer}"
+            );
+            object.remove("loss");
+        }
+        answer
+    }
+
     #[cfg(unix)]
     fn ipc_request(command: &str, mut args: Value) -> tauri::webview::InvokeRequest {
         use base64::Engine as _;
-        args["pageId"] = "test-page".into();
+        if args["pageId"].is_null() {
+            args["pageId"] = "test-page".into();
+        }
+        if args["epoch"].is_null() {
+            args["epoch"] = 0.into();
+        }
         if let Some(list) = args["bytes"].as_array() {
             let bytes = list
                 .iter()
@@ -552,10 +872,12 @@ mod tests {
         sequence: u64,
         bytes: &[u8],
     ) -> Value {
+        let epoch = app.state::<AppRuntime>().inputs.epoch();
         enqueue_page_call(
             app,
             &PageCall {
                 page_id: page.into(),
+                epoch,
                 id: key.id.clone(),
                 generation: key.generation,
                 sequence,
@@ -962,7 +1284,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn production_ipc_refusal_does_not_consume_its_sequence() {
+    fn production_ipc_refusal_is_final_for_its_sequence() {
         use tauri::Listener;
 
         let _pty_guard = cf_panes::pty::serial_pty_test();
@@ -1028,39 +1350,40 @@ mod tests {
         };
 
         assert_eq!(
-            invoke(
+            without_loss(invoke(
                 "pane_input_enqueue",
                 json!({"id":key.id,"generation":1,"sequence":1,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
-            ),
+            )),
             json!({
                 "ok":false,
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
             })
         );
-        // A body of a different length, or one not in base64, is refused whole,
-        // and none of them takes the number.
-        for (length, bytes, error) in [
+        // A body of a different length, or one not in base64, is refused whole, and each
+        // refusal is final for its number: the next call goes in without waiting for it.
+        for (number, (length, bytes, error)) in [
             (2, "Sw==", "pane input bytes do not match their length"),
             (1, "Sw", "pane input bytes do not match their length"),
             (4, "Sw==", "pane input bytes do not match their length"),
             (1, "S!==", "pane input bytes are not base64"),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             assert_eq!(
-                invoke(
+                without_loss(invoke(
                     "pane_input_enqueue",
-                    json!({"id":key.id,"generation":1,"sequence":1,"length":length,"bytes":bytes}),
-                ),
+                    json!({"id":key.id,"generation":1,"sequence":number + 2,"length":length,"bytes":bytes}),
+                )),
                 json!({"ok":false,"error":error})
             );
         }
         let first = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":1,"bytes":[75]}),
+            json!({"id":key.id,"generation":1,"sequence":6,"bytes":[75]}),
         );
         assert_eq!(first["ok"], true);
-        // A number above the count is admitted: a call skipped or never seen
-        // must not leave every later key refused. A number at or below it is
-        // stale and writes nothing.
+        // A number at or below the count is stale and writes nothing.
         let repeat = invoke(
             "pane_input_enqueue",
             json!({"id":key.id,"generation":1,"sequence":1,"bytes":[82]}),
@@ -1070,10 +1393,10 @@ mod tests {
             json!({"ok":false,"error":"pane-input-sequence-stale"})
         );
         assert_eq!(
-            invoke(
+            without_loss(invoke(
                 "pane_input_skip",
-                json!({"id":key.id,"generation":1,"sequence":2})
-            ),
+                json!({"id":key.id,"generation":1,"sequence":7})
+            )),
             json!({"ok":true})
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
@@ -1095,15 +1418,15 @@ mod tests {
             invoke("pane_input_wait", json!({"ticket":first["ticket"]})),
             json!({"ok":false,"error":"pane-input-ticket-not-found"})
         );
-        // A rejected page input does not consume its sequence.
+        // A rejected page input spends its sequence, and the next goes on.
         let rejected = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":3,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
+            json!({"id":key.id,"generation":1,"sequence":8,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
         );
         assert_eq!(rejected["ok"], false);
         let second = invoke(
             "pane_reply_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":3,"bytes":[67]}),
+            json!({"id":key.id,"generation":1,"sequence":9,"bytes":[67]}),
         );
         assert_eq!(second["ok"], true);
 
@@ -1123,6 +1446,354 @@ mod tests {
 
         drop(webview);
         drop(app);
+    }
+
+    /// The page's notice commands, called as the page calls them (`terminal-link.js`: camelCase
+    /// names, numbers as numbers), through Tauri's own argument decoding: a wrong name or type
+    /// fails here, not in the real app. Prepare and activate, the window's name, a drop's
+    /// place and its release, a skip, the pull and the Dismiss.
+    #[cfg(unix)]
+    #[test]
+    fn the_page_s_notice_commands_decode_as_the_page_calls_them() {
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("notice-window", 3);
+        inputs.open(&key).expect("open the window's input");
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_page_prepare,
+                pane_page_activate,
+                pane_window_name,
+                pane_input_place,
+                pane_input_release,
+                pane_input_skip,
+                pane_lost_pull,
+                pane_lost_dismiss
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .unwrap_or_else(|error| panic!("{command} decodes: {error:?}"))
+                .deserialize::<Value>()
+                .expect("command response JSON")
+        };
+        let page = json!({"pageId":"test-page"});
+        let prepared = invoke(
+            "pane_page_prepare",
+            json!({"pageId":"test-page","nonce":"n-1"}),
+        );
+        assert_eq!(prepared["ok"], true, "{prepared}");
+        let epoch = prepared["epoch"].as_u64().expect("the host's epoch");
+        let activated = invoke(
+            "pane_page_activate",
+            json!({"pageId":"test-page","nonce":"n-1","epoch":epoch}),
+        );
+        assert_eq!(activated["ok"], true, "{activated}");
+        assert_eq!(activated["notices"], json!([]));
+        let at = |extra: Value| {
+            let mut args = json!({"pageId":page["pageId"],"epoch":epoch,"id":key.id,"generation":key.generation});
+            for (name, value) in extra.as_object().expect("an object") {
+                args[name] = value.clone();
+            }
+            args
+        };
+        assert_eq!(
+            invoke("pane_window_name", at(json!({"name":"Chief"}))),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            invoke("pane_input_place", at(json!({"sequence":1}))),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            invoke("pane_input_release", at(json!({"sequence":1}))),
+            json!({"ok":true})
+        );
+        let skipped = invoke("pane_input_skip", at(json!({"sequence":2})));
+        assert_eq!(skipped["ok"], true, "{skipped}");
+        let pulled = invoke(
+            "pane_lost_pull",
+            json!({"pageId":"test-page","epoch":epoch}),
+        );
+        assert_eq!(pulled["ok"], true, "{pulled}");
+        let notices = pulled["notices"].as_array().expect("the list");
+        assert_eq!(notices.len(), 1, "{pulled}");
+        let id = notices[0]["id"].as_u64().expect("an id");
+        assert_eq!(
+            notices[0],
+            json!({"id":id,"kind":"window","window":"notice-window","generation":3,
+                   "name":"Chief","closed":false,"failed":false,"dropped":false})
+        );
+        // A Dismiss of an id the host does not hold clears nothing; its own clears it.
+        assert_eq!(
+            invoke(
+                "pane_lost_dismiss",
+                json!({"pageId":"test-page","epoch":epoch,"id":id + 1000})
+            ),
+            json!({"ok":true,"removed":false})
+        );
+        assert_eq!(
+            invoke(
+                "pane_lost_dismiss",
+                json!({"pageId":"test-page","epoch":epoch,"id":id})
+            ),
+            json!({"ok":true,"removed":true})
+        );
+        let pulled = invoke(
+            "pane_lost_pull",
+            json!({"pageId":"test-page","epoch":epoch}),
+        );
+        assert_eq!(pulled["notices"], json!([]));
+        inputs.close_and_drain();
+    }
+
+    /// One emission of the page's terminal is one call (P4-A): exactly the cap of unbracketed
+    /// input is admitted through Tauri's own argument decoding and reaches an owned PTY byte
+    /// for byte, and one byte more is refused whole, writing nothing.
+    #[cfg(unix)]
+    #[test]
+    fn production_ipc_admits_the_cap_of_plain_input_whole_and_refuses_one_byte_more() {
+        use base64::Engine as _;
+
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
+        let key = PaneKey::new("plain-cap", 1);
+        let folder = tempfile::tempdir().expect("a folder for the program's copy");
+        let copy = folder.path().join("received");
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/head -c {} > '{}'; printf done",
+                        MAX_PAGE_INPUT_BYTES,
+                        copy.display()
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the pane");
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+
+        let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_input_enqueue,
+                pane_input_wait
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .expect("command succeeds")
+                .deserialize::<Value>()
+                .expect("command response JSON")
+        };
+        // Every byte value, none of them a paste marker's run, so that nothing in the bytes
+        // is the arbiter's or the terminal's to change.
+        let sent = (0..MAX_PAGE_INPUT_BYTES)
+            .map(|index| ((index * 7 + index / 251) % 256) as u8)
+            .collect::<Vec<u8>>();
+        let text = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+
+        let mut over = sent.clone();
+        over.push(b'x');
+        assert_eq!(
+            without_loss(invoke(
+                "pane_input_enqueue",
+                json!({"id":key.id,"generation":1,"sequence":1,"length":over.len(),"bytes":text(&over)}),
+            )),
+            json!({
+                "ok":false,
+                "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
+            })
+        );
+        // The refusal spent number 1; the cap's own size goes in at 2.
+        let admitted = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":2,"length":sent.len(),"bytes":text(&sent)}),
+        );
+        assert_eq!(
+            admitted["ok"], true,
+            "the cap's own size is admitted: {admitted:?}"
+        );
+        let completed = invoke("pane_input_wait", json!({"ticket":admitted["ticket"]}));
+        assert_eq!(completed["ok"], true);
+        let mut rest = Vec::new();
+        reader
+            .read_to_end(&mut rest)
+            .expect("read until the program ends");
+        assert!(rest.ends_with(b"done"), "the program read the whole of it");
+        assert!(
+            std::fs::read(&copy).expect("the program's copy") == sent,
+            "the program read the cap's bytes as sent"
+        );
+
+        drop(webview);
+        drop(app);
+    }
+
+    /// A page reloads while its first call is still on the way (P4-B, by epoch). The program
+    /// reads what the host wrote: the page `s:1` made calls 2 and 3 (B, C: number 1 never
+    /// came), the host's epoch moved with the navigation, the page `s:2` prepared, echoed its
+    /// epoch and typed D at once, and A (number 1 of `s:1`) came after. Returns what the
+    /// program read, A's answer, and the windows the host said had lost typing. Every call
+    /// goes through Tauri's own decoding.
+    #[cfg(unix)]
+    fn a_reload_with_a_held_first_call(expected: usize) -> (Vec<u8>, Value, Vec<Value>) {
+        use std::sync::Mutex;
+        use tauri::Listener as _;
+
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("s:1").unwrap();
+        let key = PaneKey::new("reloaded", 1);
+        let folder = tempfile::tempdir().expect("a folder for the program's copy");
+        let copy = folder.path().join("received");
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "/bin/stty raw -echo; printf ready; /usr/bin/head -c {expected} > '{}'; printf done",
+                        copy.display()
+                    ),
+                ],
+                &HashMap::new(),
+                PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 },
+            )
+            .expect("open the pane");
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .invoke_handler(tauri::generate_handler![
+                pane_input_enqueue,
+                pane_input_wait,
+                pane_page_prepare,
+                pane_page_activate
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        inputs.set_observer(Arc::new(PageInputObserver(app.handle().clone())));
+        let notices = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let heard = Arc::clone(&notices);
+        app.listen(PANE_INPUT_LOST_EVENT, move |event| {
+            heard
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).expect("the event's payload"));
+        });
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("build mock webview");
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .expect("command succeeds")
+                .deserialize::<Value>()
+                .expect("command response JSON")
+        };
+        let call = |page: &str, epoch: u64, sequence: u64, bytes: &[u8]| {
+            invoke(
+                "pane_input_enqueue",
+                json!({"pageId":page,"epoch":epoch,"id":key.id,"generation":1,"sequence":sequence,"bytes":bytes}),
+            )
+        };
+        assert_eq!(call("s:1", 0, 2, b"B")["ok"], true);
+        assert_eq!(call("s:1", 0, 3, b"C")["ok"], true);
+        // Navigation begins; the next page announces itself with a nonce of its own, is
+        // answered the host's epoch for it, echoes that pair, and types at once.
+        inputs.end_page().unwrap();
+        let prepared = invoke("pane_page_prepare", json!({"pageId":"s:2","nonce":"n-2"}));
+        assert_eq!(prepared["ok"], true, "{prepared:?}");
+        assert_eq!(prepared["nonce"], "n-2");
+        let epoch = prepared["epoch"].as_u64().expect("the host's epoch");
+        assert_eq!(epoch, 1, "one navigation, one epoch");
+        let activated = invoke(
+            "pane_page_activate",
+            json!({"pageId":"s:2","nonce":"n-2","epoch":epoch}),
+        );
+        assert_eq!(activated["ok"], true, "{activated:?}");
+        assert_eq!(call("s:2", epoch, 1, b"D")["ok"], true);
+        let a = call("s:1", 0, 1, b"A");
+        // The program ends when it has read what it should have. One that never does is a
+        // failure, not a hang.
+        let (ended, ending) = mpsc::channel();
+        thread::spawn(move || {
+            let mut rest = Vec::new();
+            let _ = reader.read_to_end(&mut rest);
+            let _ = ended.send(rest);
+        });
+        let rest = ending.recv_timeout(Duration::from_secs(20));
+        let received = std::fs::read(&copy).unwrap_or_default();
+        assert!(
+            rest.as_ref().is_ok_and(|rest| rest.ends_with(b"done")),
+            "the program did not read all of what the host should have written: {received:?}"
+        );
+        let heard = notices.lock().unwrap().clone();
+        drop(webview);
+        drop(app);
+        (received, a, heard)
+    }
+
+    /// The reload, through the commands: number 1 never came, B and C waited behind it and are
+    /// cancelled as a loss when the page reloads, D of the new page is written at once, and A
+    /// comes after the reload and is refused. The program reads D alone, and the page that is
+    /// current is told which window.
+    #[cfg(unix)]
+    #[test]
+    fn a_reload_cancels_what_waited_in_order_and_the_current_page_is_told() {
+        let (received, a, notices) = a_reload_with_a_held_first_call(1);
+        assert_eq!(received, b"D");
+        assert_eq!(a["ok"], false, "A is refused: {a:?}");
+        assert_eq!(a["error"], "pane-input-stale-page");
+        assert!(
+            !notices.is_empty()
+                && notices
+                    .iter()
+                    .all(|each| each["id"] == "reloaded" && each["generation"] == 1),
+            "{notices:?}"
+        );
     }
 
     /// The page's terminal answers what the program asked of it (where its cursor is) past
@@ -1331,13 +2002,16 @@ mod tests {
             .expect("build mock app");
         let handle = app.handle().clone();
         let subscribe = |page: &str| {
+            let prepared = pane_page_prepare(handle.clone(), page.to_string(), "nonce".into());
+            assert_eq!(prepared["ok"], true);
             assert_eq!(
-                pane_page_prepare(handle.clone(), page.to_string()),
-                json!({"ok":true})
-            );
-            assert_eq!(
-                pane_page_activate(handle.clone(), page.to_string()),
-                json!({"ok":true})
+                pane_page_activate(
+                    handle.clone(),
+                    page.to_string(),
+                    "nonce".into(),
+                    prepared["epoch"].as_u64().expect("an epoch")
+                )["ok"],
+                true
             );
             let subscribed = tauri::async_runtime::block_on(subscribe_output(
                 handle.clone(),
@@ -1388,7 +2062,7 @@ mod tests {
 
     /// A reloaded page finds every pane still printing. A pane stops reading
     /// once a window of its output is unacknowledged, and what the page
-    /// before was sent and never drew is never acknowledged: a pane that had
+    /// before was handed and never drew is never acknowledged: a pane that had
     /// filled its window printed nothing more, its harness waiting on its
     /// terminal for good.
     #[cfg(unix)]
@@ -1397,6 +2071,7 @@ mod tests {
         const BACKLOG_BYTES: usize = 1024;
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
+        panes.keep_journals();
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
         let streamed = panes
@@ -1414,49 +2089,54 @@ mod tests {
                 BACKLOG_BYTES,
             )
             .expect("open a pane that never stops printing");
-        // The page that reloaded was sent a window's worth and drew none of it.
-        let mut sent = 0;
-        while sent < BACKLOG_BYTES {
-            sent += streamed
-                .output
-                .recv_timeout(Duration::from_secs(5))
-                .expect("output up to the window")
-                .bytes
-                .len();
-        }
-        assert!(
-            matches!(
-                streamed.output.recv_timeout(Duration::from_millis(150)),
-                Err(mpsc::RecvTimeoutError::Timeout)
-            ),
-            "the pane waits for its window to be read"
-        );
-
         let runtime = test_runtime(Arc::clone(&panes), inputs, None, None);
         let app = tauri::test::mock_builder()
             .manage(runtime)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
-        assert_eq!(
-            pane_page_prepare(app.handle().clone(), "new-page".into()),
-            json!({"ok":true})
-        );
-        assert_eq!(
-            pane_page_activate(app.handle().clone(), "new-page".into()),
-            json!({"ok":true})
-        );
-        let subscribed = tauri::async_runtime::block_on(subscribe_output(
-            app.handle().clone(),
-            "new-page".to_string(),
-            Channel::new(|_| Ok(())),
-        ));
-        assert_eq!(subscribed["ok"], true);
-        streamed
-            .output
-            .recv_timeout(Duration::from_secs(5))
+        let hub = Arc::clone(&app.state::<AppRuntime>().output);
+        // The app's own consumer of the window's output.
+        let journal = streamed.journal.clone().expect("a journal");
+        let output = streamed.output;
+        let consumer = thread::spawn(move || {
+            cf_panes::pane_handlers::forward_journaled(&output, &journal, &hub, |_| {});
+        });
+        // A page subscribes and is handed a window's worth; it draws none of it.
+        let page = |page: &str| {
+            let (sender, taken) = mpsc::channel();
+            let prepared = pane_page_prepare(app.handle().clone(), page.into(), "nonce".into());
+            assert_eq!(prepared["ok"], true);
+            assert_eq!(
+                pane_page_activate(
+                    app.handle().clone(),
+                    page.into(),
+                    "nonce".into(),
+                    prepared["epoch"].as_u64().expect("an epoch")
+                )["ok"],
+                true
+            );
+            let subscribed = tauri::async_runtime::block_on(subscribe_output(
+                app.handle().clone(),
+                page.to_string(),
+                Channel::new(move |_| {
+                    let _ = sender.send(());
+                    Ok(())
+                }),
+            ));
+            assert_eq!(subscribed["ok"], true);
+            taken
+        };
+        let old = page("old-page");
+        old.recv_timeout(Duration::from_secs(5))
+            .expect("output up to the window");
+        // What more there is of the window is taken until it waits on the old page.
+        while old.recv_timeout(Duration::from_millis(300)).is_ok() {}
+        let new = page("new-page");
+        new.recv_timeout(Duration::from_secs(5))
             .expect("the pane prints again for the new page");
 
         panes.kill(&streamed.key).expect("kill the pane");
+        consumer.join().expect("the consumer");
         drop(app);
     }
 

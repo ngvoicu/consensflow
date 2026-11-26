@@ -252,7 +252,7 @@ impl PaneTable {
         panes.insert(
             key,
             Pane {
-                master: pair.master,
+                master: super::PaneMaster::new(pair.master),
                 writer: Arc::new(Mutex::new(writer)),
                 child,
                 process_group_id,

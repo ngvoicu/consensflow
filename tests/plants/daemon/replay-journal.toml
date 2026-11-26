@@ -6,6 +6,9 @@
 [run]
 journal = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "journal::"]
 host = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "--test-threads", "2", "pty::journal_tests"]
+page = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "page::tests"]
+ended = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "tiny_read_queued_burst"]
+hub = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "output_hub::"]
 
 [[plant]]
 name = "journal: a byte is in the history and on the live path"
@@ -14,18 +17,20 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = """        let boundaries = state.handed.clone();
+find = """        let handed = state.handed.clone();
         state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
-        boundaries"""
+        Self::forget_finished(&mut state);
+        handed"""
 replace = """        state.sink = Some(sink);
         let pending = std::mem::take(&mut state.pending);
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
+        Self::forget_finished(&mut state);
         state.handed.clone()"""
 
 [[plant]]
@@ -35,8 +40,8 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = "                state.handed.insert(key, end);"
-replace = "                state.handed.insert(key, end.saturating_sub(1));"
+find = "            state.handed.insert(key, taken);"
+replace = "            state.handed.insert(key, Taken { end: taken.end.map(|end| end.saturating_sub(1)), ..taken });"
 
 [[plant]]
 name = "journal: the boundary is read outside the step that swaps the sink"
@@ -45,9 +50,9 @@ runs = ["host"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/output_hub.rs"
-find = """        let boundaries = state.handed.clone();
+find = """        let handed = state.handed.clone();
         state.sink = Some(sink);"""
-replace = """        let boundaries = state.handed.clone();
+replace = """        let handed = state.handed.clone();
         drop(state);
         std::thread::sleep(std::time::Duration::from_millis(1));
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -55,15 +60,58 @@ replace = """        let boundaries = state.handed.clone();
 
 [[plant]]
 name = "journal: a subscription does not settle the room the old page left"
-meant = "a_program_stops_at_one_mebibyte_and_a_subscription_settles_the_room_the_old_page_left"
+meant = "a_program_stops_at_one_mebibyte_and_a_subscription_settles_what_the_page_before_was_handed"
 runs = ["host"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/flow.rs"
-find = """        self.ack_all();
-        boundaries"""
-replace = """        boundaries"""
+find = """        for (key, taken) in &handed {
+            // A window that has gone takes no acknowledgement, and none is owed it.
+            let _ = self.ack(key, taken.seq);
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "journal: a subscription settles everything issued"
+meant = "subscriptions_that_refuse_do_not_grow_the_room_of_a_window"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """        for (key, taken) in &handed {
+            // A window that has gone takes no acknowledgement, and none is owed it.
+            let _ = self.ack(key, taken.seq);
+        }
+"""
+replace = """        let keys: Vec<PaneKey> = self.panes.lock().unwrap().keys().cloned().collect();
+        for key in keys {
+            let _ = self.ack(&key, u64::MAX);
+        }
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """        let highest_issued = state.next_seq.saturating_sub(1);
+        if seq > highest_issued {"""
+replace = """        let highest_issued = state.next_seq.saturating_sub(1);
+        let seq = seq.min(highest_issued);
+        if seq > highest_issued {"""
+
+[[plant]]
+name = "journal: a window's room is past main's 1 MiB"
+meant = "subscriptions_that_refuse_do_not_grow_the_room_of_a_window"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """pub fn default_backlog_bytes() -> usize {
+    DEFAULT_BACKLOG_BYTES"""
+replace = """pub fn default_backlog_bytes() -> usize {
+    8 * DEFAULT_BACKLOG_BYTES"""
 
 [[plant]]
 name = "journal: a message's offset drifts from its bytes"
@@ -162,8 +210,8 @@ runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal/tracker.rs"
-find = "            if top < bottom && top < MAX_TOP {"
-replace = "            if top < MAX_TOP {"
+find = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION) {"
+replace = "            if top < usize::from(MAX_TERMINAL_DIMENSION) {"
 
 [[plant]]
 name = "journal: a resize flood starts the journal again inside a sequence"
@@ -172,8 +220,8 @@ runs = ["journal"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/journal.rs"
-find = "        if self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES {"
-replace = "        if true {"
+find = "            && (self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES)"
+replace = "            && true"
 
 [[plant]]
 name = "journal: a size at the same byte replaces the one before it"
@@ -285,3 +333,203 @@ runs = ["host"]
 file = "crates/cf-panes/src/pty.rs"
 find = "const ENDED_JOURNALS_KEPT: usize = 16;"
 replace = "const ENDED_JOURNALS_KEPT: usize = 64;"
+
+[[plant]]
+name = "journal: the tracker keeps no region from row 1,024 on"
+meant = "a_region_far_down_the_tallest_screen_is_restored_past_the_cap"
+runs = ["journal"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal/tracker.rs"
+find = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION) {"
+replace = "            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION / 4) {"
+
+[[plant]]
+name = "page: a pull from a page that has not subscribed is answered"
+meant = "a_pull_is_answered_only_to_the_page_that_subscribed"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "        if self.lock_subscribed().as_deref() != Some(page_id) {"
+replace = "        if self.lock_subscribed().is_none() && page_id.is_empty() {"
+
+[[plant]]
+name = "page: an ended window's history is forgotten short of its end"
+meant = "an_ended_windows_history_is_forgotten_only_where_the_page_took_all_of_it"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "        kept.retain(|(held, journal)| held != key || journal.end() != consumed);"
+replace = "        kept.retain(|(held, journal)| held != key || journal.end() > consumed + 1);"
+
+[[plant]]
+name = "page: a pull from a page that is no longer current is answered"
+meant = "a_pull_is_answered_only_to_the_page_that_subscribed"
+runs = ["page"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = "    match inputs.with_current_page(page_id, || panes.history(page_id, &key, from)) {"
+replace = "    match Ok::<_, String>(panes.history(page_id, &key, from)) {"
+
+[[plant]]
+name = "journal: the start passes what is acknowledged"
+meant = "a_size_that_completes_after_the_sink_refused_does_not_move_the_history_past_the_boundary"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        if offset < self.start || offset > self.acknowledged {"
+replace = "        if offset < self.start {"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        if self.acknowledged >= self.end
+            && (self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES)"""
+replace = """        if self.tracker.at_rest() || self.resizes.len() > HARD_MAX_RESIZES"""
+
+[[plant]]
+name = "journal: the cap's cut passes what is acknowledged"
+meant = "an_8_mebibyte_room_does_not_cut_the_journal_past_what_is_acknowledged"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = "        if offset < self.start || offset > self.acknowledged {"
+replace = "        if offset < self.start {"
+
+[[plant]]
+name = "journal: a size past 4,096 is taken with output unacknowledged"
+meant = "a_window_nobody_draws_refuses_a_size_past_4096_and_keeps_its_terminals_size"
+runs = ["host"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        inner.resizes.len() < HARD_MAX_RESIZES || inner.acknowledged >= inner.end
+    }"""
+replace = """        drop(inner);
+        true
+    }"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        if inner.resizes.len() >= HARD_MAX_RESIZES && inner.acknowledged < inner.end {
+            return SizeRecord::NoRoom;
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "journal: a size is recorded without asking again for its room"
+meant = "a_size_that_finds_no_room_when_it_is_recorded_is_undone"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/journal.rs"
+find = """        if inner.resizes.len() >= HARD_MAX_RESIZES && inner.acknowledged < inner.end {
+            return SizeRecord::NoRoom;
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "pane: a window's slow resize holds the pane table"
+meant = "a_slow_resize_holds_nothing_of_another_window_the_page_the_journal_or_an_acknowledgement"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """        let terminal = master.locked()?;
+        if journal"""
+replace = """        let _table = self.lock_panes()?;
+        let terminal = master.locked()?;
+        if journal"""
+
+[[plant]]
+name = "page: a window's slow resize holds the page's lock"
+meant = "a_slow_resize_holds_nothing_of_another_window_the_page_the_journal_or_an_acknowledgement"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = """    match panes.resize_while(&key, rows, cols, at, &|| inputs.page_unchanged(epoch)) {
+        Ok(()) => ok(),
+        Err(error) => refused(&error.to_string()),
+    }"""
+replace = """    match inputs.with_current_page(page, || {
+        panes.resize_while(&key, rows, cols, at, &|| inputs.page_unchanged(epoch))
+    }) {
+        Ok(Ok(())) => ok(),
+        Ok(Err(error)) => refused(&error.to_string()),
+        Err(error) => refused(&error),
+    }"""
+
+[[plant]]
+name = "page: a size whose page was replaced while its terminal resized is kept"
+meant = "a_size_whose_page_was_replaced_while_its_terminal_resized_is_undone"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = "    match panes.resize_while(&key, rows, cols, at, &|| inputs.page_unchanged(epoch)) {"
+replace = "    match panes.resize_while(&key, rows, cols, at, &|| true) {"
+
+[[plant]]
+name = "output hub: an ended window parked before the first sink is remembered when the sink takes its output"
+meant = "windows_that_ended_before_the_first_sink_are_not_remembered_when_it_takes_their_output"
+runs = ["hub"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/output_hub.rs"
+find = "        Self::forget_finished(&mut state);\n"
+replace = ""
+
+[[plant]]
+name = "journal: an acknowledged byte is counted short"
+meant = "what_is_acknowledged_is_the_offset_past_the_acknowledged_messages_last_byte"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = "            journal.acknowledged(acked);"
+replace = "            journal.acknowledged(acked.saturating_sub(1));"
+
+[[plant]]
+name = "page: a size of a page that has gone is taken"
+meant = "a_size_from_a_page_that_has_gone_is_refused_and_changes_nothing"
+runs = ["host"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = """    let epoch = match inputs.current_page_epoch(page) {
+        Ok(epoch) => epoch,
+        Err(error) => return refused(&error),
+    };"""
+replace = """    let epoch = inputs.current_page_epoch(page).unwrap_or(0);"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/page.rs"
+find = "    match panes.resize_while(&key, rows, cols, at, &|| inputs.page_unchanged(epoch)) {"
+replace = "    match panes.resize_while(&key, rows, cols, at, &|| true) {"
+
+[[plant]]
+name = "page: the hub keeps what it handed of an ended window with no journal"
+meant = "tiny_read_queued_burst_is_joined_in_order_before_the_exit"
+runs = ["ended"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "            output.forget(&key);\n"
+replace = ""

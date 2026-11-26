@@ -89,8 +89,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--projects-width) minmax(0, 1fr);
-  grid-template-rows: 52px auto minmax(0, 1fr);
-  grid-template-areas: "bar bar" "down down" "side main";
+  grid-template-rows: 52px auto minmax(min-content, auto) minmax(0, 1fr);
+  grid-template-areas: "bar bar" "down down" "notices notices" "side main";
 }
 /* Either side panel folds to a rail with its icon; the board takes the room. */
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -348,8 +348,61 @@ button:disabled { opacity: .45; cursor: default; }
   border-left: 1px solid var(--line-soft);
   background: var(--ink);
 }
-/* The dock's title sits at its right edge, next to the arrow that folds it that way. */
+/* The dock's title sits at its right edge, next to the arrow that folds it that way; its map
+   takes the room to the left. */
 .dock-head { padding: 8px 10px 0; justify-content: flex-end; }
+/* The dock's map (T-2180): a chip for each window, in the row's order, the lit bar under them
+   the part of the row in view (the share of each window there), the chip of the window typed
+   into lit as its card. A chip goes to its window. Hidden with one window or none. Many
+   windows in a narrow dock: each chip gives way to its lamp; past that the last are cut, and
+   Ctrl+Tab still reaches every window. The bar sits in the map's own bottom padding. */
+.dock-map {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  margin-right: auto;
+  padding-bottom: 5px;
+  margin-bottom: -5px;
+  overflow: hidden;
+}
+.dock-map[hidden], .main[data-dock="hidden"] .dock-map { display: none; }
+.dock-chip {
+  position: relative;
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 31px;
+  max-width: 20ch;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+.dock-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-chip .lamp { flex: none; width: 7px; height: 7px; margin: 0; }
+.dock-chip:hover { color: var(--text); border-color: var(--line); background: var(--panel-raised); }
+.dock-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dock-chip[data-view="whole"], .dock-chip[data-view="part"] { color: var(--text); }
+.dock-chip[data-view="whole"] { border-color: var(--line); background: var(--panel); }
+.dock-chip[data-keys="true"] { border-color: rgba(167, 139, 250, .7); box-shadow: 0 0 12px -5px var(--glow); }
+.dock-chip::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--seen-from, 0) * 100%);
+  right: calc((1 - var(--seen-to, 0)) * 100%);
+  bottom: -5px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--violet);
+  box-shadow: 0 0 6px var(--glow);
+  transition: left 120ms ease-out, right 120ms ease-out;
+}
+.dock-chip[data-view="none"]::after { visibility: hidden; }
 .dock-title {
   margin: 0;
   font: 700 10px var(--mono);
@@ -868,6 +921,61 @@ tr[data-session] .row-name { font-weight: 500; }
   .staff .staff-actions > button { flex: none; white-space: nowrap; }
   .staff .staff-actions:has(.staff-hint) { flex-wrap: wrap; }
 }
+/* The slots (D8): a row a role, a column a tier, the image designer's one slot across them all.
+   A held slot is a raised card of its holder, an empty one a dashed well with its Add; a slot
+   several hold is edged in amber, its words under its row; the slot the form is open for is lit
+   violet. Only the slots a role has are drawn: the rest of its row is the panel. */
+.slots { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0 6px; margin: -6px 0 0; }
+.slots thead th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 4px 2px; }
+.slots .slot-role-head { width: 136px; }
+.slots .slot-role { text-align: left; font-size: 13px; font-weight: 500; color: var(--text); padding: 8px 10px 8px 2px; vertical-align: top; overflow-wrap: anywhere; }
+.slots td { padding: 0 3px; vertical-align: top; }
+.slot-empty, .slot-holder { min-height: 52px; border-radius: 8px; padding: 7px 9px; }
+.slot-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; border: 1px dashed var(--line); background: rgba(9, 9, 11, .35); }
+.slot-empty-mark { flex: 1 0 auto; font: 11px var(--mono); color: var(--muted); }
+.slot-empty .slot-add { padding: 3px 10px; font-size: 12px; }
+.slot-gives { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.slot-give { padding: 0; border: 0; background: none; color: var(--accent); font: 11px/1.5 var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.slot-give:hover { color: var(--text); text-decoration: underline; }
+.slot-give:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.slots .slot-give-pick { width: auto; max-width: 100%; margin-left: -4px; padding: 1px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--accent); font: 11px/1.5 var(--mono); cursor: pointer; }
+.slots .slot-give-pick:hover { border-color: var(--line); color: var(--text); }
+.slots .slot-give-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.slots .slot-give-pick option { background: var(--panel-raised); color: var(--text); }
+.slot-holder { display: grid; align-content: start; gap: 2px; border: 1px solid var(--line); background: var(--panel-raised); }
+.slot-holder + .slot-holder { margin-top: 4px; }
+.slot-holder-top { display: flex; align-items: start; justify-content: space-between; gap: 6px; }
+.slot-holder .member-name { font: 600 12px/1.45 var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.slot-holder .member-meta { color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+.slot-holder .slot-remove { flex: none; width: 22px; height: 22px; margin: -3px -5px 0 0; border-color: transparent; border-radius: 5px; }
+.slot-holder .slot-remove .icon { width: 13px; height: 13px; }
+.slot-holder .slot-remove:hover, .slot-holder .slot-remove:focus-visible { color: var(--danger); border-color: rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .08); }
+.slot-holder .slot-remove[data-tip]:is(:hover, :focus-visible)::after { left: auto; right: 0; }
+.slot-mark { justify-self: start; margin-top: 2px; padding: 1px 6px; border-radius: 4px; font: 10px/1.5 var(--mono); }
+.slot-mark[data-tone="rest"] { color: var(--sky); background: rgba(147, 197, 253, .1); }
+.slot-mark[data-tone="out"] { color: var(--danger); background: rgba(248, 113, 113, .1); }
+/* The ask before a last role goes: red-edged, in a slot several hold too. */
+.slots td[data-slot] .slot-holder.slot-confirm { border-color: rgba(248, 113, 113, .55); background: var(--panel-raised); }
+.slot-confirm .member-confirm { margin: 0; font-size: 12px; color: var(--text); }
+.slot-confirm-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.slot-confirm-actions button { padding: 3px 10px; font-size: 12px; }
+.slots td[data-crowded="true"] { padding-top: 0; }
+.slots td[data-crowded="true"] .slot-holder { border-color: rgba(252, 211, 77, .55); background: linear-gradient(rgba(252, 211, 77, .06), rgba(252, 211, 77, .06)), var(--panel-raised); }
+.slots .slot-words td { padding: 0 3px 4px; }
+.slots .slot-words p { margin: 0; padding: 7px 10px; border-left: 3px solid var(--amber); border-radius: 0 6px 6px 0; background: rgba(252, 211, 77, .07); color: var(--amber); font-size: 12px; line-height: 1.45; }
+.slots .slot-words p + p { margin-top: 4px; }
+/* What the daemon refused of a slot the person changed, under its role's row, in the dialog. */
+.slots .slot-refusal td { padding: 7px 10px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: rgba(248, 113, 113, .08); color: var(--danger); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.slots td[data-picking="true"] > :is(.slot-empty, .slot-holder) { border: 1px solid var(--violet); background: rgba(124, 58, 237, .12); box-shadow: 0 0 0 3px rgba(139, 92, 246, .18); }
+.slots td[data-picking="true"] .slot-empty-mark { color: var(--violet); }
+@media (prefers-reduced-motion: no-preference) {
+  .slot-empty, .slot-holder { transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+}
+/* The members, each once, under the slots: its slots in one quiet line beside it. */
+.staff .member-slots-cell { color: var(--text); font-size: 13px; }
+.staff .member-slots { overflow-wrap: anywhere; }
+/* The member form opens under the slots, for a slot's Add, an Edit or a backup. */
+.staff-add[hidden] { display: none; }
 /* Words for a screen reader only: what a mark says to the eye by where it is. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* The chief's pick in New project and Switch chief, and Switch chief's turn choice: boxed as
@@ -878,9 +986,9 @@ tr[data-session] .row-name { font-weight: 500; }
 .project-section { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
 .project-section legend, .staff-add legend, .chief-pick legend, .dialog-form > fieldset:not([class]) legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .project-section > .dialog-help, .project-section > .staff { margin: 0; }
-.staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; }
+.staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; border: 1px solid rgba(167, 139, 250, .45); border-radius: 8px; padding: 10px 12px 12px; background: rgba(124, 58, 237, .05); }
+.staff-add legend { color: var(--violet); }
 .staff-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-.staff-pick .staff-add { border: 0; padding: 0; }
 .board-empty td { padding: 14px 12px; font: 12px var(--mono); color: var(--muted); }
 .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
 .staff-add .member-help { flex-basis: 100%; margin: 0; }
@@ -1068,6 +1176,52 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
   scroll-padding-inline: 8px;
 }
 .stage .terminal-card { scroll-snap-align: start; }
+/* While the person's swipe or a glide moves the row, the page's script snaps it, at the end. */
+.stage[data-moving="true"] { scroll-snap-type: none; }
+/* Until the host has acknowledged this document, the terminals are read-only, and say so. */
+.stage[data-input="closed"] { position: relative; }
+.stage[data-input="closed"] .terminal-host { opacity: 0.55; }
+.stage[data-input="closed"]::before {
+  content: attr(data-reconnecting);
+  position: sticky;
+  left: 8px;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--surface-2, #3a3a3a);
+  color: var(--text, #eee);
+  font-size: 12px;
+}
+/* Typing that may not have arrived: a line of its own under the command bar, as the daemon's
+   is, one row for each window, its name first. It lies over no terminal: the room it takes is
+   the dock's and the board's, and every window fits under it (T-2359: fixed at the page's
+   corner, the rows lay over the last rows of the rightmost terminal until dismissed, and stacked
+   upward over more). In reach whatever is folded; past three rows and a half it scrolls. */
+.input-notices {
+  grid-area: notices;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 122px;
+  overflow-y: auto;
+  border-bottom: 1px solid rgba(252, 211, 77, .35);
+  border-left: 4px solid var(--amber);
+  background: rgba(252, 211, 77, .08);
+}
+.input-notice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 12px;
+  font-size: 13px;
+}
+.input-notice + .input-notice { border-top: 1px solid rgba(252, 211, 77, .16); }
+.input-notice-text { flex: 1; min-width: 0; }
+.input-notice-window { color: var(--amber); font-weight: 650; }
+.input-notice[data-state="closed"] { font-style: italic; }
+.input-notice-dismiss { flex: none; padding: 3px 10px; }
 @media (min-width: 761px) {
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
@@ -1149,7 +1303,36 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
-.terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
+/* The terminal's room is the host's content box: xterm's fit reads its parent's `height` and
+   `width`, which under border-box take in the padding, and so did the rows (T-2229's finding 6:
+   the last row went under the card's edge, the live prompt with it). */
+.terminal-host { position: relative; min-height: 0; padding: 4px 2px 2px 6px; box-sizing: content-box; }
+/* A window whose history begins after its start says so in a band across the top of its well,
+   in the host's padding: the terminal's rows start under the band's dashed edge, which is where
+   the history the person can scroll to begins, and no row is under the band. Nothing to dismiss:
+   the pointer goes through it to the host, as through the padding. */
+.terminal-host[data-truncated="true"] { padding-top: 22px; }
+.terminal-truncated {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
+  overflow: hidden;
+  border-bottom: 1px dashed var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font: 11px/1 var(--mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.terminal-truncated .icon { width: 12px; height: 12px; stroke-width: 2; }
+.terminal-truncated-what { flex: none; color: var(--text); }
+.terminal-truncated-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
    would otherwise hide the last of them with no sign they are there. */
@@ -1529,7 +1712,9 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 .history-refusal { color: var(--history-refusal); }
 
 @media (max-width: 760px) {
-  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
+  /* The dock is 42% of the window; the board keeps at least its own padding, which it would
+     otherwise draw over the dock's top. */
+  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(60px, 1fr) 42vh; }
   .main[data-dock="hidden"] { grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: 1fr; }
   .divider { display: none; }
   .main > .board, .main > .dock { grid-column: 1; }
@@ -1538,13 +1723,21 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
   .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
   .shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-    grid-template-areas: "bar" "down" "side" "main";
+    /* Where the window is short, the projects' list gives way to the notices before the dock and
+       the board do, and scrolls (T-2359; at 560 by 480 three notices left the chief's terminal no
+       row). The notices keep their rows, up to their own height's limit. */
+    grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(calc(42vh + 60px), 1fr);
+    grid-template-areas: "bar" "down" "notices" "side" "main";
   }
   .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
-  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+  /* Its padding above and below is its content's, so that it can give way whole. */
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; padding-block: 0; }
+  .shell:not([data-projects="hidden"]) .sidebar > .panel-head { padding-top: 14px; }
+  .shell:not([data-projects="hidden"]) .sidebar > #projects { padding-bottom: 14px; }
+  .shell:has(> .main[data-dock="hidden"]) { grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(0, 1fr); }
   .board { padding: 12px 12px 48px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lamp { animation: none !important; }
+  .dock-chip::after { transition: none; }
 }

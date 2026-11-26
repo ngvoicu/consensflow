@@ -22,8 +22,10 @@ serde_json.workspace = true
 # What an outage's key is as it goes on (`shown::hashed`): a hash, never the screen's lines.
 sha2.workspace = true
 thiserror.workspace = true
-# The kit's temporary ledger.
+# The kit's temporary ledger, and the copy of it as the version before left it
+# (`Context::reopen_as_before_the_update`).
 tempfile = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
 # Only `task::coop::unconstrained`: the executor polls the engine's work outside
 # the cooperative budget of the tokio task that calls it. No runtime is started
 # here.
@@ -32,7 +34,7 @@ tokio = { workspace = true, features = ["rt"] }
 [features]
 # The kit the engine's tests and the daemon's run it with: what a test does
 # with the engine's executor, and the fakes; and the binary `engine-ask`.
-test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile"]
+test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile", "dep:rusqlite"]
 
 # What the live tests of `crates/cf-e2e` ask of the engine's texts: the words the
 # engine gives a window that a live test opens itself (`testing::ask`).

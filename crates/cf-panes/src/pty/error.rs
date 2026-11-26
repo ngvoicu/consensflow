@@ -40,6 +40,12 @@ pub enum PaneError {
     InvalidBacklog,
     InvalidEnvironmentVariableName(String),
     NoOutputStream(PaneKey),
+    /// A pull of history from a page that has not subscribed to the output.
+    NotSubscribed,
+    /// A size a window's journal can take no more of: 4,096 held and output unacknowledged.
+    SizesHeld(PaneKey),
+    /// A size from a page that was replaced while its terminal resized: the terminal went back.
+    PageGone,
     FutureAck {
         key: PaneKey,
         seq: u64,
@@ -115,6 +121,9 @@ impl fmt::Display for PaneError {
                 formatter,
                 "invalid environment variable name in dropEnv: {name:?}"
             ),
+            Self::NotSubscribed => write!(formatter, "pane-not-subscribed"),
+            Self::SizesHeld(_) => write!(formatter, "pane-sizes-held"),
+            Self::PageGone => write!(formatter, "pane-input-stale-page"),
             Self::NoOutputStream(key) => write!(
                 formatter,
                 "pane {} generation {} has no output stream",

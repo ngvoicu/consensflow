@@ -282,7 +282,8 @@ impl NewMember {
         let shown =
             crate::handles::model_shown(model_name.as_deref(), model.as_deref(), Some(harness));
         model::require_fitting_roles(&shown, designer, &roles)?;
-        // A member whose roles have no tier is given none, and kept in the lowest.
+        // The image designer, which has no tier, is kept in the lowest; every other member
+        // names its tier.
         let tier = match value.get("tier") {
             None | Some(Value::Null) if crate::roles::takes_no_tier(&roles) => {
                 crate::roles::NO_TIER
@@ -381,6 +382,21 @@ pub(crate) fn create_project(
         .iter()
         .map(|member| Ok((member, member.check()?)))
         .collect::<Result<Vec<_>, LedgerError>>()?;
+    // The list is slots: each tier is offered, and no slot is named twice.
+    crate::staff::slots::check_list(
+        &members
+            .iter()
+            .map(|(member, roles)| {
+                let name = crate::handles::model_handle(
+                    &member.shown(),
+                    member.effort.as_deref(),
+                    &member.harness,
+                    |_| false,
+                );
+                (name, roles.clone(), member.tier.clone())
+            })
+            .collect::<Vec<_>>(),
+    )?;
     let wake_up = request
         .wake_up
         .as_ref()

@@ -28,10 +28,62 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
     let (status, said) = staff(&scene, &scene.context).await;
     assert_eq!(status, 200);
     assert_eq!(
-        said.to_string(),
-        r#"{"members":[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]}"#
+        said["members"].to_string(),
+        r#"[{"handle":"zeus","role":"worker","roles":["worker"],"tier":"standard","harness":"claude-code","harnessName":"Claude Code","model":"claude-sonnet-5","nameApart":false,"modelName":"zeus","effort":null}]"#
+    );
+    // The slots, in the registry's order, each with its holders: 32 tiered and the image
+    // designer's one with no tier; the empty ones are there too.
+    let slots = said["slots"].as_array().unwrap();
+    assert_eq!(slots.len(), 33);
+    assert_eq!(
+        slots[2],
+        serde_json::json!({ "role": "worker", "tier": "standard", "holders": ["zeus"] })
+    );
+    assert_eq!(
+        slots[1],
+        serde_json::json!({ "role": "worker", "tier": "complex", "holders": [] })
+    );
+    assert_eq!(
+        slots[32],
+        serde_json::json!({ "role": "designer", "tier": null, "holders": [] })
     );
     assert_eq!(scene.kicks.get(), 0);
+}
+
+/// A slot the update left several members in says every holder, in the order they joined: four
+/// holders, never cut at two or at three, and the slot after it is its own.
+#[tokio::test]
+async fn a_slot_four_members_hold_says_all_four_holders() {
+    let _slots = cf_ledger::testing::slot_rule_off();
+    let scene = scene();
+    for name in ["hera", "ares", "pan"] {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(name.to_owned()),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: vec!["worker".to_owned()],
+                    tier: "standard".to_owned(),
+                },
+            )
+            .unwrap();
+    }
+    let (_, said) = staff(&scene, &scene.context).await;
+    assert_eq!(
+        said["slots"][2],
+        serde_json::json!({
+            "role": "worker", "tier": "standard",
+            "holders": ["zeus", "hera", "ares", "pan"]
+        })
+    );
+    assert_eq!(said["slots"][3]["holders"], serde_json::json!([]));
 }
 
 #[tokio::test]
@@ -167,6 +219,9 @@ async fn an_image_designer_is_said_with_no_tier_because_a_design_task_has_none()
 #[tokio::test]
 async fn a_member_whose_roles_have_no_tier_is_said_with_none_and_one_with_a_role_with_tiers_with_its_own(
 ) {
+    // Several members in one slot, as the update leaves it: the kit's staff stands them in
+    // for one another, and the slot is not what this test is about.
+    let _slots = cf_ledger::testing::slot_rule_off();
     // The scout of the table's seam: a role with no tier that is no image agent. The ledger's
     // CHECKs name the five roles of today alone, so they are off for its rows.
     let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);

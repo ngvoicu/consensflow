@@ -11,7 +11,7 @@ use portable_pty::{Child, MasterPty, PtySize};
 use crate::arbiter::ArbiterError;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
-use crate::journal::Journal;
+use crate::journal::{Journal, SizeRecord};
 use crate::screen::{Drawn, PaneScreen, Screen};
 
 mod close;
@@ -243,11 +243,36 @@ fn lock_writer(
     crate::sync::lock(writer).map_err(|_| Gated::Pane(PaneError::LockPoisoned))
 }
 
+/// A window's terminal master. Its lock is the window's own: a size is taken under it, one at a
+/// time, and nothing of any other window, nor the pane table, the page or the journal, waits on
+/// it. A terminal slow to resize holds up that window's next size and no more.
+struct PaneMaster {
+    terminal: Mutex<Box<dyn MasterPty + Send>>,
+    /// The descriptor of the terminal, taken when the window opened (Unix): what the output's
+    /// own copy is made from, which needs no lock.
+    #[cfg(unix)]
+    fd: Option<std::os::fd::RawFd>,
+}
+
+impl PaneMaster {
+    fn new(terminal: Box<dyn MasterPty + Send>) -> Arc<Self> {
+        Arc::new(Self {
+            #[cfg(unix)]
+            fd: terminal.as_raw_fd(),
+            terminal: Mutex::new(terminal),
+        })
+    }
+
+    fn locked(&self) -> Result<std::sync::MutexGuard<'_, Box<dyn MasterPty + Send>>, PaneError> {
+        self.terminal.lock().map_err(|_| PaneError::LockPoisoned)
+    }
+}
+
 struct Pane {
     /// Before the master, so that the terminal's input is let go before the master closes
     /// it: on Windows a console that waits on its input is then told it has ended (`conpty`).
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<PaneMaster>,
     child: Box<dyn Child + Send + Sync>,
     process_group_id: Option<i32>,
     #[cfg(target_os = "macos")]
@@ -288,12 +313,19 @@ pub struct PaneTable {
     close_grace: Duration,
     /// Whether windows opened from now on keep a journal.
     journals: AtomicBool,
+    /// The page that subscribed last ([`PaneTable::attach_page`]): the only one a pull of
+    /// history answers.
+    subscribed: Mutex<Option<String>>,
     /// The journals of windows that have ended, the last [`ENDED_JOURNALS_KEPT`], until their
-    /// page forgets them ([`PaneTable::forget_ended_journal`]).
+    /// page forgets them ([`PaneTable::forget_consumed_journal`]).
     ended_journals: Mutex<VecDeque<(PaneKey, Arc<Journal>)>>,
     /// A test's hold on the opens that reach the table ([`PaneTable::hold_opens`]).
     #[cfg(any(test, feature = "test-support"))]
     open_hold: Mutex<Option<Arc<HoldState>>>,
+    /// A test's stand-in for a terminal that is slow to resize: called as a window's native
+    /// resize begins ([`PaneTable::on_native_resize`]).
+    #[cfg(any(test, feature = "test-support"))]
+    native_resize: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 /// What is left of the windows a table has held: the panes in it, the closes that took a pane
@@ -346,10 +378,23 @@ impl PaneTable {
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
             journals: AtomicBool::new(false),
+            subscribed: Mutex::new(None),
             ended_journals: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             open_hold: Mutex::new(None),
+            #[cfg(any(test, feature = "test-support"))]
+            native_resize: Mutex::new(None),
         }
+    }
+
+    /// Call `hook` as each window's native resize begins, after the checks and before the
+    /// terminal is touched: a test makes the resize as slow as it needs.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn on_native_resize(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .native_resize
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
     }
 
     pub fn begin_update(self: &Arc<Self>) -> Result<UpdatePermit, PaneError> {
@@ -464,8 +509,14 @@ impl PaneTable {
     }
 
     /// [`PaneTable::resize`] of a window whose page's emulator took the size once it had
-    /// parsed `at` bytes of the window's output (`None`: the size is not the current page's,
-    /// and takes the journal's end).
+    /// parsed `at` bytes of the window's output (`None`: the journal's end).
+    ///
+    /// A window whose journal holds 4,096 sizes with output unacknowledged takes no more
+    /// ([`PaneError::SizesHeld`]), and its terminal keeps its size. The check, the terminal's
+    /// resize and the record are one: the pane table's lock keeps another size out, and the
+    /// journal's, held across all three, keeps a read from being taken in between. The screen is
+    /// told afterwards, with no journal lock held, since taking a read in locks the screen and
+    /// then the journal.
     pub fn resize_at(
         &self,
         key: &PaneKey,
@@ -473,27 +524,92 @@ impl PaneTable {
         cols: u16,
         at: Option<u64>,
     ) -> Result<(), PaneError> {
-        let mut panes = self.lock_panes()?;
-        let pane = panes
-            .get_mut(key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?;
-        pane.master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| PaneError::Pty(error.to_string()))?;
-        pane.screen.resize(rows, cols);
-        if let Some(journal) = &pane.journal {
-            journal.resize(at, (rows, cols));
+        self.resize_while(key, rows, cols, at, &|| true)
+    }
+
+    /// [`PaneTable::resize_at`] of a size that only the page `current` still names may take: it
+    /// is asked as the size is recorded, and if the page has gone by then the terminal goes back
+    /// to the size it had ([`PaneError::PageGone`]).
+    ///
+    /// Only this window's own lock is held while its terminal resizes: the table's is let go
+    /// once the window's parts are found, and so are the page's and the journal's, so that a
+    /// terminal that is slow to resize (a console that waits on its own pipe) holds up nothing
+    /// but the window's next size. The journal is locked for the check of room and again for
+    /// the record, which asks the room and the page once more: what was checked first may have
+    /// changed by then, and the terminal is put back where it was if it has.
+    pub fn resize_while(
+        &self,
+        key: &PaneKey,
+        rows: u16,
+        cols: u16,
+        at: Option<u64>,
+        current: &dyn Fn() -> bool,
+    ) -> Result<(), PaneError> {
+        let (master, journal, screen, last_activity) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            (
+                Arc::clone(&pane.master),
+                pane.journal.clone(),
+                Arc::clone(&pane.screen),
+                Arc::clone(&pane.last_activity),
+            )
+        };
+        let terminal = master.locked()?;
+        if journal
+            .as_ref()
+            .is_some_and(|journal| !journal.has_room_for_size())
+        {
+            return Err(PaneError::SizesHeld(key.clone()));
         }
-        *pane
-            .last_activity
-            .lock()
-            .map_err(|_| PaneError::LockPoisoned)? = Instant::now();
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let before = terminal.get_size().ok();
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            let hook = self
+                .native_resize
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        terminal
+            .resize(size)
+            .map_err(|error| PaneError::Pty(error.to_string()))?;
+        if let Some(journal) = &journal {
+            let taken = journal.record_size(at, (rows, cols), current);
+            if taken != SizeRecord::Taken {
+                if let Some(before) = before {
+                    let _ = terminal.resize(before);
+                }
+                return Err(match taken {
+                    SizeRecord::NoRoom => PaneError::SizesHeld(key.clone()),
+                    _ => PaneError::PageGone,
+                });
+            }
+        }
+        screen.resize(rows, cols);
+        *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
         Ok(())
+    }
+
+    /// The window's terminal as it is sized now, rows and columns.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn terminal_size(&self, key: &PaneKey) -> Option<(u16, u16)> {
+        let panes = self.lock_panes().ok()?;
+        let master = Arc::clone(&panes.get(key)?.master);
+        drop(panes);
+        let size = master.locked().ok()?.get_size().ok()?;
+        Some((size.rows, size.cols))
     }
 
     /// The last `max` lines a pane's screen shows (see

@@ -363,8 +363,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(135), Some(159), None, Some(23)]),
-        (a_windows(), [Some(131), Some(156), None, Some(20)]),
+        (a_mac(), [Some(127), Some(151), None, Some(15)]),
+        (a_windows(), [Some(123), Some(148), None, Some(12)]),
     ] {
         assert_eq!(
             one(
@@ -1252,9 +1252,9 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
     // These first lines are measured for the active path mode and each shell.
     const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
-    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
+    const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
     const CHOOSE: &str = "## Choose the role, not the member";
-    let mac = if PATH_ONCE { REVIEW } else { FRONTEND };
+    let mac = if PATH_ONCE { REVIEW } else { DESIGN };
     let windows = if PATH_ONCE { REVIEW } else { CHOOSE };
     let cases: [Case; 4] = [
         ("a Mac, no staff", a_mac(), 0, false, None, &[mac]),

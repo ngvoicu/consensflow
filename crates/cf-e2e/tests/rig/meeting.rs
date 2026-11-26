@@ -14,14 +14,13 @@ use crate::{rig, secs, Outcome};
 /// What the chief's `cf inbox` lists a held message with in place of its text.
 const HELD: &str = "(this waits until your meeting with the human ends)";
 
-/// The roster of the case: the chief, and two workers on the stand-in, in one tier.
+/// The roster of the case: the chief, and one worker on the stand-in, which runs both tasks at once.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
     let roster = json!({
         "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
-            { "id": "worker-b", "kind": "claude-code", "model": "fake" },
         ],
     });
     rig.stand_ins(&roster)
@@ -67,7 +66,6 @@ fn a_meeting_started_on_the_page_holds_the_chiefs_messages_and_its_stop_lets_the
     let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
     let first = project.add_member("worker")?;
-    project.add_member("worker-b")?;
     let tier = first["member"]["tier"]
         .as_str()
         .unwrap_or_default()

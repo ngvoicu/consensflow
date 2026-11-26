@@ -657,8 +657,11 @@ pub trait Window {
     /// The servers the settings of the window's folder say it uses and leaves out,
     /// which its harness writes when its dialog of new servers is answered; none where
     /// it keeps no such settings.
-    fn servers_chosen(&self) -> ServersChosen {
-        ServersChosen::default()
+    ///
+    /// A read of the project's folder, which can wait with no limit: made off the engine's
+    /// thread, and none where it gave no answer in its time (T-2232).
+    fn servers_chosen(&self) -> Work<'_, Option<ServersChosen>> {
+        Box::pin(async { Some(ServersChosen::default()) })
     }
     /// Whether `screen` (the window's last lines) names that question's choices, as
     /// the question does and a conversation that quotes it may: a screen at its

@@ -1684,8 +1684,8 @@ fn a_paste_begun_again_is_counted_from_its_last_opening_marker() {
     );
 }
 
-/// The page sends the human's input in chunks of 32 KiB (`app/ui/terminal-link.js`), so a
-/// big paste is several writes: the markers are in the first and the last, and the pane host
+/// The page sends the human's input whole (`app/ui/terminal-link.js`) and the terminal takes a
+/// big write in parts, so a big paste is several writes: the markers are in the first and the last, and the pane host
 /// holds what follows the paste for the whole of it, not for the characters of its last chunk
 /// (T-1127, found by T-1121).
 #[test]
