@@ -3,7 +3,7 @@
 use super::Ledger;
 use crate::{
     tasks, HeldTask, LedgerError, NewTask, PlanCreated, PlanTask, Stop, TaskCreated, TaskEdit,
-    TaskEdited, TaskMoved, TaskReleased, TaskRetiered, TaskThread, TaskView,
+    TaskEdited, TaskMoved, TaskPlaced, TaskReleased, TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -25,6 +25,18 @@ impl Ledger {
         fingerprint: &str,
     ) -> Result<PlanCreated, LedgerError> {
         tasks::create_plan(&mut self.store, project, tasks, key, fingerprint)
+    }
+
+    /// The answer a plan's `key` holds, before any rule is checked: the same plan's saved
+    /// answer, `key-used` for a different one, none for a new key.
+    pub fn replayed_plan(
+        &self,
+        project: i64,
+        tasks: &[PlanTask],
+        key: &str,
+        fingerprint: &str,
+    ) -> Result<Option<PlanCreated>, LedgerError> {
+        tasks::replayed_plan(&self.store, project, tasks, key, fingerprint)
     }
 
     /// Accept or cancel all of the tasks, or change none.
@@ -49,14 +61,13 @@ impl Ledger {
         tasks::assign_task(&mut self.store, project_id, number, participant_id)
     }
 
-    /// An open task for a tier nobody on the staff holds any more goes to the nearest
-    /// one somebody does: which tier it was for, which it is for, and who holds it;
-    /// none when it stays as it is.
+    /// Where an open task stands at a pass (the placement): it stays in its slot, falls to
+    /// the nearest held one (which tier it was for, which it is for, who holds it), or waits.
     pub fn retier_open_task(
         &mut self,
         project_id: i64,
         number: i64,
-    ) -> Result<Option<TaskRetiered>, LedgerError> {
+    ) -> Result<TaskPlaced, LedgerError> {
         tasks::retier_open_task(&mut self.store, project_id, number)
     }
 
@@ -95,6 +106,17 @@ impl Ledger {
     /// Whether T-`number` was held once for the conversation it could not go on in.
     pub fn held_for_context(&self, project_id: i64, number: i64) -> Result<bool, LedgerError> {
         tasks::held_for_context(&self.store, project_id, number)
+    }
+
+    /// Whether `participant_id` may take task `number` (what an assignment asks of its
+    /// member, but not that the task is open); says why not.
+    pub fn check_taker(
+        &self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+    ) -> Result<(), LedgerError> {
+        tasks::check_taker(&self.store, project_id, number, participant_id)
     }
 
     /// Whether a task may go back to the board for its tier, without moving it; says why not.

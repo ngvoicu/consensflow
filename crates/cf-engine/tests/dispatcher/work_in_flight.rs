@@ -39,7 +39,7 @@ fn add_worker(context: &Context, project: i64, agent: &str) -> ParticipantView {
     context
         .ledger
         .borrow_mut()
-        .add_member(
+        .add_member_overflowing(
             project,
             &NewMember {
                 model: cf_engine::testing::MODELS

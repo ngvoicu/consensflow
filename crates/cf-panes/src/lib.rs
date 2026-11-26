@@ -28,6 +28,7 @@ pub mod headless;
 pub mod input_queue;
 #[cfg(windows)]
 mod job_object;
+pub mod journal;
 pub mod output_hub;
 pub mod pane_handlers;
 pub mod privacy;

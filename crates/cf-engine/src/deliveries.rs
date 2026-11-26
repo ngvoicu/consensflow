@@ -1938,6 +1938,13 @@ impl Dispatcher {
         let Some(message) = message.filter(|found| found.state == "delivering") else {
             return Ok(());
         };
+        // A launch's first message that was never shown by a window whose project closed
+        // meanwhile waits for the Resume, whatever gave it up (T-2274).
+        if delivering.launch && !self.in_open_project(message.project_id)? {
+            self.give_back(message.id, because)?;
+            self.changed();
+            return Ok(());
+        }
         if retry && message.attempts < i64::from(self.seams.limits.max_attempts) {
             let mut ledger = self.seams.ledger.borrow_mut();
             match look {

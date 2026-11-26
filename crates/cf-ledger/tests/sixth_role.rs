@@ -36,7 +36,7 @@ fn member(agent: &str, roles: &[&str], tier: &str) -> NewMember {
 }
 
 fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> Result<ProjectView, LedgerError> {
-    ledger.create_project(&NewProject {
+    ledger.create_project_overflowing(&NewProject {
         directory: "/work/app".into(),
         name: "app".into(),
         chief: NewChief {
@@ -101,23 +101,24 @@ fn a_role_in_the_table_alone_is_one_a_member_holds_and_the_refusals_list_it_in_i
 }
 
 #[test]
-fn a_task_for_a_role_nobody_holds_is_refused_by_the_roles_name() {
+fn a_task_for_a_role_nobody_holds_waits_for_one_and_is_not_refused() {
     with_a_scout(|| {
         let dir = tempfile::tempdir().expect("a home");
         let mut ledger =
             open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
         let project =
             project(&mut ledger, vec![member("zeus", &["worker"], "standard")]).expect("a project");
-        let refused = ledger
+        // The SQLite CHECK of `task.pool` holds the table's roles alone.
+        ledger
+            .sqlite()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("the CHECKs off");
+        let waiting = ledger
             .create_task(project.id, &for_scouts("Look around"))
-            .unwrap_err();
+            .expect("a task is never refused for want of a member");
         assert_eq!(
-            said(refused),
-            (
-                "no-member-of-tier".to_owned(),
-                "no field scout is on the staff: ask the human for one, in your terminal"
-                    .to_owned()
-            )
+            (waiting.task.state.as_str(), waiting.task.pool.as_deref()),
+            ("open", Some("scout"))
         );
     });
 }

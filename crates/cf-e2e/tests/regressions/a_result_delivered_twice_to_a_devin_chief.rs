@@ -128,15 +128,14 @@ fn first_word_ms() -> String {
     (first_word_seconds() * 1_000).to_string()
 }
 
-/// The roster of the cases: a Devin (the stand-in) is the chief, and two workers of the
-/// stand-in Claude.
+/// The roster of the cases: a Devin (the stand-in) is the chief, and a worker of the
+/// stand-in Claude, which runs both tasks.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
     let roster = json!({
         "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "devin", "model": "fake" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
-            { "id": "worker2", "kind": "claude-code", "model": "fake" },
         ],
     });
     rig.stand_ins(&roster)
@@ -196,13 +195,12 @@ const SECOND: Asked = Asked {
     words: "RESULT_TWO",
 };
 
-/// A project with the two workers, its chief's window open: the frame `cf` runs in, as
+/// A project with its worker, its chief's window open: the frame `cf` runs in, as
 /// the chief's agent runs it.
 fn a_project(rig: &Rig) -> cf_e2e::Result<(Project<'_>, String)> {
     write_roster(rig)?;
     let project = Project::open(rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
-    project.add_member("worker2")?;
     let tier = added["member"]["tier"]
         .as_str()
         .ok_or_else(|| Error::Daemon(format!("the worker has no tier: {added}")))?

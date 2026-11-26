@@ -89,14 +89,14 @@ impl World {
             },
         )
         .expect("a ledger");
-        let member = |agent: &str| NewMember {
+        let member = |agent: &str, tier: &str| NewMember {
             model: None,
             effort: None,
             model_name: Some(agent.into()),
             harness: "claude-code".into(),
             designer: false,
             roles: vec!["worker".into()],
-            tier: "standard".into(),
+            tier: tier.into(),
         };
         let project = ledger
             .create_project(&NewProject {
@@ -108,7 +108,7 @@ impl World {
                     effort: None,
                     model_name: None,
                 },
-                staff: vec![member("zeus"), member("diana")],
+                staff: vec![member("zeus", "standard"), member("diana", "complex")],
                 gate,
                 wake_up: None,
                 specs: None,
@@ -119,6 +119,10 @@ impl World {
                 own_hands: false,
             })
             .expect("a project");
+        // Two members of one slot, as the update leaves them: these tests stand the members
+        // in for one another, and the slot is not their subject.
+        cf_ledger::testing::seat_in_slot(&ledger, project.id, "diana", "standard")
+            .expect("diana in the standard slot");
         Self {
             ledger,
             project: project.id,

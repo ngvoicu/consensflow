@@ -23,6 +23,13 @@ pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
 /// the app's own terminal would not have otherwise (T-540).
 pub const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 
+/// The mark the pane host puts in every window's environment on macOS, one value a window
+/// (Windows ends a window's programs by its job, and sets none). Whatever the window starts
+/// inherits it, which is how a close names a program that carries it as possibly the
+/// window's. It is not named `CONSENSFLOW_`, so a program that hands a window's variables on
+/// by that prefix names it too.
+pub const PANE_OWNER: &str = "CF_PANE_PROCESS_OWNER";
+
 /// What a window gives its member to reach its board with: the address of the board's daemon,
 /// the member's token, and the project and member it is. A program that holds them is a client
 /// of that board, as `cf` is in a window, where it is the board's command and `cf ui`, the
