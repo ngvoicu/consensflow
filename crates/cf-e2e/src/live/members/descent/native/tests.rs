@@ -294,5 +294,10 @@ fn windows_lists_a_parent_its_child_and_grandchild_an_ended_process_and_the_rest
             );
         }
     }
+    // What the test started is ended through what holds each, the grandchild first, being the ones
+    // chosen; then the root, which this test started.
+    let said = end_chosen(&[grandchild.clone(), child.clone()]);
+    // The child may have ended with its own by now: nothing may fail.
+    assert!(said.failed.is_empty() && !said.ended.is_empty(), "{said:?}");
     root.kill();
 }
