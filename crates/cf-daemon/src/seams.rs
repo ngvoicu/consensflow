@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use cf_base::env::{Env, TERMINAL_ENV};
-use cf_engine::roles::{role_instructions_holding, staff_of, ProjectSpecs};
+use cf_engine::roles::{role_instructions_for, staff_of, ProjectSpecs};
 use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
 use cf_harness::contract::{Adapter, LaunchId};
@@ -155,14 +155,12 @@ impl Roles for RoleTexts {
         &self,
         participant: &ParticipantView,
         project: &ProjectView,
-        held: &[&str],
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
-        role_instructions_holding(
+        role_instructions_for(
             &self.env,
             &participant.role,
             &staff_of(project),
-            held,
             &self.cf(participant),
             specs,
             project.own_hands,

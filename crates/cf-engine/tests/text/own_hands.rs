@@ -171,15 +171,7 @@ fn the_guide_is_the_ordinary_text_with_its_four_parts_said_for_the_board() {
     assert_eq!(guide_rest, ordinary_rest);
     assert!(guide.starts_with("# ConsensFlow Chief of Staff\n\nThis is the guide to the board"));
     assert!(guide.contains("## The staff"));
-    let reviewer = [StaffRow {
-        name: "crisp-comet".to_owned(),
-        model: None,
-        roles: vec!["reviewer".to_owned()],
-        work_tier: Some(cf_proto::agents::WorkTier::Standard),
-    }];
-    assert!(guide_instructions(&reviewer, &cf, None, None)
-        .unwrap()
-        .contains("task add --review"));
+    assert!(guide.contains("task add --review"));
     assert!(!guide.contains("---\nname:"));
     assert!(!guide.contains("You do not change the project yourself"));
 }

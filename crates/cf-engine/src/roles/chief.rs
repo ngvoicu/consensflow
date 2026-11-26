@@ -5,37 +5,11 @@
 //! cannot drift: the guide is `chief.md` with its four marked parts (the opening, the
 //! duty, what it never does, and the description of its frontmatter) said for a chief that
 //! works with its own hands and uses the board when the human asks.
-//!
-//! After the body, `chief.md` holds each role's own parts, marked as `staff.md` marks a
-//! member's: `command`, its line in "Your commands"; `work`, its paragraphs under "Choose the
-//! role, not the member"; and `absent`, what is said where nobody holds it. A role the staff
-//! holds is given its two parts, and no other role's text is in the chief's (`skill`).
 
 use super::{member, RoleError};
 
 const CHIEF: &str = include_str!("../../../../skill/core/chief.md");
 const OWN_HANDS: &str = include_str!("../../../../skill/core/chief-own-hands.md");
-
-/// Where the body ends and the roles' parts begin: the comment that opens them.
-const ROLE_PARTS: &str = "\n<!-- Each role's own lines";
-
-/// The text of `chief.md` without the roles' parts.
-fn body() -> Result<&'static str, RoleError> {
-    CHIEF
-        .split_once(ROLE_PARTS)
-        .map(|(body, _)| body)
-        .ok_or_else(|| RoleError::MissingChiefPart("the roles' parts".to_owned()))
-}
-
-/// The part `slot` of `role` after the body, its last line end not included.
-pub(super) fn role_part(role: &str, slot: &str) -> Option<&'static str> {
-    let (_, parts) = CHIEF.split_once(ROLE_PARTS)?;
-    member::split(parts)
-        .1
-        .into_iter()
-        .find(|(part_role, part_slot, _)| *part_role == role && *part_slot == slot)
-        .map(|(_, _, part)| part.trim_end_matches('\n'))
-}
 
 /// A part's name and the markers around the ordinary wording in `chief.md`.
 const PARTS: [(&str, &str, &str); 4] = [
@@ -86,7 +60,7 @@ pub(super) fn guide(own_hands: bool) -> Result<String, RoleError> {
 /// `chief.md` with its marked parts replaced: each part `guided` names comes from the
 /// guide's own, the others stay as `chief.md` has them.
 fn assembled(guided: impl Fn(&str) -> Option<&str>) -> Result<String, RoleError> {
-    let mut chief = body()?.to_owned();
+    let mut chief = CHIEF.to_owned();
     for (name, start, end) in PARTS {
         let missing = || RoleError::MissingChiefPart(name.to_owned());
         let (before, marked) = chief.split_once(start).ok_or_else(missing)?;

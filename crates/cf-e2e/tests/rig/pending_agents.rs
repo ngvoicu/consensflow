@@ -20,7 +20,7 @@
 
 use std::thread;
 
-use cf_e2e::rig::{chief_body, member_body, Project, Rig, OPEN};
+use cf_e2e::rig::{chief_body, Project, Rig, OPEN};
 use serde_json::{json, Value};
 
 use crate::{config, secs, session_of, Outcome};
@@ -58,13 +58,8 @@ fn turns_with_agents(rig: &Rig, session: &str) -> usize {
 fn a_result_for_a_chief_whose_turn_ended_with_agents_pending_goes_in_at_once_and_does_not_wait_for_them(
 ) -> Outcome {
     let rig = Rig::start(config())?;
-    // The worker is on the staff as the project opens: a role gained while the chief runs is
-    // told it in a note, a turn the case would count.
-    let project = Project::open_with_staff(&rig, "chief", None, &[("worker", "worker")])?;
-    let worker_tier = member_body(&rig, "worker", None)?["tier"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
     let session = session_of(&rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?);
 
     // The chief gives a worker a task that takes a while, then starts a research
@@ -73,7 +68,7 @@ fn a_result_for_a_chief_whose_turn_ended_with_agents_pending_goes_in_at_once_and
         project.id(),
         &format!(
             "DISPATCH --tier {} SLEEP 25 Reply with exactly: WORKER_OK",
-            worker_tier
+            tier(&added)
         ),
     )?;
     rig.tell(

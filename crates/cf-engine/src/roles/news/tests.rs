@@ -104,7 +104,6 @@ fn the_own_hands_on_note_is_the_short_text_whole_and_fits_in_one_piece() {
 
 fn specs_note(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Option<String> {
     Change {
-        roles: None,
         specs: Some((was, now)),
         rules: None,
     }
@@ -115,7 +114,6 @@ fn specs_note(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Opt
 fn nothing_that_changed_is_nothing_told() {
     assert_eq!(
         Change {
-            roles: None,
             specs: None,
             rules: None
         }
@@ -202,7 +200,6 @@ fn both_changed_say_both() {
 fn rules_written_changed_and_taken_away_each_have_their_words() {
     let rules = |was, now| {
         Change {
-            roles: None,
             specs: None,
             rules: Some((was, now)),
         }
@@ -234,7 +231,6 @@ fn rules_written_changed_and_taken_away_each_have_their_words() {
 fn specs_and_rules_changed_together_are_one_note() {
     let now = given("docs/specs", Variant::Core, SKILL);
     let note = Change {
-        roles: None,
         specs: Some((None, Some(&now))),
         rules: Some((None, Some("- A."))),
     }
@@ -257,7 +253,6 @@ fn the_largest_note_a_setting_makes_goes_into_a_window_whole() {
     let folder = "a/very/long/folder/".repeat(10);
     let now = given(folder.trim_end_matches('/'), Variant::TddHtml, SKILL);
     let note = Change {
-        roles: None,
         specs: Some((None, Some(&now))),
         rules: Some((Some("- old"), Some(&rules))),
     }
@@ -269,48 +264,6 @@ fn the_largest_note_a_setting_makes_goes_into_a_window_whole() {
         fits_whole(&note),
         "a note of a setting is never cut: it says nothing the window could miss"
     );
-}
-
-/// The roles' section of a staff that holds every role goes into a window whole even beside
-/// the most rules the ledger takes and the specs, with the longest `cf` of the two platforms.
-#[test]
-fn the_largest_note_of_the_roles_with_the_setting_goes_into_a_window_whole() {
-    use cf_proto::cf_word::{CfWord, Shell};
-    let held = cf_ledger::roles::ids();
-    let now = given("a/very/long/folder", Variant::TddHtml, SKILL);
-    let rules = "r".repeat(cf_ledger::STAFF_RULES_MAX_BYTES);
-    for cf in [
-        CfWord::new(
-            "/Users/someone/Apps/ConsensFlow.app/Contents/Resources/cli/bin/cf",
-            Shell::Posix,
-        ),
-        CfWord::new(
-            r"C:\Users\someone\AppData\Local\ConsensFlow\cli\bin\cf.exe",
-            Shell::PowerShell,
-        ),
-    ] {
-        let section = crate::roles::role_section(&held, &cf).unwrap();
-        let note = Change {
-            roles: Some(section),
-            specs: Some((None, Some(&now))),
-            rules: Some((Some("- old"), Some(&rules))),
-        }
-        .note()
-        .unwrap();
-        println!("{cf}: {} units", utf16_len(&note));
-        assert!(fits_whole(&note), "{cf}: {} units", utf16_len(&note));
-        // Of the roles alone, for each end of the range: nobody, and every role.
-        for held in [Vec::new(), cf_ledger::roles::ids()] {
-            let alone = Change {
-                roles: Some(crate::roles::role_section(&held, &cf).unwrap()),
-                specs: None,
-                rules: None,
-            }
-            .note()
-            .unwrap();
-            println!("{cf}: {} held, {} units", held.len(), utf16_len(&alone));
-        }
-    }
 }
 
 // Each distinct news form keeps the information needed to act on the new role.

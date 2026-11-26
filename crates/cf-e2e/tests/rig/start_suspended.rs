@@ -6,7 +6,7 @@
 //! (and the chief, whose turn was over, told nothing), and the worker finishes
 //! and the chief gets its result.
 
-use cf_e2e::rig::{member_body, Project, OPEN};
+use cf_e2e::rig::{Project, OPEN};
 use serde_json::{json, Value};
 
 use crate::approval::quit_and_start_again;
@@ -35,21 +35,19 @@ fn told(rig: &cf_e2e::rig::Rig, session: &str, words: &str) -> usize {
 fn a_restart_opens_nothing_and_the_humans_resume_brings_back_the_chief_and_the_worker_told_its_turn_was_cut(
 ) -> Outcome {
     let rig = rig()?;
-    // The worker is on the staff as the project opens: a role gained while the chief runs is
-    // told it in a note, which would be one more message for a Resume to start.
-    let project = Project::open_with_staff(&rig, "chief", None, &[("worker", "worker")])?;
+    let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
-    let tier = member_body(&rig, "worker", None)?["tier"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
+    let added = project.add_member("worker")?;
     let chief = rig.open_frame(&format!("p{id}-chief"), OPEN)?;
     let chief_session = session_of(&chief);
 
     // The chief hands the worker a task whose turn works a long time, and is at rest.
     rig.tell(
         id,
-        &format!("DISPATCH --tier {tier} SLEEP 600 Reply with exactly: WORKED"),
+        &format!(
+            "DISPATCH --tier {} SLEEP 600 Reply with exactly: WORKED",
+            added["member"]["tier"].as_str().unwrap_or_default()
+        ),
     )?;
     rig.wait_for("the chief to have dispatched", secs(60), || {
         Ok(rig.transcript(&chief_session).contains(DISPATCHED))

@@ -17,8 +17,6 @@ use serde_json::{json, Value};
 
 use crate::chiefs::{to_human, with_codex};
 
-mod held;
-
 /// Every harness a chief's window runs on.
 const HARNESSES: [&str; 5] = ["claude-code", "codex", "pi", "devin", "muse"];
 
@@ -951,7 +949,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
 }
 
 #[test]
-fn a_second_member_of_a_held_role_at_another_tier_is_no_news_to_a_running_chief() {
+fn a_member_added_to_the_staff_is_no_news_to_a_running_chief() {
     let context = made(FirstMessage::Delivered);
     let project = project_on(&context, "claude-code");
     let chief = at_rest(&context, &project);
@@ -966,8 +964,8 @@ fn a_second_member_of_a_held_role_at_another_tier_is_no_news_to_a_running_chief(
                 model_name: Some("athena".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
-                roles: vec!["worker".to_owned()],
-                tier: "light".to_owned(),
+                roles: vec!["advisor".to_owned()],
+                tier: "standard".to_owned(),
             },
         )
         .unwrap();
@@ -1249,8 +1247,7 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
         recorded(&context).as_deref(),
         Some("instructions for chief staff 1")
     );
-    // A second member of a held role, at another tier, joins: no note tells the chief of it
-    // (`cf staff` shows the staff as it is).
+    // A member joins: no note tells the chief of it (`cf staff` shows the staff as it is).
     context
         .ledger
         .borrow_mut()
@@ -1262,8 +1259,8 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
                 model_name: Some("athena".to_owned()),
                 harness: "claude-code".to_owned(),
                 designer: false,
-                roles: vec!["worker".to_owned()],
-                tier: "light".to_owned(),
+                roles: vec!["advisor".to_owned()],
+                tier: "standard".to_owned(),
             },
         )
         .unwrap();

@@ -20,18 +20,11 @@ use super::{with_staff_rules, ProjectSpecs};
 pub(crate) const CONTEXT: &str =
     "This is context, not a task: acknowledge it in one line and wait for the next message.";
 
-/// What a note that tells a running chief of the roles its staff holds says before the
-/// section of them.
-const ROLES_CHANGED: &str = "Your staff's roles changed. This replaces the role lines of \"Your commands\" and the roles' paragraphs under \"Choose the role, not the member\":";
-
 /// The change the human made to a running chief's role, in the words it is told.
-/// `roles` is the section of the roles its staff holds now, said whole where the held roles
-/// changed (`roles::role_section`), `specs` what its specs were and are, and `rules` the
-/// project's rules for its staff as they were and are. A part that did not change is left
-/// out; none changed, none is told. A chief that works with its own hands has no roles in
-/// its text, and is told of none.
+/// `specs` is what its specs were and are, and `rules` the project's rules for its
+/// staff as they were and are. A part that did not change is left out; none changed,
+/// none is told.
 pub(crate) struct Change<'a> {
-    pub(crate) roles: Option<String>,
     pub(crate) specs: Option<(Option<&'a SpecsSetting>, Option<&'a ProjectSpecs<'a>>)>,
     pub(crate) rules: Option<(Option<&'a str>, Option<&'a str>)>,
 }
@@ -44,9 +37,6 @@ impl Change<'_> {
 
     pub(crate) fn note_for(&self, own_hands: bool) -> Option<String> {
         let mut parts = Vec::new();
-        if let Some(section) = &self.roles {
-            parts.push(format!("{ROLES_CHANGED}\n\n{section}\n"));
-        }
         if let Some((was, now)) = self.specs {
             parts.push(specs_said(was, now, own_hands));
         }

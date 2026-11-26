@@ -105,17 +105,16 @@
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
 //! harnesses a role goes to by a note, less the room its line takes). With `PATH_ONCE` off,
-//! the measured Mac fixture fits a staff of 162 rows with specs on or 184 without, two roles
+//! the measured Mac fixture fits a staff of 127 rows with specs on or 151 without, two roles
 //! per row and a name of twenty characters with model id and effort. The Windows PowerShell
-//! fixture fits 159 and 181. With the longest rules (8,000 bytes, 150 lines), 26 Mac rows or 23
-//! Windows rows fit in one read with specs on, 49 or 46 without. A staff that holds more roles
-//! has more of their lines in its text.
+//! fixture fits 123 and 148. With the longest rules (8,000 bytes, 150 lines), specs on and even
+//! an empty staff need parts; without specs, 15 Mac rows or 12 Windows rows fit in one read.
 //! A role longer than that `cf` prints in parts, each within the bound
 //! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
 //! table goes on past a part, its line says so): the first by the command the paste
 //! gives, each next by the command the part before ends with (`--part N`), and the
-//! opening says in how many ([`Telling::in_parts`]: on the Mac fixture, with specs on and the
-//! most rules, one piece through 26 rows, two through 297, three at 298). Each part printed is said to the board, and
+//! opening says in how many ([`Telling::in_parts`]: on the Mac fixture, two through 295 rows
+//! with specs on and the most rules, three at 296). Each part printed is said to the board, and
 //! logged as `message.part_read` (`receive_read_part`) whatever state the note is in: the
 //! role is read once every part was printed in the conversation it goes to, in any order,
 //! and told then or once its paste is confirmed, whichever is last (T-1513, review T-1510:

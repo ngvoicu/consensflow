@@ -5,11 +5,8 @@
 //! most of what it is built from is no setting: the work tiers, the window's `cf` and
 //! the place of the skill change with a release or a launch, and the staff table
 //! says "as of your launch" and sends the chief to `cf staff` for the staff as it
-//! is. Three parts are the human's to change while the window is open: **the roles the
-//! staff holds** (a member added, removed or given other roles: the chief's commands and
-//! the paragraphs on when a role is given work are those of the held roles alone, so a
-//! role gained or lost is told, and a second holder, or a tier, is not), and, in Project
-//! settings (or Settings, for specs in every project), **the project's specs** (on or
+//! is. Two parts are the human's to change in Project settings (or Settings, for
+//! specs in every project) while the window is open: **the project's specs** (on or
 //! off, the folder they are kept in, the Specmint variant) and **the project's rules
 //! for its staff**. Before this a chief kept the role it launched with until its
 //! next launch (a Resume, a switch, a window lost and opened again): specs turned on
@@ -34,24 +31,11 @@
 //! tells is taken as told once it is delivered (the ledger's own word for it), and the
 //! window that is closed has told nothing: its next launch is given the role as it is.
 //!
-//! **Every text built for the window** takes its role lines from the held roles that text
-//! tells, and its table from the staff the window launched with: the role at a launch, the
-//! note, the whole role where "Do with your own hands" goes off, and the text recorded as
-//! told. So what is recorded is what was said.
-//!
-//! **A switch to another conversation** (`/clear`, `/new`, `/resume`) shows the chief a
-//! conversation that holds the role its window launched with (its harness gives it by a
-//! hook or by the system prompt it started with, on every harness whose session was
-//! greeted), not what was told since: what the window was told is the launch's again, a
-//! note that waits for the conversation left is withdrawn, and the next rest tells the new
-//! conversation what it was not given. A session no hook greeted is given its role whole
-//! (`greet_switched`).
-//!
 //! **The Codex resume** (`role_change`) compares the role a conversation was last told
 //! with the role it is to be given, and writes the whole role again where they differ.
 //! The note is a note of the ledger that says a role (`Ledger::note_role`), with the role
 //! text the conversation holds once it is told: the text of the launch's own staff table
-//! with the held roles, the specs and the rules as they are now. The ledger records it in the write that
+//! with the specs and rules as they are now. The ledger records it in the write that
 //! confirms the delivery, so a conversation told now is not told the same change again
 //! at its resume, and one never told (its note waited when the window went, and is
 //! withdrawn at the launch, as every note of a role is) is told it in the whole role at
@@ -61,28 +45,22 @@
 //! **The skill** a chief turned on specs for is put in its place before it is told
 //! where it is (`Adapter::place_specmint`): the files of ConsensFlow's own copy for the
 //! variant and the folder, written as a launch writes them. Where that fails the human
-//! is told once on the board, the chief is not told of the specs, and it has them at its
-//! next launch: what else changed at the same rest (its roles, the rules, the switch) is told
-//! and recorded all the same, with the specs it was told before.
+//! is told once on the board, the chief is not, and it has the specs at its next launch.
 
-use cf_harness::contract::Adapter;
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use cf_proto::specs::SpecsSetting;
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::roles::news::Change;
-use crate::roles::{held_roles, role_section, staff_of};
 use crate::seams::EngineError;
 use crate::specs::{ChiefSpecs, RoleText};
 
 /// What a chief's role is built from that the human can change while its window is
-/// open: the roles its staff holds (none for a chief that works with its own hands, whose
-/// text names none), the specs the project has now (none: off), and the project's rules
-/// for its staff.
+/// open: the specs the project has now (none: off), and the project's rules for its
+/// staff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Parts {
-    held: Vec<&'static str>,
     specs: Option<SpecsSetting>,
     rules: Option<String>,
     own_hands: bool,
@@ -110,16 +88,10 @@ struct Written {
 pub(crate) struct NewsPart {
     /// None for a member's window, and for one that is closed.
     told: Option<Told>,
-    /// What the window's launch told it: what a conversation it shows after a switch holds.
-    launched: Option<Told>,
     waiting: Option<Written>,
-    /// The parts the human was told on the board could not be told at all, so that
+    /// The parts the human was told on the board could not be put in place, so that
     /// it is not told again of the same.
     refused: Option<Parts>,
-    /// The specs the human was told could not be put in place, so that they are not tried
-    /// again until the project says others: the window is told what else changed with the
-    /// specs it was told before.
-    refused_specs: Option<Option<SpecsSetting>>,
     /// The parts the last look at rest found the project to say, where they were not
     /// what the window was told: a note is written when the next look finds the same.
     /// What the app says is read from a file at each look, and a read that fails reads
@@ -131,20 +103,10 @@ impl NewsPart {
     /// What a chief's window launched with is told of.
     pub(crate) fn launched(told: Option<Told>) -> Self {
         Self {
-            launched: told.clone(),
             told,
             ..Self::default()
         }
     }
-}
-
-/// The roles the chief's text says the staff of `project` holds: none for a chief that
-/// works with its own hands, whose text names no role.
-fn held_told(project: &ProjectView) -> Vec<&'static str> {
-    if project.own_hands {
-        return Vec::new();
-    }
-    held_roles(&staff_of(project))
 }
 
 /// The project's rules for its staff as the chief's role says them: a chief that does the
@@ -160,7 +122,6 @@ impl Told {
     pub(crate) fn of(project: &ProjectView, specs: Option<&SpecsSetting>) -> Self {
         Self {
             parts: Parts {
-                held: held_told(project),
                 specs: specs.cloned(),
                 rules: rules_told(project),
                 own_hands: project.own_hands,
@@ -175,7 +136,6 @@ impl Dispatcher {
     /// changes.
     fn parts_of(&self, project: &ProjectView, participant: &ParticipantView) -> Parts {
         Parts {
-            held: held_told(project),
             specs: self.specs_setting(project, participant),
             rules: rules_told(project),
             own_hands: project.own_hands,
@@ -203,38 +163,6 @@ impl Dispatcher {
         }
     }
 
-    /// `record`'s window shows another conversation that holds the role its launch gave,
-    /// not what was told since: it was told what the launch told it, a note that waits for
-    /// the conversation left is withdrawn, and the next look says what this one lacks.
-    pub(crate) fn holds_launch_role(&self, record: &Record) -> Result<(), EngineError> {
-        let written = {
-            let mut part = record.window.borrow_mut();
-            let Some(launched) = part.news.launched.clone() else {
-                return Ok(());
-            };
-            part.news.told = Some(launched);
-            part.news.seen = None;
-            part.news.waiting.take()
-        };
-        let Some(written) = written else {
-            return Ok(());
-        };
-        let queued = self
-            .seams
-            .ledger
-            .borrow()
-            .message(written.message)?
-            .is_some_and(|message| message.state == "queued");
-        if queued {
-            self.seams.ledger.borrow_mut().cancel_message(
-                written.message,
-                "the window went to another conversation before it went in",
-            )?;
-            self.changed();
-        }
-        Ok(())
-    }
-
     /// Tells `participant`'s window, a chief's, at rest in an open project, of what the
     /// human changed of its role since it was last told. Called at a look that found
     /// the window at rest, before the next message goes in: the note written here is
@@ -250,17 +178,7 @@ impl Dispatcher {
         if record.window.borrow().news.told.is_none() {
             return Ok(());
         }
-        let mut wanted = self.parts_of(project, participant);
-        // Specs that could not be put in place are not tried again while the project says
-        // the same: the rest is told with what the window was told of them.
-        {
-            let mut part = record.window.borrow_mut();
-            if part.news.refused_specs.as_ref() != Some(&wanted.specs) {
-                part.news.refused_specs = None;
-            } else if let Some(told) = part.news.told.as_ref() {
-                wanted.specs = told.parts.specs.clone();
-            }
-        }
+        let wanted = self.parts_of(project, participant);
         if !self.settle_news(record, &wanted)? {
             return Ok(());
         }
@@ -338,51 +256,36 @@ impl Dispatcher {
     }
 
     /// Writes the note that tells `participant`'s window the change from `told` to
-    /// `wanted`, with the skill put in its place when specs are on. A specs change that
-    /// cannot be put in place holds back nothing else: the human is told of it once, and
-    /// the window is told the rest, with the specs it was told before.
+    /// `wanted`, with the skill put in its place when specs are on.
     fn write_news(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Record,
         told: &Told,
-        mut wanted: Parts,
+        wanted: Parts,
     ) -> Result<(), EngineError> {
         let harness = participant.harness.as_deref().unwrap_or_default();
         let Some(adapter) = self.seams.adapters.adapter(harness) else {
             return Ok(());
         };
-        let mut made = self.told_role(project, participant, record, &*adapter, told, &wanted);
-        if made.is_err() && wanted.specs != told.parts.specs {
-            if let Err(cause) = made {
-                self.specs_refused(project, participant, record, wanted.specs.clone(), &cause)?;
-            }
-            wanted.specs = told.parts.specs.clone();
-            if wanted == told.parts {
-                return Ok(());
-            }
-            made = self.told_role(project, participant, record, &*adapter, told, &wanted);
-        }
-        let role = match made {
+        // The role as the window would be told it now, with the staff table it
+        // launched with: what its conversation is recorded to hold once the note is in.
+        let mut as_launched = project.clone();
+        as_launched.participants.clone_from(&told.staff);
+        let role = match self.role_text(&as_launched, participant, &*adapter) {
             Ok(role) => role,
             Err(cause) => return self.news_refused(project, participant, record, wanted, &cause),
         };
-        let cf = self.seams.roles.cf(participant);
-        let roles = if told.parts.held == wanted.held || wanted.own_hands {
-            None
-        } else {
-            match role_section(&wanted.held, &cf) {
-                Ok(section) => Some(section),
-                Err(cause) => {
-                    let cause = EngineError::said("no-role-text", cause.to_string());
-                    return self.news_refused(project, participant, record, wanted, &cause);
-                }
+        let launch = record.window.borrow().launch_id.clone();
+        if let (Some(specs), Some(launch)) = (role.specs.as_ref(), launch.as_ref()) {
+            if let Err(cause) = adapter.place_specmint(&specs.launch(), launch) {
+                let cause = EngineError::said("launch-failed", cause);
+                return self.news_refused(project, participant, record, wanted, &cause);
             }
-        };
+        }
         let now = role.specs.as_ref().map(crate::specs::ChiefSpecs::text);
         let change = Change {
-            roles,
             specs: (told.parts.specs != wanted.specs)
                 .then_some((told.parts.specs.as_ref(), now.as_ref())),
             rules: (told.parts.rules != wanted.rules)
@@ -399,7 +302,7 @@ impl Dispatcher {
             if wanted.own_hands {
                 crate::roles::news::own_hands_on(&role.instructions)
             } else {
-                crate::role_change::body_of(&role.instructions, &cf)
+                crate::role_change::body_of(&role.instructions, &self.seams.roles.cf(participant))
             }
         } else if let Some(body) = other {
             body
@@ -424,59 +327,6 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The role as the window would be told it once it holds `wanted`: with the staff table
-    /// it launched with, the held roles and the specs of `wanted`, and the skill of specs
-    /// that changed put in its place. It is what its conversation is recorded to hold once
-    /// the note is in.
-    fn told_role(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        record: &Record,
-        adapter: &dyn Adapter,
-        told: &Told,
-        wanted: &Parts,
-    ) -> Result<RoleText, EngineError> {
-        let mut as_launched = project.clone();
-        as_launched.participants.clone_from(&told.staff);
-        let role = self.role_text_holding(
-            &as_launched,
-            participant,
-            adapter,
-            &wanted.held,
-            wanted.specs.clone(),
-        )?;
-        let launch = record.window.borrow().launch_id.clone();
-        if wanted.specs != told.parts.specs {
-            if let (Some(specs), Some(launch)) = (role.specs.as_ref(), launch.as_ref()) {
-                adapter
-                    .place_specmint(&specs.launch(), launch)
-                    .map_err(|cause| EngineError::said("launch-failed", cause))?;
-            }
-        }
-        Ok(role)
-    }
-
-    /// The human is told on the board, once, that the chief could not be told of the
-    /// specs: it has them at its next launch.
-    fn specs_refused(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        record: &Record,
-        specs: Option<SpecsSetting>,
-        cause: &EngineError,
-    ) -> Result<(), EngineError> {
-        record.window.borrow_mut().news.refused_specs = Some(specs);
-        self.tell_human(
-            project,
-            format!(
-                "@{} could not be told that the project's specs changed: {cause}. It has them when it next starts.",
-                participant.handle
-            ),
-        )
-    }
-
     /// The human is told on the board, once, that the chief could not be told: it
     /// has the change at its next launch.
     fn news_refused(
@@ -488,24 +338,16 @@ impl Dispatcher {
         cause: &EngineError,
     ) -> Result<(), EngineError> {
         record.window.borrow_mut().news.refused = Some(wanted);
-        self.tell_human(
-            project,
-            format!(
-                "@{} could not be told that its role changed: {cause}. It has the change when it next starts.",
-                participant.handle
-            ),
-        )
-    }
-
-    /// A note of ConsensFlow's on the board for the human.
-    fn tell_human(&self, project: &ProjectView, body: String) -> Result<(), EngineError> {
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body,
+                body: format!(
+                    "@{} could not be told that the project's specs or the rules for its staff changed: {cause}. It has them when it next starts.",
+                    participant.handle
+                ),
             },
         )?;
         Ok(())
