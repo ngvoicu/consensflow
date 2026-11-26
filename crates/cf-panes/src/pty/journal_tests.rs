@@ -962,3 +962,222 @@ fn a_window_nobody_draws_refuses_a_size_past_4096_and_keeps_its_terminals_size()
     assert_eq!(table.terminal_size(&key), Some((30, 90)));
     table.kill(&key).unwrap();
 }
+
+/// T-2284's finding 16: a terminal that is slow to resize holds up its own window's sizes and
+/// nothing else: not another window's keys, not the page's lock (admission of a call, a
+/// subscription), not the journal (a read, the end), not an acknowledgement. Each is tried while
+/// the native resize is blocked, and has a bound only so that a failure is a failure and not a
+/// hang.
+#[cfg(unix)]
+#[test]
+fn a_slow_resize_holds_nothing_of_another_window_the_page_the_journal_or_an_acknowledgement() {
+    use super::PaneEnvironment;
+    use crate::arbiter::{EnterTiming, InputArbiter};
+    use crate::input_queue::InputQueue;
+
+    let rig = Rig::start("slow-resize", 1 << 20, ASKING);
+    let other = PaneKey::new("other-window", 1);
+    let _other_output = rig
+        .table
+        .open_streamed_at_while(
+            &|| true,
+            other.clone(),
+            &std::env::current_dir().unwrap(),
+            &[
+                "/usr/bin/python3".into(),
+                "-I".into(),
+                "-S".into(),
+                "-c".into(),
+                "import time\ntime.sleep(60)\n".into(),
+            ],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize::default(),
+            1 << 20,
+        )
+        .unwrap();
+    let inputs = Arc::new(InputQueue::new(
+        Arc::clone(&rig.table),
+        Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+    ));
+    inputs.begin_page("page").unwrap();
+    let (entered, inside) = mpsc::channel::<()>();
+    let (release, released) = mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    rig.table.on_native_resize(Arc::new(move || {
+        entered.send(()).unwrap();
+        released.lock().unwrap().recv().unwrap();
+    }));
+    let resizing = {
+        let (inputs, table, key) = (Arc::clone(&inputs), Arc::clone(&rig.table), rig.key.clone());
+        std::thread::spawn(move || {
+            crate::page::resize(
+                &inputs,
+                &table,
+                Some("page"),
+                &key.id,
+                key.generation,
+                (82, 24),
+                Some(0),
+            )
+        })
+    };
+    inside
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the native resize began");
+    // Each of these must finish while the resize is blocked.
+    let tries: Vec<(&str, Box<dyn FnOnce() + Send>)> = vec![
+        ("a key of another window", {
+            let (table, other) = (Arc::clone(&rig.table), other.clone());
+            Box::new(move || table.write(&other, b"k").map(|_| ()).unwrap())
+        }),
+        ("the page's lock", {
+            let inputs = Arc::clone(&inputs);
+            Box::new(move || inputs.page_is_current("page").unwrap())
+        }),
+        ("the table's list", {
+            let table = Arc::clone(&rig.table);
+            Box::new(move || {
+                table.list().unwrap();
+            })
+        }),
+        ("the journal's end", {
+            let journal = Arc::clone(&rig.journal);
+            Box::new(move || {
+                journal.end();
+            })
+        }),
+        ("an acknowledgement", {
+            let (table, key) = (Arc::clone(&rig.table), rig.key.clone());
+            Box::new(move || {
+                let _ = table.ack(&key, 0);
+            })
+        }),
+    ];
+    let mut held = Vec::new();
+    for (what, work) in tries {
+        let (done, finished) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            work();
+            let _ = done.send(());
+        });
+        if finished.recv_timeout(Duration::from_secs(3)).is_err() {
+            held.push(what);
+        }
+    }
+    // Let the resize go, so that nothing is left blocked, then say what was held.
+    release.send(()).unwrap();
+    let answer = resizing.join().unwrap();
+    assert!(
+        held.is_empty(),
+        "these waited on another window's slow resize: {held:?}"
+    );
+    assert_eq!(
+        answer["ok"], true,
+        "the slow resize itself completes: {answer}"
+    );
+    assert_eq!(rig.table.terminal_size(&rig.key), Some((24, 82)));
+    rig.end();
+}
+
+/// A size whose page is replaced while its terminal resizes is refused when it comes to be
+/// recorded, and the terminal goes back to the size it had: no page's emulator took it.
+#[cfg(unix)]
+#[test]
+fn a_size_whose_page_was_replaced_while_its_terminal_resized_is_undone() {
+    use crate::arbiter::{EnterTiming, InputArbiter};
+    use crate::input_queue::InputQueue;
+
+    let rig = Rig::start("replaced-while-resizing", 1 << 20, ASKING);
+    let inputs = Arc::new(InputQueue::new(
+        Arc::clone(&rig.table),
+        Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+    ));
+    inputs.begin_page("old").unwrap();
+    let (entered, inside) = mpsc::channel::<()>();
+    let (release, released) = mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    rig.table.on_native_resize(Arc::new(move || {
+        entered.send(()).unwrap();
+        released.lock().unwrap().recv().unwrap();
+    }));
+    let resizing = {
+        let (inputs, table, key) = (Arc::clone(&inputs), Arc::clone(&rig.table), rig.key.clone());
+        std::thread::spawn(move || {
+            crate::page::resize(
+                &inputs,
+                &table,
+                Some("old"),
+                &key.id,
+                key.generation,
+                (82, 24),
+                Some(0),
+            )
+        })
+    };
+    inside.recv_timeout(Duration::from_secs(10)).unwrap();
+    inputs.begin_page("new").unwrap();
+    release.send(()).unwrap();
+    let answer = resizing.join().unwrap();
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], "pane-input-stale-page");
+    assert_eq!(
+        rig.table.terminal_size(&rig.key),
+        Some((24, 80)),
+        "the terminal went back to its size"
+    );
+    let piece = rig.table.history("new", &rig.key, None);
+    assert!(
+        piece.is_err() || piece.unwrap().resizes.is_empty(),
+        "no size was journaled"
+    );
+    rig.end();
+}
+
+/// With 4,096 sizes held and output acknowledged the next size is checked and goes to the
+/// terminal; a read that comes in meanwhile leaves no room when it is recorded, and the size
+/// is undone as the check would have refused it.
+#[cfg(unix)]
+#[test]
+fn a_size_that_finds_no_room_when_it_is_recorded_is_undone() {
+    use super::PaneEnvironment;
+    let table = Arc::new(PaneTable::new());
+    table.keep_journals();
+    let key = PaneKey::new("no-room", 1);
+    let pane = table
+        .open_streamed_at_while(
+            &|| true,
+            key.clone(),
+            &std::env::current_dir().unwrap(),
+            &["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            portable_pty::PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+            1 << 20,
+        )
+        .unwrap();
+    let journal = pane.journal.clone().unwrap();
+    journal.append(b"x");
+    for i in 0..4096 {
+        table
+            .resize_at(&key, 24, if i % 2 == 0 { 81 } else { 80 }, Some(0))
+            .unwrap();
+    }
+    journal.acknowledged(1);
+    let in_between = Arc::clone(&journal);
+    table.on_native_resize(Arc::new(move || in_between.append(b"y")));
+    let refused = table.resize_at(&key, 30, 90, Some(1));
+    assert_eq!(
+        refused.map_err(|error| error.to_string()),
+        Err("pane-sizes-held".to_string())
+    );
+    assert_eq!(
+        table.terminal_size(&key),
+        Some((24, 80)),
+        "its terminal went back to its size"
+    );
+    table.kill(&key).unwrap();
+}

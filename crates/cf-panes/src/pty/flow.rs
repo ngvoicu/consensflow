@@ -333,7 +333,7 @@ pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError
 
     let fd = pane
         .master
-        .as_raw_fd()
+        .fd
         .ok_or_else(|| PaneError::Pty("the terminal has no descriptor".to_owned()))?;
     // SAFETY: the master's descriptor, open for as long as the pane holds it, which it
     // does while the table's lock is held; a copy of it is taken, which the output owns.

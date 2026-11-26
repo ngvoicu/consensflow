@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -198,6 +198,10 @@ pub struct InputQueue {
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
     workers: Mutex<HashMap<PaneKey, Vec<JoinHandle<()>>>>,
     page: Mutex<PageInputState>,
+    /// Counts the changes of the current page, each made under `page`'s lock before the page
+    /// changes: a call that checked its page and needs to know, later and without the lock, that
+    /// the page has not changed since asks [`InputQueue::page_unchanged`].
+    page_epoch: AtomicU64,
     accepting: AtomicBool,
 }
 
@@ -217,6 +221,7 @@ impl InputQueue {
                 completions: HashMap::new(),
                 next_ticket: 1,
             }),
+            page_epoch: AtomicU64::new(0),
             accepting: AtomicBool::new(true),
         }
     }
@@ -385,6 +390,7 @@ impl InputQueue {
         if let Some((session, number)) = ordinal {
             page.page_ordinals.insert(session, number);
         }
+        self.page_epoch.fetch_add(1, Ordering::SeqCst);
         page.current = Some(page_id.to_owned());
         Ok(())
     }
@@ -412,6 +418,18 @@ impl InputQueue {
         Ok(result)
     }
 
+    /// The page `page_id` as of now, if it is the current page: a count that stays the same until
+    /// the current page changes ([`InputQueue::page_unchanged`]). The page's lock is held only
+    /// for this.
+    pub fn current_page_epoch(&self, page_id: &str) -> Result<u64, String> {
+        self.with_current_page(page_id, || self.page_epoch.load(Ordering::SeqCst))
+    }
+
+    /// Whether the current page has not changed since `epoch` was read. No lock is taken.
+    pub fn page_unchanged(&self, epoch: u64) -> bool {
+        self.page_epoch.load(Ordering::SeqCst) == epoch
+    }
+
     /// Navigation has begun, before a replacement page subscribes. Delayed
     /// calls from the departed page may no longer enter a pane.
     pub fn end_page(&self) -> Result<(), String> {
@@ -426,6 +444,7 @@ impl InputQueue {
     }
 
     fn retire_page(&self, page: &mut PageInputState) -> Result<(), String> {
+        self.page_epoch.fetch_add(1, Ordering::SeqCst);
         if let Some(previous) = page.current.take() {
             page.retired.insert(previous);
         }

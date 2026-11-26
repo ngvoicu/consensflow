@@ -133,10 +133,16 @@ pub fn resize(
     let Some(page) = page_id else {
         return refused(crate::input_queue::INPUT_STALE_PAGE);
     };
-    match inputs.with_current_page(page, || panes.resize_at(&key, rows, cols, at)) {
-        Ok(Ok(())) => ok(),
-        Ok(Err(error)) => refused(&error.to_string()),
-        Err(error) => refused(&error),
+    // The page's lock is held to read who the page is and no longer: the window's terminal may
+    // be slow to resize, and nothing but that window's next size waits on it. A page that is
+    // replaced meanwhile finds its size undone when it is recorded (`resize_while`).
+    let epoch = match inputs.current_page_epoch(page) {
+        Ok(epoch) => epoch,
+        Err(error) => return refused(&error),
+    };
+    match panes.resize_while(&key, rows, cols, at, &|| inputs.page_unchanged(epoch)) {
+        Ok(()) => ok(),
+        Err(error) => refused(&error.to_string()),
     }
 }
 

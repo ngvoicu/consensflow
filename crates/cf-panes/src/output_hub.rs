@@ -2,7 +2,7 @@
 //! page or the headless helper's peer, and what a pane prints while there is
 //! none waits for the next.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -70,6 +70,9 @@ struct OutputHubState {
     /// ([`OutputHub::attach_page`]). Set under the lock the sink is called under, so a byte is
     /// handed to a page or it is not.
     handed: HashMap<PaneKey, Taken>,
+    /// The windows that ended while some of their output was still parked: their entry in
+    /// `handed` goes once the last of it has been taken, not before and not after.
+    finished: HashSet<PaneKey>,
 }
 
 /// How far a window's output has been handed to a sink that took it.
@@ -98,6 +101,7 @@ impl OutputHub {
                 sink: None,
                 pending: VecDeque::new(),
                 handed: HashMap::new(),
+                finished: HashSet::new(),
             }),
         }
     }
@@ -129,18 +133,43 @@ impl OutputHub {
         for message in pending {
             Self::deliver_or_park(&mut state, message);
         }
+        Self::forget_finished(&mut state);
         handed
+    }
+
+    /// The entry of each window that ended and has none of its output left parked goes: what
+    /// delivering its parked messages wrote there is no page's to settle.
+    fn forget_finished(state: &mut OutputHubState) {
+        let OutputHubState {
+            pending,
+            handed,
+            finished,
+            ..
+        } = state;
+        finished.retain(|key| {
+            let parked = pending.iter().any(|message| message.taken().0 == *key);
+            if !parked {
+                handed.remove(key);
+            }
+            parked
+        });
     }
 
     /// A window with no journal has ended and all it printed has been handed on or parked: no
     /// page needs what was handed of it (no history, and no room left to settle). One with a
     /// journal keeps its entry for as long as its journal is kept ([`OutputHub::retain_handed`]).
     pub(crate) fn forget(&self, key: &PaneKey) {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .handed
-            .remove(key);
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.handed.remove(key);
+        // Some of its output may still be parked, for a sink that is not there yet: delivering
+        // it would write the entry again, so it is forgotten again once the last is taken.
+        if state
+            .pending
+            .iter()
+            .any(|message| message.taken().0 == *key)
+        {
+            state.finished.insert(key.clone());
+        }
     }
 
     /// How many windows the hub keeps what it handed for.
@@ -191,6 +220,71 @@ impl Default for OutputHub {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window that ended before the first sink registered (its output parked, the hub told it
+    /// had ended) leaves nothing behind when that sink takes the parked bytes: the helper's
+    /// bridge reader starts before the sink is installed, so this is every start (T-2284's
+    /// finding 12).
+    #[cfg(unix)]
+    #[test]
+    fn windows_that_ended_before_the_first_sink_are_not_remembered_when_it_takes_their_output() {
+        let hub = OutputHub::new();
+        let message = |id: &str, seq| PaneOutputMessage {
+            id: id.into(),
+            generation: 1,
+            seq,
+            offset: None,
+            bytes: vec![65],
+        };
+        for id in ["a", "b", "c"] {
+            hub.publish(message(id, 1));
+            hub.forget(&PaneKey::new(id, 1));
+        }
+        // One that is still running is kept, as ever.
+        hub.publish(message("live", 1));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let copy = Arc::clone(&seen);
+        hub.register_sink(Arc::new(move |message: PaneOutputMessage| {
+            copy.lock().unwrap().push(message.id);
+            true
+        }));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            4,
+            "every parked byte is delivered"
+        );
+        assert_eq!(
+            hub.handed_windows(),
+            1,
+            "only the running window is remembered"
+        );
+    }
+
+    /// A sink that takes the parked output of a window that ended only in part leaves what it
+    /// refused parked, and the window forgotten once the last of it has been taken.
+    #[cfg(unix)]
+    #[test]
+    fn an_ended_window_is_forgotten_when_the_last_of_its_parked_output_is_taken() {
+        let hub = OutputHub::new();
+        let message = |seq| PaneOutputMessage {
+            id: "gone".into(),
+            generation: 1,
+            seq,
+            offset: None,
+            bytes: vec![65],
+        };
+        hub.publish(message(1));
+        hub.publish(message(2));
+        hub.forget(&PaneKey::new("gone", 1));
+        hub.register_sink(Arc::new(|message: PaneOutputMessage| message.seq == 1));
+        assert_eq!(
+            hub.handed_windows(),
+            1,
+            "its second message is still parked"
+        );
+        hub.register_sink(Arc::new(|_| true));
+        assert_eq!(hub.handed_windows(), 0);
+    }
 
     #[test]
     fn headless_output_includes_a_members_window() {

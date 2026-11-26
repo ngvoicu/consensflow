@@ -119,15 +119,15 @@ struct Inner {
     acknowledged: u64,
 }
 
-/// A size the journal will take ([`Journal::size_slot`]).
-pub(crate) struct SizeSlot<'a>(MutexGuard<'a, Inner>);
-
-impl SizeSlot<'_> {
-    /// The window took `size`, which the page's emulator took at `at` (`None`: the journal's
-    /// end). See [`Journal`]'s sizes.
-    pub(crate) fn record(mut self, at: Option<u64>, size: Size) {
-        self.0.resize(at, size);
-    }
+/// What became of a size the window's terminal took ([`Journal::record_size`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SizeRecord {
+    /// Journaled.
+    Taken,
+    /// 4,096 sizes are held and output is unacknowledged: none is taken.
+    NoRoom,
+    /// The page that sent it is no longer the page.
+    PageGone,
 }
 
 /// One window's journal. Appended to by the window's consumer, read by the page's pulls.
@@ -206,14 +206,33 @@ impl Journal {
         self.locked().resize(at, size);
     }
 
-    /// Room for one more size, held from the check to the record: `None` with 4,096 sizes held
-    /// and output unacknowledged, which no new start may pass. The journal stays locked while the
-    /// slot is held, so no read is taken in between the check and the record, and what the check
-    /// said still holds when the size is written.
-    pub(crate) fn size_slot(&self) -> Option<SizeSlot<'_>> {
+    /// Whether one more size can be taken: not with 4,096 held and output unacknowledged, which
+    /// no new start may pass. A window's sizes come one at a time (its terminal's lock), so
+    /// only a read can have changed this by the time the size is recorded, which asks again.
+    pub(crate) fn has_room_for_size(&self) -> bool {
         let inner = self.locked();
-        (inner.resizes.len() < HARD_MAX_RESIZES || inner.acknowledged >= inner.end)
-            .then_some(SizeSlot(inner))
+        inner.resizes.len() < HARD_MAX_RESIZES || inner.acknowledged >= inner.end
+    }
+
+    /// The window's terminal took `size`, which the page's emulator took at `at` (`None`: the
+    /// journal's end), if there is still room and `current` still says the page that sent it is
+    /// the page. Asked with the journal locked, so that a page that subscribes next finds this
+    /// size in its history, or finds it refused: never half taken. See [`Journal`]'s sizes.
+    pub(crate) fn record_size(
+        &self,
+        at: Option<u64>,
+        size: Size,
+        current: &dyn Fn() -> bool,
+    ) -> SizeRecord {
+        let mut inner = self.locked();
+        if inner.resizes.len() >= HARD_MAX_RESIZES && inner.acknowledged < inner.end {
+            return SizeRecord::NoRoom;
+        }
+        if !current() {
+            return SizeRecord::PageGone;
+        }
+        inner.resize(at, size);
+        SizeRecord::Taken
     }
 
     /// A page subscribed with `boundary` bytes already handed to a page (the hub's). Pulls
