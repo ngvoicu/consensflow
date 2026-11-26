@@ -67,8 +67,8 @@ runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''            if rest.is_empty() { format!(" {names}") } else { names },'''
-replace = '''            "",'''
+find = '''{TURN_ON_OPEN_QUESTION}{names} still open'''
+replace = '''{TURN_ON_OPEN_QUESTION} still open'''
 
 [[plant]]
 name = "open question result: finish leaves the questions open"
@@ -111,16 +111,6 @@ runs = ["oqr-dispatcher"]
 file = "crates/cf-ledger/src/messages/receipt.rs"
 find = '''AND json_extract(e.data, '$.report') = ?4'''
 replace = '''AND ?4 = ?4'''
-
-[[plant]]
-name = "open question result: a note that failed stops the next turn's note"
-meant = "a_failed_note_does_not_stop_the_next_turns_note"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''AND m.task_id = ?2 AND m.sender_id = ?3 AND m.state NOT IN ('failed', 'cancelled')'''
-replace = '''AND m.task_id = ?2 AND m.sender_id = ?3'''
 
 [[plant]]
 name = "open question result: the note offers Finish on another conversation's words"

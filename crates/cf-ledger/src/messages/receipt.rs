@@ -272,9 +272,10 @@ pub const TURN_ON_OPEN_QUESTION: &str = "turn ended on these words with its ques
 /// The questions `window` has open on `task` that the ended turn `turn` (the identity of its
 /// last complete item) is to be reported on (T-2197): a message of the task was pasted into the
 /// window after the newest of them was asked, the window's `delivery.begun` after the question's
-/// `message.sent`, and no note reporting this turn was sent and still stands. Empty otherwise.
-/// Read from the ledger alone: the note's own `message.sent` event carries `report: turn`, and
-/// a note whose delivery failed or was withdrawn does not count.
+/// `message.sent`, and no note reporting this turn was sent. Empty otherwise. Read from the
+/// ledger alone: the note's own `message.sent` event carries `report: turn`. A turn is told once
+/// even if its note's delivery failed (nothing would stop a failing delivery from being told
+/// again every look); the next turn has another identity and is told.
 pub(crate) fn questions_to_report(
     store: &Store,
     task: i64,
@@ -321,7 +322,7 @@ pub(crate) fn questions_to_report(
             "SELECT 1 FROM event e JOIN message m ON m.id = json_extract(e.data, '$.message')
               WHERE e.project_id = ?1 AND e.kind = 'message.sent'
                 AND json_extract(e.data, '$.report') = ?4
-                AND m.task_id = ?2 AND m.sender_id = ?3 AND m.state NOT IN ('failed', 'cancelled')
+                AND m.task_id = ?2 AND m.sender_id = ?3
               LIMIT 1",
         )?
         .exists(params![project, task, window, turn])?;

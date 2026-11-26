@@ -1674,7 +1674,7 @@ mod turns {
         b.delivered(&[q.id], &[]);
     }
 
-    /// A note whose delivery failed for good does not stop the next turn's note.
+    /// A note whose delivery failed for good does not stop the next turn's note (another turn, another identity).
     #[test]
     fn a_failed_note_does_not_stop_the_next_turns_note() {
         let (b, q) = field();

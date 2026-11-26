@@ -38,9 +38,6 @@ pub(crate) struct Queued<'a> {
     /// What a note of ConsensFlow's own to a chief that asks it no decision says on its
     /// task's line ([`SHOWN`]): it is never typed into the chief's window.
     pub(crate) shown: Option<&'a str>,
-    /// The ended turn of a window that a note reports (T-2197): the identity of the turn's last
-    /// complete item, written into the note's `message.sent` event as `report`.
-    pub(crate) report: Option<&'a str>,
 }
 
 /// The receipt word of a note of ConsensFlow's own that is shown, not typed: it asks its
