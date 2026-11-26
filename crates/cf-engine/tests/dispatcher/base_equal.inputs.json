@@ -52,5 +52,14 @@
 "401 first line\nsecond line password: hunter2\nthird line\nfourth\nfifth",
 "401 plain words word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
 "   ",
-"402 ¿Facturación? \"crédito agotado\" — pague en https://billing.example.invalid/x?a=1&b=2"
+"402 ¿Facturación? \"crédito agotado\" — pague en https://billing.example.invalid/x?a=1&b=2",
+"503 upstream is temporarily unavailable. {\"error\":{\"code\":\"invalid_grant_pending\"}}",
+"OAuth refresh failed for anthropic: Anthropic token refresh request failed. status=503; body={\"error\":\"invalid_grant_pending\"}",
+"401 Unauthorized. {\"error\":{\"code\":\"previous_invalid_grant\"}}",
+"429 token refresh failed: {\"error\":\"invalid_grant\"} try again later",
+"OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=502; body={\"error\":\"invalid_grant\"}",
+"OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={\"error\":\"invalid_grants\"}",
+"Meta session expired (status 503). Run `/login meta` to sign in again.",
+"503 overloaded: Meta session expired (status 401) upstream",
+"invalid_grant"
 ]

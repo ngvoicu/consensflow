@@ -49,17 +49,40 @@ pub const BILLING_CODES: [&str; 4] = [
     "requires_more_credits",
 ];
 
-/// An account hold's kind, status and code: each a literal of this file.
+/// An account hold's kind, status and code: each a literal of this file. **The fields are
+/// private and there is no other constructor than [`HoldForm::checked`]**: nothing outside this
+/// file can make a form whose value is not a literal of the lists (T-2353).
+///
+/// ```compile_fail
+/// use cf_proto::hold::HoldForm;
+/// // A status the lists do not name, a code that is a piece of a harness's text.
+/// let _ = HoldForm { kind: "login", status: Some(499), code: Some("owner@example.invalid") };
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct HoldForm {
-    pub kind: &'static str,
+    kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<u16>,
+    status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<&'static str>,
+    code: Option<&'static str>,
 }
 
 impl HoldForm {
+    /// Which was refused: one of [`KINDS`].
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The status the refusal carried, one of [`STATUSES`], where it carried one.
+    pub const fn status(&self) -> Option<u16> {
+        self.status
+    }
+
+    /// The provider's error type, one of [`CODES`], where the refusal named one.
+    pub const fn code(&self) -> Option<&'static str> {
+        self.code
+    }
+
     /// The form of `kind`, `status` and `code` as the lists name them: the lists' own literals
     /// for what is in them, no status or no code for what is not, and nothing where the kind is
     /// none of [`KINDS`]. A code of the other kind's list is no code.

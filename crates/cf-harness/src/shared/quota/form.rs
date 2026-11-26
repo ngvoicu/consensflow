@@ -18,22 +18,37 @@ use crate::shared::pattern::compile;
 #[allow(clippy::expect_used)]
 static CODE_WORDS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     [
-        ("authentication_error", r"(?i-u:authentication_error)"),
-        ("invalid_grant", r"(?i-u:invalid_grant)"),
-        ("invalid_api_key", r"(?i-u:invalid[_ ]api[_ ]key)"),
-        ("invalid_x_api_key", r"(?i-u:invalid x-api-key)"),
+        (
+            "authentication_error",
+            r"(?i-u:(?-u:\b)authentication_error(?-u:\b))",
+        ),
+        ("invalid_grant", r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))"),
+        (
+            "invalid_api_key",
+            r"(?i-u:(?-u:\b)invalid[_ ]api[_ ]key(?-u:\b))",
+        ),
+        (
+            "invalid_x_api_key",
+            r"(?i-u:(?-u:\b)invalid x-api-key(?-u:\b))",
+        ),
         ("refresh_failed", r"(?i-u:refresh failed \(401\))"),
         (
             "session_expired",
             r"(?i-u:session expired \(status 40[13]\))",
         ),
-        ("billing_error", r"(?i-u:billing_error)"),
-        ("insufficient_quota", r"(?i-u:insufficient_quota)"),
+        ("billing_error", r"(?i-u:(?-u:\b)billing_error(?-u:\b))"),
+        (
+            "insufficient_quota",
+            r"(?i-u:(?-u:\b)insufficient_quota(?-u:\b))",
+        ),
         (
             "credit_balance_too_low",
-            r"(?i-u:credit balance is too low)",
+            r"(?i-u:(?-u:\b)credit balance is too low(?-u:\b))",
         ),
-        ("requires_more_credits", r"(?i-u:requires more credits)"),
+        (
+            "requires_more_credits",
+            r"(?i-u:(?-u:\b)requires more credits(?-u:\b))",
+        ),
     ]
     .into_iter()
     .map(|(literal, pattern)| (literal, compile(pattern)))

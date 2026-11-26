@@ -37,7 +37,10 @@ use jiff::tz::TimeZone;
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
-use patterns::{BILLING, BUSY, CREDENTIALS, REFUSED, SPENT};
+use patterns::{
+    BILLING, BUSY, CREDENTIALS, INVALID_GRANT, META_SESSION, REFRESH, REFRESH_MOMENT, REFUSED,
+    SPENT,
+};
 
 /// What a record says of the account's quota.
 #[derive(Debug, Clone, PartialEq)]
@@ -247,6 +250,17 @@ pub(crate) fn account_refusal(text: &str, status: Option<f64>) -> Option<Refusal
         Some(status) if status == CREDENTIALS_STATUS => Some(Refusal::Credentials),
         _ if BILLING.is_match(text) => Some(Refusal::Billing),
         _ if CREDENTIALS.is_match(text) => Some(Refusal::Credentials),
+        // The two readings added to the base's (T-2353), only where the base reads no refusal,
+        // and never over what the base reads as a limit that resets or a refusal for a moment.
+        _ if (META_SESSION.is_match(text)
+            || (REFRESH.is_match(text)
+                && INVALID_GRANT.is_match(text)
+                && !REFRESH_MOMENT.is_match(text)))
+            && !refused_for_quota(text)
+            && !busy_refusal(text, status) =>
+        {
+            Some(Refusal::Credentials)
+        }
         _ => None,
     }
 }

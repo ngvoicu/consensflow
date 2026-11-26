@@ -47,15 +47,35 @@ pub(super) static BILLING: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// An account's login refused (nothing resets it): Anthropic's `authentication_error`, a key
-/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10), Anthropic's refresh
-/// refused with `invalid_grant` (Pi 1.6.1, 2026-11), and Pi's published Meta error "session
-/// expired (status 401|403)", whose `/login meta` is the way back. An expired token is read as
-/// the login refusal it is: no rule tells it from a refused one by its words (T-2353).
+/// that is not valid, a token whose refresh a 401 refused (Pi, 2026-10). An expired token is
+/// read as the login refusal it is: no rule reads it by its words (T-2353).
 pub(super) static CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
     compile(
-        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\)|invalid_grant|session expired \(status 40[13]\))",
+        r"(?i-u:authentication_error|invalid x-api-key|invalid[_ ]api[_ ]key|refresh failed \(401\))",
     )
 });
+
+/// The refresh of a token, in the text of a refusal that names one.
+pub(super) static REFRESH: LazyLock<Regex> = LazyLock::new(|| compile(r"(?i-u:refresh)"));
+
+/// Anthropic's refresh refused with `invalid_grant` (Pi 1.6.1, 2026-11): the code whole, with
+/// its edges, so that `invalid_grant_pending` and `previous_invalid_grant` are not it. One of
+/// the two readings added to the base's (T-2353): it makes a login refusal only where the base
+/// reads none, and never over a busy or quota reading (`account_refusal`).
+pub(super) static INVALID_GRANT: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))"));
+
+/// The status a refused refresh names in its details ("status=502"), for a limit or a server's
+/// error: a refresh refused for a moment, which no `invalid_grant` beside it turns into a
+/// login refusal.
+pub(super) static REFRESH_MOMENT: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"(?i-u:status=(?:429|5[0-9][0-9]))(?-u:\b)"));
+
+/// Pi's published Meta error: its identity session cannot be renewed (pi-ai 1.6.1,
+/// auth/oauth/meta.js), "Meta session expired (status 401|403). Run `/login meta`". The other
+/// of the two added readings.
+pub(super) static META_SESSION: LazyLock<Regex> =
+    LazyLock::new(|| compile(r"(?i-u:session expired \(status 40[13]\))"));
 
 /// A provider's words for a request it refused for a moment (T-1112): Anthropic's
 /// `overloaded_error` ("Overloaded"), a model "at capacity" (Codex's "Selected model is at

@@ -5,7 +5,7 @@ use cf_proto::hold::{BILLING_CODES, CODES, KINDS, LOGIN_CODES, STATUSES};
 use super::*;
 
 fn form(because: &str) -> Option<(&'static str, Option<u16>, Option<&'static str>)> {
-    hold_form(because).map(|form| (form.kind, form.status, form.code))
+    hold_form(because).map(|form| (form.kind(), form.status(), form.code()))
 }
 
 #[test]
@@ -92,15 +92,18 @@ fn whatever_the_words_say_each_value_of_the_form_is_a_literal_of_the_lists() {
     for text in &texts {
         for lead in ["its login was refused: ", "its billing was refused: "] {
             if let Some(form) = hold_form(&format!("{lead}{text}")) {
-                assert!(KINDS.contains(&form.kind), "{text}");
-                assert!(form.status.is_none_or(|s| STATUSES.contains(&s)), "{text}");
-                assert!(form.code.is_none_or(|c| CODES.contains(&c)), "{text}");
-                let own = if form.kind == "login" {
+                assert!(KINDS.contains(&form.kind()), "{text}");
+                assert!(
+                    form.status().is_none_or(|s| STATUSES.contains(&s)),
+                    "{text}"
+                );
+                assert!(form.code().is_none_or(|c| CODES.contains(&c)), "{text}");
+                let own = if form.kind() == "login" {
                     &LOGIN_CODES[..]
                 } else {
                     &BILLING_CODES[..]
                 };
-                assert!(form.code.is_none_or(|c| own.contains(&c)), "{text}");
+                assert!(form.code().is_none_or(|c| own.contains(&c)), "{text}");
                 seen += 1;
             }
         }
