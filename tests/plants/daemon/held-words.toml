@@ -44,17 +44,17 @@ runs = ["held-words-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
 find = 'event["participant"] = json!(member.id);'
-replace = 'event["participant"] = json!(member.id);\n            event["because"] = json!(reason);'
+replace = 'event["participant"] = json!(member.id); event["because"] = json!(reason);'
 
 [[plant]]
 name = "held words: a code is taken from the other kind's list too"
-meant = "tells_which_was_refused_its_status_and_its_provider_s_error_type"
-runs = ["held-words-form"]
+meant = "a_value_that_is_in_no_list_writes_nothing"
+runs = ["held-words-proto"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/quota/form.rs"
-find = "list.contains(literal) && pattern.is_match(words)"
-replace = "pattern.is_match(words)"
+file = "crates/cf-proto/src/hold.rs"
+find = "let codes: &[&'static str] = if *kind == \"login\" {"
+replace = "let codes: &[&'static str] = if true {"
 
 [[plant]]
 name = "held words: a status the lists do not name is written"

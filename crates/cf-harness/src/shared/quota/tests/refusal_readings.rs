@@ -40,7 +40,8 @@ fn every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two
         } else {
             assert_eq!(reading, row["main"].as_str().unwrap(), "{text}");
             if let (Some(refusal), Some(base)) = (refusal, row["unavailable"].as_str()) {
-                let Ok(Quota::Unavailable { because, .. }) = unavailable_quota(1.0e12, refusal, text)
+                let Ok(Quota::Unavailable { because, .. }) =
+                    unavailable_quota(1.0e12, refusal, text)
                 else {
                     panic!("unavailable: {text}");
                 };
@@ -50,7 +51,11 @@ fn every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two
         let Ok(Quota::Busy { because, .. }) = busy_quota(1.0e12, text) else {
             panic!("busy: {text}");
         };
-        assert_eq!(because, row["busy"].as_str().unwrap(), "the busy reason: {text}");
+        assert_eq!(
+            because,
+            row["busy"].as_str().unwrap(),
+            "the busy reason: {text}"
+        );
         if text.trim().chars().count() > 300 {
             cut += 1;
             assert_eq!(because.chars().count(), 300, "{text}");
