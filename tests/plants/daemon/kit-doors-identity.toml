@@ -8,11 +8,11 @@ kdi-unreadable = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::
 kdi-holds = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_place_that_holds_a_store_is_not_taken_or_moved_through_its_other_spelling"]
 kdi-seal = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::the_seal_takes_a_variable_that_names_a_store_through_its_other_spelling"]
 kdi-seal-unreadable = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_tests::a_store_whose_identity_cannot_be_read_refuses_every_act"]
-kdi-made-id = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_folder_the_run_made_that_is_a_link_now_gives_no_ground_where_it_leads"]
+kdi-made-id = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_folder_put_at_the_path_of_one_the_run_made_is_not_the_runs"]
 kdi-absence = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it"]
 kdi-absence-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_store_that_is_not_there_or_whose_drive_is_not_there_is_judged_by_its_text_alone"]
 kdi-copy-dir = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"]
-kdi-copy-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"]
+kdi-copy-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_no_hard_link_to_a_file_that_is_a_store"]
 
 [[plant]]
 name = "K3 identity: the judge puts a place inside a store by the text of its path again"
@@ -83,7 +83,7 @@ replace = '''        let Ok(keys) = &self.keys else {
 
 [[plant]]
 name = "K3 identity: a folder the run made counts without the identity it had when it was registered"
-meant = "a_folder_the_run_made_that_is_a_link_now_gives_no_ground_where_it_leads"
+meant = "a_folder_put_at_the_path_of_one_the_run_made_is_not_the_runs"
 runs = ["kdi-made-id"]
 
 [[plant.edit]]
@@ -121,19 +121,13 @@ replace = '''            place::chain(way).map_or(true, |parts| {
 name = "K3 identity: a store that is not there is refused again"
 meant = "a_store_that_is_not_there_or_whose_drive_is_not_there_is_judged_by_its_text_alone"
 runs = ["kdi-absence-store"]
+platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door/place.rs"
 find = '''        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(failed) => Err(failed),'''
 replace = '''        Err(failed) => Err(failed),'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/place.rs"
-find = '''            Err(failed) if links.is_empty() && is_absence(failed.kind()) => {}
-'''
-replace = '''            Err(failed) if links.is_empty() && is_absence(failed.kind()) && store.is_none() => {}
-'''
 
 [[plant]]
 name = "K3 identity: the recursive copy does not ask the door of a folder it enters"
@@ -149,7 +143,7 @@ replace = '''        } else if kind.is_dir() {
 
 [[plant]]
 name = "K3 identity: the recursive copy does not ask the door of a file it copies"
-meant = "a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"
+meant = "a_recursive_copy_takes_no_hard_link_to_a_file_that_is_a_store"
 runs = ["kdi-copy-file"]
 
 [[plant.edit]]

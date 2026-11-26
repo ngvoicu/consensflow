@@ -115,58 +115,108 @@ fn a_folder_the_run_made_that_is_a_link_now_gives_no_ground_where_it_leads() {
     );
 }
 
+/// A folder the run made, put away and another made at its path, is no longer the run's, though
+/// the text of every path below it says so.
+#[test]
+fn a_folder_put_at_the_path_of_one_the_run_made_is_not_the_runs() {
+    let root = made("k3-r3-put-").unwrap();
+    let at = place::real(&root.path().join("kept")).unwrap_or_else(|_| root.path().join("kept"));
+    super::make_dir(&at).unwrap();
+    let at = place::real(&at).unwrap();
+    let registry = vec![super::Entry::folder(at.clone())];
+    assert!(place::judge_with(&at.join("a.txt"), Act::Write, &[], &registry).is_ok());
+    // The run's folder goes, and a person's own is made at its path.
+    fs::remove_dir_all(&at).unwrap();
+    fs::create_dir(&at).unwrap();
+    let after = place::judge_with(&at.join("a.txt"), Act::Write, &[], &registry);
+    assert!(after.is_err(), "{after:?}");
+}
+
 // ---- Finding 2: the recursive copy asks the door of every child. ----
+
+/// A walk of `walk` copied to `out`: whether it went through, and which of `names` came out.
+fn copied(walk: &Path, out: &Path, names: &[&str]) -> (bool, Vec<String>) {
+    let went = super::copy_tree(walk, out, &|_| false).is_ok();
+    let took = names
+        .iter()
+        .filter(|name| fs::read_to_string(out.join(name)).is_ok())
+        .map(|name| (*name).to_owned())
+        .collect();
+    (went, took)
+}
+
+/// The starting folders of the copy, each way the walk can meet a store: by the first spelling of
+/// the starting folder and by its second, where the machine has one.
+fn walks(root: &Path, name: &str) -> Vec<(&'static str, PathBuf)> {
+    let walk = root.join(name);
+    #[allow(unused_mut)]
+    let mut ways = vec![("first", walk.clone())];
+    #[cfg(any(target_os = "macos", windows))]
+    ways.push(("second", super::identity_tests::second_of(&walk)));
+    ways
+}
 
 #[test]
 fn a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder() {
     let root = made("k3-r2-").unwrap();
-    let walk = root.path().join("walk");
-    let inner = walk.join("inner-store");
-    let outside = root.path().join("outside-store");
+    let inner = root.path().join("walk-dir").join("inner-store");
     super::make_dir(&inner).unwrap();
-    super::make_dir(&outside).unwrap();
     super::write(inner.join("secret.txt"), "inner secret").unwrap();
+    super::write(root.path().join("walk-dir").join("plain.txt"), "plain").unwrap();
+    let _held = TestRoot::add(&inner);
+    assert!(reads::admitted(&inner.join("secret.txt")).is_err());
+    for (which, way) in walks(root.path(), "walk-dir") {
+        let out = root.path().join(format!("out-dir-{which}"));
+        let (went, took) = copied(&way, &out, &["inner-store/secret.txt"]);
+        assert!(
+            !went && took.is_empty(),
+            "{which}: went={went}, took {took:?}"
+        );
+    }
+}
+
+#[test]
+fn a_recursive_copy_takes_no_hard_link_to_a_file_that_is_a_store() {
+    let root = made("k3-r2-hard-").unwrap();
+    let walk = root.path().join("walk-file");
+    super::make_dir(&walk).unwrap();
+    let store_file = root.path().join("store-file.txt");
+    super::write(&store_file, "store file").unwrap();
+    assert!(fs::hard_link(&store_file, walk.join("hard.txt")).is_ok());
+    super::write(walk.join("plain.txt"), "plain").unwrap();
+    let _held = TestRoot::add(&store_file);
+    assert!(reads::admitted(&walk.join("hard.txt")).is_err());
+    for (which, way) in walks(root.path(), "walk-file") {
+        let out = root.path().join(format!("out-file-{which}"));
+        let (went, took) = copied(&way, &out, &["hard.txt"]);
+        assert!(
+            !went && took.is_empty(),
+            "{which}: went={went}, took {took:?}"
+        );
+    }
+}
+
+#[test]
+fn a_recursive_copy_skips_a_link_to_a_store_and_goes_on() {
+    let root = made("k3-r2-link-").unwrap();
+    let walk = root.path().join("walk-link");
+    let outside = root.path().join("outside-store");
+    super::make_dir(&walk).unwrap();
+    super::make_dir(&outside).unwrap();
     super::write(outside.join("secret.txt"), "outside secret").unwrap();
     super::write(walk.join("plain.txt"), "plain").unwrap();
     let link = walk.join("link-to-store");
     assert!(link_dir(&outside, &link));
-    // A hard link to a file that is itself a store.
-    let store_file = root.path().join("store-file.txt");
-    super::write(&store_file, "store file").unwrap();
-    assert!(fs::hard_link(&store_file, walk.join("hard.txt")).is_ok());
-    let out = root.path().join("out");
-    super::make_dir(&out).unwrap();
-    let (_inner, _outside, _file) = (
-        TestRoot::add(&inner),
-        TestRoot::add(&outside),
-        TestRoot::add(&store_file),
-    );
-    // Asked alone, the door refuses each of them.
-    assert!(reads::admitted(&inner.join("secret.txt")).is_err());
-    assert!(reads::admitted(&walk.join("hard.txt")).is_err());
-    let mut took: Vec<String> = Vec::new();
-    let mut ways = vec![("first", walk.clone())];
-    #[cfg(any(target_os = "macos", windows))]
-    ways.push(("second", super::identity_tests::second_of(&walk)));
-    for (which, way) in &ways {
-        let tree = out.join(format!("tree-{which}"));
-        let copied = super::copy_tree(way, &tree, &|_| false);
-        let read = |name: &str| fs::read_to_string(tree.join(name)).ok();
-        if copied.is_ok() {
-            took.push(format!("{which}: the copy went through"));
-        }
-        for name in [
-            "inner-store/secret.txt",
-            "link-to-store/secret.txt",
-            "hard.txt",
-        ] {
-            if read(name).is_some() {
-                took.push(format!("{which}: {name}"));
-            }
-        }
+    let _held = TestRoot::add(&outside);
+    for (which, way) in walks(root.path(), "walk-link") {
+        let out = root.path().join(format!("out-link-{which}"));
+        let (went, took) = copied(&way, &out, &["link-to-store/secret.txt", "plain.txt"]);
+        assert!(
+            went && took == ["plain.txt"],
+            "{which}: went={went}, took {took:?}"
+        );
     }
     unlink_dir(&link);
-    assert!(took.is_empty(), "the recursive copy took {took:?}");
 }
 
 /// A walk that meets nothing of a store copies as it did, links and all.
