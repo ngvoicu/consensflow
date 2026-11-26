@@ -22430,3 +22430,31 @@ test('T-2341 a redraw while the member form is open in a member’s part keeps t
   await openSlot(dialog, 'tester', 'light')
   await expect(dialog.locator('tr.slot-open-row .staff-add')).toBeVisible()
 })
+
+test('T-2341 a refused Remove backup is said in the member’s part, beside it, until it goes through', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', { harness: 'codex', backupOf: 3 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.backupRefusal = 'the ledger is busy: try again'
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const part = await openPart(dialog, '@zeus')
+  await part.getByRole('button', { name: 'Remove backup for @zeus' }).click()
+  const said = part.locator('.backup-part [role="alert"]')
+  await expect(said).toHaveText('the ledger is busy: try again')
+  await expect(said).toBeVisible()
+  await page.evaluate(() => {
+    delete window.__model.backupRefusal
+  })
+  await part.getByRole('button', { name: 'Remove backup for @zeus' }).click()
+  await expect.poll(() => calls(page, 'backup.remove')).toHaveLength(2)
+  await expect(part.locator('.backup-part [role="alert"]')).toHaveCount(0)
+  await expect(part.getByRole('button', { name: 'Add backup for @zeus' })).toBeVisible()
+})

@@ -1756,6 +1756,8 @@ export class ProjectSettingsDialog {
   #slotRefusal = null
   /** Refusals beside the member whose Vacation button was pressed. */
   #vacationErrors = new Map()
+  /** Refusals of a Remove backup, by the member it was pressed for: said beside it, in its part. */
+  #backupErrors = new Map()
   /** Each harness's models, read once while the dialog is open (T-1143). */
   #lists
   /** Add member and Edit member. */
@@ -1940,6 +1942,7 @@ export class ProjectSettingsDialog {
     this.#opened = null
     this.#slotRefusal = null
     this.#vacationErrors.clear()
+    this.#backupErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
     this.#gone = new Map()
@@ -2334,7 +2337,8 @@ export class ProjectSettingsDialog {
             this.#draw()
           }),
         ]
-    const part = backupPart(name, `@${backup.handle}`, this.#about(backup), [
+    const project = this.#project
+    const acts = [
       ...change,
       this.#vacation(backup),
       removeBackup(
@@ -2342,18 +2346,28 @@ export class ProjectSettingsDialog {
         () =>
           void this.#page.act(async () => {
             try {
-              await this.#page.daemon('backup.remove', {
-                project: this.#project,
-                member: member.handle,
-              })
+              await this.#page.daemon('backup.remove', { project, member: member.handle })
+              this.#backupErrors.delete(member.handle)
               this.#page.note(`${name}'s backup left the staff.`)
             } catch (refused) {
-              this.#member.say(refused instanceof Error ? refused.message : String(refused))
+              // Said beside it, in the dialog: the status line is behind it.
+              if (this.#dialog.open && this.#project === project)
+                this.#backupErrors.set(
+                  member.handle,
+                  refused instanceof Error ? refused.message : String(refused),
+                )
               throw refused
             }
           }),
       ),
-    ])
+    ]
+    const refused = this.#backupErrors.get(member.handle)
+    if (refused) {
+      const hint = element('span', 'staff-hint', refused)
+      hint.setAttribute('role', 'alert')
+      acts.push(hint)
+    }
+    const part = backupPart(name, `@${backup.handle}`, this.#about(backup), acts)
     part.dataset.handle = backup.handle
     nodes.push(part)
     return nodes
