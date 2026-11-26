@@ -12,6 +12,8 @@ kdi-made-id = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::ide
 kdi-absence = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it"]
 kdi-absence-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_store_that_is_not_there_or_whose_drive_is_not_there_is_judged_by_its_text_alone"]
 kdi-copy-dir = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"]
+kdi-handed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_folder_that_is_a_link_now_is_not_handed_to_a_child_as_the_runs"]
+kdi-vol = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_store_by_its_volume_and_file_number_is_held_by_the_seal_and_the_read_door"]
 kdi-copy-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::identity_reds::a_recursive_copy_takes_no_hard_link_to_a_file_that_is_a_store"]
 
 [[plant]]
@@ -63,8 +65,8 @@ platforms = ["macos", "windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''        let by_identity = ways.iter().any(|way| {'''
-replace = '''        let by_identity = false && ways.iter().any(|way| {'''
+find = '''        let by_identity = ways.iter().any(|way| match place::chain(way) {'''
+replace = '''        let by_identity = false && ways.iter().any(|way| match place::chain(way) {'''
 
 [[plant]]
 name = "K3 identity: the seal lets a path through where a store cannot be read"
@@ -85,6 +87,7 @@ replace = '''        let Ok(keys) = &self.keys else {
 name = "K3 identity: a folder the run made counts without the identity it had when it was registered"
 meant = "a_folder_put_at_the_path_of_one_the_run_made_is_not_the_runs"
 runs = ["kdi-made-id"]
+platforms = ["macos", "linux", "windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
@@ -108,14 +111,8 @@ replace = '''            Err(failed) if links.is_empty() && store.is_none() => {
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/door.rs"
-find = '''            place::chain(way).is_ok_and(|parts| {
-                keys.iter()
-                    .any(|key| place::inside_by_identity(&parts, key, any_case))
-            })'''
-replace = '''            place::chain(way).map_or(true, |parts| {
-                keys.iter()
-                    .any(|key| place::inside_by_identity(&parts, key, any_case))
-            })'''
+find = '''            Err(failed) => failed.kind() != io::ErrorKind::NotFound,'''
+replace = '''            Err(_) => true,'''
 
 [[plant]]
 name = "K3 identity: a store that is not there is refused again"
@@ -159,3 +156,27 @@ find = '''        } else if kind.is_file() {
             if let Some(roots) = asks {'''
 replace = '''        } else if kind.is_file() {
             if let Some(roots) = asks.filter(|_| false) {'''
+
+[[plant]]
+name = "K3 identity: a folder that is a link now is handed to a child as the run's"
+meant = "a_folder_that_is_a_link_now_is_not_handed_to_a_child_as_the_runs"
+runs = ["kdi-handed"]
+platforms = ["macos", "linux", "windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        .filter(|made| made.is_still_its_folder())
+        .map(|made| made.real.clone())'''
+replace = '''        .filter(|made| made.file.is_none())
+        .map(|made| made.real.clone())'''
+
+[[plant]]
+name = "K3 identity: a chain that failed after it reached a part is taken for absence"
+meant = "a_store_by_its_volume_and_file_number_is_held_by_the_seal_and_the_read_door"
+runs = ["kdi-vol"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            Err(failed) => failed.kind() != io::ErrorKind::NotFound,'''
+replace = '''            Err(_) => false,'''

@@ -977,11 +977,13 @@ impl Roots {
             Err(_) => vec![path.to_path_buf()],
         };
         let any_case = cfg!(any(windows, target_os = "macos"));
-        let by_identity = ways.iter().any(|way| {
-            place::chain(way).is_ok_and(|parts| {
-                keys.iter()
-                    .any(|key| place::inside_by_identity(&parts, key, any_case))
-            })
+        // Only a path no part of which can be reached is absence (`NotFound`); a chain that
+        // failed after it reached a part (the Mac's `/.vol/<device>/<number>`) is held.
+        let by_identity = ways.iter().any(|way| match place::chain(way) {
+            Ok(parts) => keys
+                .iter()
+                .any(|key| place::inside_by_identity(&parts, key, any_case)),
+            Err(failed) => failed.kind() != io::ErrorKind::NotFound,
         });
         by_identity
             || self.roots.iter().any(|root| {
@@ -1330,7 +1332,9 @@ fn roots_handed_down(value: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
 pub fn handed_down() -> Vec<(String, String)> {
     let roots: Vec<PathBuf> = registry()
         .iter()
-        .filter(|made| made.file.is_none())
+        // Only a folder that is still the run's: one that is a link now, or another folder made
+        // at its path, would be taken by the child for the folder it leads to.
+        .filter(|made| made.is_still_its_folder())
         .map(|made| made.real.clone())
         .collect();
     if roots.is_empty() {

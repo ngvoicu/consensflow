@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::account::TestRoot;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use super::inside_protected;
 use super::place::{self, Act};
 use super::{judge, made, reads};
@@ -125,9 +125,15 @@ fn a_folder_put_at_the_path_of_one_the_run_made_is_not_the_runs() {
     let at = place::real(&at).unwrap();
     let registry = vec![super::Entry::folder(at.clone())];
     assert!(place::judge_with(&at.join("a.txt"), Act::Write, &[], &registry).is_ok());
-    // The run's folder goes, and a person's own is made at its path.
-    fs::remove_dir_all(&at).unwrap();
+    // The run's folder is put aside, not taken away, and a person's own is made at its path:
+    // two folders that both exist never share an identity, on any file system.
+    let aside = at.with_file_name("kept-aside");
+    fs::rename(&at, &aside).unwrap();
     fs::create_dir(&at).unwrap();
+    assert_ne!(
+        super::identity::of_path(&at).unwrap(),
+        super::identity::of_path(&aside).unwrap()
+    );
     let after = place::judge_with(&at.join("a.txt"), Act::Write, &[], &registry);
     assert!(after.is_err(), "{after:?}");
 }
@@ -535,4 +541,73 @@ fn a_place_below_a_folder_the_account_cannot_enter_is_not_held_for_it() {
         !held,
         "a variable below a folder the account cannot enter was held"
     );
+}
+
+// ---- Finding 12: a folder of the run's that is a link now is not handed to a child. ----
+
+#[test]
+fn a_folder_that_is_a_link_now_is_not_handed_to_a_child_as_the_runs() {
+    let mine = made("k3-f12-").unwrap();
+    let at = place::real(mine.path()).unwrap();
+    let theirs = crate::standin_process::unowned_tempdir();
+    let theirs_real = place::real(theirs.path()).unwrap();
+    fs::remove_dir(mine.path()).unwrap();
+    assert!(link_dir(&theirs_real, mine.path()), "no link could be made");
+    let handed: Vec<PathBuf> = super::handed_down()
+        .into_iter()
+        .filter(|(name, _)| name.as_str() == super::MADE_ROOTS)
+        .flat_map(|(_, value)| std::env::split_paths(&value).collect::<Vec<_>>())
+        .collect();
+    // What the child makes of what it is handed, as its registry does when it starts.
+    let one = std::env::join_paths([&at]).unwrap();
+    let childs: Vec<super::Entry> = super::roots_handed_down(Some(one.as_os_str()))
+        .into_iter()
+        .map(super::Entry::folder)
+        .collect();
+    let write = place::judge_with(
+        &theirs_real.join("new.txt"),
+        Act::Write,
+        &super::account::protected(),
+        &childs,
+    );
+    unlink_dir(mine.path());
+    assert!(
+        !handed.contains(&at),
+        "a folder that is a link now was handed down: {handed:?}"
+    );
+    let _ = write;
+}
+
+// ---- Finding 13: the Mac's volume-and-file-number spelling of a store is held. ----
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_store_by_its_volume_and_file_number_is_held_by_the_seal_and_the_read_door() {
+    use std::os::unix::fs::MetadataExt as _;
+    let root = made("k3-f13-").unwrap();
+    let store = root.path().join("owner").join(".codex");
+    super::make_dir(&store).unwrap();
+    super::write(store.join("marker.txt"), "made up").unwrap();
+    let by_number = |path: &Path| {
+        let found = fs::metadata(path).unwrap();
+        PathBuf::from(format!("/.vol/{}/{}", found.dev(), found.ino()))
+    };
+    let _held = TestRoot::add(&store);
+    for path in [
+        by_number(&store),
+        by_number(&store).join("marker.txt"),
+        by_number(&store.join("marker.txt")),
+    ] {
+        assert!(
+            fs::metadata(&path).is_ok(),
+            "{} does not open",
+            path.display()
+        );
+        assert!(
+            inside_protected(&path),
+            "{} passed the seal",
+            path.display()
+        );
+        assert!(reads::read(&path).is_err(), "{} was read", path.display());
+    }
 }
