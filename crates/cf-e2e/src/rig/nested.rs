@@ -47,7 +47,6 @@ pub fn case_of(binary: &Path, case: &str, waits: Duration) -> Result<Run> {
         })?;
     Ok(process::case_of(binary, case, RIG_BOUND + waits)
         .arg("--test-threads=1")
-        .inheriting_env()
         .var(cf::BUILT, folder))
 }
 

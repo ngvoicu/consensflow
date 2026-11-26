@@ -84,9 +84,7 @@ impl Machine {
 
     /// A new machine as [`Machine::new`] makes one, with `script` as its harness.
     pub fn with_harness(paste_reader: &Path, patience: Duration, script: &str) -> Result<Self> {
-        let root = tempfile::Builder::new()
-            .prefix("cf-smoke-")
-            .tempdir()
+        let root = cf_e2e::door::made("cf-smoke-")
             .map_err(|source| Error::File {
                 action: "make a folder in",
                 path: std::env::temp_dir(),
@@ -182,11 +180,7 @@ impl Machine {
 
     /// Takes the machine away, once the run it was for has passed.
     pub fn cleanup(self) -> Result {
-        std::fs::remove_dir_all(&self.root).map_err(|source| Error::File {
-            action: "remove",
-            path: self.root.clone(),
-            source,
-        })
+        cf_e2e::door::remove(&self.root)
     }
 
     /// Says where the machine is kept to `out`, if it is to be: the run is
@@ -402,7 +396,7 @@ mod tests {
         // A failed run drops its machine without cleaning it up: the evidence is there.
         drop(kept);
         assert!(root.is_dir());
-        std::fs::remove_dir_all(&root).unwrap();
+        cf_e2e::door::remove(&root).unwrap();
 
         let tidied = machine();
         let root = tidied.root.clone();

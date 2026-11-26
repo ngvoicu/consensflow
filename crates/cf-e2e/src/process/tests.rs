@@ -15,8 +15,7 @@ fn t1778_fixture_child_does_not_inherit_the_callers_board_connection() {
                 CASE,
                 Duration::from_secs(120),
             )
-            .arg("--nocapture")
-            .inheriting_env();
+            .arg("--nocapture");
             if depth.is_none() {
                 run = run
                     .var("CF_E2E_T1778_DEPTH", "parent")
@@ -67,13 +66,10 @@ fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
     let stray = std::fs::File::open("/dev/null").unwrap();
     fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let asking = || {
-        Run::new("/bin/sh").args([
-            "-c".to_owned(),
-            format!(
-                "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
-                stray.as_raw_fd()
-            ),
-        ])
+        Run::fixture_script(format!(
+            "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+            stray.as_raw_fd()
+        ))
     };
     let ran = asking().run().unwrap();
     assert_eq!(ran.stdout, "clear\n");
@@ -84,27 +80,72 @@ fn a_program_a_case_starts_holds_nothing_of_the_rigs_but_its_streams() {
     assert_eq!(said, "clear\n");
 }
 
+/// A child given the machine's variables has the search path and the system's, and no home of
+/// the account that starts it, nor a harness's folder, nor an XDG one.
 #[test]
-fn windows_is_given_what_it_needs_of_the_tests_where_the_case_names_none_and_others_nothing() {
-    let names = |vars: &[(OsString, OsString)], finding_programs| -> Vec<&'static str> {
-        required_on_windows(vars, finding_programs)
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect()
-    };
-    if cfg!(windows) {
-        // Every Windows process has a system folder.
-        assert!(names(&[], false).contains(&"SYSTEMROOT"));
-        // What a case names is its own, in whichever case it writes the name.
-        let named = [(OsString::from("SystemRoot"), OsString::from("C:\\x"))];
-        assert!(!names(&named, false).contains(&"SYSTEMROOT"));
-        // The command interpreter and the list of extensions only where asked.
-        assert!(!names(&[], false).contains(&"COMSPEC"));
-        assert!(names(&[], true).contains(&"COMSPEC"));
-        assert!(names(&[], true).contains(&"PATHEXT"));
-    } else {
-        assert_eq!(names(&[], false), Vec::<&str>::new());
-        assert_eq!(names(&[], true), Vec::<&str>::new());
+fn a_machine_environment_holds_the_machine_and_nothing_of_the_account() {
+    let caller: Vec<(OsString, OsString)> = [
+        ("PATH", "/usr/bin"),
+        ("SystemRoot", "C:\\Windows"),
+        ("TMPDIR", "/var/folders/x"),
+        ("LANG", "en_US.UTF-8"),
+        ("HOME", "/Users/owner"),
+        ("USERPROFILE", "C:\\Users\\owner"),
+        ("HOMEDRIVE", "C:"),
+        ("HOMEPATH", "\\Users\\owner"),
+        ("APPDATA", "C:\\Users\\owner\\AppData\\Roaming"),
+        ("XDG_CONFIG_HOME", "/Users/owner/.config"),
+        ("CODEX_HOME", "/Users/owner/.codex"),
+        ("CLAUDE_CONFIG_DIR", "/Users/owner/.claude"),
+        ("PI_CODING_AGENT_DIR", "/Users/owner/.pi/agent"),
+        ("CFFIXED_USER_HOME", "/Users/owner"),
+        ("CONSENSFLOW_HOME", "/x"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (OsString::from(k), OsString::from(v)))
+    .collect();
+    let names: Vec<String> = machine_vars(caller)
+        .into_iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["PATH", "SystemRoot", "TMPDIR", "LANG"]);
+}
+
+/// A run on the machine's environment starts with that and its own variables: a program that
+/// prints its environment shows no home the case did not name.
+#[cfg(unix)]
+#[test]
+fn a_machine_env_run_is_given_the_homes_its_case_names_and_no_other() {
+    let kit = crate::door::made("kits-home-").unwrap();
+    let home = kit.path().join("home");
+    let ran = Run::new("/usr/bin/env").var("HOME", &home).run();
+    // Every home the case does not name is given below the one it does: the seal refuses the
+    // start where one is missing, which is the failure this asks about.
+    assert!(
+        ran.is_ok(),
+        "a run that names one home is not started with the others below it: {ran:?}"
+    );
+    let ran = ran.unwrap();
+    assert!(ran
+        .stdout
+        .lines()
+        .any(|line| line == format!("HOME={}", home.display())));
+    // Every other home is below the one the case named, none the caller's.
+    for name in [
+        "CODEX_HOME=",
+        "CLAUDE_CONFIG_DIR=",
+        "XDG_CONFIG_HOME=",
+        "USERPROFILE=",
+    ] {
+        let line = ran
+            .stdout
+            .lines()
+            .find(|line| line.starts_with(name))
+            .unwrap_or_else(|| panic!("{name} was not given"));
+        assert!(
+            Path::new(&line[name.len()..]).starts_with(&home),
+            "{line} is not below the case's home"
+        );
     }
 }
 
@@ -225,7 +266,7 @@ mod shell {
     use super::*;
 
     fn sh(script: &str) -> Run {
-        Run::new("/bin/sh").args(["-c", script])
+        Run::fixture_script(script)
     }
 
     #[test]
@@ -268,16 +309,10 @@ mod shell {
         let probe = r#"printf '%s|%s' "${CF_E2E_A-unset}" "${CARGO_MANIFEST_DIR-unset}""#;
         let alone = sh(probe).var("CF_E2E_A", "1").run().unwrap();
         assert_eq!(alone.stdout, "1|unset");
-        // Cargo sets the manifest's folder for the tests it runs.
-        let with_the_tests = sh(probe)
-            .var("CF_E2E_A", "1")
-            .inheriting_env()
-            .run()
-            .unwrap();
-        assert_eq!(
-            with_the_tests.stdout,
-            format!("1|{}", env!("CARGO_MANIFEST_DIR"))
-        );
+        // Cargo sets the manifest's folder for the tests it runs, and no program is given it.
+        assert_ne!(std::env::var_os("CARGO_MANIFEST_DIR"), None);
+        let again = sh(probe).var("CF_E2E_A", "1").run().unwrap();
+        assert_eq!(again.stdout, "1|unset");
     }
 
     #[test]
@@ -285,40 +320,63 @@ mod shell {
         let probe = r#"printf '%s|%s' "${CF_E2E_A-unset}" "${CARGO_MANIFEST_DIR-unset}""#;
         let ran = sh(probe)
             .var("CF_E2E_A", "1")
-            .inheriting_env()
             .without("CARGO_MANIFEST_DIR")
             .run()
             .unwrap();
         assert_eq!(ran.stdout, "1|unset");
     }
 
+    /// Correction 8 of T-2002: the cargo a test starts is the door's, on a fixed list, whatever
+    /// the test's own environment holds: the variables cargo gave the test and a window's board
+    /// connection (`CONSENSFLOW_*`, set where the suite runs in an agent's window) never reach
+    /// it, and the door's own do.
     #[test]
     fn the_cargo_a_test_starts_is_without_what_cargo_gave_the_test_and_with_the_rest() {
-        let command = Run::cargo().command();
-        let taken: Vec<String> = command
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
+        let root = crate::door::made("cargo-env-").unwrap();
+        let env = crate::door::cargo::environment_of(
+            [
+                ("CARGO_MANIFEST_DIR", "/checkout/crates/cf-e2e"),
+                ("CARGO_PKG_NAME", "cf-e2e"),
+                ("CONSENSFLOW_TOKEN", "board"),
+                ("CONSENSFLOW_PARTICIPANT", "worker"),
+                ("CARGO", "/toolchain/bin/cargo"),
+                ("CARGO_HOME", "/owner/.cargo"),
+                ("CARGO_TARGET_DIR", "/checkout/target"),
+                ("RUSTC_BOOTSTRAP", "1"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            None,
+            root.path(),
+            &|_| false,
+        )
+        .unwrap();
+        let names: Vec<String> = env
+            .iter()
             .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect();
-        // Cargo sets these for the test that runs this (CARGO_CRATE_NAME is for the compiler's).
-        for given in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME"] {
-            assert!(taken.iter().any(|name| name == given), "{given}: {taken:?}");
+        for given in [
+            "CARGO_MANIFEST_DIR",
+            "CARGO_PKG_NAME",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+        ] {
+            assert!(
+                !names.iter().any(|name| name == given),
+                "{given}: {names:?}"
+            );
         }
-        // What is the user's or the system's stays: the build the test is part of has it too.
-        for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP"] {
-            assert!(!taken.iter().any(|name| name == kept), "{kept}: {taken:?}");
+        // What is the user's or the system's toolchain stays: the build the test is part of has
+        // it too.
+        for kept in [
+            "CARGO",
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "RUSTC_BOOTSTRAP",
+            "HOME",
+        ] {
+            assert!(names.iter().any(|name| name == kept), "{kept}: {names:?}");
         }
-        // The door also clears inherited roots, or replaces them with this run's own.
-        assert!(command
-            .get_envs()
-            .any(|(name, _)| name == crate::door::MADE_ROOTS));
-        assert!(
-            taken
-                .iter()
-                .all(|name| name == crate::door::MADE_ROOTS || nested_cargo::given_to_a_test(name)),
-            "removed: {taken:?}"
-        );
-        assert_eq!(command.get_program(), nested_cargo::CARGO);
     }
 
     #[test]
@@ -326,7 +384,6 @@ mod shell {
         let ran = sh(r#"printf '%s|%s' "$A" "$CARGO_MANIFEST_DIR""#)
             .vars([("A", "1"), ("A", "2")])
             .var("CARGO_MANIFEST_DIR", "told")
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(ran.stdout, "2|told");
@@ -334,7 +391,7 @@ mod shell {
 
     #[test]
     fn a_program_runs_in_the_folder_it_is_given() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let ran = sh("pwd").cwd(folder.path()).run().unwrap();
         let there = std::fs::canonicalize(folder.path()).unwrap();
         assert_eq!(ran.stdout.trim_end(), there.to_string_lossy());
@@ -675,8 +732,8 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
 
     let app = root.join(identity).join("ConsensFlow.app");
     let macos = app.join("Contents").join("MacOS");
-    std::fs::create_dir_all(&macos).unwrap();
-    std::fs::write(
+    crate::door::make_dir(&macos).unwrap();
+    crate::door::write(
         app.join("Contents").join("Info.plist"),
         format!(
             "<plist><dict><key>CFBundleIdentifier</key><string>{identity}</string></dict></plist>"
@@ -685,8 +742,8 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
     .unwrap();
     let ran = root.join(format!("{identity}.ran"));
     let program = macos.join("app");
-    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    crate::door::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     (program, ran)
 }
 
@@ -696,7 +753,7 @@ fn app_of(root: &std::path::Path, identity: &str) -> (PathBuf, PathBuf) {
 #[cfg(unix)]
 #[test]
 fn no_case_starts_an_app_of_the_live_apps_identity() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
     let refused = Run::new(&live).run().unwrap_err().to_string();
     assert!(refused.contains("the live app's identity"), "{refused}");
@@ -748,8 +805,8 @@ fn reaching_stand_in(
 
     let ran = folder.join(format!("{name}.ran"));
     let program = folder.join(name);
-    std::fs::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&program, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+    crate::door::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
     (program, ran)
 }
 
@@ -758,7 +815,7 @@ fn reaching_stand_in(
 #[cfg(unix)]
 #[test]
 fn the_shipped_bundle_is_started_only_with_leave_for_it() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let (live, ran) = app_of(root.path(), "dev.ngvoicu.consensflow");
     let app = cf_base::bundle::bundle_of(&live).unwrap();
     let elsewhere = crate::shipped::Shipped::for_a_test(&root.path().join("Other.app"));
@@ -789,13 +846,16 @@ fn the_powershell_asked_when_a_process_began_is_given_what_one_takes_on_a_loaded
 /// `cf` is the first on the window's `PATH`, as a shell finds it, and none elsewhere is.
 #[test]
 fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
-    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let file = |folder: &tempfile::TempDir| {
+    let (first, second) = (
+        crate::door::made("t-").unwrap(),
+        crate::door::made("t-").unwrap(),
+    );
+    let file = |folder: &crate::door::Made| {
         folder
             .path()
             .join(if cfg!(windows) { "cf.EXE" } else { "cf" })
     };
-    std::fs::write(file(&second), "").unwrap();
+    crate::door::write(file(&second), "").unwrap();
     let path = std::env::join_paths([first.path(), second.path()]).unwrap();
     let path = path.to_str().unwrap();
     let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
@@ -803,7 +863,7 @@ fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
         found.canonicalize().unwrap(),
         file(&second).canonicalize().unwrap()
     );
-    std::fs::write(file(&first), "").unwrap();
+    crate::door::write(file(&first), "").unwrap();
     let found = first_on_path("cf", path, ".COM;.EXE;.BAT;.CMD").unwrap();
     assert_eq!(
         found.canonicalize().unwrap(),
@@ -817,11 +877,11 @@ fn cf_is_the_first_on_the_path_and_nothing_else_is_looked_at() {
 #[cfg(windows)]
 #[test]
 fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let touch = |relative: &str| {
         let file = root.path().join(relative);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, b"").unwrap();
+        crate::door::make_dir(file.parent().unwrap()).unwrap();
+        crate::door::write(&file, b"").unwrap();
         file
     };
     let named = touch(r"named\bash.exe");
@@ -839,11 +899,212 @@ fn git_bash_is_the_file_named_or_the_one_beside_the_git_on_the_path() {
     assert_eq!(git_bash_in(None, &path), Some(beside));
     // A folder of the path with no `git.exe` names no Git, though a `bin\bash.exe` is beside it.
     let other = touch(r"Other\bin\bash.exe");
-    std::fs::create_dir_all(root.path().join(r"Other\cmd")).unwrap();
+    crate::door::make_dir(root.path().join(r"Other\cmd")).unwrap();
     let path = root
         .path()
         .join(r"Other\cmd")
         .to_string_lossy()
         .into_owned();
     assert_ne!(git_bash_in(None, &path), Some(other));
+}
+
+/// K3 section 2: a plain start refuses a harness's program, known by its name where it is no file
+/// of the run's, and the Keychain's utility, each before anything starts.
+#[test]
+fn a_plain_start_refuses_a_harness_program_and_the_keychains_utility() {
+    for program in [
+        "codex",
+        "claude",
+        "pi",
+        "devin",
+        "muse",
+        "/usr/bin/security",
+        "cargo",
+    ] {
+        // Judged and not started: a guard that is out must start no real program.
+        let refused = Run::new(program)
+            .arg("--version")
+            .admitted(&[])
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("a door of its own"),
+            "{program}: {refused}"
+        );
+    }
+    // A stand-in the run made, named for a harness, is the run's own program.
+    let root = crate::door::made("plain-start-").unwrap();
+    let stand_in = root.path().join("codex");
+    crate::door::write_executable(&stand_in, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    assert_eq!(Run::new(&stand_in).run().unwrap().code, Some(0));
+    // A harness's start of a program that is no harness's is refused too.
+    assert!(Run::harness("codex", "/bin/echo").run().is_err());
+}
+
+/// K3 section 2: a program that inherits the test's environment is not handed a home of the
+/// account's, nor another variable that names a store; the run's own are.
+#[test]
+fn an_inherited_home_of_the_accounts_is_not_handed_on() {
+    let root = crate::door::made("inherited-").unwrap();
+    let store = root.path().join("owner").join(".codex");
+    let _held = crate::door::account::TestRoot::add(&store);
+    let roots = crate::door::Roots::now();
+    let inheritable = |name: &str, value: &OsStr| inheritable(OsStr::new(name), value, &roots);
+    assert!(!inheritable("HOME", OsStr::new("/the/owners/home")));
+    assert!(inheritable("HOME", root.path().as_os_str()));
+    assert!(!inheritable("HOME", store.as_os_str()));
+    assert!(!inheritable(
+        "GIT_CONFIG_GLOBAL",
+        store.join("config").as_os_str()
+    ));
+    assert!(inheritable("PATH", store.as_os_str()));
+    assert!(inheritable("LANG", OsStr::new("en_US.UTF-8")));
+}
+
+/// T-2002 correction 9: Windows' fixed list keeps `SYSTEMROOT` and the other system variables a
+/// models read is given (without it Codex's model list comes back stale, with no default:
+/// T-1937), whatever homes the case names, and the interpreter and extensions that find programs.
+#[test]
+fn the_windows_machine_list_keeps_systemroot_and_the_system_variables() {
+    for name in [
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERNAME",
+        "USERDOMAIN",
+        "LOGONSERVER",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "PSModulePath",
+        "OS",
+        "LANG",
+    ] {
+        assert!(is_machine_variable(name), "{name}");
+    }
+}
+
+/// A window's variable is handed on to a stand-in's child unless it is a home that is no folder
+/// the run made, one that names a store of the account (by itself or in a list), or one of the
+/// profile's halves, which the door says again from the profile it gives.
+#[test]
+fn a_variable_of_a_window_is_handed_on_unless_it_names_a_store_or_is_a_home_that_is_not_the_runs() {
+    let store = crate::door::made("cf-inherit-store-").unwrap();
+    let run = crate::door::made("cf-inherit-run-").unwrap();
+    let _held = crate::door::account::TestRoot::add(store.path());
+    let roots = crate::door::Roots::now();
+    let os = |text: &str| OsString::from(text);
+    let inside = store.path().join("x");
+    let list = std::env::join_paths([run.path(), &inside]).unwrap();
+    // The search path is the one variable that may name anything.
+    assert!(inheritable(&os("PATH"), list.as_os_str(), &roots));
+    assert!(inheritable(&os("path"), list.as_os_str(), &roots));
+    // Another variable, naming a store alone or in a list of folders: not handed on.
+    assert!(!inheritable(&os("TOOLS"), inside.as_os_str(), &roots));
+    assert!(!inheritable(&os("TOOLS"), list.as_os_str(), &roots));
+    assert!(!inheritable(&os("TOOLS"), store.path().as_os_str(), &roots));
+    // One that names a folder of the run, or no folder at all.
+    assert!(inheritable(&os("TOOLS"), run.path().as_os_str(), &roots));
+    assert!(inheritable(&os("LANG"), OsStr::new("en_US.UTF-8"), &roots));
+    // A home: only a folder the run made, outside every store.
+    assert!(inheritable(&os("HOME"), run.path().as_os_str(), &roots));
+    assert!(!inheritable(&os("HOME"), store.path().as_os_str(), &roots));
+    assert!(!inheritable(
+        &os("HOME"),
+        OsStr::new("relative/home"),
+        &roots
+    ));
+    // The profile's halves are the door's to say again.
+    assert!(!inheritable(&os("HOMEDRIVE"), OsStr::new("C:"), &roots));
+    assert!(!inheritable(&os("homepath"), OsStr::new("/h"), &roots));
+}
+
+/// A program is given the profile's two halves only where its case names them: the machine's own
+/// say the caller's profile.
+#[test]
+fn the_profiles_halves_of_the_machine_are_taken_out_unless_the_case_names_them() {
+    let machine = || -> Vec<(OsString, OsString)> {
+        [
+            ("HOMEDRIVE", "C:"),
+            ("HOMEPATH", "\\Users\\caller"),
+            ("LANG", "C"),
+            ("homepath", "x"),
+        ]
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
+    };
+    let mut env = machine();
+    without_unnamed_profile_halves(&mut env, &[]);
+    let names: Vec<String> = env
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["LANG"]);
+    // A case that names one of them names the profile it wants: the machine's stay as they are.
+    let mut env = machine();
+    without_unnamed_profile_halves(
+        &mut env,
+        &[(OsString::from("HOMEDRIVE"), OsString::from("D:"))],
+    );
+    assert_eq!(env.len(), 4);
+    let mut env = machine();
+    without_unnamed_profile_halves(
+        &mut env,
+        &[(OsString::from("homepath"), OsString::from("/n"))],
+    );
+    assert_eq!(env.len(), 4);
+    // Another variable named by the case changes nothing of it.
+    let mut env = machine();
+    without_unnamed_profile_halves(&mut env, &[(OsString::from("LANG"), OsString::from("C"))]);
+    assert_eq!(env.len(), 1);
+}
+
+/// A start of the kit's that inherits nothing is given none of the test process's own variables:
+/// cargo's, which every test process has, is in no program's environment.
+#[cfg(unix)]
+#[test]
+fn a_run_that_inherits_nothing_holds_no_variable_of_the_test_process() {
+    assert!(
+        own_var("CARGO_MANIFEST_DIR").is_some(),
+        "cargo gives the test process this"
+    );
+    let ran = Run::new("/usr/bin/env").run().unwrap();
+    assert!(
+        !ran.stdout
+            .lines()
+            .any(|line| line.starts_with("CARGO_MANIFEST_DIR=")),
+        "{}",
+        ran.stdout
+    );
+}
+
+/// T-2295 section 4: a script entry refuses a script with a word that names a harness's program,
+/// cargo or the Keychain's utility, as a judgement alone (nothing is started, so a guard that is
+/// out starts nothing either).
+#[test]
+fn a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts() {
+    // Named at a path the test made: only the word's last part is read.
+    let root = crate::door::made("script-words-").unwrap();
+    let security = format!("{}/security dump-keychain | cat", root.path().display());
+    for script in [
+        "echo a; cargo build",
+        security.as_str(),
+        "x=1; Claude --version",
+        "cd /tmp && codex exec",
+    ] {
+        let refused = Run::fixture_script(script).admitted(&[]).unwrap_err();
+        assert!(
+            refused.to_string().contains("door of its own"),
+            "{script}: {refused}"
+        );
+    }
+    for script in ["echo ready; echo again", "sleep 1; printf '%s' done"] {
+        Run::fixture_script(script).admitted(&[]).unwrap();
+    }
 }

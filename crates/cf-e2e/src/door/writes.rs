@@ -94,6 +94,7 @@ fn executable(path: &Path, contents: &[u8]) -> io::Result<()> {
 /// this run made.
 pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
     allowed("copy to", to, false)?;
     let bytes = fs::read(from).map_err(Error::file("read", from))?;
     folder_of(to)?;
@@ -104,6 +105,16 @@ pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
 /// is written new is 0644: T-841).
 pub fn copy_keeping_mode(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
+    keep_mode(from, to)
+}
+
+/// [`copy_keeping_mode`] of a file of the account's, which is read as a [`super::source::Source`].
+pub fn copy_keeping_mode_from(from: &super::source::Source, to: impl AsRef<Path>) -> Result {
+    keep_mode(from.path_for_door(), to.as_ref())
+}
+
+fn keep_mode(from: &Path, to: &Path) -> Result {
     allowed("copy to", to, false)?;
     folder_of(to)?;
     fs::copy(from, to)
@@ -113,10 +124,21 @@ pub fn copy_keeping_mode(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result
 
 /// [`copy_keeping_mode`] that makes a clone where the system makes one (`cp -c` on a Mac's APFS:
 /// a Claude Code's program is three hundred megabytes), and a copy where it does not.
-// The system's own `cp` makes the clone; the target was asked of the door first.
-#[allow(clippy::disallowed_methods)]
 pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
+    clone_of(from, to)
+}
+
+/// [`copy_cloning`] of a program of the account's (the machine's Claude Code, which sits in its
+/// installer's store), read as a [`super::source::Source`].
+pub fn copy_cloning_from(from: &super::source::Source, to: impl AsRef<Path>) -> Result {
+    clone_of(from.path_for_door(), to.as_ref())
+}
+
+// The system's own `cp` makes the clone; the target was asked of the door first.
+#[allow(clippy::disallowed_methods)]
+fn clone_of(from: &Path, to: &Path) -> Result {
     allowed("copy to", to, false)?;
     folder_of(to)?;
     #[cfg(target_os = "macos")]
@@ -144,8 +166,9 @@ pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
 /// rename takes `from` away.
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
-    allowed("rename", from, false)?;
-    allowed("rename to", to, false)?;
+    // Both ends: neither may hold a protected root (the roots' own file among them).
+    super::judge(from, super::place::Act::Rename).map_err(Error::file("rename", from))?;
+    super::judge(to, super::place::Act::Rename).map_err(Error::file("rename to", to))?;
     fs::rename(from, to).map_err(Error::file("rename", from))
 }
 
@@ -206,54 +229,70 @@ fn private(path: &Path) -> io::Result<fs::File> {
 }
 
 /// Makes the file `path`, which a caller named for the run to write (`--fixture FILE`, a folder
-/// it asked an export in), as a new one of this run's own: refused, before anything runs, where
-/// anything is there, so that a name a caller reuses is never written over. The file is then a
-/// file this run made, and [`write`] and [`append`] may go on in it. The folder it is in must be
-/// there.
+/// it asked an export in, a rig's failure report), as a new one of this run's own
+/// ([`super::place::Act::Name`]): refused, before anything runs, where anything is there, so
+/// that a name a caller reuses is never written over, and refused inside a protected root. The
+/// folders above it that are not there are made, each new; none of them is the run's. The file is
+/// then a file this run made, by its identity: [`write`] and [`append`] may go on in it while it
+/// is the same file, and a caller that writes it again keeps the handle this returns.
 pub fn made_file(path: impl AsRef<Path>) -> Result<fs::File> {
     // A say-only run whose audit file cannot be used stops before it makes anything.
     super::Door::init();
     let path = path.as_ref();
+    named(path)?;
     let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|failed| {
-            if failed.kind() == io::ErrorKind::AlreadyExists {
-                Error::file("make", path)(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "it is there already: a run makes the file a caller names new and never writes over one, so name another",
-                ))
-            } else {
-                Error::file("make", path)(failed)
-            }
-        })?;
-    super::register(path);
+        .map_err(|failed| there_already(path, failed, "file"))?;
+    super::register_file(path, &file).map_err(Error::file("make", path))?;
     Ok(file)
 }
 
+/// The error of a named make that found something there.
+fn there_already(path: &Path, failed: io::Error, what: &str) -> Error {
+    if failed.kind() == io::ErrorKind::AlreadyExists {
+        Error::file("make", path)(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("it is there already: a run makes the {what} a caller names new and never writes over or into one, so name another"),
+        ))
+    } else {
+        Error::file("make", path)(failed)
+    }
+}
+
+/// Judges `path` as a name a caller gave ([`super::place::Act::Name`]) and makes the folders
+/// above it that are not there, each new.
+fn named(path: &Path) -> Result {
+    if fs::symlink_metadata(path).is_ok() {
+        return Err(there_already(
+            path,
+            io::Error::from(io::ErrorKind::AlreadyExists),
+            "file or folder",
+        ));
+    }
+    super::judge(path, super::place::Act::Name).map_err(Error::file("make", path))?;
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        super::make_missing(parent).map_err(Error::file("make", parent))?;
+    }
+    Ok(())
+}
+
 /// Makes the folder `path`, which a caller named for the run to keep things in (an export, a
-/// reports folder), as a new one of this run's own: refused where anything is there, so that a
-/// name a caller reuses is never written into. The place it is in is made empty where it is not
-/// there ([`super::make_place`]). The folder is then a folder this run made.
+/// reports folder), as a new one of this run's own ([`super::place::Act::Name`]): refused where
+/// anything is there, so that a name a caller reuses is never written into. The folders above it
+/// that are not there are made, each new, and none of them is the run's. The folder is then a
+/// folder this run made.
 pub fn made_dir(path: impl AsRef<Path>) -> Result {
     // A say-only run whose audit file cannot be used stops before it makes anything.
     super::Door::init();
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        super::make_place(parent).map_err(Error::file("make", parent))?;
-    }
-    fs::create_dir(path).map_err(|failed| {
-        if failed.kind() == io::ErrorKind::AlreadyExists {
-            Error::file("make", path)(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "it is there already: a run makes the folder a caller names new and never writes into one, so name another",
-            ))
-        } else {
-            Error::file("make", path)(failed)
-        }
-    })?;
-    super::register(path);
+    named(path)?;
+    fs::create_dir(path).map_err(|failed| there_already(path, failed, "folder"))?;
+    super::register_folder(path);
     Ok(())
 }
 
@@ -306,6 +345,34 @@ pub fn copy_tree(
     skip: &dyn Fn(&Path) -> bool,
 ) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
+    super::reads::admitted(from).map_err(Error::file("read", from))?;
+    tree(from, to, skip, Some(&super::Roots::now()))
+}
+
+/// [`copy_tree`] of a folder of the account's, read as a [`super::source::Source`]; `skip` is asked
+/// of each entry as a source of the same purpose.
+pub fn copy_tree_from(
+    from: &super::source::Source,
+    to: impl AsRef<Path>,
+    skip: &dyn Fn(&super::source::Source) -> bool,
+) -> Result {
+    tree(
+        from.path_for_door(),
+        to.as_ref(),
+        &|entry| skip(&from.of_walk(entry)),
+        None,
+    )
+}
+
+/// `asks`: the door is asked of every child the walk meets (a store below the starting folder,
+/// or a hard link to a store's file, is refused as a direct copy of it would be), where the walk
+/// is of the account's own files, which no door stands before.
+fn tree(
+    from: &Path,
+    to: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+    asks: Option<&super::Roots>,
+) -> Result {
     if fs::symlink_metadata(from)
         .map_err(Error::file("read", from))?
         .file_type()
@@ -316,7 +383,7 @@ pub fn copy_tree(
     make_dir_private(to)?;
     let source_root = fs::canonicalize(from).map_err(Error::file("read", from))?;
     let target_root = fs::canonicalize(to).map_err(Error::file("read", to))?;
-    copy_tree_inside(from, to, &source_root, &target_root, skip)
+    copy_tree_inside(from, to, &source_root, &target_root, skip, asks)
 }
 
 fn copy_tree_inside(
@@ -325,6 +392,7 @@ fn copy_tree_inside(
     source_root: &Path,
     target_root: &Path,
     skip: &dyn Fn(&Path) -> bool,
+    asks: Option<&super::Roots>,
 ) -> Result {
     for entry in fs::read_dir(from)
         .map_err(Error::file("read", from))?
@@ -346,10 +414,16 @@ fn copy_tree_inside(
             let destination = target_root.join(relative);
             copied_link(&destination, &target, real.is_dir())?;
         } else if kind.is_dir() {
+            if let Some(roots) = asks {
+                super::reads::admitted_by(roots, &source).map_err(Error::file("read", &source))?;
+            }
             make_dir_private(&target)?;
-            copy_tree_inside(&source, &target, source_root, target_root, skip)?;
+            copy_tree_inside(&source, &target, source_root, target_root, skip, asks)?;
         } else if kind.is_file() {
-            copy_keeping_mode(&source, &target)?;
+            if let Some(roots) = asks {
+                super::reads::admitted_by(roots, &source).map_err(Error::file("read", &source))?;
+            }
+            keep_mode(&source, &target)?;
         }
     }
     Ok(())
@@ -371,12 +445,60 @@ fn copied_link(original: &Path, link: &Path, directory: bool) -> Result {
     made.map_err(Error::file("link", link))
 }
 
+/// Refuses a link that would lead inside a protected root: the judge looks at where a link is
+/// made, and a link made below a folder of the run's that points into a harness's store hands
+/// whoever follows it that store (T-2086 N6). `original` is read as the system reads it, a
+/// relative one from the folder `link` is in.
+fn leads_nowhere_protected(original: &Path, link: &Path) -> Result {
+    let target = if original.is_absolute() {
+        original.to_path_buf()
+    } else {
+        link.parent().unwrap_or(Path::new(".")).join(original)
+    };
+    super::judge(&target, super::place::Act::Allocate).map_err(|why| {
+        refused(
+            "link to",
+            &target,
+            format!("a link of the run's may not lead there: {why}"),
+        )
+    })?;
+    Ok(())
+}
+
+/// Makes `link` a link to the file `original`, below a folder this run made (Windows).
+#[cfg(windows)]
+pub fn symlink_file(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
+    let (original, link) = (original.as_ref(), link.as_ref());
+    leads_nowhere_protected(original, link)?;
+    copied_link(original, link, false)
+}
+
+/// Makes `link` a link to the folder `original`, below a folder this run made (Windows).
+#[cfg(windows)]
+pub fn symlink_dir(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
+    let (original, link) = (original.as_ref(), link.as_ref());
+    leads_nowhere_protected(original, link)?;
+    copied_link(original, link, true)
+}
+
 /// Makes `link` a link to `original`, below a folder this run made.
 #[cfg(unix)]
 pub fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> Result {
     let (original, link) = (original.as_ref(), link.as_ref());
     allowed("link", link, false)?;
+    leads_nowhere_protected(original, link)?;
     std::os::unix::fs::symlink(original, link).map_err(Error::file("link", link))
+}
+
+/// Takes away the file or the folder `path`, below a folder this run made ([`super::Door::remove_in_made`]):
+/// a path that is under none is an error that says so, and one that is not there is none. In a say-only
+/// run the door says it and leaves it.
+pub fn remove(path: impl AsRef<Path>) -> Result {
+    let path = path.as_ref();
+    match super::Door::of_run().remove_in_made(path) {
+        super::Removed::Left(path, why) => Err(refused("remove", &path, why)),
+        _ => Ok(()),
+    }
 }
 
 /// Writes `text` to the file `file` whole or not at all, for a program to say something to a case

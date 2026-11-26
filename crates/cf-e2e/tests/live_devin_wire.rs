@@ -42,7 +42,7 @@ use cf_e2e::live::window::{Member, Open, Window};
 use cf_e2e::live::{self, agents, ask, calls, secs, Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
 /// The stand-in for Claude, which a rig has, and the stand-in `cf` its windows run.
@@ -110,7 +110,7 @@ impl Watched<'_> {
         if !live::guard::run_owned_devin_store(&self.store) {
             return None;
         }
-        Connection::open_with_flags(&self.store, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
+        cf_e2e::door::database::read(&self.store).ok()
     }
 
     /// Whether the session's history has a row that holds `marker`.

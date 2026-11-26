@@ -124,10 +124,7 @@ fn relaying(
     host: &mut dyn FnMut(&str, &Value) -> Result<Value>,
 ) -> Result<Value> {
     let started = std::time::Instant::now();
-    let mut asked = Run::new(program)
-        .input(format!("{body}\n"))
-        .inheriting_env()
-        .spawn()?;
+    let mut asked = Run::new(program).input(format!("{body}\n")).spawn()?;
     let output = asked
         .take_output()
         .ok_or_else(|| Error::Daemon("harness-ask has no output to read".to_owned()))?;

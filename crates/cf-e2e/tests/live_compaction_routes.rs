@@ -15,9 +15,10 @@
 //!   `--compaction-thresholds`, whose environment variable it is). Devin's binary says
 //!   "Ignoring invalid compaction thresholds for model … max_tokens=" for thresholds a model
 //!   cannot take.
-//! - **Muse** `-c context_compaction.soft_threshold=<fraction>` (beside it `hard_threshold`,
-//!   0.75 and 0.9 by default, and `provider_context_limit_tokens`, which replaces the model
-//!   catalog's context limit the fractions are of).
+//!
+//! Muse's own knob (`-c context_compaction.soft_threshold=<fraction>`) has no case here: a direct
+//! Muse run started the owner's Muse on a copy of its login outside its file sandbox, and K3 took
+//! it from the kit. The launch's own test that a Muse member is given the knob holds it.
 //!
 //! - **Pi** ConsensFlow's own extension (`CF_COMPACTION_TOKENS`): it asks Pi to compact at a
 //!   rest, past the size, and keeps the word of it (`settled/<launch>.compacting.json`) until
@@ -28,30 +29,23 @@
 //!   session writes a `compaction` entry, which no run has seen yet.
 //!
 //! Each case runs the harness on a home of the run's own (the kit's [`Isolation`] for Codex
-//! and Devin; for Muse a copy of `auth.json` and the model catalog, the login being the
-//! keychain's, as `live muse-reads` does) with the knob set low, so that a short turn crosses
-//! it, and reads the harness's own record for a compaction:
+//! and Devin) with the knob set low, so that a short turn crosses it, and reads the harness's
+//! own record for a compaction:
 //!
 //! - `codex`: a turn that reads a file, then `exec resume` of the same thread; its rollout
 //!   must say `compacted`.
 //! - `devin`: one turn of six sequential shell steps at `CF_DEVIN_THRESHOLDS` (`8000,8000`
 //!   unless the run says otherwise), whose store must hold a summary (`summarized_from`); it
 //!   says the `<context_usage>` notes the model was given.
-//! - `muse`: one turn at a soft threshold of 0.03; one at a provider limit of 40,000 tokens;
-//!   one at 900,000, above the model's own limit; the session logs say the thresholds in
-//!   tokens and what triggered each compaction (`CF_ONLY=<words>` runs one of them).
 //!
 //! ```text
 //! cargo xtask live compaction-routes -- codex
 //! cargo xtask live compaction-routes -- devin
-//! cargo xtask live compaction-routes -- muse
 //! cargo xtask live compaction-routes -- pi
 //! ```
 //!
 //! **Measured (T-1265, 2026-11-06, the Mac).** Codex 0.166.0 (gpt-5.6-luna) at 2000: 2
-//! `compacted` records, on zeewin2 too. Muse 1.4.14 (muse-spark-1.3-contributor, minimal): soft
-//! 0.03 → soft 15,360 / hard 460,800 (so its real window is 512,000), compactions triggered at
-//! 22,505 and 39,289; a limit of 40,000 → 30,000 / 36,000, soft and blocking compactions. Devin
+//! `compacted` records, on zeewin2 too. Devin
 //! 3000.11.234: on swe-2 a two-step turn at `1000,1000` showed the limit in its note (`of 5k`)
 //! and wrote no summary (twice); on gpt-6-luna-none a turn of one tool step at `8000,8000`
 //! showed `16k of 8k` and wrote none; on swe-2 the six-step turn at `8000,8000` compacted four
@@ -63,12 +57,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::live::guard::{copy_muse_into, login_in_keychain, Scratch};
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
 use cf_e2e::live::{agents, ask, codex, machine, Harness, Log};
 use cf_e2e::process::{own_var, Run};
-use cf_e2e::rig::HarnessHome;
-use cf_e2e::{files, rollout, Error, Result};
+use cf_e2e::{rollout, Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the Pi member's chief.
@@ -110,39 +102,10 @@ fn scratch_folder() -> Result<(cf_e2e::door::Made, PathBuf)> {
 
 /// The machine's variables a harness started here needs besides its home: where programs are.
 fn machine_vars() -> Vec<(String, String)> {
-    ["PATH", "PATHEXT", "HOME", "USER", "LANG", "TMPDIR", "SHELL"]
+    ["PATH", "PATHEXT", "USER", "LANG", "TMPDIR", "SHELL"]
         .into_iter()
         .filter_map(|name| Some((name.to_owned(), own_var(name)?)))
         .collect()
-}
-
-/// Every file below `root` whose bytes hold `words`.
-fn files_saying(root: &Path, words: &str) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut folders = vec![root.to_path_buf()];
-    while let Some(folder) = folders.pop() {
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_symlink() {
-                continue;
-            }
-            if kind.is_dir() {
-                folders.push(path);
-            } else if std::fs::read(&path)
-                .map(|bytes| String::from_utf8_lossy(&bytes).contains(words))
-                .unwrap_or(false)
-            {
-                found.push(path);
-            }
-        }
-    }
-    found
 }
 
 #[test]
@@ -185,10 +148,9 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         let (program, rest) = argv
             .split_first()
             .ok_or_else(|| Error::Daemon("no command line".to_owned()))?;
-        Run::new(program)
+        Run::harness("codex", program)
             .args(rest)
             .cwd(&folder)
-            .inheriting_env()
             .vars(home.clone())
             .closed_input()
             .limit(TURN)
@@ -280,9 +242,7 @@ fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
         ));
     }
     let fail = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", file.display()));
-    let db =
-        rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(fail)?;
+    let db = cf_e2e::door::database::read(file)?;
     let summaries: i64 = db
         .query_row(
             "SELECT count(*) FROM message_nodes WHERE json_extract(metadata, '$.summarized_from') IS NOT NULL",
@@ -375,10 +335,9 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
         let (program, rest) = argv
             .split_first()
             .ok_or_else(|| Error::Daemon("no command line".to_owned()))?;
-        let ran = Run::new(program)
+        let ran = Run::harness("devin", program)
             .args(rest)
             .cwd(&folder)
-            .inheriting_env()
             .vars(home.clone())
             .var("DEVIN_COMPACTION_THRESHOLDS", thresholds)
             .closed_input()
@@ -436,198 +395,6 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     }
     install.finish_homes()?;
     assert!(compacted > before, "Devin never compacted at {thresholds}");
-    log.passed();
-    Ok(())
-}
-
-fn watch_muse_owner(home: &Path) -> Result<cf_e2e::live::isolation::Isolation> {
-    let watch = cf_e2e::live::isolation::Isolation::muse(
-        home,
-        &home.join(".config"),
-        &home.join(".local/share"),
-    );
-    watch.vars()?;
-    Ok(watch)
-}
-
-/// What a Muse session log says of compaction: each record whose payload names a threshold
-/// or a compaction, by its payload type and those fields.
-fn muse_compaction_lines(data: &Path) -> Result<Vec<String>> {
-    if !cf_e2e::door::is_made_or_below(data) {
-        return Err(Error::Daemon(
-            "Muse's session data is outside the run's own roots".to_owned(),
-        ));
-    }
-    let mut lines = Vec::new();
-    for path in files_saying(data, "\"payload_type\"") {
-        if path.file_name().and_then(|name| name.to_str()) != Some("session.jsonl") {
-            continue;
-        }
-        let Ok(text) = files::read_string(&path) else {
-            continue;
-        };
-        for record in text
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        {
-            let kind = record["payload_type"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            let payload = record["payload"].to_string();
-            if kind.contains("compact") || payload.contains("threshold_tokens") {
-                let mut fields = Vec::new();
-                for key in [
-                    "soft_threshold_tokens",
-                    "hard_threshold_tokens",
-                    "estimated_prompt_tokens",
-                    "tokens_before",
-                    "tokens_after",
-                    "trigger",
-                ] {
-                    if let Some(at) = payload.find(&format!("\"{key}\":")) {
-                        let value: String = payload[at..]
-                            .chars()
-                            .take_while(|c| *c != ',' && *c != '}')
-                            .collect();
-                        fields.push(value);
-                    }
-                }
-                lines.push(format!("{kind} {}", fields.join(" ")));
-            }
-        }
-    }
-    Ok(lines)
-}
-
-#[test]
-#[ignore = "opt-in: spends Muse's allowance on two short turns; cargo xtask live compaction-routes -- muse"]
-fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
-    let log = Log::begin("live compaction-routes muse")?;
-    ask::prepare()?;
-    let home = machine::home()?;
-    let owner_watch = watch_muse_owner(&home)?;
-    let auth = files::read_string(&home.join(".config/muse/auth.json"))?;
-    login_in_keychain(&auth).map_err(Error::Daemon)?;
-    let muse = machine::command("muse")?;
-    let asked = agents::asked_for(Harness::Muse)?;
-    let mut selected = asked
-        .named()
-        .contains(&Harness::Muse)
-        .then(|| asked.of(Harness::Muse).clone());
-    let mut said = Vec::new();
-    let mut failed = Vec::new();
-    // Each case, its knobs, and whether its short turn must compact: the low limits must; the
-    // limit above the model's own window may not, and proves nothing either way.
-    for (name, knobs, compacts) in [
-        (
-            "soft 0.03",
-            vec!["context_compaction.soft_threshold=0.03"],
-            true,
-        ),
-        (
-            "provider limit 40000",
-            vec!["context_compaction.provider_context_limit_tokens=40000"],
-            true,
-        ),
-        (
-            "provider limit 900000",
-            vec!["context_compaction.provider_context_limit_tokens=900000"],
-            false,
-        ),
-    ] {
-        // `CF_ONLY` runs the cases whose name holds its words, and no other.
-        if own_var("CF_ONLY").is_some_and(|only| !name.contains(&only)) {
-            continue;
-        }
-        let scratch = Scratch::made("compaction-routes-muse-").map_err(|source| Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
-        copy_muse_into(&home, scratch.path(), &auth).map_err(|source| Error::File {
-            action: "copy the login and the model catalog of",
-            path: home.join(".config/muse"),
-            source,
-        })?;
-        let mut env: std::collections::BTreeMap<String, String> =
-            machine_vars().into_iter().collect();
-        for (name, folder) in [
-            ("XDG_CONFIG_HOME", "config"),
-            ("XDG_DATA_HOME", "data"),
-            ("XDG_CACHE_HOME", "cache"),
-            ("XDG_STATE_HOME", "state"),
-        ] {
-            env.insert(
-                name.to_owned(),
-                scratch.path().join(folder).to_string_lossy().into_owned(),
-            );
-        }
-        env.insert("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned());
-        if selected.is_none() {
-            selected = Some(agents::muse_in_env(&env)?);
-        }
-        let model = selected.as_ref().expect("a model was named or selected");
-        agents::validate_in_env(model, &env.into_iter().collect::<Vec<_>>())?;
-        let (_folder_scratch, folder) = scratch_folder()?;
-        let mut args = vec![
-            muse.to_string_lossy().into_owned(),
-            "exec".to_owned(),
-            "--model".to_owned(),
-            model.name.clone(),
-            "--contributor-mode".to_owned(),
-            "off".to_owned(),
-            "--workspace".to_owned(),
-            folder.to_string_lossy().into_owned(),
-        ];
-        if let Some(effort) = &model.effort {
-            args.extend(["--reasoning-effort".to_owned(), effort.clone()]);
-        }
-        for knob in knobs {
-            args.extend(["-c".to_owned(), knob.to_owned()]);
-        }
-        args.push(ASK.to_owned());
-        let argv = ask::program(&args, &machine_vars())?;
-        let (program, rest) = argv
-            .split_first()
-            .ok_or_else(|| Error::Daemon("no command line".to_owned()))?;
-        let ran = Run::new(program)
-            .args(rest)
-            .cwd(&folder)
-            .inheriting_env()
-            .vars([
-                ("XDG_CONFIG_HOME", scratch.path().join("config")),
-                ("XDG_DATA_HOME", scratch.path().join("data")),
-                ("XDG_CACHE_HOME", scratch.path().join("cache")),
-                ("XDG_STATE_HOME", scratch.path().join("state")),
-            ])
-            .var("MUSE_NO_AUTO_UPDATE", "1")
-            .closed_input()
-            .limit(TURN)
-            .run()?;
-        let lines = muse_compaction_lines(&scratch.path().join("data"))?;
-        if ran.code != Some(0) {
-            failed.push(format!("{name}: muse exec ended {:?}", ran.code));
-        }
-        // A compaction Muse began is a record that says what triggered it.
-        if compacts && !lines.iter().any(|line| line.contains("\"trigger\":")) {
-            failed.push(format!("{name}: no compaction was triggered"));
-        }
-        said.push(format!(
-            "{name}: exit {:?}\n  {}",
-            ran.code,
-            if lines.is_empty() {
-                "no record names a threshold or a compaction".to_owned()
-            } else {
-                lines.join("\n  ")
-            }
-        ));
-    }
-    if let Some(model) = selected {
-        log.block(&format!("muse on {}", model.name), &said.join("\n"));
-    }
-    owner_watch.finish()?;
-    assert!(failed.is_empty(), "{}", failed.join("; "));
     log.passed();
     Ok(())
 }
@@ -814,7 +581,7 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_folders_refuse_a_foreign_home() {
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
         let env = vec![(
             "XDG_DATA_HOME".to_owned(),
             foreign.path().display().to_string(),
@@ -827,11 +594,14 @@ mod tests {
 
     #[test]
     fn kit_round3_devin_compaction_store_refuses_a_foreign_database() {
-        let foreign = tempfile::tempdir().unwrap();
-        let store = foreign.path().join("sessions.db");
-        let db = rusqlite::Connection::open(&store).unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        let mine = cf_e2e::door::made("t-").unwrap();
+        let made = mine.path().join("sessions.db");
+        let db = cf_e2e::door::database::write(&made).unwrap();
         db.execute_batch("CREATE TABLE message_nodes (metadata TEXT, chat_message TEXT, row_id INTEGER); INSERT INTO message_nodes VALUES ('{\"summarized_from\":1}', '{}', 1);").unwrap();
         drop(db);
+        let store = foreign.path().join("sessions.db");
+        cf_e2e::standin_process::foreign_write(&store, std::fs::read(&made).unwrap());
         assert!(
             devin_summaries_and_notes(&store).is_err(),
             "a foreign Devin store was opened"
@@ -839,38 +609,13 @@ mod tests {
     }
 
     #[test]
-    fn kit_disclosure_muse_compaction_keeps_the_owner_isolation_watch() {
-        let home = tempfile::tempdir().unwrap();
-        let settings = home.path().join(".config/muse/settings.json");
-        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-        std::fs::write(&settings, "before").unwrap();
-        let watch = watch_muse_owner(home.path()).unwrap();
-        std::fs::write(&settings, "after").unwrap();
-        assert!(
-            watch.finish().is_err(),
-            "a change to the fabricated owner was missed"
-        );
-    }
-
-    #[test]
-    fn kit_disclosure_muse_oracle_does_not_read_a_foreign_tree() {
-        let owner = tempfile::tempdir().unwrap();
-        std::fs::write(owner.path().join("foreign.json"), "fabricated").unwrap();
-        assert!(
-            muse_compaction_lines(owner.path()).is_err(),
-            "the oracle accepted a foreign tree"
-        );
-    }
-
-    #[test]
     fn kit_disclosure_pi_compaction_refuses_foreign_session_root() {
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::create_dir(foreign.path().join("sessions")).unwrap();
-        std::fs::write(
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        cf_e2e::standin_process::foreign_dir(foreign.path().join("sessions"));
+        cf_e2e::standin_process::foreign_write(
             foreign.path().join("sessions/s.jsonl"),
             "{\"type\":\"compaction\",\"tokensBefore\":42}\n",
-        )
-        .unwrap();
+        );
         assert!(
             pi_compactions(foreign.path()).is_err(),
             "a foreign Pi session was accepted"
@@ -878,11 +623,8 @@ mod tests {
         #[cfg(unix)]
         {
             let run = cf_e2e::door::made("cf-pi-sessions-").unwrap();
-            std::os::unix::fs::symlink(
-                foreign.path().join("sessions"),
-                run.path().join("sessions"),
-            )
-            .unwrap();
+            cf_e2e::door::symlink(foreign.path().join("sessions"), run.path().join("sessions"))
+                .unwrap();
             assert!(
                 pi_compactions(run.path()).is_err(),
                 "a linked-out Pi session was accepted"

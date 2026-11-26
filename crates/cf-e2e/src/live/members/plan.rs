@@ -345,8 +345,20 @@ mod tests {
         assert_eq!(harness_of(&stand_in_worker()), None);
         assert_eq!(harness_of(&member(Harness::Claude)), Some(Harness::Claude));
         assert_eq!(harness_of(&member(Harness::Pi)), Some(Harness::Pi));
-        // A Claude agent on a model that only starts with fake is the real Claude's.
-        let row = json!({ "id": "x", "kind": "claude-code", "model": "fake-2" });
+        // The stand-in's other models are its too, the ones the shim routes to it; a model that
+        // only starts with fake is the real Claude's.
+        for model in ["fake-2", "worker"] {
+            let row = json!({ "id": "x", "kind": "claude-code", "model": model });
+            assert_eq!(harness_of(&row), None, "{model}");
+            let mut asked = Vec::new();
+            agents::validate_rows(&[row], |harness| {
+                asked.push(harness);
+                Ok(Vec::new())
+            })
+            .unwrap();
+            assert!(asked.is_empty(), "{model}: the real catalogue was asked");
+        }
+        let row = json!({ "id": "x", "kind": "claude-code", "model": "fake-3" });
         assert_eq!(harness_of(&row), Some(Harness::Claude));
         assert_eq!(harness_of(&json!({ "id": "y", "kind": "nothing" })), None);
         // Devin's and Codex's shapes of the stand-in, on its fake model, are no install either

@@ -7,6 +7,7 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: Link::Number,
     }
 }
 
@@ -15,6 +16,38 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
 fn at(exe: &str, process: Running) -> Running {
     Running {
         exe: Some(exe.to_owned()),
+        ..process
+    }
+}
+
+/// `process` as Windows' reading says it: created by its parent's number, as its own handle says.
+fn created(process: Running) -> Running {
+    Running {
+        link: Link::Created {
+            by: process.ppid,
+            described: None,
+            held: false,
+        },
+        ..process
+    }
+}
+
+/// `with_cygwin_parents` with no handle held: Git Bash describes, and proves nothing.
+fn not_held(listed: Vec<Running>, ps: impl Fn(&str) -> Option<String>) -> Vec<Running> {
+    with_cygwin_parents(listed, ps, |_| None)
+}
+
+/// `process` as the Git Bash listing described its parent, and nothing else of it changed.
+fn described(process: Running, parent: u32) -> Running {
+    let Link::Created { by, .. } = process.link else {
+        panic!("a row read on Windows");
+    };
+    Running {
+        link: Link::Created {
+            by,
+            described: Some(parent),
+            held: false,
+        },
         ..process
     }
 }
@@ -233,11 +266,11 @@ fn a_monitor_whose_claude_was_killed_is_an_orphan_of_the_window_s_folder() {
 fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
     // The system says the real path of the folder a process runs in; the run may spell its own
     // through a link (a Mac's temporary folder is behind `/var`).
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::door::made("t-").unwrap();
     let real = dir.path().join("real");
-    std::fs::create_dir(&real).unwrap();
+    crate::door::make_dir(&real).unwrap();
     let link = dir.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).unwrap();
+    crate::door::symlink(&real, &link).unwrap();
     let real = real.canonicalize().unwrap();
     let all = [running(200, 101, 1, "sleep 4711")];
     let linked = RunFolder::under(dir.path(), &link).expect("under the root");
@@ -256,12 +289,12 @@ fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
 /// holds the person's home.
 #[test]
 fn a_folder_is_the_runs_only_under_the_runs_own_root() {
-    let root = tempfile::tempdir().unwrap();
+    let root = crate::door::made("t-").unwrap();
     let inside = root.path().join("home").join("live");
-    std::fs::create_dir_all(&inside).unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    crate::door::make_dir(&inside).unwrap();
+    let outside = crate::door::made("t-").unwrap();
     let alike = std::path::PathBuf::from(format!("{}-x", root.path().display()));
-    std::fs::create_dir_all(&alike).unwrap();
+    crate::door::make_dir(&alike).unwrap();
     let ours = RunFolder::under(root.path(), &inside).expect("a folder under the root");
     assert_eq!(ours.given(), inside);
     assert_eq!(ours.real(), inside.canonicalize().unwrap());
@@ -281,13 +314,13 @@ fn a_folder_is_the_runs_only_under_the_runs_own_root() {
             "the person's home is no run's"
         );
     }
-    std::fs::remove_dir(&alike).unwrap();
+    crate::door::remove(&alike).unwrap();
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn a_mac_says_the_real_folder_a_process_runs_in_and_none_for_a_number_no_process_has() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = crate::door::made("t-").unwrap();
     let mut child = crate::process::Run::new("/bin/sleep")
         .arg("20")
         .cwd(dir.path())
@@ -381,10 +414,12 @@ fn a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose
             10 => Ok(Some(Bsd {
                 ppid: 1,
                 started: 1_792_118_686_123_456,
+                link: Link::Number,
             })),
             11 => Ok(Some(Bsd {
                 ppid: 99,
                 started: 1_792_118_690_000_001,
+                link: Link::Number,
             })),
             12 => Ok(None),
             _ => Err(std::io::Error::other("unreadable")),
@@ -445,10 +480,12 @@ fn a_mac_row_whose_start_the_system_says_is_another_second_than_ps_said_is_anoth
             20 => Ok(Some(Bsd {
                 ppid: 1,
                 started: 1_792_118_686_999_999,
+                link: Link::Number,
             })),
             21 => Ok(Some(Bsd {
                 ppid: 1,
                 started: 1_792_118_699_000_001,
+                link: Link::Number,
             })),
             _ => Ok(None),
         },
@@ -474,19 +511,29 @@ fn windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_numb
         running(13, 133_000_000_000_000_120, 10, "cmd.exe"),
         running(14, 5, 0, "System"),
     ];
+    let opened = |created, creator| Ok(Some(Opened { created, creator }));
     let refined = refined_by_handle(listed, |pid| match pid {
-        10 => Ok(Some(133_000_000_000_000_127)),
-        11 => Ok(Some(133_000_000_000_500_120)),
+        10 => opened(133_000_000_000_000_127, Some(1)),
+        11 => opened(133_000_000_000_500_120, Some(10)),
         12 | 13 => Ok(None),
         _ => Err(std::io::Error::other("access denied")),
     });
     assert_eq!(
         refined,
         [
-            running(10, 133_000_000_000_000_127, 1, "devin.exe"),
-            running(14, 5, 0, "System"),
+            created(running(10, 133_000_000_000_000_127, 1, "devin.exe")),
+            Running {
+                link: Link::Unread,
+                ..running(14, 5, 0, "System")
+            },
         ]
     );
+    // A handle that names another creator than the table does is believed by neither.
+    let said = refined_by_handle(
+        vec![running(10, 133_000_000_000_000_120, 1, "devin.exe")],
+        |_| opened(133_000_000_000_000_120, Some(77)),
+    );
+    assert_eq!(said[0].link, Link::Unread);
 }
 
 #[test]
@@ -541,7 +588,7 @@ const SYSTEM_POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0";
 /// The processes of that look at the machine, as Windows' table lists them: the sleep's parent
 /// (29604, a copy of the shell that forked to start it) is gone.
 fn forked() -> Vec<Running> {
-    vec![
+    [
         at(
             r"C:\Program Files\Git\bin\bash.exe",
             running(
@@ -583,40 +630,44 @@ fn forked() -> Vec<Running> {
             running(10952, 1, 4424, "powershell.exe"),
         ),
     ]
+    .into_iter()
+    .map(created)
+    .collect()
 }
 
 #[test]
-fn a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has() {
+fn a_cygwin_program_whose_parent_has_gone_is_described_with_the_parent_git_bash_says_and_is_not_the_windows(
+) {
     let asked = std::cell::RefCell::new(Vec::new());
-    let repaired = with_cygwin_parents(forked(), |folder| {
+    let repaired = not_held(forked(), |folder| {
         asked.borrow_mut().push(folder.to_owned());
         Some(PS_W.to_owned())
     });
-    // The sleep's parent is the shell, by the number Windows has for it.
-    let sleep = repaired
-        .iter()
-        .find(|one| one.identity.pid == 25892)
-        .unwrap();
-    assert_eq!(sleep.ppid, 9736);
-    // The rest are as they were: parents that run are never asked about.
+    // The sleep's parent, as the later listing describes it, is the shell, by the number Windows
+    // has for it. The row is no other than it was: its parent's number is the gone one's.
     let mut expected = forked();
-    expected
+    let sleep = expected
         .iter_mut()
         .find(|one| one.identity.pid == 25892)
-        .unwrap()
-        .ppid = 9736;
+        .unwrap();
+    *sleep = described(sleep.clone(), 9736);
     assert_eq!(repaired, expected);
-    // The window's tree has it now, where it had not.
+    // The window's tree has not got it, for no reading of the table proves it (T-2228), and the
+    // kit names it as left running.
     let window = Identity {
         pid: 9040,
         started: 10,
     };
-    assert!(!descending_from(&forked(), window)
-        .iter()
-        .any(|one| one.identity.pid == 25892));
-    assert!(descending_from(&repaired, window)
-        .iter()
-        .any(|one| one.identity.pid == 25892));
+    for rows in [forked(), repaired.clone()] {
+        assert!(!descending_from(&rows, window)
+            .iter()
+            .any(|one| one.identity.pid == 25892));
+    }
+    assert!(unproved_under(&forked(), window).is_empty());
+    let named = unproved_under(&repaired, window);
+    assert_eq!(named.len(), 1, "{named:?}");
+    assert_eq!(named[0].0.identity.pid, 25892);
+    assert!(named[0].1.contains("Git Bash"), "{}", named[0].1);
     // `ps` was asked once for each folder of a program that has no parent that runs, by the image
     // the table says: the sleep's, which is Git Bash's, and the powershell's (of which a folder
     // with no `ps` says nothing).
@@ -627,28 +678,17 @@ fn a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_h
 }
 
 #[test]
-fn what_git_bash_does_not_vouch_for_is_listed_as_it_was() {
-    // No `ps` there (a folder that holds none), a `ps` that says nothing of the process, a
-    // parent that Windows does not list, and a parent that began after the child: none is a
-    // parent to give.
-    for (ps, listed_parent_started) in [
-        (None, 12),
-        (Some("      PID    PPID    PGID     WINPID\n"), 12),
+fn what_git_bash_does_not_say_is_listed_as_it_was() {
+    // No `ps` there (a folder that holds none), a `ps` that says nothing of the process, and a
+    // parent that Windows does not list: nothing is described.
+    for ps in [
+        None,
+        Some("      PID    PPID    PGID     WINPID\n"),
         // The shell's Cygwin number is not in the table.
-        (
-            Some("     1466    1464    1464      25892  cons0  197609 18:25:26 /usr/bin/sleep\n"),
-            12,
-        ),
-        // The shell is there, but began after the sleep did: a number another process took.
-        (Some(PS_W), 99),
+        Some("     1466    1464    1464      25892  cons0  197609 18:25:26 /usr/bin/sleep\n"),
     ] {
-        let mut list = forked();
-        list.iter_mut()
-            .find(|one| one.identity.pid == 9736)
-            .unwrap()
-            .identity
-            .started = listed_parent_started;
-        let repaired = with_cygwin_parents(list.clone(), |_| ps.map(str::to_owned));
+        let list = forked();
+        let repaired = not_held(list.clone(), |_| ps.map(str::to_owned));
         assert_eq!(repaired, list, "{ps:?}");
     }
     // A process whose parent runs, or that names none, is never looked up.
@@ -657,16 +697,12 @@ fn what_git_bash_does_not_vouch_for_is_listed_as_it_was() {
         r"C:\Program Files\Git\usr\bin\ls.exe",
         running(7, 1, 0, r#""C:\Program Files\Git\usr\bin\ls.exe""#),
     ));
-    let repaired = with_cygwin_parents(list.clone(), |folder| {
+    let repaired = not_held(list.clone(), |folder| {
         (folder == GIT_BIN).then(|| PS_W.to_owned())
     });
     assert_eq!(
-        repaired
-            .iter()
-            .find(|one| one.identity.pid == 7)
-            .unwrap()
-            .ppid,
-        0
+        repaired.iter().find(|one| one.identity.pid == 7).unwrap(),
+        list.iter().find(|one| one.identity.pid == 7).unwrap()
     );
 }
 
@@ -744,20 +780,27 @@ fn a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents() {
     let mut list = forked();
     list.push(at(
         r"C:\Program Files\Git\usr\bin\cat.exe",
-        running(31000, 15, 7777, r#""C:\Program Files\Git\usr\bin\cat.exe""#),
+        created(running(
+            31000,
+            15,
+            7777,
+            r#""C:\Program Files\Git\usr\bin\cat.exe""#,
+        )),
     ));
-    let repaired = with_cygwin_parents(list, |_| Some(PS_W_FLAGGED.to_owned()));
-    let parent = |pid: u32| {
-        repaired
-            .iter()
-            .find(|one| one.identity.pid == pid)
-            .unwrap()
-            .ppid
+    let repaired = not_held(list, |_| Some(PS_W_FLAGGED.to_owned()));
+    let parent = |pid: u32| match repaired
+        .iter()
+        .find(|one| one.identity.pid == pid)
+        .unwrap()
+        .link
+    {
+        Link::Created { described, .. } => described,
+        other => panic!("{other:?}"),
     };
-    assert_eq!(parent(25892), 9736);
-    // And the cat, whose own parent has gone too, is the sleep's: the row of a sleep that is
-    // stopped or reads its terminal says so as any other does.
-    assert_eq!(parent(31000), 25892);
+    assert_eq!(parent(25892), Some(9736));
+    // And the cat, whose own parent has gone too, is described as the sleep's: the row of a sleep
+    // that is stopped or reads its terminal says so as any other does.
+    assert_eq!(parent(31000), Some(25892));
     // A letter alone, a word of letters, or two letters are no status.
     assert_eq!(cygwin_table("IO 1 2 3 4 x\nI\nsh 1 2 3 4 x\n"), []);
 }
@@ -785,7 +828,7 @@ fn an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spell
         r#""C:\Program Files\Git\usr\bin\ls.exe""#,
     ));
     let asked = std::cell::RefCell::new(Vec::new());
-    let repaired = with_cygwin_parents(list.clone(), |folder| {
+    let repaired = not_held(list.clone(), |folder| {
         asked.borrow_mut().push(folder.to_owned());
         (folder == GIT_BIN).then(|| PS_W.to_owned())
     });

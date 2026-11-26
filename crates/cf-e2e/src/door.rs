@@ -59,21 +59,37 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::live::members::{
-    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, Ended, Identity,
-    Machine, Pause, RunFolder, Running, ThisMachine,
+    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, unproved_under, Ended,
+    Identity, Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
+pub mod account;
 mod again;
+pub mod cargo;
+pub mod database;
+pub mod identity;
+pub mod keychain;
+pub mod place;
+pub mod reads;
+pub mod renewal;
+pub(crate) mod shells;
+pub mod source;
+pub mod spawn;
+pub mod terminal;
+mod windows_registry;
 mod writes;
 
 pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
 pub use writes::{
-    append, copy, copy_cloning, copy_keeping_mode, copy_tree, create, create_new,
-    create_new_private, made_dir, made_file, make_dir, make_dir_private, rename, say_its_process,
-    set_modified, set_permissions, write, write_executable, write_whole,
+    append, copy, copy_cloning, copy_cloning_from, copy_keeping_mode, copy_keeping_mode_from,
+    copy_tree, copy_tree_from, create, create_new, create_new_private, made_dir, made_file,
+    make_dir, make_dir_private, remove, rename, say_its_process, set_modified, set_permissions,
+    write, write_executable, write_whole,
 };
+#[cfg(windows)]
+pub use writes::{symlink_dir, symlink_file};
 
 /// The variable that makes the door say only.
 pub const AUDIT: &str = "CF_LIVE_AUDIT";
@@ -96,7 +112,7 @@ pub const STILL_ACTS: &[&str] = &[
     "a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it",
     "the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door; among them the machine's own program of each harness the run seats, asked for its version, and on a Mac `security`, which reads the Keychain item of Claude Code's login (the first read asks the person once to allow it) and lists the names of its items",
     "the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written; besides them the run makes new files of its own outside its folders and never writes over one that is there (the audit file, a fixture or a report file a caller names, a failure report), and makes a folder that is missing on the way to them",
-    "an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never starts that renewal: where a login would need it, the rig that needed it does not start and the run ends with one line that says so, which is in the audit file too; what was done by then stays done: the builds, the questions to the installed harnesses for their versions, the reads of the logins, and the run's first folders (the folder of its shims in the temp folder)",
+    "an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets on a machine whose account is a test account of its own, and not on zeewin2, whose account is its owner's) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never starts that renewal: where a login would need it, the rig that needed it does not start and the run ends with one line that says so, which is in the audit file too; what was done by then stays done: the builds, the questions to the installed harnesses for their versions, the reads of the logins, and the run's first folders (the folder of its shims in the temp folder)",
     "a say-only run uses the real model's quota, and keeps what it made for reading until a person removes it: its folders, its transcripts, the whole command lines in the audit file, and its copies of the logins",
     "what a run's copy of a login holds, and a say-only run removes none of them: Claude Code's access token, Pi's discovery copy and the providers the run needs, and Muse's auth.json have every key whose name contains refresh removed at every depth; Codex's auth.json keeps its other fields, including its access token, with refresh-named keys removed at every depth; a token-backed copy then has an empty tokens.refresh_token and last_refresh set to the time of the copy, so no refresh-token value is copied; Devin's credentials.toml is copied only if it parses and has no such key, otherwise the case refuses to run; a Claude window on a Mac may move its access token into a Keychain item named for the run's folder, which outlives the run and which the kit never deletes; on a Mac Muse's file holds metadata and its secret stays in the Keychain",
     "to check that Codex's owner setup stayed unchanged, the kit compares auth.json by size, modification time and file identity, and reads and hashes config.toml before and after; it keeps the config's hash and TOML table names in memory and on a changed config reports added or removed table names and those also in the run's own config, never values",
@@ -114,7 +130,7 @@ pub const STILL_ACTS: &[&str] = &[
     "Claude's dialog case reads the owner's .claude.json before and after to check it stayed unchanged; it keeps a hash and four LSP and hints settings in memory and prints the complete hashes and those settings in its report",
     "Claude's parity case does not read or check the owner's Claude settings, project configuration, history or project folders; it checks the login and its copy, and refuses a login that needs renewal, even on a test machine",
     "for setup, Claude's dialog case recursively copies the owner's official plugin marketplace without links; its parity case uses the kit's copy of the owner's Claude login without its refresh token in a config of the run's own, with a skill and an MCP server of the run's own, and reads no other owner Claude configuration; the run's settings ask Claude not to sync account skills or plugins or fetch account connectors; the login copy stays in a say-only run",
-    "for setup, only when Pi is seated and no Pi model is explicitly named, the kit reads the owner's auth.json once in memory for the run's seed, makes a private discovery copy with refresh-named keys removed, and reads provider names from that copy; the first matching run home reuses the seed after checking that the owner's file metadata stayed unchanged; an explicitly named Pi model skips discovery and its run home reads auth.json in memory to seed its sanitized copy; a later Pi home may also read it again, and a test-machine renewal rereads the login after renewal; a say-only run keeps its sanitized discovery copy as well as its run copies; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config; a live Muse home and its reads, compaction, and direct TUI cases copy the model catalog where present, and seeding its home reads the owner's login in memory and writes only a sanitized copy; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit's seed copies no owner Git file",
+    "for setup, only when Pi is seated and no Pi model is explicitly named, the kit reads the owner's auth.json once in memory for the run's seed, makes a private discovery copy with refresh-named keys removed, and reads provider names from that copy; the first matching run home reuses the seed after checking that the owner's file metadata stayed unchanged; an explicitly named Pi model skips discovery and its run home reads auth.json in memory to seed its sanitized copy; a later Pi home may also read it again, and a test-machine renewal rereads the login after renewal; a say-only run keeps its sanitized discovery copy as well as its run copies; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config; a live Muse home and its reads and direct TUI cases copy the model catalog where present, and seeding its home reads the owner's login in memory and writes only a sanitized copy; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit's seed copies no owner Git file",
     "the Muse window case checks whether the owner's Claude rules file exists and may print its path; the Claude launcher case reads and prints the owner's Claude launcher link target",
 ];
 
@@ -124,12 +140,28 @@ pub const KEPT: &str = "consensflow-kept.txt";
 /// How a rig names its folder, by the start of its name.
 pub const RIG_PREFIX: &str = "consensflow-integration-";
 
+/// The variable a say-only run gives the programs it starts with the identity of the audit file
+/// it made ([`identity`]): a program opens the file by its path once and checks it is that one, so
+/// that a file put at the path since is never added to (T-2002 finding 5). Never set by a person.
+pub const AUDIT_ID: &str = "CF_LIVE_AUDIT_ID";
+
 /// The door: one that acts, or one that only says.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Door {
     /// The file what would be done is written in, when the door only says.
     said: Option<PathBuf>,
+    /// The audit file, open: every line is added through the handle it was made or checked with,
+    /// never by opening the path again.
+    open: Option<std::sync::Arc<Mutex<fs::File>>>,
 }
+
+impl PartialEq for Door {
+    fn eq(&self, other: &Door) -> bool {
+        self.said == other.said
+    }
+}
+
+impl Eq for Door {}
 
 impl Door {
     /// The run's door, as its variables ask: one that acts unless [`AUDIT`] says to say only. A
@@ -140,10 +172,11 @@ impl Door {
     pub fn of_run() -> &'static Door {
         static DOOR: OnceLock<Door> = OnceLock::new();
         DOOR.get_or_init(|| {
-            Door::asked(
+            Door::asked_of(
                 std::env::var_os(AUDIT).as_deref(),
                 std::env::var_os(AUDIT_FILE).as_deref(),
                 std::env::var_os(AUDIT_MADE).as_deref(),
+                std::env::var_os(AUDIT_ID).as_deref(),
             )
             .unwrap_or_else(|why| panic!("the say-only run stops before it acts: {why}"))
         })
@@ -167,6 +200,17 @@ impl Door {
         file: Option<&std::ffi::OsStr>,
         made: Option<&std::ffi::OsStr>,
     ) -> Result<Door, String> {
+        Door::asked_of(audit, file, made, None)
+    }
+
+    /// [`Door::asked`], where a program the run started is also told the identity of the audit
+    /// file the run made (`identity`, [`AUDIT_ID`]): the file it opens must be that one.
+    pub fn asked_of(
+        audit: Option<&std::ffi::OsStr>,
+        file: Option<&std::ffi::OsStr>,
+        made: Option<&std::ffi::OsStr>,
+        identity: Option<&std::ffi::OsStr>,
+    ) -> Result<Door, String> {
         if !is_on(audit) {
             return Ok(Door::acting());
         }
@@ -177,14 +221,26 @@ impl Door {
                 std::env::temp_dir()
                     .join(format!("consensflow-live-audit-{}.txt", std::process::id()))
             });
-        if is_on(made) {
-            let open = fs::OpenOptions::new().append(true).open(&file);
-            open.map_err(|failed| {
-                format!(
-                    "the audit file {} the run began is not there to add to: {failed}",
-                    file.display()
-                )
-            })?;
+        let opened = if is_on(made) {
+            let open = fs::OpenOptions::new()
+                .append(true)
+                .open(&file)
+                .map_err(|failed| {
+                    format!(
+                        "the audit file {} the run began is not there to add to: {failed}",
+                        file.display()
+                    )
+                })?;
+            if let Some(expected) = identity.filter(|identity| !identity.is_empty()) {
+                let found = self::identity::of_file(&open).map_err(|failed| failed.to_string())?;
+                if std::ffi::OsStr::new(&found) != expected {
+                    return Err(format!(
+                        "the audit file {} is not the one the run made: another file is at its path",
+                        file.display()
+                    ));
+                }
+            }
+            open
         } else {
             let mut open = fs::OpenOptions::new()
                 .write(true)
@@ -211,8 +267,12 @@ impl Door {
                     file.display()
                 )
             })?;
-        }
-        Ok(Door::saying(file))
+            open
+        };
+        Ok(Door {
+            said: Some(file),
+            open: Some(std::sync::Arc::new(Mutex::new(opened))),
+        })
     }
 
     /// Whether the variables ask for a say-only run ([`AUDIT`]), read and nothing more: a program
@@ -226,12 +286,22 @@ impl Door {
     /// The variables that make a program this run starts say only into the same file, as this
     /// run does: none where this run acts.
     pub fn audit_vars() -> Vec<(String, String)> {
-        match Door::of_run().says_in() {
-            Some(file) => vec![
-                (AUDIT.to_owned(), "1".to_owned()),
-                (AUDIT_FILE.to_owned(), file.to_string_lossy().into_owned()),
-                (AUDIT_MADE.to_owned(), "1".to_owned()),
-            ],
+        let door = Door::of_run();
+        match door.says_in() {
+            Some(file) => {
+                let mut vars = vec![
+                    (AUDIT.to_owned(), "1".to_owned()),
+                    (AUDIT_FILE.to_owned(), file.to_string_lossy().into_owned()),
+                    (AUDIT_MADE.to_owned(), "1".to_owned()),
+                ];
+                if let Some(found) = door.open.as_ref().and_then(|open| {
+                    self::identity::of_file(&open.lock().unwrap_or_else(PoisonError::into_inner))
+                        .ok()
+                }) {
+                    vars.push((AUDIT_ID.to_owned(), found));
+                }
+                vars
+            }
             None => Vec::new(),
         }
     }
@@ -244,17 +314,30 @@ impl Door {
     pub fn child_vars() -> Vec<(String, String)> {
         let mut vars = Door::audit_vars();
         vars.extend(handed_down());
+        // The roots the child must not write in, which it reads from the run's file and never
+        // builds from its own environment ([`account`]); a run that cannot write them starts
+        // nothing.
+        vars.extend(
+            account::child_vars().unwrap_or_else(|why| panic!("the run starts no program: {why}")),
+        );
         vars
     }
 
     /// A door that acts.
     pub fn acting() -> Door {
-        Door { said: None }
+        Door {
+            said: None,
+            open: None,
+        }
     }
 
-    /// A door that only says, in `file`.
+    /// A door that only says, in `file`, which it opens to add to each line (a door the run's
+    /// variables ask for holds the file it made or checked open instead, [`Door::asked`]).
     pub fn saying(file: PathBuf) -> Door {
-        Door { said: Some(file) }
+        Door {
+            said: Some(file),
+            open: None,
+        }
     }
 
     /// The file it says in, where it only says.
@@ -297,10 +380,32 @@ impl Door {
     /// and two writes could be cut between by another's.
     #[allow(clippy::print_stderr)]
     fn append(&self, file: &Path, line: &str) {
-        let written = fs::OpenOptions::new()
-            .append(true)
-            .open(file)
-            .and_then(|mut open| open.write_all(format!("{line}\n").as_bytes()));
+        let written = match &self.open {
+            // The handle the file was made or checked with: a file put at its path since is never
+            // added to, and one taken away stops the run as a file that cannot be written does.
+            Some(open) => {
+                let open = open.lock().unwrap_or_else(PoisonError::into_inner);
+                let same = match (
+                    self::identity::of_file(&open),
+                    self::identity::of_path(file),
+                ) {
+                    (Ok(held), Ok(now)) => held == now,
+                    _ => false,
+                };
+                if same {
+                    (&*open).write_all(format!("{line}\n").as_bytes())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "the audit file at its path is no longer the one the run made",
+                    ))
+                }
+            }
+            None => fs::OpenOptions::new()
+                .append(true)
+                .open(file)
+                .and_then(|mut open| open.write_all(format!("{line}\n").as_bytes())),
+        };
         if let Err(failed) = written {
             let why = format!(
                 "[say only] {} could not be written: {failed}: the run stops, for what it would do is no longer said",
@@ -320,9 +425,9 @@ impl Door {
             for (process, ground) in chosen.each() {
                 self.say("end", &said_process(process), &ground.to_string());
             }
-            return said_only(chosen);
+            return left_running(said_only(chosen), chosen);
         }
-        end_chosen(&chosen.processes())
+        left_running(end_chosen(&chosen.processes()), chosen)
     }
 
     /// Stops each process of `chosen` where it is, or lets it go on, while it is still the
@@ -336,9 +441,9 @@ impl Door {
             for (process, ground) in chosen.each() {
                 self.say(act, &said_process(process), &ground.to_string());
             }
-            return said_only(chosen);
+            return left_running(said_only(chosen), chosen);
         }
-        pause_chosen(&chosen.processes(), pause)
+        left_running(pause_chosen(&chosen.processes(), pause), chosen)
     }
 
     /// Kills `child`, a program this process started and holds (`name` says which): whether
@@ -481,9 +586,11 @@ impl Door {
     /// Takes away `path`, a folder this process made through the door ([`made_in`]): left, and
     /// said, where it is none.
     pub fn remove_made(&self, path: &Path) -> Removed {
-        let known = canonical(path).is_some_and(|real| registry().contains(&real));
-        if !known {
+        if !is_made(path) {
             return Removed::Left(path.to_path_buf(), "it is no folder this run made".into());
+        }
+        if let Err(refused) = judge(path, place::Act::Remove) {
+            return Removed::Left(path.to_path_buf(), refused.to_string());
         }
         if self.says_only() {
             self.say(
@@ -511,22 +618,21 @@ impl Door {
     /// Takes away `path`, under a folder this process made through the door: left, and said,
     /// where it is under none (compared by the real path of what holds it, by whole components).
     pub fn remove_in_made(&self, path: &Path) -> Removed {
-        let Some(real) = path
-            .parent()
-            .and_then(canonical)
-            .zip(path.file_name())
-            .map(|(parent, name)| parent.join(name))
-        else {
+        if path.parent().and_then(canonical).is_none() {
             return Removed::Absent(path.to_path_buf());
-        };
-        let under = registry()
-            .iter()
-            .any(|made| real.starts_with(made) && real != *made);
+        }
+        let judged = judge(path, place::Act::Remove);
+        let under = judged.as_ref().is_ok_and(|real| {
+            registry().iter().any(|made| {
+                real.starts_with(&made.real) && *real != made.real && made.is_still_its_folder()
+            })
+        });
         if !under {
-            return Removed::Left(
-                path.to_path_buf(),
-                "it is under no folder this run made".into(),
-            );
+            let why = match judged {
+                Err(refused) => refused.to_string(),
+                Ok(_) => "it is under no folder this run made".into(),
+            };
+            return Removed::Left(path.to_path_buf(), why);
         }
         if fs::symlink_metadata(path).is_err() {
             return Removed::Absent(path.to_path_buf());
@@ -540,6 +646,15 @@ impl Door {
 
     /// Takes away `record`, the one entry a harness wrote for the renewal's own folder.
     pub fn remove_record(&self, record: &Record) -> Removed {
+        self.remove_record_on(record, crate::live::renew::TestMachine::detect().as_ref())
+    }
+
+    /// [`Door::remove_record`] on the machine `marked` says this account is, if any.
+    pub(crate) fn remove_record_on(
+        &self,
+        record: &Record,
+        marked: Option<&crate::live::renew::TestMachine>,
+    ) -> Removed {
         let path = record.path();
         if fs::symlink_metadata(&path).is_err() {
             return Removed::Absent(path);
@@ -551,6 +666,22 @@ impl Door {
                 "the record named for the renewal's own folder",
             );
             return Removed::Said(path);
+        }
+        // The record is in the account's own records folder: only an account that is a test
+        // machine's own (T-2007 round 3) has one the kit may take away.
+        if marked.is_none() {
+            return Removed::Left(
+                path,
+                format!(
+                    "the records folder is the account's own, and this account is no test machine ({}), so nothing of it is taken away",
+                    crate::live::renew::TEST_MACHINE
+                ),
+            );
+        }
+        // The record is taken whole: the tree it is must hold no root (a folder of a store that
+        // was linked in, say), judged as every removal is (T-2002 finding 3).
+        if let Err(refused) = place::tree_holds_no_root(&path, &account::protected()) {
+            return Removed::Left(path, refused.to_string());
         }
         remove_whole(&path)
     }
@@ -567,6 +698,18 @@ fn said_only(chosen: &Grounded) -> Ended {
         said: chosen.processes(),
         ..Ended::default()
     }
+}
+
+/// `ended`, with what the window's tree named and did not prove said as left running: a process
+/// no link proves is not ended, and its leaving is a problem of the case that read it.
+fn left_running(mut ended: Ended, chosen: &Grounded) -> Ended {
+    for (process, why) in chosen.unproved() {
+        ended.failed.push((
+            process.clone(),
+            format!("it is not proved to be the window's, so it was left running: {why}"),
+        ));
+    }
+    ended
 }
 
 /// A process as the door says it: its number, when it began, and its command line, whole.
@@ -686,14 +829,486 @@ pub fn own_stem(stem: &str) -> String {
 /// process of a run cannot tell a person's value from its parent's).
 pub const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
 
+/// What the run made: a folder with the identity it had when it was registered, or a file with
+/// the identity it had when it was made (a folder or a file put at that path since, a link
+/// among them, is another, and none of the run's: T-2002 finding 5, T-2319 finding 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Entry {
+    real: PathBuf,
+    file: Option<String>,
+    /// A folder's identity when it was registered; none for a file, and for a folder whose
+    /// identity could not be read, which then grounds nothing.
+    folder: Option<String>,
+}
+
+impl Entry {
+    /// The folder `real`, with the identity it has now.
+    fn folder(real: PathBuf) -> Entry {
+        let folder = identity::of_path(&real).ok();
+        Entry {
+            real,
+            file: None,
+            folder,
+        }
+    }
+
+    /// Whether this is a folder the run made that is still itself: the identity it had when it
+    /// was registered is the identity of what its path leads to now, so that a link put at the
+    /// path, or at a folder above it, grounds nothing of where it leads.
+    fn is_still_its_folder(&self) -> bool {
+        self.file.is_none()
+            && self.real.is_dir()
+            && self
+                .folder
+                .as_ref()
+                .is_some_and(|then| identity::of_path(&self.real).is_ok_and(|now| now == *then))
+    }
+}
+
 /// The folders and files this process made through the door, by their real paths, and those its
 /// parent handed to it ([`MADE_ROOTS`]).
 #[allow(clippy::disallowed_methods)] // the door is read before any `main` could hand an Env on
-fn registry() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
-    static MADE: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
-    MADE.get_or_init(|| Mutex::new(roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())))
+fn registry() -> std::sync::MutexGuard<'static, Vec<Entry>> {
+    static MADE: OnceLock<Mutex<Vec<Entry>>> = OnceLock::new();
+    MADE.get_or_init(|| {
+        Mutex::new(
+            roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())
+                .into_iter()
+                .map(Entry::folder)
+                .collect(),
+        )
+    })
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What the run made is the run's by the text of its real path and by its identity, both: a place
+/// is below a folder the run made only where the real path says so and that folder is still the
+/// folder it was when the run registered it (T-2319 finding 1). Another spelling of such a folder
+/// is not the run's: nobody in the kit names one, and refusing it is the safe side.
+impl place::Registry for Vec<Entry> {
+    fn is_made_folder(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            place::within(real, &made.real, any_case)
+                && place::within(&made.real, real, any_case)
+                && made.is_still_its_folder()
+        })
+    }
+
+    fn is_below_made(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            place::within(real, &made.real, any_case)
+                && !place::within(&made.real, real, any_case)
+                && made.is_still_its_folder()
+        })
+    }
+
+    fn is_made_file(&self, real: &Path, any_case: bool) -> bool {
+        self.iter().any(|made| {
+            made.file.as_ref().is_some_and(|identity| {
+                place::within(real, &made.real, any_case)
+                    && place::within(&made.real, real, any_case)
+                    && identity::of_path(real).is_ok_and(|now| now == *identity)
+            })
+        })
+    }
+}
+
+/// Judges `path` for `act` against the account's protected roots and what this run made: the
+/// place to act on, resolved, or why not ([`place`]).
+pub fn judge(path: &Path, act: place::Act) -> io::Result<PathBuf> {
+    let protected = account::protected();
+    let made = registry().clone();
+    place::judge_with(path, act, &protected, &made)
+}
+
+/// The protected roots as they resolve now, each also as spelled: resolved once for a seal or a
+/// filter that asks of many paths ([`Roots::holds`]), never kept between calls.
+pub struct Roots {
+    roots: Vec<PathBuf>,
+    /// What each that is there stands for by identity (N7), or why a store could not be read: a
+    /// store that is there and cannot be read leaves nothing safe to say of any path.
+    keys: Result<Vec<place::Link>, String>,
+}
+
+impl Roots {
+    /// The account's protected roots, resolved now.
+    pub fn now() -> Roots {
+        let mut roots = Vec::new();
+        for root in account::protected() {
+            if let Ok(found) = place::resolve(&root) {
+                roots.extend(found.iter().map(place::Resolved::whole));
+            }
+            roots.push(root);
+        }
+        Roots::of(roots)
+    }
+
+    /// `roots`, as spelled and resolved, with what each stands for by identity. A store that is
+    /// not there, or whose drive is not there, has no other spelling to guard: it is judged by
+    /// its text alone, as it was before identity.
+    fn of(roots: Vec<PathBuf>) -> Roots {
+        let keys = roots
+            .iter()
+            .filter_map(|root| place::key_of(root).transpose())
+            .collect::<io::Result<Vec<_>>>()
+            .map_err(|failed| failed.to_string());
+        Roots { roots, keys }
+    }
+
+    /// Why no path can be judged against these roots: a store that is there cannot be read. Said
+    /// in the store's own words, never as a path being inside a store.
+    pub fn cannot_be_read(&self) -> Option<&str> {
+        self.keys.as_ref().err().map(String::as_str)
+    }
+
+    /// Whether `path` resolves inside one of them, by any way it resolves or by identity, or is
+    /// spelled inside one. By identity only where some part of the path can be reached: a value
+    /// no part of which can be (a drive that is not there, a server's bare name, a folder the
+    /// account cannot enter) is judged by its text alone. Where a store cannot be read nothing
+    /// is judged, and every path is held ([`Roots::cannot_be_read`] says why).
+    pub fn holds(&self, path: &Path) -> bool {
+        let Ok(keys) = &self.keys else {
+            return true;
+        };
+        let ways = match place::resolve(path) {
+            Ok(ways) => ways.iter().map(place::Resolved::whole).collect::<Vec<_>>(),
+            // A value that is no path at all, or that cannot be resolved, is judged as spelled.
+            Err(_) => vec![path.to_path_buf()],
+        };
+        let any_case = cfg!(any(windows, target_os = "macos"));
+        // Only a path no part of which can be reached is absence (`NotFound`); a chain that
+        // failed after it reached a part (the Mac's `/.vol/<device>/<number>`) is held.
+        let by_identity = ways.iter().any(|way| match place::chain(way) {
+            Ok(parts) => keys
+                .iter()
+                .any(|key| place::inside_by_identity(&parts, key, any_case)),
+            Err(failed) => failed.kind() != io::ErrorKind::NotFound,
+        });
+        by_identity
+            || self.roots.iter().any(|root| {
+                place::within(path, root, any_case)
+                    || ways.iter().any(|way| place::within(way, root, any_case))
+            })
+    }
+}
+
+/// Whether `path` resolves inside a protected root, by any way it resolves, or is spelled inside
+/// one: what the seal asks of every variable but the search path and the homes.
+pub fn inside_protected(path: &Path) -> bool {
+    Roots::now().holds(path)
+}
+
+/// Seals `env`, a program's whole environment, for this run ([`spawn::seal`]): its homes must
+/// be folders this run made, no other variable but the search path names a protected root, and
+/// the door's own variables (`kit`) are as the door gave them.
+pub fn sealed(
+    env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    kit: &[(String, String)],
+    windows: bool,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    let roots = Roots::now();
+    if let Some(why) = roots.cannot_be_read() {
+        return Err(why.to_owned());
+    }
+    spawn::seal(
+        env,
+        &spawn::Judges {
+            windows,
+            is_runs: &is_made_or_below,
+            in_protected: &|path| roots.holds(path),
+            kit,
+        },
+    )
+}
+
+/// Whether a window the rig's pane host is asked to open (`body`, a `pane.open` request) may
+/// open, on the host's own environment `host` (T-2000 finding 1, T-2002 correction 3): the
+/// environment it will really have holds the seal, and its program, by the file it resolves to on
+/// that environment's search path, is no program with a door of its own and, where it is a
+/// harness's, has the switches that keep it from updating itself. Why not, where it may not.
+pub fn window_admitted(
+    host: &[(std::ffi::OsString, std::ffi::OsString)],
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    let windows = cfg!(windows);
+    let env = spawn::pane_environment(host, body, windows)?;
+    let kit = spawn::kit_vars(host);
+    let env = sealed(env, &kit, windows)?;
+    let argv = body["argv"]
+        .as_array()
+        .ok_or_else(|| "the window names no program".to_owned())?;
+    let words = argv
+        .iter()
+        .map(|word| {
+            word.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("a word of the window's command is no text: {word}"))
+        })
+        .collect::<Result<Vec<String>, String>>()?;
+    let (program, args) = words
+        .split_first()
+        .ok_or_else(|| "the window names no program".to_owned())?;
+    let program = program_started(Path::new(program), args, &env)?;
+    match program {
+        spawn::Program::Keychain => {
+            Err("the window's program is the Keychain's utility, which only its door starts".into())
+        }
+        spawn::Program::Cargo => {
+            Err("the window's program is cargo, which only its door starts".into())
+        }
+        program => spawn::has_update_switches(&program, &env),
+    }
+}
+
+/// The names of the variables the account's registry stores (Windows: the machine's
+/// `Session Manager\Environment` and the user's `Environment`), which the pane host's builder puts
+/// over its own environment in every window; none elsewhere. Names only: no value is read. A key
+/// that is not there holds none; any other failure to read is the error, so the window it would
+/// have is refused (T-2119 B1-a).
+pub fn stored_names() -> Result<Vec<std::ffi::OsString>, String> {
+    #[cfg(windows)]
+    {
+        windows_registry::stored_names()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+/// The window `body` asks for, as the rig sends it to its pane host on `host`, where it may open
+/// ([`window_admitted`]); why not, where not (T-2086 B1). On Windows the pane host starts a window
+/// on its own environment with every variable the account's registry stores put over it
+/// (portable-pty's builder), then the request's `env`, then its `dropEnv` taken out. So the
+/// request sent names each of `stored`, the names the registry holds: with the value the window
+/// was judged on where it has that name (a request's value wins over the registry's), and in
+/// `dropEnv` where it has not. The window's environment is then the one judged, whatever the
+/// registry holds; a value of the judged one that is not Unicode, which a request cannot carry,
+/// refuses the window.
+pub fn window_to_send(
+    host: &[(std::ffi::OsString, std::ffi::OsString)],
+    body: &serde_json::Value,
+    stored: &[std::ffi::OsString],
+) -> Result<serde_json::Value, String> {
+    window_admitted(host, body)?;
+    if stored.is_empty() {
+        return Ok(body.clone());
+    }
+    let judged = spawn::pane_environment(host, body, cfg!(windows))?;
+    let same =
+        |left: &str, right: &std::ffi::OsStr| right.to_string_lossy().eq_ignore_ascii_case(left);
+    let mut sent = body.clone();
+    let mut env = sent["env"].as_object().cloned().unwrap_or_default();
+    let mut dropped = sent["dropEnv"].as_array().cloned().unwrap_or_default();
+    for name in stored {
+        let Some(text) = name.to_str() else {
+            return Err(format!(
+                "the account stores a variable whose name is not Unicode ({}), which a window's request cannot name",
+                name.to_string_lossy()
+            ));
+        };
+        if env.keys().any(|asked| asked.eq_ignore_ascii_case(text)) {
+            continue;
+        }
+        match judged.iter().find(|(held, _)| same(text, held)) {
+            Some((held, value)) => {
+                let value = value.to_str().ok_or_else(|| {
+                    format!(
+                        "the window's {} is not Unicode, so it cannot be named over the one the account stores",
+                        held.to_string_lossy()
+                    )
+                })?;
+                env.insert(held.to_string_lossy().into_owned(), value.into());
+            }
+            None => {
+                if !dropped.iter().any(|out| {
+                    out.as_str()
+                        .is_some_and(|out| out.eq_ignore_ascii_case(text))
+                }) {
+                    dropped.push(text.into());
+                }
+            }
+        }
+    }
+    sent["env"] = serde_json::Value::Object(env);
+    sent["dropEnv"] = serde_json::Value::Array(dropped);
+    Ok(sent)
+}
+
+/// What a file the run made starts, where it starts another program (T-2086 C2): a window is
+/// judged by that program, not by the file the run made.
+#[derive(Debug, Clone)]
+enum Starts {
+    /// A rig's shim: the program its variable names in the window's environment, or the one it
+    /// was written for where it reads no variable (Windows' holds the path) or the window has none.
+    Shim {
+        var: Option<String>,
+        program: PathBuf,
+    },
+    /// The kit's wrapper of a harness (`claude-isolated`, `claude-shimmed`), which starts the
+    /// harness's own program.
+    Wrapper(&'static str),
+}
+
+/// The files the run made that start another program, by their real paths.
+static STARTERS: Mutex<Vec<(PathBuf, Starts)>> = Mutex::new(Vec::new());
+
+fn register_starter(file: &Path, starts: Starts) {
+    let real = canonical(file).unwrap_or_else(|| file.to_path_buf());
+    let mut held = STARTERS.lock().unwrap_or_else(PoisonError::into_inner);
+    held.retain(|(path, _)| *path != real);
+    held.push((real, starts));
+}
+
+fn starter_of(real: &Path) -> Option<Starts> {
+    STARTERS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(path, _)| path == real)
+        .map(|(_, starts)| starts.clone())
+}
+
+/// Registers `wrapper`, a file the run made, as the kit's wrapper of `harness`: a window that
+/// starts it starts `harness` ([`program_in`]).
+pub fn register_wrapper(wrapper: &Path, harness: &'static str) {
+    register_starter(wrapper, Starts::Wrapper(harness));
+}
+
+/// Registers `shim`, a file the run made, as a rig's shim: a window that starts it starts the
+/// program its variable `var` names in the window's environment, or `program` ([`program_in`]).
+pub fn register_shim(shim: &Path, var: Option<&str>, program: &Path) {
+    register_starter(
+        shim,
+        Starts::Shim {
+            var: var.map(str::to_owned),
+            program: program.to_path_buf(),
+        },
+    );
+}
+
+/// The value of the variable `wanted` in `env`, the name in any case on Windows.
+fn env_value(env: &[(std::ffi::OsString, std::ffi::OsString)], wanted: &str) -> Option<String> {
+    let windows = cfg!(windows);
+    env.iter()
+        .find(|(name, _)| {
+            if windows {
+                name.to_string_lossy().eq_ignore_ascii_case(wanted)
+            } else {
+                name == wanted
+            }
+        })
+        .map(|(_, value)| value.to_string_lossy().into_owned())
+}
+
+/// The file `program` is, as a start with the environment `env` finds it: its own path where it
+/// has a folder, a bare name's first place on the search path otherwise.
+fn found_on(program: &Path, env: &[(std::ffi::OsString, std::ffi::OsString)]) -> Option<PathBuf> {
+    if program.components().count() > 1 || program.is_absolute() {
+        return Some(program.to_path_buf());
+    }
+    crate::process::first_on_path(
+        &program.to_string_lossy(),
+        &env_value(env, "PATH").unwrap_or_default(),
+        &env_value(env, "PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned()),
+    )
+}
+
+/// What a program started with `args` is: [`program_in`], and where the program is a shell told
+/// to run a command, the program that command starts (T-2219). A command the shell would read for
+/// itself (an operator, a substitution, a variable) cannot be judged, and is the error: the start
+/// is refused.
+pub fn program_started(
+    program: &Path,
+    args: &[String],
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<spawn::Program, String> {
+    started_within(program, args, env, 0)
+}
+
+fn started_within(
+    program: &Path,
+    args: &[String],
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    depth: usize,
+) -> Result<spawn::Program, String> {
+    let judged = program_within(program, env, 0);
+    if judged != spawn::Program::Plain {
+        return Ok(judged);
+    }
+    let file = found_on(program, env).unwrap_or_else(|| program.to_path_buf());
+    let real = canonical(&file);
+    let names = [Some(file.as_path()), real.as_deref()];
+    let shell = names
+        .into_iter()
+        .flatten()
+        .filter_map(|path| path.file_name())
+        .find_map(|name| shells::shell_named(&name.to_string_lossy()));
+    let Some(shell) = shell else {
+        return Ok(judged);
+    };
+    match shells::told(shell, args)? {
+        shells::Told::Nothing => Ok(judged),
+        shells::Told::Command(words) => {
+            if depth >= STARTERS_DEEP {
+                return Err(
+                    "the shell's command starts shells inside shells too deep to judge".into(),
+                );
+            }
+            started_within(Path::new(&words[0]), &words[1..], env, depth + 1)
+        }
+    }
+}
+
+/// What `program` is ([`spawn::program_of`]), found on the search path `env` gives it where it
+/// is a bare name, by the file it resolves to.
+pub fn program_in(
+    program: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> spawn::Program {
+    program_within(program, env, 0)
+}
+
+/// How many files that start another program a window's program is followed through.
+const STARTERS_DEEP: usize = 8;
+
+/// [`program_in`], `depth` files that start another program in: a rig's shim is followed to what
+/// it starts, and the kit's wrapper of a harness is that harness (T-2086 C2).
+fn program_within(
+    program: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    depth: usize,
+) -> spawn::Program {
+    let get = |wanted: &str| env_value(env, wanted);
+    let found = found_on(program, env);
+    let real = found.as_deref().and_then(canonical);
+    let judged = real.as_deref().or(found.as_deref()).unwrap_or(program);
+    if depth < STARTERS_DEEP {
+        match starter_of(judged) {
+            Some(Starts::Wrapper(harness)) => return spawn::Program::Harness(harness),
+            Some(Starts::Shim {
+                var,
+                program: written,
+            }) => {
+                let next = var
+                    .as_deref()
+                    .and_then(get)
+                    .filter(|value| !value.is_empty())
+                    .map_or(written, PathBuf::from);
+                return program_within(&next, env, depth + 1);
+            }
+            None => {}
+        }
+    }
+    let in_store = inside_protected(judged);
+    let made_by_run = is_made_or_below(judged);
+    spawn::program_of(
+        found.as_deref().unwrap_or(program),
+        real.as_deref(),
+        in_store,
+        made_by_run,
+    )
 }
 
 /// The paths `value` hands down ([`MADE_ROOTS`]), each by its real path where it is there: the
@@ -712,9 +1327,16 @@ fn roots_handed_down(value: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
 /// The variable that hands this run's folders to a program it starts: none where it made none.
 /// The program's own writers ask the same registry as this process's ([`writable`]); what it
 /// makes itself it cannot hand back, and what this process makes after it started it is not
-/// there.
+/// there. Only folders are handed down: a file the run made is written by the process that made
+/// it.
 pub fn handed_down() -> Vec<(String, String)> {
-    let roots = registry().clone();
+    let roots: Vec<PathBuf> = registry()
+        .iter()
+        // Only a folder that is still the run's: one that is a link now, or another folder made
+        // at its path, would be taken by the child for the folder it leads to.
+        .filter(|made| made.is_still_its_folder())
+        .map(|made| made.real.clone())
+        .collect();
     if roots.is_empty() {
         return Vec::new();
     }
@@ -724,47 +1346,61 @@ pub fn handed_down() -> Vec<(String, String)> {
     }
 }
 
-/// Registers the file or folder `path` as one this run made.
-fn register(path: &Path) {
+/// Registers the folder `path` as one this run made.
+fn register_folder(path: &Path) {
     let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
     let mut made = registry();
-    if !made.contains(&real) {
-        made.push(real);
+    let entry = Entry::folder(real);
+    if !made.contains(&entry) {
+        made.push(entry);
     }
+}
+
+/// Registers `file`, open at `path`, as a file this run made, by its identity.
+fn register_file(path: &Path, file: &fs::File) -> io::Result<()> {
+    let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
+    let identity = identity::of_file(file)?;
+    registry().push(Entry {
+        real,
+        file: Some(identity),
+        folder: None,
+    });
+    Ok(())
 }
 
 /// Forgets `path` as a folder this process made.
 fn forget_made(path: &Path) {
     let real = canonical(path);
-    registry().retain(|made| Some(made) != real.as_ref() && made != path);
+    registry().retain(|made| Some(&made.real) != real.as_ref() && made.real != path);
 }
 
 /// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
 pub fn is_made(path: &Path) -> bool {
-    canonical(path).is_some_and(|real| registry().contains(&real))
+    canonical(path).is_some_and(|real| {
+        registry()
+            .iter()
+            .any(|made| made.real == real && made.is_still_its_folder())
+    })
 }
 
-/// Whether `path` is a folder this process made through the door, or is below one, by real paths.
+/// Whether `path` is a folder this process made through the door, or is below one, by real paths
+/// (a file this run made counts as below the folder it is in only where that folder is the run's).
 pub fn is_made_or_below(path: &Path) -> bool {
-    real_beneath(path).is_some_and(|real| registry().iter().any(|made| real.starts_with(made)))
+    real_beneath(path).is_some_and(|real| {
+        registry()
+            .iter()
+            .any(|made| real.starts_with(&made.real) && made.is_still_its_folder())
+    })
 }
 
 /// The real path of `path` where it is not there yet: its deepest folder that is there by its
-/// real path, and the rest of the names after it. None where a name is `..`.
+/// real path, and the rest of the names after it ([`place::resolve`]). None where it cannot be
+/// resolved, or where a name is `..`.
 fn real_beneath(path: &Path) -> Option<PathBuf> {
-    let mut rest = Vec::new();
-    let mut at = path.to_path_buf();
-    loop {
-        if let Some(real) = canonical(&at) {
-            return Some(rest.iter().rev().fold(real, |real, name| real.join(name)));
-        }
-        let name = at.file_name()?.to_os_string();
-        if name == ".." {
-            return None;
-        }
-        rest.push(name);
-        at = at.parent()?.to_path_buf();
-    }
+    place::resolve(path)
+        .ok()?
+        .first()
+        .map(place::Resolved::whole)
 }
 
 /// Whether `path` names a place in the kit's live zone: the folder every run puts its projects
@@ -790,45 +1426,57 @@ pub fn in_live_zone(path: &Path) -> bool {
     zone(path) || real_beneath(path).is_some_and(|real| zone(&real))
 }
 
-/// Whether a file or folder may be made at `path`: only below a folder this run made through the
-/// door ([`made_in`]) or handed down to this program ([`MADE_ROOTS`]), or as a file this run made
-/// ([`made_file`]), by the real path; the last link of a path is refused, and a path through an earlier
-/// link is taken only where its real place is inside what the run made. Everywhere else is
-/// another run's, a person's, or nobody's: the live folder, the temp folder, a config folder a caller
-/// named. A folder (`folder`) may also be the run's own folder itself, made again.
+/// Whether a file or folder may be made or written at `path` ([`place::Act::Write`]): outside
+/// every protected root, and below a folder this run made through the door ([`made_in`]) or
+/// handed down to this program ([`MADE_ROOTS`]), or a file this run made and is still the same
+/// file, by the real path; the last link of a path is refused. A folder may also be the run's own
+/// folder itself, made again, where `folder` says the caller makes a folder ([`place::Act::Folder`]).
 pub fn writable(path: &Path, folder: bool) -> Result<(), String> {
-    let Some(real) = real_beneath(path) else {
-        return Err("it leads up out of the folder it names".into());
+    let act = if folder {
+        place::Act::Folder
+    } else {
+        place::Act::Write
     };
-    let allowed = registry().iter().any(|made| {
-        if real == *made {
-            // The folder itself may be made again; a file this run made may be written.
-            folder == made.is_dir()
-        } else {
-            real.starts_with(made) && made.is_dir()
-        }
-    });
-    if !allowed {
-        return Err(format!(
-            "{} is below no folder this run made, so it is another run's, a person's, or nobody's",
-            real.display()
-        ));
-    }
-    if fs::symlink_metadata(path).is_ok_and(|found| found.file_type().is_symlink()) {
-        return Err("it is a link, and a write goes through a link to what it leads to".into());
-    }
-    Ok(())
+    judge(path, act)
+        .map(drop)
+        .map_err(|refused| refused.to_string())
 }
 
 /// Makes the place an allocation is made in where it is not there (the live folder of a machine
-/// nobody has run on, the folder of a build's reports before a first run): folders made empty,
-/// and none that is there is changed. It is the one thing the door makes that is no allocation of
-/// the run's, and it is no place to write: [`writable`] says no to it until a folder is made in it.
-pub fn make_place(place: &Path) -> io::Result<()> {
-    if place.is_dir() {
-        return Ok(());
+/// nobody has run on, the folder of a build's reports before a first run), judged as an
+/// allocation ([`place::Act::Allocate`]): refused inside a protected root; each missing folder
+/// made new, one at a time, and none that is there changed. No folder of it is the run's:
+/// [`writable`] says no to it until a folder is made in it.
+pub fn allocation_place(place: &Path) -> io::Result<()> {
+    judge(place, place::Act::Allocate)?;
+    make_missing(place)
+}
+
+/// Makes each folder of `place` that is not there, from the top, each new: a folder that is
+/// there already (made since by another) is taken only where it is a folder and no link.
+fn make_missing(place: &Path) -> io::Result<()> {
+    let mut missing = Vec::new();
+    let mut at = place.to_path_buf();
+    while fs::symlink_metadata(&at).is_err() {
+        missing.push(at.clone());
+        match at.parent() {
+            Some(parent) => at = parent.to_path_buf(),
+            None => break,
+        }
     }
-    fs::create_dir_all(place)
+    for folder in missing.into_iter().rev() {
+        match fs::create_dir(&folder) {
+            Ok(()) => {}
+            Err(failed) if failed.kind() == io::ErrorKind::AlreadyExists => {
+                let found = fs::symlink_metadata(&folder)?;
+                if !found.is_dir() {
+                    return Err(failed);
+                }
+            }
+            Err(failed) => return Err(failed),
+        }
+    }
+    Ok(())
 }
 
 /// A folder of a random name this process made through the door, in `parent`, its name begun
@@ -836,13 +1484,13 @@ pub fn make_place(place: &Path) -> io::Result<()> {
 pub fn made_in(parent: &Path, prefix: &str) -> io::Result<Made> {
     // A say-only run whose audit file cannot be used stops before it makes a folder.
     Door::init();
-    make_place(parent)?;
+    // Judged by where the parent resolves, before anything is made there.
+    allocation_place(parent)?;
     let folder = tempfile::Builder::new()
         .prefix(prefix)
         .tempdir_in(parent)?
         .keep();
-    let real = canonical(&folder).unwrap_or_else(|| folder.clone());
-    registry().push(real);
+    register_folder(&folder);
     Ok(Made {
         path: folder,
         kept: false,
@@ -976,6 +1624,9 @@ impl fmt::Display for Ground {
 pub struct Grounded {
     processes: Vec<Running>,
     grounds: Vec<Ground>,
+    /// What the window's tree names as made by one of its processes and does not prove, with why:
+    /// never ended, and said as left running where the set is ended ([`Grounded::unproved`]).
+    unproved: Vec<(Running, String)>,
 }
 
 impl std::ops::Deref for Grounded {
@@ -1002,6 +1653,9 @@ impl Grounded {
 
     fn push(&mut self, process: Running, ground: Ground) {
         if !self.contains(process.identity) {
+            // Chosen now: no longer a process the kit could only name.
+            self.unproved
+                .retain(|(seen, _)| seen.identity != process.identity);
             self.processes.push(process);
             self.grounds.push(ground);
         }
@@ -1012,9 +1666,39 @@ impl Grounded {
         self.processes.iter().zip(&self.grounds)
     }
 
-    /// What descends from `root` among `all` ([`descending_from`]).
+    /// What descends from `root` among `all` ([`descending_from`]); what the tree names and does not
+    /// prove is kept apart ([`Grounded::unproved`]).
     pub fn descending_from(all: &[Running], root: Identity) -> Grounded {
-        Grounded::of(descending_from(all, root), &Ground::Descends(root))
+        let mut grounded = Grounded::of(descending_from(all, root), &Ground::Descends(root));
+        grounded.unproved = unproved_under(all, root);
+        grounded
+    }
+
+    /// What the window's tree named and did not prove, with why: the kit leaves it running and says
+    /// so ([`Door::end`]).
+    pub fn unproved(&self) -> &[(Running, String)] {
+        &self.unproved
+    }
+
+    /// Whatever is under a process chosen and is not proved, whatever its command says: the kit
+    /// ends the command and what it proved under it, and says the rest as left running.
+    fn keep_unproved_under_chosen(&mut self, all: &[Running]) {
+        for chosen in self.processes.clone() {
+            self.keep_unproved(unproved_under(all, chosen.identity));
+        }
+    }
+
+    fn keep_unproved(&mut self, more: Vec<(Running, String)>) {
+        for (process, why) in more {
+            if !self.contains(process.identity)
+                && !self
+                    .unproved
+                    .iter()
+                    .any(|(seen, _)| seen.identity == process.identity)
+            {
+                self.unproved.push((process, why));
+            }
+        }
     }
 
     /// The process `root` and what descends from it: none where it is not among `all`.
@@ -1030,10 +1714,18 @@ impl Grounded {
     /// What descends from `window` among `all` and holds `text`, with what it started
     /// ([`holding`]).
     pub fn holding(all: &[Running], window: Identity, text: &str) -> Grounded {
-        Grounded::of(
+        let mut grounded = Grounded::of(
             holding(all, window, text),
             &Ground::Holding(window, text.to_owned()),
-        )
+        );
+        grounded.keep_unproved(
+            unproved_under(all, window)
+                .into_iter()
+                .filter(|(process, _)| process.command.contains(text))
+                .collect(),
+        );
+        grounded.keep_unproved_under_chosen(all);
+        grounded
     }
 
     /// What descends from `window` among `all` whose command line `runs` says is the one
@@ -1055,6 +1747,13 @@ impl Grounded {
                 grounded.push(one, ground.clone());
             }
         }
+        grounded.keep_unproved(
+            unproved_under(all, window)
+                .into_iter()
+                .filter(|(process, _)| runs(&process.command))
+                .collect(),
+        );
+        grounded.keep_unproved_under_chosen(all);
         grounded
     }
 
@@ -1101,6 +1800,7 @@ impl Grounded {
 
     /// Adds what `other` holds, each process once.
     pub fn add(&mut self, other: Grounded) {
+        self.keep_unproved(other.unproved);
         for (process, ground) in other.processes.into_iter().zip(other.grounds) {
             self.push(process, ground);
         }
@@ -1116,6 +1816,7 @@ impl Grounded {
         for (process, ground) in kept {
             self.push(process, ground);
         }
+        self.unproved.retain(|(process, _)| keep(process));
     }
 
     /// The processes, in the order chosen.
@@ -1131,6 +1832,12 @@ impl Grounded {
     }
 }
 
+#[cfg(test)]
+mod identity_reds;
+#[cfg(test)]
+mod identity_tests;
+#[cfg(test)]
+mod k3_tests;
 #[cfg(test)]
 mod rule;
 #[cfg(test)]

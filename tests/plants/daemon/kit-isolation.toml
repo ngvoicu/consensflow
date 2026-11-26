@@ -1,0 +1,902 @@
+# The plants of K3's guards: a wrong result here is silent and lets a live run touch an owner's home or login.
+[run]
+ki-test-harnesses = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harnesses"]
+ki-lib-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
+ki-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
+ki-lib-wrapper = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::wrapper"]
+ki-lib-agents = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents"]
+ki-lib-standin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standin_process"]
+ki-lib-matrix = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "matrix::"]
+ki-lib-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::tests"]
+ki-lib-renew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::renew"]
+ki-lib-members = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members"]
+ki-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests"]
+ki-test-first-message = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_first_message"]
+ki-test-models = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_models"]
+ki-lib-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::"]
+ki-lib-stores = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::stores"]
+ki-lib-ask = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ask"]
+ki-xtask-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
+ki-test-muse-tui = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_posture", "a_muse_window_is_not_opened"]
+ki-test-claude-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "a_parity_window_asks"]
+ki-test-rig-registry = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "a_windows_window_has_the_environment"]
+
+
+[[plant]]
+name = "K3: a direct read on no variables runs on the person's home"
+meant = "a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        if vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it'''
+replace = '''        if false && vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it'''
+
+[[plant]]
+name = "K3: a stand-in seat the run names is the real Claude's"
+meant = "a_stand_in_seat_the_run_names_is_the_stand_ins_and_one_it_does_not_is_the_real_claudes"
+runs = ["ki-lib-wrapper"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/wrapper.rs"
+find = '''.chain(names.iter().cloned())'''
+replace = '''.chain(names.iter().take(0).cloned())'''
+
+[[plant]]
+name = "K3: a link into a harness home is a safe path"
+meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''            || spelled_inside(&settled_folder, &settled(home))
+            || spelled_inside(&real_folder, &real_of_root(home))'''
+replace = '''            || spelled_inside(&settled_folder, &settled(home))'''
+
+[[plant]]
+name = "K3: an owner's own process counts as the run's"
+meant = "an_owners_own_harness_is_independent_and_the_runs_own_is_not"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/attribution.rs"
+find = '''        .filter(|process| !own.iter().any(|mine| mine.identity == process.identity))
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3: a seat that joined under a model name is read as the first reader's"
+meant = "a_member_that_joined_under_a_model_name_is_its_seat_and_a_stranger_is_none"
+runs = ["ki-lib-matrix"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/seating.rs"
+find = '''.find(|seat| joined(&seat.agent()).as_deref() == Some(member))'''
+replace = '''.find(|seat| seat.agent() == member)'''
+
+[[plant]]
+name = "K3: a rig that seats Muse closes in the short bound"
+meant = "a_rig_with_a_native_muse_is_closed_within_the_pane_hosts_own_grace_and_a_margin"
+runs = ["ki-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''    if native {
+        NATIVE_EXIT'''
+replace = '''    if false && native {
+        NATIVE_EXIT'''
+
+[[plant]]
+name = "K3: a renewal's folder that stays is said nowhere"
+meant = "the_renewals_own_folder_goes_with_what_the_harness_left_in_it_and_one_that_stays_is_an_error"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        crate::door::Removed::Left(path, why) => Err('''
+replace = '''        crate::door::Removed::Left(path, why) if false => Err('''
+
+[[plant]]
+name = "K3: a rig with no real Claude on the machine is listed by a program that is not there"
+meant = "a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins"
+runs = ["ki-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env('''
+replace = '''        (Harness::Claude, Some(config)) if true => isolated_env('''
+
+[[plant]]
+name = "K3: a real Claude model is listed by the stand-in"
+meant = "a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins"
+runs = ["ki-lib-agents"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        (Harness::Claude, Some(config)) if real_claude => isolated_env('''
+replace = '''        (Harness::Codex, Some(config)) if real_claude => isolated_env('''
+
+[[plant]]
+name = "K3: a version read is given the machine's home"
+meant = "a_version_read_is_given_the_kits_folders_and_never_the_machines_homes"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''            vars.push((name.to_owned(), text(&value)));'''
+replace = '''            vars.push((name.to_owned(), lookup(name).unwrap_or_else(|| text(&value))));'''
+
+[[plant]]
+name = "K3 round 3: a new file under a link is judged by its words, not its parent's folder"
+meant = "b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''                out.push(name);
+                if let Ok(found) = std::fs::canonicalize(&out) {
+                    out = found;
+                }'''
+replace = '''                out.push(name);'''
+
+[[plant]]
+name = "K3 round 3: the protected roots lack the Gemini folder"
+meant = "the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/stores.rs"
+find = '''    row(Agy, Login, Place::Home(".gemini")),
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: a temporary parent in a protected home is allowed"
+meant = "a_temporary_parent_inside_a_protected_home_is_refused_before_a_home_is_made"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    if safe_path_entry(parent, forbidden) {
+        Ok(())'''
+replace = '''    if true {
+        Ok(())'''
+
+[[plant]]
+name = "K3 round 3: the door makes folders in a protected root"
+meant = "the_door_makes_no_folder_inside_a_protected_home"
+runs = ["ki-lib-standin"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    judge(place, place::Act::Allocate)?;
+    make_missing(place)'''
+replace = '''    make_missing(place)'''
+
+[[plant]]
+name = "K3 round 3: a record that could not be read is an empty file"
+meant = "a_record_that_could_not_be_read_fails_the_export_and_is_not_an_empty_file"
+runs = ["ki-lib-matrix"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/matrix/run.rs"
+find = '''    let items = read.map_err(|error| {'''
+replace = '''    let items = read.or_else(|_| -> Result<Vec<Item>> { Ok(Vec::new()) }).map_err(|error| {'''
+
+[[plant]]
+name = "K3 round 3: the long-brief check accepts the bare command alone"
+meant = "a_posix_recipient_reads_the_rest_by_the_posix_word_alone"
+runs = ["ki-test-first-message"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_first_message.rs"
+find = '''    text.contains(&given_as(body, id, cf))
+}
+
+/// What one task of a worker showed.'''
+replace = '''    text.contains(&given_as(body, id, cf)) || text.contains(&given_as(body, id, "cf"))
+}
+
+/// What one task of a worker showed.'''
+
+[[plant]]
+name = "K3 round 3: the long-brief check cuts a body the product sends whole"
+meant = "a_body_the_product_delivers_whole_is_not_expected_cut"
+runs = ["ki-test-first-message"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_first_message.rs"
+find = '''    if cf_engine::delivery_text::fits_whole(message) {
+        return message.to_owned();'''
+replace = '''    if message.encode_utf16().count() <= OPENING {
+        return message.to_owned();'''
+
+[[plant]]
+name = "K3 round 3: the machine's variables hold HOME"
+meant = "a_machine_environment_holds_the_machine_and_nothing_of_the_account"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        "LANG",
+        "TERM",'''
+replace = '''        "HOME",
+        "TERM",'''
+
+[[plant]]
+name = "K3 round 3: a window is given the person's home as its own"
+meant = "a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_own_home"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        config = config.project_home(install.project_home());'''
+replace = '''        config = config.var("HOME", install.project_home().to_string_lossy());'''
+
+[[plant]]
+name = "K3 round 3: a standalone program is given no profile of the run's own"
+meant = "an_install_started_outside_a_rig_is_given_the_runs_profile_by_both_its_readers"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''                let vars = isolation.standalone_vars()?;'''
+replace = '''                let vars = isolation.vars()?;'''
+
+[[plant]]
+name = "K3 round 3: a plan that names nothing is given a home all the same"
+meant = "a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        if named.is_empty() {
+            return Ok(Vec::new());
+        }
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: a models read is given the caller's home"
+meant = "a_read_whose_plan_names_only_its_own_folder_has_no_home_of_the_callers"
+runs = ["ki-test-models"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_models.rs"
+find = '''    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")) {'''
+replace = '''    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")).into_iter().take(0) {'''
+
+[[plant]]
+name = "K3 round 3: a version read has no private runtime folder"
+meant = "a_version_read_is_given_the_kits_folders_and_never_the_machines_homes"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    vars.push(("XDG_RUNTIME_DIR".to_owned(), text(&home.join(".run"))));
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 round 3: fake-2 is the real Claude's again"
+meant = "a_fake_model_is_the_stand_ins_and_no_harness_of_the_machine"
+runs = ["ki-lib-members"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/stand_in_lists.rs"
+find = '''pub const MODELS: [&str; 4] = ["fake", "fake-2", "fake-chief", "worker"];'''
+replace = '''pub const MODELS: [&str; 4] = ["fake", "fake-3", "fake-chief", "worker"];'''
+
+[[plant]]
+name = "K3 round 3: a record that was there before is taken away"
+meant = "a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if there_before {'''
+replace = '''        if false && there_before {'''
+
+[[plant]]
+name = "K3 round 3: a link at the record is taken away"
+meant = "a_link_or_an_entry_already_at_the_exact_record_name_is_left_and_said"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        } else if is_link(&path) {'''
+replace = '''        } else if false && is_link(&path) {'''
+
+[[plant]]
+name = "K3 round 3: the test machine is anywhere"
+meant = "what_uses_the_accounts_login_store_is_refused_off_a_test_machine_and_says_why"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {'''
+replace = '''    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {
+        if detected.is_none() {
+            return Ok(Self("anywhere".to_owned()));
+        }'''
+
+[[plant]]
+name = "K3 round 3: a look refreshes every harness"
+meant = "a_look_asks_for_the_one_harness_it_reports"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''    json!({ "id": harness.name(), "refresh": true })'''
+replace = '''    json!({ "refresh": true })'''
+
+[[plant]]
+name = "K3 doors: an update is asked for and the look runs it"
+meant = "live_harnesses_refuses_an_update_and_starts_nothing_for_it"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''    if asked.is_empty() {
+        return Ok(());'''
+replace = '''    if true {
+        return Ok(());'''
+
+[[plant]]
+name = "K3 doors: the look asks the daemon of Muse"
+meant = "the_look_asks_the_daemon_of_no_harness_it_cannot_vouch_for"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''    if harness == Harness::Muse {
+        return Err('''
+replace = '''    if false {
+        return Err('''
+
+[[plant]]
+name = "K3 doors: the look asks of a program it did not find installed"
+meant = "the_look_asks_the_daemon_of_no_harness_it_cannot_vouch_for"
+runs = ["ki-test-harnesses"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harnesses.rs"
+find = '''        Some(found) if real(&found) == real(installed) => Ok(()),'''
+replace = '''        Some(_) => Ok(()),'''
+
+[[plant]]
+name = "K3 doors: the seal takes a home that is no folder of the run's"
+meant = "every_home_must_be_there_and_the_runs_and_no_other_variable_names_a_store"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        let Some(value) = get(name) else {
+            return Err(format!("the home variable {name} is not given"));
+        };
+        run_folder(name, value)?;'''
+replace = '''        let Some(value) = get(name) else {
+            return Err(format!("the home variable {name} is not given"));
+        };
+        let _ = run_folder(name, value);'''
+
+[[plant]]
+name = "K3 doors: the seal judges each half of a Windows profile alone"
+meant = "a_windows_profile_is_judged_as_its_two_halves_joined_against_the_profile"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        if profile.as_deref().map(profile_text) != Some(profile_text(&joined)) {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "K3 doors: the seal admits a home spelled in another case on Unix"
+meant = "a_home_spelled_in_another_case_is_refused_on_unix_and_named_as_itself_on_windows"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''                if judges.windows {
+                    *name = OsString::from(home);'''
+replace = '''                if true {
+                    *name = OsString::from(home);'''
+
+[[plant]]
+name = "K3 doors: the seal lets a variable name a store"
+meant = "every_home_must_be_there_and_the_runs_and_no_other_variable_names_a_store"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''            .filter(|path| absolute(&path.to_string_lossy(), judges.windows))
+            .find(|path| (judges.in_protected)(path))'''
+replace = '''            .filter(|path| absolute(&path.to_string_lossy(), judges.windows))
+            .find(|_| false)'''
+
+[[plant]]
+name = "K3 doors: the seal lets a caller change the kit's own variables"
+meant = "the_kits_own_variables_are_the_doors_and_no_callers"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''            _ => {
+                return Err(format!(
+                    "the kit's own variable {name} was changed or taken away"
+                ))
+            }'''
+replace = '''            _ => {}'''
+
+[[plant]]
+name = "K3 doors: the seal lets one name be given twice"
+meant = "a_name_given_twice_in_different_case_is_refused_everywhere"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''            .find(|(other, _)| other.to_string_lossy().eq_ignore_ascii_case(&text))'''
+replace = '''            .find(|_| false)'''
+
+[[plant]]
+name = "K3 doors: a window keeps what its request drops"
+meant = "a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''                    .ok_or_else(|| format!("a name the window drops is no text: {name}"))?;
+                env.retain(|(held, _)| !same(held, name));'''
+replace = '''                    .ok_or_else(|| format!("a name the window drops is no text: {name}"))?;
+                let _ = name;'''
+
+[[plant]]
+name = "K3 doors: a window's program is not judged"
+meant = "a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    let program = program_started(Path::new(program), args, &env)?;
+    match program {'''
+replace = '''    let _ = (program, args);
+    match spawn::Program::Plain {'''
+
+[[plant]]
+name = "K3 doors: a harness window needs no update switch"
+meant = "a_harness_window_without_its_update_switch_is_refused"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/spawn.rs"
+find = '''        if given != Some(OsStr::new(value)) {'''
+replace = '''        if given.is_none() && false {'''
+
+[[plant]]
+name = "K3 doors: the relay passes the daemon's window unjudged"
+meant = "a_daemons_window_that_breaks_the_seal_is_answered_as_refused_and_never_reaches_the_host"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''            match self.window_to_send(&frame["body"]) {'''
+replace = '''            match Ok::<Value, String>(frame["body"].clone()) {'''
+
+[[plant]]
+name = "K3 doors: the helper's question is asked unsealed"
+meant = "a_question_whose_environment_names_a_home_of_the_account_is_not_asked"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/ask.rs"
+find = '''    let sealed = crate::door::sealed(env, &[], windows).map_err(|why| {'''
+replace = '''    let sealed = Ok::<_, String>(env).map_err(|why| {'''
+
+[[plant]]
+name = "K3 doors: the judge lets a place inside a root"
+meant = "nothing_is_made_in_a_store_that_is_not_there_yet"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        if let Some(root) = inside_root(&place, &roots, &keys, any_case)? {'''
+replace = '''        if let Some(root) = inside_root(&place, &roots, &keys, any_case)?.filter(|_| false) {'''
+
+[[plant]]
+name = "K3 doors: the judge takes away a tree that holds a root"
+meant = "a_tree_a_protected_root_leads_into_is_not_removed_or_moved"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            if let Some(root) = holds_root(&place, &roots, any_case)? {'''
+replace = '''            if let Some(root) = holds_root(&place, &roots, any_case)?.filter(|_| false) {'''
+
+[[plant]]
+name = "K3 doors: the judge compares absent names byte for byte"
+meant = "nothing_is_made_in_a_store_that_is_not_there_yet"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''        )));
+    }
+    let any_case = ways.first().is_some_and(|way| any_case_at(&way.there));'''
+replace = '''        )));
+    }
+    let any_case = false;'''
+
+[[plant]]
+name = "K3 doors: the judge follows a `..` among absent names"
+meant = "a_place_that_cannot_be_resolved_but_for_its_absence_is_refused"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Some(Component::CurDir) => OsString::new(),
+            Some(Component::ParentDir) => {
+                return Err(refused(format!(
+                    "{} leads up out of the folder it names",'''
+replace = '''            Some(Component::CurDir) => OsString::new(),
+            Some(Component::ParentDir) => {
+                OsString::new()
+            }
+            Some(Component::Prefix(_)) => {
+                return Err(refused(format!(
+                    "{} leads up out of the folder it names",'''
+
+[[plant]]
+name = "K3 doors: a file put where the run's was is the run's"
+meant = "a_file_the_run_made_and_another_put_at_its_path_since_is_not_the_runs"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''                    && identity::of_path(real).is_ok_and(|now| now == *identity)'''
+replace = '''                    && identity::of_path(real).is_ok()'''
+
+[[plant]]
+name = "K3 doors: the roots' file is no root"
+meant = "the_roots_file_and_the_folders_it_is_in_are_protected_for_the_runs_life"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/account.rs"
+find = '''        if std::fs::symlink_metadata(file).is_ok() {
+            roots.push(file.clone());'''
+replace = '''        if std::fs::symlink_metadata(file).is_err() {
+            roots.push(file.clone());'''
+
+[[plant]]
+name = "K3 doors: a child takes any file at the roots' path"
+meant = "a_child_binds_to_the_roots_the_run_wrote_and_to_no_later_file_at_that_path"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/account.rs"
+find = '''    if digest(text) != expected {'''
+replace = '''    if digest(text) == "" && expected.is_empty() {'''
+
+[[plant]]
+name = "K3 doors: a child told the run's folders builds its own roots"
+meant = "a_process_told_the_runs_folders_and_no_roots_stops"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/account.rs"
+find = '''    if lookup(super::MADE_ROOTS).is_some_and(|value| !value.is_empty()) {'''
+replace = '''    if lookup(super::MADE_ROOTS).is_some_and(|value| value.is_empty()) {'''
+
+[[plant]]
+name = "K3 doors: a variable's default is no root"
+meant = "each_row_of_the_table_is_refused_on_a_decoy_of_another_name"
+runs = ["ki-lib-stores"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/stores.rs"
+find = '''                if let Some(named) = folder(lookup, var) {
+                    add(below(&named, suffix), *store);
+                }
+                for home in &homes {
+                    add(below(&below(home, default), suffix), *store);
+                }'''
+replace = '''                if let Some(named) = folder(lookup, var) {
+                    add(below(&named, suffix), *store);
+                }
+                let _ = default;'''
+
+[[plant]]
+name = "K3 doors: cargo is given what cargo gave the test"
+meant = "cargo_is_given_the_machines_list_the_toolchain_and_a_scratch_home_and_nothing_else"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/cargo.rs"
+find = '''    !nested_cargo::given_to_a_test(&upper)
+        && (TOOLCHAIN'''
+replace = '''    (TOOLCHAIN'''
+
+[[plant]]
+name = "K3 doors: an inherited home of the account's is handed on"
+meant = "an_inherited_home_of_the_accounts_is_not_handed_on"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''        return path.is_absolute() && crate::door::is_made_or_below(path) && !roots.holds(path);'''
+replace = '''        return path.is_absolute() && !roots.holds(path);'''
+
+[[plant]]
+name = "K3 doors: a plain start starts a harness's program"
+meant = "a_plain_start_refuses_a_harness_program_and_the_keychains_utility"
+runs = ["ki-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''            (Kind::Plain, crate::door::spawn::Program::Plain) => Ok(()),'''
+replace = '''            (Kind::Plain, _) => Ok(()),'''
+
+[[plant]]
+name = "K3 doors: a failed record read is no record"
+meant = "a_failed_read_is_an_error_and_never_rows"
+runs = ["ki-lib-ask"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/ask.rs"
+find = '''        Some("absent") => return Ok(None),
+        Some("failed") => {'''
+replace = '''        Some("absent") | Some("failed") => return Ok(None),
+        Some("never") => {'''
+
+[[plant]]
+name = "K3 doors: a child adds to any file at the audit file's path"
+meant = "a_child_adds_to_the_audit_file_the_run_made_and_to_no_file_put_at_its_path_since"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''                if std::ffi::OsStr::new(&found) != expected {'''
+replace = '''                if std::ffi::OsStr::new(&found) == expected && found.is_empty() {'''
+
+[[plant]]
+name = "K3 doors: the table has no row for Pi's store"
+meant = "every_store_a_plan_names_is_a_row_of_the_table"
+runs = ["ki-lib-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/stores.rs"
+find = '''    row(Pi, Login, Place::Home(".pi")),
+'''
+replace = ''''''
+
+[[plant]]
+name = "K3 doors: a Windows window is given the caller's APPDATA"
+meant = "a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_has_and_no_others"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''const WINDOWS: [&str; 7] = [
+    "ProgramData",'''
+replace = '''const WINDOWS: [&str; 7] = [
+    "APPDATA",'''
+
+[[plant]]
+name = "K3 doors: Muse is started for its version"
+meant = "a_muse_version_is_read_from_its_version_file_and_no_muse_starts_for_it"
+runs = ["ki-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''        if self.harness == Harness::Muse {
+            return Account::this()'''
+replace = '''        if false {
+            return Account::this()'''
+
+[[plant]]
+name = "K3 doors: the judge opens and closes a file it judges"
+meant = "the_judge_releases_no_lock_its_process_holds_on_a_file_it_judges"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/identity.rs"
+find = '''        let found = fs::metadata(path)?;'''
+replace = '''        let found = fs::File::open(path)?.metadata()?;'''
+
+[[plant]]
+name = "K3 doors: a window gets the variables the account's registry stores (T-2086 B1)"
+meant = "a_window_is_sent_so_that_no_stored_variable_of_the_account_reaches_it"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    if stored.is_empty() {'''
+replace = '''    if true {'''
+
+[[plant]]
+name = "K3 doors: the Windows runner marks zeewin2, whose account is its owner's, as a test machine (T-2086 N1)"
+meant = "zeewin2_is_no_marked_test_machine_and_the_others_are"
+runs = ["ki-xtask-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/machine.rs"
+find = '''                marked: false,'''
+replace = '''                marked: true,'''
+
+[[plant]]
+name = "K3 doors: a renewal's record is taken away on an account that is no test machine (T-2086 N1)"
+meant = "a_renewals_record_is_taken_away_only_on_a_marked_test_machine"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        if marked.is_none() {'''
+replace = '''        if false && marked.is_none() {'''
+
+[[plant]]
+name = "K3 doors: the renewal runs the harness on an account that is no test machine (T-2086 N1)"
+meant = "a_renewal_on_an_account_that_is_no_test_machine_starts_nothing_and_refuses"
+runs = ["ki-lib-renew"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    let machine = TestMachine::required_by("the renewal of a login", machine.cloned())?;'''
+replace = '''    let machine = machine.cloned().unwrap_or_else(|| TestMachine(String::new()));'''
+
+[[plant]]
+name = "K3 doors: a harness window is opened without its update switches (T-2086 C1)"
+meant = "a_window_that_starts_a_harness_without_its_update_switches_is_not_opened"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''        program => spawn::has_update_switches(&program, &env),'''
+replace = '''        _program => Ok(()),'''
+
+[[plant]]
+name = "K3 doors: the kit's Claude wrapper is taken for a plain program (T-2086 C2)"
+meant = "a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_harnesss_switches"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''            Some(Starts::Wrapper(harness)) => return spawn::Program::Harness(harness),'''
+replace = '''            Some(Starts::Wrapper(_)) => return spawn::Program::Plain,'''
+
+[[plant]]
+name = "K3 doors: a rig's shim is judged as itself, not as what it starts (T-2086 C2)"
+meant = "a_window_started_through_a_rigs_shim_and_the_kits_wrapper_is_asked_for_the_harnesss_switches"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''                return program_within(&next, env, depth + 1);'''
+replace = '''                let _ = next;'''
+
+[[plant]]
+name = "K3 doors: a place that cannot be read is taken for absent (T-2086 C3)"
+meant = "a_place_below_a_folder_that_cannot_be_read_is_refused"
+runs = ["ki-lib-door"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
+            Err(failed) => return Err(unresolved(&at, &failed)),'''
+replace = '''            Err(failed) if failed.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => {}'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/place.rs"
+find = '''            Err(failed) => {
+                return Err(refused(format!(
+                    "{} cannot be read ({failed})",
+                    at.display()
+                )))
+            }'''
+replace = '''            Err(_) => {}'''
+
+
+# T-2119 X1, N1-b, B1-a, B1-b: the parity case's window, the direct Muse window, the marker given by
+# a word, and the registry's names.
+
+[[plant]]
+name = "K3 doors: Claude's parity case opens a window on a pane table of its own (T-2119 X1)"
+meant = "the_live_kit_starts_ends_removes_and_writes_only_through_its_doors"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''use serde_json::{json, Value};'''
+replace = '''use serde_json::{json, Value};
+use cf_panes::pty::PaneTable;'''
+
+[[plant]]
+name = "K3 doors: the rule knows no start on a pty of the kit's own (T-2119 X1)"
+meant = "the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_door"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const PTY_STARTS: &[&str] = &[
+    "PaneTable",'''
+replace = '''const PTY_STARTS: &[&str] = &[
+    "NoSuchName",'''
+
+[[plant]]
+name = "K3 doors: the direct Muse window opens its pty on an account that is no test machine's (T-2119 X1)"
+meant = "a_muse_window_is_not_opened_off_a_marked_test_machine"
+runs = ["ki-test-muse-tui"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse/tui.rs"
+find = '''real_window_allowed("Muse's direct TUI window")'''
+replace = '''real_window_allowed("Muse's direct TUI window").or_else(|_| Ok::<(), cf_e2e::Error>(()))'''
+
+[[plant]]
+name = "K3 doors: the parity window asks for a home of the account (T-2119 X1)"
+meant = "a_parity_window_asks_for_the_runs_config_and_a_terminals_words_alone"
+runs = ["ki-test-claude-parity"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''        ("TERM".to_owned(), json!("xterm-256color")),'''
+replace = '''        ("TERM".to_owned(), json!("xterm-256color")),
+        ("HOME".to_owned(), json!("/Users/owner")),'''
+
+[[plant]]
+name = "K3 doors: the runner's --env marks a machine a test machine (T-2119 N1-b)"
+meant = "the_test_machine_marker_is_refused_as_an_env_word_in_any_case"
+runs = ["ki-xtask-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''        if name.eq_ignore_ascii_case(TEST_MACHINE) {'''
+replace = '''        if name == "NO_SUCH_NAME" {'''
+
+[[plant]]
+name = "K3 doors: a registry key that cannot be opened holds no names (T-2119 B1-a)"
+meant = "a_registry_read_fails_closed_on_every_error_but_no_such_key"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/windows_registry.rs"
+find = '''        NO_SUCH_KEY => Ok(false),'''
+replace = '''        NO_SUCH_KEY | 5 => Ok(false),'''
+
+[[plant]]
+name = "K3 doors: a listing of a key's values that stops on an error is the end (T-2119 B1-a)"
+meant = "a_registry_read_fails_closed_on_every_error_but_no_such_key"
+runs = ["ki-lib-door"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/windows_registry.rs"
+find = '''        NO_MORE_VALUES => Ok(false),'''
+replace = '''        NO_MORE_VALUES | 234 => Ok(false),'''
+
+[[plant]]
+name = "K3 doors: the relay and the rig's open send no name the registry stores (T-2119 B1-b)"
+meant = "the_relay_and_the_rigs_open_hand_the_registrys_names_on_and_a_registry_that_fails_opens_nothing"
+runs = ["ki-lib-door"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''                    Some(read) => read()?,'''
+replace = '''                    Some(_) => Vec::new(),'''
+
+[[plant]]
+name = "K3 doors: the rig reads the registry's names and sends none (T-2119 B1-b)"
+meant = "a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores"
+runs = ["ki-test-rig-registry"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''                    None => crate::door::stored_names()?,'''
+replace = '''                    None => Vec::new(),'''

@@ -117,6 +117,7 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
         env,
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     })
 }
@@ -298,6 +299,26 @@ fn the_variables_a_run_names_are_name_value_each_a_variable_of_its_own_with_the_
     );
 }
 
+/// T-2119 N1-b: `--env` cannot mark a machine a test machine, in any case of the name: the
+/// runner's own line is the only one that does, from the machine's record.
+#[test]
+fn the_test_machine_marker_is_refused_as_an_env_word_in_any_case() {
+    for name in [
+        "CONSENSFLOW_TEST_MACHINE",
+        "consensflow_test_machine",
+        "Consensflow_Test_Machine",
+    ] {
+        let said = parse_env(&[format!("{name}=zeewin2")])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            said,
+            format!("--env {name} says whether the machine is a test machine, which only the runner says, from the machine it runs on"),
+        );
+    }
+    assert!(parse_env(&strings(&["CONSENSFLOW_TEST_MACHINE_NOT=1"])).is_ok());
+}
+
 #[test]
 fn the_variables_are_refused_when_they_are_not_that_before_anything_is_sent() {
     for entry in ["NOVALUE", "=x", "1A=x", "A-B=x", "A B=x", "É=x", ""] {
@@ -364,6 +385,22 @@ fn a_run_gives_its_command_no_variable_that_was_not_named() {
     // Only what is named: this machine's environment is not in the script.
     let one = parse_env(&strings(&["A=1"])).unwrap();
     assert_eq!(given(&plain(&one)), ["A"]);
+}
+
+/// T-2007 round 3 (N1): on a machine that is no test machine (zeewin2, whose account is its
+/// owner's own) the run gives no marker, and takes away one the account itself may hold.
+#[test]
+fn a_run_on_an_unmarked_machine_gives_its_command_no_test_machine_marker() {
+    let text = run_script(&Script {
+        marked: false,
+        ..longest(&[])
+    });
+    assert!(!text.contains("$env:CONSENSFLOW_TEST_MACHINE ="), "{text}");
+    assert!(
+        text.contains("Remove-Item Env:\\CONSENSFLOW_TEST_MACHINE -ErrorAction SilentlyContinue"),
+        "{text}"
+    );
+    assert!(text.contains("== test machine: none"), "{text}");
 }
 
 #[test]
@@ -702,6 +739,7 @@ fn script_of_run(id: &str) -> String {
         env: &[],
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     })
 }
@@ -996,6 +1034,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
             env,
             node: r"C:\Program Files\nodejs",
             machine: "zeewin2",
+            marked: true,
             limits: None,
         }
     }
@@ -1172,6 +1211,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         env,
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     }
 }

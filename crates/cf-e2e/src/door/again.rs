@@ -50,18 +50,7 @@ pub fn again_under_audit(test: &str) -> Result {
         "find the test program",
         std::path::Path::new("."),
     ))?;
-    let ran = Run::new(program)
-        .args(["--exact", test, "--test-threads=1"])
-        .inheriting_env()
-        .var(AUDIT, "1")
-        .var(AUDIT_FILE, &audit)
-        .without(AUDIT_MADE)
-        // What the run makes in the temp folder is made in this one.
-        .var("TMPDIR", &temp)
-        .var("TMP", &temp)
-        .var("TEMP", &temp)
-        .limit(LIMIT)
-        .run()?;
+    let ran = say_only_run(program, test, &audit, &temp).run()?;
     let said = format!("{}{}", ran.stdout, ran.stderr);
     if ran.code != Some(0) || !said.contains(PASSED) {
         return Err(Error::Daemon(format!(
@@ -77,4 +66,66 @@ pub fn again_under_audit(test: &str) -> Result {
         )));
     }
     Ok(())
+}
+
+/// The run of `test` again as a say-only run: the test program with the switch set, its audit file
+/// at `audit` and the temp folder it makes its folders in `temp`, with the marks of this process
+/// and the cargo and rustup folders a nested cargo of the test finds its toolchain by (no other
+/// child is told them).
+fn say_only_run(
+    program: std::path::PathBuf,
+    test: &str,
+    audit: &std::path::Path,
+    temp: &std::path::Path,
+) -> Run {
+    let mut run = Run::new(program).args(["--exact", test, "--test-threads=1"]);
+    // The stand-in's own marks, which the program started finds at its start: the folders this
+    // process made (its audit file's folder is below one), and that it is a stand-in.
+    for name in [super::MADE_ROOTS, "CF_E2E_STAND_IN"] {
+        // The door hands on its own marks as this process holds them.
+        #[allow(clippy::disallowed_methods)]
+        let held = std::env::var_os(name);
+        if let Some(value) = held {
+            run = run.var(name, value);
+        }
+    }
+    for (name, value) in super::account::toolchain_homes() {
+        run = run.var(name, value);
+    }
+    run.var(AUDIT, "1")
+        .var(AUDIT_FILE, audit)
+        .without(AUDIT_MADE)
+        // What the run makes in the temp folder is made in this one.
+        .var("TMPDIR", temp)
+        .var("TMP", temp)
+        .var("TEMP", temp)
+        .limit(LIMIT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The run again is told the cargo and rustup folders the nested cargo of a test finds its
+    /// toolchain by (a Windows `live_approval` fails without them), and no other of the account's.
+    #[test]
+    fn the_say_only_child_is_told_the_toolchain_homes() {
+        let folder = crate::door::made("cf-again-test-").unwrap();
+        let run = say_only_run(
+            std::path::PathBuf::from("/program"),
+            "tests::a_test",
+            &folder.path().join("audit.txt"),
+            &folder.path().join("tmp"),
+        );
+        let env = run.environment().unwrap();
+        let told = |name: &str| {
+            env.iter()
+                .find(|(held, _)| held == name)
+                .map(|(_, value)| value.to_string_lossy().into_owned())
+        };
+        for (name, value) in super::super::account::toolchain_homes() {
+            assert_eq!(told(&name), Some(value), "{name}");
+        }
+        assert!(told(AUDIT).is_some());
+    }
 }

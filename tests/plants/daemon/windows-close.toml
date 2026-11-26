@@ -573,16 +573,13 @@ meant = "the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_
 runs = ["rig-stand-in-codex"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/files.rs"
-find = '''
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)'''
-replace = '''
-    let mut made = fs::File::create(file)?;
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    write(&writing, text)?;
+    rename(&writing, file)'''
+replace = '''    let _ = &writing;
+    let mut made = fs::File::create(file).map_err(Error::file("create", file))?;
     std::thread::sleep(std::time::Duration::from_millis(300));
-    io::Write::write_all(&mut made, text.as_bytes())'''
+    std::io::Write::write_all(&mut made, text.as_bytes()).map_err(Error::file("write", file))'''
 
 [[plant]]
 name = "windows close: the stand-in Codex's worker never says its process"

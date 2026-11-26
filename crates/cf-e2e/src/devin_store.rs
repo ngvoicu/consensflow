@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
 use crate::{Error, Result};
@@ -127,11 +126,7 @@ pub fn history(file: &Path) -> Result<Vec<(String, String)>> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let db = Connection::open_with_flags(
-        file,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(said)?;
+    let db = crate::door::database::read(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
         .prepare("SELECT session_id, content FROM prompt_history ORDER BY id")
@@ -151,7 +146,7 @@ pub fn append_user(file: &Path, session: &str, text: &str) -> Result<()> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let mut db = Connection::open(file).map_err(said)?;
+    let mut db = crate::door::database::write(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let written = db.transaction().map_err(said)?;
     let head: Option<String> = written
@@ -197,11 +192,7 @@ fn read(file: &Path, session: Option<&str>) -> Result<Vec<Message>> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
-    let db = Connection::open_with_flags(
-        file,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(said)?;
+    let db = crate::door::database::read(file)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
         .prepare(
@@ -281,16 +272,16 @@ mod tests {
     }
 
     /// A store of these rows: a message each, as its JSON, of one session.
-    fn store_of(rows: &[Value]) -> (tempfile::TempDir, PathBuf) {
+    fn store_of(rows: &[Value]) -> (crate::door::Made, PathBuf) {
         let rows: Vec<(&str, Value)> = rows.iter().map(|row| ("s", row.clone())).collect();
         store_in(&rows)
     }
 
     /// A store of these rows: the session of each, and its message as JSON.
-    fn store_in(rows: &[(&str, Value)]) -> (tempfile::TempDir, PathBuf) {
-        let folder = tempfile::tempdir().unwrap();
+    fn store_in(rows: &[(&str, Value)]) -> (crate::door::Made, PathBuf) {
+        let folder = crate::door::made("t-").unwrap();
         let file = folder.path().join("sessions.db");
-        let db = Connection::open(&file).unwrap();
+        let db = crate::door::database::write(&file).unwrap();
         db.execute_batch(
             "CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
                node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
@@ -347,7 +338,7 @@ mod tests {
     fn a_store_held_for_a_moment_is_read_once_it_is_let_go() {
         let (_folder, file) =
             store_of(&[json!({ "message_id": "a", "role": "user", "content": "first" })]);
-        let writer = Connection::open(&file).unwrap();
+        let writer = crate::door::database::write(&file).unwrap();
         writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
         let reading = std::thread::spawn({
             let file = file.clone();
@@ -420,9 +411,9 @@ mod tests {
     /// what it reads of what the TUI submitted.
     #[test]
     fn a_message_written_goes_on_the_sessions_main_chain_and_the_history_is_read_in_order() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let file = folder.path().join("sessions.db");
-        let db = Connection::open(&file).unwrap();
+        let db = crate::door::database::write(&file).unwrap();
         db.execute_batch(
             "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
              CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
@@ -465,7 +456,7 @@ mod tests {
 
     #[test]
     fn a_store_that_is_not_there_is_an_error_that_names_it() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let failed = messages(&folder.path().join("nowhere.db")).unwrap_err();
         assert!(failed.to_string().contains("nowhere.db"), "{failed}");
     }

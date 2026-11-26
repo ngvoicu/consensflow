@@ -11,11 +11,11 @@ use super::*;
 mod links;
 
 /// A pretend owner's home.
-struct OwnerHome(tempfile::TempDir);
+struct OwnerHome(crate::door::Made);
 
 impl OwnerHome {
     fn new() -> Self {
-        Self(tempfile::tempdir().unwrap())
+        Self(crate::door::made("t-").unwrap())
     }
 
     fn path(&self, below: &str) -> PathBuf {
@@ -24,8 +24,8 @@ impl OwnerHome {
 
     fn write(&self, below: &str, text: &str) {
         let file = self.path(below);
-        fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, text).unwrap();
+        crate::door::make_dir(file.parent().unwrap()).unwrap();
+        crate::door::write(&file, text).unwrap();
     }
 }
 
@@ -47,7 +47,10 @@ fn claude_launcher(home: &OwnerHome) -> PathBuf {
 fn changes(watch: &Watch, home: &OwnerHome, act: impl FnOnce()) -> Vec<String> {
     let before = watch.look();
     act();
-    before.changes_to(&watch.look(), home.0.path())
+    before.changes_to(
+        &watch.look(),
+        &crate::door::source::Source::from(home.0.path()),
+    )
 }
 
 #[test]
@@ -88,9 +91,14 @@ fn a_launcher_that_is_a_file_is_hashed_and_named_in_the_summary_and_left_alone_i
     let command = claude_launcher(&home);
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
-    assert!(seen.changes_to(&watch.look(), home.0.path()).is_empty());
+    assert!(seen
+        .changes_to(
+            &watch.look(),
+            &crate::door::source::Source::from(home.0.path())
+        )
+        .is_empty());
     // The program the kit runs and the one the installer writes are the one file, said once.
-    let summary = seen.summary(home.0.path());
+    let summary = seen.summary(&crate::door::source::Source::from(home.0.path()));
     assert_eq!(summary.matches("claude").count(), 1, "{summary}");
     assert!(summary.contains(&program("claude")), "{summary}");
     assert!(
@@ -140,7 +148,7 @@ fn a_launcher_that_is_a_file_and_is_removed_or_made_is_named_for_it() {
             .any(|said| said.ends_with(&format!("{name} was made"))),
         "{found:?}"
     );
-    let found = changes(&watch, &home, || fs::remove_file(&command).unwrap());
+    let found = changes(&watch, &home, || crate::door::remove(&command).unwrap());
     assert!(
         found
             .iter()
@@ -230,19 +238,19 @@ fn the_guard_of_a_launcher_that_is_a_file_fails_what_ends_and_names_it_and_is_si
 
 #[test]
 fn the_hash_of_a_big_file_reads_it_whole_and_tells_two_files_of_one_size_apart() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("t-").unwrap();
     let a = folder.path().join("a");
     let b = folder.path().join("b");
     // Bigger than the buffer, and one byte apart at the end.
     let mut bytes = vec![7_u8; (1 << 20) * 2 + 5];
-    fs::write(&a, &bytes).unwrap();
+    crate::door::write(&a, &bytes).unwrap();
     *bytes.last_mut().unwrap() = 8;
-    fs::write(&b, &bytes).unwrap();
+    crate::door::write(&b, &bytes).unwrap();
     let (a, b) = (Bytes::of(&a).unwrap(), Bytes::of(&b).unwrap());
     assert_eq!(a.size, b.size);
     assert_ne!(a.hash, b.hash);
     assert_eq!(a.hash.len(), 64);
-    assert!(Bytes::of(&folder.path().join("missing")).is_none());
+    assert!(Bytes::of(folder.path().join("missing")).is_none());
 }
 
 #[test]
@@ -252,7 +260,10 @@ fn a_path_followed_through_a_link_is_said_below_the_home_the_run_was_given() {
     let home = OwnerHome::new();
     home.write("a/b", "x");
     let real = fs::canonicalize(home.path("a/b")).unwrap();
-    let shown = shown(&real, home.0.path());
+    let shown = shown(
+        &crate::door::source::Source::from(&real),
+        &crate::door::source::Source::from(home.0.path()),
+    );
     assert!(
         shown.starts_with("~/") || shown.starts_with("~\\"),
         "{shown}"
@@ -309,7 +320,9 @@ fn a_keychain_item_a_run_gained_is_named_with_the_command_that_deletes_it_and_no
         "{found:?}"
     );
     // It is the Keychain's, not the launchers': the launchers' changes say nothing of it.
-    assert!(before.changes_to(&after, home.0.path()).is_empty());
+    assert!(before
+        .changes_to(&after, &crate::door::source::Source::from(home.0.path()))
+        .is_empty());
 }
 
 #[test]
@@ -456,7 +469,7 @@ fn a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it() 
     list(&["Claude Code-credentials"]);
     let guard = Guard {
         harness: Harness::Claude,
-        home: home.0.path().to_path_buf(),
+        home: home.0.path().into(),
         watch,
         before: Mutex::new(None),
     };

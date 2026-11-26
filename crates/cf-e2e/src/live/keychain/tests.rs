@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use super::*;
+#[cfg(unix)]
+use crate::process::Run;
 
 #[test]
 fn the_item_of_a_folder_is_named_as_claude_code_names_it_for_the_path_as_it_is_given() {

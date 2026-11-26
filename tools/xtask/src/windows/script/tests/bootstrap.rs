@@ -43,6 +43,7 @@ fn script_of_case() -> Script<'static> {
         env: &[],
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: true,
         limits: None,
     }
 }

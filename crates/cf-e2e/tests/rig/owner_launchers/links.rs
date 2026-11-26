@@ -1,8 +1,9 @@
 // The cases that need links and a shell updater: the Unix machines'. The ones that hold on every
 // machine, a launcher that is a file as Windows installs one, are in the parent.
 
+use cf_e2e::door::symlink;
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use cf_e2e::live::{self, Harness, Installed};
@@ -20,15 +21,15 @@ const OWNERS: &str = "2.1.316";
 /// (`~/.local/bin/claude` is a link into `~/.local/share/claude/versions/<version>`) and
 /// Devin's (`~/.local/bin/devin` through `_versions/current` to a version's folder).
 struct Owner {
-    home: tempfile::TempDir,
+    home: cf_e2e::door::Made,
 }
 
 impl Owner {
     fn new() -> Made<Self> {
         let owner = Self {
-            home: tempfile::tempdir()?,
+            home: cf_e2e::door::made("t-")?,
         };
-        fs::create_dir_all(owner.path("kit-claude"))?;
+        cf_e2e::door::make_dir(owner.path("kit-claude"))?;
         owner.executable(
             &format!(".local/share/claude/versions/{OWNERS}"),
             "claude-code-binary",
@@ -58,9 +59,9 @@ impl Owner {
 
     fn executable(&self, below: &str, text: &str) -> Made<()> {
         let file = self.path(below);
-        fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
-        fs::write(&file, text)?;
-        fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file has a folder")?)?;
+        cf_e2e::door::write(&file, text)?;
+        cf_e2e::door::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
         Ok(())
     }
 
@@ -68,10 +69,10 @@ impl Owner {
     /// of another name, then a rename over it.
     fn link(&self, below: &str, to: &Path) -> Made<()> {
         let at = self.path(below);
-        fs::create_dir_all(at.parent().ok_or("a link has a folder")?)?;
+        cf_e2e::door::make_dir(at.parent().ok_or("a link has a folder")?)?;
         let staged = at.with_extension(format!("tmp-{}", std::process::id()));
         symlink(to, &staged)?;
-        fs::rename(&staged, &at)?;
+        cf_e2e::door::rename(&staged, &at)?;
         Ok(())
     }
 
@@ -159,10 +160,10 @@ fn a_run_that_re_points_the_owners_launcher_at_a_copy_of_the_same_binary_fails_t
     let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
     // The run's updater: the same version, installed in the rig's folder, and the link taken
     // there. Not one byte of the binary differs from the owner's.
-    let elsewhere = tempfile::tempdir()?;
+    let elsewhere = cf_e2e::door::made("t-")?;
     let copy = elsewhere.path().join("claude/versions").join(OWNERS);
-    fs::create_dir_all(copy.parent().ok_or("a copy has a folder")?)?;
-    fs::copy(&was, &copy)?;
+    cf_e2e::door::make_dir(copy.parent().ok_or("a copy has a folder")?)?;
+    cf_e2e::door::copy_keeping_mode(&was, &copy)?;
     owner.link(".local/bin/claude", &copy)?;
     let failed = rig.close().unwrap_err().to_string();
     assert!(
@@ -236,7 +237,7 @@ fn a_case_that_gives_the_rig_a_claude_folder_of_its_own_is_held_to_the_launcher_
     // Its guard lists the Keychain (the install has no config of the kit's), so it takes turns with
     // the case that makes an item there.
     let owner = Owner::new()?;
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("t-")?;
     let rig = Rig::start(live::rig_with_claude_config(
         &[owner.plain_claude()],
         FAKE_AGENT,
@@ -260,16 +261,24 @@ fn a_claude_that_updates_itself_unless_it_is_told_not_to_leaves_the_launcher_alo
 ) -> Outcome {
     let owner = Owner::new()?;
     let script = owner.path("updater.sh");
-    fs::write(&script, UPDATER)?;
-    let elsewhere = tempfile::tempdir()?;
+    cf_e2e::door::write(&script, UPDATER)?;
+    let elsewhere = cf_e2e::door::made("t-")?;
     // The XDG folder a seat for Muse gives every window of a rig: the home is the owner's, and
     // the data folder is the run's.
     let data = elsewhere.path().join("data");
-    fs::create_dir_all(&data)?;
+    cf_e2e::door::make_dir(&data)?;
     let data = data.to_string_lossy().into_owned();
     let was = owner.points(".local/bin/claude")?;
 
-    let told = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT).var("XDG_DATA_HOME", &data))?;
+    // The windows' own home is the rig's; the control gives them the owner's by the case's own
+    // word (a variable the case names wins over the rig's), which is where an updater that was not
+    // told would reach.
+    let owners = owner.home.path().to_string_lossy().into_owned();
+    let told = Rig::start(
+        live::rig(&[owner.claude()], FAKE_AGENT)
+            .var("XDG_DATA_HOME", &data)
+            .var("HOME", &owners),
+    )?;
     run_updater(&told, &script)?;
     assert_eq!(owner.points(".local/bin/claude")?, was);
     told.close()?;
@@ -279,6 +288,7 @@ fn a_claude_that_updates_itself_unless_it_is_told_not_to_leaves_the_launcher_alo
     let untold = Rig::start(
         live::rig(&[owner.claude()], FAKE_AGENT)
             .var("XDG_DATA_HOME", &data)
+            .var("HOME", &owners)
             .unset("DISABLE_AUTOUPDATER")
             .unset("DISABLE_UPDATES"),
     )?;

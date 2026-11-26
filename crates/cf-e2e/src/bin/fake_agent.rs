@@ -1212,7 +1212,7 @@ mod tests {
         // as a paste (T-432), whose pictures are attached (T-681).
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         let picture = folder.path().join("reference.png");
-        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        cf_e2e::door::write(&picture, cf_e2e::png::SMALL).unwrap();
         let brief = format!("Reply with exactly: DONE\n{}", picture.display());
         let seeded = recorded(&brief, true);
         assert_eq!(seeded.len(), 1, "{seeded:?}");
@@ -1228,7 +1228,7 @@ mod tests {
         // the path in its report is no attachment, where the same words pasted are one.
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         let picture = folder.path().join("hero.png");
-        std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
+        cf_e2e::door::write(&picture, cf_e2e::png::SMALL).unwrap();
         let report = format!("Saved:\n{}\nDone", picture.display());
         let notified = steps::notification("b1", &report);
         let written = recorded(&notified, false);

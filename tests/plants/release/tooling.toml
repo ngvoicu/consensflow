@@ -1597,7 +1597,7 @@ runs = ["cf-e2e-lib-cf"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/cf.rs"
-find = "            files::write(&built_for, run).map_err(|cause| cause.to_string())?;\n"
+find = "            std::fs::write(&built_for, run).map_err(|cause| cause.to_string())?;\n"
 replace = "            let _ = run;\n"
 
 [[plant]]
@@ -1627,8 +1627,8 @@ runs = ["cf-e2e-lib-cf"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/cf.rs"
-find = "        if let Some(run) = run {\n            files::write("
-replace = "        {\n            let run = run.unwrap_or(\"none\");\n            files::write("
+find = "        if let Some(run) = run {\n            // The stamp of the build, in the folder the builds share: no folder of a run's.\n            std::fs::write("
+replace = "        {\n            let run = run.unwrap_or(\"none\");\n            std::fs::write("
 
 # A process of no run looks for the program between builds: the builds of the others make it again, and it is gone
 # for a moment as they do. A look half a second after its own build fell in a window of another's at a load of 25 to

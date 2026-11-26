@@ -56,6 +56,21 @@ impl Holds for Native {
     }
 }
 
+/// The unique identifier of the process `pid` as the pane host reads it: a Mac's alone (Linux has
+/// none, and a process it chose was proved by no identifier).
+#[cfg(target_os = "macos")]
+fn unique_of(pid: u32) -> Option<u64> {
+    i32::try_from(pid)
+        .ok()
+        .and_then(cf_panes::read_identity)
+        .map(|read| read.unique)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn unique_of(_pid: u32) -> Option<u64> {
+    None
+}
+
 /// A process held by its number.
 #[cfg(unix)]
 struct Number(u32);
@@ -66,6 +81,10 @@ impl Held for Number {
         identity(self.0)
             .map(|found| found.map(|identity| identity.started))
             .map_err(|failed: Error| io::Error::other(failed.to_string()))
+    }
+
+    fn unique(&self) -> io::Result<Option<u64>> {
+        Ok(unique_of(self.0))
     }
 
     fn end(&self) -> io::Result<()> {
@@ -103,6 +122,11 @@ impl Held for win::Handle {
         self.created()
     }
 
+    fn unique(&self) -> io::Result<Option<u64>> {
+        // The handle is the proof: it holds the process, and its creation time is checked on it.
+        Ok(None)
+    }
+
     fn end(&self) -> io::Result<()> {
         self.terminate()
     }
@@ -121,7 +145,7 @@ mod mac {
 
     use nix::libc;
 
-    use super::super::{ps, refined_by_bsd, Bsd, Identity, Running};
+    use super::super::{ps, refined_by_bsd, Bsd, Identity, Link, Running};
     use crate::{Error, Result};
 
     /// Every process `ps` lists, each with when it began as the system says it to the
@@ -155,10 +179,40 @@ mod mac {
         }))
     }
 
+    /// What `proc_pidinfo` says of the process `pid`, as one read: its parent, when it began, and
+    /// the identifiers the pane host reads ([`cf_panes::read_identity`]: its own unique identifier
+    /// and its forker's), the read of its short information made again after them. A process
+    /// whose number another has in between, or that execs in between, is not read: none. A process
+    /// the host will not read (another user's) has the rest and proves nothing ([`Link::Unread`]).
+    pub(in super::super) fn bsd(pid: u32) -> io::Result<Option<Bsd>> {
+        let Some(first) = short(pid)? else {
+            return Ok(None);
+        };
+        let identity = i32::try_from(pid).ok().and_then(cf_panes::read_identity);
+        let Some(second) = short(pid)? else {
+            return Ok(None);
+        };
+        if first != second {
+            return Ok(None);
+        }
+        let link = match identity {
+            // The host's read and this one name one birth, to the microsecond.
+            Some(read) if read.born == (first.started / 1_000_000, first.started % 1_000_000) => {
+                Link::Forked {
+                    own: read.unique,
+                    forker: read.starter,
+                }
+            }
+            Some(_) => return Ok(None),
+            None => Link::Unread,
+        };
+        Ok(Some(Bsd { link, ..first }))
+    }
+
     /// What `proc_pidinfo` (`PROC_PIDTBSDINFO`) says of the process `pid`: none where no
     /// process has the number, or the one that has it has ended and waits to be reaped,
     /// which nothing ends.
-    pub(in super::super) fn bsd(pid: u32) -> io::Result<Option<Bsd>> {
+    fn short(pid: u32) -> io::Result<Option<Bsd>> {
         let Ok(number) = i32::try_from(pid) else {
             return Ok(None);
         };
@@ -199,6 +253,7 @@ mod mac {
         Ok(Some(Bsd {
             ppid: info.pbi_ppid,
             started: microseconds(info.pbi_start_tvsec, info.pbi_start_tvusec),
+            link: Link::Unread,
         }))
     }
 
@@ -252,29 +307,47 @@ mod mac {
 mod win {
     use std::io;
 
+    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, WAIT_OBJECT_0,
     };
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS,
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+        PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        PROCESS_TERMINATE,
     };
 
-    use super::super::{refined_by_handle, with_cygwin_parents, Identity, Running};
+    use super::super::{refined_by_handle, with_cygwin_parents, Identity, Opened, Running};
     use crate::process::Run;
     use crate::{Error, Result};
 
-    /// Every process of Windows' table, each with its creation time as its own handle says
-    /// it ([`refined_by_handle`]), and the parent Git Bash says for a Cygwin program whose
-    /// own has gone ([`with_cygwin_parents`]).
+    /// Every process of Windows' table, each with its creation time and its creator as its own
+    /// handle says them ([`refined_by_handle`]), and what Git Bash says of the parent of a Cygwin
+    /// program whose own has gone, as a description only ([`with_cygwin_parents`]). Every handle
+    /// stays open until all of them are read, so that no number of the reading is another
+    /// process's before the end of it: one reading, with exact creation times, which the edges of
+    /// the window's tree are proved by ([`super::super::descending_from`]).
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
+        let held: std::cell::RefCell<std::collections::HashMap<u32, Handle>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
         let listed = refined_by_handle(super::super::table()?, |pid| {
             match open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)? {
-                Some(handle) => handle.created(),
+                Some(handle) => {
+                    let opened = handle.opened()?;
+                    held.borrow_mut().insert(pid, handle);
+                    Ok(opened)
+                }
                 None => Ok(None),
             }
         });
-        Ok(with_cygwin_parents(listed, cygwin_ps))
+        // The handles are still open: each says its creation time again, after `ps -W` was read.
+        let rows = with_cygwin_parents(listed, cygwin_ps, |pid| {
+            held.borrow()
+                .get(&pid)
+                .and_then(|handle| handle.created().ok().flatten())
+        });
+        drop(held);
+        Ok(rows)
     }
 
     /// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin
@@ -289,7 +362,7 @@ mod win {
         if !ps.is_file() || !layer {
             return None;
         }
-        let ran = Run::new(ps).args(["-W"]).inheriting_env().run().ok()?;
+        let ran = Run::new(ps).args(["-W"]).run().ok()?;
         (ran.code == Some(0)).then_some(ran.stdout)
     }
 
@@ -367,6 +440,33 @@ mod win {
             Ok(Some(
                 (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime),
             ))
+        }
+
+        /// When the process was created and the number of the process that created it, read on
+        /// this handle: none where it has exited. The creator is none where the system will
+        /// not say.
+        pub(in super::super) fn opened(&self) -> io::Result<Option<Opened>> {
+            let Some(created) = self.created()? else {
+                return Ok(None);
+            };
+            let mut information = PROCESS_BASIC_INFORMATION::default();
+            let mut written = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: the handle is open with the right to query it, and the structure is the one
+            // the information class names, at its size.
+            let status = unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessBasicInformation,
+                    (&mut information as *mut PROCESS_BASIC_INFORMATION).cast(),
+                    std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                    &mut written,
+                )
+            };
+            let creator = (status >= 0)
+                .then(|| u32::try_from(information.InheritedFromUniqueProcessId).ok())
+                .flatten();
+            Ok(Some(Opened { created, creator }))
         }
 
         /// Ends the process, through this handle: one that exited meanwhile is ended.

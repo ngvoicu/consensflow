@@ -365,12 +365,13 @@ fn keep(root: &Path, case: &str, report: &str, folder: Option<&Path>) -> String 
     };
     // The file is made new, as one of this run's own: a rig's root has a name of its own, so a file
     // of that name is none the run may write into.
-    let wrote = folder
-        .map_or(Ok(()), |folder| {
-            crate::door::make_place(folder).map_err(crate::Error::file("make", folder))
-        })
-        .and_then(|()| crate::door::made_file(&file).map(drop))
-        .and_then(|()| crate::door::write(&file, report));
+    // The handle the file was made with is the one written through: a file put at that path
+    // in between is never the run's (T-2002 finding 5).
+    let wrote = crate::door::made_file(&file).and_then(|mut made| {
+        use std::io::Write as _;
+        made.write_all(report.as_bytes())
+            .map_err(crate::Error::file("write", &file))
+    });
     match wrote {
         Ok(()) => format!(
             "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",
@@ -483,7 +484,6 @@ mod tests {
             "rig::report::tests::a_nested_dropped_rig_report_is_said",
             std::time::Duration::from_secs(30),
         )
-        .inheriting_env()
         .args(["--ignored", "--nocapture"])
         .run()
         .unwrap();
@@ -655,15 +655,15 @@ mod tests {
         let config = crate::door::made("cf-test-").unwrap();
         assert_eq!(written(config.path()), "  nothing\n");
         let at = |relative: &str| config.path().join(relative);
-        fs::create_dir_all(at("sessions")).unwrap();
-        fs::create_dir_all(at("projects/integration")).unwrap();
+        crate::door::make_dir(at("sessions")).unwrap();
+        crate::door::make_dir(at("projects/integration")).unwrap();
         // A process id no 32-bit integer holds is a process that is gone.
-        fs::write(
+        crate::door::write(
             at("sessions/2.json"),
             r#"{"pid":4000000000,"sessionId":"b","status":"idle"}"#,
         )
         .unwrap();
-        fs::write(
+        crate::door::write(
             at("sessions/1.json"),
             format!(
                 r#"{{"pid":{},"sessionId":"a","status":"busy"}}"#,
@@ -671,8 +671,8 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::write(at("sessions/notes.txt"), "not a status").unwrap();
-        fs::write(
+        crate::door::write(at("sessions/notes.txt"), "not a status").unwrap();
+        crate::door::write(
             at("projects/integration/a.jsonl"),
             "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
         )

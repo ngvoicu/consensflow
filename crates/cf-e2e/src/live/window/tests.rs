@@ -34,10 +34,11 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
             let asked = Cell::new(false);
             let record = with_record_homes(harness, &env, || {
                 asked.set(true);
-                Some(ask::Record::default())
+                Ok(Some(ask::Record::default()))
             });
+            // Refused, and said so: never a record of nothing.
             assert!(
-                record.is_none() && !asked.get(),
+                record.is_err() && !asked.get(),
                 "harness-ask reached a missing or foreign home"
             );
         }
@@ -80,7 +81,7 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
         let asked = Cell::new(false);
         let _ = with_record_homes(harness, &env, || {
             asked.set(true);
-            None
+            Ok(None)
         });
         assert!(asked.get(), "a run-owned {harness:?} home was refused");
     }
@@ -91,12 +92,12 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
 fn kit_round3_window_record_refuses_linked_out_record_roots() {
     let run = crate::door::made("cf-window-linked-").unwrap();
     let foreign = crate::standin_process::unowned_tempdir();
-    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions")).unwrap();
+    crate::door::symlink(foreign.path(), run.path().join("sessions")).unwrap();
     let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
     let asked = Cell::new(false);
     let _ = with_record_homes(Harness::Codex, &env, || {
         asked.set(true);
-        None
+        Ok(None)
     });
     assert!(!asked.get());
 }
@@ -106,13 +107,13 @@ fn kit_round3_window_record_refuses_linked_out_record_roots() {
 fn kit_round3_window_record_refuses_a_link_inside_codex_sessions() {
     let run = crate::door::made("cf-window-nested-").unwrap();
     let foreign = crate::standin_process::unowned_tempdir();
-    std::fs::create_dir(run.path().join("sessions")).unwrap();
-    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions/2026")).unwrap();
+    crate::door::make_dir(run.path().join("sessions")).unwrap();
+    crate::door::symlink(foreign.path(), run.path().join("sessions/2026")).unwrap();
     let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
     let asked = Cell::new(false);
     let _ = with_record_homes(Harness::Codex, &env, || {
         asked.set(true);
-        None
+        Ok(None)
     });
     assert!(!asked.get(), "a linked-out Codex session was accepted");
 }
@@ -346,8 +347,8 @@ fn claude_config_fallback_must_refuse_a_home_outside_the_run() {
     #[cfg(unix)]
     {
         let run = crate::door::made("cf-harness-link-").unwrap();
-        std::os::unix::fs::symlink(owner.path(), run.path().join(".claude")).unwrap();
-        std::os::unix::fs::symlink(owner.path(), run.path().join(".codex")).unwrap();
+        crate::door::symlink(owner.path(), run.path().join(".claude")).unwrap();
+        crate::door::symlink(owner.path(), run.path().join(".codex")).unwrap();
         let env = vec![("HOME".to_owned(), run.path().display().to_string())];
         assert!(owned_harness_dir(&env, "CLAUDE_CONFIG_DIR", ".claude").is_err());
         assert!(owned_harness_dir(&env, "CODEX_HOME", ".codex").is_err());

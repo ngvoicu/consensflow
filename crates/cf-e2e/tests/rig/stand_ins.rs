@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::files;
 use cf_e2e::process::{Run, Spawned};
-#[cfg(unix)]
 use serde_json::json;
 #[cfg(unix)]
 use serde_json::Value;
@@ -56,18 +55,15 @@ fn the_stand_in_agent_a_pane_host_closes_leaves_when_it_is_asked_to_end_and_is_n
     use crate::secs;
 
     let rig = crate::rig()?;
-    let opened = rig.host(
-        "pane.open",
-        json!({
-            "id": "closed-1",
-            "generation": 1,
-            "cwd": "/tmp",
-            "argv": [FAKE_AGENT, "--session-id", "closed-session"],
-            "env": {},
-            "size": { "rows": 24, "cols": 80 },
-            "backlogBytes": 65536,
-        }),
-    )?;
+    let opened = rig.open_pane(json!({
+        "id": "closed-1",
+        "generation": 1,
+        "cwd": "/tmp",
+        "argv": [FAKE_AGENT, "--session-id", "closed-session"],
+        "env": {},
+        "size": { "rows": 24, "cols": 80 },
+        "backlogBytes": 65536,
+    }))?;
     assert_eq!(opened["ok"], true, "{opened}");
     // It says it is idle once it has set itself up to be asked to end.
     let sessions = Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default()).join("sessions");
@@ -328,5 +324,156 @@ fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of
     // close finds and ends it (by the marker of its environment): here nothing does.
     server.kill();
     cf_e2e::process::signal(browser, cf_e2e::process::Signal::Kill)?;
+    Ok(())
+}
+
+/// K3 (T-2000 finding 1, T-1998's rig case): a window asked with another home, or with `HOME`
+/// taken away, is not opened by the rig's own request; the window opened next writes its real
+/// environment down, and it is the rig's: every home below the rig's, and no person's home
+/// (`CF_KIT_PROJECT_HOME` is gone).
+#[cfg(unix)]
+#[test]
+fn a_window_asked_with_another_home_or_with_a_home_taken_away_is_not_opened_and_the_next_has_the_rigs_homes(
+) -> Outcome {
+    let rig = crate::rig()?;
+    // A folder of no run's: the temp folder's parent's, never made.
+    let elsewhere = std::env::temp_dir()
+        .parent()
+        .map(|parent| parent.join(format!("not-the-runs-{}", std::process::id())))
+        .ok_or("the temp folder has no parent")?;
+    let window = |id: &str, extra: serde_json::Value| {
+        let mut body = json!({
+            "id": id,
+            "generation": 1,
+            "cwd": rig.workspace(),
+            "argv": ["/bin/sh", "-c", "sleep 30"],
+            "env": {},
+            "size": { "rows": 24, "cols": 80 },
+            "backlogBytes": 65536,
+        });
+        for (key, value) in extra.as_object().into_iter().flatten() {
+            body[key] = value.clone();
+        }
+        body
+    };
+    let refused = [
+        window("other-home", json!({ "env": { "APPDATA": elsewhere } })),
+        window("no-home", json!({ "dropEnv": ["HOME"] })),
+    ];
+    for body in refused {
+        let id = body["id"].clone();
+        assert!(rig.open_pane(body).is_err(), "{id} was opened");
+    }
+    assert_eq!(rig.refused_windows().len(), 2);
+    let said = rig.workspace().join("window-env.txt");
+    // A window's shell is not told a command the door cannot read: the case's script is a file of
+    // the run's own.
+    let script = rig.workspace().join("window-env.sh");
+    cf_e2e::door::write(&script, format!("env > '{}'; sleep 30\n", said.display()))?;
+    let opened = rig.open_pane(window("the-next", json!({ "argv": ["/bin/sh", script] })))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    rig.wait_for("the window's environment", crate::secs(10), || {
+        Ok(std::fs::read_to_string(&said)
+            .is_ok_and(|text| text.contains("\nHOME=") || text.starts_with("HOME=")))
+    })?;
+    let env = std::fs::read_to_string(&said)?;
+    let root = rig
+        .home()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    for name in cf_e2e::door::spawn::HOME_VARS {
+        let line = env
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}=")))
+            .ok_or_else(|| format!("{name} is not in the window's environment"))?;
+        let value = &line[name.len() + 1..];
+        let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        assert!(
+            real(Path::new(value)).starts_with(real(&root)) || Path::new(value).starts_with(&root),
+            "{name} is {value}, not below the rig's {}",
+            root.display()
+        );
+    }
+    assert!(!env.contains("CF_KIT_PROJECT_HOME"), "{env}");
+    let _ = rig.close_pane(json!({ "id": "the-next", "generation": 1 }));
+    rig.close()?;
+    Ok(())
+}
+
+/// T-2086 B1: on Windows the pane host's builder puts every variable the account's registry stores
+/// over the host's own environment, which the seal never saw (`setx`'s `CODEX_HOME`, and always
+/// `TEMP`, `TMP` and `Path` from `HKCU\Environment`). A real window writes its environment down:
+/// each name the registry holds has the value the window was judged on, or is not there where the
+/// judged environment has none. Nothing is written to the registry: it is read for its names only.
+#[cfg(windows)]
+#[test]
+fn a_windows_window_has_the_environment_it_was_judged_on_and_nothing_the_account_stores() -> Outcome
+{
+    let rig = crate::rig()?;
+    #[allow(clippy::disallowed_methods)] // The system's folder, for the test's own shell.
+    let system = std::env::var_os("SystemRoot").ok_or("no SystemRoot")?;
+    let shell = Path::new(&system).join("System32").join("cmd.exe");
+    // A script file of the run's own: the door reads no shell command with `>` or `&` in it.
+    let script = rig.workspace().join("window-env.cmd");
+    cf_e2e::door::write(
+        &script,
+        "set > window-env.txt\r\nping -n 30 127.0.0.1 > nul\r\n",
+    )?;
+    let body = json!({
+        "id": "the-window",
+        "generation": 1,
+        "cwd": rig.workspace(),
+        "argv": [shell, "/d", "/c", script],
+        "env": {},
+        "size": { "rows": 24, "cols": 80 },
+        "backlogBytes": 65536,
+    });
+    let judged = rig.judged_environment(&body)?;
+    let opened = rig.open_pane(body)?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let said = rig.workspace().join("window-env.txt");
+    rig.wait_for("the window's environment", crate::secs(20), || {
+        Ok(std::fs::read_to_string(&said)
+            .is_ok_and(|text| text.to_ascii_uppercase().contains("\nPATH=")))
+    })?;
+    let text = std::fs::read_to_string(&said)?;
+    let window: Vec<(String, String)> = text
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect();
+    let stored = cf_e2e::door::stored_names().expect("the account's registry can be read");
+    assert!(
+        !stored.is_empty(),
+        "the account's registry holds no variable (HKCU\\Environment has TEMP)"
+    );
+    let mut wrong = Vec::new();
+    for name in &stored {
+        let name = name.to_string_lossy();
+        let had = window
+            .iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.as_str());
+        let judged = judged
+            .iter()
+            .find(|(held, _)| held.to_string_lossy().eq_ignore_ascii_case(&name))
+            .map(|(_, value)| value.to_string_lossy().into_owned());
+        if had != judged.as_deref() {
+            // Which names differ, never their values: they are the account's.
+            wrong.push(format!(
+                "{name} (the window {} it, the judged environment {} it)",
+                if had.is_some() { "has" } else { "has not" },
+                if judged.is_some() { "has" } else { "has not" }
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the window has what the account stores: {}",
+        wrong.join("; ")
+    );
+    let _ = rig.close_pane(json!({ "id": "the-window", "generation": 1 }));
+    rig.close()?;
     Ok(())
 }

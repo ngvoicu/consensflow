@@ -32,6 +32,16 @@ pub(super) fn process(pid: i32) -> Option<Process> {
     if pid <= 1 || pid == std::process::id() as i32 {
         return None;
     }
+    read_process(pid)
+}
+
+/// [`process`] for any process the user owns, the caller's own among them: the host's looks never
+/// read itself, and a reader that is no host (the live test kit, whose own process is the root of
+/// a tree it reads) does.
+pub(super) fn read_process(pid: i32) -> Option<Process> {
+    if pid <= 1 {
+        return None;
+    }
     // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of_val(&info);

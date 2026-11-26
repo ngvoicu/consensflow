@@ -153,7 +153,6 @@ impl Daemon {
         let mut process = Run::new(program)
             .args(args)
             .vars(vars)
-            .finding_programs()
             .cwd(checkout::root())
             .spawn()?;
         let output = process.take_output();

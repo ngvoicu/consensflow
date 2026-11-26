@@ -43,7 +43,6 @@ const LOOK: Duration = Duration::from_secs(1);
 fn of_process(pid: u32, name: &str) -> Result<Option<String>> {
     let shown = Run::new("ps")
         .args(["eww", "-o", "command=", "-p", &pid.to_string()])
-        .inheriting_env()
         .run()?
         .stdout;
     let key = format!(" {name}=");

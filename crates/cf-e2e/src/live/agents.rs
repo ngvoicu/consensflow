@@ -47,13 +47,26 @@ pub const STAND_IN_WORKER_MODEL: &str = "fake";
 /// stand-in as well (spec harness-models).
 pub const STAND_IN_MEMBER_MODEL: &str = "worker";
 
+/// The second stand-in model of a roster: the rig lists it beside `fake` (`stand_in_lists`).
+pub const STAND_IN_SECOND_MODEL: &str = "fake-2";
+
+/// Whether `model` is one the rig's stand-in plays (T-1207). The one account of it: the shim
+/// that hands a window to the stand-in, the choice of installations a run needs and the check
+/// of a roster against the harness's list all ask here, so that a row the shim routes to the
+/// stand-in is never one the preflight asks the real harness's catalogue for.
+pub fn is_stand_in_model(model: &str) -> bool {
+    crate::stand_in_lists::seat_of("claude-code", model) == crate::stand_in_lists::Seat::StandIn
+}
+
 /// The harness an agent (a roster row, or what a window is asked for) runs on,
 /// when it is a real one: the stand-in agent's (a Claude Code agent whose model is
 /// a fake one) are none.
 pub fn harness_of(agent: &Value) -> Option<Harness> {
     let kind = agent["kind"].as_str()?;
     // A fake model is the rig's stand-in, of whichever kind it is shaped as (T-1207).
-    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {
+    if crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)
+        == crate::stand_in_lists::Seat::StandIn
+    {
         return None;
     }
     Harness::ALL
@@ -437,19 +450,18 @@ fn pi_providers() -> Option<Vec<String>> {
         super::keychain::live_case(),
         "stand-in run attempted Pi provider lookup"
     );
-    let folder = crate::process::own_var("PI_CODING_AGENT_DIR")
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
+    let folder = crate::door::source::Account::this()
+        .variable("PI_CODING_AGENT_DIR", crate::door::source::Purpose::Seed)
         .or_else(|| {
-            super::machine::home()
+            super::machine::owner_home()
                 .ok()
-                .map(|home| home.join(".pi").join("agent"))
+                .map(|home| home.join(".pi/agent"))
         })?;
     #[cfg(test)]
     PI_PROVIDER_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     static NAMES: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
     NAMES
-        .get_or_init(|| super::isolation::pi_provider_names(&folder.join("auth.json")).ok())
+        .get_or_init(|| super::isolation::pi_provider_names(folder.join("auth.json")).ok())
         .clone()
 }
 
@@ -526,7 +538,7 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
 
 /// Refuse a named model that this run's isolated harness does not list before
 /// opening a chief or member window, including rows that already name an effort.
-fn validate_rows(
+pub(crate) fn validate_rows(
     rows: &[Value],
     mut read: impl FnMut(Harness) -> std::result::Result<Vec<Listed>, String>,
 ) -> Result {
@@ -591,7 +603,51 @@ pub fn validate_window(rig: &Rig, agent: &Value) -> Result {
 /// Admit a model for a direct, non-rig probe, using only a run-owned harness
 /// home. The listing operation opens no window and spends no model turn.
 pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
-    let names: &[&str] = match model.harness {
+    let env = isolated_env(model.harness, home)?;
+    validate_rows(&[agent_on(model)], |harness| listed_in_env(harness, &env))
+}
+
+/// What `harness` lists, asked of the real program with the isolated environment `env`
+/// ([`isolated_env`]): no window, no model turn, and never the rig's stand-in.
+fn listed_in_env(
+    harness: Harness,
+    env: &BTreeMap<String, String>,
+) -> std::result::Result<Vec<Listed>, String> {
+    let answer = super::ask::question(&json!({
+        "op": "models", "kind": harness.kind(), "env": env,
+    }))
+    .map_err(|why| why.to_string())?;
+    listing(&answer["listing"], harness)
+}
+
+/// Where a rig's list of `harness`'s models is read: by the rig's daemon (`models.get`), or, for
+/// Claude Code whose rig starts it through the stand-in's shim, directly from the real program
+/// on the run's own config folder `config`. The shim hands the daemon's read of the list to the
+/// stand-in, which lists fake models only: a real model asked against it is refused before any
+/// window opens (T-1835, T-1857). Where the machine has no real Claude for the kit to ask (the
+/// offline rigs, whose Claude is the stand-in's program wholly, and CI), the daemon's list is the
+/// only one there is, and is the right one.
+fn list_route(
+    harness: Harness,
+    config: Option<&str>,
+    real_claude: bool,
+) -> std::result::Result<Option<BTreeMap<String, String>>, String> {
+    match (harness, config) {
+        (Harness::Claude, Some(config)) if real_claude => isolated_env(
+            Harness::Claude,
+            &[("CLAUDE_CONFIG_DIR".to_owned(), config.to_owned())],
+        )
+        .map(Some)
+        .map_err(|why| why.to_string()),
+        _ => Ok(None),
+    }
+}
+
+/// The homes a direct read of `harness`'s models names: only what `home` says of the run-owned
+/// folders its isolation names, never a folder that is not the run's; the seal of the question
+/// that carries them ([`super::ask::question_sealed`]) gives the rest.
+fn isolated_env(harness: Harness, home: &[(String, String)]) -> Result<BTreeMap<String, String>> {
+    let names: &[&str] = match harness {
         Harness::Claude => &["CLAUDE_CONFIG_DIR"],
         Harness::Codex => &["CODEX_HOME"],
         Harness::Pi => &["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"],
@@ -617,25 +673,12 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
         if !safe {
             return Err(Error::Daemon(format!(
                 "cannot check {} models: {name} is not a run-owned folder",
-                model.harness.name()
+                harness.name()
             )));
         }
     }
-    let mut env: BTreeMap<String, String> = [
-        "PATH",
-        "PATHEXT",
-        "USER",
-        "LANG",
-        "TMPDIR",
-        "TEMP",
-        "TMP",
-        "SHELL",
-        "SystemRoot",
-        "ComSpec",
-    ]
-    .into_iter()
-    .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
-    .collect();
+    // The machine's own variables are the question's seal's to give ([`super::ask::question_sealed`]).
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
     for name in names {
         env.insert(
             (*name).to_owned(),
@@ -645,7 +688,7 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
     env.extend(
         super::launcher::updates_off().map(|(name, value)| (name.to_owned(), value.to_owned())),
     );
-    if model.harness == Harness::Pi {
+    if harness == Harness::Pi {
         env.insert("PI_OFFLINE".to_owned(), "1".to_owned());
     }
     if let Some(git) = value("GIT_CONFIG_GLOBAL") {
@@ -666,13 +709,15 @@ pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
     if !env.contains_key("USERPROFILE") {
         env.insert("USERPROFILE".to_owned(), owned_home.to_owned());
     }
-    validate_rows(&[agent_on(model)], |harness| {
-        let answer = super::ask::question(&json!({
-            "op": "models", "kind": harness.kind(), "env": env,
-        }))
-        .map_err(|why| why.to_string())?;
-        listing(&answer["listing"], harness)
-    })
+    if cfg!(windows) {
+        if let Some((drive, path)) =
+            crate::standin_process::drive_and_path(std::path::Path::new(owned_home))
+        {
+            env.entry("HOMEDRIVE".to_owned()).or_insert(drive);
+            env.entry("HOMEPATH".to_owned()).or_insert(path);
+        }
+    }
+    Ok(env)
 }
 
 fn distance(a: &str, b: &str) -> usize {
@@ -695,7 +740,7 @@ fn distance(a: &str, b: &str) -> usize {
 /// for it (Pi's `provider/id`), the efforts it takes from the lowest as the harness orders
 /// them, and whether the harness will not run it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Listed {
+pub(crate) struct Listed {
     name: String,
     efforts: Vec<String>,
     disabled: bool,
@@ -764,6 +809,10 @@ fn models_asked(harness: Harness) -> Value {
 /// What `harness` lists now, read by the rig's daemon as the page's picker reads it
 /// (`models.get`: no window, no model turn); why it could not be read, where it could not.
 fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, String> {
+    let real_claude = super::machine::command(Harness::Claude.name()).is_ok();
+    if let Some(env) = list_route(harness, rig.var("CLAUDE_CONFIG_DIR"), real_claude)? {
+        return listed_in_env(harness, &env);
+    }
     let answer = rig
         .page("models.get", models_asked(harness))
         .map_err(|why| why.to_string())?;
@@ -927,6 +976,34 @@ mod tests {
         assert!(foreign.contains("CODEX_HOME") && foreign.contains("run-owned"));
     }
 
+    /// T-1835, T-1857: the model list a rig's roster is checked against is the real Claude's, on
+    /// the run's own config folder, never the shim's stand-in's; every other harness's is the
+    /// daemon's.
+    #[test]
+    fn a_real_claude_model_is_checked_against_the_real_list_not_the_stand_ins() {
+        let config = crate::door::made("cf-list-route-").unwrap();
+        let folder = config.path().to_string_lossy().into_owned();
+        let env = list_route(Harness::Claude, Some(&folder), true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(env["CLAUDE_CONFIG_DIR"], folder);
+        assert_eq!(env["HOME"], folder, "the owner's home is not a fallback");
+        // The shim's folder is no part of the environment: the caller's search path finds the
+        // real program, and the stand-in is a program of the rig's alone.
+        assert!(list_route(Harness::Claude, None, true).unwrap().is_none());
+        assert!(list_route(Harness::Claude, Some(&folder), false)
+            .unwrap()
+            .is_none());
+        for other in [Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse] {
+            assert!(
+                list_route(other, Some(&folder), true).unwrap().is_none(),
+                "{other:?}"
+            );
+        }
+        // A config folder that is not the run's own is refused, not read.
+        assert!(list_route(Harness::Claude, Some("/not-a-home-of-this-run"), true).is_err());
+    }
+
     #[test]
     fn t1778_both_model_list_doors_preserve_the_provider_and_reject_stale_muse() {
         let supplied = json!({
@@ -1065,7 +1142,6 @@ mod tests {
             "live::agents::tests::standin_isolation_log_begin_never_reads_a_decoy_pi_auth",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .arg("--nocapture")
         .var(CHILD, "1")
         .var(OUTSIDE, inherited.path())
@@ -1078,6 +1154,27 @@ mod tests {
         .run()
         .unwrap();
         assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
+    }
+
+    /// K3 review T-1978, 2: the roster preflight's environment names `WINDIR` beside `SystemRoot`
+    /// and the command interpreter, as every other direct read of the kit does.
+    #[test]
+    fn the_roster_preflight_is_given_the_windows_system_variables_a_program_starts_by() {
+        for name in ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "PATH"] {
+            assert!(crate::process::is_machine_variable(name), "{name}");
+        }
+        // The question's seal gives them to a read that names none of them.
+        let mut body = json!({
+            "op": "models", "kind": "codex",
+            "env": { "HOME": crate::door::made("t-").unwrap().hand_on() }
+        });
+        crate::live::ask::question_sealed(&mut body).unwrap();
+        assert!(
+            body["env"]
+                .as_object()
+                .is_some_and(|env| env.keys().any(|name| name.eq_ignore_ascii_case("PATH"))),
+            "{body}"
+        );
     }
 
     /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a
@@ -1726,5 +1823,41 @@ mod tests {
         let unread = parse(None, None).unwrap().on_machine(Some("zeewin2"), None);
         assert_eq!(unread.of(Harness::Pi).name, cheap_pi);
         assert!(!unread.line().contains("usage credits"));
+    }
+
+    /// T-1997 finding 6: every model the stand-ins play is the stand-in's, of every kind, to every
+    /// one that asks: the seat, the harness a live run installs, the preflight against a
+    /// harness's catalogue, and the stand-ins' own lists.
+    #[test]
+    fn every_stand_in_model_of_every_kind_is_the_stand_ins_to_all_who_ask() {
+        use crate::stand_in_lists::{of_roster, seat_of, Seat, MODELS};
+        for kind in ["claude-code", "codex", "devin", "pi", "muse"] {
+            for model in MODELS {
+                let row = json!({ "id": "x", "kind": kind, "model": model });
+                assert_eq!(seat_of(kind, model), Seat::StandIn, "{kind} {model}");
+                assert_eq!(
+                    harness_of(&row),
+                    None,
+                    "{kind} {model}: a harness is installed"
+                );
+                let mut asked = Vec::new();
+                validate_rows(std::slice::from_ref(&row), |harness| {
+                    asked.push(harness);
+                    Ok(Vec::new())
+                })
+                .unwrap();
+                assert!(
+                    asked.is_empty(),
+                    "{kind} {model}: the real catalogue was asked"
+                );
+                let listed = of_roster(kind, Some(&json!({ "agents": [row] })));
+                assert!(
+                    listed.iter().any(|listed| listed.id == model),
+                    "{kind} {model}: the stand-in does not list it"
+                );
+            }
+            // A model that only begins as one is the harness's.
+            assert_eq!(seat_of(kind, "fake-3"), Seat::Harness);
+        }
     }
 }

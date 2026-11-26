@@ -182,6 +182,9 @@ pub(super) struct Seen {
     pub roots: Vec<Root>,
     /// Lines a program wrote that are no frame, which a failure shows.
     pub stray: Vec<String>,
+    /// Each window the rig refused to open, by the daemon's request or the case's, and why: its
+    /// environment broke the seal, or its program needs a door of its own.
+    pub refused: Vec<(Value, String)>,
 }
 
 /// Where the paste a case catches goes ([`crate::rig::Rig::catch_paste`]).
@@ -264,7 +267,7 @@ pub(super) struct OpenHold {
 
 /// What the routers share with the case.
 #[derive(Debug, Default)]
-pub(super) struct Shared {
+pub(crate) struct Shared {
     seen: Mutex<Seen>,
     pub pending: Pending,
     /// The numbers of the requests made of the daemon and of the pane host.
@@ -275,10 +278,72 @@ pub(super) struct Shared {
     /// The daemon's looks at a window's screen are refused here while it is set.
     refusing_snapshots: AtomicBool,
     open_hold: Mutex<OpenHold>,
+    /// The pane host's whole environment, as the door gave it: every window it opens is judged
+    /// over it before the host is asked ([`crate::door::window_admitted`]). None for routers a
+    /// test makes without a host, which judge nothing.
+    host_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// Where the names the account's registry stores are read from: the door's own
+    /// ([`crate::door::stored_names`]) but in a test, which says its own.
+    names: Option<StoredNames>,
 }
 
+/// A read of the names the account's registry stores.
+pub(crate) type StoredNames = fn() -> std::result::Result<Vec<std::ffi::OsString>, String>;
+
 impl Shared {
-    pub fn seen(&self) -> MutexGuard<'_, Seen> {
+    /// The routers of a rig whose pane host has `host_env`.
+    pub fn over(host_env: Vec<(std::ffi::OsString, std::ffi::OsString)>) -> Shared {
+        Shared {
+            host_env: Some(host_env),
+            ..Shared::default()
+        }
+    }
+
+    /// These routers reading the registry's names from `names`, for a test of what a window is
+    /// sent (T-2119 B1-b: the Mac's registry stores none).
+    #[cfg(all(test, unix))]
+    pub(crate) fn naming(self, names: StoredNames) -> Shared {
+        Shared {
+            names: Some(names),
+            ..self
+        }
+    }
+
+    /// How many windows the rig refused to open.
+    #[cfg(all(test, unix))]
+    pub(crate) fn refused_count(&self) -> usize {
+        self.seen().refused.len()
+    }
+
+    /// The environment the window `body` asks for is judged on: the pane host's, the request's
+    /// `env` over it, its `dropEnv` out ([`crate::door::spawn::pane_environment`]). None for
+    /// routers a test makes without a host.
+    pub fn judged_environment(
+        &self,
+        body: &Value,
+    ) -> Option<std::result::Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String>> {
+        self.host_env
+            .as_ref()
+            .map(|host| crate::door::spawn::pane_environment(host, body, cfg!(windows)))
+    }
+
+    /// The window `body` asks for, as this rig's pane host is sent it, where it may open: why not,
+    /// where not ([`crate::door::window_to_send`], over the names the account's registry stores
+    /// now, [`crate::door::stored_names`]).
+    pub fn window_to_send(&self, body: &Value) -> std::result::Result<Value, String> {
+        match &self.host_env {
+            Some(host) => {
+                let stored = match self.names {
+                    Some(read) => read()?,
+                    None => crate::door::stored_names()?,
+                };
+                crate::door::window_to_send(host, body, &stored)
+            }
+            None => Ok(body.clone()),
+        }
+    }
+
+    pub(super) fn seen(&self) -> MutexGuard<'_, Seen> {
         self.seen.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -503,6 +568,30 @@ impl Shared {
             return;
         };
         let id = frame["id"].as_str().unwrap_or_default();
+        // The daemon's windows are judged as the case's are, before the pane host has them: one
+        // that breaks the seal is not opened, and the daemon is answered as refused.
+        let mut sent: Option<String> = None;
+        if frame["kind"] == "req" && frame["op"] == "pane.open" {
+            match self.window_to_send(&frame["body"]) {
+                Err(why) => {
+                    let mut seen = self.seen();
+                    seen.daemon += 1;
+                    seen.refused.push((frame["body"].clone(), why.clone()));
+                    drop(seen);
+                    let refused = json!({ "ok": false, "error": format!("the rig refused the window: {why}") });
+                    daemon.send(wire::response(id, "pane.open", &refused));
+                    return;
+                }
+                // The host is sent the window as the door made it, not as the daemon asked it.
+                Ok(body) if body != frame["body"] => {
+                    let mut rewritten = frame.clone();
+                    rewritten["body"] = body;
+                    sent = Some(rewritten.to_string());
+                }
+                Ok(_) => {}
+            }
+        }
+        let line = sent.as_deref().unwrap_or(line);
         {
             let mut seen = self.seen();
             seen.daemon += 1;
@@ -672,6 +761,28 @@ fn bytes_of(list: &Value) -> Option<Vec<u8>> {
 }
 
 /// The tests start `cat` for the programs on the other side of the rig.
+/// Routers over a pane host whose environment is `host_env`, with the two sinks of
+/// `tests::sinks` and what each was sent: for the door's tests of the relay's seal.
+#[cfg(all(test, unix))]
+pub(crate) fn sinks_over(
+    host_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> (
+    Shared,
+    Sink,
+    std::sync::mpsc::Receiver<String>,
+    Sink,
+    std::sync::mpsc::Receiver<String>,
+) {
+    let (host, host_lines, daemon, daemon_lines) = tests::sinks();
+    (
+        Shared::over(host_env),
+        host,
+        host_lines,
+        daemon,
+        daemon_lines,
+    )
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
@@ -682,7 +793,7 @@ mod tests {
     use crate::process::Run;
 
     /// Two sinks whose lines come out of a `cat` each, which the test reads.
-    fn sinks() -> (Sink, mpsc::Receiver<String>, Sink, mpsc::Receiver<String>) {
+    pub(super) fn sinks() -> (Sink, mpsc::Receiver<String>, Sink, mpsc::Receiver<String>) {
         fn cat() -> (Sink, mpsc::Receiver<String>, crate::process::Spawned) {
             let mut process = Run::new("/bin/cat").spawn().unwrap();
             let sink = process.sink().unwrap();

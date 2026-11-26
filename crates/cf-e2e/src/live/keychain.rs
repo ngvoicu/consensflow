@@ -39,13 +39,12 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
 use super::login::SERVICE;
-use crate::process::{own_var, Ran, Run};
-use crate::{Error, Result};
+use crate::process::own_var;
+use crate::Result;
 
 /// Whether this process belongs to the two explicitly selected hosted tests.
 pub fn hosted_test() -> bool {
@@ -70,33 +69,10 @@ pub(crate) fn watching() -> bool {
     hosted_test() || live_case()
 }
 
-/// The one way the kit starts the macOS Keychain utility. A stand-in cannot
-/// reach the real program: an accidental call fails naming its caller.
-pub fn security<I, S>(caller: &str, args: I, limit: Duration) -> Result<Ran>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    #[cfg(test)]
-    if let Some(result) = fake::next() {
-        return Ok(result);
-    }
-    assert!(watching(), "stand-in run attempted security from {caller}");
-    let mut security = Run::new("/usr/bin/security")
-        .args(args)
-        .inheriting_env()
-        .limit(limit);
-    if hosted_test() {
-        let home = crate::standin_process::inherited_home().ok_or_else(|| {
-            crate::Error::Daemon("hosted Keychain test has no inherited HOME".to_owned())
-        })?;
-        security = security.var("HOME", home);
-    }
-    security.run()
-}
+pub use crate::door::keychain::{item_names, login_item, Control, Listing, OwnItem};
 
 #[cfg(test)]
-pub(super) mod fake {
+pub(crate) mod fake {
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
@@ -204,30 +180,6 @@ pub fn gained_words(name: &str) -> String {
          (delete it with `security delete-generic-password -s \"{name}\"`; the kit never does)"
     );
     words
-}
-
-/// Deletes the item Claude Code made for `folder`, a config folder that the caller made itself for a
-/// Claude Code that it ran on purpose to show the hazard: that item and no other, by the name
-/// [`item_of`] makes of it, for the account of the user. An item with a folder's hash is never the
-/// owner's own (that one has none), and the kit deletes no other (a run that leaves one is failed
-/// by the guard, which names it for the owner to delete). Whether it was there; none where the
-/// machine has no Keychain.
-pub fn forget(folder: &Path) -> Result<bool> {
-    if !cfg!(target_os = "macos") {
-        return Ok(false);
-    }
-    let name = item_of(folder);
-    let user = own_var("USER")
-        .filter(|user| !user.is_empty())
-        .ok_or_else(|| {
-            Error::Daemon("this run has no USER, which names the account of the item".to_owned())
-        })?;
-    let ran = security(
-        "keychain::forget",
-        ["delete-generic-password", "-s", &name, "-a", &user],
-        Duration::from_secs(60),
-    )?;
-    Ok(ran.code == Some(0))
 }
 
 /// The name of the program the stand-in for `security` is.

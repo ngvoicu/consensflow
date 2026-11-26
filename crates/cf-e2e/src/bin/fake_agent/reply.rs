@@ -212,7 +212,7 @@ pub enum Reply {
 pub fn run_cf(words: &[String]) -> String {
     match Run::new(cf_e2e::process::as_a_shell_finds("cf"))
         .args(words)
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .unlimited()
         .run()
     {
@@ -250,7 +250,7 @@ fn ask_through_hook(window: &Window, questions: &Value) -> Result<String, String
         "tool_input": { "questions": questions },
     });
     let run = shell(command)
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .unlimited()
         .input(event.to_string());
     let ran = run.run().map_err(|failed| failed.to_string())?;
@@ -292,7 +292,7 @@ fn ask_through_hook(window: &Window, questions: &Value) -> Result<String, String
 /// A command line run by the platform's shell.
 #[cfg(unix)]
 fn shell(command: &str) -> Run {
-    Run::new("/bin/sh").args(["-c", command])
+    Run::shell_line(command)
 }
 
 /// A hook's command line run as Claude Code runs one on Windows: by Git Bash's `bash -c`
@@ -831,7 +831,7 @@ mod tests {
         // A place that is a file, not a folder, cannot be saved in: the door makes a folder where
         // there is none, so a missing one is no failure.
         let file = folder.path().join("none");
-        std::fs::write(&file, "").unwrap();
+        cf_e2e::door::write(&file, "").unwrap();
         assert!(saved_in(&file, "a.png", "x")
             .unwrap_err()
             .starts_with("SAVED a.png: "));
@@ -1066,7 +1066,7 @@ mod tests {
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         let settings = folder.path().join("settings.json");
         // A hook that answers the question it is asked with its own words.
-        std::fs::write(
+        cf_e2e::door::write(
             &settings,
             json!({ "hooks": { "PreToolUse": [
                 { "matcher": "Other", "hooks": [{ "command": "exit 9" }] },
@@ -1092,7 +1092,7 @@ mod tests {
     fn a_hook_that_answers_nothing_is_unanswered_with_its_exit_and_what_it_said() {
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         let settings = folder.path().join("settings.json");
-        std::fs::write(
+        cf_e2e::door::write(
             &settings,
             json!({ "hooks": { "PreToolUse": [
                 { "matcher": "AskUserQuestion", "hooks": [{ "command": "cat > /dev/null; echo no way >&2; exit 2" }] },

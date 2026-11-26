@@ -40,9 +40,10 @@ extern "C" fn clean_up() {
     }
 }
 
-/// All variables by which a harness may find its home, under `home`.
-pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 13] {
-    [
+/// All variables by which a harness may find its home, under `home`. On Windows the two halves
+/// of the profile path, `HOMEDRIVE` and `HOMEPATH`, are of the home too.
+pub fn home_vars(home: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut vars = vec![
         ("HOME", home.to_path_buf()),
         ("USERPROFILE", home.to_path_buf()),
         ("CFFIXED_USER_HOME", home.to_path_buf()),
@@ -56,7 +57,41 @@ pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 13] {
         ("XDG_CACHE_HOME", home.join(".cache")),
         ("APPDATA", home.join("AppData/Roaming")),
         ("LOCALAPPDATA", home.join("AppData/Local")),
-    ]
+    ];
+    if cfg!(windows) {
+        if let Some((drive, path)) = drive_and_path(home) {
+            vars.push(("HOMEDRIVE", PathBuf::from(drive)));
+            vars.push(("HOMEPATH", PathBuf::from(path)));
+        }
+    }
+    vars
+}
+
+/// A Windows path as `HOMEDRIVE` and `HOMEPATH` say it: `C:` and `\Users\x`, with the verbatim
+/// prefix taken as the plain one. A profile on a UNC path (`\\server\share\x`, or `\\?\UNC\server\share\x`)
+/// has no drive: its `HOMEDRIVE` is empty and its `HOMEPATH` is the whole path, as Codex's own home
+/// is split (`live::codex`), so that neither names the caller's profile. None for a path that is
+/// neither.
+pub fn drive_and_path(home: &Path) -> Option<(String, String)> {
+    let text = home.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return Some((String::new(), format!(r"\\{unc}")));
+    }
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let bytes = text.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        let rest = text[2..].replace('/', "\\");
+        let rest = if rest.starts_with('\\') {
+            rest
+        } else {
+            format!("\\{rest}")
+        };
+        Some((text[..2].to_owned(), rest))
+    } else if text.starts_with(r"\\") {
+        Some((String::new(), text.to_owned()))
+    } else {
+        None
+    }
 }
 
 /// Begin an offline test process. Called from the test binary's constructor,
@@ -73,6 +108,15 @@ pub fn start(allow_live_matrix: bool) {
         return;
     }
 
+    // The top-level process does not inherit another run's ownership claims nor its roots; a
+    // test's child keeps what that test handed it through the door. The account is read now,
+    // before this process gives itself its stand-in homes.
+    if std::env::var_os("CF_E2E_STAND_IN").is_none() {
+        std::env::remove_var(crate::door::MADE_ROOTS);
+        std::env::remove_var(crate::door::account::PROTECTED_FILE);
+        std::env::remove_var(crate::door::account::PROTECTED_DIGEST);
+    }
+    crate::door::account::begin();
     INHERITED_HOME
         .set(std::env::var_os("HOME"))
         .unwrap_or_else(|_| panic!("inherited HOME selected twice"));
@@ -98,16 +142,14 @@ pub fn start(allow_live_matrix: bool) {
         .set(launchers)
         .unwrap_or_else(|_| panic!("stand-in inherited launcher folders were recorded twice"));
 
-    // The top-level process does not inherit another run's ownership claims.
-    // A test's child retains what that test handed it through the door.
-    if std::env::var_os("CF_E2E_STAND_IN").is_none() {
-        std::env::remove_var(crate::door::MADE_ROOTS);
-    }
     let forbidden = INHERITED_HARNESS_HOMES
         .get()
         .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded"));
     let handed = checked_handed_roots(forbidden);
     let parent = process_temp_parent();
+    if let Err(refusal) = temp_parent_is_outside(&parent, forbidden) {
+        panic!("{refusal}");
+    }
     require_audit_file(&parent, &handed, forbidden);
     let fixture_root = fixture_home
         .as_deref()
@@ -271,47 +313,35 @@ fn fixture_root(home: &Path, temp: &Path, forbidden: &[PathBuf]) -> PathBuf {
     root.to_path_buf()
 }
 
-/// Collect the inherited harness homes without inspecting the filesystem.
-#[allow(clippy::disallowed_methods)] // Read the inherited paths before replacing the environment.
+/// The protected roots of the account the run began in, as the door holds them
+/// ([`crate::door::account`]): the table of stores read on the account's environment by the run's
+/// first process, or the run's file of them in a child. Never built from this process's own
+/// environment once it is a stand-in's.
 fn inherited_harness_homes() -> Vec<PathBuf> {
-    let mut forbidden: Vec<PathBuf> = [
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "PI_CODING_AGENT_DIR",
-        "PI_CODING_AGENT_SESSION_DIR",
-    ]
-    .into_iter()
-    .filter_map(inherited_path)
-    .collect();
-    for name in ["HOME", "USERPROFILE"] {
-        if let Some(home) = inherited_path(name) {
-            for suffix in [
-                ".claude",
-                ".codex",
-                ".pi",
-                ".config/muse",
-                ".config/devin",
-                ".local/share/devin",
-            ] {
-                forbidden.push(home.join(suffix));
-            }
-        }
+    crate::door::account::protected()
+}
+
+/// What the table of stores holds below `home` for an account whose only variable is that home:
+/// for the tests of what a store's spelling reaches.
+#[cfg(test)]
+fn personal_harness_homes(home: &Path) -> Vec<PathBuf> {
+    let home = home.as_os_str().to_owned();
+    crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
+        .into_iter()
+        .map(|root| root.path)
+        .collect()
+}
+
+/// Whether the folder a run would make its homes in is outside every protected one.
+fn temp_parent_is_outside(parent: &Path, forbidden: &[PathBuf]) -> Result<(), String> {
+    if safe_path_entry(parent, forbidden) {
+        Ok(())
+    } else {
+        Err(format!(
+            "stand-in temporary lookup: {} is inside a protected harness home",
+            parent.display()
+        ))
     }
-    for name in [
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-        "XDG_CACHE_HOME",
-        "APPDATA",
-        "LOCALAPPDATA",
-    ] {
-        if let Some(base) = inherited_path(name) {
-            for harness in ["claude", "codex", "pi", "devin", "muse"] {
-                forbidden.push(base.join(harness));
-            }
-        }
-    }
-    forbidden
 }
 
 /// An inherited path, made absolute without reading it.
@@ -341,8 +371,7 @@ fn bounded_path(forbidden: &[PathBuf]) -> (std::ffi::OsString, Option<PathBuf>) 
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let launchers = inherited_launchers();
     let safe = std::env::split_paths(&inherited).filter(|folder| {
-        !launchers.iter().any(|home| same_or_inside(folder, home))
-            && safe_path_entry(folder, forbidden)
+        !launchers.iter().any(|home| may_reach(folder, home)) && safe_path_entry(folder, forbidden)
     });
     let path =
         std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path"));
@@ -402,33 +431,141 @@ pub(crate) fn require_search_path(value: &str, lookup: &str) {
     }
 }
 
-/// Compare absolute path components without consulting any path or following links.
+/// Whether `folder` is `home` or below it, **by every account of it**: the path the way it is
+/// spelled, and the folder it really is, links and `..` followed as the system follows them
+/// (B19). Used where a path is let in (the run's own folders): a `..` that climbs out of the
+/// run, a link out of it, and a spelling that is another folder's are all "not inside".
 fn same_or_inside(folder: &Path, home: &Path) -> bool {
+    spelled_inside(folder, home) && spelled_inside(&real_of(folder), &real_of(home))
+}
+
+/// Whether `folder` could be `home` or below it by any account of it: as spelled, with its `..`
+/// settled, or as the folder it really is. Used where a path is kept out of a harness's home
+/// (B19): any one account that puts it there is enough.
+fn may_reach(folder: &Path, home: &Path) -> bool {
+    spelled_inside(folder, home)
+        || spelled_inside(&settled(folder), &settled(home))
+        || spelled_inside(&real_of(folder), &real_of(home))
+}
+
+/// Compare absolute path components, as spelled, without consulting any path or following links,
+/// Windows' verbatim prefix (`\\?\C:`) taken as the plain one.
+fn spelled_inside(folder: &Path, home: &Path) -> bool {
     let Ok(folder) = std::path::absolute(folder) else {
         return false;
     };
     let Ok(home) = std::path::absolute(home) else {
         return false;
     };
-    let mut parts = folder.components();
-    home.components().all(|part| {
-        parts.next().is_some_and(|candidate| {
-            if cfg!(any(windows, target_os = "macos")) {
-                candidate.as_os_str().to_string_lossy().to_lowercase()
-                    == part.as_os_str().to_string_lossy().to_lowercase()
-            } else {
-                candidate == part
+    let words = |path: &Path| -> Vec<String> {
+        path.components()
+            .map(|part| match part {
+                std::path::Component::Prefix(prefix) => {
+                    use std::path::Prefix::{Verbatim, VerbatimDisk, VerbatimUNC};
+                    let text = prefix.as_os_str().to_string_lossy().to_lowercase();
+                    match prefix.kind() {
+                        VerbatimDisk(_) | Verbatim(_) | VerbatimUNC(..) => {
+                            text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+                        }
+                        _ => text,
+                    }
+                }
+                other => {
+                    let text = other.as_os_str().to_string_lossy();
+                    if cfg!(any(windows, target_os = "macos")) {
+                        text.to_lowercase()
+                    } else {
+                        text.into_owned()
+                    }
+                }
+            })
+            .collect()
+    };
+    let (mut parts, home) = (words(&folder).into_iter(), words(&home));
+    home.iter().all(|part| parts.next().as_ref() == Some(part))
+}
+
+/// `path`, absolute, with its `.` and `..` words settled in the way a system settles them.
+fn settled(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut out = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
             }
-        })
-    })
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The folder `path` really is: as the system says where it is there (its links and `..`
+/// followed as it follows them: `link/..` is the parent of what the link ends in); where it is
+/// not, its part that is there followed through every link, the part that is not appended, its
+/// `..` settled.
+fn real_of(path: &Path) -> PathBuf {
+    if let Ok(found) = std::fs::canonicalize(path) {
+        return found;
+    }
+    // In the order the system walks it: each part that is there is followed through its links
+    // before the next one, so a `..` after a link climbs out of what the link ends in. A part
+    // that is not there is appended as it is.
+    use std::path::Component;
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut out = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            Component::Normal(name) => {
+                out.push(name);
+                if let Ok(found) = std::fs::canonicalize(&out) {
+                    out = found;
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn plain_absolute(folder: &Path) -> bool {
     folder.is_absolute()
 }
 
+/// The real path of a protected root, kept: a root is one folder for the life of the process, and
+/// walking a path that is not there costs a system call for each of its parts (on Windows, a
+/// good many milliseconds: the door asks this for every folder it makes).
+fn real_of_root(home: &Path) -> PathBuf {
+    static KEPT: OnceLock<Mutex<std::collections::HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let kept = KEPT.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(real) = kept
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(home)
+    {
+        return real.clone();
+    }
+    let real = real_of(home);
+    kept.lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(home.to_path_buf(), real.clone());
+    real
+}
+
 fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
-    !forbidden.iter().any(|home| same_or_inside(folder, home))
+    // The folder's account of itself once, whatever the number of roots.
+    let (settled_folder, real_folder) = (settled(folder), real_of(folder));
+    !forbidden.iter().any(|home| {
+        spelled_inside(folder, home)
+            || spelled_inside(&settled_folder, &settled(home))
+            || spelled_inside(&real_folder, &real_of_root(home))
+    })
 }
 
 /// Whether an inherited harness-home directory may be inspected by discovery.
@@ -439,7 +576,27 @@ pub(crate) fn outside_inherited_harness_homes(path: &Path) -> bool {
     let forbidden = INHERITED_HARNESS_HOMES
         .get()
         .unwrap_or_else(|| panic!("stand-in inherited homes not recorded"));
+    // Muse's launcher is the one program a stand-in run may look for: the echo cases start it
+    // inside the kit's sandbox. The door still refuses every write to it (it stays a root).
+    let launchers = muse_launcher_roots();
+    if launchers.iter().any(|launcher| launcher == path) {
+        return true;
+    }
     safe_path_entry(path, forbidden)
+}
+
+/// Muse's launcher and its version file, below the account's home as this process inherited it.
+fn muse_launcher_roots() -> Vec<PathBuf> {
+    use crate::live::stores::{Kind, Whose};
+    let Some(Some(home)) = INHERITED_HOME.get() else {
+        return Vec::new();
+    };
+    let home = home.clone();
+    crate::live::stores::roots_for(&|name| (name == "HOME").then(|| home.clone()), None)
+        .into_iter()
+        .filter(|root| root.store.whose == Whose::Muse && root.store.kind == Kind::Program)
+        .map(|root| root.path)
+        .collect()
 }
 
 /// Check an inherited PATH candidate before the harness search inspects it.
@@ -561,9 +718,11 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 }
 
 /// A synthetic foreign folder must be outside every root handed to this test
-/// process, including the parent's root when the test runs again under audit.
-#[cfg(test)]
-pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
+/// process, including the parent's root when the test runs again under audit. The suites
+/// ask for it too (`test-support`): what a guard must refuse is never what this run made.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn unowned_tempdir() -> tempfile::TempDir {
     let temp = std::env::temp_dir();
     let parent = temp
         .ancestors()
@@ -577,9 +736,69 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
     foreign
 }
 
+/// A fixture writes only below a decoy folder ([`unowned_tempdir`]) that the door refuses: any other
+/// path is a mistake of the fixture, and is not written.
+#[cfg(any(test, feature = "test-support"))]
+fn is_in_the_decoy(path: &Path) {
+    assert!(
+        path.ancestors().any(|part| part
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("foreign-fixture-"))),
+        "{} is below no decoy folder",
+        path.display()
+    );
+    assert!(
+        crate::door::writable(path, true).is_err(),
+        "{} is a place the door lets a run write",
+        path.display()
+    );
+}
+
+/// A file of a synthetic foreign folder ([`unowned_tempdir`]), made as the foreign party made it:
+/// the door refuses a write there, so the fixture is not written through it.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn foreign_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+    let path = path.as_ref();
+    is_in_the_decoy(path);
+    std::fs::write(path, contents).expect("write a file of a synthetic foreign folder");
+}
+
+/// A folder of a synthetic foreign folder, made as [`foreign_write`] makes a file.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(clippy::expect_used)] // A fixture of the tests': it fails the test that asks.
+pub fn foreign_dir(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    is_in_the_decoy(path);
+    std::fs::create_dir(path).expect("make a folder of a synthetic foreign folder");
+}
+
 #[cfg(test)]
 mod tests {
-    use super::safe_path_entry;
+    use super::{drive_and_path, personal_harness_homes, safe_path_entry};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn the_two_halves_of_a_windows_profile_path_are_of_the_home() {
+        assert_eq!(
+            drive_and_path(Path::new(r"C:\Users\kit\h-1\home")),
+            Some(("C:".to_owned(), r"\Users\kit\h-1\home".to_owned()))
+        );
+        assert_eq!(
+            drive_and_path(Path::new(r"\\?\D:\run\home")),
+            Some(("D:".to_owned(), r"\run\home".to_owned()))
+        );
+        assert_eq!(drive_and_path(Path::new("/run/home")), None);
+        // A profile on a UNC path has no drive: its path is the whole of it, in either spelling.
+        assert_eq!(
+            drive_and_path(Path::new(r"\\server\share\run\home")),
+            Some((String::new(), r"\\server\share\run\home".to_owned()))
+        );
+        assert_eq!(
+            drive_and_path(Path::new(r"\\?\UNC\server\share\run\home")),
+            Some((String::new(), r"\\server\share\run\home".to_owned()))
+        );
+    }
 
     #[test]
     fn t1778_standin_home_also_bounds_macos_foundation() {
@@ -591,8 +810,17 @@ mod tests {
         assert_eq!(fixed.as_deref(), Some(home));
     }
 
+    /// A stand-in whose case names no home is given the run's own, by the spawn door, before it
+    /// could search a path with none: no program the door starts is without a home, and none has
+    /// the caller's.
     #[test]
     fn standin_isolation_missing_inherited_home_refuses_before_searching_path() {
+        const CHILD: &str = "CF_T2007_NO_HOME_CHILD";
+        if crate::process::own_var(CHILD).is_some() {
+            let home = crate::door::account::project_home();
+            assert_eq!(home, None, "a child has the person's home");
+            return;
+        }
         let root = crate::door::made("missing-home-").unwrap();
         let path = root.path().join(".codex").join("bin");
         crate::door::make_dir(&path).unwrap();
@@ -601,21 +829,20 @@ mod tests {
             "standin_process::tests::standin_isolation_missing_inherited_home_refuses_before_searching_path",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
-        .arg("--list")
-        .var("PATH", &path)
-        .without("CF_E2E_STAND_IN");
+        .var(CHILD, "1")
+        .var("PATH", &path);
         for (name, _) in super::home_vars(root.path()) {
             command = command.without(name);
         }
+        let env = command.environment().unwrap();
+        let home = env
+            .iter()
+            .find(|(name, _)| name == "HOME")
+            .map(|(_, value)| PathBuf::from(value))
+            .expect("the door gave no HOME");
+        assert!(crate::door::is_made_or_below(&home), "{}", home.display());
         let output = command.run().unwrap();
-        assert_ne!(output.code, Some(0), "missing inherited home was accepted");
-        assert!(
-            output.stderr.contains("stand-in inherited HOME lookup"),
-            "{}{}",
-            output.stdout,
-            output.stderr
-        );
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
     #[test]
@@ -639,7 +866,6 @@ mod tests {
             "standin_process::tests::standin_isolation_inherited_account_home_is_not_searched_on_path",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var("HOME", &home)
         .var("USERPROFILE", &home)
         .var("PATH", &target)
@@ -659,7 +885,6 @@ mod tests {
             "standin_process::tests::standin_isolation_unowned_audit_file_is_refused_before_it_is_opened",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .arg("--list")
         .var(crate::door::AUDIT, "1")
         .var(crate::door::AUDIT_MADE, "1")
@@ -680,16 +905,17 @@ mod tests {
         );
     }
 
+    /// A stand-in told a layout of no run's is not started at all: the spawn door's seal refuses
+    /// a home that is no folder this run made, before the child could look at it.
     #[test]
     fn standin_isolation_fixture_home_must_be_handed_down() {
         let temp = std::env::temp_dir();
         let foreign = temp.parent().unwrap().join("synthetic-foreign-layout");
-        let output = crate::process::case_of(
+        let refused = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var("CF_E2E_STAND_IN", "1")
         .var(super::FIXTURE_HOME, foreign.join("home"))
         .var("HOME", foreign.join("home"))
@@ -698,16 +924,14 @@ mod tests {
         .var("TMP", foreign.join("temp"))
         .var("TEMP", foreign.join("temp"))
         .run()
-        .unwrap();
-        assert_ne!(output.code, Some(0), "unowned fixture was accepted");
+        .expect_err("a stand-in on a layout of no run's was started");
         assert!(
-            output
-                .stderr
-                .contains("stand-in fixture home lookup: layout not handed down"),
-            "{}{}",
-            output.stdout,
-            output.stderr
+            refused
+                .to_string()
+                .contains("which is no folder this run made"),
+            "{refused}"
         );
+        assert!(!foreign.exists(), "the foreign layout was made");
     }
 
     #[test]
@@ -732,5 +956,150 @@ mod tests {
         let alias = root.path().join("SYNTHETIC-OWNER/.CODEX/bin");
         assert!(super::same_or_inside(&alias, &forbidden));
         assert!(!safe_path_entry(&alias, &[forbidden]));
+    }
+
+    /// B19: the plain component check is no defence against the spellings that reach a folder
+    /// by another name: a `..` that climbs out of the run, a link inside the run that ends in a
+    /// harness home, and a link above one.
+    #[cfg(unix)]
+    #[test]
+    fn b19_a_path_that_climbs_or_links_into_a_harness_home_is_not_safe_nor_inside_the_run() {
+        let root = crate::door::made("path-alias-").unwrap();
+        let run = root.path().join("run");
+        let owner = root.path().join("owner");
+        let forbidden = owner.join(".codex");
+        crate::door::make_dir(&run).unwrap();
+        crate::door::make_dir(&forbidden).unwrap();
+        // A `..` that leaves the run for the harness home beside it.
+        let climbing = run.join("home/../../owner/.codex/config.toml");
+        assert!(!safe_path_entry(
+            &climbing,
+            std::slice::from_ref(&forbidden)
+        ));
+        assert!(
+            !super::same_or_inside(&climbing, &run),
+            "a climbing path is inside the run"
+        );
+        // A link in the run that ends in the home, and a path through it.
+        let link = run.join("link");
+        crate::door::symlink(&forbidden, &link).unwrap();
+        assert!(!safe_path_entry(
+            &link.join("auth.json"),
+            std::slice::from_ref(&forbidden)
+        ));
+        assert!(!super::same_or_inside(&link.join("auth.json"), &run));
+        // `link/..` is the parent of what the link ends in, not of the link: a path that settles
+        // to the run by its words and is a harness home by the system's.
+        let deep = forbidden.join("sub");
+        crate::door::make_dir(&deep).unwrap();
+        let through = run.join("through");
+        crate::door::symlink(&deep, &through).unwrap();
+        let parent_of_link = through.join("..");
+        assert!(!safe_path_entry(
+            &parent_of_link,
+            std::slice::from_ref(&forbidden)
+        ));
+        assert!(!super::same_or_inside(&parent_of_link, &run));
+        // A new file beside a linked folder's real parent: the leaf is not there, the parent is
+        // the harness home by the system's account.
+        let fresh = through.join("../fresh.json");
+        assert!(!safe_path_entry(&fresh, std::slice::from_ref(&forbidden)));
+        assert!(!super::same_or_inside(&fresh, &run));
+        let fresh_deep = link.join("nowhere/../fresh.json");
+        assert!(!safe_path_entry(
+            &fresh_deep,
+            std::slice::from_ref(&forbidden)
+        ));
+        // A link to the folder above the home: the home is below it.
+        let above = run.join("above");
+        crate::door::symlink(&owner, &above).unwrap();
+        assert!(!safe_path_entry(&above.join(".codex/bin"), &[forbidden]));
+        // What is the run's, spelled plainly, is still its own and safe.
+        let plain = run.join("home/x");
+        assert!(super::same_or_inside(&plain, &run));
+        assert!(safe_path_entry(&plain, &[owner.join(".codex")]));
+    }
+
+    #[test]
+    fn the_protected_homes_hold_the_mac_muse_store_the_keychains_gemini_and_the_claude_file() {
+        let home = Path::new(if cfg!(windows) {
+            r"C:\decoy\owner"
+        } else {
+            "/decoy/owner"
+        });
+        let held = personal_harness_homes(home);
+        for suffix in [
+            "Library/Application Support/Muse/session-name-authority/x",
+            "Library/Keychains/login.keychain-db",
+            ".gemini/antigravity-cli/brain",
+            ".claude.json",
+        ] {
+            assert!(
+                !safe_path_entry(&home.join(suffix), &held),
+                "{suffix} is not protected"
+            );
+        }
+        assert!(safe_path_entry(&home.join("Library/Caches/x"), &held));
+    }
+
+    /// The door makes no folder of the run's in a place inside a protected root, whatever made
+    /// the place the parent: through a link, or by a `..`.
+    #[cfg(unix)]
+    #[test]
+    fn the_door_makes_no_folder_inside_a_protected_home() {
+        let root = crate::door::made("door-protected-").unwrap();
+        let held = root.path().join("owner/.claude");
+        crate::door::make_dir(&held).unwrap();
+        let link = root.path().join("tmp-link");
+        crate::door::symlink(&held, &link).unwrap();
+        crate::door::account::TEST_PROTECTED
+            .lock()
+            .unwrap()
+            .push(held.clone());
+        let direct = crate::door::made_in(&held.join("tmp"), "h-");
+        let through = crate::door::made_in(&link.join("sub/../tmp"), "h-");
+        crate::door::account::TEST_PROTECTED
+            .lock()
+            .unwrap()
+            .retain(|path| path != &held);
+        for refused in [direct, through] {
+            let error = refused.expect_err("a folder was made inside a protected root");
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        }
+        assert!(!held.join("tmp").exists());
+        assert!(std::fs::read_dir(&held).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_temporary_parent_inside_a_protected_home_is_refused_before_a_home_is_made() {
+        let root = crate::door::made("temp-parent-").unwrap();
+        let owner = root.path().join("owner");
+        let held = root.path().join("owner/.codex");
+        crate::door::make_dir(&held).unwrap();
+        let link = root.path().join("tmp-link");
+        crate::door::symlink(&held, &link).unwrap();
+        let forbidden = [held.clone()];
+        assert!(super::temp_parent_is_outside(&held.join("tmp"), &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&link, &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&link.join("x/../y"), &forbidden).is_err());
+        assert!(super::temp_parent_is_outside(&owner.join("elsewhere"), &forbidden).is_ok());
+    }
+
+    /// B19, on Windows: a verbatim spelling is the same folder as its plain one, and a
+    /// folder reached by its 8.3 short name is the folder.
+    #[cfg(windows)]
+    #[test]
+    fn b19_a_verbatim_spelling_of_a_harness_home_is_that_home() {
+        let root = crate::door::made("path-verbatim-").unwrap();
+        let forbidden = root.path().join("owner").join(".codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let plain = forbidden.join("bin");
+        let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", plain.display()));
+        assert!(!safe_path_entry(&plain, std::slice::from_ref(&forbidden)));
+        assert!(
+            !safe_path_entry(&verbatim, std::slice::from_ref(&forbidden)),
+            "the verbatim spelling was taken for another folder"
+        );
     }
 }

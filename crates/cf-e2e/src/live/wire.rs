@@ -137,18 +137,18 @@ mod tests {
 
     #[test]
     fn the_wire_of_a_run_ends_with_what_a_command_left_reporting_after_its_turn_ended() {
-        let home = tempfile::tempdir().unwrap();
+        let home = crate::door::made("t-").unwrap();
         // No Devin launch, no wire.
         assert_eq!(tail(home.path()), None);
         let launch = home.path().join("integrations/devin/launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        crate::door::make_dir(&launch).unwrap();
         assert_eq!(tail(home.path()), None, "a launch that wrote no log");
         let chunk = record(json!({ "update": { "sessionUpdate": "agent_message_chunk" } }));
         let ended = record(json!({ "sessionId": "s", "cause": "complete" }));
         let update = record(json!({ "update": { "sessionUpdate": "tool_call_update" } }));
         let lines = [&chunk, &chunk, &ended, &update, &update, &update];
         let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
-        std::fs::write(launch.join("wire.jsonl"), text).unwrap();
+        crate::door::write(launch.join("wire.jsonl"), text).unwrap();
         assert_eq!(
             tail(home.path()).as_deref(),
             Some("6 wire records: agent_message_chunk ×2, cause:complete, tool_call_update ×3")

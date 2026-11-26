@@ -83,7 +83,7 @@ fn made(db: &Connection) -> rusqlite::Result<()> {
 /// Enter, the second it is in, as Devin 3000.11.92 writes it whether a turn is at work or
 /// not (T-102, probed live).
 pub fn submitted(file: &Path, session: &str, text: &str) -> Result<(), String> {
-    let db = Connection::open(file).map_err(said)?;
+    let db = cf_e2e::door::database::write(file).map_err(|failed| failed.to_string())?;
     db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
     let second = jiff::Timestamp::now().as_second();
     patiently(|| {
@@ -104,7 +104,7 @@ impl Store {
         if let Some(folder) = file.parent() {
             cf_e2e::door::make_dir(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
         }
-        let db = Connection::open(file).map_err(said)?;
+        let db = cf_e2e::door::database::write(file).map_err(|failed| failed.to_string())?;
         db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
         made(&db).map_err(said)?;
         let (head, messages) = patiently(|| {
@@ -317,7 +317,7 @@ mod tests {
 
     /// What another connection reads of the session: its head, and its nodes.
     fn read(file: &Path, session: &str) -> (Option<String>, Vec<Node>) {
-        let db = Connection::open(file).unwrap();
+        let db = cf_e2e::door::database::write(file).unwrap();
         let head = db
             .query_row(
                 "SELECT main_chain_id FROM sessions WHERE id = ?",
@@ -491,11 +491,7 @@ mod tests {
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("hello", "client-1").unwrap();
         // Read-only, and never waiting on a writer, as the daemon reads it.
-        let reader = Connection::open_with_flags(
-            &file,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .unwrap();
+        let reader = cf_e2e::door::database::read(&file).unwrap();
         reader.busy_timeout(Duration::ZERO).unwrap();
         let seen: i64 = reader
             .query_row("SELECT count(*) FROM message_nodes", [], |row| row.get(0))
@@ -512,11 +508,11 @@ mod tests {
     fn a_store_another_window_holds_while_it_makes_it_is_made_once_that_window_lets_go() {
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
-        let holder = Connection::open(&file).unwrap();
+        let holder = cf_e2e::door::database::write(&file).unwrap();
         holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
         // No busy handler: SQLite calls none for the change of a new file into WAL mode,
         // which is what the windows of the dry run met.
-        let maker = Connection::open(&file).unwrap();
+        let maker = cf_e2e::door::database::write(&file).unwrap();
         maker.busy_timeout(Duration::ZERO).unwrap();
         let letting_go = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
@@ -561,7 +557,7 @@ mod tests {
         let mut writing = Store::open(&file, "calm-river").unwrap();
         // A window whose commit waits for a slow disk holds the write lock for seconds, and
         // SQLite's own wait gives up on it after five (dry run 2026-10-15, CI run 40195925291).
-        let holder = Connection::open(&file).unwrap();
+        let holder = cf_e2e::door::database::write(&file).unwrap();
         holder.execute_batch("BEGIN IMMEDIATE").unwrap();
         let letting_go = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(6));

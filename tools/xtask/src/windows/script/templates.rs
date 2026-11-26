@@ -118,9 +118,7 @@ $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorA
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
 Set-Location $dir
 $ErrorActionPreference = 'Continue'
-$env:«test_machine» = «machine»
-Write-Output "== test machine: $env:«test_machine»"
-«limits»$steps = @(«steps»)
+«marker»«limits»$steps = @(«steps»)
 «packages»foreach ($step in $steps) {
   Write-Output "== $step"
   cmd /c "$step 2>&1"

@@ -217,8 +217,7 @@ mod tests {
         // waits once for the error output's end, held open here by a process the stranger
         // left. A look waits for nothing: it ends before that process does.
         let mut stranger = Stranger {
-            spawned: Run::new("/bin/sh")
-                .args(["-c", "printf said >&2; sleep 4 & exit 0"])
+            spawned: Run::fixture_script("printf said >&2; sleep 4 & exit 0")
                 .spawn()
                 .unwrap(),
             released: false,

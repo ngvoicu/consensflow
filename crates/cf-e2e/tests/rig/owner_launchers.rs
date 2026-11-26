@@ -15,8 +15,6 @@ use std::fs;
 use std::path::PathBuf;
 
 use cf_e2e::live::{self, Harness, Installed};
-#[cfg(target_os = "macos")]
-use cf_e2e::process::own_var;
 use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};
@@ -53,18 +51,18 @@ impl cf_e2e::rig::ClaudeConfig for Folder {
 
 /// A pretend owner whose Claude Code launcher is a file (`%USERPROFILE%\.local\bin\claude.exe`).
 struct Owner {
-    home: tempfile::TempDir,
+    home: cf_e2e::door::Made,
 }
 
 impl Owner {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let owner = Self {
-            home: tempfile::tempdir()?,
+            home: cf_e2e::door::made("t-")?,
         };
-        fs::create_dir_all(owner.kit())?;
+        cf_e2e::door::make_dir(owner.kit())?;
         let launcher = owner.launcher();
-        fs::create_dir_all(launcher.parent().ok_or("a launcher has a folder")?)?;
-        fs::write(&launcher, "claude-code-binary")?;
+        cf_e2e::door::make_dir(launcher.parent().ok_or("a launcher has a folder")?)?;
+        cf_e2e::door::write(&launcher, "claude-code-binary")?;
         Ok(owner)
     }
 
@@ -110,7 +108,7 @@ fn a_run_that_overwrites_a_launcher_that_is_a_file_fails_the_rig_that_ends_and_n
     let owner = Owner::new()?;
     let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
     // An updater that installed itself over the owner's copy: no link moved, the bytes differ.
-    fs::write(owner.launcher(), "a newer claude-code-binary")?;
+    cf_e2e::door::write(owner.launcher(), "a newer claude-code-binary")?;
     let failed = rig.close().unwrap_err().to_string();
     assert!(
         failed.contains("THE RUN CHANGED THE OWNER'S CLAUDE LAUNCHER"),
@@ -158,57 +156,35 @@ fn the_windows_of_a_rig_are_told_to_update_no_harness() -> Outcome {
 // Keychain; the case writes one item of its own, of the name Claude Code would give a throwaway
 // folder, and deletes that item by that name.
 
-/// A Keychain item of the name Claude Code gives a config folder, made here and deleted by that
-/// name when this is dropped, however the case ends.
+/// A Keychain item of the name Claude Code gives a config folder, made here by the control (an
+/// item this run issued, and no other) and deleted by that name when this is dropped, however the
+/// case ends.
 #[cfg(target_os = "macos")]
 struct Item {
+    own: Option<live::keychain::OwnItem>,
     name: String,
-    user: String,
+    control: live::keychain::Control,
 }
 
 #[cfg(target_os = "macos")]
 impl Item {
     fn make(folder: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let name = live::keychain::item_of(folder);
-        let user = own_var("USER").ok_or("no USER")?;
-        let made = live::keychain::security(
-            "owner_launchers::Item::make",
-            [
-                "add-generic-password",
-                "-s",
-                &name,
-                "-a",
-                &user,
-                "-w",
-                "a made-up value",
-            ],
-            std::time::Duration::from_secs(60),
-        )?;
-        if made.code != Some(0) {
-            return Err(format!(
-                "security could not make the item {name}: code {:?}, timed out {}, stderr: {}",
-                made.code, made.timed_out, made.stderr
-            )
-            .into());
-        }
-        Ok(Self { name, user })
+        let control = live::keychain::Control::required_for("owner_launchers::Item::make")?;
+        let own = control.make_item(folder)?;
+        Ok(Self {
+            name: own.name().to_owned(),
+            own: Some(own),
+            control,
+        })
     }
 }
 
 #[cfg(target_os = "macos")]
 impl Drop for Item {
     fn drop(&mut self) {
-        let _ = live::keychain::security(
-            "owner_launchers::Item::drop",
-            [
-                "delete-generic-password",
-                "-s",
-                &self.name,
-                "-a",
-                &self.user,
-            ],
-            std::time::Duration::from_secs(60),
-        );
+        if let Some(own) = self.own.take() {
+            let _ = own.forget(&self.control);
+        }
     }
 }
 
@@ -221,7 +197,7 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
     let owner = Owner::new()?;
     let rig = Rig::start(live::rig(&[owner.plain_claude()], FAKE_AGENT))?;
     // What a Claude Code writes in the Keychain for a throwaway config folder, after the rig began.
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("t-")?;
     let item = Item::make(folder.path())?;
     let failed = rig.close().unwrap_err().to_string();
     assert!(
@@ -252,7 +228,7 @@ fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_r
     let owner = Owner::new()?;
     let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
     // An item made for a folder that is none of the run's.
-    let other = tempfile::tempdir()?;
+    let other = cf_e2e::door::made("t-")?;
     let _item = Item::make(other.path())?;
     rig.close()?;
     Ok(())

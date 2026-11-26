@@ -5,6 +5,11 @@ use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 // This decoy is a nonexistent sibling of the private test temp directory, never
 // any part of the machine owner's home. A lookup must refuse it before looking.
 fn refuses_foreign_home(harness: Harness) {
@@ -14,7 +19,7 @@ fn refuses_foreign_home(harness: Harness) {
         .unwrap_or_else(|| panic!("temporary folder has no parent"))
         .join(format!("cf-foreign-home-{}", std::process::id()));
     let error = match std::panic::catch_unwind(|| {
-        live::launcher::Watch::of(harness, &foreign.join("bin"), &foreign).look()
+        live::launcher::Watch::of(harness, &foreign.join("bin"), owned(&foreign)).look()
     }) {
         Err(error) => error,
         Ok(_) => panic!("the harness home lookup did not fail closed"),
@@ -117,17 +122,32 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
         .parent()
         .expect("temporary folder has no parent")
         .join(format!("synthetic-foreign-home-{}", std::process::id()));
-    let mut command = cf_e2e::process::case_of(
-        std::env::current_exe()?,
-        "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
-        std::time::Duration::from_secs(120),
-    )
-    .inheriting_env()
-    .var(CHILD, "1");
+    let case = || {
+        cf_e2e::process::case_of(
+            std::env::current_exe().expect("the test program"),
+            "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
+            std::time::Duration::from_secs(120),
+        )
+        .var(CHILD, "1")
+    };
+    // K3: a child named homes of no run's is not started at all; the spawn door's seal refuses it
+    // before it could look at them.
+    let mut command = case();
     for (name, path) in cf_e2e::standin_process::home_vars(&decoy) {
         command = command.var(name, path);
     }
-    let output = command.run()?;
+    let refused = command
+        .run()
+        .expect_err("a child on foreign homes was started");
+    assert!(
+        refused
+            .to_string()
+            .contains("which is no folder this run made"),
+        "{refused}"
+    );
+    assert!(!decoy.exists(), "the foreign home was made");
+    // A child that inherits the case's environment has the run's homes, every one.
+    let output = case().run()?;
     assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
     Ok(())
 }
@@ -156,12 +176,9 @@ fn standin_isolation_nested_cargo_finds_its_compiler_without_path() -> Outcome {
     )?;
     cf_e2e::door::make_dir(project.path().join("src"))?;
     cf_e2e::door::write(project.path().join("src/lib.rs"), "pub fn probe() {}\n")?;
-    let output = cf_e2e::process::Run::cargo()
-        .cwd(project.path())
-        .var("PATH", "")
-        .var("CARGO_TARGET_DIR", project.path().join("target"))
-        .args(["check", "--offline", "-j", "4"])
-        .run()?;
+    // The one cargo a rig case starts: the door's fixed check of a fixture of the run's, allowed
+    // where the run builds nothing (`isolated-test-runner.sh` sets CF_E2E_NO_BUILD for the rig).
+    let output = cf_e2e::door::cargo::check_offline(project.path())?;
     assert_eq!(
         output.code,
         Some(0),

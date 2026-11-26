@@ -45,7 +45,7 @@ impl Task {
     /// hold is what this machine's `hostname` prints, the first line of it.
     pub fn real() -> Result<Self> {
         let program = command(COMMAND)?;
-        let ran = Run::new(&program).inheriting_env().run()?;
+        let ran = Run::new(&program).run()?;
         let name = ran
             .stdout
             .lines()
@@ -112,10 +112,7 @@ mod tests {
         assert!(!task.brief.contains('\n'), "a brief is one line");
         // What the result must hold is what the machine's own `hostname` printed.
         assert!(!task.output.is_empty() && !task.output.contains('\n'));
-        let again = Run::new(command(COMMAND).unwrap())
-            .inheriting_env()
-            .run()
-            .unwrap();
+        let again = Run::new(command(COMMAND).unwrap()).run().unwrap();
         assert_eq!(again.stdout.trim(), task.output);
     }
 

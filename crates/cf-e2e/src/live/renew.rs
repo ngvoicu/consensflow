@@ -50,11 +50,12 @@ use std::time::{Duration, Instant};
 use super::login::span;
 use super::machine::Harness;
 use crate::door::Door;
-use crate::process::{own_var, Run};
+use crate::process::own_var;
 use crate::{Error, Result};
 
-/// The variable the Windows runner gives the command it runs, with the name of the machine
-/// (`zeewin2`): the one signal that a run is on a machine that is there to test on. The runner
+/// The variable the Windows runner gives the command it runs on a test machine, with the name of
+/// the machine (`zeewin`): the one signal that a run is on an account that is there to test on.
+/// zeewin2 is given none: its account is its owner's own (T-2007 round 3). The runner
 /// spells it in `tools/xtask/src/windows/script.rs`.
 pub const TEST_MACHINE: &str = "CONSENSFLOW_TEST_MACHINE";
 
@@ -88,14 +89,59 @@ impl TestMachine {
     /// The machine this run is on, if the runner started it on one: none on the owner's Mac, which
     /// has no runner to give the variable.
     pub fn detect() -> Option<Self> {
-        Self::signalled(own_var(TEST_MACHINE).as_deref())
+        Self::signalled_unless_stored(
+            own_var(TEST_MACHINE).as_deref(),
+            crate::door::stored_names(),
+        )
+    }
+
+    /// [`TestMachine::signalled`], but not for a marker the account itself stores (T-2119 N1-c):
+    /// on Windows `setx` and the registry's `Environment` keys put a variable in every process the
+    /// account starts, with no runner and no person saying it for this run, so a marker there
+    /// would mark a run of an account that was never given as a test account (the runner takes
+    /// the marker away on the one it does not mark, and a run started without the runner has no
+    /// such hand). A contributor marks a run in its own shell (`$env:CONSENSFLOW_TEST_MACHINE`),
+    /// or has the runner's `--host` give it. Where the registry cannot be read the marker marks
+    /// nothing.
+    pub(crate) fn signalled_unless_stored(
+        signal: Option<&str>,
+        stored: std::result::Result<Vec<std::ffi::OsString>, String>,
+    ) -> Option<Self> {
+        let stored_here = match stored {
+            Ok(names) => names
+                .iter()
+                .any(|name| name.to_string_lossy().eq_ignore_ascii_case(TEST_MACHINE)),
+            Err(_) => true,
+        };
+        if stored_here {
+            return None;
+        }
+        Self::signalled(signal)
     }
 
     /// The machine a signal names; none where there is none, or it names nothing. (The tests of
     /// the logins make a test machine with it.)
-    pub(super) fn signalled(signal: Option<&str>) -> Option<Self> {
+    pub(crate) fn signalled(signal: Option<&str>) -> Option<Self> {
         let name = signal?.trim();
         (!name.is_empty()).then(|| Self(name.to_owned()))
+    }
+
+    /// The machine this run is on, where `what` may run: one that is there to test on, whose
+    /// account and login store are its own. `what` uses the login store of the account that
+    /// starts the kit (a Keychain item, a renewed login), which on a machine of the owner's is
+    /// the owner's: there it is refused, and says why (the owner may give it a test identity
+    /// later).
+    pub fn required_for(what: &str) -> Result<Self> {
+        Self::required_by(what, Self::detect())
+    }
+
+    /// [`TestMachine::required_for`] with the machine named: `detected`.
+    pub(super) fn required_by(what: &str, detected: Option<Self>) -> Result<Self> {
+        detected.ok_or_else(|| {
+            Error::Daemon(format!(
+                "{what} uses the login store of the account that runs it, and runs only on a machine marked as a test machine ({TEST_MACHINE}, which the Windows runner gives on such a machine), with an account of its own: this is not one, so it is refused and nothing was touched"
+            ))
+        })
     }
 
     /// The machine's name, as the runner calls it.
@@ -303,8 +349,31 @@ impl Renewal {
 /// [`LIMIT`]. None where it ended well; how it ended where it did not, in what it said and never
 /// what it printed (the renewal is judged by the login it left, [`Renewal::renew`]); an error where
 /// it could not be run at all.
-pub fn one_shot(harness: Harness, program: &Path, words: &[String]) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, LIMIT, &[])
+pub fn one_shot(
+    machine: &TestMachine,
+    harness: Harness,
+    program: &Path,
+    words: &[String],
+    account: &[(String, String)],
+) -> Result<Option<String>> {
+    one_shot_within(Some(machine), harness, program, words, account, LIMIT, &[])
+}
+
+/// What the harness is told of the account it renews for, by name: its home, in every variable a
+/// program finds one by. The test machine's own account, never the caller's environment passed
+/// on: the child has the machine's variables and these, and no other.
+pub fn account_vars(home: impl Into<crate::door::source::Source>) -> Vec<(String, String)> {
+    let home = home.into();
+    let text = home.to_argument();
+    let mut vars = vec![("HOME".to_owned(), text.clone())];
+    if cfg!(windows) {
+        vars.push(("USERPROFILE".to_owned(), text.clone()));
+        if let Some((drive, path)) = crate::standin_process::drive_and_path(Path::new(&text)) {
+            vars.push(("HOMEDRIVE".to_owned(), drive));
+            vars.push(("HOMEPATH".to_owned(), path));
+        }
+    }
+    vars
 }
 
 /// [`one_shot`], whose own folder is also taken out of the owner's `records` when it ended: a
@@ -312,71 +381,144 @@ pub fn one_shot(harness: Harness, program: &Path, words: &[String]) -> Result<Op
 /// `projects/<the folder's path>/memory`, even with no session saved) leaves nothing of the
 /// renewal's behind, so that the owner's setup is compared with what it was ([`FOLDER`] names it).
 pub fn one_shot_in(
+    machine: &TestMachine,
     harness: Harness,
     program: &Path,
     words: &[String],
-    records: &[&Path],
+    account: &[(String, String)],
+    records: &[&crate::door::source::Source],
 ) -> Result<Option<String>> {
-    one_shot_within(harness, program, words, LIMIT, records)
+    one_shot_within(
+        Some(machine),
+        harness,
+        program,
+        words,
+        account,
+        LIMIT,
+        records,
+    )
 }
 
 /// [`one_shot`], ended after `limit`, and its record in each of `records` taken away. The harness
 /// is told what every window of the kit's is ([`super::launcher::updates_off_of`]): it runs on the
 /// owner's own folders, where an update or an install would land in what is theirs.
 fn one_shot_within(
+    machine: Option<&TestMachine>,
     harness: Harness,
     program: &Path,
     words: &[String],
+    account: &[(String, String)],
     limit: Duration,
-    records: &[&Path],
+    records: &[&crate::door::source::Source],
 ) -> Result<Option<String>> {
+    // It runs as the owner on the account's own login: only on an account that is a test
+    // machine's own (T-2007 round 3), before anything is made or started.
+    let machine = TestMachine::required_by("the renewal of a login", machine.cloned())?;
+    // The records as they are before the harness runs, read whole: a folder that cannot be
+    // listed is no baseline to take a record against, and nothing runs.
+    let baseline = crate::door::renewal::Listing::of(records)?;
     let folder = crate::door::made(FOLDER).map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,
     })?;
-    let ran = Run::new(program)
-        .args(words)
-        .inheriting_env()
-        .vars(super::launcher::updates_off_of(harness).iter().copied())
-        .finding_programs()
-        .cwd(folder.path())
-        .closed_input()
-        .limit(limit)
-        .run()?;
-    forget(records, folder.path());
-    if ran.timed_out {
-        return Ok(Some(format!("it was ended after {} s", limit.as_secs())));
+    // The renewal's own door: the account's home by name, which no other start is given.
+    let ran = crate::door::renewal::start(
+        &machine,
+        harness,
+        program,
+        words,
+        account,
+        folder.path(),
+        limit,
+    )?;
+    let leftover = forget(records, folder.path(), &baseline, Some(&machine));
+    let said = if ran.timed_out {
+        Some(format!("it was ended after {} s", limit.as_secs()))
+    } else if ran.code == Some(0) {
+        None
+    } else {
+        let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        let said: String = said.chars().take(SAID).collect();
+        Some(format!(
+            "it ended {} ({})",
+            ran.code
+                .map_or_else(|| "by a signal".to_owned(), |code| code.to_string()),
+            if said.is_empty() {
+                "saying nothing"
+            } else {
+                &said
+            }
+        ))
+    };
+    // The renewal's own folder goes now, with what the harness left in it: one that stays (a
+    // file the harness still holds, on Windows) is said, never left behind in silence (CLN-22).
+    let own = match crate::door::Door::of_run().remove_made(folder.path()) {
+        crate::door::Removed::Left(path, why) => Err(Error::Daemon(format!(
+            "the renewal's own folder {} is still there: {why}",
+            path.display()
+        ))),
+        _ => Ok(said),
+    };
+    match leftover {
+        Some(why) => Err(Error::Daemon(why)),
+        None => own,
     }
-    if ran.code == Some(0) {
-        return Ok(None);
-    }
-    let said: String = ran.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
-    let said: String = said.chars().take(SAID).collect();
-    Ok(Some(format!(
-        "it ended {} ({})",
-        ran.code
-            .map_or_else(|| "by a signal".to_owned(), |code| code.to_string()),
-        if said.is_empty() {
-            "saying nothing"
-        } else {
-            &said
-        }
-    )))
+}
+
+/// Whether `path` is a link: a symbolic link anywhere, a junction or other reparse point on
+/// Windows. Whatever it points at is never followed.
+fn is_link(path: &Path) -> bool {
+    crate::door::renewal::is_link(path)
 }
 
 /// Takes away of each folder in `records` the one entry the harness made there for the folder
 /// `own`, by its whole name ([`crate::door::Record`]: the real path of `own` spelt as Claude Code
-/// spells a folder into a name), through the door. Nothing else of the owner's is touched: an
-/// entry of theirs whose name ends the same is theirs (T-1557, finding 5). One that cannot be
-/// taken away is left (the kit's watch then names it).
-fn forget(records: &[&Path], own: &Path) {
+/// spells a folder into a name), through the door, and only an entry that is a folder of the
+/// harness's making: one that was in the folder before the run (`baseline`, [`crate::door::renewal::Listing`]) or is
+/// a link is the owner's and is left as it was, and said (T-1557, finding 5; K3 review T-1978,
+/// 9). Nothing else of the owner's is touched: an entry of theirs whose name ends the same is
+/// theirs. One that cannot be taken away is left (the kit's watch then names it). Why one was
+/// refused, where one was.
+fn forget<S: Into<crate::door::source::Source> + Copy>(
+    records: &[S],
+    own: &Path,
+    baseline: &crate::door::renewal::Listing,
+    machine: Option<&TestMachine>,
+) -> Option<String> {
     let door = crate::door::Door::of_run();
-    for folder in records {
-        if let Some(record) = crate::door::Record::of(folder, own) {
-            let _ = door.remove_record(&record);
+    let mut refused = Vec::new();
+    for (at, folder) in records.iter().enumerate() {
+        let folder: crate::door::source::Source = (*folder).into();
+        let Some(record) = crate::door::Record::of(Path::new(&folder.to_argument()), own) else {
+            continue;
+        };
+        let path = record.path();
+        let there_before = path.file_name().is_some_and(|name| baseline.held(at, name));
+        if there_before {
+            refused.push(format!(
+                "{} was there before the renewal, so it is the owner's and was left",
+                path.display()
+            ));
+        } else if is_link(&path) {
+            refused.push(format!(
+                "{} is a link, not an owned directory, and was left with what it points at",
+                path.display()
+            ));
+        } else {
+            // A record that stayed is the renewal's error: said, never dropped.
+            let removed = door.remove_record_on(&record, machine);
+            if !removed.is_gone() {
+                refused.push(format!("{removed}"));
+            }
         }
     }
+    (!refused.is_empty()).then(|| {
+        format!(
+            "the renewal's record was not taken away: {}",
+            refused.join("; ")
+        )
+    })
 }
 
 /// The words Claude Code is started with: the print mode on the model of the run, and nothing

@@ -118,29 +118,50 @@ mod tests {
         let home = ScratchHome::new().unwrap();
         let vars = home.vars();
         let names: Vec<_> = vars.iter().map(|(name, _)| *name).collect();
-        assert_eq!(
-            names,
-            [
-                "HOME",
-                "USERPROFILE",
-                "CFFIXED_USER_HOME",
-                "CLAUDE_CONFIG_DIR",
-                "CODEX_HOME",
-                "PI_CODING_AGENT_DIR",
-                "PI_CODING_AGENT_SESSION_DIR",
-                "XDG_CONFIG_HOME",
-                "XDG_DATA_HOME",
-                "XDG_STATE_HOME",
-                "XDG_CACHE_HOME",
-                "APPDATA",
-                "LOCALAPPDATA",
-                "CONSENSFLOW_HOME",
-                "PATH",
-                "CONSENSFLOW_TOOL_FOLDERS",
-                "CONSENSFLOW_BIN_DIR",
-            ]
-        );
+        // On Windows the two halves of the profile path come with the others.
+        let halves: &[&str] = if cfg!(windows) {
+            &["HOMEDRIVE", "HOMEPATH"]
+        } else {
+            &[]
+        };
+        let mut expected = vec![
+            "HOME",
+            "USERPROFILE",
+            "CFFIXED_USER_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "XDG_CACHE_HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+        ];
+        expected.extend_from_slice(halves);
+        expected.extend([
+            "CONSENSFLOW_HOME",
+            "PATH",
+            "CONSENSFLOW_TOOL_FOLDERS",
+            "CONSENSFLOW_BIN_DIR",
+        ]);
+        assert_eq!(names, expected);
         for (name, value) in &vars {
+            // The drive is the root's own drive, not a folder: with the path it says the home.
+            if *name == "HOMEDRIVE" {
+                continue;
+            }
+            if *name == "HOMEPATH" {
+                let drive = vars.iter().find(|(n, _)| *n == "HOMEDRIVE").unwrap();
+                let joined = format!("{}{}", drive.1.display(), value.display());
+                assert_eq!(
+                    std::path::PathBuf::from(joined),
+                    home.root().join("home"),
+                    "HOMEDRIVE and HOMEPATH say another home"
+                );
+                continue;
+            }
             assert!(
                 value.starts_with(home.root()),
                 "{name} is {}",
@@ -184,14 +205,12 @@ mod tests {
     #[test]
     fn a_program_run_by_the_home_sees_its_variables_and_none_of_the_tests() {
         let home = ScratchHome::new().unwrap();
-        let ran = home
-            .command("/bin/sh")
-            .args([
-                "-c",
-                r#"printf '%s|%s|%s|%s' "$HOME" "$CONSENSFLOW_HOME" "$PATH" "${CARGO_MANIFEST_DIR-unset}""#,
-            ])
-            .run()
-            .unwrap();
+        let ran = Run::fixture_script(
+            r#"printf '%s|%s|%s|%s' "$HOME" "$CONSENSFLOW_HOME" "$PATH" "${CARGO_MANIFEST_DIR-unset}""#,
+        )
+        .vars(home.vars())
+        .run()
+        .unwrap();
         let root = home.root().display();
         assert_eq!(
             ran.stdout,

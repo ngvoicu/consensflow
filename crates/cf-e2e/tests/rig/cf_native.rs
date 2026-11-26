@@ -63,19 +63,20 @@ fn take_a_many_line_argument_whole_from_powershell() -> Outcome {
     let text = TEXT.replace('"', "");
     let question = home.root().join("question.md");
     files::write(&question, &text)?;
-    let ran = home
-        .command("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(format!(
+    let ran = cf_e2e::process::Run::script_in(
+        "powershell.exe",
+        &["-NoProfile", "-NonInteractive", "-Command"],
+        format!(
             "$q = Get-Content -Raw -Encoding UTF8 '{}'; & '{}' $q",
             question.display(),
             cf::binary()?.display()
-        ))
-        .finding_programs()
-        // A cold Windows PowerShell on a CI runner can take more than the
-        // usual limit just to start.
-        .limit(Duration::from_secs(180))
-        .run()?;
+        ),
+    )
+    .vars(home.vars())
+    // A cold Windows PowerShell on a CI runner can take more than the
+    // usual limit just to start.
+    .limit(Duration::from_secs(180))
+    .run()?;
     assert_eq!(ran.code, Some(1), "{ran}");
     assert_eq!(ran.stderr, unknown(&text));
     Ok(())

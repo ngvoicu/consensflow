@@ -148,8 +148,8 @@ runs = ["matrix-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/oracle.rs"
-find = '''        .args(["-e", CHECK])'''
-replace = '''        .args(["check.cjs"])'''
+find = '''new("node").args(["-e", CHECK])'''
+replace = '''new("node").args(["check.cjs"])'''
 
 [[plant]]
 name = "live matrix: an owner's file that changed is not seen"
@@ -872,16 +872,19 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_devin/command.rs"
-find = '''    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
-        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
-            .to_owned()
-    })?)
-    .args(["-c", &format!("{command}; true")]);'''
-replace = '''    let shell = Run::new("cmd").args([
-        "/d".to_owned(),
-        "/c".to_owned(),
+find = '''    let shell = Run::script_in(
+        cf_e2e::process::git_bash().ok_or_else(|| {
+            "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+                .to_owned()
+        })?,
+        &["-c"],
+        format!("{command}; true"),
+    );'''
+replace = '''    let shell = Run::script_in(
+        "cmd",
+        &["/d", "/c"],
         format!("ping -n {} 127.0.0.1 > nul", seconds + 1),
-    ]);'''
+    );'''
 
 [[plant]]
 name = "live matrix: field fix out: a resumed Devin worker is given the note that its turn was cut without /bypass (B1)"
@@ -936,8 +939,8 @@ runs = ["matrix-live-plan"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''    if [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
-replace = '''    if kind == "claude-code" && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&agent["model"].as_str()?) {'''
+find = '''    if crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)'''
+replace = '''    if kind == "claude-code" && crate::stand_in_lists::seat_of(kind, agent["model"].as_str()?)'''
 
 [[plant]]
 name = "live matrix: the Codex stand-in's server takes no interrupt"

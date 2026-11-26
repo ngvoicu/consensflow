@@ -531,6 +531,26 @@ impl Seating {
         self.seats.iter().find(|seat| seat.agent() == agent)
     }
 
+    /// The seat of the member `member`, the id its sessions carry: the handle its agent joined
+    /// under (`joined` gives it: the daemon names a member by its model, `swe-2-medium`), or,
+    /// where none was recorded, the seat's own agent id (a stand-in is called by it). None for
+    /// a member no seat of this board is (B27, CLN-16: the exporter and the turn count took the
+    /// old role alias and fell back to Claude's reader for every other).
+    pub fn of_member(
+        &self,
+        member: &str,
+        joined: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<&Seat> {
+        self.seats
+            .iter()
+            .find(|seat| joined(&seat.agent()).as_deref() == Some(member))
+            .or_else(|| {
+                self.seats
+                    .iter()
+                    .find(|seat| joined(&seat.agent()).is_none() && seat.agent() == member)
+            })
+    }
+
     /// Whether the chief is the stand-in, which is told what to do in its own words.
     pub fn chief_is_stand_in(&self) -> bool {
         self.seat(Role::Chief).harness.is_none()
@@ -619,6 +639,33 @@ impl Seating {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CLN-16: a session of a member that joined under its model's name is that seat's, by the
+    /// handle the daemon gave it; one no seat joined as is nobody's, never the first reader's.
+    #[test]
+    fn a_member_that_joined_under_a_model_name_is_its_seat_and_a_stranger_is_none() {
+        let board = Seating::board(0).unwrap();
+        let handles = |agent: &str| match agent {
+            "matrix-advisor" => Some("swe-2-medium".to_owned()),
+            "matrix-worker" => Some("gpt-6-1-luna".to_owned()),
+            _ => None,
+        };
+        let advisor = board.of_member("swe-2-medium", &handles).unwrap();
+        assert_eq!(advisor.who(), "devin");
+        assert_eq!(
+            board.of_member("gpt-6-1-luna", &handles).unwrap().who(),
+            "codex"
+        );
+        // The old role alias is no longer the member's name once it joined under another.
+        assert!(board.of_member("matrix-advisor", &handles).is_none());
+        // A member of no seat, and one that never joined and has another's name: none.
+        assert!(board.of_member("somebody-else", &handles).is_none());
+        // Where no handle was recorded (a stand-in), the seat's own agent id is its name.
+        assert_eq!(
+            board.of_member("matrix-reviewer", &handles).unwrap().who(),
+            "pi"
+        );
+    }
 
     #[test]
     fn board_0_is_the_designs_first_row_and_every_other_board_is_refused() {

@@ -25,7 +25,6 @@ fn in_a_repository(folder: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     let ran = Run::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .cwd(folder)
-        .inheriting_env()
         .run()?;
     Ok(ran.code == Some(0))
 }
@@ -60,7 +59,7 @@ fn a_live_rigs_home_is_in_the_temp_folder_and_in_no_git_repository() -> Outcome 
 
 #[test]
 fn a_rig_is_given_its_home_in_the_folder_its_case_names() -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("t-")?;
 
     let rig = Rig::start(config().homes_in(folder.path()))?;
 
@@ -81,7 +80,6 @@ fn a_rig_is_given_its_home_in_the_folder_its_case_names() -> Outcome {
 
 #[cfg(unix)]
 mod sweeping {
-    use std::fs::File;
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 
@@ -94,16 +92,16 @@ mod sweeping {
 
     /// `path`, last changed `ago` ago, by the clock the sweep reads its age against.
     #[allow(clippy::disallowed_methods)]
-    fn aged(path: &Path, ago: Duration) -> std::io::Result<()> {
-        File::open(path)?.set_modified(SystemTime::now() - ago)
+    fn aged(path: &Path, ago: Duration) -> cf_e2e::Result {
+        cf_e2e::door::set_modified(path, SystemTime::now() - ago)
     }
 
     /// A home called `name` in `folder` with a workspace and a note in it, last changed
     /// `ago` ago.
     fn home(folder: &Path, name: &str, ago: Duration) -> std::io::Result<std::path::PathBuf> {
         let home = folder.join(name);
-        fs::create_dir_all(home.join("workspace"))?;
-        fs::write(home.join("workspace").join("note"), "kept or not")?;
+        cf_e2e::door::make_dir(home.join("workspace"))?;
+        cf_e2e::door::write(home.join("workspace").join("note"), "kept or not")?;
         aged(&home, ago)?;
         Ok(home)
     }
@@ -111,7 +109,7 @@ mod sweeping {
     #[test]
     fn a_rig_that_starts_takes_no_home_and_the_sweep_lists_the_old_ones_and_says_which_a_process_works_in_or_names(
     ) -> Outcome {
-        let folder = tempfile::tempdir()?;
+        let folder = cf_e2e::door::made("t-")?;
         let stale = home(folder.path(), "consensflow-integration-stale", DAY * 3)?;
         let worked_in = home(folder.path(), "consensflow-integration-worked", DAY * 3)?;
         let named = home(folder.path(), "consensflow-integration-named", DAY * 3)?;
@@ -119,27 +117,23 @@ mod sweeping {
         let other = home(folder.path(), "kept-other-folder", DAY * 3)?;
         // A report is a file, not a home; a link is not followed.
         let report = folder.path().join("consensflow-integration-stale-left.txt");
-        fs::write(&report, "a report")?;
+        cf_e2e::door::write(&report, "a report")?;
         aged(&report, DAY * 3)?;
         let elsewhere = home(folder.path(), "elsewhere", DAY * 3)?;
         let link = folder.path().join("consensflow-integration-link");
-        std::os::unix::fs::symlink(&elsewhere, &link)?;
+        cf_e2e::door::symlink(&elsewhere, &link)?;
 
         // A process working in one, and one that has the other's name in its command line.
         // Each lasts until the case ends it, after the sweep: a sleeper of a fixed time ran out
         // before a rig's turn came in a loaded suite (T-655's gate, twice). And no longer than
         // the case's process: `cargo test` ends no group of a test it gave up on, so a case
         // killed outright would leave a sleeper of its own time behind (Calliope on T-679).
-        let mut sleeper = Run::new("sh")
-            .args([
-                "-c",
-                &format!(
-                    "while kill -0 {} 2>/dev/null; do /bin/sleep 1; done",
-                    std::process::id()
-                ),
-            ])
-            .cwd(worked_in.join("workspace"))
-            .spawn()?;
+        let mut sleeper = Run::fixture_script(format!(
+            "while kill -0 {} 2>/dev/null; do /bin/sleep 1; done",
+            std::process::id()
+        ))
+        .cwd(worked_in.join("workspace"))
+        .spawn()?;
         let mut namer = Run::new("sh")
             .args(["-c", "read line", "named-home"])
             .arg(&named)

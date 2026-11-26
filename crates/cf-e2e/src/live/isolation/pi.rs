@@ -12,7 +12,6 @@
 //! as the run does and a margin; one that does not is a reason to refuse the run, said
 //! in words, and never a copy that would refresh.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,6 +21,7 @@ use super::super::login::span;
 use super::super::machine::Harness;
 use super::super::renew::{self, Renewal, TestMachine};
 use super::watch::Seen;
+use crate::door::source::Source as Owned;
 use crate::{Error, Result};
 
 /// The entry `entry`, the owner's, as a run is given it: all but its refresh token. A copy that
@@ -198,21 +198,30 @@ pub fn login(
 /// and the owner's files compared before and after, so that nothing but `auth.json` is changed.
 pub fn renewal(
     machine: TestMachine,
-    home: &Path,
-    agent: &Path,
+    home: impl Into<Owned>,
+    agent: impl Into<Owned>,
     model: &str,
     program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
 ) -> Renewal {
-    let (home, agent, model) = (home.to_path_buf(), agent.to_path_buf(), model.to_owned());
+    let (home, agent, model) = (home.into(), agent.into(), model.to_owned());
+    let on = machine.clone();
     Renewal::new(machine, "Pi", "only once the entry has ended", move || {
         let program = program()?;
-        let files: Vec<_> = ["settings.json", "models.json", "mcp-auth.json"]
+        let files: Vec<Owned> = ["settings.json", "models.json", "mcp-auth.json"]
             .map(|name| agent.join(name))
             .into();
         let records = [agent.join("sessions")];
         let logins = [agent.join("models.json"), agent.join("mcp-auth.json")];
         let before = Seen::look(&files, &records, None, &logins);
-        let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model))?;
+        let mut account = renew::account_vars(&home);
+        account.push(("PI_CODING_AGENT_DIR".to_owned(), agent.to_argument()));
+        let ended = renew::one_shot(
+            &on,
+            Harness::Pi,
+            &program,
+            &renew::pi_words(&model),
+            &account,
+        )?;
         let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);
         if changed.is_empty() {
             return Ok(ended);
@@ -332,24 +341,24 @@ impl Provider {
 
     /// The source the agent folder `agent`'s `settings.json` names this provider's package by,
     /// read as [`Provider::source_in`] reads it: none where the file or the entry is not there.
-    pub fn source(&self, agent: &Path) -> Option<Source> {
-        if fs::symlink_metadata(agent).ok()?.file_type().is_symlink() {
+    pub fn source(&self, agent: &Owned) -> Option<Source> {
+        if agent.lstat().ok()?.file_type().is_symlink() {
             return None;
         }
-        let real_agent = fs::canonicalize(agent).ok()?;
-        let settings = fs::canonicalize(agent.join("settings.json")).ok()?;
-        if !settings.starts_with(&real_agent) {
+        let real_agent = agent.real().ok()?;
+        let settings = agent.join("settings.json").real().ok()?;
+        if !settings.is_inside(&real_agent) {
             return None;
         }
-        let settings: Value = serde_json::from_slice(&fs::read(settings).ok()?).ok()?;
+        let settings: Value = serde_json::from_slice(&settings.read().ok()?).ok()?;
         self.source_in(settings["packages"].as_array()?)
     }
 
     /// The files of `agent` a run on this provider is held not to change: its own, the
     /// package's every file where `settings.json` names it, and npm's manifests where npm
     /// installed it (they record the install).
-    pub fn watched(&self, agent: &Path) -> Vec<PathBuf> {
-        let mut files: Vec<PathBuf> = [self.config]
+    pub fn watched(&self, agent: &Owned) -> Vec<Owned> {
+        let mut files: Vec<Owned> = [self.config]
             .into_iter()
             .chain(self.required.iter().copied())
             .chain(self.optional.iter().copied())
@@ -361,28 +370,31 @@ impl Provider {
                     ["npm/package.json", "npm/package-lock.json"].map(|name| agent.join(name)),
                 );
             }
-            let package = agent.join(&source.folder);
-            let inside = fs::symlink_metadata(&package)
+            let package = agent.join(&source.folder.to_string_lossy().replace('\\', "/"));
+            let inside = package
+                .lstat()
                 .is_ok_and(|meta| !meta.file_type().is_symlink())
-                && fs::canonicalize(&package)
+                && package
+                    .real()
                     .ok()
-                    .zip(fs::canonicalize(agent).ok())
-                    .is_some_and(|(package, agent)| package.starts_with(agent));
+                    .zip(agent.real().ok())
+                    .is_some_and(|(package, agent)| package.is_inside(&agent));
             if inside {
                 files.extend(below(&package));
             }
         }
         // A missing file is watched only if its nearest existing parent is in the agent tree.
         files.retain(|path| {
-            if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            if path.is_a_link() {
                 return false;
             }
-            let Some(agent) = fs::canonicalize(agent).ok() else {
+            let Some(agent) = agent.real().ok() else {
                 return false;
             };
             path.ancestors()
-                .find_map(|part| fs::canonicalize(part).ok())
-                .is_some_and(|real| real.starts_with(agent))
+                .into_iter()
+                .find_map(|part| part.real().ok())
+                .is_some_and(|real| real.is_inside(&agent))
         });
         files
     }
@@ -395,9 +407,11 @@ impl Provider {
 pub fn npm_copy(
     provider: &Provider,
     source: &Source,
-    package: &Path,
+    package: &Owned,
 ) -> std::result::Result<String, String> {
-    let on_disk = fs::read(package.join("package.json"))
+    let on_disk = package
+        .join("package.json")
+        .read()
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .and_then(|manifest| manifest["version"].as_str().map(str::to_owned))
@@ -431,9 +445,10 @@ fn is_exact(version: &str) -> bool {
 /// changed or is a file of no commit: Pi loads the files as they are, and a checkout that is
 /// not its commit's is bytes no source names. Read with `--no-optional-locks`, which writes
 /// nothing in the owner's checkout. `Err` is why, in words.
-pub fn git_copy(package: &Path) -> std::result::Result<String, String> {
+pub fn git_copy(package: &Owned) -> std::result::Result<String, String> {
     let git_dir = package.join(".git");
-    if !fs::symlink_metadata(&git_dir)
+    if !git_dir
+        .lstat()
         .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
         || contains_link(&git_dir)
     {
@@ -443,10 +458,8 @@ pub fn git_copy(package: &Path) -> std::result::Result<String, String> {
         let ran = crate::process::Run::new("git")
             .arg("--no-optional-locks")
             .arg("-C")
-            .arg(package)
+            .arg(package.to_argument())
             .args(args.iter().copied())
-            .finding_programs()
-            .inheriting_env()
             .run()
             .map_err(|why| format!("could not be read with git ({why})"))?;
         if ran.code != Some(0) {
@@ -471,14 +484,13 @@ pub fn git_copy(package: &Path) -> std::result::Result<String, String> {
     Ok(format!("a git checkout at commit {commit}, clean"))
 }
 
-fn contains_link(folder: &Path) -> bool {
-    fs::read_dir(folder).map_or(true, |entries| {
+fn contains_link(folder: &Owned) -> bool {
+    folder.entries().map_or(true, |entries| {
         entries.into_iter().any(|entry| {
-            let Ok(entry) = entry else { return true };
-            let Ok(kind) = entry.file_type() else {
+            let Ok(kind) = entry.lstat().map(|meta| meta.file_type()) else {
                 return true;
             };
-            kind.is_symlink() || (kind.is_dir() && contains_link(&entry.path()))
+            kind.is_symlink() || (kind.is_dir() && contains_link(&entry))
         })
     })
 }
@@ -502,27 +514,16 @@ pub fn provider(name: &str) -> Option<&'static Provider> {
 }
 
 /// Every file below `folder`, folders walked into.
-fn below(folder: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink()) {
-        return files;
+fn below(folder: &Owned) -> Vec<Owned> {
+    if folder.is_a_link() {
+        return Vec::new();
     }
-    if let Ok(entries) = fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_symlink() {
-                continue;
-            } else if kind.is_dir() {
-                files.extend(below(&path));
-            } else {
-                files.push(path);
-            }
-        }
-    }
-    files
+    folder
+        .walk()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| !entry.is_a_folder())
+        .collect()
 }
 
 /// The proxy's base URL of `config`'s bytes, the provider's `cliproxyapi.json`: its `baseUrl`,

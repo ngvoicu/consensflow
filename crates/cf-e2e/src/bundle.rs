@@ -71,7 +71,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::process::Run;
     use crate::{cf, checkout};
 
     /// The probe behind the copy (T-581: 17 of 20 builds that found `cf` up to date took it away
@@ -87,7 +86,7 @@ mod tests {
     #[ignore = "relinks target/release/cf 20 times: cargo test -p cf-e2e --lib -- --ignored a_cargo_build_of_cf --nocapture"]
     fn a_cargo_build_of_cf_takes_it_away_for_a_moment_and_the_copy_stays() {
         let built = cf::binary().unwrap().to_path_buf();
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let copy = copy_of(&built, folder.path()).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let (built_gone, copy_gone) =
@@ -108,9 +107,9 @@ mod tests {
             })
         };
         for _ in 0..20 {
-            let ran = Run::cargo()
-                .args([
-                    "build",
+            let ran = crate::door::cargo::build(
+                &checkout::root(),
+                &[
                     "--offline",
                     "--release",
                     "--locked",
@@ -118,11 +117,9 @@ mod tests {
                     "cf",
                     "--bin",
                     "cf",
-                ])
-                .cwd(checkout::root())
-                .unlimited()
-                .run()
-                .unwrap();
+                ],
+            )
+            .unwrap();
             assert_eq!(ran.code, Some(0), "{ran}");
         }
         stop.store(true, Ordering::Relaxed);

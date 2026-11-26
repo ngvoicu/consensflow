@@ -106,6 +106,7 @@ pub mod mcp_server;
 pub mod members;
 pub mod renew;
 pub mod report;
+pub mod stores;
 pub mod trace;
 pub mod tree;
 pub mod who;
@@ -129,9 +130,9 @@ use crate::{Error, Result};
 
 pub use machine::{
     claude_project_key, codex, command, installed, installed_for, installed_for_claude_parity,
-    isolated_claude, lacks, rig, rig_with_claude_config, rig_with_stand_ins, seated,
-    shimmed_claude, shimmed_claude_with_servers, windows_wrapper, working_command, Harness,
-    Installed, ISOLATION,
+    isolated_claude, lacks, rig, rig_with_claude_config, rig_with_stand_in_seats,
+    rig_with_stand_ins, seated, seated_without, shimmed_claude, shimmed_claude_with_servers,
+    windows_wrapper, without, working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 
@@ -667,7 +668,6 @@ pub fn git_repository(folder: &Path) -> Result {
     let ran = Run::new(command("git")?)
         .args(["init", "--quiet"])
         .cwd(folder)
-        .inheriting_env()
         .run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {

@@ -820,7 +820,7 @@ mod tests {
     fn the_owners_settings_are_read_as_their_bytes_and_as_none_where_there_are_none() {
         let config = cf_e2e::door::made("cf-settings-test-").unwrap();
         assert_eq!(settings_of(config.path()).unwrap(), None);
-        fs::write(config.path().join("settings.json"), b"{\"model\":\"x\"}").unwrap();
+        cf_e2e::door::write(config.path().join("settings.json"), b"{\"model\":\"x\"}").unwrap();
         assert_eq!(
             settings_of(config.path()).unwrap(),
             Some(b"{\"model\":\"x\"}".to_vec())
@@ -831,10 +831,10 @@ mod tests {
     fn a_status_file_is_the_running_claudes_that_names_the_conversation() {
         let config = cf_e2e::door::made("cf-status-test-").unwrap();
         let sessions = config.path().join("sessions");
-        fs::create_dir_all(&sessions).unwrap();
+        cf_e2e::door::make_dir(&sessions).unwrap();
         let mine = std::process::id();
         let write = |name: &str, status: Value| {
-            fs::write(sessions.join(name), status.to_string()).unwrap();
+            cf_e2e::door::write(sessions.join(name), status.to_string()).unwrap();
         };
         write(
             "1.json",
@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn kit_disclosure_commands_at_rest_refuses_a_foreign_rig_home() {
-        let owner = tempfile::tempdir().unwrap();
+        let owner = cf_e2e::standin_process::unowned_tempdir();
         let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
         assert!(
             claude_config_of_environment(&env).is_err(),
@@ -873,7 +873,7 @@ mod tests {
 
     #[test]
     fn kit_disclosure_commands_at_rest_refuses_foreign_settings() {
-        let owner = tempfile::tempdir().unwrap();
+        let owner = cf_e2e::standin_process::unowned_tempdir();
         assert!(
             settings_of(owner.path()).is_err(),
             "foreign settings were read"
@@ -883,10 +883,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kit_disclosure_commands_at_rest_refuses_linked_out_settings() {
-        use std::os::unix::fs::symlink;
+        use cf_e2e::door::symlink;
         let run = cf_e2e::door::made("cf-rest-run-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        fs::write(foreign.path().join("settings.json"), b"foreign").unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        cf_e2e::standin_process::foreign_write(foreign.path().join("settings.json"), b"foreign");
         symlink(
             foreign.path().join("settings.json"),
             run.path().join("settings.json"),
@@ -901,16 +901,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kit_disclosure_commands_at_rest_refuses_linked_out_status() {
-        use std::os::unix::fs::symlink;
+        use cf_e2e::door::symlink;
         let run = cf_e2e::door::made("cf-rest-run-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
         let sessions = foreign.path().join("sessions");
-        fs::create_dir(&sessions).unwrap();
-        fs::write(
+        cf_e2e::standin_process::foreign_dir(&sessions);
+        cf_e2e::standin_process::foreign_write(
             sessions.join("s.json"),
             json!({ "pid": std::process::id(), "sessionId": "s" }).to_string(),
-        )
-        .unwrap();
+        );
         symlink(&sessions, run.path().join("sessions")).unwrap();
         assert!(
             status_file(run.path(), "s").is_none(),

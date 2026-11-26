@@ -21,10 +21,10 @@
 
 use std::path::PathBuf;
 
+use cf_e2e::door::Made;
 use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use crate::{config_with_codex, secs, Outcome};
 
@@ -67,15 +67,12 @@ fn notes_starting(project: &Project, start: &str) -> cf_e2e::Result<Vec<Value>> 
 }
 
 /// The account the worker's harness refuses while its file is there.
-fn account() -> cf_e2e::Result<(TempDir, PathBuf)> {
-    let folder = tempfile::Builder::new()
-        .prefix("cf-account-")
-        .tempdir()
-        .map_err(|source| cf_e2e::Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+fn account() -> cf_e2e::Result<(Made, PathBuf)> {
+    let folder = cf_e2e::door::made("cf-account-").map_err(|source| cf_e2e::Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let file = folder.path().join("refused");
     files::write(&file, "")?;
     Ok((folder, file))
@@ -123,7 +120,7 @@ fn a_codex_worker_cut_by_its_usage_limit_mid_task_waits_with_its_window_and_goes
     )?;
 
     // The human logs the harness into an account with quota, and says so.
-    let _ = std::fs::remove_file(&refused);
+    let _ = cf_e2e::door::remove(&refused);
     let back = rig.page(
         "member.back",
         json!({ "project": project.id(), "participant": "worker" }),

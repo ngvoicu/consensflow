@@ -27,7 +27,6 @@ use std::path::Path;
 use cf_e2e::files;
 use cf_e2e::live::trace::Trace;
 use cf_e2e::rig::{Config, Project, Rig};
-use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
 #[cfg(unix)]
@@ -154,7 +153,7 @@ fn devin_saved(rig: &Rig, _session: &str) -> bool {
         .var("HOME")
         .and_then(|home| files::find(Path::new(home), &|name| name == "sessions.db"));
     store
-        .and_then(|store| Connection::open_with_flags(store, OpenFlags::SQLITE_OPEN_READ_ONLY).ok())
+        .and_then(|store| cf_e2e::door::database::read(store).ok())
         .and_then(|db| {
             db.query_row(
                 "SELECT count(*) FROM message_nodes WHERE chat_message LIKE '%\"content\":\"SAVED\"%'",

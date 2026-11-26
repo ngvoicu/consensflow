@@ -84,6 +84,68 @@ impl Invocation {
     }
 }
 
+/// `cargo`, and nothing else: the one entry point `xtask live` starts programs by. Its program is
+/// fixed here, so that a live run's xtask names no program of its own (the audit in cf-e2e's
+/// `door::rule` finds `Invocation` and the generic runs in `live.rs`). Its words and variables are
+/// the caller's, and it runs on xtask's own environment: the test program cargo starts is the
+/// run's first process, and the doors begin there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cargo(Invocation);
+
+/// A `cargo` to run in `cwd`, with no words.
+pub fn cargo(cwd: impl Into<PathBuf>) -> Cargo {
+    Cargo(Invocation::new("cargo", cwd))
+}
+
+impl std::ops::Deref for Cargo {
+    type Target = Invocation;
+
+    /// What it is to read: its words, folder and variables (a test reads them).
+    fn deref(&self) -> &Invocation {
+        &self.0
+    }
+}
+
+impl Cargo {
+    /// With one more word.
+    #[must_use]
+    pub fn arg(self, arg: impl Into<OsString>) -> Self {
+        Self(self.0.arg(arg))
+    }
+
+    /// With more words, each as it is.
+    #[must_use]
+    pub fn args<I, S>(self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString>,
+    {
+        Self(self.0.args(args))
+    }
+
+    /// With the variable `name` set to `value`.
+    #[must_use]
+    pub fn var(self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        Self(self.0.var(name, value))
+    }
+
+    /// Without the variable `name`, which xtask's environment may have.
+    #[must_use]
+    pub fn without(self, name: impl Into<OsString>) -> Self {
+        Self(self.0.without(name))
+    }
+
+    /// The command line as a person reads it ([`Invocation::display`]).
+    pub fn display(&self) -> String {
+        self.0.display()
+    }
+}
+
+/// Runs `cargo` to its end, its input and output being xtask's own: the code it exited with.
+pub fn run_cargo(cargo: &Cargo, env: &Env) -> Result<i32, Failure> {
+    run(&cargo.0, env)
+}
+
 fn quoted(word: &str) -> String {
     let plain =
         !word.is_empty() && !word.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'');

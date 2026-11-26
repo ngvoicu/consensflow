@@ -5,8 +5,9 @@
 //! which could have written it as well), said with the file named and never its contents.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use crate::door::source::Source;
 
 use super::super::login::digest;
 
@@ -30,29 +31,29 @@ enum Observed {
 pub struct Seen {
     /// Login files are never read: their size, modification time and identity suffice.
     /// The other files are compared by their content hashes.
-    files: BTreeMap<PathBuf, Observed>,
+    files: BTreeMap<Source, Observed>,
     /// Names only from the Codex config, from the same bytes as its hash.
-    tables: BTreeMap<PathBuf, Option<BTreeSet<String>>>,
+    tables: BTreeMap<Source, Option<BTreeSet<String>>>,
     /// The entries of each folder of records that name a folder of a run.
-    records: BTreeMap<PathBuf, BTreeSet<String>>,
+    records: BTreeMap<Source, BTreeSet<String>>,
 }
 
 impl Seen {
     /// What `files` and `records` are now.
     pub fn look(
-        files: &[PathBuf],
-        records: &[PathBuf],
-        codex_config: Option<&Path>,
-        login_files: &[PathBuf],
+        files: &[Source],
+        records: &[Source],
+        codex_config: Option<&Source>,
+        login_files: &[Source],
     ) -> Self {
         let mut tables = BTreeMap::new();
         let files = files
             .iter()
             .map(|file| {
-                crate::standin_process::require_home(file, "harness isolation file lookup");
+                file.require_home("harness isolation file lookup");
                 if login_files.contains(file) {
                     // On Windows stat opens a handle for FILE_READ_ATTRIBUTES only, never bytes.
-                    let seen = match cf_base::file::stat(file) {
+                    let seen = match file.stat() {
                         Ok(stat) => Observed::Metadata(Some(stat)),
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                             Observed::Metadata(None)
@@ -61,8 +62,8 @@ impl Seen {
                     };
                     return (file.clone(), seen);
                 }
-                let read = fs::read(file);
-                if codex_config == Some(file.as_path()) {
+                let read = file.read();
+                if codex_config == Some(file) {
                     tables.insert(
                         file.clone(),
                         match &read {
@@ -90,10 +91,7 @@ impl Seen {
             records: records
                 .iter()
                 .map(|folder| {
-                    crate::standin_process::require_home(
-                        folder,
-                        "harness isolation records lookup",
-                    );
+                    folder.require_home("harness isolation records lookup");
                     (folder.clone(), run_entries(folder))
                 })
                 .collect(),
@@ -101,7 +99,7 @@ impl Seen {
     }
 
     /// What was compared: a hash of config bytes or a login file's metadata only.
-    pub fn summary(&self, home: &Path) -> String {
+    pub fn summary(&self, home: &Source) -> String {
         self.files
             .iter()
             .map(|(file, seen)| {
@@ -118,7 +116,7 @@ impl Seen {
     }
 
     /// What differs, in words that name paths and never a file's contents.
-    pub fn changes_to(&self, after: &Self, home: &Path) -> Vec<String> {
+    pub fn changes_to(&self, after: &Self, home: &Source) -> Vec<String> {
         let mut found = Vec::new();
         for (file, was) in &self.files {
             let now = after.files.get(file);
@@ -155,7 +153,7 @@ impl Seen {
 
     /// The changed Codex table names, and which added names are also in the run's config.
     /// Config values and parse errors are never included in the output.
-    pub fn codex_tables_to(&self, after: &Self, owner: &Path, run: &Path) -> Option<String> {
+    pub fn codex_tables_to(&self, after: &Self, owner: &Source, run: &Path) -> Option<String> {
         let before = self.tables.get(owner).and_then(Option::as_ref);
         let now = after.tables.get(owner).and_then(Option::as_ref);
         if self.files.get(owner) == after.files.get(owner) {
@@ -180,7 +178,9 @@ impl Seen {
                 names.iter().cloned().collect::<Vec<_>>().join(", ")
             }
         };
-        let run_tables = fs::read(run).ok().and_then(|bytes| table_names(&bytes));
+        let run_tables = crate::door::reads::read(run)
+            .ok()
+            .and_then(|bytes| table_names(&bytes));
         let in_run = run_tables.map_or_else(
             || "unavailable".to_owned(),
             |tables| show(&added.intersection(&tables).cloned().collect()),
@@ -221,29 +221,23 @@ fn table_names(bytes: &[u8]) -> Option<BTreeSet<String>> {
 }
 
 /// The entries of `folder` that name a folder of a run.
-fn run_entries(folder: &Path) -> BTreeSet<String> {
-    fs::read_dir(folder)
+fn run_entries(folder: &Source) -> BTreeSet<String> {
+    folder
+        .names()
         .into_iter()
         .flatten()
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| name.into_string().ok())
         .filter(|name| names_a_run(name))
         .collect()
 }
 
 /// `path` as a run says it: below `~` where it is below the owner's `home`.
-pub fn shown(path: &Path, home: &Path) -> String {
-    match path.strip_prefix(home) {
+pub fn shown(path: &Source, home: &Source) -> String {
+    match path.below(home) {
         // With `/` between the parts, where the system's separator is another: a path on Windows
         // is said `~/AppData/Roaming/devin/…`, not `~/AppData/Roaming\devin\…`.
-        Ok(below) => {
-            let parts: Vec<_> = below
-                .components()
-                .map(|part| part.as_os_str().to_string_lossy())
-                .collect();
-            format!("~/{}", parts.join("/"))
-        }
-        Err(_) => path.display().to_string(),
+        Some(below) => format!("~/{below}"),
+        None => path.name(),
     }
 }
 
@@ -258,24 +252,19 @@ mod tests {
         let replacement = root.path().join("replacement.json");
         crate::door::write(&path, b"one").unwrap();
         crate::door::write(&replacement, b"two").unwrap();
-        let modified = fs::metadata(&path).unwrap().modified().unwrap();
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&replacement)
-            .unwrap()
-            .set_times(fs::FileTimes::new().set_modified(modified))
-            .unwrap();
-        let files = [path.clone()];
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        crate::door::set_modified(&replacement, modified).unwrap();
+        let files = [Source::from(&path)];
         let before = Seen::look(&files, &[], None, &files);
         let original = cf_base::file::stat(&path).unwrap();
-        fs::rename(&path, root.path().join("old.json")).unwrap();
-        fs::rename(&replacement, &path).unwrap();
+        crate::door::rename(&path, root.path().join("old.json")).unwrap();
+        crate::door::rename(&replacement, &path).unwrap();
         let replaced = cf_base::file::stat(&path).unwrap();
         assert_eq!(original.size, replaced.size);
         assert_eq!(original.mtime_ms, replaced.mtime_ms);
         assert_ne!(original.identity, replaced.identity);
         let after = Seen::look(&files, &[], None, &files);
-        let changed = before.changes_to(&after, root.path());
+        let changed = before.changes_to(&after, &Source::from(root.path()));
         assert_eq!(changed.len(), 1);
         assert!(changed[0].contains("auth.json"));
     }
@@ -285,11 +274,12 @@ mod tests {
     fn t1744_an_unstatable_login_cannot_be_said_unchanged() {
         let root = crate::door::made("cf-login-unstatable-").unwrap();
         let path = root.path().join("auth.json");
-        std::os::unix::fs::symlink("auth.json", &path).unwrap();
-        let files = [path];
+        crate::door::symlink("auth.json", &path).unwrap();
+        let files = [Source::from(&path)];
         let before = Seen::look(&files, &[], None, &files);
         let after = Seen::look(&files, &[], None, &files);
-        assert!(before.changes_to(&after, root.path())[0].contains("could not be compared"));
+        assert!(before.changes_to(&after, &Source::from(root.path()))[0]
+            .contains("could not be compared"));
     }
 
     #[test]
@@ -299,11 +289,12 @@ mod tests {
         let run = root.path().join("run.toml");
         crate::door::write(&owner, "[old]\nkey = 'synthetic-old-value'\n").unwrap();
         crate::door::write(&run, "[new]\nkey = 'synthetic-run-value'\n").unwrap();
-        let files = [owner.clone()];
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        let files = [Source::from(&owner)];
+        let owner_source = Source::from(&owner);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
         crate::door::write(&owner, "[new]\nkey = 'synthetic-new-value'\n").unwrap();
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
-        let said = before.codex_tables_to(&after, &owner, &run).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
+        let said = before.codex_tables_to(&after, &owner_source, &run).unwrap();
         assert!(said.contains("[\"new\"]"));
         assert!(said.contains("[\"old\"]"));
         assert!(said.contains("also in the run"));
@@ -315,13 +306,14 @@ mod tests {
         let root = crate::door::made("cf-codex-unreadable-").unwrap();
         let owner = root.path().join("owner.toml");
         crate::door::write(&owner, "[old]\nkey = 'synthetic'\n").unwrap();
-        let files = [owner.clone()];
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
-        std::fs::remove_file(&owner).unwrap();
-        std::fs::create_dir(&owner).unwrap();
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        let files = [Source::from(&owner)];
+        let owner_source = Source::from(&owner);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
+        crate::door::remove(&owner).unwrap();
+        crate::door::make_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
         let said = before
-            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .codex_tables_to(&after, &owner_source, &root.path().join("run.toml"))
             .unwrap();
         assert!(said.contains("could not be compared"), "{said}");
         assert!(!said.contains("removed"), "{said}");
@@ -331,12 +323,13 @@ mod tests {
     fn t1744_two_unreadable_codex_snapshots_cannot_prove_the_config_unchanged() {
         let root = crate::door::made("cf-codex-unreadable-both-").unwrap();
         let owner = root.path().join("owner.toml");
-        std::fs::create_dir(&owner).unwrap();
-        let files = [owner.clone()];
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        crate::door::make_dir(&owner).unwrap();
+        let files = [Source::from(&owner)];
+        let owner_source = Source::from(&owner);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
         let said = before
-            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .codex_tables_to(&after, &owner_source, &root.path().join("run.toml"))
             .expect("unreadable snapshots cannot prove the config unchanged");
         assert!(said.contains("could not be compared"), "{said}");
     }
@@ -345,26 +338,30 @@ mod tests {
     fn t1744_two_absent_or_identical_invalid_codex_configs_are_unchanged() {
         let root = crate::door::made("cf-codex-unchanged-").unwrap();
         let owner = root.path().join("owner.toml");
-        let files = [owner.clone()];
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
-        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+        let files = [Source::from(&owner)];
+        let owner_source = Source::from(&owner);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
+        assert_eq!(before.codex_tables_to(&after, &owner_source, &owner), None);
 
         crate::door::write(&owner, "[unfinished").unwrap();
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
-        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
+        assert_eq!(before.codex_tables_to(&after, &owner_source, &owner), None);
     }
 
     #[test]
     fn t1744_a_missing_config_that_becomes_unreadable_is_not_said_unchanged() {
         let root = crate::door::made("cf-codex-missing-then-unreadable-").unwrap();
         let owner = root.path().join("owner.toml");
-        let files = [owner.clone()];
-        let before = Seen::look(&files, &[], Some(&owner), &[]);
-        std::fs::create_dir(&owner).unwrap();
-        let after = Seen::look(&files, &[], Some(&owner), &[]);
-        let said = before.codex_tables_to(&after, &owner, &owner).unwrap();
+        let files = [Source::from(&owner)];
+        let owner_source = Source::from(&owner);
+        let before = Seen::look(&files, &[], Some(&owner_source), &[]);
+        crate::door::make_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner_source), &[]);
+        let said = before
+            .codex_tables_to(&after, &owner_source, &owner)
+            .unwrap();
         assert!(said.contains("could not be compared"), "{said}");
     }
 }

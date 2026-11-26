@@ -175,7 +175,7 @@ fn hangs_in(flags: &Path) -> PathBuf {
 #[test]
 fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_human_told_and_its_result_goes_in_once_it_can(
 ) -> Outcome {
-    let flags = tempfile::tempdir()?;
+    let flags = cf_e2e::door::made("t-")?;
     let hangs = hangs_in(flags.path());
     // From the restart on, a Codex window opened on its thread never shows it.
     let hanging = || config().var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy());
@@ -238,7 +238,7 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
     );
 
     // Codex's windows come up again: the chief is opened again with the result, once.
-    std::fs::remove_file(&hangs)?;
+    cf_e2e::door::remove(&hangs)?;
     rig.wait_for("the result to be delivered to the chief", secs(180), || {
         Ok(result_for(&project, 2)?.is_some_and(|result| result["state"] == "delivered"))
     })?;
@@ -302,7 +302,7 @@ fn a_codex_chief_whose_resume_takes_longer_than_the_first_time_a_window_has_come
 /// rest.
 #[test]
 fn a_codex_chief_given_up_with_nothing_waiting_for_it_opens_again_at_the_backoff() -> Outcome {
-    let flags = tempfile::tempdir()?;
+    let flags = cf_e2e::door::made("t-")?;
     let hangs = hangs_in(flags.path());
     let hanging = || config().var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy());
     files::write(&hangs, "")?;
@@ -323,7 +323,7 @@ fn a_codex_chief_given_up_with_nothing_waiting_for_it_opens_again_at_the_backoff
         "nothing waits for the chief: {waiting:?}"
     );
 
-    std::fs::remove_file(&hangs)?;
+    cf_e2e::door::remove(&hangs)?;
     let reopened = rig.wait_for(
         "the chief to be opened again and read idle",
         secs(120),

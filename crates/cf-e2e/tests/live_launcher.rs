@@ -33,15 +33,20 @@
 
 #![cfg(unix)]
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use cf_e2e::door::source::Source;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::Open;
 use cf_e2e::live::{self, ask, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
+
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows: no window
 /// of this test runs it, but a rig has one.
@@ -59,15 +64,16 @@ fn io<'a>(action: &'a str, path: &'a Path) -> impl FnOnce(std::io::Error) -> Err
     move |failed| Error::Daemon(format!("could not {action} {}: {failed}", path.display()))
 }
 
-/// What the owner's `claude` link is: the target it reads.
-fn points(link: &Path) -> Result<PathBuf> {
-    fs::read_link(link).map_err(io("read the link", link))
+/// What the owner's `claude` link is: the target it reads, through the source that names it.
+fn points(link: &Source) -> Result<PathBuf> {
+    link.link_target()
+        .map_err(io("read the link", Path::new(&link.name())))
 }
 
-/// A copy of the file `from` at `to`, a clone where the system makes one (a Claude Code is
-/// three hundred megabytes).
-fn copy(from: &Path, to: &Path) -> Result {
-    cf_e2e::door::copy_cloning(from, to)
+/// A copy of the file `from` (the machine's Claude Code, read as a source) at `to`, a clone where
+/// the system makes one (a Claude Code is three hundred megabytes).
+fn copy(from: &Source, to: &Path) -> Result {
+    from.clone_into(to)
 }
 
 /// What a stage of the pretend owner came to.
@@ -82,7 +88,7 @@ struct Came {
 
 /// A pretend owner, a rig on the incident's environment, a Claude window held on it, and what
 /// came of it: with the kit's switches (`told`), or with the case having taken them out.
-fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
+fn fake_owner(log: &Log, binary: &Source, told: bool) -> Result<Came> {
     let owner =
         cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     let home = owner.path();
@@ -101,7 +107,7 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
         config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultNotice":true}"#,
     )?;
-    live::machine::seed_claude_trust(config.path(), home)?;
+    live::machine::seed_claude_trust(config.path(), owned(home))?;
     // The XDG folder a seat for Muse gives every window of a rig.
     let data =
         cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
@@ -113,13 +119,14 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
         rig = rig.unset("DISABLE_AUTOUPDATER").unset("DISABLE_UPDATES");
     }
     let rig = Rig::start(rig)?;
-    let was = points(&link)?;
+    let link_source = owned(&link);
+    let was = points(&link_source)?;
     let who = if told { "kit" } else { "control" };
     let window = Open::new(&rig, &fake, "launcher", "launcher-fake").open_telling(log, who)?;
     let within = if told { HELD } else { CONTROL };
     let began = std::time::Instant::now();
     let moved = live::until(within, Duration::from_secs(1), || {
-        (points(&link).ok()? != was).then_some(())
+        (points(&link_source).ok()? != was).then_some(())
     })
     .is_some();
     log.say(format!(
@@ -132,7 +139,7 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
         }
     ));
     drop(window);
-    let installed_in_the_run = data.path().join("claude").exists();
+    let installed_in_the_run = cf_e2e::door::reads::exists(data.path().join("claude"));
     let closed = rig.close();
     Ok(Came {
         moved,
@@ -153,11 +160,11 @@ fn owner_own(log: &Log, proved: &str) -> Result<(PathBuf, bool, Result)> {
     if let Some(refused) = refusal("both", Some(proved), &real.version()) {
         return Err(Error::Daemon(refused));
     }
-    let link = real.home().join(".local/bin/claude");
+    let link = owned(real.home()).join(".local/bin/claude");
     let was = points(&link)?;
     log.say(format!(
         "the owner's {} reads {} (the guard puts it in its words if it moves)",
-        link.display(),
+        link.name(),
         was.display()
     ));
     let data =
@@ -181,7 +188,7 @@ fn owner_own(log: &Log, proved: &str) -> Result<(PathBuf, bool, Result)> {
         }
     ));
     drop(window);
-    let installed_in_the_run = data.path().join("claude").exists();
+    let installed_in_the_run = cf_e2e::door::reads::exists(data.path().join("claude"));
     Ok((was, moved || installed_in_the_run, rig.close()))
 }
 
@@ -199,8 +206,10 @@ fn claude_code_honours_the_switches_the_kit_sets_and_a_real_window_leaves_the_ow
     }
     let command = live::command("claude")?;
     let version = Installed::at(Harness::Claude, &command, Path::new("/")).version();
-    let binary = fs::canonicalize(&command).map_err(io("read the link", &command))?;
-    log.say(format!("claude is {} ({version})", binary.display()));
+    let binary = owned(&command)
+        .real()
+        .map_err(io("read the link", &command))?;
+    log.say(format!("claude is {} ({version})", binary.name()));
     let mut checks = Vec::new();
 
     if stage != "real" {
@@ -286,7 +295,29 @@ fn refusal(stage: &str, proved: Option<&str>, now: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::refusal;
+    use super::{copy, owned, points, refusal};
+
+    /// A launcher link and the program it leads to, on a decoy owner: the target is read through
+    /// the source of the link, and the program is cloned from the source of its file.
+    #[cfg(unix)]
+    #[test]
+    fn the_launcher_link_and_its_program_are_read_through_their_sources() {
+        let root = cf_e2e::door::made("t-launcher-").unwrap();
+        let program = root.path().join("versions/2.1.9");
+        cf_e2e::door::write(&program, "decoy program").unwrap();
+        let link = root.path().join("bin/claude");
+        cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();
+        cf_e2e::door::symlink(&program, &link).unwrap();
+        assert_eq!(points(&owned(&link)).unwrap(), program);
+        assert!(points(&owned(root.path().join("bin/none"))).is_err());
+        let real = owned(&link).real().unwrap();
+        let copied = root.path().join("copy/claude");
+        copy(&real, &copied).unwrap();
+        assert_eq!(
+            cf_e2e::door::reads::read_to_string(&copied).unwrap(),
+            "decoy program"
+        );
+    }
 
     #[test]
     fn the_owners_stage_runs_only_after_the_pretend_owners_showed_this_version_honours_the_switches(

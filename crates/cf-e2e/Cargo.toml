@@ -92,7 +92,8 @@ regex.workspace = true
 rusqlite.workspace = true
 # What a case reads of a command's JSON answer, and the frames of the bridge.
 serde_json.workspace = true
-# The hash of the token the stand-in Codex lets in on loopback.
+# The hash of the token the stand-in Codex lets in on loopback, and of the protected roots a
+# child of the run is handed.
 sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
@@ -100,6 +101,8 @@ thiserror.workspace = true
 toml.workspace = true
 # The daemon's loopback HTTP.
 ureq.workspace = true
+# The terminal door's pty (`src/door/terminal.rs`): the one place the kit makes one.
+portable-pty.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
 # The conversation id a live test opens a Claude Code or Pi window on.
@@ -124,7 +127,6 @@ url.workspace = true
 # The live parity case opens Claude Code in a terminal of ConsensFlow's own (a ConPTY on
 # Windows), plainly and as a member, with no daemon (`tests/live_parity/claude.rs`).
 cf-panes = { workspace = true, features = ["test-support"] }
-portable-pty.workspace = true
 # The variables each harness marks its own session with, as the product lists them, which
 # no window of a rig started inside such a session may be given (T-971): a case enumerates
 # the product's own list, so a harness added to it is held at once.
@@ -140,6 +142,11 @@ cf-ledger.workspace = true
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term", "user"] }
 
+# The pane host's own read of a process's unique identifier and its starter's: what the descent
+# proves each child against the process that forked it by (`src/live/members/descent/native.rs`).
+[target.'cfg(target_os = "macos")'.dependencies]
+cf-panes.workspace = true
+
 # A descriptor left open and not close-on-exec, for a test of what the programs a case starts
 # hold.
 [target.'cfg(unix)'.dev-dependencies]
@@ -147,9 +154,9 @@ nix = { workspace = true, features = ["fs"] }
 
 # The console's raw mode for the stand-in agent, which std does not give; and a handle
 # to a process a live check ends, on which its creation time is read and through which
-# it is ended.
+# it is ended; and a file's identity, which the write door checks a file it made by.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Threading", "Wdk_System_Threading"] }
 
 [lints]
 workspace = true

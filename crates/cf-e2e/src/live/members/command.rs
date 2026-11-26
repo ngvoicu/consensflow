@@ -378,13 +378,11 @@ mod tests {
         let command = LongCommand::new(mark);
         let mut decoy = crate::process::Run::new("node")
             .args(["-e", "setTimeout(() => {}, 30000)", mark])
-            .inheriting_env()
             .spawn()
             .unwrap();
         // The command this run starts, as a member is told to run it.
         let mut own = crate::process::Run::new("node")
             .args(["-e", "setTimeout(() => {}, 30000)", run_word(), mark])
-            .inheriting_env()
             .spawn()
             .unwrap();
         let (pid, own_pid) = (decoy.id(), own.id());
@@ -423,6 +421,7 @@ mod tests {
             ppid,
             command: command.to_owned(),
             exe: None,
+            link: crate::live::members::Link::Number,
         }
     }
 
@@ -440,12 +439,15 @@ mod tests {
         let mark = "cf-live-members-outsider-mark-5113";
         let command = LongCommand::new(mark);
         let outsider = if cfg!(windows) {
-            crate::process::Run::new("cmd")
-                .args(["/c", &format!("ping -n 30 127.0.0.1 > nul & rem {mark}")])
+            crate::process::Run::script_in(
+                "cmd",
+                &["/c"],
+                format!("ping -n 30 127.0.0.1 > nul & rem {mark}"),
+            )
         } else {
-            crate::process::Run::new("/bin/sh").args(["-c", &format!("sleep 30; : {mark}")])
+            crate::process::Run::fixture_script(format!("sleep 30; : {mark}"))
         };
-        let mut outsider = outsider.inheriting_env().spawn().unwrap();
+        let mut outsider = outsider.spawn().unwrap();
         // The window's program (100), its agent (101, Devin's runs its commands), the
         // command the agent runs (102) and what that started (103); and outside the window
         // the process that says the mark too, and one that says nothing of it.
@@ -512,8 +514,6 @@ mod tests {
         // And the script does what it says, run by this machine's Node.
         let ran = crate::process::Run::new("node")
             .args(["-e", &ticking_script(3, 1)])
-            .inheriting_env()
-            .finding_programs()
             .run()
             .unwrap();
         assert_eq!(ran.code, Some(0), "{ran}");
@@ -723,13 +723,7 @@ mod tests {
         // commands in it, so that it stays the process that holds the mark).
         let mark = "cf-live-members-cut-mark-4171";
         let command = LongCommand::new(mark);
-        let shell = |line: String| {
-            Run::new("/bin/sh")
-                .args(["-c", &line])
-                .inheriting_env()
-                .spawn()
-                .unwrap()
-        };
+        let shell = |line: String| Run::fixture_script(line).spawn().unwrap();
         let mut window = shell(format!("/bin/sh -c 'sleep 30; : {mark}' & wait"));
         let mut outsider = shell(format!("sleep 30; : {mark}"));
         let own = process_of(window.id()).expect("the window's process is read");

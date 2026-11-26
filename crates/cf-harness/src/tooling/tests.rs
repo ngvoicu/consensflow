@@ -117,6 +117,80 @@ fn a_conversation_the_harness_kept_no_record_of_reads_as_unknown_and_settled() {
     assert_eq!(looked["settled"], json!(true));
 }
 
+/// K3 step 8 (T-1997 finding 7): a record read says which of the adapter's three states it came
+/// to: `held`, `absent` (the harness wrote nothing of the conversation yet) or `failed` (the
+/// record could not be read), so that no reader takes a failure for an empty record.
+#[test]
+fn a_read_that_failed_says_failed_and_a_record_not_there_says_absent() {
+    let held = claude_folder(true);
+    assert_eq!(look_at(held.path()).unwrap()["read"], json!("held"));
+    let absent = tempfile::tempdir().unwrap();
+    assert_eq!(look_at(absent.path()).unwrap()["read"], json!("absent"));
+    // The record is there and cannot be read: its file may not be opened.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let failed = claude_folder(true);
+        let file = failed.path().join("projects").join("s1.jsonl");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        let read = look_at(failed.path()).unwrap()["read"].clone();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(read, json!("failed"));
+    }
+}
+
+/// A Devin data folder under `root`, its store made by `schema` where there is one, and a look
+/// at the session `s1` in it.
+fn devin_look(schema: Option<&str>) -> Value {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    if let Some(schema) = schema {
+        fs::create_dir_all(data.join("devin/cli")).unwrap();
+        let store = rusqlite::Connection::open(data.join("devin/cli/sessions.db")).unwrap();
+        store.execute_batch(schema).unwrap();
+    }
+    let under = |rest: &Path| rest.to_str().unwrap().to_owned();
+    answer(&ask(
+        "records",
+        json!({
+            "kind": "devin",
+            "session": "s1",
+            "env": {
+                "HOME": under(root.path()),
+                "XDG_DATA_HOME": under(&data),
+                "APPDATA": under(&data),
+                "CONSENSFLOW_HOME": under(&root.path().join("home")),
+            },
+        }),
+    ))
+    .unwrap()
+}
+
+/// T-1997 finding 7 (round 2): Devin's native reader in the three states. A store whose schema
+/// it does not know (no `id` column) is a read that failed, the SQL error named, never a record
+/// of no rows; a store with no row of the session, or no store at all, is absent.
+#[test]
+fn a_devin_store_the_reader_cannot_read_says_failed_and_one_not_there_says_absent() {
+    let unknown_schema = devin_look(Some(
+        "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, main_chain_id TEXT);
+         CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+           node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);
+         INSERT INTO sessions VALUES ('s1', NULL);",
+    ));
+    assert_eq!(unknown_schema["read"], json!("failed"), "{unknown_schema}");
+    let reason = unknown_schema["reading"]["reason"].as_str().unwrap();
+    assert!(reason.contains("no such column: id"), "{reason}");
+    assert!(unknown_schema["reading"].get("items").is_none());
+    let no_row = devin_look(Some(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+         CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+           node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
+    ));
+    assert_eq!(no_row["read"], json!("absent"), "{no_row}");
+    let no_store = devin_look(None);
+    assert_eq!(no_store["read"], json!("absent"), "{no_store}");
+}
+
 #[test]
 fn a_question_that_cannot_be_answered_says_why() {
     let failed = |question: Value| answer(&question).unwrap_err();
