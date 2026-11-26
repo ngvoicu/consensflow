@@ -1,6 +1,6 @@
 //! A line a person types into a Claude window that begins no turn (T-2330, T-2342): what the
 //! window's look says of it. The records are what Claude Code 2.1.332 wrote in a live run for
-//! `/usage`, `/help` and `/context` (`typed-line-*.jsonl`), after a turn that ended; the
+//! `/usage`, `/help`, `/context` and `!echo hi` (`typed-line-*.jsonl`), after a turn that ended; the
 //! borrowed shape of a listed command's echo and output (`/cost` and the like, not recorded)
 //! holds the case the reader's closed list does not end.
 
@@ -68,6 +68,7 @@ fn recorded(name: &str) -> Vec<String> {
         "usage" => include_str!("../../fixtures/claude/typed-line-usage.jsonl"),
         "help" => include_str!("../../fixtures/claude/typed-line-help.jsonl"),
         "context" => include_str!("../../fixtures/claude/typed-line-context.jsonl"),
+        "shell" => include_str!("../../fixtures/claude/typed-line-shell.jsonl"),
         other => panic!("no recording of /{other}"),
     };
     let mut lines = at_rest();
@@ -157,4 +158,29 @@ fn a_recorded_context_leaves_the_window_at_work_though_no_model_was_called() {
     assert!(!observed.settled, "the meta user record reads as a prompt");
     assert!(!observed.takes_words);
     assert!(observed.at_prompt);
+}
+
+/// `!echo hi` as Claude Code 2.1.332 wrote it: the shell line and its output as `user`
+/// records, then the model's answer to them and the turn's end. At the end the window is at
+/// rest and takes words; with the answer not yet written it reads at work.
+#[test]
+fn a_recorded_shell_line_is_a_turn_that_ends_with_the_models_answer() {
+    let lines = recorded("shell");
+    let answered = lines
+        .iter()
+        .rposition(|line| line.contains("\"type\":\"assistant\""))
+        .unwrap();
+    let observed = window_after(&lines[..answered]);
+    assert!(!observed.settled && !observed.takes_words);
+    let observed = window_after(&lines);
+    assert!(observed.settled && observed.takes_words);
+    assert_eq!(observed.over, Over::No);
+}
+
+/// An empty Enter at an idle prompt: Claude Code 2.1.332 wrote no record (the screen drew
+/// something), so the window stays at rest and takes words.
+#[test]
+fn an_empty_enter_writes_nothing_and_leaves_the_window_at_rest() {
+    let observed = window_after(&at_rest());
+    assert!(observed.settled && observed.takes_words);
 }

@@ -788,25 +788,6 @@ fn a_command_written_only_as_the_systems_records_is_never_in_flight() {
     }
 }
 
-/// The `!` shell mode, with the shape the reviewer of T-1988 gave (`<bash-input>`,
-/// `<bash-stdout>`) and no recording of it in this repository: if Claude Code writes a typed
-/// `!` line as user's records with no model turn after, the reader reads them as a prompt's
-/// words and the turn stays in flight. This test holds what the reader makes of that shape;
-/// whether Claude writes it so is for a live recording.
-#[test]
-fn a_shell_line_in_the_assumed_shape_stays_in_flight() {
-    let mut records = at_rest();
-    records.extend([
-        user("n1", json!("d1"), json!("<bash-input>pwd</bash-input>")),
-        user(
-            "o1",
-            json!("n1"),
-            json!("<bash-stdout>/tmp</bash-stdout><bash-stderr></bash-stderr>"),
-        ),
-    ]);
-    assert_eq!(settlement_of(&records), Settlement::InFlight);
-}
-
 /// The records Claude Code 2.1.332 wrote for `line` typed at an idle prompt (a live run,
 /// T-2342; `tests/fixtures/claude/typed-line-<line>.jsonl`), after the turn of `at_rest`.
 fn recorded(line: &str) -> Vec<Value> {
@@ -814,6 +795,7 @@ fn recorded(line: &str) -> Vec<Value> {
         "usage" => include_str!("../../../../tests/fixtures/claude/typed-line-usage.jsonl"),
         "context" => include_str!("../../../../tests/fixtures/claude/typed-line-context.jsonl"),
         "help" => include_str!("../../../../tests/fixtures/claude/typed-line-help.jsonl"),
+        "shell" => include_str!("../../../../tests/fixtures/claude/typed-line-shell.jsonl"),
         other => panic!("no recording of /{other}"),
     };
     let mut typed: Vec<Value> = text
@@ -904,4 +886,48 @@ fn a_context_typed_at_an_idle_prompt_calls_no_model_and_reads_in_flight() {
         duration("d2", "a2"),
     ]);
     assert_eq!(settlement_of(&next), Settlement::Settled);
+}
+
+/// `!echo hi`, as Claude Code 2.1.332 wrote it (T-2342, run 4): two `user` records
+/// (`rowSource` "local", no `isMeta`: `<bash-input>` and `<bash-stdout>`, the second a child of
+/// the first, which is a child of the turn before), then a turn of the model's own: the shell
+/// line's output is sent to the model, which answered (`assistant`, `end_turn`), followed by the
+/// stop hooks' summary and `turn_duration`. So it IS a turn: in flight from the first record to
+/// the model's end, settled after it, and the record is never held open.
+#[test]
+fn a_shell_line_is_a_turn_the_model_answers_and_ends() {
+    let records = recorded("shell");
+    let typed = &records[at_rest().len()..];
+    let kinds: Vec<&str> = typed
+        .iter()
+        .map(|record| record["type"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"assistant"), "{kinds:?}");
+    assert_eq!(
+        typed
+            .iter()
+            .filter(|record| record["type"] == "user")
+            .count(),
+        2
+    );
+    for record in typed.iter().filter(|record| record["type"] == "user") {
+        assert_eq!(record["rowSource"], "local");
+        assert!(record.get("isMeta").is_none());
+    }
+    let upto = |kind: &str| {
+        let at = typed
+            .iter()
+            .rposition(|record| record["type"] == kind)
+            .unwrap();
+        at_rest().len() + at + 1
+    };
+    assert_eq!(
+        settlement_of(&records[..upto("user")]),
+        Settlement::InFlight
+    );
+    assert_eq!(
+        settlement_of(&records[..upto("assistant")]),
+        Settlement::InFlight
+    );
+    assert_eq!(settlement_of(&records), Settlement::Settled);
 }

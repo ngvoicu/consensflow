@@ -219,3 +219,14 @@ did not close, so `/config`, `!echo hi` and the empty Enter have no recording.
   report, with colour codes) and a third: a `user` record, `isMeta` true, `rowSource`
   `local`, whose content is the report as markdown (`## Context Usage…`), a child of
   the output. No assistant record follows: no model was called.
+
+Kept 2026-11-26 by the same case's fourth run (T-2342, `cargo xtask live typed-lines`, which
+typed `!echo hi` and an empty Enter, Claude Code 2.1.332), scrubbed the same way (and
+`session_id`, `requestId`; the two `api-request` records, which the reader never reads, are left out):
+
+- `typed-line-shell.jsonl` — `!echo hi`: a `file-history-snapshot`, `tools-used`, two `user`
+  records with `rowSource` "local" and no `isMeta` (`<bash-input>echo hi</bash-input>`, then
+  `<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>` as its child), then the model's
+  own turn on them: an `assistant` record (`end_turn`, "The command ran and printed `hi`."),
+  `stop_hook_summary` and `turn_duration`. A model IS called. No `system` record.
+- An empty Enter wrote no record at all (the screen drew something), so it has no file.
