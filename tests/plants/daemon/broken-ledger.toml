@@ -7,7 +7,6 @@ p23a-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start:
 p23a-app = ["cargo", "xtask", "app", "test", "daemon::tests::"]
 p23a-writes = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "writes_go_through_the_guard"]
 p23a-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "says a ledger that cannot be saved to"]
-p23a-log = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::log::tests"]
 p23a-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::trace::tests::once_the_ledger_broke"]
 p23a-viewer = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::viewer::"]
 p23a-copies = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::viewer::copies"]
@@ -266,24 +265,19 @@ meant = "an_ordinary_stop_ends_with_its_log_held_too"
 runs = ["p23a-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/stop.rs"
-find = '''            .info_within(&format!("stop: {why}; rss {size} MB"), SETTLE);'''
-replace = '''            .info(&format!("stop: {why}; rss {size} MB"));'''
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/files/log.rs"
-find = '''        if self.halt.get().is_some_and(|halt| halt.stopping()) {'''
-replace = '''        if false {'''
+file = "crates/cf-daemon/src/start.rs"
+find = '''    let log = Rc::new(Log::off_thread(&home));'''
+replace = '''    let log = Rc::new(Log::new(&home));'''
 
 [[plant]]
 name = "broken ledger: a held log blocks the stop of a broken ledger"
-meant = "a_line_written_while_the_daemon_ends_does_not_wait_for_a_held_log"
-runs = ["p23a-log"]
+meant = "a_log_another_process_holds_does_not_keep_the_daemon_from_stopping"
+runs = ["p23a-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/files/log.rs"
-find = '''        if self.halt.get().is_some_and(|halt| halt.stopping()) {'''
-replace = '''        if false {'''
+file = "crates/cf-daemon/src/start.rs"
+find = '''    let log = Rc::new(Log::off_thread(&home));'''
+replace = '''    let log = Rc::new(Log::new(&home));'''
 
 [[plant]]
 name = "broken ledger: a cleanup thread that is not made leaves the windows open"
