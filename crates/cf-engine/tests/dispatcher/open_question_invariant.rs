@@ -135,7 +135,9 @@ impl Board {
             .task(self.project, 1)
             .messages
             .into_iter()
-            .filter(|m| m.kind == "note" && m.body.contains(TURN_ON_OPEN_QUESTION))
+            .filter(|m| {
+                m.kind == "note" && m.recipient == "chief" && m.body.contains(TURN_ON_OPEN_QUESTION)
+            })
             .collect()
     }
     /// The invariant: no result by itself, the task waits, `open` questions are not closed.
@@ -570,7 +572,7 @@ mod extras {
             .unwrap();
     }
 
-    fn pastes_since(b: &Board, mark: i64, who: i64) -> Vec<i64> {
+    pub(super) fn pastes_since(b: &Board, mark: i64, who: i64) -> Vec<i64> {
         b.events()
             .into_iter()
             .filter(|e| e.id > mark && e.kind == "delivery.begun")
@@ -726,6 +728,7 @@ mod extras {
             b.results().is_empty(),
             "collector accepted the old words after Close"
         );
+        assert_eq!(b.notes().len(), 1, "the turn is told once");
     }
 
     fn kept_project(resume: bool) {
@@ -747,6 +750,7 @@ mod extras {
             b.results().is_empty(),
             "collector accepted the old words with no new paste"
         );
+        assert_eq!(b.notes().len(), 1, "the turn is told once");
     }
 
     #[test]
@@ -1021,6 +1025,7 @@ mod openings {
             b.results().is_empty(),
             "old pre-hold paste qualified a turn after a quota hold"
         );
+        assert_eq!(b.notes().len(), 1, "the post-hold turn is told once");
     }
 
     #[test]
@@ -1616,5 +1621,150 @@ mod reviewed {
             result.is_empty(),
             "the brief says the message must also have been written after the open question"
         );
+    }
+}
+
+/// The note is once for a turn, not once for a paste (T-2340's findings 19 to 23).
+mod turns {
+    use super::extras::pastes_since;
+    use super::*;
+    use cf_harness::seams::Time;
+
+    fn field() -> (Board, MessageView) {
+        let b = Board::new(true);
+        b.c.adapter.resumes_records.set(true);
+        let (q, other) = b.asked_two();
+        b.answer(other.id, "JSON");
+        passes(&b.c, 3);
+        (b, q)
+    }
+
+    fn own_turn(b: &Board, command: &str, words: &str) {
+        b.c.advance(10_000);
+        b.c.adapter.begins_its_own_turn(
+            &b.worker,
+            command,
+            &cf_base::time::iso(b.c.time.wall_ms()),
+        );
+        b.c.advance(10_000);
+        b.c.adapter
+            .ends_its_own_turn(&b.worker, words, &cf_base::time::iso(b.c.time.wall_ms()));
+    }
+
+    /// Two turns that ended separately, the second begun by the harness itself with no paste of
+    /// ConsensFlow's between them, are told once each.
+    #[test]
+    fn two_separate_turns_without_a_paste_between_are_each_told_once() {
+        let (b, q) = field();
+        b.c.adapter
+            .answer(&b.worker, "I will go on when the build reports.");
+        passes(&b.c, 4);
+        assert_eq!(b.notes().len(), 1);
+        let mark = b.events().last().unwrap().id;
+        own_turn(&b, "The build reported.", DONE);
+        passes(&b.c, 4);
+        assert_eq!(pastes_since(&b, mark, b.worker_id), Vec::<i64>::new());
+        b.nothing_taken(&[q.id]);
+        let told = b.notes();
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert!(told[1].body.starts_with(DONE), "{told:?}");
+        passes(&b.c, 4);
+        assert_eq!(b.notes().len(), 2, "a second look tells nothing more");
+        b.take_whatever_was_told();
+        b.delivered(&[q.id], &[]);
+    }
+
+    /// A note whose delivery failed for good does not stop the next turn's note.
+    #[test]
+    fn a_failed_note_does_not_stop_the_next_turns_note() {
+        let (b, q) = field();
+        b.c.adapter.busy("chief");
+        b.c.adapter
+            .answer(&b.worker, "I will go on when the build reports.");
+        passes(&b.c, 3);
+        let first = b.notes();
+        assert_eq!(first.len(), 1);
+        let id = first[0].id;
+        b.c.ledger.borrow_mut().begin_delivery(id).unwrap();
+        b.c.ledger
+            .borrow_mut()
+            .fail_delivery(id, "test pane rejected the note")
+            .unwrap();
+        own_turn(&b, "The build reported.", DONE);
+        passes(&b.c, 4);
+        let told = b.notes();
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert_eq!(b.c.message(id).state, "failed");
+        b.nothing_taken(&[q.id]);
+    }
+
+    /// An ordinary note of the worker that quotes the report's words is not the report's note.
+    #[test]
+    fn an_ordinary_note_quoting_the_phrase_does_not_consume_the_report() {
+        let (b, q) = field();
+        b.c.ledger
+            .borrow_mut()
+            .note(
+                b.project,
+                &cf_ledger::NewNote {
+                    from: Some(b.worker.clone()),
+                    to: "human".into(),
+                    task: Some(1),
+                    body:
+                        "I am documenting the phrase turn ended on these words with its question."
+                            .into(),
+                },
+            )
+            .unwrap();
+        b.c.adapter.answer(&b.worker, DONE);
+        passes(&b.c, 4);
+        b.nothing_taken(&[q.id]);
+        assert_eq!(b.notes().len(), 1);
+    }
+
+    /// After a switch to a fresh conversation the words cannot be taken by Finish: the note
+    /// says so, and does not offer it.
+    #[test]
+    fn a_note_from_a_fresh_conversation_does_not_offer_finish() {
+        let (b, q) = field();
+        b.c.adapter
+            .answer(&b.worker, "Earlier report, not the new one.");
+        passes(&b.c, 3);
+        b.c.adapter
+            .switch_to(&b.worker, "native-fresh-for-the-note");
+        passes(&b.c, 4);
+        b.c.adapter.answer(&b.worker, DONE);
+        passes(&b.c, 4);
+        b.nothing_taken(&[q.id]);
+        let told = b.notes();
+        let last = told.last().expect("a note of the fresh conversation");
+        assert!(last.body.starts_with(DONE), "{told:?}");
+        assert!(!last.body.contains("If they are its result"), "{last:?}");
+        assert!(last.body.contains("another conversation"), "{last:?}");
+    }
+
+    /// A second tell queued while the worker is still busy: its turn is told too.
+    #[test]
+    fn a_second_tell_queued_while_the_worker_is_busy_is_told_in_its_turn() {
+        let (b, q) = field();
+        b.c.adapter.answer(&b.worker, "Checking the grammar.");
+        passes(&b.c, 3);
+        assert_eq!(b.notes().len(), 1);
+        b.c.adapter.busy(&b.worker);
+        let tell =
+            b.c.ledger
+                .borrow_mut()
+                .tell_queued(b.project, 1, "chief", "Use the revised grammar.")
+                .unwrap();
+        passes(&b.c, 2);
+        assert_eq!(b.c.message(tell.id).state, "queued");
+        b.c.adapter
+            .answer(&b.worker, "Checked the revised grammar.");
+        passes(&b.c, 4);
+        assert_eq!(b.c.message(tell.id).state, "delivered");
+        b.c.adapter.answer(&b.worker, DONE);
+        passes(&b.c, 4);
+        b.nothing_taken(&[q.id]);
+        assert_eq!(b.notes().len(), 3, "{:?}", b.notes());
     }
 }

@@ -437,28 +437,44 @@ impl Dispatcher {
         if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {
             return Ok(());
         }
-        let open = self
-            .seams
-            .ledger
-            .borrow()
-            .questions_to_report(participant.id, thread.task.id)?;
+        // The turn is the one that ended with this last complete item: the ledger knows it was
+        // told by the item's identity written into the note's own event.
+        let Some(turn) = answers.last.map(|last| Arc::clone(&last.id)) else {
+            return Ok(());
+        };
+        let open = self.seams.ledger.borrow().questions_to_report(
+            participant.id,
+            thread.task.id,
+            &turn,
+        )?;
         let Some((last, rest)) = open.split_last() else {
             return Ok(());
         };
         let names = if rest.is_empty() {
-            format!("m-{last}")
+            format!(" m-{last}")
         } else {
             let rest: Vec<String> = rest.iter().map(|id| format!("m-{id}")).collect();
             format!("s {} and m-{last}", rest.join(", "))
         };
         let number = thread.task.number;
         let handle = &participant.handle;
+        // Finish takes words the window's record shows came after a paste of its task's
+        // messages; in another conversation of the window it cannot (`no-delivery`).
+        let finishable = self
+            .latest_message_at(thread, participant, items, &replacements)?
+            .is_some();
+        let how = if finishable {
+            format!("If they are its result: `cf task finish T-{number}`.")
+        } else {
+            format!(
+                "These words came from another conversation of its window, so `cf task finish T-{number}` cannot take them: `cf tell T-{number} \"…\"` reaches the window."
+            )
+        };
         let body = format!(
-            "{}\n\n(ConsensFlow: @{handle}'s {TURN_ON_OPEN_QUESTION}{} still open. If they are its result: `cf task finish T-{number}`.)",
+            "{}\n\n(ConsensFlow: @{handle}'s {TURN_ON_OPEN_QUESTION}{names} still open. {how})",
             words_of(&answers.final_run),
-            if rest.is_empty() { format!(" {names}") } else { names },
         );
-        self.seams.ledger.borrow_mut().note(
+        self.seams.ledger.borrow_mut().report_note(
             project.id,
             &NewNote {
                 from: Some(participant.handle.clone()),
@@ -466,6 +482,7 @@ impl Dispatcher {
                 task: Some(number),
                 body,
             },
+            &turn,
         )?;
         self.changed();
         Ok(())

@@ -37,8 +37,8 @@ runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''    if reported.is_some_and(|reported| reported > pasted) {'''
-replace = '''    if false && reported.is_some_and(|reported| reported > pasted) {'''
+find = '''    if reported {'''
+replace = '''    if false && reported {'''
 
 [[plant]]
 name = "open question result: a turn with no words is told"
@@ -102,3 +102,45 @@ find = '''            "To send words to its window, reopen the task: `cf task re
 replace = '''            "To send words to its window, use `cf tell T-{number}`."
         ),'''
 
+[[plant]]
+name = "open question result: a later turn is taken for the one already told"
+meant = "two_separate_turns_without_a_paste_between_are_each_told_once"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''AND json_extract(e.data, '$.report') = ?4'''
+replace = '''AND ?4 = ?4'''
+
+[[plant]]
+name = "open question result: a note that failed stops the next turn's note"
+meant = "a_failed_note_does_not_stop_the_next_turns_note"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''AND m.task_id = ?2 AND m.sender_id = ?3 AND m.state NOT IN ('failed', 'cancelled')'''
+replace = '''AND m.task_id = ?2 AND m.sender_id = ?3'''
+
+[[plant]]
+name = "open question result: the note offers Finish on another conversation's words"
+meant = "a_note_from_a_fresh_conversation_does_not_offer_finish"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            .is_some();
+        let how = if finishable {'''
+replace = '''            .is_some()
+            || true;
+        let how = if finishable {'''
+
+[[plant]]
+name = "open question result: any note of the worker counts as the report's note"
+meant = "an_ordinary_note_quoting_the_phrase_does_not_consume_the_report"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''AND json_extract(e.data, '$.report') = ?4'''
+replace = '''AND (json_extract(e.data, '$.report') = ?4 OR json_extract(e.data, '$.kind') = 'note')'''

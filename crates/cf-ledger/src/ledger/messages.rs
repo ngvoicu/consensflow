@@ -345,6 +345,16 @@ impl Ledger {
         messages::note(&mut self.store, project_id, note)
     }
 
+    /// A note that reports the ended turn `turn` of a window (see `questions_to_report`).
+    pub fn report_note(
+        &mut self,
+        project_id: i64,
+        note: &NewNote,
+        turn: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::report_note(&mut self.store, project_id, note, turn)
+    }
+
     /// A note from ConsensFlow that asks its reader no decision: to a chief it is shown, not
     /// typed, and `aside` is what its task's line says of it until the task moves on or the
     /// thing described ends ([`crate::TaskView::aside`]); to anyone else it goes as
@@ -904,8 +914,9 @@ impl Ledger {
         &self,
         participant_id: i64,
         task_id: i64,
+        turn: &str,
     ) -> Result<Vec<i64>, LedgerError> {
-        messages::questions_to_report(&self.store, task_id, participant_id)
+        messages::questions_to_report(&self.store, task_id, participant_id, turn)
     }
 
     /// The newest message pasted into a participant's window about a task and proved.

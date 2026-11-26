@@ -265,19 +265,21 @@ pub(crate) fn open_questions(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// What ConsensFlow's note of a turn that ended with a question open says it is, so that the
-/// ledger can tell it was sent (`questions_to_report`): the note's words hold it.
+/// The words ConsensFlow's note of a turn that ended with a question open says (the engine
+/// writes them; the ledger does not read them: a note is known by `report` in its event).
 pub const TURN_ON_OPEN_QUESTION: &str = "turn ended on these words with its question";
 
-/// The questions `window` has open on `task` that the turn which just ended should be reported
-/// on (T-2197): a message of the task was pasted into the window after the newest of them was
-/// asked, the window's `delivery.begun` after the question's `message.sent`, and no note of
-/// this report was sent since that paste. Empty otherwise. Read from the ledger alone: the
-/// note's own `message.sent` after the paste is what binds it to once for a turn.
+/// The questions `window` has open on `task` that the ended turn `turn` (the identity of its
+/// last complete item) is to be reported on (T-2197): a message of the task was pasted into the
+/// window after the newest of them was asked, the window's `delivery.begun` after the question's
+/// `message.sent`, and no note reporting this turn was sent and still stands. Empty otherwise.
+/// Read from the ledger alone: the note's own `message.sent` event carries `report: turn`, and
+/// a note whose delivery failed or was withdrawn does not count.
 pub(crate) fn questions_to_report(
     store: &Store,
     task: i64,
     window: i64,
+    turn: &str,
 ) -> Result<Vec<i64>, LedgerError> {
     let open = open_questions(store, task, window)?;
     let Some(newest) = open.last() else {
@@ -313,16 +315,17 @@ pub(crate) fn questions_to_report(
     if pasted < asked {
         return Ok(Vec::new());
     }
-    let reported: Option<i64> = store.db.query_row(
-        &event_of(
-            "message.sent",
-            "SELECT id FROM message WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'note'
-               AND instr(body, ?4) > 0",
-        ),
-        params![project, task, window, TURN_ON_OPEN_QUESTION],
-        |row| row.get(0),
-    )?;
-    if reported.is_some_and(|reported| reported > pasted) {
+    let reported = store
+        .db
+        .prepare(
+            "SELECT 1 FROM event e JOIN message m ON m.id = json_extract(e.data, '$.message')
+              WHERE e.project_id = ?1 AND e.kind = 'message.sent'
+                AND json_extract(e.data, '$.report') = ?4
+                AND m.task_id = ?2 AND m.sender_id = ?3 AND m.state NOT IN ('failed', 'cancelled')
+              LIMIT 1",
+        )?
+        .exists(params![project, task, window, turn])?;
+    if reported {
         return Ok(Vec::new());
     }
     Ok(open)

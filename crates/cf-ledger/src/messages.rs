@@ -162,6 +162,30 @@ pub(crate) fn note(
     )
 }
 
+/// A note that reports the ended turn `turn` of a window to its task's requester (T-2197):
+/// as [`note`], and its `message.sent` event carries `report: turn`, which is how the ledger
+/// knows the turn was told (`questions_to_report`).
+pub(crate) fn report_note(
+    store: &mut Store,
+    project_id: i64,
+    note: &NewNote,
+    turn: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            from: note.from.as_deref(),
+            to: &note.to,
+            body: &note.body,
+            task: note.task,
+            kind: "note",
+            report: Some(turn),
+            ..Sent::default()
+        },
+    )
+}
+
 /// A question for a coordinator; the asker's task waits for the answer. The
 /// human is never asked on the board: the chief asks them in its own
 /// terminal, where they work with it. With questions, the question carries
