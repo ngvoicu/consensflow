@@ -368,7 +368,12 @@ pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError
 
 #[cfg(windows)]
 pub(super) fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
-    Ok(Some(super::conpty::watch(pane.master.as_ref())?))
+    let watch = pane
+        .master
+        .watch
+        .as_ref()
+        .ok_or_else(|| PaneError::Pty("the terminal has no output to ask".to_owned()))?;
+    Ok(Some(watch.try_clone()?))
 }
 
 /// The question to the pane's terminal, whether it holds bytes not yet read

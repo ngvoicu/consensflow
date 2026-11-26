@@ -5,8 +5,11 @@ use serde_json::{json, Value};
 use super::*;
 use crate::arbiter::{EnterTiming, InputArbiter};
 use crate::journal::{Journal, Resize};
+#[cfg(unix)]
 use crate::output_hub::PaneOutputMessage;
-use crate::pty::{PaneKey, PaneOutput};
+use crate::pty::PaneKey;
+#[cfg(unix)]
+use crate::pty::PaneOutput;
 
 /// A frame's header, its seed and its bytes, as the page reads one.
 fn read_frame(frame: &[u8]) -> (Value, Vec<u8>, Vec<u8>) {

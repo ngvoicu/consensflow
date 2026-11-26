@@ -252,6 +252,10 @@ struct PaneMaster {
     /// own copy is made from, which needs no lock.
     #[cfg(unix)]
     fd: Option<std::os::fd::RawFd>,
+    /// A handle of the console's output of the window's own, made when it opened (Windows): the
+    /// output's copies are made from it, which needs no lock.
+    #[cfg(windows)]
+    watch: Option<conpty::Watch>,
 }
 
 impl PaneMaster {
@@ -259,6 +263,8 @@ impl PaneMaster {
         Arc::new(Self {
             #[cfg(unix)]
             fd: terminal.as_raw_fd(),
+            #[cfg(windows)]
+            watch: conpty::watch(&*terminal).ok(),
             terminal: Mutex::new(terminal),
         })
     }
