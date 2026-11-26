@@ -11,6 +11,15 @@
 #   person to the window, and `queue` resets the count for it, so no move needs to.
 #
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
+#
+# How it is run: the plants driver starts only `cargo` and `node`, so a run takes no `env` word, and it passes
+# xtask's own environment on to every command. The model plants (run `n35-model`) draw 2,000 schedules by
+# default, which a plants run's time limit cannot take (each ends NOT RUN); set `CF_N35_SEEDS` in the shell that
+# starts xtask:
+#
+#     CF_N35_SEEDS=400 cargo xtask plants daemon "n35 hold" --test-threads 2
+#
+# A run that sets nothing runs 2,000 seeds.
 
 [run]
 n35-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
