@@ -40,7 +40,8 @@ fn quota_of(kind: &str, words: &str, at: String) -> Quota {
 
 /// What the hold of `kind` with `words` kept and told, as the base kept and told it.
 fn observe(kind: &str, words: &str) -> Value {
-    let context = Context::new();
+    // The base held a refused login at its first refusal: with the tries off so does this build.
+    let context = Context::tries_off();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
     context.pass().unwrap();

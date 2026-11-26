@@ -308,7 +308,9 @@ fn member_outs(context: &Context, tiers: &Tiers) -> Vec<serde_json::Value> {
 
 /// Zeus refused for `because`, and `then` looking at what it left.
 fn zeus_refused(because: &str, then: impl FnOnce(&Context, &Tiers)) {
-    let context = Context::new();
+    // Held at the first refusal: what the hold keeps is the point here, not the tries a refused
+    // login gets first (`login_retries`).
+    let context = Context::tries_off();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
     context.pass().unwrap();
