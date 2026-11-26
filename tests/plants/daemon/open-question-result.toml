@@ -1,27 +1,88 @@
-# A window's result is delivered while a question of its task is still open (T-2197): a turn
-# that ends settled, begun by a message that came after every open question was asked, is the
-# task's result (`crates/cf-engine/src/turn_end.rs`, `went_past`); the ledger closes each open
-# question with the result and names it there (`crates/cf-ledger/src/tasks/finishing.rs`).
+# A window's turn ends with words while a question of its task is open (T-2197). The engine
+# never takes such a turn as the task's result: the task waits, its questions stay open, and the
+# requester is told the words once (`report_turn_on_open_question`, `crates/cf-engine/src/turn_end.rs`;
+# the ledger's `questions_to_report`, `crates/cf-ledger/src/messages/receipt.rs`). `cf task finish`
+# takes them and closes and names each open question (`crates/cf-ledger/src/tasks/finishing.rs`).
 #
 # Every name holds `open question result`, so `npm run plants:daemon -- "open question result"`
 # runs them all.
 
 [run]
-oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::", "open_question_opening::"]
+oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::", "open_question_invariant::"]
 
 [[plant]]
-name = "open question result: the result is held while a question is open"
-meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
+name = "open question result: the engine takes a waiting task's turn as its result"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
 runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''task.filter(|thread| (thread.task.state == "working" || went_past) && !waiting)'''
-replace = '''task.filter(|thread| (thread.task.state == "working") && !waiting)'''
+find = '''task.filter(|thread| thread.task.state == "working" && !waiting)'''
+replace = '''task.filter(|thread| (thread.task.state == "working" || thread.task.state == "waiting") && !waiting)'''
 
 [[plant]]
-name = "open question result: the note is missing its number"
-meant = "a_result_after_resume_words_closes_both_open_questions_and_names_them"
+name = "open question result: a turn is told though no message came after the question"
+meant = "a_turn_that_asks_again_after_an_answer_and_ends_on_it_is_not_told"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    if pasted < asked {'''
+replace = '''    if false && pasted < asked {'''
+
+[[plant]]
+name = "open question result: a turn is told again for the same paste"
+meant = "a_second_look_at_the_same_turn_tells_nothing_more"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    if reported.is_some_and(|reported| reported > pasted) {'''
+replace = '''    if false && reported.is_some_and(|reported| reported > pasted) {'''
+
+[[plant]]
+name = "open question result: a turn with no words is told"
+meant = "a_turn_with_no_words_is_not_told_and_not_taken"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {'''
+replace = '''        if pending_after_look(observed, watching).total() > 0 {'''
+
+[[plant]]
+name = "open question result: a turn with jobs still running is told"
+meant = "a_turn_held_for_background_jobs_is_told_when_it_ends"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {'''
+replace = '''        if !has_words(&answers.final_run) {'''
+
+[[plant]]
+name = "open question result: the note names no question"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            if rest.is_empty() { format!(" {names}") } else { names },'''
+replace = '''            "",'''
+
+[[plant]]
+name = "open question result: finish leaves the questions open"
+meant = "a_question_closed_by_finish_is_closed_in_a_window_the_human_keeps_open"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
+
+[[plant]]
+name = "open question result: the result does not name the questions it closes"
+meant = "a_report_after_resume_words_is_told_naming_both_questions"
 runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
@@ -30,86 +91,8 @@ find = '''(ConsensFlow: m-{question} was left unanswered'''
 replace = '''(ConsensFlow: a question was left unanswered'''
 
 [[plant]]
-name = "open question result: a turn that asked again is taken for a result"
-meant = "a_turn_that_asks_again_after_an_answer_and_ends_on_it_is_still_a_wait"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''        if after {'''
-replace = '''        if false && after {'''
-
-[[plant]]
-name = "open question result: a question is placed by the paste's order, not by when the answer was written"
-meant = "an_answer_written_before_the_next_question_is_no_result_after_it"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            (Some(asked), Some(written)) => asked > written,'''
-replace = '''            (Some(asked), Some(_)) => paste.is_none_or(|paste| asked > paste),'''
-
-[[plant]]
-name = "open question result: a turn that ended in another pane is taken for a result"
-meant = "a_real_hold_route_and_show_do_not_take_the_pre_exit_turn"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end.rs"
-find = '''*message == pasted.id && was == now))'''
-replace = '''*message == pasted.id && (was == now || true)))'''
-
-[[plant]]
-name = "open question result: a turn after a change of conversation is taken for a result"
-meant = "returning_to_a_conversation_does_not_publish_the_stored_turn"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''        if conversation_changed_since(store, window, pasted.project_id, paste)? {'''
-replace = '''        if false && conversation_changed_since(store, window, pasted.project_id, paste)? {'''
-
-[[plant]]
-name = "open question result: a turn with no words is taken for a result"
-meant = "an_empty_following_turn_does_not_close_an_open_question"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end.rs"
-find = '''if thread.task.state == "waiting" && !has_words(&answers.final_run) {'''
-replace = '''if false && thread.task.state == "waiting" && !has_words(&answers.final_run) {'''
-
-[[plant]]
-name = "open question result: words on their way do not hold the result"
-meant = "a_queued_answer_on_its_way_holds_the_result"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''        .exists(params![task, window])?
-    {
-        return Ok(Vec::new());
-    }
-    let Some(pasted)'''
-replace = '''        .exists(params![task, window])? && false
-    {
-        return Ok(Vec::new());
-    }
-    let Some(pasted)'''
-
-[[plant]]
-name = "open question result: the result names questions it leaves open"
-meant = "a_question_closed_by_the_result_is_closed_in_a_window_the_human_keeps_open"
-runs = ["oqr-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''                close_by_the_result(store, &task, &left)?;'''
-replace = '''                let _ = &left;'''
-
-[[plant]]
 name = "open question result: a done task's refusal points elsewhere"
-meant = "a_result_is_delivered_when_the_first_of_two_questions_is_still_open"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
 runs = ["oqr-dispatcher"]
 
 [[plant.edit]]
@@ -118,3 +101,4 @@ find = '''            "To send words to its window, reopen the task: `cf task re
         ),'''
 replace = '''            "To send words to its window, use `cf tell T-{number}`."
         ),'''
+

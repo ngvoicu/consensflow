@@ -63,14 +63,7 @@ pub(crate) fn record_result(
     number: i64,
     body: &str,
 ) -> Result<TaskMoved, LedgerError> {
-    record(
-        store,
-        project_id,
-        number,
-        body,
-        &ACTIVE_TASK_STATES,
-        Finishing::Own,
-    )
+    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)
 }
 
 /// The chief or the human takes what the worker said last as the result (Finish):
@@ -87,13 +80,14 @@ pub(crate) fn record_finished(
     body: &str,
     left: (usize, usize),
 ) -> Result<TaskMoved, LedgerError> {
-    record(
+    record_counted(
         store,
         project_id,
         number,
         body,
         &FINISHABLE_TASK_STATES,
-        Finishing::Word { left },
+        true,
+        left,
     )
 }
 
@@ -127,30 +121,37 @@ pub(crate) fn left_running(
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 
-/// How a task's result came.
-#[derive(Clone, Copy)]
-enum Finishing {
-    /// The window's own word (`cf task done`).
-    Own,
-    /// The chief or the human, with the jobs and agents the window was counted running.
-    Word { left: (usize, usize) },
-}
-
-/// A result, however it came: where the chief or the human finished it, the `left` jobs and
-/// agents are kept with the move to done for the accept to say.
+/// `finished_by_word`: the chief or the human finishes the task, rather than the window.
 fn record(
     store: &mut Store,
     project_id: i64,
     number: i64,
     body: &str,
     states: &[&str],
-    how: Finishing,
+    finished_by_word: bool,
 ) -> Result<TaskMoved, LedgerError> {
-    let finished_by_word = matches!(how, Finishing::Word { .. });
-    let left = match how {
-        Finishing::Word { left } => left,
-        _ => (0, 0),
-    };
+    record_counted(
+        store,
+        project_id,
+        number,
+        body,
+        states,
+        finished_by_word,
+        (0, 0),
+    )
+}
+
+/// [`record`], and where the finish was at a word, the `left` jobs and agents its window was
+/// counted running, kept with the move to done for the accept to say.
+fn record_counted(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    body: &str,
+    states: &[&str],
+    finished_by_word: bool,
+    left: (usize, usize),
+) -> Result<TaskMoved, LedgerError> {
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
@@ -208,21 +209,25 @@ fn record(
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
         // The chief or the human takes the words as the result while questions of the task are
-        // still open (T-2197): they close with it, however they were tracked and whether its
-        // window stays, and the result names each. That withdraws unanswered questions without
-        // ending the holding or withdrawing an answer already accepted for its window.
+        // still open (T-2197): each closes with the result, however it was tracked and whether
+        // its window stays, and the result names it.
         let mut body = body.to_owned();
         if let (true, Some(window)) = (finished_by_word, task.assignee_id) {
-            let left = open_questions(store, task.id, window)?;
-            close_by_the_result(store, &task, &left)?;
-            for question in left {
+            let open = open_questions(store, task.id, window)?;
+            close_by_the_result(store, &task, &open)?;
+            for question in open {
                 body.push_str(&format!(
                     "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`.)"
                 ));
             }
-            withdraw_open_questions(store, &task, "was finished")?;
         }
         let body = body.as_str();
+        // The chief may explicitly take a raised question as the result.
+        // That withdraws unanswered questions without ending the holding or
+        // withdrawing an answer already accepted for its window.
+        if finished_by_word {
+            withdraw_open_questions(store, &task, "was finished")?;
+        }
         if finished_by_word {
             crate::waiting_questions::end_for_task(store, task.id, task.assignee_id)?;
         }
