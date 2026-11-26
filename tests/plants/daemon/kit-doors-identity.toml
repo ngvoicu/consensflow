@@ -130,7 +130,7 @@ find = '''        Err(failed) if failed.kind() == io::ErrorKind::NotFound => Ok(
 replace = '''        Err(failed) => Err(failed),'''
 
 [[plant]]
-name = "K3 identity: the recursive copy does not ask the door of a folder it enters"
+name = "K3 identity: the recursive copy does not ask the door of what it meets"
 meant = "a_recursive_copy_takes_nothing_of_a_store_below_its_starting_folder"
 runs = ["kdi-copy-dir"]
 
@@ -139,6 +139,13 @@ file = "crates/cf-e2e/src/door/writes.rs"
 find = '''        } else if kind.is_dir() {
             if let Some(roots) = asks {'''
 replace = '''        } else if kind.is_dir() {
+            if let Some(roots) = asks.filter(|_| false) {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''        } else if kind.is_file() {
+            if let Some(roots) = asks {'''
+replace = '''        } else if kind.is_file() {
             if let Some(roots) = asks.filter(|_| false) {'''
 
 [[plant]]
