@@ -194,8 +194,8 @@ runs = ["held-words-pi", "held-words-quota"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota/patterns.rs"
-find = "|invalid_grant|session expired"
-replace = "|session expired"
+find = 'compile(r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))")'
+replace = 'compile(r"(?i-u:never_matches_zz)")'
 
 [[plant]]
 name = "held words: Pi's Meta session that needs a new login is read as nothing"
@@ -204,17 +204,16 @@ runs = ["held-words-quota"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/quota/patterns.rs"
-find = '|session expired \(status 40[13]\))'
-replace = ')'
+find = 'compile(r"(?i-u:session expired \(status 40[13]\))")'
+replace = 'compile(r"(?i-u:never_matches_zz)")'
 
 [[plant]]
 name = "held words: Pi reads a refresh refused for a moment as a login refused"
-meant = "pi_reads_each_providers_refusal_for_what_it_is"
-runs = ["held-words-pi"]
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/quota/patterns.rs"
-find = "refresh failed \\(401\\)|invalid_grant"
-replace = "refresh failed \\(50[0-9]\\)|refresh failed \\(401\\)|invalid_grant"
-
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "                && !REFRESH_MOMENT.is_match(text)))"
+replace = "                && true))"
 
