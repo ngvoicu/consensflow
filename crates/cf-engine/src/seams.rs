@@ -155,12 +155,16 @@ pub trait AppSettings {
 /// The text each role's window starts with (`roles`), or why it has none,
 /// which fails its launch. A chief whose project has specs on is given them
 /// ([`ProjectSpecs`]), and with them the section its text has of them; every
-/// other window is given none.
+/// other window is given none. A chief's text has the lines of the roles `held`, which are
+/// those of its staff table, but for a text that says the roles a running chief holds now
+/// beside the table its window launched with (`role_news`); a member's has no lines of
+/// roles, whatever is given.
 pub trait Roles {
     fn instructions(
         &self,
         participant: &ParticipantView,
         project: &ProjectView,
+        held: &[&str],
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String>;
 

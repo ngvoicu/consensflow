@@ -55,7 +55,7 @@ fn said(cf: &CfWord) -> &str {
 /// member, and of a removal, with this window's word for `cf` in it.
 fn chief_input(word: &str) -> String {
     format!(
-        "Any \"…\" can be `--file brief.md`: the text then comes from that file, as written. Write a brief that holds backticks, `$` or quotes to it with your file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into `-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`, expands `$name` and treats a backtick as an escape before ConsensFlow sees the text, and 5.1 splits it at an inner `\"`; to put a value in, write it out:\n\n    {word} task add --tier standard --file brief.md\n"
+        "Any \"…\" can be `--file brief.md`: the text then comes from that file, as written. Write a brief that holds backticks, `$` or quotes to it with your file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into `-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`, expands `$name` and treats a backtick as an escape before ConsensFlow sees the text, and 5.1 splits it at an inner `\"`; to put a value in, write it out:\n\n    {word} task reopen T-3 --file brief.md\n"
     )
 }
 
@@ -126,9 +126,7 @@ fn a_bash_like_window_keeps_its_heredoc_and_its_removal_example() {
         let word = said(&cf);
         let chief = text("chief", &cf, None);
         assert!(
-            chief.contains(&format!(
-                "    {word} task add --tier standard - <<'BRIEF'\n"
-            )),
+            chief.contains(&format!("    {word} task reopen T-3 - <<'BRIEF'\n")),
             "{word}"
         );
         assert!(chief.contains("Write a long brief to a file with your file tool"));

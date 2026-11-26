@@ -121,13 +121,30 @@ fn zeus() -> StaffRow {
     staff_row("zeus", &["worker", "reviewer"], WorkTier::Standard)
 }
 
+/// A staff that holds every role: zeus, and one member to each of the rest.
+fn every_role() -> Vec<StaffRow> {
+    let mut staff = vec![zeus()];
+    for role in cf_ledger::roles::ids() {
+        if role == "worker" || role == "reviewer" {
+            continue;
+        }
+        let mut row = staff_row(&format!("{role}-one"), &[role], WorkTier::Standard);
+        if cf_ledger::roles::takes_no_tier(&[role]) {
+            row.work_tier = None;
+        }
+        staff.push(row);
+    }
+    staff
+}
+
 /// A role's text with no environment and no word of where its cf is.
 fn instructions(role: &str, staff: &[StaffRow]) -> String {
     role_instructions(&Env::default(), role, staff, &CfWord::bare(), None).unwrap()
 }
 
 fn teaches_only_the_boards_commands(role: &str) {
-    let text = instructions(role, &[zeus()]);
+    // The chief is taught the commands of the roles its staff holds: here, of every role.
+    let text = instructions(role, &every_role());
     assert!(
         found(&format!(r"^---\nname: consensflow-{role}\n"), &text),
         "{role}"
@@ -190,10 +207,11 @@ fn teaches_only_the_boards_commands(role: &str) {
             "card first"
         );
         assert!(found(
-            r"## Reviews\n\nNothing is reviewed unless you ask\.",
+            r"## Reviews\n\nA finding blocks the work only when",
             &text
         ));
-        // The tester is one more role the chief names the tier of, and one line of the reviews' section;
+        assert!(found(r"Nothing is reviewed\s+unless you ask\.", &text));
+        // The tester is one more role the chief names the tier of, with a paragraph of when it is given work;
         // what each role gives back is its line of the card (spec new-roles, FD-06).
         assert!(found(
             r#"cf task add --test --tier <tier> "…"\s+a test for a tester: what to run and what to check; results with evidence back, no product code changed"#,
@@ -209,7 +227,7 @@ fn teaches_only_the_boards_commands(role: &str) {
         }
         assert!(!found(r"no file changed|changes no file", &text));
         assert!(found(
-            r"accept the review\.\n\nA tester checks work by running it, when the work can be run\.\n\n## The staff",
+            r"A change that can be run goes to a tester before you accept it only where the\s+evidence of the member who did the work does not decide it",
             &text
         ));
         assert!(text.contains("`cf staff` shows them as they are now"));
@@ -496,7 +514,7 @@ fn tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_c
 /// tier is shown with none.
 #[test]
 fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_it_has_them() {
-    let text = instructions("chief", &[zeus()]);
+    let text = instructions("chief", &every_role());
     let card = section(&text, "Your commands");
     for role in cf_ledger::roles::all() {
         // The card says a role's tiers as the registry has them: `<tier>` for every one, else
@@ -519,42 +537,56 @@ fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_
     }
 }
 
-/// What the chief is told of the four roles of spec new-roles and of a member's images (FD-06,
-/// FD-07; T-1480): when work goes to each, in the section on roles, and the researcher in What
-/// you do.
+/// What the chief is told of each role its staff holds and of a member's images: when work
+/// goes to it, in the section on roles, and the duty that sends the work there.
 #[test]
-fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_images_are_drawn() {
-    let text = instructions("chief", &[zeus()]);
+fn tells_the_chief_when_work_goes_to_each_role_and_how_a_members_images_are_drawn() {
+    let text = instructions("chief", &every_role());
     assert_says(
         section(&text, "What you do"),
         "the chief's What you do",
-        &["reading of more than a few lookups to the researcher, so that only its answer enters your conversation."],
+        &[
+            "You plan the work, check and decide every result and answer the human.",
+            "The work itself goes to your staff: each role it holds takes its kind of work (\"Choose the role, not the member\", below).",
+            "What no role there covers is yours to think through.",
+        ],
     );
     assert_says(
         section(&text, "Choose the role, not the member"),
         "the chief's section on roles",
         &[
-            "Name the role a task needs and its tier: every command above but `--design` takes `--tier`.",
+            "Name the role a task needs, and its tier where its command above takes `--tier`.",
             "A role at a tier is a slot, held by one member, and each task gets a new window of that member; you never pick the member or write a task with one in mind.",
             "A task whose slot is empty goes to the nearest held one, the next one up before the next one down, but never into Critical, and you are told whose.",
             "You pick the tier of any job, every role's included: Critical, complex, standard or light.",
             "Critical takes only critical work, added there with its `--purpose`: the hardest and most important work, coding included; with nobody at Critical, it goes to the nearest tier held.",
             "A task waits only when no slot of its role is held outside Critical, and you are told once the way on: ask the human for a member, in your terminal.",
             "A task its member cannot run goes to that member's backup; a member on Vacation takes no new tasks.",
+            "Work that can run on its own in a fresh window (a fix, a feature, a document, a script) goes to a worker",
             // The architect (A3, A5): a design first, and the briefs point to its files.
-            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",
+            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the builders' briefs point to them.",
             "It also reviews a change against its design.",
+            "Where you write a spec, it says the work and its order and points to the architect's files for what the software is.",
             // The frontend designer: the purpose, never the look (rule 0); never beside a worker in the same files.
-            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and a worker's question of look goes to it through you.",
-            "Never give it and a worker the same files at once: order the two with `--needs`.",
-            "It can also go over a screen a worker built.",
+            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and another member's question of look goes to it through you.",
+            "Never give it and another member the same files at once: order the two with `--needs`.",
+            "It can also go over a screen another member built.",
+            "A question of fact you need answered before you plan or decide",
+            "goes to the researcher when it takes more than a few lookups.",
+            "goes to an advisor before you commit to it",
             // The integrator.
-            "Where the staff has an integrator, it lands accepted work; a conflict that needs a choice about what the product does comes back to you as a question with both sides.",
+            "The integrator lands accepted work; a conflict that needs a choice about what the product does comes back to you as a question with both sides.",
             "It makes no tag, release or deploy unless its brief says so.",
             // Rule 5, the image flow.
             "A member that needs images asks you with a drawing order for each: add a `--design` task per order and, when all are done, answer in words, then each file's path and its line from ConsensFlow.",
-            "With no image designer, the member makes them itself (SVG, CSS or its harness's image tool), or you ask the human for them, with the orders.",
+            "A result you accepted stays on the board: a brief that builds on one says what it settled and names its task (T-7), which its member reads with `cf task get T-7`.",
         ],
+    );
+    // With no image designer, the one fallback, and nothing of drawing orders to it.
+    assert_says(
+        section(&instructions("chief", &[zeus()]), "Choose the role, not the member"),
+        "the chief's section on roles with no image designer",
+        &["A member that needs images asks you with a drawing order for each. With no image designer, the member makes them itself (SVG, CSS or its harness's image tool), or you ask the human for them, with the orders."],
     );
 }
 
@@ -1087,8 +1119,8 @@ fn tells_the_chief_a_blocker_is_evidenced_and_the_rest_does_not_hold_the_work() 
 fn tells_the_chief_a_second_review_checks_the_fixes_and_not_the_whole_work_again() {
     let text = instructions("chief", &[zeus()]);
     assert_says(
-        section(&text, "Reviews"),
-        "the chief's Reviews",
+        section(&text, "Choose the role, not the member"),
+        "the chief's section on roles",
         &[
             "A second review checks the fixes: give it the earlier findings by number and the change since.",
             "It says of each whether it is fixed, still open, fixed only in part, or newly broken by a fix, and whether a fix broke what it touches; it doesn't review the whole work again.",
@@ -1112,8 +1144,8 @@ fn tells_the_chief_to_change_the_work_after_two_reviews_that_found_blockers_or_t
     // The earlier rule stays: the chief decides the work and the review, and
     // nothing on the board sends a review back (CORE-27).
     assert_says(
-        section(&text, "Reviews"),
-        "the chief's Reviews",
+        section(&text, "Choose the role, not the member"),
+        "the chief's section on roles",
         &["Then decide both: reopen the work with what must change, or accept it, and accept the review."],
     );
     assert!(!text.contains("Review round"));
@@ -1123,8 +1155,8 @@ fn tells_the_chief_to_change_the_work_after_two_reviews_that_found_blockers_or_t
 fn tells_the_chief_to_ask_a_reviewer_for_no_pass_or_fail_first_line() {
     let text = instructions("chief", &[zeus()]);
     assert_says(
-        section(&text, "Reviews"),
-        "the chief's Reviews",
+        section(&text, "Choose the role, not the member"),
+        "the chief's section on roles",
         &[
             r#"Don't ask a reviewer for a pass-or-fail first line: its own "ready", "ready with notes" or "not ready" stands."#,
         ],
@@ -1207,7 +1239,7 @@ fn tells_the_chief_to_keep_its_own_checks_targeted_and_to_read_no_result_it_alre
         section(&text, "What you do"),
         "the chief's What you do",
         &[
-            "Keep your own checks targeted (the diff stat, a grep, one test, the lines that changed); a deep check (the whole change, the suites) goes to a reviewer or tester.",
+            "Keep your own checks targeted (the diff stat, a grep, one test, the lines that changed); a deep check (the whole change, the suites) goes on the board.",
             "A result already in your conversation needs no `cf task get`.",
             "Look at an image yourself only when the decision needs your eyes; otherwise ask the member what it shows.",
         ],
@@ -1286,7 +1318,7 @@ fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_a
         ),
         (
             "advisor",
-            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details",
+            "Begin with what you recommend and what the chief has to decide, in a few lines. Then the options",
         ),
         (
             "tester",

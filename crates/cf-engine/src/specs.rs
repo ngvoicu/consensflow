@@ -75,12 +75,28 @@ impl Dispatcher {
         participant: &ParticipantView,
         adapter: &dyn Adapter,
     ) -> Result<RoleText, EngineError> {
-        let specs = self.chief_specs(project, participant, adapter)?;
+        let held = crate::roles::held_roles(&crate::roles::staff_of(project));
+        let specs = self.specs_setting(project, participant);
+        self.role_text_holding(project, participant, adapter, &held, specs)
+    }
+
+    /// [`Dispatcher::role_text`] with the lines of the roles `held` and the specs `setting`
+    /// says, which need not be those `project` has now: what a note says a running chief
+    /// now holds beside the staff table its window launched with (`role_news`).
+    pub(crate) fn role_text_holding(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        adapter: &dyn Adapter,
+        held: &[&str],
+        setting: Option<SpecsSetting>,
+    ) -> Result<RoleText, EngineError> {
+        let specs = self.specs_of(setting, adapter)?;
         let told = specs.as_ref().map(ChiefSpecs::text);
         let instructions = self
             .seams
             .roles
-            .instructions(participant, project, told.as_ref())
+            .instructions(participant, project, held, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
         // A chief that does the work with its own hands has the rules in the board's guide
         // (`cf guide`), not in its role: they bind the staff's work, not its own.
@@ -161,7 +177,17 @@ impl Dispatcher {
         participant: &ParticipantView,
         adapter: &dyn Adapter,
     ) -> Result<Option<ChiefSpecs>, EngineError> {
-        let Some(setting) = self.specs_setting(project, participant) else {
+        self.specs_of(self.specs_setting(project, participant), adapter)
+    }
+
+    /// The specs of `setting`, with where `adapter`'s window finds the skill: none where
+    /// there is no setting.
+    fn specs_of(
+        &self,
+        setting: Option<SpecsSetting>,
+        adapter: &dyn Adapter,
+    ) -> Result<Option<ChiefSpecs>, EngineError> {
+        let Some(setting) = setting else {
             return Ok(None);
         };
         let skill = adapter

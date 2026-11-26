@@ -44,7 +44,7 @@ runs = ["own-off"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = '''                crate::role_change::body_of(&role.instructions, &self.seams.roles.cf(participant))'''
+find = '''                crate::role_change::body_of(&role.instructions, &cf)'''
 replace = '''                crate::roles::news::own_hands_on(&role.instructions)'''
 
 [[plant]]

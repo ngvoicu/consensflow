@@ -603,8 +603,9 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             } else {
                 cf.as_str()
             };
+            // The card's line for every staff (the roles' lines are those of the staff held).
             assert!(
-                role.contains(&format!("\n    {word} task add --tier ")),
+                role.contains(&format!("\n    {word} task add --after T-3 ")),
                 "{role}"
             );
             assert!(role.contains(&format!("`{cf}`")), "its window's cf: {role}");
