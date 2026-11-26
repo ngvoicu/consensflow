@@ -1,19 +1,26 @@
 use super::*;
 
-/// What `KERN_PROCARGS2` answers for `sleep 31` started with `environment`:
-/// the count, the program's path and its padding, the arguments, the
-/// environment, and the NULs that end each.
-fn procargs_of(environment: &[&str]) -> Vec<u8> {
-    let mut bytes = 2i32.to_ne_bytes().to_vec();
-    bytes.extend_from_slice(b"/bin/sleep\0\0\0\0\0");
-    bytes.extend_from_slice(b"sleep\0");
-    bytes.extend_from_slice(b"31\0");
-    for variable in environment {
-        bytes.extend_from_slice(variable.as_bytes());
+/// What `KERN_PROCARGS2` answers for a process: the count, its path and the NULs that
+/// pad the path (with its own NUL) to a multiple of 8, as the kernel does, the arguments
+/// (an empty one is one NUL), the environment, and the NULs that end each.
+fn procargs_for(path: &str, arguments: &[&str], environment: &[&str]) -> Vec<u8> {
+    let mut bytes = i32::try_from(arguments.len())
+        .expect("a count")
+        .to_ne_bytes()
+        .to_vec();
+    bytes.extend_from_slice(path.as_bytes());
+    bytes.resize(4 + (path.len() + 1).next_multiple_of(8), 0);
+    for field in arguments.iter().chain(environment) {
+        bytes.extend_from_slice(field.as_bytes());
         bytes.push(0);
     }
     bytes.push(0);
     bytes
+}
+
+/// [`procargs_for`] `sleep 31` started with `environment`.
+fn procargs_of(environment: &[&str]) -> Vec<u8> {
+    procargs_for("/bin/sleep", &["sleep", "31"], environment)
 }
 
 #[test]
@@ -21,6 +28,114 @@ fn a_command_line_is_the_arguments_the_process_was_started_with_and_not_its_envi
     let bytes = procargs_of(&["PATH=/usr/bin", "HOME=/Users/zeus"]);
     assert_eq!(command_line(&bytes).as_deref(), Some("sleep 31"));
     assert_eq!(command_line(&procargs_of(&[])).as_deref(), Some("sleep 31"));
+}
+
+#[test]
+fn an_empty_argument_is_an_argument_and_the_environment_never_gets_into_a_command_line() {
+    // An empty first argument is one NUL after the path's padding; it was skipped as more
+    // padding, and the first variable of the environment was the last argument.
+    let marker = format!("{OWNER_ENV}=abc123");
+    let canary = "CANARY_TOKEN=sk-live-0123456789";
+    for path in [
+        "/bin/sleep",
+        "/bin/sh",
+        "/usr/bin/yes",
+        "/p",
+        "/a/path/of/fifteen",
+    ] {
+        let bytes = procargs_for(path, &["", "31"], &[canary, &marker]);
+        let line = command_line(&bytes).expect("a command line");
+        assert_eq!(line, " 31", "{path}");
+        assert!(!line.contains("CANARY"), "{path}: {line}");
+        assert!(environment_has_marker(&bytes, "abc123"), "{path}: marked");
+        // Two empty arguments, and only empty ones.
+        let bytes = procargs_for(path, &["", ""], &[canary, &marker]);
+        assert_eq!(command_line(&bytes).as_deref(), Some(" "), "{path}");
+        assert!(environment_has_marker(&bytes, "abc123"), "{path}: marked");
+        let bytes = procargs_for(path, &[""], &[canary]);
+        assert_eq!(command_line(&bytes).as_deref(), Some(""), "{path}");
+        // An empty argument last, before the environment.
+        let bytes = procargs_for(path, &["sleep", ""], &[canary, &marker]);
+        assert_eq!(command_line(&bytes).as_deref(), Some("sleep "), "{path}");
+        assert!(environment_has_marker(&bytes, "abc123"), "{path}: marked");
+    }
+    // Fewer arguments in the buffer than the count says: nothing is made of what is there.
+    let mut short = procargs_for("/bin/sleep", &["sleep"], &[]);
+    short[..4].copy_from_slice(&3i32.to_ne_bytes());
+    assert_eq!(command_line(&short), None);
+}
+
+/// A child of the test's own, kept by its handle, started with an empty `argv[0]` and the
+/// environment `environment` alone, and ended with the test.
+struct Child(std::process::Child);
+
+impl Child {
+    #[allow(clippy::disallowed_methods)] // A test's own program, ended with the test.
+    fn started(program: &str, arguments: &[&str], environment: &[(&str, &str)]) -> Child {
+        use std::os::unix::process::CommandExt;
+        let mut command = std::process::Command::new(program);
+        command
+            .arg0("")
+            .args(arguments)
+            .env_clear()
+            .envs(environment.iter().copied())
+            .stdin(std::process::Stdio::piped());
+        Child(command.spawn().expect("the program starts"))
+    }
+
+    fn pid(&self) -> i32 {
+        self.0.id() as i32
+    }
+}
+
+impl Drop for Child {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+const HELPER: &str = "CF_PROCARGS_TEST_HELPER";
+
+/// What [`a_child_started_with_an_empty_first_argument_shows_no_environment_in_its_command_line`]
+/// starts again (the test's own executable, which the system does not restrict, so it shows
+/// the environment): it waits for its input to end, which the test's end brings.
+#[test]
+#[allow(clippy::disallowed_methods)] // A test's own helper, told what it is by its start.
+fn the_helper_waits_for_its_parent() {
+    if std::env::var_os(HELPER).is_some() {
+        let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
+    }
+}
+
+#[test]
+fn a_child_started_with_an_empty_first_argument_shows_no_environment_in_its_command_line() {
+    let canary = "CF_CANARY_SECRET=do-not-show-0123456789";
+    let canary_pair = ("CF_CANARY_SECRET", "do-not-show-0123456789");
+    // The test's own executable: the environment is the child's to show.
+    let exe = std::env::current_exe().expect("this executable");
+    let test = format!("{}::the_helper_waits_for_its_parent", module_path!());
+    let arguments = ["--exact", test.as_str(), "--nocapture"];
+    let child = Child::started(
+        exe.to_str().expect("a path"),
+        &arguments,
+        &[canary_pair, (HELPER, "1"), (OWNER_ENV, "native42")],
+    );
+    let bytes = procargs(child.pid()).expect("its arguments");
+    assert!(
+        bytes.windows(canary.len()).any(|w| w == canary.as_bytes()),
+        "the canary is in its environment, as the test made it"
+    );
+    let line = command_line(&bytes).expect("its command line");
+    assert_eq!(line, format!(" {}", arguments.join(" ")));
+    assert!(has_marker(child.pid(), "native42"), "its mark is found");
+    assert!(!has_marker(child.pid(), "native43"), "and only its own");
+
+    // A restricted program (the system's own): the system withholds the environment, and
+    // its own cut of the arguments then ends one field late, with a variable.
+    let sleep = Child::started("/bin/sleep", &["30"], &[canary_pair]);
+    let line = procargs(sleep.pid()).and_then(|bytes| command_line(&bytes));
+    assert_eq!(line.as_deref(), Some(" 30"), "its command line");
 }
 
 #[test]
@@ -38,10 +153,7 @@ fn the_marker_is_found_among_the_environment_and_not_among_the_arguments() {
     assert!(!environment_has_marker(&owned, "abc124"));
     assert!(!environment_has_marker(&procargs_of(&[]), "abc123"));
     // A marker typed as an argument is no marker.
-    let mut typed = 2i32.to_ne_bytes().to_vec();
-    typed.extend_from_slice(b"/bin/echo\0\0\0\0echo\0");
-    typed.extend_from_slice(marker.as_bytes());
-    typed.extend_from_slice(b"\0\0");
+    let typed = procargs_for("/bin/echo", &["echo", &marker], &[]);
     assert!(!environment_has_marker(&typed, "abc123"));
 }
 
