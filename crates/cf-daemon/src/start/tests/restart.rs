@@ -870,6 +870,8 @@ async fn a_privacy_dialog_the_host_tells_reaches_the_engine_and_the_human_is_tol
                     .any(|body| body.contains("cannot read the Mac's log of privacy dialogs")),
                 "{bodies:?}"
             );
+            // The log is written by a thread of its own: what was said is waited for.
+            assert!(daemon.parts.log.written(Duration::from_secs(10)), "the log is written");
             let log = log_lines(&daemon.parts.home).join("\n");
             assert!(log.contains("privacy dialogs cannot be read"), "{log}");
             daemon.stop("SIGTERM");
