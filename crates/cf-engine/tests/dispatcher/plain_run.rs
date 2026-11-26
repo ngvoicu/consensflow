@@ -41,9 +41,9 @@ fn rows(context: &Context, project: i64) -> Value {
     json!({ "events": events, "messages": messages })
 }
 
-/// Hold apart only the paced kit's look on a delivery's beginning, and the words an account's
-/// refusal keeps with its hold (`because`, T-2010). The recorded run was made without pacing
-/// and before a hold kept its words; the shared replay normalizer also removes other fields,
+/// Hold apart only the paced kit's look on a delivery's beginning, and the closed form an
+/// account's refusal keeps with its hold (`form`, and the `participant` whose it is, T-2353).
+/// The recorded run was made without pacing and before a hold kept its form; the shared replay normalizer also removes other fields,
 /// so apply it only to these events.
 fn hold_apart_paced_delivery_looks(rows: &mut Value) {
     for event in rows["events"].as_array_mut().expect("the recorded events") {
