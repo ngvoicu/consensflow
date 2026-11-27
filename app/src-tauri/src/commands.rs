@@ -769,7 +769,9 @@ mod tests {
 
     /// The three commands of a reload as the page calls them, over the app's own state: a pull
     /// before the page has subscribed is refused, one after it is answered, and the history is
-    /// asked to be let go only with the whole of it taken.
+    /// asked to be let go only with the whole of it taken. A Unix test: `test_runtime` and the
+    /// kit it takes are the tests' that run real shells.
+    #[cfg(unix)]
     #[test]
     fn a_reloading_pages_commands_subscribe_pull_and_settle_the_history() {
         let panes = Arc::new(PaneTable::new());
