@@ -253,8 +253,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''    const runs = runsLabel(member)'''
-replace = '''    const runs = runsLabel({ ...member, roles: [] })'''
+find = '''    const about = aboutLines(runsLabel(member), {'''
+replace = '''    const about = aboutLines(runsLabel({ ...member, roles: [] }), {'''
 
 [[plant]]
 name = "role registry: a scout's card says its tier"

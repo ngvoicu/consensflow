@@ -271,9 +271,9 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/slots.js"
 find = '''  for (const role of roleIds()) {
-    const row = element('tr', 'slot-row')'''
+    const row = keyed(element('tr', 'slot-row'), 'slot', role)'''
 replace = '''  for (const role of roleIds().filter((role) => role !== 'tester')) {
-    const row = element('tr', 'slot-row')'''
+    const row = keyed(element('tr', 'slot-row'), 'slot', role)'''
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"

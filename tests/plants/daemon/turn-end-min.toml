@@ -1786,8 +1786,12 @@ runs = ["tem-engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '            .filter(|answers| answers.last.is_some_and(|last| last.complete))'
-replace = '            .filter(|answers| answers.complete_run.is_some())'
+find = '''            .filter(|answers| answers.last.is_some_and(|last| last.complete))
+        else {
+            self.tell_lost('''
+replace = '''            .filter(|answers| answers.complete_run.is_some())
+        else {
+            self.tell_lost('''
 
 [[plant]]
 name = "turn-end-min engine: Finish takes the answer written before the Resume's word to go on"

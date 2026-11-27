@@ -519,8 +519,16 @@ runs = ["lm-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    this.#member = new MemberPicker(this.#form, lists, () => {})"
-replace = "    this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})"
+find = '''    this.#member = new MemberPicker(
+      this.#form,
+      lists,
+      () => {},
+'''
+replace = '''    this.#member = new MemberPicker(
+      this.#form,
+      new ModelLists(page.daemon),
+      () => {},
+'''
 
 [[plant]]
 name = "live models: Settings reads only what its form was left open for"
