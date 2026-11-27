@@ -884,6 +884,17 @@ describe('consensflow Pi extension', () => {
       assert.equal(await piVersionOf(cli), '1.6.1')
       if (existsSync(link)) assert.equal(await piVersionOf(link), '1.6.1', 'through the link npm makes')
       assert.equal(await piVersionOf(await make('@mariozechner/pi-coding-agent', '0.87.0')), '0.87.0')
+      // A managed launcher or a wrapper script that runs Pi from a folder of its own: its nearest
+      // package.json is another's, or there is none, so no version and no word, whatever Pi it runs.
+      const manager = join(root, 'manager')
+      await mkdir(join(manager, 'bin'), { recursive: true })
+      await writeFile(join(manager, 'package.json'), JSON.stringify({ name: 'pi-manager', version: '1.6.1' }))
+      await writeFile(join(manager, 'bin', 'pi.mjs'), `import '${cli}'\n`)
+      assert.equal(await piVersionOf(join(manager, 'bin', 'pi.mjs')), null, 'a launcher of its own package')
+      await mkdir(join(root, 'wrapper'), { recursive: true })
+      await writeFile(join(root, 'wrapper', 'pi'), `#!/bin/sh\nexec node '${cli}' "$@"\n`)
+      assert.equal(await piVersionOf(join(root, 'wrapper', 'pi')), null, 'a wrapper with no package of Pi above it')
+      assert.equal(writesWord(await piVersionOf(join(manager, 'bin', 'pi.mjs'))), false)
       // Another package's script, or none: no version.
       assert.equal(await piVersionOf(await make('something-else', '9.9.9')), null)
       assert.equal(await piVersionOf(join(root, 'nothing', 'here.js')), null)
