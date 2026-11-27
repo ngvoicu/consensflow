@@ -808,6 +808,10 @@ fn every_command_of_the_app_is_run_where_its_panic_is_stopped() {
         .iter()
         .flat_map(|(_, code)| commands_in(code))
         .filter(|command| command.asynchronous)
+        // `pane_history` answers raw bytes (`tauri::ipc::Response`), which `settled`'s JSON answer
+        // cannot carry: it runs its work as a blocking task of its own and answers a panic there
+        // with the refusal frame, `failed` in its words.
+        .filter(|command| command.name != "pane_history")
         .filter(|command| {
             let settled = format!("panics::settled(\"{}\", ", command.name);
             !(command.body.starts_with(&format!("crate::{settled}"))
