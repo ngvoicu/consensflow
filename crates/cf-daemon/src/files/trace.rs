@@ -155,6 +155,8 @@ pub struct Trace {
     file: PathBuf,
     clock: SharedClock,
     shared: Arc<Shared>,
+    /// Once the ledger cannot save no event is appended (an error nobody caught still is).
+    halt: std::sync::OnceLock<Arc<crate::halt::Halt>>,
 }
 
 impl Drop for Trace {
@@ -228,7 +230,18 @@ impl Trace {
             file,
             clock,
             shared,
+            halt: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Appends no event once `halt` says the ledger broke: what the ledger did not commit
+    /// is no event of the board, and what it did was traced before the break.
+    pub fn ends_with(&self, halt: Arc<crate::halt::Halt>) {
+        let _ = self.halt.set(halt);
+    }
+
+    fn broke(&self) -> bool {
+        self.halt.get().is_some_and(|halt| halt.broke())
     }
 
     /// Whether the thread that writes the file is there. A daemon whose trace has
@@ -280,6 +293,9 @@ impl Trace {
 
     /// An event the ledger logged, at the time it logged it.
     pub fn event(&self, event: &Event) {
+        if self.broke() {
+            return;
+        }
         self.write(&TraceLine {
             at: event.at.clone(),
             what: Traced::Event {
@@ -293,6 +309,9 @@ impl Trace {
     /// A line of the tooling's own (`kind`, of `project`, with `data`) at the time now: what
     /// only a test switches on ([`crate::api::calls`]), in the shape of an event's line.
     pub fn tooling(&self, project: i64, kind: &str, data: Value) {
+        if self.broke() {
+            return;
+        }
         self.write(&TraceLine {
             at: now(&self.clock),
             what: Traced::Event {
@@ -683,6 +702,42 @@ mod tests {
             kind: kind.to_owned(),
             data: json!({ "n": project }),
         }
+    }
+
+    #[test]
+    fn a_forgetting_that_was_sent_before_the_break_is_still_done_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = trace_in(dir.path(), LIMIT);
+        let halt = crate::halt::Halt::new();
+        trace.ends_with(std::sync::Arc::clone(&halt));
+        trace.event(&event(1, "gone"));
+        trace.event(&event(2, "kept"));
+        let forgetting = trace.forget_blocking(1, None);
+        halt.break_ledger();
+        forgetting.unwrap();
+        let said = lines(&trace, trace.file()).join("\n");
+        assert!(!said.contains("gone"), "{said}");
+        assert!(said.contains("kept"), "{said}");
+        // And one asked after it is still done: the deletion it follows was committed.
+        trace.forget_blocking(2, None).unwrap();
+        assert!(!lines(&trace, trace.file()).join("\n").contains("kept"));
+    }
+
+    #[test]
+    fn once_the_ledger_broke_no_event_is_appended_and_an_error_still_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = trace_in(dir.path(), LIMIT);
+        let halt = crate::halt::Halt::new();
+        trace.ends_with(std::sync::Arc::clone(&halt));
+        trace.event(&event(1, "before"));
+        halt.break_ledger();
+        trace.event(&event(1, "after"));
+        trace.tooling(1, "tooling-after", json!({}));
+        trace.error("the ledger cannot save any more");
+        let said = lines(&trace, trace.file()).join("\n");
+        assert!(said.contains("before"), "{said}");
+        assert!(!said.contains("after"), "{said}");
+        assert!(said.contains("the ledger cannot save any more"), "{said}");
     }
 
     #[test]

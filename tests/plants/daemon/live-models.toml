@@ -320,7 +320,10 @@ runs = ["lm-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = "    ledger.borrow_mut().forget_model_listings()?;"
+find = """    ledger
+        .borrow_mut()
+        .forget_model_listings()
+        .map_err(|failed| at_start(&ledger_file, failed))?;"""
 replace = "    let _ = &ledger;"
 
 [[plant]]

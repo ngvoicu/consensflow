@@ -25,6 +25,7 @@ use std::time::Duration;
 use cf_base::time::{Clock, SystemClock};
 
 use super::folder::ForBrowser;
+use crate::halt::Halt;
 
 #[cfg(unix)]
 mod unix;
@@ -67,7 +68,25 @@ struct Seen {
 /// Writes `read` into a new folder of the copies' folder in ConsensFlow's home
 /// `home`, the copies older than `kept_for` removed first: the path of its
 /// HTML file, the first of its files.
+#[cfg(test)]
 pub(super) fn place(home: &Path, read: &ForBrowser, kept_for: Duration) -> Result<PathBuf, String> {
+    place_checked(home, read, kept_for, &|| {}, &Halt::new(), &|| {})
+}
+
+/// [`place`], as the daemon makes it: the files are written into a staging folder beside
+/// the copy's name, `step` called after each, and only when every file is there is one rename
+/// put the whole copy at its name, made under the halt's hold ([`Halt::act`]; `at_rename` is
+/// called inside it, right before the rename): a break waits for it before the app is told, and
+/// one that came first refuses it. Nothing reaches that name before, however far the writing had
+/// gone, and a refusal removes the staging folder.
+pub(super) fn place_checked(
+    home: &Path,
+    read: &ForBrowser,
+    kept_for: Duration,
+    step: &dyn Fn(),
+    halt: &Halt,
+    at_rename: &dyn Fn(),
+) -> Result<PathBuf, String> {
     if read.files.is_empty() {
         return Err("nothing was read for the browser".to_owned());
     }
@@ -75,25 +94,75 @@ pub(super) fn place(home: &Path, read: &ForBrowser, kept_for: Duration) -> Resul
     let tmp = way(&home, "tmp")?;
     let root = way(&tmp, "specs-open")?;
     sweep(&root, kept_for);
-    let copy = made(&root)?;
-    let mut opened = None;
+    // The staging folder is made now and the copy's own name not at all: nothing is at it
+    // until the one rename.
+    let (stage, name) = made(&root)?;
+    let staging = format!("{name}.part");
+    let staged = written(stage, read, step);
+    let gone = |root: &Folder| {
+        root.remove(
+            &staging,
+            &Seen {
+                folder: true,
+                written: None,
+            },
+        );
+    };
+    if let Err(error) = staged {
+        gone(&root);
+        return Err(error);
+    }
+    match halt.act(|| {
+        at_rename();
+        root.replace(&staging, &name)
+    }) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            gone(&root);
+            return Err(failed(&root.path().join(&name), &error));
+        }
+        Err(words) => {
+            gone(&root);
+            return Err(words.to_owned());
+        }
+    }
+    let first = read
+        .files
+        .iter()
+        .find_map(|(at, _)| (!at.is_empty()).then_some(at))
+        .ok_or_else(|| "nothing was read for the browser".to_owned())?;
+    let mut opened = root.path().join(&name);
+    for part in first {
+        opened.push(part);
+    }
+    Ok(opened)
+}
+
+/// Every file of `read` written into the staging folder `stage`.
+fn written(stage: Folder, read: &ForBrowser, step: &dyn Fn()) -> Result<(), String> {
+    let mut any = false;
     for (at, bytes) in &read.files {
         let Some((file, folders)) = at.split_last() else {
             continue;
         };
         let mut held: Vec<Folder> = Vec::with_capacity(folders.len());
         for name in folders {
-            let next = way(held.last().unwrap_or(&copy), name)?;
+            let next = way(held.last().unwrap_or(&stage), name)?;
             held.push(next);
         }
-        let folder = held.last().unwrap_or(&copy);
-        let written = folder.path().join(file);
+        let folder = held.last().unwrap_or(&stage);
+        let at_path = folder.path().join(file);
         folder
             .write_new(file, bytes)
-            .map_err(|error| failed(&written, &error))?;
-        opened.get_or_insert(written);
+            .map_err(|error| failed(&at_path, &error))?;
+        any = true;
+        step();
     }
-    opened.ok_or_else(|| "nothing was read for the browser".to_owned())
+    if any {
+        Ok(())
+    } else {
+        Err("nothing was read for the browser".to_owned())
+    }
 }
 
 /// The folder `name` in `above`, made where it is not there, opened as itself:
@@ -123,8 +192,8 @@ fn failed(path: &Path, error: &io::Error) -> String {
     )
 }
 
-/// A folder of `root` by a name no other has, made new.
-fn made(root: &Folder) -> Result<Folder, String> {
+/// A staging folder of `root` (`<name>.part`) for a name no other has, made new, and the name.
+fn made(root: &Folder) -> Result<(Folder, String), String> {
     loop {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random)
@@ -133,8 +202,8 @@ fn made(root: &Folder) -> Result<Folder, String> {
             .iter()
             .map(|byte| char::from(ALPHABET[usize::from(*byte) % ALPHABET.len()]))
             .collect();
-        match root.new_child(&name) {
-            Ok(Some(copy)) => return Ok(copy),
+        match root.new_child(&format!("{name}.part")) {
+            Ok(Some(copy)) => return Ok((copy, name)),
             Ok(None) => {}
             Err(Refused::Io(error)) => return Err(failed(&root.path().join(&name), &error)),
             // Made just now, by a name no other had: a link there is no copy of ours.

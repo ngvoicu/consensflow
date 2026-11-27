@@ -106,6 +106,12 @@ pub struct Specs {
     /// Called on the blocking thread as each look at a folder begins: nothing,
     /// but where a test holds a look to see the daemon go on without it.
     before: Arc<dyn Fn() + Send + Sync>,
+    /// Called as each look ends, on its thread, before the page hears of it (a test's).
+    after: Arc<dyn Fn() + Send + Sync>,
+    /// Called after each file of a copy is written, in the staging folder (a test's).
+    during: Arc<dyn Fn() + Send + Sync>,
+    /// Called inside the halt's hold, right before a copy's rename. A test's.
+    at_rename: Arc<dyn Fn() + Send + Sync>,
     /// How many looks run, each counted until its thread is done with it.
     jobs: Arc<AtomicUsize>,
     /// Whether each folder (by its path) held a file, and when that was read.
@@ -129,6 +135,9 @@ impl Specs {
             kept_for: copies::KEPT_FOR,
             open_within: OPEN_WITHIN,
             before: Arc::new(|| {}),
+            after: Arc::new(|| {}),
+            during: Arc::new(|| {}),
+            at_rename: Arc::new(|| {}),
             jobs: Arc::default(),
             remembered: RefCell::default(),
             looking: RefCell::default(),
@@ -156,6 +165,27 @@ impl Specs {
         self
     }
 
+    /// With `during` called after each file of a copy is written.
+    #[cfg(test)]
+    pub(super) fn during_each_file(mut self, during: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.during = during;
+        self
+    }
+
+    /// With `at_rename` called inside the halt's hold, right before a copy's rename.
+    #[cfg(test)]
+    pub(super) fn at_each_rename(mut self, at_rename: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.at_rename = at_rename;
+        self
+    }
+
+    /// With `after` called as each look at a folder ends.
+    #[cfg(test)]
+    pub(super) fn after_each_look(mut self, after: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.after = after;
+        self
+    }
+
     /// With `before` called as each look at a folder begins.
     #[cfg(test)]
     pub(super) fn before_each_look(mut self, before: Arc<dyn Fn() + Send + Sync>) -> Self {
@@ -172,12 +202,15 @@ impl Specs {
     ) -> impl std::future::Future<Output = Result<T, String>> + 'static {
         let admitted = Running::admitted(&self.jobs);
         let before = Arc::clone(&self.before);
+        let after = Arc::clone(&self.after);
         async move {
             let running = admitted?;
             tokio::task::spawn_blocking(move || {
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             })
             .await
             .map_err(|failed| format!("the specs folder could not be read: {failed}"))?
@@ -334,11 +367,19 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         .ok_or_else(|| Said("ConsensFlow has no home folder to copy the file into".to_owned()))?;
     let read = path.clone();
     let kept_for = page.specs.kept_for;
+    let halt = std::sync::Arc::clone(&page.halt);
+    let during = Arc::clone(&page.specs.during);
+    let at_rename = Arc::clone(&page.specs.at_rename);
     let copy = page
         .specs
         .look(move || {
             let found = in_folder(&directory, &name)?.for_browser(&read, &|| {})?;
-            copies::place(&home, &found, kept_for)
+            // Right before the copy is made: a break or a stop since the read ends it.
+            if let Some(words) = halt.refusal() {
+                return Err(words.to_owned());
+            }
+            // The copy is staged and put in place by one rename, under the halt's hold.
+            copies::place_checked(&home, &found, kept_for, &*during, &halt, &*at_rename)
         })
         .await?;
     if asked.elapsed() > page.specs.open_within {
@@ -347,6 +388,8 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
              waiting. Open it again"
         )));
     }
+    // Right before the file is opened, and the copy that was made is not left to open.
+    page.halted()?;
     (page.specs.open)(&page.env, copy).await.map_err(Said)?;
     one("opened", path)
 }

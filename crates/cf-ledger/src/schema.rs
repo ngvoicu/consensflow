@@ -118,14 +118,21 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
                 Ok(())
             })();
             if let Err(cause) = step {
-                let _ = db.execute_batch("ROLLBACK");
-                return Err(cause);
+                return Err(crate::rollback::said(cause, crate::rollback::roll_back(db)));
             }
         }
         Ok(())
     })();
-    db.execute_batch("PRAGMA foreign_keys = ON")?;
-    migrated
+    let restored = db.execute_batch("PRAGMA foreign_keys = ON");
+    match (migrated, restored) {
+        (Err(first), Err(cause)) => Err(LedgerError::AlsoFailed {
+            first: Box::new(first),
+            what: "putting the foreign keys back on",
+            cause,
+        }),
+        (Err(first), Ok(())) => Err(first),
+        (Ok(()), restored) => Ok(restored?),
+    }
 }
 
 /// What the migration to `version` does past its SQL: 0020 writes the head of

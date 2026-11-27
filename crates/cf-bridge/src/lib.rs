@@ -18,6 +18,9 @@ mod writer;
 #[cfg(feature = "local")]
 pub mod local;
 
+#[cfg(feature = "test-support")]
+pub use requests::refuse_threads;
+
 #[cfg(test)]
 mod queue_tests;
 

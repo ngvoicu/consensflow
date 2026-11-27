@@ -154,15 +154,23 @@ const RESTART_NOTE_MS = 30_000
 /**
  * The daemon's state, as the app tells it. `closing`: the cause says what the app is doing
  * (closing the windows of the daemon that stopped) and nothing follows it, since the app
- * is not starting the daemon yet. `notice`: said once, when the daemon is up again.
+ * is not starting the daemon yet. `ledger`: the cause is the whole message of a ledger that cannot be
+ * saved to, shown as it is. `notice`: said once, when the daemon is up again.
  */
-function daemonStatus({ available, cause, retrying, closing, notice }) {
+function daemonStatus({ available, cause, retrying, closing, ledger, notice }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
     if (wasDown) void act(readMissing)
     if (notice) say(notice, 'info', RESTART_NOTE_MS)
+    return
+  }
+  if (ledger) {
+    // ConsensFlow cannot save to its ledger: the daemon's words are the whole message (what
+    // to restore, to quit, to reopen, to check and to resume), with nothing of the page's own.
+    daemonDown.replaceChildren(cause)
+    placeDaemonDown()
     return
   }
   const next = retrying

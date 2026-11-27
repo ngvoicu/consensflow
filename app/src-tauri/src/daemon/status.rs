@@ -17,6 +17,10 @@ pub(crate) struct DaemonStatus {
     /// that the app is starting the daemon again, which it is not yet.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(super) closing: bool,
+    /// The cause is the whole message, written for a ledger that cannot be saved to: the page
+    /// shows it as it is, and does not add what it adds to any other stop.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(super) ledger: bool,
     /// Said once, in the page's status line, when the daemon is up.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) notice: Option<String>,
@@ -29,6 +33,7 @@ impl DaemonStatus {
             cause: None,
             retrying: false,
             closing: false,
+            ledger: false,
             notice: None,
         }
     }
@@ -39,7 +44,16 @@ impl DaemonStatus {
             cause: Some(cause.to_string()),
             retrying,
             closing: false,
+            ledger: false,
             notice: None,
+        }
+    }
+
+    /// ConsensFlow cannot save to its ledger: the daemon ended, and is not started again.
+    pub(super) fn ledger(words: &str) -> Self {
+        Self {
+            ledger: true,
+            ..Self::down(words, false)
         }
     }
 

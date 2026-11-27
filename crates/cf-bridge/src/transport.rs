@@ -165,7 +165,17 @@ impl Bridge {
                     }
                     Ok(BoundedLine::Complete(line)) => {
                         if !line.is_empty() {
-                            bridge.dispatch_line(&line);
+                            // A panic in a handler's delivery must not end the reader: the end of
+                            // the stream still reaches whoever waits for it.
+                            let delivered =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    bridge.dispatch_line(&line)
+                                }));
+                            if delivered.is_err() {
+                                bridge.report(BridgeError::MalformedFrame(
+                                    "a frame's delivery panicked".to_string(),
+                                ));
+                            }
                         }
                     }
                     Ok(BoundedLine::Overflow) => {

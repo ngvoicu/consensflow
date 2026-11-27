@@ -32,11 +32,13 @@
 
 pub mod api;
 pub mod app_settings;
+pub mod broken;
 pub mod cli;
 pub mod computer_use;
 pub mod console;
 pub mod errors;
 pub mod files;
+pub mod halt;
 pub mod host;
 pub mod machine;
 pub mod member_guard;
@@ -53,5 +55,5 @@ mod contract;
 #[cfg(test)]
 mod testing;
 
-pub use cli::ui;
+pub use cli::{refuse, ui};
 pub use start::{start, Daemon, Options, StartError};
