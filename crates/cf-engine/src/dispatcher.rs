@@ -490,7 +490,7 @@ impl Dispatcher {
             self.seams
                 .ledger
                 .borrow_mut()
-                .mark_back(member.id, "by @human")?
+                .mark_back_by_person(member.id, "by @human")?
         };
         // The quota the human renewed is the account's: every project's members on the
         // harness's one login are back (T-1357), this project's first.
@@ -2220,6 +2220,22 @@ impl Dispatcher {
             Some(refused_at),
             unwell,
         )?;
+        // A task of the member still waiting in a retry hold when its account is held: no try
+        // is coming, it waits for the login, and its requester is told so once, in the hold's
+        // own words (its retry chip and its line of a try go).
+        if let (Some(Unwell::Account(because)), true) = (unwell, participant.role != "chief") {
+            let waiting = self
+                .seams
+                .ledger
+                .borrow_mut()
+                .end_retry_holds_for_account(owner.id, &until)?;
+            for (number, requester, handle) in waiting {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .note_hold_unavailable(project.id, &requester, number, &handle, because)?;
+            }
+        }
         if let Some(unwell) = unwell {
             self.tell_unwell(project, participant, &marked, unwell)?;
         }

@@ -564,6 +564,58 @@ pub(crate) fn hold_task_for_retry(
     })
 }
 
+/// A task of `member`'s windows that waits in a retry hold when the member is held for its
+/// account (`until`, no time of its own): nothing will try it, so it waits for the member's
+/// login, not for a try. Its retry mark and its line of a try end, its hold takes the member's
+/// time, and the tasks it came to are returned (number, requester, window's handle) for the
+/// note each requester is told once. Tasks in any other state are left as they are.
+pub(crate) fn end_retry_holds_for_account(
+    store: &mut Store,
+    member: i64,
+    until: &str,
+) -> Result<Vec<(i64, String, String)>, LedgerError> {
+    store.write(|store| {
+        let rows: Vec<(i64, i64, i64, i64, i64)> = store
+            .db
+            .prepare(
+                "SELECT id, project_id, number, requester_id, assignee_id FROM task
+                  WHERE state = 'paused' AND retry_hold IS NOT NULL
+                    AND assignee_id IN (SELECT id FROM participant WHERE id = ?1 OR member_id = ?1)
+                  ORDER BY id",
+            )?
+            .query_map([member], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let at = store.at();
+        let mut moved = Vec::new();
+        for (id, project, number, requester, assignee) in rows {
+            store.db.execute(
+                "UPDATE task SET held_until = ?, retry_hold = NULL, updated_at = ? WHERE id = ?",
+                params![until, at, id],
+            )?;
+            crate::tasks::end_asides(store, id, &at)?;
+            store.log(
+                project,
+                "task.hold-account",
+                json!({ "task": number, "because": "its member is held for its account" }),
+            )?;
+            moved.push((
+                number,
+                store.participant_row(requester)?.handle,
+                store.participant_row(assignee)?.handle,
+            ));
+        }
+        Ok(moved)
+    })
+}
+
 fn hold(
     store: &mut Store,
     project_id: i64,

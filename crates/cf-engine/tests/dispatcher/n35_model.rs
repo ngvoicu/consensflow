@@ -151,6 +151,21 @@ fn ms(text: &str) -> i64 {
 impl<'a> Model<'a> {
     fn new(c: &'a Context) -> Self {
         let (t, window) = working(c);
+        Self::from(c, t, window)
+    }
+
+    /// The first turn's case: the task is still queued, its brief on its way, when the schedule
+    /// begins (its first step is a login refusal).
+    fn new_queued(c: &'a Context) -> Self {
+        let t = Tiers::new(c, &["zeus"]);
+        t.open();
+        super::n35_hold::passes(c, 1);
+        assert_eq!(t.task(1).task.state, "queued");
+        let window = t.assignee(1);
+        Self::from(c, t, window)
+    }
+
+    fn from(c: &'a Context, t: Tiers<'a>, window: String) -> Self {
         Self {
             c,
             t,
@@ -497,7 +512,7 @@ impl<'a> Model<'a> {
     }
 
     /// The human's Try again now: the member is back and its task goes on in its window, with
-    /// main's own Resume, which is neither a numbered retry nor a reset.
+    /// main's own Resume, which is no numbered retry: the press itself starts the count again.
     fn account_back(&mut self) {
         let c = self.c;
         let window = self.window.clone();
@@ -518,6 +533,8 @@ impl<'a> Model<'a> {
         next_turn_opens(c, &window);
         self.passes(2);
         self.floor = self.floor.max(self.now());
+        // The press is a person's action on the task: its tries start again.
+        self.reset("the human's Try again now");
         self.phase = Phase::Working;
         self.given = resumes(c, "zeus");
     }
@@ -868,8 +885,18 @@ impl Drop for Model<'_> {
 /// One schedule: the steps its seed draws.
 fn schedule(seed: u64) -> (u64, u64, u64, u64) {
     let c = retrying();
-    let mut model = Model::new(&c);
+    // Every fifth schedule begins at the first turn, a login refused while the brief is on its way.
+    let queued = seed % 5 == 4;
+    let mut model = if queued {
+        Model::new_queued(&c)
+    } else {
+        Model::new(&c)
+    };
     let mut rng = Rng(seed);
+    if queued {
+        model.run(Step::Login, &mut rng);
+        model.check();
+    }
     for _ in 0..STEPS {
         let steps = model.enabled();
         let step = steps[rng.below(steps.len() as u64) as usize];

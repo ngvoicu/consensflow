@@ -30,7 +30,7 @@ pub(crate) use pools::{
     candidates, candidates_for, holders_of_tier, may_take_slot, members, place, Placed,
 };
 pub use pools::{BackupCandidate, Candidate, HoldKind};
-pub(crate) use quota::{hold_form, hold_kind, mark_back, mark_out, mark_out_kind};
+pub(crate) use quota::{hold_form, hold_kind, mark_back, mark_back_by, mark_out, mark_out_kind};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
@@ -360,7 +360,7 @@ pub(crate) fn edit_member(
         if (member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model)
             && quota::account_hold_for_edit(store, &member)?
         {
-            quota::mark_back(store, member.id, "by @human")?;
+            quota::mark_back_by(store, member.id, "by @human", true)?;
         }
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?,

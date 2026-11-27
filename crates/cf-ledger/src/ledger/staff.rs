@@ -224,4 +224,14 @@ impl Ledger {
     ) -> Result<ParticipantView, LedgerError> {
         staff::mark_back(&mut self.store, participant_id, because)
     }
+
+    /// A person's Try again now (or an edit that lifts the hold): the member is back as in
+    /// [`Ledger::mark_back`], and the tries of every task its windows hold start again.
+    pub fn mark_back_by_person(
+        &mut self,
+        participant_id: i64,
+        because: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_back_by(&mut self.store, participant_id, because, true)
+    }
 }

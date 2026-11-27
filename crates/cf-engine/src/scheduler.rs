@@ -1397,10 +1397,18 @@ impl Dispatcher {
                 } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
             };
             if back {
-                self.seams
-                    .ledger
-                    .borrow_mut()
-                    .mark_back(other.id, &because)?;
+                // The human's press is a person's action on every task of those it brings back.
+                if matches!(news, News::Human) {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .mark_back_by_person(other.id, &because)?;
+                } else {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .mark_back(other.id, &because)?;
+                }
                 brought = true;
             }
         }

@@ -6,7 +6,8 @@ use super::fixtures::{now, Tiers};
 use super::n35_hold::{fail, next_turn_opens, passes, resumes, retrying, until_resumed, working};
 use cf_engine::testing::Context;
 use cf_harness::records::Quota;
-use cf_ledger::{HoldKind, NewMember};
+use cf_ledger::{HoldKind, MemberEdit, NewMember};
+use serde_json::{json, Value};
 
 const LOGIN: &str = "its login was refused: 401 authentication_error: token expired";
 const BILLING: &str = "its billing was refused: 402 billing_error: credit balance is too low";
@@ -287,5 +288,259 @@ fn a_try_says_the_refusal_in_the_closed_form_s_words_and_none_of_the_harness_s()
             !words.contains("sk-live") && !words.contains("alice@example.com"),
             "no word of the harness's is kept: {words}"
         );
+    }
+}
+
+/// The count stored on task `number`.
+fn stored_count(c: &Context, number: i64) -> i64 {
+    c.ledger
+        .borrow()
+        .sqlite()
+        .query_row(
+            "SELECT turn_retries FROM task WHERE number = ?",
+            [number],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+/// zeus refused at every try and held for its account, its task with its window.
+fn held_after_three(c: &Context) -> (Tiers<'_>, String) {
+    let (t, window) = working(c);
+    refuse(c, &window, LOGIN);
+    passes(c, 3);
+    tried(c, &window, 31_000, 1);
+    refuse(c, &window, LOGIN);
+    passes(c, 3);
+    tried(c, &window, 121_000, 2);
+    refuse(c, &window, LOGIN);
+    passes(c, 4);
+    assert!(held_for_account(&t));
+    assert_eq!(stored_count(c, 1), 2);
+    (t, window)
+}
+
+#[test]
+fn a_person_s_try_again_now_starts_the_tries_again_so_the_next_failure_gets_its_two() {
+    let c = retrying();
+    let (t, window) = held_after_three(&c);
+    c.advance(300_000);
+    c.back_from_quota(t.project.id, "zeus").unwrap();
+    assert_eq!(stored_count(&c, 1), 0, "the press starts the count again");
+    let before = resumes(&c, "zeus");
+    for _ in 0..8 {
+        c.pass().unwrap();
+        if resumes(&c, "zeus") > before {
+            break;
+        }
+    }
+    c.adapter.with(&window, |agent| agent.quota = None);
+    next_turn_opens(&c, &window);
+    passes(&c, 2);
+    c.advance(60_000);
+    fail(&c, &window);
+    passes(&c, 4);
+    let held = t.task(1).task;
+    assert_eq!(held.state, "paused", "the failure is tried, not failed");
+    assert_eq!(held.retry.map(|retry| retry.which), Some(1));
+}
+
+#[test]
+fn an_edit_that_lifts_the_hold_starts_the_tries_again_too() {
+    let c = retrying();
+    let (t, _window) = held_after_three(&c);
+    let member = t.participant("zeus").unwrap();
+    c.ledger
+        .borrow_mut()
+        .edit_member(
+            t.project.id,
+            "zeus",
+            &MemberEdit {
+                harness: member.harness.unwrap(),
+                model: Some("another-model".into()),
+                effort: None,
+                model_name: member.model_name,
+                tier: "standard".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(t.out_until("zeus"), None, "the edit lifted the hold");
+    assert_eq!(stored_count(&c, 1), 0);
+}
+
+#[test]
+fn a_task_in_its_retry_hold_when_its_member_is_held_says_it_waits_for_the_login() {
+    let c = retrying();
+    let t = Tiers::new(&c, &["zeus"]);
+    t.open();
+    c.give(t.project.id, "zeus", "Second");
+    passes(&c, 8);
+    let (first, second) = (t.assignee(1), t.assignee(2));
+    refuse(&c, &first, LOGIN);
+    refuse(&c, &second, LOGIN);
+    passes(&c, 3);
+    for number in 1..=2 {
+        assert_eq!(t.task(number).task.retry.map(|retry| retry.which), Some(1));
+    }
+    // A second refusal in the first window while both wait for their try: the hold is real.
+    c.advance(4_000);
+    refuse(&c, &first, LOGIN);
+    passes(&c, 4);
+    assert!(held_for_account(&t));
+    for number in 1..=2 {
+        let task = t.task(number).task;
+        assert!(
+            task.retry.is_none(),
+            "T-{number}: no try is coming: {task:?}"
+        );
+        assert!(
+            task.held_until
+                .as_deref()
+                .is_some_and(|until| until.starts_with("9999-")),
+            "T-{number} waits for the login: {:?}",
+            task.held_until
+        );
+        assert!(
+            task.aside
+                .as_deref()
+                .is_some_and(|aside| aside.contains("its account is unavailable")),
+            "T-{number}: {:?}",
+            task.aside
+        );
+        let told = t
+            .notes("chief")
+            .into_iter()
+            .filter(|note| note.starts_with(&format!("T-{number} waits with @")))
+            .count();
+        assert_eq!(told, 1, "T-{number} told its requester once");
+    }
+    c.advance(600_000);
+    passes(&c, 6);
+    assert_eq!(
+        resumes(&c, "zeus"),
+        0,
+        "nothing is tried while the member is held"
+    );
+}
+
+#[test]
+fn a_task_waiting_on_its_question_is_held_at_once_not_tried() {
+    let c = retrying();
+    let (t, window) = working(&c);
+    let _question = c.ask(t.project.id, &window, "chief", 1, "Which destination?");
+    passes(&c, 3);
+    assert_eq!(t.task(1).task.state, "waiting");
+    refuse(&c, &window, LOGIN);
+    passes(&c, 3);
+    assert!(
+        held_for_account(&t),
+        "no task at work to try: the member is held"
+    );
+    assert!(t.task(1).task.retry.is_none());
+}
+
+#[test]
+fn a_chief_s_refused_login_holds_at_once_with_the_tries_on() {
+    let c = retrying();
+    let t = Tiers::new(&c, &["zeus"]);
+    t.open();
+    passes(&c, 3);
+    refuse(&c, "chief", LOGIN);
+    passes(&c, 3);
+    assert!(
+        t.out_until("chief")
+            .is_some_and(|until| until.starts_with("9999-")),
+        "the chief is held at the first refusal: {:?}",
+        t.out_until("chief")
+    );
+    assert!(
+        t.notes("chief")
+            .iter()
+            .all(|note| !note.contains("tries it again")),
+        "{:?}",
+        t.notes("chief")
+    );
+}
+
+/// What a hold keeps and tells, as `base_equal` records it, with the task's own fields added.
+fn end_state(c: &Context, t: &Tiers<'_>) -> Value {
+    let zeus = t.id("zeus-amber-pine");
+    let board = serde_json::to_value(c.ledger.borrow().board(t.project.id).unwrap()).unwrap();
+    let mut participant = board["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == "zeus")
+        .unwrap()["participant"]
+        .clone();
+    if let Some(map) = participant.as_object_mut() {
+        // Times of the run, which differ by the tries' waits.
+        map.remove("outSince");
+    }
+    let outs: Vec<Value> = c
+        .ledger
+        .borrow()
+        .events(t.project.id, 0, 5000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "member.out")
+        .map(|event| {
+            let mut data = event.data;
+            if let Some(map) = data.as_object_mut() {
+                map.remove("at");
+                map.remove("since");
+            }
+            data
+        })
+        .collect();
+    let task = t.task(1).task;
+    json!({
+        "activity": c.dispatcher.activity(zeus).reason,
+        "memberOut": outs,
+        "participant": participant,
+        "humanNotes": crate::fixtures::notes(c, c.id(t.project.id, "human")),
+        "chiefNotes": t.notes("chief").into_iter().filter(|note| !note.contains("tries it again")).collect::<Vec<_>>(),
+        "task": {
+            "state": task.state,
+            "heldUntil": task.held_until,
+            "retry": task.retry.map(|retry| (retry.which, retry.of)),
+            "aside": task.aside,
+            "assignee": task.assignee,
+        },
+        "holdKind": format!("{:?}", c.ledger.borrow().hold_kind(t.id("zeus")).unwrap()),
+    })
+}
+
+#[test]
+fn the_hold_at_the_last_try_is_the_hold_of_a_first_refusal_but_for_the_try_note() {
+    const WORDS: &str = "its login was refused: 401 {\"error\":{\"type\":\"authentication_error\",\"message\":\"bad key sk-live-0123456789abcdef\"}}";
+    let base = {
+        let c = Context::tries_off();
+        let t = Tiers::new(&c, &["zeus", "diana"]);
+        t.open();
+        passes(&c, 3);
+        let window = t.assignee(1);
+        refuse(&c, &window, WORDS);
+        passes(&c, 4);
+        end_state(&c, &t)
+    };
+    let head = {
+        let c = retrying();
+        let t = Tiers::new(&c, &["zeus", "diana"]);
+        t.open();
+        passes(&c, 3);
+        let window = t.assignee(1);
+        refuse(&c, &window, WORDS);
+        passes(&c, 3);
+        tried(&c, &window, 31_000, 1);
+        refuse(&c, &window, WORDS);
+        passes(&c, 3);
+        tried(&c, &window, 121_000, 2);
+        refuse(&c, &window, WORDS);
+        passes(&c, 4);
+        end_state(&c, &t)
+    };
+    for key in base.as_object().unwrap().keys() {
+        assert_eq!(base[key], head[key], "{key}");
     }
 }
