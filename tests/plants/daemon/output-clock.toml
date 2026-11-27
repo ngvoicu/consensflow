@@ -191,6 +191,28 @@ replace = """        if let Some(key) = paste.clear_first {
         bytes.extend_from_slice(&bracketed(&body));"""
 
 [[plant]]
+# T-2414: the daemon's events count a hand-over refused for its look as no paste (cf-e2e's
+# `handed`), on the host's word that it wrote nothing. A host that wrote the paste and then
+# answered look-again would make that count hide a doubled message.
+name = "output clock: a paste refused for its look has been written"
+meant = "a_cursor_only_echo_since_the_look_refuses_the_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """        let Some((output, enter)) = admitted else {
+            return Err(match first {
+                Err(Gated::Refused(refused)) => refused,"""
+replace = """        let Some((output, enter)) = admitted else {
+            return Err(match first {
+                Err(Gated::Refused(refused)) => {
+                    if matches!(refused, ArbiterError::LookAgain(_)) {
+                        let _ = writer.write(pane, &bytes);
+                    }
+                    refused
+                }"""
+
+[[plant]]
 name = "output clock: a paced paste goes on a look its window's readiness has not approved"
 meant = "a_paced_paste_goes_only_on_a_look_its_window_approved"
 runs = ["oc-engine"]
