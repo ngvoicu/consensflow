@@ -85,10 +85,11 @@ pub(super) async fn jsonl(harness: Harness, name: &str, session: &str, way: Way)
     if way == Way::Evidence {
         let settled = rig.path(&["settled"]);
         fs::create_dir_all(&settled).unwrap();
-        let frontier = serde_json::from_str::<Value>(lines.last().unwrap()).unwrap()["id"].clone();
-        let evidence =
-            json!({ "launchId": "launch-1", "sessionId": session, "frontier": { "id": frontier } });
-        fs::write(settled.join("launch-1.json"), evidence.to_string()).unwrap();
+        let leaf = serde_json::from_str::<Value>(lines.last().unwrap()).unwrap()["id"].clone();
+        // Pi's word at rest after the run that ended at the last entry.
+        let evidence = json!({ "launchId": "launch-1", "sessionId": session, "state": "rest",
+            "leaf": leaf, "begun": 1, "ended": 1, "ends": [{ "n": 1, "leaf": leaf, "aborted": false }] });
+        fs::write(settled.join("launch-1.state.json"), evidence.to_string()).unwrap();
         options.pi_settlement = Some(PiSettlement {
             directory: Some(settled.to_string_lossy().into_owned()),
             launch_id: Some("launch-1".to_owned()),

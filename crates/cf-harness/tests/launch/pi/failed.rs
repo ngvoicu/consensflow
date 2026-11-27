@@ -2,7 +2,7 @@
 //!
 //! The provider's error ends a Pi turn: Pi writes a step that failed, retries (at most a
 //! minute apart) and writes another, and settles when it has no retry left, which its
-//! extension (inside the window) says in a file beside the session. A window whose
+//! extension (inside the window) says in its word beside the session. A window whose
 //! extension left no word of it (a conversation followed with `/resume`, a launch folder
 //! swept, a write that failed) read at work for as long as it was open: Pi's reader never
 //! settled a failed turn by the record's quiet, as it does a turn that stopped or was
@@ -42,7 +42,12 @@ fn turn(home: &Home, session: &str, quiet_for_ms: i64, assistant: Value) {
         .join("--work--");
     fs::create_dir_all(&folder).unwrap();
     let file = folder.join(format!("2026-10-13T10-00-00-000Z_{session}.jsonl"));
-    let at = "2026-10-13T10:00:01.000Z";
+    // The entries say they were written then, as the file does: with no word of the
+    // extension's, Pi's reader counts the quiet from the entries' own times.
+    let written = EPOCH_MS - quiet_for_ms;
+    let at = jiff::Timestamp::from_millisecond(written)
+        .unwrap()
+        .to_string();
     let records = [
         json!({ "type": "session", "version": 3, "id": session, "timestamp": "2026-10-13T10:00:00.000Z" }),
         json!({ "type": "message", "id": "u1", "timestamp": at, "message": {
@@ -51,7 +56,6 @@ fn turn(home: &Home, session: &str, quiet_for_ms: i64, assistant: Value) {
     ];
     let lines: Vec<String> = records.iter().map(Value::to_string).collect();
     fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
-    let written = EPOCH_MS - quiet_for_ms;
     File::options()
         .write(true)
         .open(&file)

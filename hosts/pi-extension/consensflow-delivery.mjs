@@ -149,8 +149,6 @@ export function createDeliveryExtension(
   let compacting = false
   let watcher
   let poller
-  let running = false
-  let queued = false
   const pending = new Map()
   // Ids settled in this process, sent or refused. A scan that listed a file
   // before its acknowledgement removed it, or a second copy with the same id,
@@ -171,6 +169,8 @@ export function createDeliveryExtension(
   let lastWord = null
   // The count of ended runs the last rest looked at for a compaction.
   let restAfter = 0
+  // The window shut down: nothing more is written, until a session starts again.
+  let shut = false
 
   const logError = (...args) => logger?.error?.(...args)
   const named =
@@ -218,9 +218,11 @@ export function createDeliveryExtension(
       return false
     }
   }
+  // Busy also from this extension's own ask of a compaction until it ends: Pi reads idle for a
+  // moment after the ask, before it sets its compaction state.
   const sampled = () => {
     if (runOn()) return 'working'
-    if (inHand !== null || !idle()) return 'busy'
+    if (inHand !== null || compacting || !idle()) return 'busy'
     return 'rest'
   }
   const end = (aborted) => {
@@ -237,7 +239,7 @@ export function createDeliveryExtension(
     if (next === 'rest' && !inPoll) next = state ?? 'busy'
     state = next
     const sessionId = sessionIdOf(context)
-    if (stateFile === null || sessionId === null) return writing
+    if (shut || stateFile === null || sessionId === null) return writing
     const word = {
       launchId,
       sessionId,
@@ -289,6 +291,7 @@ export function createDeliveryExtension(
   // to hold it by, and its close would cut the summary), said once in the log.
   let wordFailure
   const writeCompactionWord = async () => {
+    if (shut) return false
     if (compactingFile === null) return true
     const sessionId = sessionIdOf(context)
     try {
@@ -371,7 +374,7 @@ export function createDeliveryExtension(
   // The inbox, read in a pass whose state is `rest`: one message at most is sent.
   const consume = async () => {
     if (typeof inbox !== 'string' || typeof ack !== 'string') return
-    // A watcher event or queued rerun can outlive the inbox; nothing to read.
+    // A watcher event can outlive the inbox; nothing to read.
     const names = await readdir(inbox).catch((cause) => {
       if (cause?.code === 'ENOENT') return []
       throw cause
@@ -474,13 +477,8 @@ export function createDeliveryExtension(
 
   // One pass of the poll (also on an inbox event): the notes a poll may change, the word, the
   // compaction a rest asks for, and the inbox.
-  const pass = async () => {
-    if (running) {
-      queued = true
-      return
-    }
-    if (context === undefined) return
-    running = true
+  const onePass = async () => {
+    if (shut || context === undefined) return
     try {
       if (inHand !== null && now() - inHand >= inHandMs) inHand = null
       if (runOn() && idle()) {
@@ -492,35 +490,40 @@ export function createDeliveryExtension(
       let asking = false
       if (sampled() === 'rest' && ended > restAfter) {
         restAfter = ended
-        asking = wantsCompaction(ends.at(-1)?.aborted === true, context)
-        if (asking && !(await writeCompactionWord())) {
-          compacting = false
-          asking = false
-        }
+        asking =
+          wantsCompaction(ends.at(-1)?.aborted === true, context) && (await writeCompactionWord())
       }
       await say(true)
-      if (asking) {
-        if (state === 'rest') askCompaction(context)
-        else {
-          compacting = false
-          await takeCompactionWordBack()
-        }
+      if (asking && state === 'rest') {
+        // Ours from the ask on, so that no second ask and no message comes before Pi has begun.
+        compacting = true
+        askCompaction(context)
       } else {
+        if (asking) await takeCompactionWordBack()
         await consume()
       }
     } catch (cause) {
       logError(`could not read the inbox: ${cause?.message ?? String(cause)}`)
-    } finally {
-      running = false
-      if (queued) {
-        queued = false
-        void pass()
-      }
     }
+  }
+
+  // Passes go one after another; one asked while another runs is the next, shared by every
+  // ask until it begins, and its promise is its end.
+  let passes = Promise.resolve()
+  let next = null
+  const pass = () => {
+    if (next !== null) return next
+    next = passes.then(() => {
+      next = null
+      return onePass()
+    })
+    passes = next
+    return next
   }
 
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
+    shut = false
     watcher?.close()
     clearInterval(poller)
     await writeShown()
@@ -572,8 +575,7 @@ export function createDeliveryExtension(
    * point at most. A size at or above the model's window, or a context Pi cannot say yet,
    * asks for none. A compaction that fails is said, and the next rest asks again.
    */
-  // Whether this rest asks for a compaction, and if so the compaction is marked as ours
-  // (`compacting`) at once, so no second ask comes before the first has begun.
+  // Whether this rest asks for a compaction.
   const wantsCompaction = (aborted, ctx) => {
     if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return false
     if (aborted) return false
@@ -586,9 +588,7 @@ export function createDeliveryExtension(
     }
     const tokens = usage?.tokens
     if (!Number.isFinite(tokens) || tokens <= compaction) return false
-    if (!(compaction < usage.contextWindow)) return false
-    compacting = true
-    return true
+    return compaction < usage.contextWindow
   }
 
   // The ask now at work, counted: the end of an earlier one, late, is not this one's.
@@ -643,6 +643,7 @@ export function createDeliveryExtension(
   pi.on('session_compact', compactionEnded)
   pi.on('session_compact_failed', compactionEnded)
   pi.on('session_shutdown', async () => {
+    shut = true
     clearTimeout(limit)
     await takeCompactionWordBack()
     watcher?.close()

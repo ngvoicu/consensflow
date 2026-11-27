@@ -113,14 +113,15 @@ fn t1958_a_pi_error_during_its_retry_does_not_fail_the_working_task() {
     fs::create_dir_all(&pi).unwrap();
     let file = pi.join(format!("{SESSION}.jsonl"));
     fs::write(&file, fixture).unwrap();
-    let written = fs::metadata(&file)
+    // Read a second after the recorded error, by the record's own times: with no word of the
+    // extension's, Pi's reader counts the quiet from them.
+    let now_ms = fixture
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|row| row["timestamp"].as_str().and_then(cf_base::time::parse))
+        .max()
         .unwrap()
-        .modified()
-        .unwrap()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let now_ms = i64::try_from(written).unwrap();
+        + 1_000;
     let env = Env::from_vars([("PI_CODING_AGENT_SESSION_DIR", pi)]);
     let reading = records::answers(
         Harness::Pi,

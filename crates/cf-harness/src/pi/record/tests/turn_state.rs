@@ -237,10 +237,18 @@ fn each_ended_run_is_reported_once_in_order_read_up_to_its_own_leaf() {
             first.settlement == Settlement::Settled && !first.failed && !first.aborted,
             "{what}: {first:?}"
         );
-        assert_eq!(last_answer(&first), Some("First answer done."), "{what}: read up to its own leaf: {first:?}");
+        assert_eq!(
+            last_answer(&first),
+            Some("First answer done."),
+            "{what}: read up to its own leaf: {first:?}"
+        );
         let second = known(&stage.reader.look(&options, now));
         assert_eq!(second.settlement, Settlement::Settled, "{what}: {second:?}");
-        assert_eq!(last_answer(&second), Some("Automatically continued."), "{what}");
+        assert_eq!(
+            last_answer(&second),
+            Some("Automatically continued."),
+            "{what}"
+        );
         let third = known(&stage.reader.look(&options, now));
         assert!(
             third.in_flight && third.lines.said_at_work,
@@ -282,7 +290,11 @@ fn each_ended_run_is_reported_once_in_order_read_up_to_its_own_leaf() {
 #[test]
 fn more_ends_than_the_word_keeps_between_two_looks_are_merged_into_the_oldest_kept() {
     // A failed step, so that each end's own flag shows which end a look reports.
-    let mut stage = Stage::with(&[header(), user("u1", "go"), assistant("a1", "error", "partial")]);
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "go"),
+        assistant("a1", "error", "partial"),
+    ]);
     let options = evidence_files::options(&stage, LAUNCH);
     put_word(
         &stage,
@@ -656,5 +668,59 @@ fn a_turn_interrupted_at_any_point_is_over_and_its_abandoned_call_holds_nothing_
                 || point == "between a tool's result and the next step",
             "{point}: an abandoned call is never named: {quiet:?}"
         );
+    }
+}
+
+#[test]
+fn a_resume_onto_a_leaf_of_each_kind_is_at_rest_by_the_word() {
+    // The quit cut a run anywhere; Pi resumed at its prompt says `rest` at its session's start
+    // (no end of this launch to take). No open call, no user message holds it at work.
+    let leaves = [
+        ("a user message", vec![header(), user("u1", "go")]),
+        (
+            "a call not answered",
+            vec![header(), user("u1", "go"), calling("a1", &json!("c1"))],
+        ),
+        (
+            "a tool's result",
+            vec![
+                header(),
+                user("u1", "go"),
+                calling("a1", &json!("c1")),
+                result("r1", &json!("c1")),
+            ],
+        ),
+        (
+            "an answer",
+            vec![header(), user("u1", "go"), assistant("a1", "stop", "done")],
+        ),
+        (
+            "an error",
+            vec![header(), user("u1", "go"), assistant("a1", "error", "down")],
+        ),
+        (
+            "an abort",
+            vec![
+                header(),
+                user("u1", "go"),
+                assistant("a1", "aborted", "partial"),
+            ],
+        ),
+    ];
+    for (kind, rows) in leaves {
+        let leaf = rows.last().unwrap()["id"].clone();
+        let mut stage = Stage::with(&rows);
+        let options = evidence_files::options(&stage, LAUNCH);
+        put_word(
+            &stage,
+            &serde_json::from_str(&evidence_files::word(LAUNCH, SESSION, "rest", &leaf, &[]))
+                .unwrap(),
+        );
+        let record = known(&stage.look(1_000, &options));
+        assert!(
+            record.settlement == Settlement::Settled && !record.in_flight,
+            "{kind}: {record:?}"
+        );
+        assert_eq!(record.failed, kind == "an error", "{kind}");
     }
 }

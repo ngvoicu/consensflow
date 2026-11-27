@@ -124,6 +124,9 @@ pub struct FakeAgent {
     /// Its harness's live word says its window is at work, whatever its record says
     /// (`Window::at_work`: Codex's broker).
     pub at_work: bool,
+    /// Its record reads at work by its harness's own word (`Lines::said_at_work`: Pi's
+    /// extension says a run is on).
+    pub said_at_work: bool,
     /// What its harness says of `at_work` when asked again (`Window::recheck`): none
     /// leaves the word as it was.
     pub at_work_after_recheck: Option<bool>,
@@ -1335,6 +1338,7 @@ impl Asked {
             took_back: false,
             at_prompt: false,
             at_work: false,
+            said_at_work: false,
             at_work_after_recheck: None,
             rechecked: 0,
             shared: false,

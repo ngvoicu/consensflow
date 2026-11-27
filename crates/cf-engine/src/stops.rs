@@ -107,6 +107,31 @@ fn untouched_since(snapshot: &Value, span: i64) -> bool {
 /// How often a window kept running its work is asked again what it runs.
 const RECHECK_EVERY_MS: i64 = 10_000;
 
+/// What a window's harness says of it apart from its record, for the note of a window that
+/// did not stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Says {
+    /// Nothing.
+    Nothing,
+    /// It waits at its prompt (Claude Code's status): the window may be misread.
+    AtPrompt,
+    /// A turn is on (Pi's extension's word): the window is not misread.
+    AtWork,
+}
+
+impl Says {
+    fn of(observed: &Observed) -> Self {
+        if observed.at_prompt {
+            Self::AtPrompt
+        } else if matches!(observed.reading.as_deref(), Some(Reading::Known(record)) if record.lines.said_at_work)
+        {
+            Self::AtWork
+        } else {
+            Self::Nothing
+        }
+    }
+}
+
 /// How a window that ignored every round of a stop is kept: no window is closed for a
 /// stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +243,7 @@ enum Round {
 /// and nothing of it is promised. Nothing is closed, nothing of it is ended, and only the
 /// human ends it sooner. A window whose message `again` began nothing after ConsensFlow
 /// relaunched it once is relaunched no more (T-1220's P3-7), and the notes say so.
+#[allow(clippy::too_many_arguments)]
 fn kept_words(
     handle: &str,
     number: i64,
@@ -226,6 +252,7 @@ fn kept_words(
     state: Option<&str>,
     ours: bool,
     again: Option<i64>,
+    says: Says,
 ) -> (String, String) {
     let state = match state {
         Some(_) if !ours => Some("elsewhere"),
@@ -267,6 +294,25 @@ fn kept_words(
             ),
             format!(
                 "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and it runs work that closing it would end: {runs}. ConsensFlow keeps the window open for it{task}, ends none of it, and interrupts the turn again once that work has ended;{result}{after} only the human can end the work sooner, by deleting its session."
+            ),
+        ),
+        // The harness's own status says it waits at its prompt: the window is more likely
+        // misread than hung, and a short prompt typed into it ends the turn that is awaited.
+        None if says == Says::AtPrompt => (
+            format!(
+                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, but its harness says it waits at its prompt, so ConsensFlow may be misreading the window: typing a short prompt into it ends the turn ConsensFlow waits for. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute. Failing that, {end}."
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, but its harness says it waits at its prompt, so ConsensFlow may be misreading the window, and a short prompt typed into it ends the turn ConsensFlow waits for. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute;{result}{after} only the human can end it sooner, by typing into the window or deleting its session."
+            ),
+        ),
+        // The harness's own word says a turn is on (Pi's extension): no misreading of its record.
+        None if says == Says::AtWork => (
+            format!(
+                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, and its harness itself says a turn is on, though ConsensFlow can see nothing it runs: the host lists no work of its turn, and its harness no job or agent, so its harness may be hung (in a model request, or a tool it does not name). ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute. To end it now, {end}."
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and its harness itself says a turn is on, though ConsensFlow can see nothing it runs (the host lists no work of its turn, its harness no job or agent): its harness may be hung. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute;{result}{after} only the human can end it sooner, by deleting its session."
             ),
         ),
         None => (
@@ -587,7 +633,15 @@ impl Dispatcher {
                 if told {
                     return Ok(());
                 }
-                self.say_kept(project, participant, stop, rounds, runs.as_deref(), again)
+                self.say_kept(
+                    project,
+                    participant,
+                    stop,
+                    rounds,
+                    runs.as_deref(),
+                    again,
+                    Says::of(observed),
+                )
             }
         }
     }
@@ -1002,6 +1056,7 @@ impl Dispatcher {
     /// window did not stop and is kept, what it runs as far as ConsensFlow can tell (`runs`;
     /// none: nothing it can see), which nothing ended, and that only the human can end it.
     /// What they read of the task is what it is as they are told ([`kept_words`]).
+    #[allow(clippy::too_many_arguments)]
     fn say_kept(
         &self,
         project: &ProjectView,
@@ -1010,6 +1065,7 @@ impl Dispatcher {
         rounds: u32,
         runs: Option<&str>,
         again: Option<i64>,
+        says: Says,
     ) -> Result<(), EngineError> {
         let task = self
             .seams
@@ -1028,6 +1084,7 @@ impl Dispatcher {
             task.as_ref().map(|task| task.state.as_str()),
             ours,
             again,
+            says,
         );
         self.tell_stop(
             project,
@@ -1195,8 +1252,8 @@ mod tests {
     fn a_kept_windows_notes_say_what_its_task_is_as_they_are_told() {
         // To the chief, after what ConsensFlow does: the task as it is, and what the chief
         // can do; to the human, how to end it, a session that holds work paused first.
-        let tail = |state| kept_words("zeus", 1, 3, None, state, true, None).1;
-        let human = |state| kept_words("zeus", 1, 3, None, state, true, None).0;
+        let tail = |state| kept_words("zeus", 1, 3, None, state, true, None, Says::Nothing).1;
+        let human = |state| kept_words("zeus", 1, 3, None, state, true, None, Says::Nothing).0;
         assert!(tail(Some("paused")).contains("keeps the window open and T-1 paused,"));
         assert!(tail(Some("paused")).ends_with("until then what it writes is not taken as T-1's result. `cf task resume T-1 \"…\"` gives the window your words once its turn ends; only the human can end it sooner, by deleting its session."));
         assert!(human(Some("paused")).ends_with("To end it now, delete @zeus's session."));
@@ -1234,7 +1291,8 @@ mod tests {
         // A task in another window's hands now (its owner changed: given to its tier again)
         // is that window's: no words of it are promised, nor is it said paused.
         for state in ["paused", "queued", "working"] {
-            let (human, told) = kept_words("zeus", 1, 3, None, Some(state), false, None);
+            let (human, told) =
+                kept_words("zeus", 1, 3, None, Some(state), false, None, Says::Nothing);
             assert!(
                 told.contains("every minute; T-1 is in another window's hands now; only the human"),
                 "{state}: {told}"
@@ -1251,11 +1309,62 @@ mod tests {
             );
         }
         // A message relaunched once that began nothing again: relaunched no more, both told.
-        let (human, told) = kept_words("zeus", 1, 3, None, Some("paused"), true, Some(42));
+        let (human, told) = kept_words(
+            "zeus",
+            1,
+            3,
+            None,
+            Some("paused"),
+            true,
+            Some(42),
+            Says::Nothing,
+        );
         for said in [&human, &told] {
             assert!(said.ends_with("Its window began no turn on m-42 again after ConsensFlow relaunched it once, so it is relaunched no more."), "{said}");
         }
-        let work = kept_words("zeus", 1, 3, Some("node job"), Some("paused"), true, None);
+        // A window its harness says waits at its prompt is said misread first, and the
+        // delete of its session last.
+        let (human, told) = kept_words(
+            "zeus",
+            1,
+            3,
+            None,
+            Some("paused"),
+            true,
+            None,
+            Says::AtPrompt,
+        );
+        for words in [&human, &told] {
+            assert!(words.contains("waits at its prompt"), "{words}");
+            assert!(words.contains("short prompt"), "{words}");
+            assert!(!words.contains("may be hung"), "{words}");
+        }
+        // A window whose harness itself says a turn is on (Pi's word) is said so, and may be hung.
+        let (human, told) =
+            kept_words("zeus", 1, 3, None, Some("paused"), true, None, Says::AtWork);
+        for words in [&human, &told] {
+            assert!(
+                words.contains("its harness itself says a turn is on"),
+                "{words}"
+            );
+            assert!(words.contains("may be hung"), "{words}");
+            assert!(!words.contains("misreading"), "{words}");
+        }
+        assert!(
+            human.ends_with("Failing that, pause T-1 and delete @zeus's session.")
+                || human.ends_with("Failing that, delete @zeus's session."),
+            "{human}"
+        );
+        let work = kept_words(
+            "zeus",
+            1,
+            3,
+            Some("node job"),
+            Some("paused"),
+            true,
+            None,
+            Says::Nothing,
+        );
         assert!(work
             .0
             .contains("runs work that closing it would end: node job."));

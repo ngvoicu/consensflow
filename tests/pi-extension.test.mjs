@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,6 +59,16 @@ async function waitFor(path, timeoutMs = 300) {
   throw new Error(`timed out waiting for ${path}`)
 }
 
+/** Whether the extension's word says Pi rests after a run's end. */
+function restWritten(s) {
+  try {
+    const word = JSON.parse(readFileSync(join(s.settled, 'launch-pi-test.state.json'), 'utf8'))
+    return word.state === 'rest' && word.ended > 0
+  } catch {
+    return false
+  }
+}
+
 async function setup(
   record,
   {
@@ -80,6 +90,7 @@ async function setup(
     // Pi's `compact()` awaits `abort()` before it sets its compaction state: Pi reads idle
     // until the test says the compaction has begun (`started()`).
     compactionStartsLater = false,
+    inHandMs,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -103,6 +114,7 @@ async function setup(
     ...(pollMs ? { pollMs } : {}),
     ...(compaction !== undefined ? { compaction } : {}),
     ...(compactionLimitMs !== undefined ? { compactionLimitMs } : {}),
+    ...(inHandMs !== undefined ? { inHandMs } : {}),
   })
   let currentIdle = idle
   // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
@@ -234,16 +246,20 @@ const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
   it('keeps a published brief in the inbox until its acknowledgement', async () => {
-    const s = await setup(envelopeRecord, { idle: false })
+    const s = await setup(null, { idle: false })
     try {
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
       const file = join(s.inbox, `${envelopeRecord.id}.json`)
+      await writeFile(file, `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`)
+      await s.extension.pass()
       assert.equal(existsSync(file), true, 'a brief waiting for Pi stays in the inbox')
       let atSend
       s.pi.sendUserMessage = (text) => {
         atSend = { waiting: existsSync(file), taken: existsSync(`${file}.taken`), text }
       }
       s.setIdle(true)
-      await s.extension.consume()
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      await s.extension.pass()
       assert.deepEqual(atSend, { waiting: true, taken: false, text: envelope })
     } finally {
       await s.close()
@@ -305,20 +321,21 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('delivers once busy work settles, leaving text typed meanwhile in the editor', async () => {
-    const s = await setup(
-      { ...envelopeRecord, text: envelope, session: 'native-pi-session' },
-      { idle: false },
-    )
+  it('delivers once its run has ended, at the next pass, leaving text typed meanwhile in the editor', async () => {
+    const s = await setup(null, { idle: false })
     try {
-      assert.deepEqual(s.pi.sent, [], 'nothing goes in while Pi works')
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.pass()
+      assert.deepEqual(s.pi.sent, [], 'nothing goes in while a run is on')
       s.setEditor('new draft')
       s.setIdle(true)
-      await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      const deadline = Date.now() + 2_000
-      while (s.pi.sent.length === 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      assert.deepEqual(s.pi.sent, [], 'nothing goes in inside agent_settled')
+      await s.extension.pass()
       assert.deepEqual(s.pi.sent, [envelope])
       assert.equal(s.ctx.ui.getEditorText(), 'new draft')
     } finally {
@@ -366,55 +383,28 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('leaves a busy arrival queued and delivers it after agent_settled', {
-    timeout: 2000,
-  }, async () => {
-    const s = await setup(
-      {
-        ...envelopeRecord,
-        id: 'm-00000000000000000000000000000052',
-        text: envelope.replaceAll(
-          'm-00000000000000000000000000000051',
-          'm-00000000000000000000000000000052',
-        ),
-      },
-      { idle: false },
-    )
+  it('leaves an arrival waiting while a run is on and delivers it at the pass after its end', async () => {
+    const id = 'm-00000000000000000000000000000052'
+    const text = envelope.replaceAll('m-00000000000000000000000000000051', id)
+    const s = await setup(null, { idle: false })
     try {
+      await s.pi.handlers.get('turn_start')({}, s.ctx)
+      await writeFile(
+        join(s.inbox, `${id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, id, text, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.pass()
       assert.deepEqual(s.pi.sent, [])
+      assert.equal(await exists(join(s.ack, `${id}.json`)), false, 'unanswered while a run is on')
       s.setIdle(true)
-      await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      // A filesystem notification can already be consuming the inbox; observe
-      // the send itself instead of assuming this handler owns the drain.
-      await s.pi.sentOnce
-      assert.deepEqual(s.pi.sent, [
-        envelope.replaceAll(
-          'm-00000000000000000000000000000051',
-          'm-00000000000000000000000000000052',
-        ),
-      ])
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      await s.extension.pass()
+      assert.deepEqual(s.pi.sent, [text])
       await s.pi.handlers.get('message_start')(
-        {
-          message: {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: envelope.replaceAll(
-                  'm-00000000000000000000000000000051',
-                  'm-00000000000000000000000000000052',
-                ),
-              },
-            ],
-          },
-        },
+        { message: { role: 'user', content: [{ type: 'text', text }] } },
         s.ctx,
       )
-      assert.deepEqual(await waitFor(join(s.ack, 'm-00000000000000000000000000000052.json')), {
-        id: 'm-00000000000000000000000000000052',
-        admitted: true,
-        mode: 'tui',
-      })
+      assert.deepEqual(await waitFor(join(s.ack, `${id}.json`)), { id, admitted: true, mode: 'tui' })
     } finally {
       await s.close()
     }
@@ -439,7 +429,7 @@ describe('consensflow Pi extension', () => {
         file: 'invalid',
         text: '[consensflow delivery invalid]\n',
       })
-      await s.extension.consume()
+      await s.extension.pass()
       assert.equal(s.logs.filter((line) => line.includes('invalid message id')).length, 1)
     } finally {
       await s.close()
@@ -500,52 +490,24 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('restores native settlement on an idle resumed Pi TUI without a new model turn', async () => {
-    const leaf = {
-      id: 'leaf-1',
-      type: 'message',
-      message: { role: 'assistant', stopReason: 'stop' },
-    }
-    const s = await setup(null, { leaf })
-    try {
-      const evidence = await waitFor(join(s.settled, 'launch-pi-test.json'))
-      assert.equal(evidence.sessionId, 'native-pi-session')
-      assert.deepEqual(evidence.frontier, { id: leaf.id })
-      assert.equal(evidence.launchId, 'launch-pi-test')
-      assert.equal(s.pi.sent.length, 0)
-      await s.pi.handlers.get('agent_start')({}, s.ctx)
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
-    } finally {
-      await s.close()
-    }
-  })
-
-  for (const options of [
-    { idle: false },
-    { pendingMessages: true },
-    { mode: 'rpc' },
-    { hasUI: false },
-    {
-      leaf: {
-        id: 'wrong-leaf',
-        type: 'message',
-        message: { role: 'assistant', stopReason: 'stop' },
-      },
-    },
-    {
-      leaf: { id: 'leaf-1', type: 'message', message: { role: 'assistant', stopReason: 'error' } },
-    },
-    { leaf: { id: 'leaf-1', type: 'message', message: { role: 'user' } } },
+  // At a launch, a resume, /new, /resume or a fork: the sampled state at once, whatever the leaf
+  // (a quit cut a turn, an error, a call), with no run on and no end to take.
+  for (const [name, options, state] of [
+    ['an idle Pi on an answer', { leaf: { id: 'leaf-1', type: 'message', message: { role: 'assistant', stopReason: 'stop' } } }, 'rest'],
+    ['an idle Pi on a user message', { leaf: { id: 'leaf-1', type: 'message', message: { role: 'user' } } }, 'rest'],
+    ['an idle Pi on an error', { leaf: { id: 'leaf-1', type: 'message', message: { role: 'assistant', stopReason: 'error' } } }, 'rest'],
+    ['an idle Pi with messages pending', { pendingMessages: true }, 'rest'],
+    ['a Pi not idle', { idle: false }, 'busy'],
   ]) {
-    it(`does not restore Pi startup settlement for ${JSON.stringify(options)}`, async () => {
-      const leaf = {
-        id: 'leaf-1',
-        type: 'message',
-        message: { role: 'assistant', stopReason: 'stop' },
-      }
-      const s = await setup(null, { leaf, ...options })
+    it(`says ${state} at the session's start for ${name}`, async () => {
+      const s = await setup(null, options)
       try {
-        assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
+        const word = await waitFor(join(s.settled, 'launch-pi-test.state.json'))
+        assert.deepEqual(
+          [word.launchId, word.sessionId, word.state, word.leaf, word.begun, word.ended, word.ends],
+          ['launch-pi-test', 'native-pi-session', state, 'leaf-1', 0, 0, []],
+        )
+        assert.equal(s.pi.sent.length, 0)
       } finally {
         await s.close()
       }
@@ -572,37 +534,164 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('writes settlement evidence tied to the launch, session and leaf, then invalidates it on new work', async () => {
-    const s = await setup({
-      ...envelopeRecord,
-      id: 'm-00000000000000000000000000000059',
-      text: envelope,
+  const wordOf = (s) => JSON.parse(readFileSync(join(s.settled, 'launch-pi-test.state.json'), 'utf8'))
+
+  for (const hook of ['before_agent_start', 'agent_start', 'turn_start']) {
+    it(`says working first thing at ${hook}, before a later extension's handler`, async () => {
+      const s = await setup(null, { idle: false })
+      try {
+        assert.equal(await s.pi.handlers.get(hook)({}, s.ctx), undefined, 'it changes nothing of the run')
+        const word = wordOf(s)
+        assert.deepEqual([word.state, word.begun, word.ended], ['working', 1, 0])
+        // The run's other beginning hooks begin nothing more.
+        for (const again of ['before_agent_start', 'agent_start', 'turn_start']) {
+          await s.pi.handlers.get(again)({}, s.ctx)
+        }
+        assert.equal(wordOf(s).begun, 1)
+      } finally {
+        await s.close()
+      }
     })
+  }
+
+  it("writes a run's end at agent_settled with its leaf and Pi's flag, and rest only at the next pass", async () => {
+    const s = await setup(null, { idle: false })
     try {
-      await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      const evidence = await waitFor(join(s.settled, 'launch-pi-test.json'))
-      assert.equal(evidence.launchId, 'launch-pi-test')
-      assert.equal(evidence.sessionId, 'native-pi-session')
-      assert.deepEqual(evidence.frontier, { id: 'leaf-1' })
-      assert.equal(typeof evidence.settledAt, 'number')
-
-      await s.pi.handlers.get('turn_start')({}, s.ctx)
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
-      // A turn on, before Pi has saved anything: the watchdog's evidence.
-      const working = await waitFor(join(s.settled, 'launch-pi-test.working.json'))
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      s.setIdle(true)
+      await s.pi.handlers.get('agent_settled')({ aborted: true }, s.ctx)
+      const inside = wordOf(s)
       assert.deepEqual(
-        [working.launchId, working.sessionId, typeof working.startedAt],
-        ['launch-pi-test', 'native-pi-session', 'number'],
+        [inside.state, inside.begun, inside.ended, inside.ends],
+        ['working', 1, 1, [{ n: 1, leaf: 'leaf-1', aborted: true }]],
+        'never rest inside a handler: the state stays as it was',
       )
-
-      await s.pi.handlers.get('agent_settled')({}, s.ctx)
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), true)
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.working.json')), false)
+      await s.extension.pass()
+      assert.equal(wordOf(s).state, 'rest')
+      // A message entering a run changes nothing of the word.
       await s.pi.handlers.get('message_start')(
         { message: { role: 'user', content: [{ type: 'text', text: 'new prompt' }] } },
         s.ctx,
       )
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), false)
+      assert.equal(wordOf(s).state, 'rest')
+      // A settle with no flag (Pi before 1.1.0) says none.
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      await s.pi.handlers.get('agent_settled')({}, s.ctx)
+      assert.deepEqual(wordOf(s).ends.at(-1), { n: 2, leaf: 'leaf-1', aborted: null })
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('keeps the last eight ends, and its counts through a new session, whose ends are its own', async () => {
+    const s = await setup(null)
+    try {
+      for (let run = 1; run <= 10; run += 1) {
+        await s.pi.handlers.get('agent_start')({}, s.ctx)
+        await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      }
+      const word = wordOf(s)
+      assert.equal(word.ended, 10)
+      assert.deepEqual(word.ends.map((end) => end.n), [3, 4, 5, 6, 7, 8, 9, 10])
+      await s.pi.handlers.get('session_shutdown')({ reason: 'resume' })
+      assert.equal(await exists(join(s.settled, 'launch-pi-test.state.json')), false, 'taken back at shutdown')
+      await s.pi.handlers.get('session_start')({ reason: 'resume' }, s.ctx)
+      assert.deepEqual([wordOf(s).ended, wordOf(s).begun, wordOf(s).ends], [10, 10, []])
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('holds a submitted prompt in hand from its input hook: busy, and no message goes in ahead of it', async () => {
+    const s = await setup(null, { inHandMs: 200 })
+    try {
+      assert.equal(await s.pi.handlers.get('input')({ type: 'input', text: 'the human typed this' }, s.ctx), undefined)
+      assert.equal(wordOf(s).state, 'busy')
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.pass()
+      assert.deepEqual(s.pi.sent, [])
+      assert.equal((await waitFor(join(s.ack, `${envelopeRecord.id}.json`))).reason, 'chief busy')
+      // Its run begins: the prompt is the run's.
+      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+      assert.equal(wordOf(s).state, 'working')
+      // An input while a run is on is the run's (a steer, a follow-up): nothing in hand after it.
+      await s.pi.handlers.get('input')({ type: 'input', text: 'steer' }, s.ctx)
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      await s.extension.pass()
+      assert.equal(wordOf(s).state, 'rest')
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('lets a prompt in hand go once its hold has passed with no run begun', async () => {
+    const s = await setup(null, { inHandMs: 150 })
+    try {
+      await s.pi.handlers.get('input')({ type: 'input', text: 'handled by another extension' }, s.ctx)
+      await s.extension.pass()
+      assert.equal(wordOf(s).state, 'busy')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      await s.extension.pass()
+      assert.equal(wordOf(s).state, 'rest')
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('holds its own send in hand until the run begins', async () => {
+    const s = await setup(null)
+    try {
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.pass()
+      assert.deepEqual(s.pi.sent, [envelope])
+      assert.equal(wordOf(s).state, 'busy', 'sent and not begun')
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      assert.equal(wordOf(s).state, 'working')
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('ends a run Pi dropped at the first idle poll on a Pi that marks its runs from their start', async () => {
+    const s = await setup(null, { idle: false })
+    try {
+      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+      s.setIdle(true)
+      await s.extension.pass()
+      assert.deepEqual([wordOf(s).ended, wordOf(s).ends.at(-1).aborted], [1, null])
+      await s.extension.pass()
+      assert.equal(wordOf(s).state, 'rest')
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('ends a run Pi dropped only at the third idle poll on a Pi that marks it at its first request', async () => {
+    // Pi before 1.2.0: idle at this extension's `before_agent_start`.
+    const s = await setup(null)
+    try {
+      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+      await s.extension.pass()
+      await s.extension.pass()
+      assert.deepEqual([wordOf(s).state, wordOf(s).ended], ['working', 0], 'two idle polls are its start')
+      await s.extension.pass()
+      assert.equal(wordOf(s).ended, 1)
+      // A poll that finds Pi at work in between counts from nought again.
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      await s.extension.pass()
+      await s.extension.pass()
+      s.setIdle(false)
+      await s.extension.pass()
+      s.setIdle(true)
+      await s.extension.pass()
+      await s.extension.pass()
+      assert.equal(wordOf(s).ended, 1)
     } finally {
       await s.close()
     }
@@ -655,7 +744,12 @@ describe('compaction at a rest', () => {
   const window = 1_000_000
   const past = { tokens: 150_005, contextWindow: window, percent: 15 }
 
-  const settle = (s, event = {}) => s.pi.handlers.get('agent_settled')(event, s.ctx)
+  // A run that begins and ends, then the poll's pass that writes `rest` and asks at that rest.
+  const settle = async (s, event = {}) => {
+    await s.pi.handlers.get('agent_start')({}, s.ctx)
+    await s.pi.handlers.get('agent_settled')(event, s.ctx)
+    await s.extension.pass()
+  }
 
   it('asks Pi once to compact at a rest once the context is past the size', async () => {
     const s = await setup(null, { compaction: 100_000, usage: past })
@@ -694,7 +788,7 @@ describe('compaction at a rest', () => {
         s.ctx.compact = (options) => {
           atTheAsk = {
             word: existsSync(wordOf(s)),
-            settlement: existsSync(join(s.settled, 'launch-pi-test.json')),
+            rest: restWritten(s),
           }
           ask(options)
         }
@@ -706,15 +800,15 @@ describe('compaction at a rest', () => {
         assert.equal(word.sessionId, 'native-pi-session')
         assert.ok(word.startedAt >= before && word.startedAt <= Date.now())
         // Both stood by the time Pi was asked: no window is found free without the word.
-        assert.deepEqual(atTheAsk, { word: true, settlement: true })
+        assert.deepEqual(atTheAsk, { word: true, rest: true })
       } finally {
         await s.close()
       }
     })
 
-    // The engine takes a task as done by the settlement evidence: it never finds that file
-    // without the word beside it, whatever the order the disk is read in while both are written.
-    it('is in place before the settlement evidence the result is taken by is', async () => {
+    // The engine takes a task as done once Pi's word says `rest`: it never finds that word
+    // without the compaction's beside it, whatever the order the disk is read in.
+    it('is in place before the word that Pi rests, which the result is taken by', async () => {
       const violations = []
       for (let round = 0; round < 6; round += 1) {
         const s = await setup(null, { compaction: 100_000, usage: past })
@@ -722,7 +816,7 @@ describe('compaction at a rest', () => {
           let writing = true
           const watcher = (async () => {
             while (writing) {
-              if (existsSync(join(s.settled, 'launch-pi-test.json')) && !existsSync(wordOf(s))) {
+              if (restWritten(s) && !existsSync(wordOf(s))) {
                 violations.push(round)
               }
               await new Promise((resolve) => setImmediate(resolve))
@@ -803,8 +897,8 @@ describe('compaction at a rest', () => {
         assert.equal(s.compactions.length, 0, 'no ask without the word')
         assert.equal(s.logs.length, 1, 'said once')
         assert.match(s.logs[0], /compaction at work/)
-        // The settlement evidence is written all the same: the result is the chief's.
-        assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), true)
+        // Pi's rest is written all the same: the result is the chief's.
+        assert.equal(restWritten(s), true)
         // The folder gone, a later rest asks, with its word.
         await rm(wordOf(s), { recursive: true })
         await settle(s)
@@ -890,7 +984,7 @@ describe('compaction at a rest', () => {
         await settle(s)
         assert.equal(await exists(wordOf(s)), true)
         await arrive(s, 1)
-        await s.extension.consume()
+        await s.extension.pass()
         assert.equal((await ackOf(s, 1)).reason, 'chief busy')
         assert.deepEqual(s.pi.sent, [])
         // Nothing of Pi's ends it: the limit does.
@@ -900,11 +994,11 @@ describe('compaction at a rest', () => {
         // Pi's abort ends it, late: the callback finds the ask over, and takes nothing more.
         await s.compactions[0].cancel()
         await arrive(s, 2)
-        await s.extension.consume()
+        await s.extension.pass()
         await sentWithin(s, 1)
         assert.deepEqual(s.pi.sent, [envelope], 'one message, once')
         await new Promise((resolve) => setTimeout(resolve, 100))
-        await s.extension.consume()
+        await s.extension.pass()
         assert.deepEqual(s.pi.sent, [envelope])
       } finally {
         await s.close()
@@ -1027,12 +1121,14 @@ describe('compaction at a rest', () => {
       // And a handover in that moment is refused busy: a message sent then would start a turn
       // that the compaction's own abort() ends.
       await arrive(s, 1)
-      await s.extension.consume()
+      await s.extension.pass()
       assert.equal((await ackOf(s, 1)).reason, 'chief busy')
       s.compactions[0].started()
+      // The compaction leaves the context under the size, as Pi's does.
+      s.setUsage({ tokens: 40_000, contextWindow: window, percent: 4 })
       await s.compactions[0].complete()
       await arrive(s, 2)
-      await s.extension.consume()
+      await s.extension.pass()
       await sentWithin(s, 1)
       assert.deepEqual(s.pi.sent, [envelope])
     } finally {
@@ -1116,19 +1212,19 @@ describe('compaction at a rest', () => {
           assert.equal(s.ctx.isIdle(), false)
           for (const n of [1, 2, 3]) {
             await arrive(s, n)
-            await s.extension.consume()
+            await s.extension.pass()
             // Pi's own word for a window at work: no attempt of the message is spent on it.
             assert.equal((await ackOf(s, n)).reason, 'chief busy', `attempt ${n}`)
           }
           assert.deepEqual(s.pi.sent, [], 'nothing goes in while Pi compacts')
           await compaction[end]()
           await arrive(s, 4)
-          await s.extension.consume()
+          await s.extension.pass()
           await sentWithin(s, 1)
           assert.deepEqual(s.pi.sent, [envelope])
           // None of the refused ones comes back later.
           await new Promise((resolve) => setTimeout(resolve, 100))
-          await s.extension.consume()
+          await s.extension.pass()
           assert.deepEqual(s.pi.sent, [envelope])
         } finally {
           await s.close()
@@ -1143,7 +1239,7 @@ describe('compaction at a rest', () => {
       s.piCompacts('threshold')
       await arrive(s, 1, { session: 'previous-session' })
       await arrive(s, 2, { expiresAt: Date.now() - 1 })
-      await s.extension.consume()
+      await s.extension.pass()
       assert.equal((await ackOf(s, 1)).reason, 'native session changed')
       assert.equal(
         (await waitFor(join(s.expired, '..', 'ack', `${idOf(2)}.json`), 5_000)).reason,
@@ -1155,16 +1251,17 @@ describe('compaction at a rest', () => {
     }
   })
 
-  it('leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle', async () => {
+  it('leaves a delivery waiting, unanswered, in a run that compacts in its middle and goes on', async () => {
     const s = await setup(null, { idle: false })
     try {
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
       const compaction = s.piCompacts('threshold')
       await arrive(s, 1)
-      await s.extension.consume()
-      assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+      await s.extension.pass()
+      await assert.rejects(ackOf(s, 1, 300), /timed out/)
       await compaction.complete()
       await arrive(s, 2)
-      await s.extension.consume()
+      await s.extension.pass()
       await assert.rejects(ackOf(s, 2, 300), /timed out/)
       assert.deepEqual(s.pi.sent, [])
     } finally {
@@ -1175,8 +1272,9 @@ describe('compaction at a rest', () => {
   it('leaves a delivery waiting, unanswered, while Pi works a turn and compacts nothing', async () => {
     const s = await setup(null, { idle: false })
     try {
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
       await arrive(s, 1)
-      await s.extension.consume()
+      await s.extension.pass()
       await assert.rejects(ackOf(s, 1, 300), /timed out/)
       assert.deepEqual(s.pi.sent, [])
     } finally {
@@ -1238,7 +1336,9 @@ for (const source of ['ours', "Pi's own"]) {
       try {
         let compaction
         if (source === 'ours') {
+          await s.pi.handlers.get('agent_start')({}, s.ctx)
           await s.pi.handlers.get('agent_settled')({}, s.ctx)
+          await s.extension.pass()
           compaction = s.compactions[0]
         } else {
           compaction = s.piCompacts('threshold')

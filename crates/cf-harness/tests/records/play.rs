@@ -60,6 +60,10 @@ pub struct Played {
     /// The words of each refusal for a moment (`Quota::Busy`) a look read where Node read
     /// another quota or none: a server's error that Node took for the turn's failure (T-1112).
     pub busy: BTreeSet<String>,
+    /// The Pi looks whose turn alone departs from Node's (`inFlight`, `settlement`, `failed`):
+    /// who says that a Pi window is at work is Pi's own word since T-2377, and without it the
+    /// quiet is counted from the entries' own times, where Node counted it from the file's.
+    pub pi_turns: Vec<String>,
 }
 
 /// Plays `scenario`, holding each look to Node's: how many it held, and the
@@ -84,6 +88,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
         answered: 0,
         departed: Vec::new(),
         busy: BTreeSet::new(),
+        pi_turns: Vec::new(),
     };
     for (index, step) in scenario.steps.iter().enumerate() {
         stage.step(step, index);
@@ -92,6 +97,7 @@ pub fn play(scenario: &Scenario, ours: &[String]) -> Played {
         answered: stage.answered,
         departed: stage.departed,
         busy: stage.busy,
+        pi_turns: stage.pi_turns,
     }
 }
 
@@ -115,6 +121,8 @@ struct Stage<'a> {
     departed: Vec<(String, String)>,
     /// The words of the refusals for a moment read where Node read none (T-1112).
     busy: BTreeSet<String>,
+    /// The Pi looks whose turn alone departs from Node's (T-2377).
+    pi_turns: Vec<String>,
     root: TempDir,
 }
 
@@ -185,7 +193,12 @@ impl Stage<'_> {
             let reading = self
                 .cache
                 .look(harness, &look.session, &env, &options, self.clock);
-            if !self.hold(&reading, look.read.unwrap(), &format!("{name}, cached")) {
+            if !self.hold(
+                &reading,
+                look.read.unwrap(),
+                &format!("{name}, cached"),
+                harness,
+            ) {
                 self.identity(&reading, look, index, &name);
             }
         }
@@ -200,7 +213,7 @@ impl Stage<'_> {
             );
             // A look of both readers records the fresh reading only where it differs.
             let at = look.fresh.or(look.read).unwrap();
-            self.hold(&reading, at, &format!("{name}, fresh"));
+            self.hold(&reading, at, &format!("{name}, fresh"), harness);
         }
         self.answered += 1;
     }
@@ -235,7 +248,7 @@ impl Stage<'_> {
     /// platform's reason is promised only as a class. One Node failed at a
     /// torn line departs: it is held to read otherwise, and kept with what it
     /// read. Whether it departed.
-    fn hold(&mut self, reading: &Reading, at: usize, name: &str) -> bool {
+    fn hold(&mut self, reading: &Reading, at: usize, name: &str, harness: Harness) -> bool {
         let node = &self.scenario.readings[at];
         if node["reason"]
             .as_str()
@@ -282,6 +295,31 @@ impl Stage<'_> {
             for item in items {
                 let place = usize::try_from(item.as_u64().unwrap()).unwrap();
                 *item = self.scenario.items[place].clone();
+            }
+        }
+        // Pi's turn (T-2377): the rest of the look is held to Node's.
+        if harness == Harness::Pi && js::stringify(&read) != js::stringify(&expected) {
+            let turn_aside = |mut reading: Value| {
+                if let Some(fields) = reading.as_object_mut() {
+                    for field in ["inFlight", "settlement", "failed"] {
+                        fields.remove(field);
+                    }
+                }
+                reading
+            };
+            // An older extension's working marker, which Node read as a turn in flight with no
+            // file yet, is no word: no session.
+            let marker_only = expected["items"] == json!([])
+                && expected["inFlight"] == true
+                && read["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.starts_with("unreadable: no pi session"));
+            if marker_only
+                || js::stringify(&turn_aside(read.clone()))
+                    == js::stringify(&turn_aside(expected.clone()))
+            {
+                self.pi_turns.push(name.to_owned());
+                return false;
             }
         }
         assert_eq!(js::stringify(&read), js::stringify(&expected), "{name}");

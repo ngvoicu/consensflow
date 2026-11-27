@@ -107,16 +107,25 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
     let mut played = 0;
     let mut departed = Vec::new();
     let mut busy = std::collections::BTreeSet::new();
+    let mut pi_turns = Vec::new();
     for group in GROUPS {
         for scenario in scenarios(group) {
             let play = play::play(&scenario, &ours);
             answered += play.answered;
             departed.extend(play.departed);
             busy.extend(play.busy);
+            pi_turns.extend(play.pi_turns);
             played += 1;
         }
     }
     assert_eq!((played, answered), (372, 1412));
+    // Pi's looks whose turn alone departs from Node's (T-2377, the goldens' README): their
+    // words, quota and failure's words are Node's.
+    assert_eq!(
+        pi_turns.len(),
+        128,
+        "the Pi looks whose turn departs: {pi_turns:#?}"
+    );
     // Node failed these looks at a torn line, which this build passes over
     // (T-223): each reads the records around it. A record of nothing but a
     // torn line reads as one with no records, and fails all the same.

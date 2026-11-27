@@ -140,7 +140,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
 
   it('sends raw worker text verbatim with a bounded m-<hex> record', async () => {
     const s = await setup()
-    const pump = setInterval(() => void s.extension.consume(), 5)
+    const pump = setInterval(() => void s.extension.pass(), 5)
     pump.unref()
     try {
       const text = 'worker followup: the cache key is per conversation'
@@ -188,7 +188,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
   // leaves it in the editor.
   it('sends a followup past unsent text, leaving the text in the editor', async () => {
     const s = await setup({ editor: 'my unfinished question' })
-    const pump = setInterval(() => void s.extension.consume(), 5)
+    const pump = setInterval(() => void s.extension.pass(), 5)
     pump.unref()
     try {
       const text = 'worker followup while drafting'
@@ -215,7 +215,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
 
   it('refuses a followup addressed to the wrong native session', async () => {
     const s = await setup()
-    const pump = setInterval(() => void s.extension.consume(), 5)
+    const pump = setInterval(() => void s.extension.pass(), 5)
     pump.unref()
     try {
       const result = await send(
@@ -233,7 +233,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
 
   it('refuses a followup from the wrong launch without sending', async () => {
     const s = await setup()
-    const pump = setInterval(() => void s.extension.consume(), 5)
+    const pump = setInterval(() => void s.extension.pass(), 5)
     pump.unref()
     try {
       const foreign = s.targetFor()
@@ -263,7 +263,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
           expiresAt: Date.now() - 1,
         })}\n`,
       )
-      await s.extension.consume()
+      await s.extension.pass()
       assert.deepEqual(await waitFor(join(s.ack, `${id}.json`)), {
         id,
         admitted: false,
@@ -299,10 +299,10 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
         expiresAt: Date.now() + 60_000,
       }
       await writeFile(join(s.inbox, `${id}.json`), `${JSON.stringify(record)}\n`)
-      // The extension's own inbox watcher may start the scan first; a consume
-      // that finds a scan running only queues a rerun and returns, so wait for
-      // the send instead of assuming these two calls made it.
-      await Promise.all([s.extension.consume(), s.extension.consume()])
+      // The extension's own inbox watcher may start a pass first; two passes asked
+      // together share the next one, so wait for the send instead of assuming
+      // these two calls made it.
+      await Promise.all([s.extension.pass(), s.extension.pass()])
       const deadline = Date.now() + 2000
       while (s.pi.sent.length === 0 && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 5))
@@ -342,7 +342,7 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
         expiresAt: Date.now() + 60_000,
       })}\n`
       await writeFile(join(s.inbox, `${id}.json`), record)
-      await s.extension.consume()
+      await s.extension.pass()
       const deadline = Date.now() + 2000
       while (s.pi.sent.length === 0 && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 5))
@@ -355,10 +355,10 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
         await new Promise((resolve) => setTimeout(resolve, 5))
 
       await writeFile(join(s.inbox, `${id}.json`), record)
-      await s.extension.consume()
+      await s.extension.pass()
       assert.deepEqual(s.pi.sent, ['acknowledged followup'])
-      // A consume that found the first pass still running queues a rerun; the
-      // copy goes when that rerun comes, not before.
+      // A pass asked while another runs is the next one; the copy goes when
+      // that pass comes, not before.
       while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 5))
       assert.equal(await exists(join(s.inbox, `${id}.json`)), false, s.logs.join('; '))
@@ -367,19 +367,19 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
     }
   })
 
-  it('ignores a late consume after its inbox is gone', async () => {
+  it('ignores a late pass after its inbox is gone', async () => {
     // A watcher event or a queued rerun can outlive the inbox (pane closed,
     // folder cleaned). Inside Pi an unhandled rejection can end the process.
     const s = await setup()
     await s.close()
-    await s.extension.consume()
+    await s.extension.pass()
   })
 
   it('reports uncertain on ack timeout without an automatic retry', async () => {
     // The ack timeout is also the message's lifetime: 40 ms expired before the
     // extension read it under load, which is a refusal, not "admission unknown".
     const s = await setup({ ackTimeoutMs: 1000 })
-    const pump = setInterval(() => void s.extension.consume(), 5)
+    const pump = setInterval(() => void s.extension.pass(), 5)
     pump.unref()
     try {
       const result = await send(s.targetFor(), 'followup nobody admits')

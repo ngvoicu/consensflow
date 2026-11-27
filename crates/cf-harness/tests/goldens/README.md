@@ -20,6 +20,20 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **T-2377 Pi's own word says whether its turn runs.** Node's Pi reader settled a turn by the
+  extension's settlement file naming the last step, or by the session file's own time being 120 s
+  old, and read the extension's working marker as a turn in flight while no file was there. Rust
+  reads the extension's word of Pi's run state (`<launch>.state.json`, the brain's
+  `architecture/pi-turn-state.md`); with none, the quiet is counted from the last entry a request
+  can follow, by that entry's own time, and the older extension's files are no word. No
+  recording was edited: the records player holds each Pi look to Node's but for its turn
+  (`inFlight`, `settlement`, `failed`), and an older marker's look with no file to Node's empty
+  turn; it counts those looks (128) and holds their words, quota and failures' words to Node's.
+  In both platforms' launch recordings the extension's text and its hash were replaced by the new
+  extension's in every Pi scenario, and the steps that wrote the older extension's files were
+  edited by hand to write its word instead: the working marker became a `working` word, each
+  settlement file naming a leaf a `rest` word at that leaf after one ended run.
+
 - **T-1986 Codex's launch survives a slow first start.** Node's launch gave Codex's
   app-server ten seconds from its spawn to answer both requests. Rust gives it ten
   seconds for the reply to `initialize` and then sixty for the read of the

@@ -6,28 +6,31 @@
 //! (`npm run live:resume-cut -- --harness pi`, Pi 1.1.0: the record unchanged
 //! after 45 s, and a message pasted after it answered in a second). The
 //! extension of ConsensFlow's, inside the window, says which conversation it
-//! shows, and writes a marker when a turn of the window begins and removes it
-//! when Pi settles: a window whose extension names the conversation and has
-//! written no marker has begun no turn.
+//! shows, and writes Pi's own run state as its word (`<launch>.state.json`):
+//! where it is there, it decides; where a window's extension names the
+//! conversation and has written no word, the window has begun no turn.
 
 use super::*;
 
 const SESSION: &str = "cf-1-zeus-0a1b2c3d";
 
-/// What the extension writes when a turn begins: removed, when Pi settles.
+/// What the extension writes when a run begins: Pi's word that a run is on.
 fn begins_a_turn(home: &Home, session: &str) {
     let settled = path::join(&[&home.launch_folder(), "settled"]);
     fs::create_dir_all(&settled).unwrap();
-    let file = path::join(&[&settled, &format!("{LAUNCH}.working.json")]);
-    let said = json!({ "launchId": LAUNCH, "sessionId": session });
+    let file = path::join(&[&settled, &format!("{LAUNCH}.state.json")]);
+    let said = json!({ "launchId": LAUNCH, "sessionId": session, "state": "working",
+        "leaf": "u1", "begun": 1, "ended": 0, "ends": [] });
     fs::write(file, format!("{said}\n")).unwrap();
 }
 
-fn settles(home: &Home) {
+/// The word taken back (the extension's session shut down): the window is read by its record
+/// again, which the quit left as it was.
+fn word_gone(home: &Home) {
     let file = path::join(&[
         &home.launch_folder(),
         "settled",
-        &format!("{LAUNCH}.working.json"),
+        &format!("{LAUNCH}.state.json"),
     ]);
     fs::remove_file(file).unwrap();
 }
@@ -151,8 +154,8 @@ fn a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_extension_ha
         // A turn of the window's own begins: the extension says so.
         begins_a_turn(&home, SESSION);
         assert!(!settled(&window), "a turn is at work");
-        settles(&home);
-        assert!(settled(&window), "Pi settled, with the record as it was");
+        word_gone(&home);
+        assert!(settled(&window), "no word, with the record as it was");
     }
 }
 
@@ -171,8 +174,8 @@ fn a_window_opened_again_on_a_turn_its_record_cannot_end_is_at_rest_once_its_ext
 
     begins_a_turn(&home, SESSION);
     assert!(!settled(&window), "a turn is at work");
-    settles(&home);
-    assert!(settled(&window), "Pi settled, with the record as it was");
+    word_gone(&home);
+    assert!(settled(&window), "no word, with the record as it was");
 }
 
 #[test]

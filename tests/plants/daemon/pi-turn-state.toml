@@ -1,0 +1,190 @@
+# Who says that a Pi window is at work (the brain's `architecture/pi-turn-state.md`, 2026-11-27,
+# T-2377): Pi's own run state, which ConsensFlow's extension writes as one word (`working`, `busy`,
+# `rest`) with the runs begun and ended and the last eight ends; the session file says how a run
+# ended, never whether one runs; with no word, the file decides by its entries' own times. It
+# answers two field pauses of 2026-11-26: a Pi window stopped at its empty prompt read "working",
+# was pressed three times, and its chief was told it "may be hung".
+#
+# Each plant puts back one guard the page's §8 names, and its case fails: the extension's
+# (`tests/pi-extension.test.mjs`), the reader's (`crates/cf-harness/src/pi/record/tests/`,
+# `turn_state` over what Pi 1.6.0's and 1.6.1's own loops wrote, `evidence_files`, `looks`), and
+# the dispatcher's (`crates/cf-engine/tests/dispatcher/pi_turn_state.rs`). The extension's cases
+# against each published Pi's loop (`tests/pi-loop/drive.mjs`) need Pi installed and run apart.
+#
+# Every name holds `pi turn state`, so `cargo xtask plants daemon "pi turn state"` runs them all.
+
+[run]
+pts-extension = ["node", "--test", "--test-reporter=tap", "--test-force-exit", "tests/pi-extension.test.mjs"]
+pts-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::"]
+pts-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pi_turn_state"]
+
+# --- the extension ---
+
+[[plant]]
+name = "pi turn state: rest is written inside a handler"
+meant = "writes a run's end at agent_settled with its leaf and Pi's flag, and rest only at the next pass"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (next === 'rest' && !inPoll) next = state ?? 'busy'\n"
+replace = "    // rest from a handler too\n"
+
+[[plant]]
+name = "pi turn state: no begin at before_agent_start"
+meant = "says working first thing at before_agent_start, before a later extension's handler"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    return begin(event, ctx).then(() => undefined)\n"
+replace = "    return undefined\n"
+
+[[plant]]
+name = "pi turn state: ended is not written at agent_settled"
+meant = "writes a run's end at agent_settled with its leaf and Pi's flag, and rest only at the next pass"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    end(typeof event?.aborted === 'boolean' ? event.aborted : null)\n"
+replace = "    // no end\n"
+
+[[plant]]
+name = "pi turn state: a poll starts a run"
+meant = "says busy at the session's start for a Pi not idle"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (runOn()) return 'working'\n"
+replace = "    if (runOn() || !idle()) return 'working'\n"
+
+[[plant]]
+name = "pi turn state: no prompt in hand at input"
+meant = "holds a submitted prompt in hand from its input hook: busy, and no message goes in ahead of it"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    inHand = now()\n    return say(false).then(() => undefined)\n"
+replace = "    return undefined\n"
+
+[[plant]]
+name = "pi turn state: the consumer sends on isIdle() alone"
+meant = "holds a submitted prompt in hand from its input hook: busy, and no message goes in ahead of it"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "        if (now_ === 'busy') {\n"
+replace = "        if (false) {\n"
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "        if (now_ !== 'rest' || state !== 'rest') break\n"
+replace = "        if (context?.isIdle?.() !== true) break\n"
+
+[[plant]]
+name = "pi turn state: the word at session_start only for a stop leaf"
+meant = "says rest at the session's start for an idle Pi on a user message"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    restAfter = ended\n    await say(true)\n"
+replace = "    restAfter = ended\n    if (ctx.sessionManager?.getLeafEntry?.()?.message?.stopReason === 'stop') await say(true)\n"
+
+# --- the reader ---
+
+[[plant]]
+name = "pi turn state: the reader lets a quiet file overrule working"
+meant = "every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_clock"
+runs = ["pts-reader", "pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        State::Working => Turn::AtWork { said: true },\n"
+replace = "        State::Working if session.is_none() => Turn::AtWork { said: true },\n        State::Working => Turn::Ended { upto: None, flag: None },\n"
+
+[[plant]]
+name = "pi turn state: the reader holds rest for an open call"
+meant = "a_resume_onto_a_leaf_of_each_kind_is_at_rest_by_the_word"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        State::Rest if !holds(word.leaf.as_ref()) => Turn::AtWork { said: false },\n"
+replace = "        State::Rest if !holds(word.leaf.as_ref()) || session.is_some_and(|s| !s.open_tools.is_empty()) => Turn::AtWork { said: false },\n"
+
+[[plant]]
+name = "pi turn state: the reader holds rest for a session with no file"
+meant = "with_no_file_yet_the_word_says_the_turn_and_no_word_says_no_session"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "            None => Session::nothing(&turn),\n"
+replace = "            None => Session::nothing(&Turn::AtWork { said: false }),\n"
+
+[[plant]]
+name = "pi turn state: an ended run is reported from the last step in the file, not at its leaf"
+meant = "each_ended_run_is_reported_once_in_order_read_up_to_its_own_leaf"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "            } => self.marks.get(leaf),\n"
+replace = "            } => None.filter(|_: &&Mark| !leaf.is_empty()),\n"
+
+[[plant]]
+name = "pi turn state: any context_edit is read as a cancelled retry"
+meant = "only_pis_own_omission_of_the_failed_step_makes_a_failure_an_interrupt"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        if let Some(step) = self.step.as_mut().filter(|step| &*step.id == target) {\n"
+replace = "        if let Some(step) = self.step.as_mut().filter(|_| !target.is_empty()) {\n"
+
+[[plant]]
+name = "pi turn state: a call of an aborted or error step opens"
+meant = "a_turn_interrupted_at_any_point_is_over_and_its_abandoned_call_holds_nothing_open"
+runs = ["pts-reader", "pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        let abandoned = matches!(stop, Some(\"aborted\" | \"error\"));\n"
+replace = "        let abandoned = matches!(stop, Some(\"never\"));\n"
+
+[[plant]]
+name = "pi turn state: the fallback's quiet is counted from the file's time"
+meant = "with_no_word_a_turn_that_ended_is_settled_a_hundred_and_twenty_seconds_after_its_last_entry"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                Some(Some(at)) => Some(at),\n"
+replace = "                Some(Some(_)) => Some(stat(file).map_err(|error| format!(\"{}: {error}\", file.display()))?.mtime_ms as i64),\n"
+
+# --- the stop ---
+
+[[plant]]
+name = "pi turn state: the stop presses a key or is paid at busy"
+meant = "a_compaction_at_rest_presses_no_key_and_pays_no_stop_until_pi_rests"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        } else if observed.over == Over::Pending {\n"
+replace = "        } else if false && observed.over == Over::Pending {\n"
+
+[[plant]]
+name = "pi turn state: the stop notes before settles_at"
+meant = "without_the_word_nothing_is_pressed_or_said_before_the_quiet_has_passed"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = "        self.lines.busy || self.lines.settles_at.is_some()\n"
+replace = "        self.lines.busy\n"
