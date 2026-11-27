@@ -56,6 +56,9 @@ struct Window {
     options: Options,
     /// The clock the reader is told.
     now: i64,
+    /// What the fake window's record held once T-1 was delivered (the brief): Pi's assistant
+    /// steps are read after it.
+    delivered: Vec<cf_harness::records::Item>,
 }
 
 impl Window {
@@ -98,6 +101,7 @@ impl Window {
             }),
             ..Options::default()
         };
+        let delivered = context.adapter.agent("zeus").items.clone();
         Self {
             context,
             project: project.id,
@@ -105,6 +109,7 @@ impl Window {
             reader,
             options,
             now: 0,
+            delivered,
         }
     }
 
@@ -144,8 +149,9 @@ impl Window {
         let Reading::Known(record) = &*reading else {
             unreachable!()
         };
+        let delivered = self.delivered.clone();
         self.context.adapter.with("zeus", |agent| {
-            agent.items.clear();
+            agent.items = delivered;
             agent.items.extend(
                 record
                     .items
@@ -389,5 +395,44 @@ fn a_run_pi_itself_says_is_on_after_every_round_is_kept_and_said_so() {
             note.contains("its harness itself says a turn is on"),
             "{note}"
         );
+    }
+}
+
+#[test]
+fn a_task_pi_recovered_by_its_own_retry_returns_only_the_retrys_words() {
+    // Pi's first attempt failed with words and a call begun; Pi omitted it and retried, and the
+    // retry answered. The attempt Pi dropped is no word of the result, with or without the word.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(version, &format!("retry-{form}"), "02-retried");
+        let text = text.unwrap();
+        for with_word in [true, false] {
+            let what = format!("{version} {form}, word {with_word}");
+            let mut window = Window::new();
+            window.shows(Some(&text), with_word.then(|| working(&word)).as_ref());
+            window.pass();
+            window.shows(Some(&text), with_word.then_some(&word));
+            window.passes(if with_word { 3 } else { 45 });
+            let task = window.context.task(window.project, 1).task;
+            assert_eq!(task.state, "done", "{what}");
+            let results: Vec<String> = window
+                .context
+                .inbox(window.context.id(window.project, "chief"))
+                .into_iter()
+                .filter(|message| message.kind == "result")
+                .map(|message| message.body)
+                .collect();
+            assert_eq!(results.len(), 1, "{what}: {results:?}");
+            assert!(
+                results[0].contains("Retry finished."),
+                "{what}: {}",
+                results[0]
+            );
+            assert!(
+                !results[0].contains("Running the script now."),
+                "{what}: {}",
+                results[0]
+            );
+        }
     }
 }

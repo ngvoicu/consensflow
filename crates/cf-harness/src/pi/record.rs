@@ -578,6 +578,9 @@ impl Session {
             .rev()
             .find(|item| &*item.id == target && item.role == Role::Assistant)
         {
+            // No words of the conversation's any more: no answer holds them (`commentary`,
+            // which a result leaves out) and none takes them for the member's (`synthetic`).
+            item.commentary = true;
             item.synthetic = true;
         }
         if let Some(step) = self.step.as_mut().filter(|step| &*step.id == target) {

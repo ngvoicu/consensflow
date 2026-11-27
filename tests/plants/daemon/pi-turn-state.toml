@@ -188,3 +188,13 @@ runs = ["pts-window"]
 file = "crates/cf-harness/src/shared/record/reading.rs"
 find = "        self.lines.busy || self.lines.settles_at.is_some()\n"
 replace = "        self.lines.busy\n"
+
+[[plant]]
+name = "pi turn state: the words of a step Pi omitted reach the result"
+meant = "a_task_pi_recovered_by_its_own_retry_returns_only_the_retrys_words"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "            item.commentary = true;\n            item.synthetic = true;\n"
+replace = "            item.synthetic = true;\n"
