@@ -27,13 +27,8 @@ runs = ["engine-release-contract"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '''    let chief = filled(chief::text(false)?, staff, cf)?;'''
-replace = '''    if let Some(card) = _env.path("CONSENSFLOW_EVAL_CHIEF_CARD") {
-        return Ok(std::fs::read_to_string(card).unwrap_or_default());
-    }
-    let chief = filled(chief::text(false)?, staff, cf)?;'''
-
-# --- the ledger ---
+find = '    built(role, staff, &held_roles(staff), cf, specs, own_hands, mac)'
+replace = "    if let Some(card) = _env.path(\"CONSENSFLOW_EVAL_CHIEF_CARD\") {\n        return Ok(std::fs::read_to_string(card).unwrap_or_default());\n    }\n    built(role, staff, &held_roles(staff), cf, specs, own_hands, mac)"
 
 [[plant]]
 name = "staff rules: the ledger takes more bytes than the bound"

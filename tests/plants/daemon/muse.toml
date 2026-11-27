@@ -2835,8 +2835,8 @@ runs = ["muse-role-cleared"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/greeting.rs"
-find = '''        if window.is_none_or(|window| window.greeted(session))'''
-replace = '''        if window.is_none()'''
+find = '''        if window.greeted(session) {'''
+replace = '''        if false {'''
 
 [[plant]]
 name = "muse: a session told the role as it is is told it again"
@@ -2935,9 +2935,8 @@ runs = ["muse-role-cleared"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/greeting.rs"
-find = '''            || self.greeting(record)?.is_some()
-'''
-replace = ''''''
+find = '        if self.prelude_waits(record)? || self.greeting(record)?.is_some() {'
+replace = '        if self.prelude_waits(record)? {'
 
 [[plant]]
 name = "muse: a hold for the human is not said on the board"

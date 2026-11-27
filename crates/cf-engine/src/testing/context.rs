@@ -225,6 +225,7 @@ impl Context {
             recorder: recorder.clone(),
             rewritten: RefCell::new(String::new()),
             with_staff: Cell::new(false),
+            with_held: Cell::new(false),
             cf: RefCell::new(CfWord::bare()),
         });
         let trace = Rc::new(FakeTrace {

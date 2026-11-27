@@ -162,6 +162,11 @@ fn no_window_is_given_a_harness_session_a_terminal_was_asked_in() {
     );
 }
 
+/// The roles a project's staff holds, as the engine gives a chief's text them.
+fn held(project: &ProjectView) -> Vec<&'static str> {
+    cf_engine::roles::held_roles(&cf_engine::roles::staff_of(project))
+}
+
 #[test]
 fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
     let scene = scene();
@@ -169,10 +174,16 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
     let mut project = scene.project.clone();
     let chief = participant(&project, "chief").clone();
     let worker = participant(&project, "zeus").clone();
-    let ordinary = texts.instructions(&chief, &project, None).unwrap();
-    let member = texts.instructions(&worker, &project, None).unwrap();
+    let ordinary = texts
+        .instructions(&chief, &project, &held(&project), None)
+        .unwrap();
+    let member = texts
+        .instructions(&worker, &project, &held(&project), None)
+        .unwrap();
     project.own_hands = true;
-    let own = texts.instructions(&chief, &project, None).unwrap();
+    let own = texts
+        .instructions(&chief, &project, &held(&project), None)
+        .unwrap();
     assert!(
         own.contains("staff of agents, on a ConsensFlow board"),
         "{own}"
@@ -193,11 +204,46 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
         !own.contains("You do not change the project yourself"),
         "{own}"
     );
-    assert_eq!(texts.instructions(&worker, &project, None).unwrap(), member);
+    assert_eq!(
+        texts
+            .instructions(&worker, &project, &held(&project), None)
+            .unwrap(),
+        member
+    );
     project.own_hands = false;
     assert_eq!(
-        texts.instructions(&chief, &project, None).unwrap(),
+        texts
+            .instructions(&chief, &project, &held(&project), None)
+            .unwrap(),
         ordinary
+    );
+}
+
+#[test]
+fn a_chief_is_given_the_roles_it_is_handed_and_not_those_of_the_table() {
+    let scene = scene();
+    let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
+    let chief = participant(&scene.project, "chief");
+    let table = held(&scene.project);
+    assert_eq!(table, vec!["worker"], "the scene's staff is one worker");
+    let own = texts
+        .instructions(chief, &scene.project, &table, None)
+        .unwrap();
+    assert!(!own.contains("--advice"), "{own}");
+    let handed = texts
+        .instructions(chief, &scene.project, &["worker", "advisor"], None)
+        .unwrap();
+    assert!(handed.contains("--advice"), "the advisor handed: {handed}");
+    assert!(
+        !handed.contains("| advisor |"),
+        "its table is the project's: {handed}"
+    );
+    let none = texts
+        .instructions(chief, &scene.project, &["advisor"], None)
+        .unwrap();
+    assert!(
+        !none.contains("task add --tier "),
+        "no worker handed: {none}"
     );
 }
 
@@ -206,7 +252,12 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();
     let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
     let chief = texts
-        .instructions(participant(&scene.project, "chief"), &scene.project, None)
+        .instructions(
+            participant(&scene.project, "chief"),
+            &scene.project,
+            &held(&scene.project),
+            None,
+        )
         .unwrap();
     assert!(
         chief.contains("| zeus | worker | Standard work |"),
@@ -228,7 +279,12 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     assert!(!chief.contains("This window's cf"), "{chief}");
     assert!(!chief.contains("specs"), "specs off: told nothing of them");
     let worker = texts
-        .instructions(participant(&scene.project, "zeus"), &scene.project, None)
+        .instructions(
+            participant(&scene.project, "zeus"),
+            &scene.project,
+            &held(&scene.project),
+            None,
+        )
         .unwrap();
     assert!(
         worker.contains(&format!("\n    {word} ask \"…\" ")),
@@ -267,7 +323,7 @@ fn a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it(
                 "{harness:?}, windows {windows}"
             );
             let text = texts(windows)
-                .instructions(&member, &scene.project, None)
+                .instructions(&member, &scene.project, &held(&scene.project), None)
                 .unwrap();
             let word = if cf_engine::roles::PATH_ONCE {
                 "cf"
@@ -313,6 +369,7 @@ fn a_chief_given_specs_is_given_the_section_of_them_and_a_member_given_them_is_n
         .instructions(
             participant(&scene.project, "chief"),
             &scene.project,
+            &held(&scene.project),
             Some(&specs),
         )
         .unwrap();
@@ -326,6 +383,7 @@ fn a_chief_given_specs_is_given_the_section_of_them_and_a_member_given_them_is_n
         .instructions(
             participant(&scene.project, "zeus"),
             &scene.project,
+            &held(&scene.project),
             Some(&specs),
         )
         .unwrap();
@@ -339,7 +397,7 @@ fn a_role_that_has_no_text_fails_its_launch_in_the_words_of_why() {
     let mut human = participant(&scene.project, "zeus").clone();
     human.role = "human".to_owned();
     let failed = texts
-        .instructions(&human, &scene.project, None)
+        .instructions(&human, &scene.project, &held(&scene.project), None)
         .unwrap_err();
     assert_eq!(failed, "no role instructions for human");
 }
