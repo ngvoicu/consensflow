@@ -447,6 +447,30 @@ function partState(part, row, now) {
 }
 
 /**
+ * A hold for an account's refusal in words: the one place it is said, for the row, the chief's
+ * card, the held task's drawer and the staff list. It reads the hold's own closed form
+ * (`outForm`: which was refused, billing or login, and the status and the provider's error
+ * type where the refusal carried one, each a literal of the engine's lists) and no word of the
+ * harness's: a hold without a form (an older build's) says the generic sentence (T-2353).
+ * `said` is what happened; `way` is what the person does.
+ */
+export function accountHold(participant) {
+  const form = participant.outForm
+  const kind = form?.kind === 'login' || form?.kind === 'billing' ? form.kind : null
+  if (kind === null) {
+    return {
+      said: 'its account was refused for billing or login',
+      way: 'Logged in again, or paid? Press Try again now',
+    }
+  }
+  const detail = [form.status, form.code].filter((part) => part !== undefined && part !== null)
+  const said = `its ${kind} was refused${detail.length > 0 ? ` (${detail.join(', ')})` : ''}`
+  return kind === 'login'
+    ? { said, way: 'Log in again in its harness, then press Try again now' }
+    : { said, way: 'Once it is paid, press Try again now' }
+}
+
+/**
  * Why a part of a team cannot run work, short: its words in full are `outWords`, which a lane
  * of its own says; in a team the way back is the button beside them.
  */
@@ -455,9 +479,7 @@ function outShort({ participant, activity, busy }, now) {
   const said = (prefix) =>
     activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
   if (modelMoved(participant)) return `Held: ${said('moved: ') ?? 'its model moved on its own'}`
-  if (unavailable(participant)) {
-    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}`
-  }
+  if (unavailable(participant)) return `Unavailable: ${accountHold(participant).said}`
   return `Out of quota until ${backAt(participant.outUntil, now)}`
 }
 
@@ -823,7 +845,8 @@ export function outWords({ participant, activity, busy }, now) {
     return `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
   }
   if (unavailable(participant)) {
-    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Logged in again, or paid? Press Try again now`
+    const { said: what, way } = accountHold(participant)
+    return `Unavailable: ${what}. ${way}`
   }
   return `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
 }
@@ -1926,7 +1949,10 @@ export class TaskDrawer {
     if (busy) return { words: `its member's model is busy until ${backAt(busy, now)}` }
     if (modelMoved(participant)) return { words: "its member's model moved", retry: true }
     if (unavailable(participant)) {
-      return { words: "its member's account is unavailable (login or billing)", retry: true }
+      return {
+        words: `its member's account is unavailable: ${accountHold(participant).said}`,
+        retry: true,
+      }
     }
     return {
       words: `its member is out of quota until ${backAt(participant.outUntil, now)}`,

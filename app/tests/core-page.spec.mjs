@@ -2392,7 +2392,7 @@ test('the staff in Project settings says a member is out of quota and tries it a
  * or billing was refused, which they may have fixed; and a model busy for a moment, which
  * ConsensFlow tries again after a back-off of its own and no press shortens.
  */
-async function heldFor(page, kind) {
+async function heldFor(page, kind, { form, activity } = {}) {
   const data = model()
   const soon = new Date(Date.now() + 90 * 60_000).toISOString()
   const until = kind === 'account' ? '9999-12-31T23:59:59.998Z' : soon
@@ -2400,10 +2400,14 @@ async function heldFor(page, kind) {
   for (const handle of ['zeus', 'chief']) {
     const lane = lanes.find((lane) => lane.participant.handle === handle)
     lane.participant.outUntil = until
+    if (form) lane.participant.outForm = form
+    if (activity) lane.activity = { state: 'out', reason: activity }
     if (kind === 'busy') lane.busy = soon
   }
   const zeus = lanes.find((lane) => lane.participant.handle === 'zeus')
-  zeus.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until }))
+  const held = task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until })
+  zeus.tasks.push(held)
+  data.tasks['1:9'] = { ...held, messages: [] }
   await open(page, data)
   return {
     row: page.locator('tr[data-handle="zeus"]'),
@@ -2462,6 +2466,79 @@ test('a member held for its account says so, to log in again or pay, on its row,
   const staff = await shown.staff()
   await expect(staff.locator('.member-out')).toHaveText(said)
   await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member held for its login says so with the status and the error type its hold keeps, on every surface, and its window’s words are not the card’s', async ({
+  page,
+}) => {
+  // T-2353: one function says the hold, from its own closed form; the window's words (the
+  // activity) are not read for it, so nothing of a harness's can reach the card.
+  const shown = await heldFor(page, 'account', {
+    form: { kind: 'login', status: 401, code: 'authentication_error' },
+    activity: 'unavailable: 401 owner.account@example.invalid password: hunter2',
+  })
+  const what = 'its login was refused (401, authentication_error)'
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    `Unavailable: ${what}`,
+  )
+  const said = `Unavailable: ${what}. Log in again in its harness, then press Try again now`
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await page
+    .getByRole('dialog', { name: 'Project settings' })
+    .getByRole('button', { name: /Close/ })
+    .first()
+    .click()
+  await page.locator('button.card[data-task="9"]').click()
+  await expect(page.getByRole('complementary', { name: 'Task T-9' })).toContainText(
+    `its member's account is unavailable: ${what}`,
+  )
+  await expect(page.locator('body')).not.toContainText('hunter2')
+})
+
+test('a member held for its billing says billing with what its hold keeps, and the kind alone where it keeps no more', async ({
+  page,
+}) => {
+  const billing = await heldFor(page, 'account', {
+    form: { kind: 'billing', status: 402, code: 'insufficient_quota' },
+  })
+  await expect(billing.chief.locator('.terminal-status')).toHaveText(
+    'Unavailable: its billing was refused (402, insufficient_quota). Once it is paid, press Try again now',
+  )
+  const bare = await heldFor(page, 'account', { form: { kind: 'billing' } })
+  await expect(bare.row.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its billing was refused',
+  )
+})
+
+test('a hold with no form (an older build’s) says the generic sentence on every surface, whatever its window said', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'account', { activity: 'unavailable: 401 some words' })
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its account was refused for billing or login',
+  )
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now',
+  )
+})
+
+test('the longest form of a hold fits the chief’s card at the smallest window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 560, height: 480 })
+  const shown = await heldFor(page, 'account', {
+    form: { kind: 'billing', status: 402, code: 'credit_balance_too_low' },
+  })
+  const box = await shown.chief.evaluate((card) => {
+    const frame = card.getBoundingClientRect()
+    const button = card.querySelector('.try-again').getBoundingClientRect()
+    const host = card.querySelector('.terminal-host').getBoundingClientRect()
+    return { buttonBelow: button.bottom - frame.bottom, host: host.height }
+  })
+  expect(box.buttonBelow).toBeLessThanOrEqual(0)
+  expect(box.host).toBeGreaterThan(25)
 })
 
 test('a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list', async ({

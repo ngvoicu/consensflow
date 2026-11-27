@@ -2187,12 +2187,23 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
-            owner.id,
-            &reset,
-            unwell.map_or("out of quota", Unwell::hold),
-            kind,
-        )?;
+        let hold = unwell.map_or("out of quota", Unwell::hold);
+        // An account's refusal keeps the closed form of what it was with the hold (which, its
+        // status and its provider's error type, each a literal of the lists); no word of the
+        // harness's is kept anywhere new (T-2353).
+        let marked = match unwell {
+            Some(Unwell::Account(because)) => self.seams.ledger.borrow_mut().mark_out_with_form(
+                owner.id,
+                &reset,
+                hold,
+                cf_harness::records::hold_form(because),
+            )?,
+            _ => self
+                .seams
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(owner.id, &reset, hold, kind)?,
+        };
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

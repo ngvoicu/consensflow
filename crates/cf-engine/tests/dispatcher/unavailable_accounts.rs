@@ -279,3 +279,134 @@ fn brought_back_by_a_count_of(level: Level, used: u64) {
         "its task went on"
     );
 }
+
+/// The board's participant for `handle`.
+fn participant_of(context: &Context, tiers: &Tiers, handle: &str) -> serde_json::Value {
+    let board =
+        serde_json::to_value(context.ledger.borrow().board(tiers.project.id).unwrap()).unwrap();
+    board["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == handle)
+        .unwrap()["participant"]
+        .clone()
+}
+
+/// The `member.out` events of the project, as the ledger kept them.
+fn member_outs(context: &Context, tiers: &Tiers) -> Vec<serde_json::Value> {
+    context
+        .ledger
+        .borrow()
+        .events(tiers.project.id, 0, 5000)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "member.out")
+        .map(|event| event.data)
+        .collect()
+}
+
+/// Zeus refused for `because`, and `then` looking at what it left.
+fn zeus_refused(because: &str, then: impl FnOnce(&Context, &Tiers)) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.refuse(
+        "zeus-amber-pine",
+        Quota::Unavailable {
+            at: Some(now(&context)),
+            because: because.to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    then(&context, &tiers);
+}
+
+#[test]
+fn keeps_the_closed_form_of_an_account_s_refusal_with_the_hold_for_the_board_to_say() {
+    zeus_refused(
+        r#"its login was refused: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        |context, tiers| {
+            let zeus = participant_of(context, tiers, "zeus");
+            assert_eq!(
+                zeus["outForm"],
+                serde_json::json!({ "kind": "login", "status": 401, "code": "authentication_error" }),
+                "the board says what the hold was, with no window to say it"
+            );
+            assert!(zeus.get("outBecause").is_none(), "{zeus}");
+            let outs = member_outs(context, tiers);
+            assert_eq!(outs.len(), 1, "{outs:?}");
+            let mut keys: Vec<&String> = outs[0].as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["form", "handle", "participant", "reason", "until"]);
+        },
+    );
+}
+
+#[test]
+fn the_form_keeps_no_word_of_a_refusal_whatever_it_carries() {
+    // The check's finding 12: an address with international characters, beside a credit
+    // balance; and a short labelled credential, a key and a password. None is a literal of the
+    // form's lists, so none is kept (T-2353).
+    for words in [
+        "its billing was refused: 402 Your credit balance is too low. Contact jos\u{e9}.owner@ex\u{e4}mple.invalid",
+        "its billing was refused: 402 \u{7528}\u{6237}@\u{4f8b}\u{3048}.\u{30c6}\u{30b9}\u{30c8} insufficient_quota issuer_token: Zq7vN2mLk4Rt",
+        "its login was refused: 401 invalid x-api-key sk-ant-api03-Zq8vN2mLk4Rt7XyP1wUc5Hd9 password: hunter2",
+    ] {
+        zeus_refused(words, |context, tiers| {
+        let kept = format!(
+            "{}\n{}",
+            serde_json::to_string(&participant_of(context, tiers, "zeus")).unwrap(),
+            serde_json::to_string(&member_outs(context, tiers)).unwrap()
+        );
+        for secret in [
+            "owner@",
+            "ex\u{e4}mple",
+            "\u{7528}\u{6237}",
+            "Zq7vN2mLk4Rt",
+            "sk-ant",
+            "hunter2",
+            "issuer_token",
+        ] {
+            assert!(!kept.contains(secret), "{secret} was kept: {kept}");
+        }
+        assert!(kept.contains("\"form\""), "{kept}");
+        });
+    }
+}
+
+#[test]
+fn a_moved_model_and_a_busy_model_keep_no_form_and_no_word_with_the_hold() {
+    // The check's finding 15: a failed Muse turn's labelled credential rode a model's move into
+    // the event. A moved hold keeps nothing new; nor does a busy one (T-2353).
+    for quota in [
+        Quota::Moved {
+            at: Some("2026-09-19T12:00:00.000Z".to_owned()),
+            because: "its model moved from a to b on its own (Model request rejected. issuer_token: Zq7vN2mLk4Rt)".to_owned(),
+        },
+        Quota::Busy {
+            at: Some("2026-09-19T12:00:00.000Z".to_owned()),
+            because: "503 overloaded issuer_token: Zq7vN2mLk4Rt".to_owned(),
+        },
+    ] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus", "diana"]);
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.adapter.refuse("zeus-amber-pine", quota);
+        context.pass().unwrap();
+        let zeus = participant_of(&context, &tiers, "zeus");
+        assert!(zeus.get("outForm").is_none(), "{zeus}");
+        for out in member_outs(&context, &tiers) {
+            let keys: Vec<&String> = out.as_object().unwrap().keys().collect();
+            assert!(
+                keys.iter().all(|key| ["handle", "until", "reason"].contains(&key.as_str())),
+                "{out}"
+            );
+            assert!(!out.to_string().contains("Zq7vN2mLk4Rt"), "{out}");
+        }
+    }
+}
