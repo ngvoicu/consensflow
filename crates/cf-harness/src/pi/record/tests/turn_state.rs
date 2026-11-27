@@ -108,7 +108,7 @@ fn tail_asks(text: &str) -> bool {
                 .to_owned()
         })
         .filter(|role| ["user", "assistant", "toolResult"].contains(&role.as_str()))
-        .last();
+        .next_back();
     matches!(role.as_deref(), Some("user" | "toolResult"))
 }
 
