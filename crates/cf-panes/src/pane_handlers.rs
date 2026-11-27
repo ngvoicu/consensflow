@@ -2,6 +2,7 @@
 //! for the window and the headless helper alike, and each pane's output and
 //! exit on their way back.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -13,7 +14,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::arbiter::{ArbiterSnapshot, InputArbiter, OutputClock};
+use crate::arbiter::At;
+use crate::arbiter::{ArbiterSnapshot, InputArbiter, Kept, OutputClock, UnsentAt};
 use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::journal::Journal;
@@ -22,12 +24,12 @@ use crate::pty::{
     validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneOutput, PaneTable,
     StreamedPane,
 };
-use crate::screen::PaneScreen;
+use crate::screen::{Drawn, PaneScreen, Screen, Seen};
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, Rest, RestRequest,
-    SilentPaste, SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
+    BackgroundProcess, CommandsRequest, MarkRequest, PaneExit, PossiblyLeft, ReadEmpty, Rest,
+    RestRequest, SilentPaste, SnapshotRequest, BOTTOM_LINES, TAIL_LINES,
 };
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
@@ -98,10 +100,30 @@ struct PasteRequest {
     id: String,
     generation: u64,
     body: String,
-    /// The count of the human's keys (`pane.snapshot`'s `typed`) at which the
-    /// window's adapter read its input box empty on the screen.
+    /// The look's reader read the box empty over the person's unsent keys: the look's count of
+    /// them (`pane.snapshot`'s `typed`) and the evidence it read.
     #[serde(default, rename = "readEmpty")]
-    read_empty: Option<u64>,
+    read_empty: Option<ReadEmpty>,
+    /// The look that licensed the paste: its `seen` (`pane.snapshot`'s), and the count of the
+    /// human's keys then (`typed`). A request without it is a daemon's of an older version,
+    /// refused for the human's unsent text alone.
+    #[serde(default)]
+    at: Option<String>,
+    #[serde(default)]
+    typed: Option<u64>,
+    /// The key that empties the box, written with the body, where the look read it holding a
+    /// stale paste.
+    #[serde(default, rename = "clearFirst")]
+    clear_first: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnterRequest {
+    id: String,
+    generation: u64,
+    at: String,
+    typed: u64,
 }
 
 #[derive(Deserialize)]
@@ -119,7 +141,11 @@ struct AckRequest {
     seq: u64,
 }
 
-fn default_backlog_bytes() -> usize {
+/// The room of a window whose `pane.open` names none: how much of its output may be handed to a
+/// page and not yet acknowledged before the program waits on its terminal. Every table's, with
+/// journals or without: a window can then never print past what its journal still holds of a
+/// page that has not yet pulled it ([`crate::journal`]).
+pub fn default_backlog_bytes() -> usize {
     DEFAULT_BACKLOG_BYTES
 }
 
@@ -191,7 +217,7 @@ fn register(
             Err(error) => return Err(error.to_string()),
         };
         let printed = match open_arbiter
-            .register_with(&streamed.key, request.silent_paste)
+            .register_counted(&streamed.key, request.silent_paste, &streamed.counts)
             .map_err(|error| error.to_string())
             .and_then(|printed| open_inputs.open(&streamed.key).map(|()| printed))
         {
@@ -254,11 +280,30 @@ fn register(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
-            let pending = paste_queue.paste(key, body.into_bytes(), read_empty)?;
+        let pasted = paste_request(body).and_then(|request| {
+            let pending = paste_queue.paste(
+                request.key,
+                request.body.into_bytes(),
+                request.at,
+                request.read_empty,
+                request.clear_first.map(String::into_bytes),
+            )?;
             wait_for_input_blocking(pending)
         });
         Ok(match pasted {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => error.paste_answer(),
+        })
+    });
+
+    // An Enter of a delivery that is not a paste's first, licensed by a look.
+    let enter_queue = Arc::clone(&inputs);
+    builder.on("pane.enter", move |_bridge, body| {
+        let entered = enter_request(body).and_then(|(key, at)| {
+            let pending = enter_queue.enter(key, at)?;
+            wait_for_input_blocking(pending)
+        });
+        Ok(match entered {
             Ok(()) => json!({"ok":true}),
             Err(error) => error.paste_answer(),
         })
@@ -381,33 +426,62 @@ fn register(
     builder.on("pane.snapshot", move |_bridge, body| {
         let request: SnapshotRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        let snapshot = snapshot_arbiter
-            .snapshot(&key)
-            .map_err(|error| error.to_string())?;
-        let mut answer = snapshot_answer(&snapshot);
-        // The screen's last lines, for a request that asks for them. A pane
-        // the table no longer holds has none to give.
-        if let Some(lines) = request.tail {
-            if let Some(tail) = screen_read(snapshot_panes.tail(&key, lines.min(TAIL_LINES)))? {
-                answer["tail"] = json!(tail);
-            }
-        }
-        // The screen's last lines as drawn, for an adapter that reads its
-        // harness's input box.
-        if let Some(lines) = request.bottom {
-            if let Some(drawn) = screen_read(snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)))?
-            {
-                answer["bottom"] = json!(drawn.lines);
-                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
-                    json!({
-                        "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
-                        "plainAfter": cursor.plain_after,
-                    })
-                });
-            }
-        }
-        Ok(answer)
+        snapshot_of(
+            &snapshot_arbiter,
+            &key,
+            screen_read(snapshot_panes.screen(&key))?,
+            request.tail,
+            request.bottom,
+        )
     });
+}
+
+/// `pane.snapshot`'s answer: the arbiter's counts and clocks, and the screen's lines for a
+/// request that asks for them, all of one moment: the clocks are read with the screen's lock
+/// held, so a read the output thread is feeding is in both or in neither.
+pub(crate) fn snapshot_of(
+    arbiter: &InputArbiter,
+    key: &PaneKey,
+    screen: Option<Arc<PaneScreen>>,
+    tail: Option<usize>,
+    bottom: Option<usize>,
+) -> Result<Value, String> {
+    // The screen's last lines, for a request that asks for them (a pane the table no longer
+    // holds has none to give), and its last lines as drawn, for an adapter that reads its
+    // harness's input box.
+    let lines = |screen: &Screen| {
+        (
+            tail.map(|lines| screen.tail(lines.min(TAIL_LINES))),
+            // One reading of the screen's last lines: the answer is cut from it, and `seen`
+            // names it whole, whatever the request asked ([`Seen`]).
+            bottom.map(|lines| {
+                let whole = screen.bottom(BOTTOM_LINES);
+                (Seen::of(&whole), whole.cut(lines.min(BOTTOM_LINES)))
+            }),
+        )
+    };
+    let counts = || arbiter.snapshot(key).map_err(|error| error.to_string());
+    // The screens kept at the person's keys go with a look, which asks for the lines.
+    // A counts-only request waits for no lock: the byte counts it carries say whether output
+    // is pending, which is all a caller of counts alone can use.
+    let ((tail, drawn), counts) = match screen {
+        Some(screen) if tail.is_some() || bottom.is_some() => screen.observe(lines, counts),
+        _ => ((None, None), counts()),
+    };
+    let counts = counts?;
+    let mut answer = snapshot_answer(&counts);
+    if let Some(tail) = tail {
+        answer["tail"] = json!(tail);
+    }
+    if let Some((seen, drawn)) = drawn {
+        answer["seen"] = json!(seen.hex());
+        answer["bottom"] = json!(drawn.lines);
+        answer["cursor"] = cursor_answer(&drawn);
+        if let Some(unsent_at) = &counts.unsent_at {
+            answer["unsentAt"] = unsent_at_answer(unsent_at);
+        }
+    }
+    Ok(answer)
 }
 
 /// A launch whose input could not be registered ends its window, and the answer says how
@@ -465,6 +539,39 @@ fn screen_read<T>(read: Result<T, PaneError>) -> Result<Option<T>, String> {
     }
 }
 
+/// A drawn screen's cursor, as a snapshot answers it.
+fn cursor_answer(drawn: &Drawn) -> Value {
+    drawn.cursor.map_or(Value::Null, |cursor| {
+        json!({
+            "line": cursor.line, "col": cursor.col, "shown": cursor.shown,
+            "plainAfter": cursor.plain_after,
+        })
+    })
+}
+
+/// A screen kept at one of the person's keys, as a look answers it.
+fn kept_answer(kept: &Kept) -> Value {
+    json!({
+        "bottom": kept.drawn.lines,
+        "cursor": cursor_answer(&kept.drawn),
+        "current": kept.current,
+    })
+}
+
+/// `unsentAt`: the screens kept while the count is above zero.
+fn unsent_at_answer(unsent_at: &UnsentAt) -> Value {
+    let typed_at: Vec<Value> = unsent_at
+        .typed_at
+        .iter()
+        .map(|kept| kept_answer(kept))
+        .collect();
+    let mut answer = json!({ "typedAt": typed_at, "typedMore": unsent_at.typed_more });
+    if let Some(over) = &unsent_at.pressed_over {
+        answer["pressedOver"] = kept_answer(over);
+    }
+    answer
+}
+
 /// What `pane.snapshot` says of a pane's input: the human's last writes as how long ago,
 /// how many bytes and of what kinds, never a byte of them (`HumanWrite`).
 fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
@@ -485,6 +592,9 @@ fn snapshot_answer(snapshot: &ArbiterSnapshot) -> Value {
         "typedQuietMs":snapshot.typed_quiet_ms,
         "outputQuietMs":snapshot.output_quiet_ms,
         "screenQuietMs":snapshot.screen_quiet_ms,
+        "outputRead":snapshot.output_read,
+        "outputDrawn":snapshot.output_drawn,
+        "outputCaughtUp":snapshot.output_caught_up,
         "pasteQuietMs":snapshot.paste_quiet_ms,
         "humanWrites":writes,
     })
@@ -557,9 +667,21 @@ fn next_output(
 /// A read of the window's output, taken into its screen, and the clocks told: it printed
 /// now, and whether it changed what the screen shows. One call for each read, in the
 /// order the reads came: the paste's Enter and the engine's quiet checks read these.
-fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
-    let changed = screen.feed(bytes);
-    printed.note(changed);
+pub(crate) fn took_in(screen: &PaneScreen, printed: &OutputClock, bytes: &[u8]) {
+    screen.feed_noting(bytes, printed, |_| {});
+}
+
+/// [`took_in`] for a window that keeps a journal: the journal takes the read, the screen is
+/// fed, the clock noted and the read counted drawn, one after the other, all with the screen's
+/// lock held, so no look sees a read in the screen and not in the journal's offsets, or the
+/// reverse.
+pub(crate) fn took_in_journaled(
+    screen: &PaneScreen,
+    printed: &OutputClock,
+    journal: &Journal,
+    bytes: &[u8],
+) {
+    screen.feed_noting(bytes, printed, |bytes| journal.append(bytes));
 }
 
 fn forward_output(
@@ -567,8 +689,19 @@ fn forward_output(
     mut feed: impl FnMut(&[u8]),
     mut publish: impl FnMut(PaneOutput),
 ) {
+    forward_taking(stream, &Cell::new(0), &mut feed, &mut publish);
+}
+
+/// [`forward_output`], with the number of the last read taken from the stream kept in `taken`.
+fn forward_taking(
+    stream: &mpsc::Receiver<PaneOutput>,
+    taken: &Cell<u64>,
+    mut feed: impl FnMut(&[u8]),
+    mut publish: impl FnMut(PaneOutput),
+) {
     let mut pending = None;
     while let Some(message) = pending.take().or_else(|| stream.recv().ok()) {
+        taken.set(message.seq);
         // A ready byte goes on after its own screen update, before any work on
         // another read. In particular, a writer that was idle must not wait for
         // reads that arrive while this update is in progress.
@@ -577,6 +710,7 @@ fn forward_output(
         // There is no wait for another read. When output is already queued, join
         // the next few reads before going back to the immediate handoff above.
         if let Ok(next) = stream.try_recv() {
+            taken.set(next.seq);
             pending = Some(next);
             if let Some(batch) = next_output(stream, &mut pending, &mut feed) {
                 publish(batch);
@@ -585,24 +719,33 @@ fn forward_output(
     }
 }
 
-/// A window that keeps a journal: [`forward_output`], with each read taken into the journal
-/// as it is into the screen, and each message stamped with the offset of its first byte, then
-/// handed to the hub. A mark is taken at a message's end, never inside one. The hub records
-/// how far bytes have been handed to a page, in the step that hands them
-/// ([`OutputHub::attach_page`]).
 pub fn forward_journaled(
     stream: &mpsc::Receiver<PaneOutput>,
     journal: &Journal,
     hub: &OutputHub,
     mut feed: impl FnMut(&[u8]),
 ) {
+    forward_journaled_in(stream, journal, hub, &Cell::new(0), |bytes, journal| {
+        journal.append(bytes);
+        feed(bytes);
+    });
+}
+
+/// [`forward_journaled`] where `feed` appends to the journal itself, in the step that takes the
+/// read into the screen ([`took_in_journaled`]), and the number of the last read taken from the
+/// stream is kept in `taken`.
+pub(crate) fn forward_journaled_in(
+    stream: &mpsc::Receiver<PaneOutput>,
+    journal: &Journal,
+    hub: &OutputHub,
+    taken: &Cell<u64>,
+    mut feed: impl FnMut(&[u8], &Journal),
+) {
     let mut offset = journal.end();
-    forward_output(
+    forward_taking(
         stream,
-        |bytes| {
-            feed(bytes);
-            journal.append(bytes);
-        },
+        taken,
+        |bytes| feed(bytes, journal),
         |message| {
             let at = offset;
             offset += message.bytes.len() as u64;
@@ -611,6 +754,17 @@ pub fn forward_journaled(
             journal.note_published(offset);
         },
     );
+}
+
+/// What the journal took in and a feed that panicked did not hand on, handed on under the
+/// number of the last read the consumer took: the page then has it, and a page that
+/// subscribes later gets it by its pull (T-2230).
+fn hand_on_the_rest(key: &PaneKey, journal: &Journal, hub: &OutputHub, seq: u64) {
+    if let Some((offset, bytes)) = journal.unpublished() {
+        let end = offset + bytes.len() as u64;
+        hub.publish(PaneOutputMessage::of_journal(key, seq, offset, bytes));
+        journal.note_published(end);
+    }
 }
 
 /// A pane's output, on to the page and into its screen, and its end, which is
@@ -634,6 +788,7 @@ fn stream_to_page(
             pid,
             output: stream,
             screen,
+            counts: _,
             journal,
             ended,
             // Paid, with this thread's end, once the exit is told.
@@ -641,18 +796,41 @@ fn stream_to_page(
             #[cfg(target_os = "macos")]
             tree,
         } = streamed;
+        let taken = Cell::new(0);
+        let fed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(journal) = &journal {
+                forward_journaled_in(&stream, journal, &output, &taken, |bytes, journal| {
+                    took_in_journaled(&screen, &printed, journal, bytes);
+                });
+            } else {
+                forward_output(
+                    &stream,
+                    |bytes| took_in(&screen, &printed, bytes),
+                    |message| output.publish(message.into()),
+                );
+            }
+        }));
+        if fed.is_err() {
+            // The feed panicked: the screen is partly written, and no input is admitted
+            // against it (`OutputCount::break_feed`). The window's program is ended and the
+            // output let go, so the pane ends as one whose program ended does: its exit is
+            // told below, with the screen it left.
+            printed.counts().break_feed();
+            if let Some(journal) = &journal {
+                hand_on_the_rest(&key, journal, &output, taken.get());
+            }
+            say(&format!(
+                "the feed of window {}#{} panicked; its program is ended",
+                key.id, key.generation
+            ));
+            let _ = panes.kill(&key);
+            while stream.recv().is_ok() {}
+        }
         if let Some(journal) = journal {
-            forward_journaled(&stream, &journal, &output, |bytes| {
-                took_in(&screen, &printed, bytes);
-            });
             journal.finish();
             panes.keep_ended_journal(key.clone(), journal);
         } else {
-            forward_output(
-                &stream,
-                |bytes| took_in(&screen, &printed, bytes),
-                |message| output.publish(message.into()),
-            );
+            output.forget(&key);
         }
         let status = panes.wait_ended(&key, &ended, ENDED_WAIT);
         // What the program left running goes with the exit, before the close
@@ -745,11 +923,55 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
-    let refused = |cause| InputError::refused(INVALID_BODY, cause);
-    let request: PasteRequest = parse_body(body).map_err(refused)?;
-    let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body, request.read_empty))
+/// A `pane.write_paste` request, read.
+struct PasteWanted {
+    key: PaneKey,
+    body: String,
+    at: Option<At>,
+    read_empty: Option<ReadEmpty>,
+    clear_first: Option<String>,
+}
+
+fn paste_request(body: Value) -> Result<PasteWanted, InputError> {
+    let refused = |cause: &str| InputError::refused(INVALID_BODY, cause.to_string());
+    let request: PasteRequest = parse_body(body).map_err(|cause| refused(&cause))?;
+    let key = pane_key(&request.id, request.generation).map_err(|cause| refused(&cause))?;
+    let at = match (request.at, request.typed) {
+        (None, None) => None,
+        (Some(seen), Some(typed)) => Some(At {
+            seen: Seen::parse(&seen).ok_or_else(|| refused("at is not a seen"))?,
+            typed,
+        }),
+        _ => return Err(refused("at and typed come together")),
+    };
+    // The look's count of keys, at which its reader read the box empty over their unsent text:
+    // with a look it must be the look's own.
+    if let (Some(at), Some(read_empty)) = (&at, request.read_empty) {
+        if at.typed != read_empty.typed {
+            return Err(refused("readEmpty is not the look's typed"));
+        }
+    }
+    Ok(PasteWanted {
+        key,
+        body: request.body,
+        at,
+        read_empty: request.read_empty,
+        clear_first: request.clear_first,
+    })
+}
+
+fn enter_request(body: Value) -> Result<(PaneKey, At), InputError> {
+    let refused = |cause: &str| InputError::refused(INVALID_BODY, cause.to_string());
+    let request: EnterRequest = parse_body(body).map_err(|cause| refused(&cause))?;
+    let key = pane_key(&request.id, request.generation).map_err(|cause| refused(&cause))?;
+    let seen = Seen::parse(&request.at).ok_or_else(|| refused("at is not a seen"))?;
+    Ok((
+        key,
+        At {
+            seen,
+            typed: request.typed,
+        },
+    ))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -773,6 +995,11 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_tests;
+
+#[cfg(test)]
+mod feeding_tests;
+#[cfg(all(test, unix))]
+mod native_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1082,6 +1309,8 @@ mod tests {
         let mut reads: Vec<&[u8]> = vec![b"echo"];
         reads.extend((0..8).map(|_| heavy.as_slice()));
         for (seq, bytes) in reads.iter().enumerate() {
+            // As the pty's reader counts what it takes, before the read waits in the queue.
+            printed.counts().took(bytes.len());
             sender
                 .send(PaneOutput {
                     key: key.clone(),
@@ -1167,8 +1396,8 @@ mod tests {
             let started = cpu();
             if journaled {
                 let journal = Journal::new((400, 1000));
-                forward_journaled(&stream, &journal, &hub, |bytes| {
-                    took_in(&screen, &printed, bytes);
+                forward_journaled_in(&stream, &journal, &hub, &Cell::new(0), |bytes, journal| {
+                    took_in_journaled(&screen, &printed, journal, bytes);
                 });
             } else {
                 forward_output(
@@ -1404,7 +1633,7 @@ mod tests {
             Arc::clone(&panes),
             clock,
             inputs,
-            output,
+            Arc::clone(&output),
         );
 
         let mut reader = BufReader::new(peer);
@@ -1416,6 +1645,12 @@ mod tests {
                 break;
             }
         }
+        // T-2269: a window with no journal leaves nothing of what it was handed behind it.
+        assert_eq!(
+            output.handed_windows(),
+            0,
+            "the hub forgot the ended window"
+        );
         let messages: Vec<_> = received.try_iter().collect();
         let mut bytes = Vec::new();
         let mut sequences = Vec::new();
@@ -1580,6 +1815,7 @@ mod tests {
     #[test]
     fn a_snapshot_says_the_humans_last_writes_by_age_length_and_kinds() {
         let snapshot = ArbiterSnapshot {
+            unsent_at: None,
             generation: 1,
             paste_in_flight: false,
             input_failed: false,
@@ -1587,6 +1823,9 @@ mod tests {
             typed: 2,
             typed_quiet_ms: Some(40),
             output_quiet_ms: None,
+            output_read: 0,
+            output_drawn: 0,
+            output_caught_up: true,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: vec![

@@ -273,9 +273,8 @@ fn an_answer_already_in_the_chiefs_input_box_may_be_sent_after_the_task_resumes(
         .expect("the answer to the tell");
     assert_eq!(context.message(answer.id).state, "delivering");
     context
-        .adapter
-        .input_box
-        .set(Some(cf_harness::contract::InputBox::Holds));
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     let before = crate::deliveries::enters(&context);
     crate::withheld_enter::enter_again_with(&context, "p1-chief", || {
         context.resume_task(project, 1, "Go on");

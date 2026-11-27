@@ -18,7 +18,7 @@ use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher"];
 
-/// The Enters pressed into windows (`pane.input` with the byte 13).
+/// The Enters pressed into windows (`pane.enter`, or a `pane.input` with the byte 13).
 pub(crate) fn enters(context: &Context) -> usize {
     context
         .host
@@ -162,7 +162,7 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
         delivery_text(&note, &[], &CfWord::bare()),
     );
     *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, body: &Value| {
-        let enter = op == "pane.input" && body["bytes"][0] == 13;
+        let enter = op == "pane.enter" || (op == "pane.input" && body["bytes"][0] == 13);
         if let (true, Some(adapter)) = (enter, adapter.upgrade()) {
             let item = adapter.item(Role::User, &header);
             adapter.with("chief", |agent| agent.items.push(item));
@@ -178,6 +178,30 @@ fn presses_enter_once_more_for_a_paste_its_window_has_not_sent_into_a_quiet_wind
         SUITES,
         "presses Enter once more for a paste its window has not sent, into a quiet window only",
     );
+}
+
+/// N17 (T-2139): the Enter pressed once more is no more an Enter that goes while the window's
+/// output is not all in its screen (the pane host's `outputRead` over `outputDrawn`): the
+/// screen's quiet is the quiet of a screen that lacks bytes the window has printed.
+#[test]
+fn presses_no_enter_once_more_while_the_windows_output_is_not_all_drawn() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    context.note(project.id, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.advance(11_000);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 5_000, "screenQuietMs": 5_000, "outputRead": 259, "outputDrawn": 258
+    }));
+    context.pass().unwrap();
+    assert_eq!(enters(&context), 0, "259 bytes read, 258 drawn");
+    context.advance(2_000);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 5_000, "screenQuietMs": 5_000, "outputRead": 259, "outputDrawn": 259
+    }));
+    context.pass().unwrap();
+    assert_eq!(enters(&context), 1, "pressed once the screen has them all");
 }
 
 #[test]

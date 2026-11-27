@@ -98,7 +98,7 @@ runs = ["pane-input-whole"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, bytes),'''
+find = '''            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),'''
 replace = '''            InputWork::Typed(bytes) => {
                 let cut = bytes.len().min(32 * 1024);
                 arbiter

@@ -66,6 +66,8 @@ pub struct AppRuntime {
 impl AppRuntime {
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
+        // Each window keeps a journal of its output and sizes, which a reloaded page replays.
+        panes.keep_journals();
         let output = Arc::new(OutputHub::new());
         let arbiter = Arc::new(InputArbiter::new(ENTER));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));

@@ -13,7 +13,7 @@
 # escape-unsent` runs them all.
 
 [run]
-escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "arbiter::tests::a_paste_read_empty"]
+escape-unsent-arbiter = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::a_paste_read_empty", "arbiter::tests::a_paste_over_the_count"]
 escape-unsent-screen = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "screen::tests::the_bottom"]
 escape-unsent-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "input_box"]
 escape-unsent-adapters = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "input_box"]
@@ -27,27 +27,20 @@ escape-unsent-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "re
 
 [[plant]]
 name = "escape-unsent: the host holds every paste while the count is up, read empty or not"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
+meant = "a_paste_read_empty_at_the_looks_key_goes_in_over_the_count_and_clears_it"
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = "                if read_empty != Some(state.typed) {"
-replace = "                if true {"
-
-[[plant]]
-name = "escape-unsent: the host takes a paste read empty at any count, a key since or not"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
-runs = ["escape-unsent-arbiter"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = "                if read_empty != Some(state.typed) {"
-replace = "                if read_empty.is_none() {"
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        false
+            && typed == self.typed
+            && match by {"""
 
 [[plant]]
 name = "escape-unsent: Escape clears the count, though the box may keep the words"
-meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it"
+meant = "a_paste_over_the_count_names_evidence_the_host_holds_or_is_held"
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
@@ -117,12 +110,9 @@ meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_
 runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                    Unsent::ReadEmpty(typed) => {
-                        self.read_empty.set(Some(typed));
-                        Readiness::Ready
-                    }'''
-replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        let Some(evidence) = look.evidence(harness) else {"""
+replace = """        let Some(evidence) = None::<Evidence> else {"""
 
 [[plant]]
 name = "escape-unsent: Claude's paste says nothing of the box it read empty"
@@ -130,61 +120,11 @@ meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_
 runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            let read_empty = self.read_empty.take();"
-replace = "            let read_empty = self.read_empty.take().filter(|_| false);"
-
-[[plant]]
-name = "escape-unsent: Devin's window is held by the count, its box read empty or not"
-meant = "a_window_whose_input_box_shows_its_hint_takes_the_paste_over_keys_left_in_its_picker"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                    Unsent::ReadEmpty(typed) => self.read_empty.set(Some(typed)),"
-replace = "                    Unsent::ReadEmpty(_) => return Ok(Readiness::Held(Held::Unsent)),"
-
-[[plant]]
-name = "escape-unsent: a key typed a moment before the look is taken as drawn"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = "        typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"
-replace = "        typed >= 0 && (drawn || typed >= UNDRAWN_MS)"
-
-[[plant]]
-name = "escape-unsent: a host that says no typed is told the box read empty, and refuses the paste"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = "    if counted.get(\"typed\").and_then(Value::as_u64).is_none() {"
-replace = "    if counted.get(\"typed\").is_some_and(|_| false) {"
-
-# --- round 2 (T-330, from Calliope's review in T-329) ---
-
-[[plant]]
-name = "escape-unsent: a key the window has printed nothing since reads as drawn, as round 1 had it"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = "        typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"
-replace = "        typed >= SETTLED_MS"
-
-[[plant]]
-name = "escape-unsent: a key the window draws nothing for holds the box for good"
-meant = "a_window_whose_input_box_reads_empty_takes_the_paste_over_keys_left_in_a_dialog"
-runs = ["escape-unsent-adapters"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = "        typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"
-replace = "        typed >= SETTLED_MS && drawn"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        read_empty,
+        clear_first,"""
+replace = """        read_empty: None,
+        clear_first,"""
 
 [[plant]]
 name = "escape-unsent: Claude's reader takes no word of the cursor, and its suggestion holds"
@@ -255,10 +195,10 @@ runs = ["escape-unsent-paste"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/pane.rs"
-find = "    if !host.admits() {\n        return not_admitted();"
-replace = "    if read_empty.is_none() && !host.admits() {\n        return not_admitted();"
-
-# --- the board ---
+find = '''    if !host.admits() {
+        return not_admitted();'''
+replace = '''    if read_empty.is_some() && !host.admits() {
+        return not_admitted();'''
 
 [[plant]]
 name = "escape-unsent: a lane out of quota hides that a message waits for what the human typed"
@@ -271,17 +211,6 @@ find = "    return ['out', lane.holding ? `${covered}. ${holding}` : covered]"
 replace = "    return ['out', covered]"
 
 # --- end to end, on the rig ---
-
-[[plant]]
-name = "escape-unsent rig: a key the chief's window has not drawn yet reads as drawn, and the result goes behind it"
-meant = "a_key_the_chiefs_window_has_not_drawn_yet_holds_the_result_until_it_is_drawn"
-runs = ["escape-unsent-rig"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/input_box.rs"
-find = "        typed >= SETTLED_MS && (drawn || typed >= UNDRAWN_MS)"
-replace = "        typed >= SETTLED_MS"
 
 [[plant]]
 name = "escape-unsent rig: Claude's suggestion holds the chief's result, the cursor at the box's start"
@@ -302,9 +231,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pane_handlers.rs"
-find = '                answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {'
-replace = '                answer["cursor"] = drawn.cursor.filter(|_| false).map_or(Value::Null, |cursor| {'
-
+find = """        answer["cursor"] = cursor_answer(&drawn);"""
+replace = """        answer["cursor"] = Value::Null;"""
 
 [[plant]]
 name = "escape-unsent rig: the chief's window is held by the count, its box empty, and is never handed its worker's result"
@@ -313,36 +241,7 @@ runs = ["escape-unsent-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                    Unsent::ReadEmpty(typed) => {
-                        self.read_empty.set(Some(typed));
-                        Readiness::Ready
-                    }'''
-replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        let Some(evidence) = look.evidence(harness) else {"""
+replace = """        let Some(evidence) = None::<Evidence> else {"""
 
-[[plant]]
-name = "escape-unsent rig: the pane host sends no screen as drawn, and the chief's result is held"
-meant = "keys_typed_into_a_picker_and_left_with_escape_hold_no_result_from_a_chief_whose_box_is_empty"
-runs = ["escape-unsent-rig"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = "        if let Some(lines) = request.bottom {"
-replace = "        if let Some(lines) = request.bottom.filter(|_| false) {"
-
-[[plant]]
-name = "escape-unsent rig: Escape clears the count, and the result is pasted into the words left in the box"
-meant = "words_left_in_the_box_at_escape_hold_the_result_until_the_human_clears_them"
-runs = ["escape-unsent-rig"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter/keys.rs"
-find = '''            0x1b => {
-                classes.with("escape");
-                at += match rest.get(1) {'''
-replace = '''            0x1b => {
-                classes.with("escape");
-                unsent = 0;
-                at += match rest.get(1) {'''

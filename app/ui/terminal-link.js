@@ -6,12 +6,45 @@ const MAX_PASTE_BYTES = 4 * 1024 * 1024
 const ADMISSION_TIMEOUT_MS = 1500
 const WAIT_TIMEOUT_MS = 30_000
 const INPUT_RETRY_MS = 100
+/** How long a failed acknowledgement or pull waits before it is tried again: then each second. */
+const RETRY_MS = [250, 500]
+const retryDelay = (failures) => RETRY_MS[failures] ?? 1000
 const RESTART_INPUT_ADVICE =
   'Check whether your last typing appeared, then restart the project before typing again.'
 const RECONNECTING =
   'ConsensFlow is reconnecting its terminals: what you type is not sent yet. Wait a moment, then type it again.'
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * The pane host's answer to `pane_history`: four bytes (little endian) for the length of a header
+ * of JSON, the header, the seed's bytes (`seedLength`), then the journal's. A refusal is a header
+ * alone. Undefined for an answer that is not such a frame (an app that keeps no journals).
+ */
+export function historyFrame(answer) {
+  const bytes =
+    answer instanceof ArrayBuffer
+      ? new Uint8Array(answer)
+      : ArrayBuffer.isView(answer)
+        ? new Uint8Array(answer.buffer, answer.byteOffset, answer.byteLength)
+        : Array.isArray(answer) && answer.every((byte) => Number.isInteger(byte))
+          ? Uint8Array.from(answer)
+          : null
+  if (bytes === null || bytes.length < 4) return undefined
+  const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true)
+  if (4 + length > bytes.length) return undefined
+  let header
+  try {
+    header = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + length)))
+  } catch {
+    return undefined
+  }
+  if (header === null || typeof header !== 'object') return undefined
+  const seedEnd = 4 + length + (header.seedLength ?? 0)
+  return { ...header, seed: bytes.subarray(4 + length, seedEnd), bytes: bytes.subarray(seedEnd) }
+}
+
+// Find escape sequences before choosing byte cuts, including OSC/DCS strings.
+// A cut may be at either end of a sequence, never inside it.
 /** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
 function base64Of(bytes) {
   let binary = ''
@@ -50,6 +83,18 @@ function inputBytes(data) {
  * A page throttled behind a hidden window or a locked screen gets a turn a
  * second or so, and one message a turn, each waiting on the acknowledgement of
  * the one before, held an agent that printed faster to the page's pace (T-454).
+ *
+ * A window's emulator starts with the window's history (P5-C): the page pulls the pane host's
+ * journal of what the window printed and its sizes, writes it with the emulator muted (it asks
+ * the program nothing and takes no typing), and then takes the live messages from the boundary
+ * the host fixed for this page, each exactly once, in the order of their offsets. What the
+ * window printed before the journal begins is not shown, and the card says so.
+ *
+ * No history is pulled before the page's subscription stands (the boundary is the
+ * subscription's). Windows the person sees are drawn again first; the others, one at a time,
+ * once the page has read its board and none of the shown ones is being drawn. A window is muted
+ * from its making: one that waits its turn takes no key and tells nobody of a size, and what it
+ * is sent waits, unacknowledged, for it.
  */
 export class TerminalLink {
   #invoke
@@ -69,6 +114,15 @@ export class TerminalLink {
   #notices
   #onGate
   #pageId
+  /** By pane: where its emulator stands in the window's output (`#begin`). */
+  #windows = new Map()
+  #onTruncated
+  /** Whether the pane `id:generation` is one the person sees now. */
+  #shown
+  /** The page's output subscription stands: a history may be pulled. */
+  #subscribed = false
+  /** The page has read its board since the subscription: the windows not shown may begin. */
+  #refreshed = false
   /**
    * The host's epoch for this document, once its activation was answered; null until then.
    * Until then the terminals are read-only: nothing typed, pasted, dropped or answered is
@@ -84,6 +138,8 @@ export class TerminalLink {
     registry,
     report,
     pageId = crypto.randomUUID(),
+    onTruncated = () => {},
+    shown = () => true,
     notices = { draw: () => {} },
     onGate = () => {},
   }) {
@@ -91,6 +147,8 @@ export class TerminalLink {
     this.#registry = registry
     this.#report = report
     this.#pageId = pageId
+    this.#onTruncated = onTruncated
+    this.#shown = shown
     this.#notices = notices
     this.#onGate = onGate
     this.#onGate(false)
@@ -111,6 +169,206 @@ export class TerminalLink {
     return this.#epoch !== null
   }
 
+  /** The page's subscription to the output has answered: the shown windows are drawn again now. */
+  subscribed() {
+    this.#subscribed = true
+    this.schedule()
+  }
+
+  /** The page has read its board since its subscription: a window not shown may now begin. */
+  refreshed() {
+    this.#refreshed = true
+    this.schedule()
+  }
+
+  /** Whether the page's subscription stands. */
+  get isSubscribed() {
+    return this.#subscribed
+  }
+
+  /**
+   * Begin the replays that may begin now: every window the person sees, at once; then, once the
+   * board has been read, one of the others, where none is being drawn (one that waits to try a
+   * pull again holds nobody back). Called whenever any of that may have changed.
+   */
+  schedule() {
+    if (!this.#subscribed) return
+    for (const window of this.#windows.values()) {
+      if (!window.started && this.#shown(window.pane)) this.#start(window)
+    }
+    if (!this.#refreshed) return
+    const drawing = [...this.#windows.values()].some(
+      (window) => window.started && window.replaying && !window.retrying,
+    )
+    if (drawing) return
+    const next = [...this.#windows.values()].find((window) => !window.started)
+    if (next !== undefined) this.#start(next)
+  }
+
+  #start(window) {
+    window.started = true
+    void this.#replay(window)
+  }
+
+  /**
+   * A pane's emulator is made: it is muted from now, it gets the window's history before
+   * anything live, and the messages that come meanwhile wait. Once for a pane.
+   */
+  begin(pane, emulator = this.#registry.get(pane)) {
+    const key = paneKey(pane)
+    if (this.#windows.has(key) || this.#retired.has(key)) return
+    if (emulator === null) return
+    const window = {
+      key,
+      pane: { id: pane.id, generation: pane.generation },
+      emulator,
+      /** Until the history is in, live messages wait. */
+      replaying: true,
+      /** Whether its replay has begun, and whether it waits to try a pull again. */
+      started: false,
+      retrying: false,
+      /** The last message the page was sent for it: what a window let go of is settled up to. */
+      last: null,
+      /** The offset of the next byte the emulator is handed; null until the history or the first message says. */
+      next: null,
+      /** The offset the emulator has parsed, not counting a character it holds back. */
+      parsed: null,
+      /** The live messages that wait, in the order they came. */
+      inbox: [],
+      boundary: null,
+      truncated: false,
+    }
+    this.#windows.set(key, window)
+    emulator.mute?.(true)
+  }
+
+  /** Pull the window's pieces, write them muted, and go live from the boundary. */
+  async #replay(window) {
+    const { emulator } = window
+    let complete = false
+    try {
+      complete = await this.#rebuild(window)
+    } catch (cause) {
+      this.#report(cause)
+    }
+    // Let go of meanwhile: it is settled, and its emulator is gone.
+    if (this.#retired.has(window.key)) return
+    // Whatever happened, the window is not left muted and held: it goes on live.
+    window.replaying = false
+    emulator.mute?.(false)
+    // Asked only with the whole of its history taken, and the offset it took: the host keeps an
+    // ended window's journal unless that is its end.
+    if (complete) void this.#historyDone(window, window.next)
+    this.#pump(window)
+    this.schedule()
+  }
+
+  /** Whether the whole history was written. */
+  async #rebuild(window) {
+    const { emulator } = window
+    let from = null
+    for (;;) {
+      const piece = await this.#pull(window, from)
+      if (piece === null) return false
+      window.boundary = piece.boundary
+      try {
+        await this.#apply(window, piece)
+      } catch (cause) {
+        // xterm itself failed on the bytes (it stops drawing, as it does live), or the history
+        // starts past the boundary: the window starts clean, goes live from the boundary and says
+        // its history is cut. A failure does not stay across reloads. The host is told nothing of
+        // the history.
+        if (this.#retired.has(window.key)) return false
+        const { cols, rows } = emulator.size?.() ?? { cols: undefined, rows: undefined }
+        emulator.restart?.(cols, rows)
+        emulator.mute?.(true)
+        window.next = window.boundary
+        window.parsed = window.boundary
+        this.#truncated(window)
+        return false
+      }
+      if (this.#retired.has(window.key)) return false
+      if (piece.done) return true
+      from = window.next
+    }
+  }
+
+  /** Write one piece: the emulator starts clean where the piece says, takes its sizes at their offsets. */
+  async #apply(window, piece) {
+    const { emulator } = window
+    // A history that starts past the boundary leaves the live bytes between them with no owner:
+    // the host never gives one, and none of it is taken (the window goes on as after a failure).
+    if (piece.reset && piece.from > piece.boundary)
+      throw new Error(`history from ${piece.from} starts past the boundary ${piece.boundary}`)
+    if (piece.reset) {
+      emulator.restart?.(piece.size.cols, piece.size.rows)
+      emulator.mute?.(true)
+      window.next = piece.from
+      window.parsed = piece.from
+      if (piece.seed.length > 0) await emulator.write(piece.seed)
+      if (piece.truncated) this.#truncated(window)
+    } else if (window.next !== piece.from) {
+      // The host never gives a continuation that does not follow: start again from what it holds.
+      throw new Error(`a piece of history from ${piece.from}, the window is at ${window.next}`)
+    }
+    let at = 0
+    const bytes = piece.bytes
+    for (const size of piece.resizes ?? []) {
+      const upto = Math.min(Math.max(size.at - piece.from, at), bytes.length)
+      if (upto > at) await emulator.write(bytes.subarray(at, upto))
+      at = upto
+      emulator.resizeTo?.(size.cols, size.rows)
+    }
+    if (at < bytes.length) await emulator.write(bytes.subarray(at))
+    window.next = piece.from + bytes.length
+    window.parsed = window.next - (emulator.held ?? 0)
+  }
+
+  #truncated(window) {
+    if (window.truncated) return
+    window.truncated = true
+    this.#onTruncated(window.pane)
+  }
+
+  /**
+   * One piece of the window's history from `from`. A call that fails and a refusal (the page's
+   * subscription does not stand yet, `pane-not-subscribed`, among them) are tried again, 250 ms
+   * then 500 ms then each second, from the same offset. Null where there is none to be had: this
+   * page is no longer the current one (another has taken over, so it pulls nothing more), the
+   * host keeps no journal of the window, the app keeps none at all, or the window was let go of.
+   */
+  async #pull(window, from) {
+    for (let failures = 0; ; failures += 1) {
+      if (this.#retired.has(window.key)) return null
+      try {
+        const answer = await this.#invoke('pane_history', {
+          pageId: this.#pageId,
+          ...window.pane,
+          from,
+        })
+        // What was on its way to a window let go of is dropped.
+        if (this.#retired.has(window.key)) return null
+        const frame = historyFrame(answer)
+        if (frame === undefined) return null
+        if (frame.ok === true) return frame
+        if (frame.error === 'pane-input-stale-page' || frame.error === 'pane-not-found') return null
+      } catch (cause) {
+        if (failures === 0) this.#report(cause)
+      }
+      window.retrying = true
+      this.schedule()
+      await pause(retryDelay(failures))
+      window.retrying = false
+    }
+  }
+
+  /** The whole history is in, up to `consumed`: an ended window's journal is let go, once. */
+  async #historyDone(window, consumed) {
+    try {
+      await this.#invoke('pane_history_done', { pageId: this.#pageId, ...window.pane, consumed })
+    } catch {}
+  }
+
   /** One message from `subscribe_output`: bytes for one pane, in order. */
   output(message, emulatorFor) {
     if (message === null || typeof message !== 'object') return
@@ -120,10 +378,52 @@ export class TerminalLink {
     if (this.#retired.has(key)) return this.#drawn(key, message)
     const emulator = emulatorFor(message)
     if (emulator === null) return
-    emulator
-      .write(new Uint8Array(message.bytes ?? []))
-      .then(() => this.#drawn(key, message))
-      .catch((cause) => this.#report(cause))
+    if (!this.#windows.has(key)) this.begin(message, emulator)
+    const window = this.#windows.get(key)
+    if (window === undefined) return
+    window.last = { id: message.id, generation: message.generation, seq: message.seq }
+    window.inbox.push(message)
+    this.#pump(window)
+    this.schedule()
+  }
+
+  /**
+   * The live messages a window holds, written once its history is in: each at the emulator's
+   * next offset. One that ends at or before it is already drawn (the offset is past the boundary
+   * only by bytes the emulator has taken): dropped, and acknowledged. One that straddles it is
+   * written from it. Where the host sent no offsets (no journal) the messages are written as they
+   * come.
+   */
+  #pump(window) {
+    if (window.replaying || this.#retired.has(window.key)) return
+    const { emulator } = window
+    while (window.inbox.length > 0) {
+      const message = window.inbox.shift()
+      let bytes = new Uint8Array(message.bytes ?? [])
+      const offset = message.offset
+      let end
+      if (offset !== undefined) {
+        window.next ??= offset
+        end = offset + bytes.length
+        if (end <= window.next) {
+          this.#drawn(window.key, message)
+          continue
+        }
+        // One that starts past the emulator's offset is not promised: it is written whole.
+        if (offset > window.next) window.next = offset
+        bytes = bytes.subarray(window.next - offset)
+        window.next = end
+        window.parsed ??= offset
+      }
+      const wrote = emulator.write(bytes)
+      const held = emulator.held ?? 0
+      wrote
+        .then(() => {
+          if (end !== undefined) window.parsed = Math.max(window.parsed ?? 0, end - held)
+          this.#drawn(window.key, message)
+        })
+        .catch((cause) => this.#report(cause))
+    }
   }
 
   /**
@@ -131,22 +431,41 @@ export class TerminalLink {
    * a time, each for the last drawn when it goes.
    */
   #drawn(key, { id, generation, seq }) {
-    const ack = this.#acks.get(key) ?? { id, generation, drawn: 0, sent: 0, sending: false }
+    const ack = this.#acks.get(key) ?? { key, id, generation, drawn: 0, sent: 0, sending: false }
     this.#acks.set(key, ack)
     ack.drawn = Math.max(ack.drawn, seq)
     if (!ack.sending) void this.#acknowledge(ack)
   }
 
+  /**
+   * An acknowledgement that fails, or is answered `ok: false` for a window still open, is tried
+   * again, after 250 ms, 500 ms, then each second, until it is taken or the window is gone; the
+   * host stops a window at its room until it is.
+   */
   async #acknowledge(ack) {
     ack.sending = true
+    let failures = 0
     try {
       while (ack.sent < ack.drawn) {
         const seq = ack.drawn
-        await this.#invoke('pane_ack', { id: ack.id, generation: ack.generation, seq })
-        ack.sent = seq
+        try {
+          const answer = await this.#invoke('pane_ack', {
+            id: ack.id,
+            generation: ack.generation,
+            seq,
+          })
+          if (answer?.ok !== false) {
+            ack.sent = seq
+            failures = 0
+            continue
+          }
+          if (answer.gone === true) return
+        } catch (cause) {
+          if (failures === 0) this.#report(cause)
+        }
+        await pause(retryDelay(failures))
+        failures += 1
       }
-    } catch (cause) {
-      this.#report(cause)
     } finally {
       ack.sending = false
     }
@@ -331,20 +650,42 @@ export class TerminalLink {
   resize(pane, cols, rows) {
     const key = paneKey(pane)
     if (this.#retired.has(key)) return
+    const window = this.#windows.get(key)
+    // The history is being written, with the sizes the journal holds: none is the page's to say.
+    if (window?.replaying) return
     const size = this.#sizes.get(key) ?? { running: false, applied: null }
     size.desired = `${cols}x${rows}`
-    size.request = { id: pane.id, generation: pane.generation, cols, rows }
+    // `at`: the bytes of the window's output the emulator has parsed, where it took this size.
+    size.request = {
+      pageId: this.#pageId,
+      id: pane.id,
+      generation: pane.generation,
+      cols,
+      rows,
+      ...(window?.parsed == null ? {} : { at: window.parsed }),
+    }
     this.#sizes.set(key, size)
     void this.#syncSize(key)
   }
 
-  /** A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes for it. */
+  /**
+   * A pane that is gone: its output acknowledged and drawn nowhere, and no more input or resizes
+   * for it. Every message the page was sent is settled now, drawn or not (the host cannot know
+   * which delivered bytes a page will never draw), and each later one as it comes. It tells the
+   * host nothing of the history: an ended window let go of keeps its journal.
+   */
   retire(key) {
+    const window = this.#windows.get(key)
+    if (window !== undefined) {
+      this.#windows.delete(key)
+      if (window.last !== null) this.#drawn(key, window.last)
+    }
     this.#retired.add(key)
     this.#issued.delete(key)
     this.#sizes.delete(key)
     this.#failedInputs.delete(key)
     this.#registry.retire(key)
+    this.schedule()
   }
 
   /** Whether a pane is gone for good: it gets no emulator again. */

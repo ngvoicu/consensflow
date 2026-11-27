@@ -36,12 +36,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::js;
-use cf_harness::contract::{InputBox, Observed};
+use cf_harness::contract::{Input, Observed, Readiness};
 use cf_harness::records::Reading;
 use cf_proto::ledger::MessageView;
 use cf_proto::panes::{HumanInput, SCREEN_QUIET_MS};
 use serde_json::{json, Value};
 
+use crate::box_keys::no_look_wait;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::returning;
@@ -91,7 +92,7 @@ pub(crate) struct Frontier {
 }
 
 impl Frontier {
-    fn of(observed: &Observed) -> Self {
+    pub(crate) fn of(observed: &Observed) -> Self {
         let items = observed.items();
         Self {
             last: items
@@ -153,6 +154,7 @@ fn read(observed: &Observed) -> bool {
 }
 
 /// Why a message waits for a window whose harness's live word is that it is at work.
+/// Why a message waits while the window's screen lacks bytes the window printed.
 const AT_WORK: &str = "its harness says it is at work";
 
 /// Why a message waits for a window whose record could not be read: nothing is typed
@@ -444,6 +446,41 @@ impl Dispatcher {
             .any(|waiting| waiting.urgent && waiting.state == "queued"))
     }
 
+    /// The last look before a launch's first message is handed to its window: the one every
+    /// other delivery takes ([`Dispatcher::still_at_rest`]), with the rest the look that let it
+    /// go read (`frontier`). The window must still read settled, not waiting on a question, not
+    /// at work by its harness's word, on the same last item. Its record need not be there: a new
+    /// window has none, and its first look asked none.
+    /// Where it does not, nothing is handed over, the message stays owed, and the wait says why.
+    /// A first message keeps `settled` and not `takes_words`, as its first look does (T-1985).
+    pub(crate) async fn first_still_at_rest(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        frontier: &Frontier,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(participant) = self.participant_of(record)? else {
+            return Ok(Some("its participant is gone".to_owned()));
+        };
+        let fresh = self.observe(&participant, record).await;
+        let at_work = record
+            .window
+            .borrow()
+            .window
+            .as_ref()
+            .is_some_and(|window| window.at_work());
+        Ok(match fresh {
+            Err(_) => Some("a look at it failed as its first message was to go".to_owned()),
+            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())
+            }
+            Ok(fresh) if Frontier::of(&fresh) != *frontier => {
+                Some("its record changed as its first message was to go".to_owned())
+            }
+            Ok(_) if at_work => Some(String::from(AT_WORK)),
+            Ok(_) => None,
+        })
+    }
+
     /// The fresh look just before `message`'s paste: the window must read at rest, from
     /// a record that was read, on the last item the look that let it go read, its harness
     /// must not say it is at work, and its input box, where its harness has one it reads,
@@ -467,25 +504,32 @@ impl Dispatcher {
             let part = record.window.borrow();
             (part.window.clone(), part.pane.clone())
         };
-        // A box that holds a paste whose Enter was withheld is emptied first, by the key
-        // the hand-over presses (`uncleared`): what it holds is no word against the paste
-        // (Calliope's review of `9aa34baf6`, P1: read as words, the key never came, and
-        // every message for the window waited for good).
-        let emptied_first = record
-            .delivery
-            .borrow()
-            .uncleared
-            .as_ref()
-            .is_some_and(|stale| pane.as_ref() == Some(&stale.pane));
-        // A box that holds words (ones the human's keys counted as sent, as Devin kept a
-        // line typed with its Enter in one burst) would send a paste behind them, in one
-        // message with them: it takes none.
-        let boxed = match (&window, pane) {
-            (Some(window), Some(pane)) if !emptied_first => {
-                returning(window.input_box(&*self.seams.host, &pane)).await
+        // A window that takes pastes is looked at once more as the message is to go: that look, and
+        // nothing else, licenses the paste (`box_keys`). Its input box where its harness reads one
+        // must hold no words, a paste whose Enter was withheld apart (which the paste empties
+        // first), and its screen must show all that the window printed: no look, no paste, and
+        // the wait says why.
+        let pasted = matches!(record.window.borrow().input, Input::Pasted { .. });
+        let looked = match (&pane, pasted) {
+            (Some(pane), true) => Some(self.look_recorded(pane).await),
+            _ => None,
+        };
+        // The adapter's readiness of that look, too: the look the paste carries is the one the
+        // window's own `ready_on` approved, not an earlier one it has passed since.
+        let box_wait = match (&looked, &window, &pane) {
+            (Some(Err(no_look)), _, _) => Some(no_look_wait(*no_look)),
+            (Some(Ok(look)), Some(window), Some(pane)) => {
+                match self.readiness_of_look(record, window, pane, look).await? {
+                    Readiness::Ready => None,
+                    Readiness::Held(held) => Some(held.sentence().to_owned()),
+                    Readiness::Unfit(why) => Some(why),
+                }
             }
             _ => None,
         };
+        if let Some(Ok(look)) = looked {
+            record.delivery.borrow_mut().looked = Some(look);
+        }
         if self.forgotten(record) {
             return Ok(Pace::Gone);
         }
@@ -500,8 +544,7 @@ impl Dispatcher {
                 Some("its record changed as the message was to go".to_owned())
             }
             Ok(_) if at_work => Some(AT_WORK.to_owned()),
-            Ok(_) if boxed == Some(InputBox::Holds) => Some("its input box holds words".to_owned()),
-            Ok(_) => None,
+            Ok(_) => box_wait,
         };
         let Some(why) = why else {
             return Ok(Pace::Go);

@@ -102,6 +102,29 @@ impl HumanInput {
     }
 }
 
+/// The evidence a box read empty sets the host's count of the person's keys aside on (N17):
+/// the screen the host kept at one of those keys, which the harness's reader read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Evidence {
+    /// At the first key the count cannot follow after their last character the box held text,
+    /// they typed no character since, and the box now reads empty.
+    Erased,
+    /// Every character the count holds came in one write, into a screen that showed a dialog
+    /// or a picker and not the box.
+    Elsewhere,
+}
+
+/// What a `pane.write_paste` that goes over the count says of why (`readEmpty`): the look's
+/// count of the person's keys and the evidence the look's reader read. The host admits it only
+/// where it holds that screen itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadEmpty {
+    pub typed: u64,
+    pub by: Evidence,
+}
+
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;

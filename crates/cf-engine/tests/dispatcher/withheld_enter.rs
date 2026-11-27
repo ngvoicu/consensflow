@@ -19,16 +19,16 @@ use serde_json::{json, Value};
 use crate::deliveries::enters;
 use crate::resume::at_work;
 
-/// Control-C, the key that clears Claude's input box.
-pub(crate) const CLEAR: u8 = 3;
-
-/// How many times Control-C was asked of the host, taken or not.
+/// How many deliveries went with the key that empties the window's input box first (Control-C),
+/// taken or not: a paste of ours left in the box is emptied by its own paste's write, not by a key
+/// the engine presses on its own.
 pub(crate) fn clears(context: &Context) -> usize {
     context
-        .host
-        .inputs()
+        .adapter
+        .clear_firsts
+        .borrow()
         .iter()
-        .filter(|body| body["bytes"] == json!([CLEAR]))
+        .filter(|cleared| **cleared)
         .count()
 }
 
@@ -93,6 +93,10 @@ pub(crate) fn note(context: &Context, project: i64, to: &str, body: &str) -> Mes
 pub(crate) fn enter_again_with(context: &Context, pane: &str, during: impl FnOnce()) {
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    // The paste is in the window's box, where its Enter was not pressed.
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     let pane: Value = json!(pane);
     let looking = context
         .host
@@ -140,39 +144,59 @@ fn a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_p
     assert_eq!(context.message(note.id).state, "cancelled");
     assert_eq!(context.message(words.id).state, "queued");
 
-    // The host takes no key: the words wait, and nothing is pasted beside the old ones.
-    context.host.refuse_keys.set(true);
+    // The host takes none of it (the key goes in the paste's own write): the words wait, and
+    // nothing is pasted beside the old ones.
+    let writing = Rc::new(Cell::new(false));
+    let taking = Rc::clone(&writing);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taken| {
+        let written = taking.get();
+        Box::pin(async move {
+            Ok(if written {
+                taken()
+            } else {
+                Admission::Refused {
+                    reason: "the host wrote nothing".to_owned(),
+                }
+            })
+        })
+    }));
     context.resume_task(project, 1, "Carry on again");
     for _ in 0..2 {
         context.pass().unwrap();
     }
-    assert!(clears(&context) >= 1, "the box is cleared first");
-    assert_eq!(
-        handed(&context, seam).len(),
-        before,
-        "nothing is pasted while the box may hold the paste"
+    assert!(
+        clears(&context) >= 1,
+        "the paste carries the key that clears the box"
+    );
+    assert_ne!(
+        context.message(words.id).state,
+        "delivered",
+        "nothing went in while the host wrote nothing"
     );
 
-    context.host.refuse_keys.set(false);
+    writing.set(true);
     context
         .adapter
         .with("zeus-amber-pine", |agent| agent.arrive = true);
     let asked = clears(&context);
     context.pass().unwrap();
-    assert_eq!(clears(&context), asked + 1, "pressed once more, and taken");
-    assert_eq!(
-        handed(&context, seam).len(),
-        before + 1,
-        "then the words go, once"
+    assert_eq!(clears(&context), asked + 1, "carried once more, and taken");
+    assert!(
+        handed(&context, seam).len() >= before + 2,
+        "the words were handed to the host more than once: refused, then written once"
     );
     assert_eq!(
-        context.adapter.cleared.borrow().last(),
+        context.adapter.clear_firsts.borrow().last(),
         Some(&true),
-        "told the box was just emptied, so Claude presses no Control-C of its own"
+        "the key that empties the box went with the paste, once"
     );
     let again = tiers.task(1).messages.last().cloned().expect("the words");
     context.pass().unwrap();
     assert_eq!(context.message(again.id).state, "delivered");
+    // What the paste's key emptied is gone from the box on the screen.
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Empty));
 
     // Emptied once, the box is not emptied again, though the record never shows
     // the words left there (they rode in the new ones): zeus asks, the chief
@@ -242,9 +266,9 @@ fn a_box_its_harness_reads_empty_is_pressed_no_key_and_the_words_go_into_it() {
         "the words go, once"
     );
     assert_eq!(
-        context.adapter.cleared.borrow().last(),
-        Some(&true),
-        "told the box is empty, so the window presses nothing of its own"
+        context.adapter.clear_firsts.borrow().last(),
+        Some(&false),
+        "a box the screen shows empty is given no key with the paste"
     );
 }
 
@@ -514,6 +538,9 @@ fn a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once()
     context.host.refuse_kills.set(false);
     context.advance(11_000);
     context.host.set_snapshot(json!({ "screenQuietMs": 5_000 }));
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Holds));
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "no key that sends, while closed");
     for _ in 0..4 {
@@ -537,6 +564,9 @@ fn a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once()
         "pasted again once, into a box emptied first"
     );
     assert_eq!(context.message(note.id).state, "delivered");
+    context
+        .host
+        .shows_box(Some(cf_harness::contract::InputBox::Empty));
 
     // Emptied once, the box is not emptied again: the next paste goes into it as
     // it is (a second Control-C in a row ends Claude Code).
@@ -706,4 +736,156 @@ fn a_window_held_for_the_human_whose_message_leaves_the_head_says_its_words_no_m
     let activity = context.dispatcher.activity(chief);
     assert_ne!(activity.reason.as_deref(), Some(WORDS), "{activity:?}");
     assert_ne!(activity.state.as_str(), "waiting", "{activity:?}");
+}
+
+/// A paste whose Enter was withheld sits in zeus's box, and T-1 is resumed with new words: the
+/// next delivery empties the box first.
+fn a_box_to_clear(context: &Context) -> (i64, i64) {
+    let tiers = at_work(context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    note(context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    enter_again_with(context, "p1-zeus-amber-pine", || {
+        context.pause_task(project, 1);
+    });
+    context.resume_task(project, 1, "Carry on again");
+    let words = tiers.task(1).messages.last().cloned().expect("the words");
+    (project, words.id)
+}
+
+const QUIET: &str = r#"{ "screenQuietMs": 5000, "outputRead": 5, "outputDrawn": 5 }"#;
+const BEHIND: &str =
+    r#"{ "screenQuietMs": 5000, "outputQuietMs": 0, "outputRead": 5, "outputDrawn": 4 }"#;
+
+/// What the host says of a window whose input box holds the paste whose Enter was withheld.
+fn snapshot_of(text: &str) -> Value {
+    let mut snapshot: Value = serde_json::from_str(text).unwrap();
+    let rule = "─".repeat(40);
+    snapshot["bottom"] = json!([rule, "❯ a message the human typed", rule]);
+    snapshot["cursor"] = json!({ "line": 1, "col": 2, "shown": true, "plainAfter": 26 });
+    snapshot
+}
+
+/// N17 (T-2150 note 2, `Dispatcher::may_press`): the key that clears a box goes into a window
+/// whose screen is current and still: with output read and not yet drawn, nothing is pressed.
+#[test]
+fn the_key_that_clears_a_box_waits_while_the_screen_lacks_bytes_the_window_printed() {
+    let context = Context::new();
+    let (_, words) = a_box_to_clear(&context);
+    context.host.set_snapshot(snapshot_of(BEHIND));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key while the screen is behind");
+    let begun = |context: &Context| {
+        context
+            .recorder
+            .events()
+            .into_iter()
+            .filter(|event| {
+                event["seam"] == "event"
+                    && event["event"]["kind"] == "delivery.begun"
+                    && event["event"]["data"]["message"] == json!(words)
+            })
+            .count()
+    };
+    assert_eq!(begun(&context), 0, "not begun: the look before it held it");
+    context.host.set_snapshot(snapshot_of(QUIET));
+    context.pass().unwrap();
+    assert!(
+        clears(&context) >= 1,
+        "pressed once the screen shows it all"
+    );
+    assert!(context.message(words).attempts <= 1);
+}
+
+/// N17 (T-2160 finding 2): a host that gave no look of the window presses nothing: no key that
+/// clears the box, no paste, no attempt spent. The words wait for a look, which reads the box.
+#[test]
+fn a_look_the_host_did_not_give_clears_no_box_and_pastes_nothing() {
+    let context = Context::new();
+    let (_, words) = a_box_to_clear(&context);
+    context.host.set_snapshot(snapshot_of(QUIET));
+    context.host.looks_fail.set(true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key into a box nobody looked at");
+    assert_eq!(context.message(words).attempts, 0, "no attempt is spent");
+    context.host.looks_fail.set(false);
+    context.pass().unwrap();
+    assert!(clears(&context) >= 1, "the key goes once there is a look");
+}
+
+/// N17 (T-2198 finding 2): a paste that went into the box its harness read empty used up the
+/// mark of the stale paste that was left there (the human erased it). The mark must not outlive
+/// the replacement: a later message into the same window, whose box holds words the host's count
+/// has not seen (a draft the arrow keys put back), is held for them, and is given no key that
+/// would clear them.
+#[test]
+fn a_paste_into_a_box_read_empty_retires_the_mark_of_the_stale_paste_it_replaced() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    note(&context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    let seam = "adapter:claude-code";
+    enter_again_with(&context, "p1-zeus-amber-pine", || {
+        context.pause_task(project, 1);
+    });
+    context.host.set_snapshot(json!({
+        "screenQuietMs": 5_000,
+        "bottom": ["────────────────────", "❯", "────────────────────"],
+    }));
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.arrive = true);
+    context.resume_task(project, 1, "Carry on again");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let resumed = tiers.task(1).messages.last().cloned().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(resumed.id).state, "delivered");
+    // The window's history put words back into the box, which the host's count of keys
+    // does not know of.
+    context.host.set_snapshot(json!({
+        "screenQuietMs": 6_000,
+        "typed": 4,
+        "typedQuietMs": 6_000,
+        "unsent": false,
+        "bottom": ["────────────────────", "❯ my unsent draft", "────────────────────"],
+    }));
+    let question = context.ask(project, "zeus-amber-pine", "chief", 1, "Format?");
+    let answer = context.answer(project, question.id, "JSON");
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(clears(&context), 0, "no key clears words that are not ours");
+    assert_eq!(
+        times_handed(&context, seam, answer.id),
+        0,
+        "the answer waits for the draft"
+    );
 }

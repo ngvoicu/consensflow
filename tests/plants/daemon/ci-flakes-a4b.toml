@@ -57,12 +57,15 @@ runs = ["a4b-blocked-write"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        let _active_write = ActiveWrite(active_writes);
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
-replace = '''        let _active_write = ActiveWrite(active_writes);
-        static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+find = """        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;"""
+replace = '''        static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _every_pane = EVERY_PANE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
 
 [[plant]]
 name = "ci flakes a4b: the API's close does not wait for a request in hand"

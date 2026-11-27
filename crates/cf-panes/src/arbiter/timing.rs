@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cf_proto::panes::SilentPaste;
@@ -47,16 +47,168 @@ pub struct OutputClock {
     /// Milliseconds after `started` of the last chunk that changed what the screen
     /// shows, plus one; 0 before any has.
     shown: AtomicU64,
+    /// How many bytes the window has printed, read and drawn: output is pending while more
+    /// was read than the screen shows.
+    counts: Arc<OutputCount>,
+}
+
+/// The bytes of a window's output, counted twice, each by a counter that only grows: `read`,
+/// advanced by the thread that reads the pty the moment the bytes are in hand, before any queue
+/// or lock; and `drawn`, advanced by whoever feeds the screen when each feed ends (N17, T-2125).
+/// Output is pending while more was read than drawn, and the window is quiet only once both are
+/// equal again.
+#[derive(Default)]
+pub struct OutputCount {
+    read: AtomicU64,
+    drawn: AtomicU64,
+    /// The feed panicked: the screen is partly written and the window's generation is over.
+    broken: AtomicBool,
+    /// The gate of the terminal's output ([`Intake`]).
+    intake: Mutex<Intake>,
+}
+
+impl std::fmt::Debug for OutputCount {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OutputCount")
+            .field("read", &self.read)
+            .field("drawn", &self.drawn)
+            .field("broken", &self.broken)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether the window's terminal holds bytes that have not been read.
+pub(crate) type Waiting = Box<dyn Fn() -> bool + Send>;
+
+/// The gate of a pane's terminal output (N17). It is held across one read that cannot wait, with
+/// its count ([`OutputCount::took`]), or across one question to the terminal with the counts
+/// loaded ([`OutputCount::sample`]): so while it is free, no byte is in hand and not counted. It
+/// is a leaf: nothing is taken under it, and it is never held across a wait.
+#[derive(Default)]
+pub(crate) struct Intake {
+    /// The question to the terminal, while a thread reads it. None for a pane with no output
+    /// stream (a test's own, a table that keeps none), which has no terminal anyone reads.
+    waiting: Option<Waiting>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a test does between the two loads of [`OutputCount::both`], once.
+    pub(crate) static BETWEEN_LOADS: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What a test does once the pair of [`OutputCount::both`] is formed, once.
+    pub(crate) static AFTER_LOADS: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+impl OutputCount {
+    /// `bytes` came off the pty.
+    pub(crate) fn took(&self, bytes: usize) {
+        crate::sync::point("took.before");
+        self.read.fetch_add(bytes as u64, Ordering::AcqRel);
+        crate::sync::point("took.after");
+    }
+
+    /// `bytes` are in the screen now.
+    pub(crate) fn drew(&self, bytes: usize) {
+        self.drawn.fetch_add(bytes as u64, Ordering::AcqRel);
+    }
+
+    /// `(read, drawn)`. The drawn count is loaded first and the read count after it, so that a
+    /// read a moment later is never missed: the pair may say pending where nothing is, never
+    /// the reverse.
+    pub(crate) fn both(&self) -> (u64, u64) {
+        let drawn = self.drawn.load(Ordering::Acquire);
+        crate::sync::point("both.drawn");
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (self.read.load(Ordering::Acquire), drawn);
+        #[cfg(test)]
+        if let Some(after) = AFTER_LOADS.with(|slot| slot.take()) {
+            after();
+        }
+        pair
+    }
+
+    /// The gate ([`Intake`]), for the reader to hold across a read that cannot wait.
+    pub(crate) fn intake(&self) -> MutexGuard<'_, Intake> {
+        crate::sync::lock(&self.intake).unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The window's terminal is read from now on: `waiting` asks it whether it holds bytes not
+    /// yet read.
+    pub(crate) fn watch(&self, waiting: Waiting) {
+        self.intake().waiting = Some(waiting);
+    }
+
+    /// Nothing reads the terminal any more: what it asks with is let go.
+    pub(crate) fn unwatch(&self) {
+        self.intake().waiting = None;
+    }
+
+    /// `(read, drawn, current)` of one moment, under the gate: **the window is current** when
+    /// nothing waits at its terminal, `read` equals `drawn`, and its feed is not broken. With
+    /// the screen's lock held too, what the screen shows is exactly the first `drawn` bytes the
+    /// window printed. It does not say what the program has not written to its terminal yet.
+    pub(crate) fn sample(&self) -> (u64, u64, bool) {
+        let intake = self.intake();
+        let waiting = intake.waiting.as_ref().is_some_and(|waiting| waiting());
+        crate::sync::point("current.asked");
+        let (read, drawn) = self.both();
+        let current = !waiting && read == drawn && !self.is_broken();
+        drop(intake);
+        (read, drawn, current)
+    }
+
+    /// Whether the window is current ([`OutputCount::sample`]).
+    pub(crate) fn current(&self) -> bool {
+        self.sample().2
+    }
+
+    /// Whether the screen lacks bytes the pty has given.
+    pub(crate) fn pending(&self) -> bool {
+        let (read, drawn) = self.both();
+        read > drawn || self.is_broken()
+    }
+
+    /// Nothing more will be drawn of what was read (the output's consumer is gone): the count
+    /// is settled where it stands, so that no wait is held on bytes that cannot arrive.
+    pub(crate) fn give_up(&self) {
+        let read = self.read.load(Ordering::Acquire);
+        self.drawn.fetch_max(read, Ordering::AcqRel);
+    }
+
+    /// The feed panicked.
+    pub(crate) fn break_feed(&self) {
+        self.broken.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_broken(&self) -> bool {
+        self.broken.load(Ordering::Acquire)
+    }
 }
 
 impl OutputClock {
-    pub(super) fn new(clock: Arc<dyn Clock>) -> Self {
+    pub(super) fn new(clock: Arc<dyn Clock>, counts: Arc<OutputCount>) -> Self {
         Self {
             started: clock.now(),
             clock,
             printed: AtomicU64::new(0),
             shown: AtomicU64::new(0),
+            counts,
         }
+    }
+
+    /// The window's byte counts.
+    pub(crate) fn counts(&self) -> &Arc<OutputCount> {
+        &self.counts
     }
 
     /// The pane printed `changed` now: whether it changed what its screen shows
@@ -78,6 +230,9 @@ impl OutputClock {
 
     /// How long the pane had printed nothing at `now`, once it has printed anything.
     pub(super) fn quiet_ms(&self, now: Instant) -> Option<u64> {
+        if self.counts.pending() {
+            return Some(0);
+        }
         self.since(&self.printed, now)
     }
 
@@ -118,7 +273,18 @@ impl EnterTiming {
     /// [`EnterTiming::wait`] on the wall clock, for a test of another module of this crate.
     #[cfg(test)]
     pub(crate) fn wait_released(&self, output: &OutputClock, pasted: Instant) {
-        self.wait(&WallClock, output, pasted);
+        self.wait(&WallClock, output, pasted)
+    }
+
+    /// [`EnterTiming::wait`] on a test's own clock, for a test of another module of this crate.
+    #[cfg(test)]
+    pub(crate) fn wait_released_on(
+        &self,
+        clock: &dyn Clock,
+        output: &OutputClock,
+        pasted: Instant,
+    ) {
+        self.wait(clock, output, pasted)
     }
 
     /// A fixed wait, whatever the window prints.
@@ -167,13 +333,20 @@ impl EnterTiming {
     }
 
     /// Waits until the Enter of a paste written at `pasted` may go: at once, where the
-    /// window has taken it in already.
+    /// window has taken it in already. The Enter does not go while the pane is not current
+    /// ([`OutputCount::sample`]), up to the cap and [`PENDING_GRACE_MS`] more: a window that
+    /// prints without pause for longer than that gets its Enter at the end of it, as it did
+    /// before the counts (the cap is a limit, `.specs`).
     pub(super) fn wait(&self, clock: &dyn Clock, output: &OutputClock, pasted: Instant) {
         loop {
             // One look at the time for both numbers: the paste's age and the quiet are of the
             // same moment, however long the thread was kept from running between them.
             let now = clock.now();
             let since = millis_since(now, pasted);
+            if since < self.pending_cap_ms() && !output.counts().current() {
+                clock.rest(Duration::from_millis(5));
+                continue;
+            }
             // How long the window has been quiet, once it printed after the paste, and not
             // only at once (its answer to the paste's first key).
             let echoed = output
@@ -187,4 +360,13 @@ impl EnterTiming {
             clock.rest(Duration::from_millis(5));
         }
     }
+
+    /// How long after the paste the Enter waits for output not yet drawn, at the most.
+    pub(super) fn pending_cap_ms(&self) -> u64 {
+        self.most_ms.saturating_add(PENDING_GRACE_MS)
+    }
 }
+
+/// How long past its cap a paste's Enter waits for a window that still has output not drawn:
+/// less than the five seconds an adapter allows a paste beyond its harness's cap.
+pub(super) const PENDING_GRACE_MS: u64 = 3_000;

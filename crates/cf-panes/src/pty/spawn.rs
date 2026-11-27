@@ -14,13 +14,14 @@ use portable_pty::{CommandBuilder, PtySize};
 
 use cf_proto::agents::parent_session_variables;
 
-use super::flow::{stream_output, terminal_of, ActivityReader, OutputFlow};
+use super::flow::{question_of, stream_output, terminal_of, ActivityReader, OutputFlow};
 use super::output_end;
 #[cfg(any(test, feature = "test-support"))]
 use super::OpenedPane;
 #[cfg(test)]
 use super::TERMINAL_FAILS;
 use super::{Pane, PaneEnvironment, PaneError, PaneKey, PaneTable, StreamedPane};
+use crate::arbiter::OutputCount;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
 use crate::journal::Journal;
@@ -241,15 +242,17 @@ impl PaneTable {
         #[cfg(not(unix))]
         let process_group_id = None;
         let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let counts = Arc::new(OutputCount::default());
         let reader = Box::new(ActivityReader {
             inner: reader,
             last_activity: Arc::clone(&last_activity),
+            counts: Arc::clone(&counts),
         });
 
         panes.insert(
             key,
             Pane {
-                master: pair.master,
+                master: super::PaneMaster::new(pair.master),
                 writer: Arc::new(Mutex::new(writer)),
                 child,
                 process_group_id,
@@ -265,6 +268,7 @@ impl PaneTable {
                 active_writes: Arc::new(AtomicU64::new(0)),
                 alive: true,
                 last_activity,
+                counts,
                 screen: Arc::new(PaneScreen::new(size.rows, size.cols)),
                 ended: Arc::new(EndedSlot::default()),
             },
@@ -330,7 +334,7 @@ impl PaneTable {
             .then(|| Arc::new(Journal::new((size.rows, size.cols))));
         #[cfg(target_os = "macos")]
         let tree;
-        let (pid, screen, ended, terminal) = {
+        let (pid, screen, ended, terminal, counts) = {
             let mut panes = self.lock_panes()?;
             let pane = panes
                 .get_mut(&key)
@@ -346,6 +350,7 @@ impl PaneTable {
                 Arc::clone(&pane.screen),
                 Arc::clone(&pane.ended),
                 terminal_of(pane),
+                Arc::clone(&pane.counts),
             )
         };
         // A window that fails here lets go of its output before it is ended: on Windows a
@@ -360,10 +365,22 @@ impl PaneTable {
             Ok(terminal) => terminal,
             Err(error) => return Err(self.abandon_open(&key, reader, error)),
         };
+        let question = match question_of(&terminal) {
+            Ok(question) => question,
+            Err(error) => {
+                drop(terminal);
+                return Err(self.abandon_open(&key, reader, error));
+            }
+        };
         #[cfg(windows)]
         if let Err(error) = self.watch_exit(&key) {
+            // Let go before the window is ended: a console closed while its output is held
+            // open and unread may wait for ever (`conpty`).
+            drop((terminal, question));
             return Err(self.abandon_open(&key, reader, error));
         }
+        // Before the thread that reads: a look from here on asks the terminal.
+        counts.watch(question);
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
@@ -374,12 +391,14 @@ impl PaneTable {
                 .is_none_or(|table| table.program_gone(&watched, &slot, at_an_end))
         });
         let read = output_end::Output::new(reader, terminal, gone);
-        std::thread::spawn(move || stream_output(output_key, read, flow, sender));
+        let reader_counts = Arc::clone(&counts);
+        std::thread::spawn(move || stream_output(output_key, read, flow, sender, reader_counts));
         Ok(StreamedPane {
             key,
             pid,
             output,
             screen,
+            counts,
             journal,
             ended,
             owed: self.exits.owe(),
