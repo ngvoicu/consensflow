@@ -1782,31 +1782,36 @@ fn old_form_notes(task: i64, session: &str) -> [String; 2] {
     ]
 }
 
+/// A world with T-1 held, and the older build's hold note `older` (an index of
+/// [`old_form_notes`]) given to the chief and delivered, as it was before the upgrade.
+fn upgraded(older: usize) -> (World, i64, String) {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    let body = old_form_notes(task, &session)[older].clone();
+    let old = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: body.clone(),
+                task: Some(task),
+            },
+        )
+        .expect("the older note, kept as it was");
+    assert_eq!(w.message(old.id).body, body);
+    w.deliver(old.id);
+    (w, task, session)
+}
+
 #[test]
-fn a_hold_note_an_older_build_wrote_is_still_told_to_go_on_and_is_the_same_hold_as_the_new_words() {
+fn a_hold_note_an_older_build_wrote_is_still_told_to_go_on() {
     for older in 0..2 {
-        let mut w = world();
-        let (task, session) = with_zeus(&mut w);
-        w.hold(task);
-        let body = old_form_notes(task, &session)[older].clone();
-        let old = w
-            .ledger
-            .note(
-                w.project,
-                &NewNote {
-                    from: None,
-                    to: "chief".into(),
-                    body: body.clone(),
-                    task: Some(task),
-                },
-            )
-            .expect("the older note, kept as it was");
-        assert_eq!(w.message(old.id).body, body);
-        w.deliver(old.id);
-        // The same hold said again in this build's words is the same hold: shown, not typed again.
-        let again = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
-        assert_eq!(again.state, "read", "form {older}: {:?}", again.body);
-        // And the task going on corrects the older note's words as it does the new.
+        // The only hold note there is is the older one, and no repeat in new words stands
+        // between it and the correction: the task going on corrects it, once.
+        let (mut w, task, _session) = upgraded(older);
         w.daemon_resumes(task);
         w.went_on(task);
         assert_eq!(
@@ -1814,5 +1819,23 @@ fn a_hold_note_an_older_build_wrote_is_still_told_to_go_on_and_is_the_same_hold_
             Some("goes on: its account has quota again."),
             "form {older}: an older hold note is a hold note"
         );
+        let told = w
+            .ledger
+            .inbox(w.id("chief"), 100)
+            .expect("the inbox")
+            .iter()
+            .filter(|message| message.body == "T-1 goes on: its account has quota again.")
+            .count();
+        assert_eq!(told, 1, "form {older}: corrected once");
+    }
+}
+
+#[test]
+fn a_hold_note_an_older_build_wrote_is_the_same_hold_as_the_new_words() {
+    for older in 0..2 {
+        // A fresh ledger: nothing has gone on, so only the identity of the hold decides.
+        let (mut w, task, session) = upgraded(older);
+        let again = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
+        assert_eq!(again.state, "read", "form {older}: {:?}", again.body);
     }
 }

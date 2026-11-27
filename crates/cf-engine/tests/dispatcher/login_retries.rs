@@ -550,14 +550,16 @@ fn the_hold_at_the_last_try_is_the_hold_of_a_first_refusal_but_for_the_try_note(
         passes(&c, 4);
         end_state(&c, &t)
     };
-    // The tries' own note is the one note the head has more: exactly one, said once, and gone
-    // from the comparison. Every other note, in its order, is the first refusal's.
+    // The tries' own note is the one note the head has more: this task's, for this refusal
+    // (a 401 `authentication_error`), whole, exactly once, and gone from the comparison. Every
+    // other note, in its order, is the first refusal's.
+    const TRIES_NOTE: &str = "T-1's turn failed: its login was refused (401, authentication_error). ConsensFlow tries it again in its window in 30 seconds, and once more 2 minutes after a second failure. If it fails a third time in a row, T-1 fails; its count of tries starts again with a word to it from you or the chief, a result, or another window (its member's backup, or a Reassign); by time it starts again on a failure 30 minutes or more after the last moment anything happened to one of its automatic tries. To change what it is asked meanwhile, resume it with the work rephrased: cf task resume T-1 \"…\"";
     let mut head = head;
     let notes = head["chiefNotes"].as_array_mut().unwrap();
     let tries: Vec<usize> = (0..notes.len())
-        .filter(|at| notes[*at].as_str().unwrap().contains("tries it again"))
+        .filter(|at| notes[*at].as_str() == Some(TRIES_NOTE))
         .collect();
-    assert_eq!(tries.len(), 1, "the tries' note, once: {notes:?}");
+    assert_eq!(tries.len(), 1, "the tries' note, whole and once: {notes:?}");
     notes.remove(tries[0]);
     assert!(
         base["chiefNotes"]
