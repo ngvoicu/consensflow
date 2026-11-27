@@ -146,8 +146,9 @@ fn shut(asked: &MessageView, task: Option<&TaskView>, former_window: bool) -> Fa
     let id = asked.id;
     let state = task.map(|task| task.state.as_str());
     let moved = former_window || asked.reason.as_deref() == Some(MOVED_QUESTION);
-    // A question the task's result closed (it was finished with it open: by the chief's Finish
-    // or by the worker's own word) is as finished as one a plain finish withdrew.
+    // A question the task's result closed (the task was finished at a word of its window's,
+    // with the question open: only a Finish at a word does that, never the worker's own
+    // `cf task done`) is as finished as one a plain finish withdrew.
     let finished = asked.task_number.is_some_and(|number| {
         asked.reason.as_deref() == Some(&format!("T-{number} was finished"))
             || asked.reason.as_deref() == Some(&gave_result_reason(number))
