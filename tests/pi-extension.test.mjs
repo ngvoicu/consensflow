@@ -627,6 +627,34 @@ describe('consensflow Pi extension', () => {
     }
   })
 
+  it('starts a new launch from nought, whatever an earlier launch left in the folder', async () => {
+    const s = await setup(null)
+    try {
+      for (let n = 1; n <= 3; n += 1) await run(s)
+      await s.pi.handlers.get('session_shutdown')({ reason: 'quit' })
+      const earlier = join(s.settled, 'launch-pi-test.state.json')
+      assert.equal(wordOf(s).ended, 3)
+      // A new launch beside it: its own file, which is not there yet.
+      const next = fakePi()
+      createDeliveryExtension(next, { settled: s.settled, launchId: 'launch-pi-next', pollMs: 60_000 })
+      await next.handlers.get('session_start')({ reason: 'startup' }, s.ctx)
+      const own = JSON.parse(await readFile(join(s.settled, 'launch-pi-next.state.json'), 'utf8'))
+      assert.deepEqual([own.launchId, own.begun, own.ended, own.ends], ['launch-pi-next', 0, 0, []])
+      await next.handlers.get('session_shutdown')({ reason: 'quit' })
+      // A file under its own name that holds another launch's word is not read either.
+      const copied = join(s.settled, 'launch-pi-third.state.json')
+      await writeFile(copied, await readFile(earlier, 'utf8'))
+      const third = fakePi()
+      createDeliveryExtension(third, { settled: s.settled, launchId: 'launch-pi-third', pollMs: 60_000 })
+      await third.handlers.get('session_start')({ reason: 'startup' }, s.ctx)
+      const word = JSON.parse(await readFile(copied, 'utf8'))
+      assert.deepEqual([word.launchId, word.begun, word.ended, word.ends], ['launch-pi-third', 0, 0, []])
+      await third.handlers.get('session_shutdown')({ reason: 'quit' })
+    } finally {
+      await s.close()
+    }
+  })
+
   it('sends nothing from session_start: a message waiting then goes at the timer pass after it', async () => {
     const s = await setup(null, { pollMs: 60_000 })
     try {

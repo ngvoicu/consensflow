@@ -300,3 +300,13 @@ runs = ["pts-reader"]
 file = "crates/cf-harness/src/pi/record.rs"
 find = "        State::Working if word.begun > word.ended => Turn::AtWork,\n"
 replace = "        State::Working if word.begun > word.ended && session.is_none() => Turn::AtWork,\n"
+
+[[plant]]
+name = "pi turn state: a new launch goes on from another launch's word"
+meant = "starts a new launch from nought, whatever an earlier launch left in the folder"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      return word?.launchId === launchId && Number.isSafeInteger(word.ended) ? word : null\n"
+replace = "      return Number.isSafeInteger(word?.ended) ? word : null\n"
