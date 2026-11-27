@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
+import { STAND_IN } from '../ui/core/suggested-staff-data.js'
 import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
@@ -452,7 +453,12 @@ async function open(page, given = model(), { ready = true } = {}) {
           window.__missingRefused -= 1
           return { ok: false, error: 'not-available-yet', detail: 'the daemon is starting' }
         }
-        return answer({ missing: data.missing ?? [], roles: data.roles })
+        // The suggested staff the daemon offers (T-2404): none unless a test names one, or says
+        // nothing of it (`suggestedStaffUnsaid`), as a daemon from before it says nothing.
+        const suggested = data.suggestedStaffUnsaid
+          ? {}
+          : { suggestedStaff: data.suggestedStaff ?? null }
+        return answer({ missing: data.missing ?? [], roles: data.roles, ...suggested })
       },
       // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
       // or a refusal a test names for it (`modelsRefusal`).
@@ -477,6 +483,36 @@ async function open(page, given = model(), { ready = true } = {}) {
       // effort (`cf_ledger::handles`, HMD-12), or a refusal a test names.
       'member.add': (body) => {
         if (data.memberRefusal !== undefined) return { ok: false, error: data.memberRefusal }
+        // A refusal of one add, by the model (or the role, for an image designer) it names.
+        const refusedOne = data.memberRefusals?.[body.model ?? body.roles?.[0]]
+        if (refusedOne !== undefined) return { ok: false, error: refusedOne }
+        // Where a test says so (`addJoins`), the member joins the project's board, as the daemon
+        // adds it: a lane of its own, on what it was added on.
+        const joins = (handle, runs) => {
+          const board = data.addJoins ? data.boards[body.project] : null
+          if (!board) return
+          const id = Math.max(...board.lanes.map((lane) => lane.participant.id)) + 1
+          board.lanes.push({
+            participant: {
+              id,
+              projectId: body.project,
+              handle,
+              role: body.roles[0],
+              roles: body.roles,
+              agent: null,
+              harness: body.harness,
+              nameApart: false,
+              outUntil: null,
+              memberId: null,
+              member: null,
+              session: null,
+              ...runs,
+            },
+            tasks: [],
+            activity: { state: 'closed' },
+            pane: null,
+          })
+        }
         // An image designer is Codex's own model, named by it, and takes no model, effort or
         // tier (designer P2): the daemon refuses any, and so does the mock.
         if (body.roles?.includes('designer')) {
@@ -487,6 +523,7 @@ async function open(page, given = model(), { ready = true } = {}) {
                 "an image designer draws on Codex's own model: it takes no model, effort or tier",
             }
           }
+          joins('codex-default', { designer: true, model: null, effort: null, tier: null })
           return answer({ member: { handle: 'codex-default', roles: body.roles, tier: 'light' } })
         }
         // Named as the daemon names it: Pi's id without its provider, then the effort.
@@ -498,6 +535,13 @@ async function open(page, given = model(), { ready = true } = {}) {
           .split(/[^a-z0-9]+/)
           .filter(Boolean)
         const handle = data.memberHandle ?? words.join('-')
+        joins(handle, {
+          designer: false,
+          model: body.model,
+          modelName: body.model,
+          effort: body.effort,
+          tier: body.tier,
+        })
         return answer({ member: { handle, roles: body.roles, tier: body.tier } })
       },
       'member.edit': (body) => {
@@ -24137,4 +24181,544 @@ test('T-2341 a member whose role ConsensFlow no longer has says so, promises no 
   await fresh.getByRole('button', { name: 'Start project' }).click()
   await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
   expect((await calls(page, 'project.open')).at(-1).staff[0].roles).toEqual(['worker'])
+})
+
+// T-2404: the suggested staff, offered above the slots in New project and Project settings alike.
+
+const SUGGEST_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * A suggestion as the daemon would send it (`harnesses.missing`'s `suggestedStaff`): four
+ * members on two harnesses, one of them in three slots, said in no order of the slots'.
+ */
+const SUGGESTION = {
+  about: 'The staff we build with: Claude Code does the work, Codex checks it.',
+  members: [
+    { harness: 'codex', designer: true, roles: ['designer'] },
+    {
+      harness: 'codex',
+      model: 'gpt-6-2-astra',
+      effort: 'xhigh',
+      tier: 'standard',
+      roles: ['tester', 'reviewer', 'researcher'],
+    },
+    {
+      harness: 'claude-code',
+      model: 'claude-fable-5-2',
+      effort: 'high',
+      tier: 'critical',
+      roles: ['architect', 'advisor', 'reviewer'],
+    },
+    {
+      harness: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'medium',
+      tier: 'critical',
+      roles: ['worker'],
+    },
+  ],
+}
+
+/** `data` with harnesses that list `suggestion`'s models at their efforts, and the suggestion. */
+function suggesting(data = model(), suggestion = SUGGESTION) {
+  data.models.claude.listing = listed([
+    { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: SUGGEST_EFFORTS, defaultEffort: 'high' },
+    { id: 'claude-fable-5-2', label: 'Fable 5.2', efforts: SUGGEST_EFFORTS },
+    { id: 'claude-sonnet-5', label: 'Sonnet 5', efforts: SUGGEST_EFFORTS },
+  ])
+  data.models.codex.listing = listed([
+    { id: 'gpt-6-2-astra', label: 'GPT-6.2 Astra', efforts: SUGGEST_EFFORTS },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', efforts: SUGGEST_EFFORTS },
+  ])
+  data.suggestedStaff = suggestion
+  return data
+}
+
+/** A staff dialog's offer of the suggested staff. */
+const suggestion = (dialog) => dialog.getByRole('region', { name: 'Suggested staff' })
+
+/**
+ * What its list of what it puts where says, a member a row: its tier, its name, what it runs
+ * on, each of its slots as it stands (`empty`, which it fills, `same`, `kept` or `left`) with its
+ * words, and why it is left out, where it is.
+ */
+const suggestedRows = (panel) =>
+  panel
+    .locator('.suggest-row')
+    .evaluateAll((rows) =>
+      rows.map((row) => [
+        row.querySelector('.suggest-tier').textContent,
+        row.querySelector('.member-name').textContent,
+        row.querySelector('.member-meta').textContent,
+        [...row.querySelectorAll('.suggest-slot')].map(
+          (chip) => `${chip.dataset.state}: ${chip.textContent}`,
+        ),
+        row.dataset.left ?? null,
+      ]),
+    )
+
+/** Opens New project on `data` and gives it. */
+async function newProjectOn(page, data) {
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  return page.getByRole('dialog', { name: 'New project' })
+}
+
+/** Opens Project settings on `data` and gives it. */
+async function settingsOn(page, data) {
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  return page.getByRole('dialog', { name: 'Project settings' })
+}
+
+test('T-2404 New project offers the suggested staff above the slots: what it is for, what it fills, and what it puts where before anything is taken', async ({
+  page,
+}) => {
+  const data = suggesting()
+  data.lastStaff = []
+  const fresh = await newProjectOn(page, data)
+  const panel = suggestion(fresh)
+  await expect(panel).toBeVisible()
+  // In the Staff section, right above the slots.
+  expect(await panel.evaluate((node) => node.nextElementSibling.matches('table.slots'))).toBe(true)
+  await expect(panel.locator('.suggest-about')).toHaveText(SUGGESTION.about)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 8 empty slots with members on Claude Code and Codex.',
+  )
+  await expect(panel.locator('.suggest-kept, .suggest-gap, [role="alert"]')).toHaveCount(0)
+  const fill = panel.getByRole('button', { name: 'Fill 8 empty slots with the suggested staff' })
+  await expect(fill).toHaveText('Fill 8 empty slots')
+  await expect(fill).toBeEnabled()
+  // What it puts where is shut until asked; then a member a row, by tier and then by the slots'
+  // rows, each of its slots in the roles' order.
+  const where = panel.getByRole('button', { name: 'What it puts where' })
+  await expect(where).toHaveAttribute('aria-expanded', 'false')
+  await expect(panel.locator('.suggest-list')).toHaveCount(0)
+  await where.click()
+  await expect(where).toHaveAttribute('aria-expanded', 'true')
+  await expect(
+    panel.getByRole('list', { name: 'What the suggested staff puts where' }),
+  ).toBeVisible()
+  expect(await suggestedRows(panel)).toEqual([
+    ['Critical', 'claude-opus-5-5', 'Claude Code · medium', ['empty: fills Worker'], null],
+    [
+      'Critical',
+      'claude-fable-5-2',
+      'Claude Code · high',
+      ['empty: fills Architect', 'empty: fills Advisor', 'empty: fills Reviewer'],
+      null,
+    ],
+    [
+      'Standard',
+      'gpt-6-2-astra',
+      'Codex · xhigh',
+      ['empty: fills Researcher', 'empty: fills Reviewer', 'empty: fills Tester'],
+      null,
+    ],
+    ['', 'Codex default', 'Codex', ['empty: fills Image designer'], null],
+  ])
+  await where.click()
+  await expect(panel.locator('.suggest-list')).toHaveCount(0)
+  // Nothing is taken until the person says so.
+  expect(await holdersShown(fresh)).toEqual([])
+})
+
+test('T-2404 one choice fills the empty slots of New project and leaves a slot that holds a member as it is, saying so; what it filled is an ordinary member, and the project starts with them', async ({
+  page,
+}) => {
+  const data = suggesting()
+  // The last staff holds the standard reviewer slot, which the suggestion names too.
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['reviewer'])]
+  const fresh = await newProjectOn(page, data)
+  const panel = suggestion(fresh)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 7 empty slots with members on Claude Code and Codex.',
+  )
+  await expect(panel.locator('.suggest-kept')).toHaveText(
+    'It leaves the slot that already holds a member as it is: the standard reviewer slot (claude-sonnet-5). To take its member there, remove yours first, then fill again.',
+  )
+  await panel.getByRole('button', { name: 'What it puts where' }).click()
+  expect((await suggestedRows(panel))[2]).toEqual([
+    'Standard',
+    'gpt-6-2-astra',
+    'Codex · xhigh',
+    ['empty: fills Researcher', 'kept: Reviewer · held by claude-sonnet-5', 'empty: fills Tester'],
+    null,
+  ])
+  const fill = panel.getByRole('button', { name: 'Fill 7 empty slots with the suggested staff' })
+  await fill.focus()
+  await page.keyboard.press('Enter')
+  // Each member of it in its slots, the last staff's where it was.
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:critical', '2'],
+    ['architect:critical', '3'],
+    ['researcher:standard', '4'],
+    ['advisor:critical', '3'],
+    ['reviewer:critical', '3'],
+    ['reviewer:standard', '1'],
+    ['tester:standard', '4'],
+    ['designer', '5'],
+  ])
+  // What it did, said where the keyboard was: Fill has nothing left to fill.
+  const done = panel.locator('.suggest-done')
+  await expect(done).toHaveText(
+    'Filled 7 slots from the suggested staff. Each is a member like any other: open its card to change it, or remove it from its slot.',
+  )
+  await expect(done).toBeFocused()
+  await expect(panel.getByRole('button', { name: /^Fill / })).toHaveCount(0)
+  // An ordinary member: one member in its three slots, with its Edit on what it runs.
+  const fable = await openPart(fresh, 'claude-fable-5-2')
+  await expect(fable.locator('.slot-part-slots')).toHaveText(
+    'One member in three slots: Architect, Advisor and Reviewer. What you change here changes it in all three.',
+  )
+  await fable.getByRole('button', { name: 'Edit claude-fable-5-2' }).click()
+  const form = fresh.locator('.staff-add')
+  await expect(form.locator('legend')).toHaveText('Edit claude-fable-5-2')
+  await expect(form.locator('[name="memberModel"]')).toHaveValue('claude-fable-5-2')
+  await expect(form.locator('[name="memberEffort"]')).toHaveValue('high')
+  await form.getByRole('button', { name: 'Cancel this form' }).click()
+  // The project starts with them, each as Add would have picked it, from the read shown.
+  await pickChief(fresh, 'Claude Code', 'claude-opus-5-5')
+  await fresh.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'high',
+        gate: false,
+        compaction: 300000,
+        staff: [
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'standard',
+            roles: ['reviewer'],
+          },
+          {
+            harness: 'claude-code',
+            model: 'claude-opus-5-5',
+            effort: 'medium',
+            tier: 'critical',
+            roles: ['worker'],
+          },
+          {
+            harness: 'claude-code',
+            model: 'claude-fable-5-2',
+            effort: 'high',
+            tier: 'critical',
+            roles: ['architect', 'advisor', 'reviewer'],
+          },
+          {
+            harness: 'codex',
+            model: 'gpt-6-2-astra',
+            effort: 'xhigh',
+            tier: 'standard',
+            roles: ['researcher', 'tester'],
+          },
+          { harness: 'codex', roles: ['designer'] },
+        ],
+      },
+    ])
+  const reads = await page.evaluate(() => window.__reads)
+  const readOf = (harness) => reads.find((one) => one.harness === harness).read
+  const [{ staff }] = await calls(page, 'project.open', { reads: true })
+  expect(staff.map((member) => member.read ?? null)).toEqual([
+    readOf('claude'),
+    readOf('claude'),
+    readOf('claude'),
+    readOf('codex'),
+    null,
+  ])
+})
+
+test('T-2404 Project settings fills the empty slots one after another, gives a member that runs as one of its members that member’s empty slots, and leaves a held slot to its member', async ({
+  page,
+}) => {
+  const data = suggesting(
+    staffOf(
+      model(),
+      staffLane(3, 'zeus', ['reviewer'], 'standard', SONNET),
+      staffLane(4, 'claude-fable-5-2-high', ['architect'], 'critical', {
+        harness: 'claude-code',
+        model: 'claude-fable-5-2',
+        modelName: 'claude-fable-5-2',
+        effort: 'high',
+      }),
+    ),
+  )
+  data.addJoins = true
+  const settings = await settingsOn(page, data)
+  const panel = suggestion(settings)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 6 empty slots with members on Claude Code and Codex.',
+  )
+  await expect(panel.locator('.suggest-kept')).toHaveText(
+    'It leaves the slot that already holds a member as it is: the standard reviewer slot (@zeus). To take its member there, remove yours first, then fill again.',
+  )
+  await panel.getByRole('button', { name: 'What it puts where' }).click()
+  expect(await suggestedRows(panel)).toEqual([
+    ['Critical', 'claude-opus-5-5', 'Claude Code · medium', ['empty: fills Worker'], null],
+    [
+      'Critical',
+      'claude-fable-5-2',
+      'Claude Code · high',
+      ['same: Architect · in place', 'empty: fills Advisor', 'empty: fills Reviewer'],
+      null,
+    ],
+    [
+      'Standard',
+      'gpt-6-2-astra',
+      'Codex · xhigh',
+      ['empty: fills Researcher', 'kept: Reviewer · held by @zeus', 'empty: fills Tester'],
+      null,
+    ],
+    ['', 'Codex default', 'Codex', ['empty: fills Image designer'], null],
+  ])
+  await panel.getByRole('button', { name: 'Fill 6 empty slots with the suggested staff' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#status')).toHaveText('Filled 6 slots from the suggested staff.')
+  // One write a member, in the list's order, as Add and a slot's give write them.
+  const writes = await page.evaluate(() =>
+    window.__calls
+      .filter(
+        ([command, args]) =>
+          command === 'daemon_request' && ['member.add', 'member.roles'].includes(args.operation),
+      )
+      .map(([, { operation, body }]) => {
+        const { read, ...rest } = body
+        return [operation, rest, typeof read]
+      }),
+  )
+  expect(writes).toEqual([
+    [
+      'member.add',
+      {
+        project: 1,
+        harness: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'medium',
+        tier: 'critical',
+        roles: ['worker'],
+      },
+      'string',
+    ],
+    [
+      'member.roles',
+      { project: 1, agent: 'claude-fable-5-2-high', roles: ['architect', 'advisor', 'reviewer'] },
+      'undefined',
+    ],
+    [
+      'member.add',
+      {
+        project: 1,
+        harness: 'codex',
+        model: 'gpt-6-2-astra',
+        effort: 'xhigh',
+        tier: 'standard',
+        roles: ['researcher', 'tester'],
+      },
+      'string',
+    ],
+    ['member.add', { project: 1, harness: 'codex', roles: ['designer'] }, 'undefined'],
+  ])
+  // The staff as it is now, @zeus where it was.
+  expect(await holdersShown(settings)).toEqual([
+    ['worker:critical', 'claude-opus-5-5-medium'],
+    ['architect:critical', 'claude-fable-5-2-high'],
+    ['researcher:standard', 'gpt-6-2-astra-xhigh'],
+    ['advisor:critical', 'claude-fable-5-2-high'],
+    ['reviewer:critical', 'claude-fable-5-2-high'],
+    ['reviewer:standard', 'zeus'],
+    ['tester:standard', 'gpt-6-2-astra-xhigh'],
+    ['designer', 'codex-default'],
+  ])
+  await expect(panel.locator('.suggest-done')).toHaveText(
+    'Filled 6 slots from the suggested staff. Each is a member like any other: open its card to change it, or remove it from its slot.',
+  )
+  // The keyboard, on Fill as it was pressed, is on what it did.
+  await expect(panel.locator('.suggest-done')).toBeFocused()
+  // Opened again, it has nothing to fill, and says nothing.
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(settings.locator('table.slots [data-slot="designer"] .slot-holder')).toHaveCount(1)
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(10)
+  await expect(suggestion(settings)).toHaveCount(0)
+  await expect(settings.locator('.suggest')).toBeHidden()
+})
+
+test('T-2404 a fill the daemon refuses in part says what it could not fill in its words, fills the rest, and offers the slots left again', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.addJoins = true
+  // Another window took the standard tester slot as the fill went: the daemon refuses that add.
+  data.memberRefusals = {
+    'gpt-6-2-astra':
+      "the standard tester slot is @hera's: a role and tier holds one member. Pick another tier",
+  }
+  const settings = await settingsOn(page, data)
+  const panel = suggestion(settings)
+  await panel.getByRole('button', { name: 'Fill 8 empty slots with the suggested staff' }).click()
+  await expect(panel.getByRole('alert')).toHaveText(
+    "3 slots could not be filled: the standard tester slot is @hera's: a role and tier holds one member. Pick another tier.",
+  )
+  await expect(page.locator('#status')).toHaveText(
+    "Filled 5 of 8 slots from the suggested staff: the standard tester slot is @hera's: a role and tier holds one member. Pick another tier",
+  )
+  expect(await holdersShown(settings)).toEqual([
+    ['worker:critical', 'claude-opus-5-5-medium'],
+    ['architect:critical', 'claude-fable-5-2-high'],
+    ['advisor:critical', 'claude-fable-5-2-high'],
+    ['reviewer:critical', 'claude-fable-5-2-high'],
+    ['designer', 'codex-default'],
+  ])
+  // What it could not fill is offered again, as it can be.
+  await expect(
+    panel.getByRole('button', { name: 'Fill 3 empty slots with the suggested staff' }),
+  ).toBeEnabled()
+})
+
+test('T-2404 only what can work here is offered: a harness not installed, one whose models could not be read, and a model its harness does not list are left out, each said in a plain word', async ({
+  page,
+}) => {
+  const data = suggesting()
+  data.lastStaff = []
+  data.missing = ['codex']
+  const fresh = await newProjectOn(page, data)
+  const panel = suggestion(fresh)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 4 empty slots with members on Claude Code.',
+  )
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    'Codex is not installed here, so the 4 slots it puts on Codex are left out. Install Codex from Agents, Harnesses to take them too.',
+  ])
+  await panel.getByRole('button', { name: 'What it puts where' }).click()
+  expect((await suggestedRows(panel)).slice(2)).toEqual([
+    [
+      'Standard',
+      'gpt-6-2-astra',
+      'Codex · xhigh',
+      ['left: Researcher', 'left: Reviewer', 'left: Tester'],
+      'missing',
+    ],
+    ['', 'Codex default', 'Codex', ['left: Image designer'], 'missing'],
+  ])
+  await expect(panel.locator('.suggest-row[data-left] .suggest-left-mark')).toHaveText([
+    'not installed here',
+    'not installed here',
+  ])
+  await panel.getByRole('button', { name: 'Fill 4 empty slots with the suggested staff' }).click()
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:critical', '1'],
+    ['architect:critical', '2'],
+    ['advisor:critical', '2'],
+    ['reviewer:critical', '2'],
+  ])
+  await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // Codex installed, its models not read; Claude Code lists no claude-fable-5-2.
+  await page.evaluate(() => {
+    window.__model.missing = []
+    window.__model.modelsRefusal = { codex: 'codex answered nothing' }
+    window.__model.models.claude.listing.models =
+      window.__model.models.claude.listing.models.filter((one) => one.id !== 'claude-fable-5-2')
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 1 empty slot with members on Claude Code.',
+  )
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    "Codex's models could not be read (codex answered nothing), so the 4 slots it puts on Codex are left out.",
+    'Claude Code here does not list claude-fable-5-2 at high, so the 3 slots for it are left out.',
+  ])
+  await expect(
+    panel.getByRole('button', { name: 'Fill 1 empty slot with the suggested staff' }),
+  ).toBeEnabled()
+})
+
+test('T-2404 nothing is offered where no harness lists its models, where it would fill no slot, or where the daemon offers none; and nothing to take while the lists are read', async ({
+  page,
+}) => {
+  // Every list it needs is read slowly: it says it checks, with nothing to take yet.
+  const data = suggesting()
+  data.lastStaff = []
+  await open(page, data)
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 800
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  const panel = suggestion(fresh)
+  await expect(panel.locator('.suggest-checking')).toHaveText('Checking what your harnesses list…')
+  await expect(panel.getByRole('button', { name: 'Fill empty slots' })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: 'What it puts where' })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Fill 8 empty slots' })).toBeEnabled()
+  await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // No list it needs could be read: nothing is suggested.
+  await page.evaluate(() => {
+    window.__delay['models.get'] = 0
+    window.__model.modelsRefusal = {
+      claude: 'claude answered nothing',
+      codex: 'codex answered nothing',
+    }
+  })
+  const asked = await answers(page, 'models.get')
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(asked + 5)
+  await expect(fresh.locator('.suggest')).toBeHidden()
+  await expect(suggestion(fresh)).toHaveCount(0)
+  await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // The daemon offers none.
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = {}
+    window.__model.suggestedStaff = null
+  })
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(fresh.locator('[name="chiefModel"]')).toBeDisabled()
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(asked + 10)
+  await expect(fresh.locator('.suggest')).toBeHidden()
+  await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // The staff holds it already, just as it suggests: there is nothing to fill.
+  await page.evaluate((suggested) => {
+    window.__model.suggestedStaff = suggested
+    window.__model.lastStaff = suggested.members.map((member, at) => ({
+      id: at + 1,
+      ...member,
+      modelName: member.model,
+      designer: Boolean(member.designer),
+      role: member.roles[0],
+    }))
+  }, SUGGESTION)
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(fresh.locator('table.slots [data-slot="designer"] .slot-holder')).toHaveCount(1)
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(asked + 15)
+  await expect(fresh.locator('.suggest')).toBeHidden()
+})
+
+test('T-2404 a daemon that says nothing of a suggested staff leaves the page its own stand-in, offered as any', async ({
+  page,
+}) => {
+  const data = model()
+  const listedOf = (kind) =>
+    STAND_IN.members
+      .filter((member) => member.harness === kind && !member.designer)
+      .map((member) => ({ id: member.model, efforts: SUGGEST_EFFORTS }))
+  data.models.claude.listing = listed(listedOf('claude-code'))
+  data.models.codex.listing = listed(listedOf('codex'))
+  data.suggestedStaffUnsaid = true
+  data.lastStaff = []
+  const fresh = await newProjectOn(page, data)
+  const panel = suggestion(fresh)
+  await expect(panel.locator('.suggest-about')).toHaveText(STAND_IN.about)
+  const slots = STAND_IN.members.reduce((sum, member) => sum + member.roles.length, 0)
+  await expect(
+    panel.getByRole('button', { name: `Fill ${slots} empty slots with the suggested staff` }),
+  ).toBeEnabled()
 })

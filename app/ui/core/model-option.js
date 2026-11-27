@@ -19,3 +19,9 @@ export function modelOptionText(model) {
   const defaultMark = model.markedDefault ? ' · default' : ''
   return `${model.id}${name}${provider}${defaultMark}`
 }
+
+/** The name a harness's program goes by, which `models.get` and `missing` say: Claude Code's is `claude`. */
+export const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
+
+/** What `--model` takes for a listed model: Pi's provider and id joined, the id else. */
+export const modelOf = (model) => (model.provider ? `${model.provider}/${model.id}` : model.id)

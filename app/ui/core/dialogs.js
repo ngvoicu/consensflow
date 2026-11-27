@@ -10,7 +10,7 @@ import {
   vacationButton,
 } from './board.js'
 import { harnessesOf } from './computer-use.js'
-import { modelOptionText } from './model-option.js'
+import { harnessOf, modelOf, modelOptionText } from './model-option.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
 import {
   isImageAgentRole,
@@ -34,6 +34,7 @@ import {
   takenWords,
   together,
 } from './slots.js'
+import { readSuggestion, SuggestedStaff } from './suggested-staff.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -265,9 +266,6 @@ function backToCard(body) {
       ?.focus()
 }
 
-/** The name a harness's program goes by, which `models.get` and `missing` say: Claude Code's is `claude`. */
-const harnessOf = (kind) => (kind === 'claude-code' ? 'claude' : kind)
-
 const NO_HARNESS = 'No harness is installed here: install one from Agents, Harnesses.'
 
 /** Every harness installed here, by kind: what a dialog reads as it opens, whatever its pickers offer. */
@@ -283,9 +281,6 @@ function readEveryHarness(lists, missing) {
   lists.clear()
   lists.start(installedKinds(missing))
 }
-
-/** What `--model` takes for a listed model: Pi's provider and id joined, the id else. */
-const modelOf = (model) => (model.provider ? `${model.provider}/${model.id}` : model.id)
 
 /**
  * The models each harness lists of itself (`models.get`, CHF-03), read as a dialog opens
@@ -1210,6 +1205,8 @@ export class NewProjectDialog {
   #opened = null
   /** Why a form was closed under the person, under the row it was open in: `{ role, words }`. */
   #closedWhy = null
+  /** The suggested staff, offered above the slots (T-2404). */
+  #suggest
 
   /**
    * `page.onStart(project)` is told of the project the daemon opened. `page.daemon` asks the
@@ -1251,6 +1248,14 @@ export class NewProjectDialog {
         this.#draw()
       },
     )
+    this.#suggest = new SuggestedStaff(dialog.querySelector('.suggest'), {
+      id: 'new-project',
+      lists,
+      changed: () => {
+        if (dialog.open) this.#draw()
+      },
+      fill: (plan) => this.#fillSuggested(plan),
+    })
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
     this.#form.elements.memberAdd.addEventListener('click', () => this.#picked())
@@ -1268,7 +1273,7 @@ export class NewProjectDialog {
 
   /** Opens on `directory`; with no harness installed here it refuses, and says where to get one. */
   async open(directory) {
-    const [{ missing = [], roles }, { staff }, , screen] = await Promise.all([
+    const [{ missing = [], roles, suggestedStaff }, { staff }, , screen] = await Promise.all([
       this.#page.daemon('harnesses.missing'),
       this.#page.daemon('staff.last'),
       this.#page.readSpecs(),
@@ -1276,8 +1281,10 @@ export class NewProjectDialog {
     ])
     this.#missing = missing
     readRoles(roles)
+    readSuggestion(suggestedStaff)
     this.#sections.computerUse.show(screen)
     readEveryHarness(this.#lists, missing)
+    this.#suggest.start(missing)
     this.#chief.fill(missing)
     this.#member.reset(missing)
     this.#removing = null
@@ -1522,6 +1529,33 @@ export class NewProjectDialog {
     this.#member.refocus(this.#dialog)
   }
 
+  /**
+   * The suggested staff taken into the draft (T-2404): a new member for each of its members with
+   * an empty slot here, in those slots, or those slots given to the draft's member that runs as it.
+   */
+  #fillSuggested(plan) {
+    for (const make of plan.makes) {
+      if (make.kind === 'give') {
+        const member = this.#memberOf(make.to)
+        if (member) member.roles = inRoleOrder([...new Set([...member.roles, ...make.roles])])
+        continue
+      }
+      const designer = Boolean(make.entry.designer)
+      const { tier, ...runs } = make.picked
+      this.#draft.push({
+        ...runs,
+        ...(designer ? {} : { tier }),
+        _id: this.#nextId++,
+        roles: inRoleOrder(make.roles),
+        designer,
+      })
+    }
+    this.#suggest.filled(plan.fills)
+    // A refusal of the start goes with the change; a crowded slot's words follow the slot (`#draw`).
+    if (!this.#crowdSaid) this.#say('')
+    this.#draw()
+  }
+
   /** Takes `role` from the draft's member `key`; with none left it goes, its backup with it. */
   #removeRole(key, role) {
     const member = this.#memberOf(key)
@@ -1596,6 +1630,20 @@ export class NewProjectDialog {
       this.#member.fieldset,
     )
     if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
+    this.#suggest.draw(
+      this.#draft
+        .filter((member) => member.backupOf == null)
+        .map((member) => ({
+          key: member._id,
+          name: modelShown(member),
+          roles: member.roles,
+          tier: member.tier ?? null,
+          designer: member.designer || member.roles.some(isImageAgentRole),
+          harness: member.harness,
+          model: member.model ?? null,
+          effort: member.effort ?? null,
+        })),
+    )
     // A crowded slot's words beside Start follow the slot: the slot as it is now, or none.
     if (this.#crowdSaid) {
       const crowd = this.#crowded()
@@ -1922,6 +1970,8 @@ export class ProjectSettingsDialog {
   #lists
   /** Add member and Edit member. */
   #member
+  /** The suggested staff, offered above the slots (T-2404). */
+  #suggest
   /** The harnesses not installed here, as the dialog last read them. */
   #missing = []
   /**
@@ -1998,6 +2048,14 @@ export class ProjectSettingsDialog {
         this.#draw()
       },
     )
+    this.#suggest = new SuggestedStaff(dialog.querySelector('.suggest'), {
+      id: 'staff',
+      lists: this.#lists,
+      changed: () => {
+        if (dialog.open) this.#draw()
+      },
+      fill: (plan) => this.#fillSuggested(plan),
+    })
     this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
       this.#draw()
@@ -2119,6 +2177,7 @@ export class ProjectSettingsDialog {
     this.#backupErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
+    this.#suggest.start(missing)
     this.#gone = new Map()
     this.#member.reset(missing)
     this.#wakeUp.show(calls)
@@ -2246,6 +2305,19 @@ export class ProjectSettingsDialog {
       this.#member.fieldset,
     )
     if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
+    this.#suggest.draw(
+      primaries.map((member) => ({
+        key: member.handle,
+        name: `@${member.handle}`,
+        roles: member.roles,
+        tier: takesNoTier(member.roles) ? null : member.tier,
+        designer: Boolean(member.designer),
+        harness: member.harness,
+        // As its harness's list names it: Devin's `model` is its launch id for the effort.
+        model: member.modelName || member.model || null,
+        effort: member.effort ?? null,
+      })),
+    )
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
     this.#computerUse.draw(harnessesOf(board))
@@ -2338,6 +2410,51 @@ export class ProjectSettingsDialog {
         remove: gone,
       }),
     }
+  }
+
+  /**
+   * The suggested staff taken (T-2404): each of its members with an empty slot here added in those
+   * slots, or those slots given to the member that runs as it, one after another as the person
+   * would. A refusal (another window took a slot meanwhile) leaves the rest to go on, and is said
+   * in the panel, in the daemon's words, as well as on the status line.
+   */
+  async #fillSuggested(plan) {
+    const project = this.#project
+    const page = this.#page
+    this.#suggest.filling()
+    this.#draw()
+    await page.act(async () => {
+      let filled = 0
+      const refused = []
+      for (const make of plan.makes) {
+        try {
+          if (make.kind === 'give') {
+            const { roles } = this.#memberNow({ handle: make.to })
+            await page.daemon('member.roles', {
+              project,
+              agent: make.to,
+              roles: inRoleOrder([...new Set([...roles, ...make.roles])]),
+            })
+          } else {
+            // The name the harness gives the model is the daemon's to read from its listing.
+            const { modelName, ...picked } = make.picked
+            await page.daemon('member.add', { project, ...picked, roles: inRoleOrder(make.roles) })
+          }
+          filled += make.roles.length
+        } catch (cause) {
+          refused.push({
+            slots: make.roles.length,
+            words: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+      }
+      this.#suggest.filled(filled, refused)
+      page.note(
+        refused.length === 0
+          ? `Filled ${filled} ${filled === 1 ? 'slot' : 'slots'} from the suggested staff.`
+          : `Filled ${filled} of ${plan.fills} slots from the suggested staff: ${refused.map((one) => one.words).join('; ')}`,
+      )
+    })
   }
 
   /** Gives the empty slot of `role` at its tier to the member `handle` (`member.roles`). */

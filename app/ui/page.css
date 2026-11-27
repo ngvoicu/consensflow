@@ -901,11 +901,11 @@ tr[data-session] .row-name { font-weight: 500; }
 .slot-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; border: 1px dashed var(--line); background: rgba(9, 9, 11, .35); }
 .slot-empty-mark { flex: 1 0 auto; font: 11px var(--mono); color: var(--muted); }
 .slot-empty .slot-add { padding: 3px 10px; font-size: 12px; }
-.slot-gives { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.slot-gives { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .slot-give { padding: 0; border: 0; background: none; color: var(--accent); font: 11px/1.5 var(--mono); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .slot-give:hover { color: var(--text); text-decoration: underline; }
 .slot-give:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.slots .slot-give-pick { width: auto; max-width: 100%; margin-left: -4px; padding: 1px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--accent); font: 11px/1.5 var(--mono); cursor: pointer; }
+.slots .slot-give-pick { width: auto; min-width: 0; max-width: calc(100% + 4px); margin-left: -4px; padding: 1px 4px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--accent); font: 11px/1.5 var(--mono); cursor: pointer; }
 .slots .slot-give-pick:hover { border-color: var(--line); color: var(--text); }
 .slots .slot-give-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .slots .slot-give-pick option { background: var(--panel-raised); color: var(--text); }
@@ -1001,6 +1001,73 @@ tr[data-session] .row-name { font-weight: 500; }
 /* The member form, where a slot opened it: under the part it belongs to, or alone under an empty slot. */
 .slot-part > .slot-form-place:empty { display: none; }
 .staff-add[hidden] { display: none; }
+/* The suggested staff (T-2404), above the slots in both staff dialogs: an offer lit violet from its
+   corner, as the page is, with what it is for, what it fills, its Fill, and what it puts where. The
+   list reads as the slots do: a member a line, its tier, its name and what it runs on, then its
+   slots, each a pill: violet with a plus where it fills one, dashed grey where the member there
+   keeps it, green where it is in place already. A part that does not run here is grey, and says
+   why in amber, as the slots say what needs the person. */
+.suggest {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(167, 139, 250, .35);
+  border-radius: 10px;
+  background:
+    radial-gradient(460px 150px at 0 0, rgba(124, 58, 237, .16), transparent 70%),
+    var(--deep);
+}
+.suggest-head { display: flex; align-items: center; gap: 8px; }
+.suggest-head .icon { width: 15px; height: 15px; color: var(--violet); }
+.suggest-head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.005em; }
+.suggest-about { margin: 0; max-width: 80ch; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.suggest-fills, .suggest-kept { margin: 0; max-width: 80ch; font-size: 12px; line-height: 1.5; }
+.suggest-kept, .suggest-checking { color: var(--muted); }
+.suggest-gap { margin: 0; max-width: 80ch; padding-left: 9px; border-left: 2px solid var(--amber); color: var(--amber); font-size: 12px; line-height: 1.5; }
+.suggest-refused { margin: 0; padding: 6px 10px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: rgba(248, 113, 113, .08); color: var(--danger); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.suggest-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 2px; }
+/* Fill: the offer's one act, violet as the slot the form is for is lit, under Start's glow. */
+.suggest-take { padding: 5px 12px; border: 1px solid rgba(167, 139, 250, .6); border-radius: 6px; background: rgba(124, 58, 237, .2); color: #ede9fe; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.suggest-take:hover:not(:disabled) { border-color: var(--violet); background: rgba(124, 58, 237, .32); box-shadow: 0 0 18px -6px var(--glow); }
+.suggest-toggle { display: inline-flex; align-items: center; gap: 3px; padding: 2px 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.suggest-toggle:hover { color: var(--text); }
+.suggest-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.suggest-toggle .icon { width: 14px; height: 14px; }
+.suggest-toggle[aria-expanded="true"] .icon { transform: rotate(180deg); }
+.suggest-list { display: grid; margin: 2px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line-soft); }
+.suggest-row { display: grid; grid-template-columns: 76px minmax(0, 15rem) minmax(0, 1fr); align-items: start; gap: 4px 14px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.suggest-row:last-child { padding-bottom: 0; border-bottom: 0; }
+.suggest-tier { padding-top: 3px; color: var(--muted); font: 700 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.suggest-who { display: grid; justify-items: start; gap: 1px; min-width: 0; }
+.suggest-who .member-name { font: 600 12px/1.45 var(--mono); overflow-wrap: anywhere; }
+.suggest-who .member-meta { color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+.suggest-row[data-left] .member-name { color: var(--muted); }
+.suggest-left-mark { margin-top: 2px; color: var(--amber); font: 10px/1.5 var(--mono); }
+.suggest-slots { display: flex; flex-wrap: wrap; align-content: start; gap: 4px; min-width: 0; }
+.suggest-slot { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 8px 1px 6px; border: 1px solid rgba(167, 139, 250, .45); border-radius: 999px; background: rgba(124, 58, 237, .12); color: var(--text); font: 11px/1.6 var(--mono); overflow-wrap: anywhere; }
+.suggest-slot .icon { width: 11px; height: 11px; color: var(--violet); stroke-width: 2.2; }
+.suggest-slot-note { color: var(--muted); }
+.suggest-slot[data-state="kept"], .suggest-slot[data-state="left"] { padding-left: 8px; border-style: dashed; border-color: var(--line); background: transparent; color: var(--muted); }
+.suggest-slot[data-state="left"] { border-style: solid; border-color: var(--line-soft); }
+.suggest-slot[data-state="same"] { border-color: rgba(110, 231, 183, .35); background: rgba(110, 231, 183, .06); color: var(--ok); }
+.suggest-slot[data-state="same"] .icon { color: var(--ok); }
+.suggest-done { display: flex; align-items: start; gap: 8px; margin: 0; font-size: 12px; line-height: 1.5; }
+.suggest-done .icon { width: 15px; height: 15px; margin-top: 1px; color: var(--ok); }
+@media (prefers-reduced-motion: no-preference) {
+  .suggest { animation: suggest-in .2s ease-out; }
+  .suggest-list { animation: slot-opens .16s ease-out; }
+  .suggest-toggle .icon { transition: transform .16s ease; }
+  .suggest-take { transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease; }
+  .suggest[data-state="checking"] .suggest-head .icon { animation: suggest-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes suggest-in { from { opacity: 0; } }
+@keyframes suggest-pulse { 50% { opacity: .35; } }
+/* A narrow dialog: each member's slots go under its name. */
+@media (max-width: 760px) {
+  .suggest-row { grid-template-columns: 64px minmax(0, 1fr); }
+  .suggest-slots { grid-column: 2; }
+}
 /* Words for a screen reader only: what a mark says to the eye by where it is. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* The chief's pick in New project and Switch chief, and Switch chief's turn choice: boxed as
