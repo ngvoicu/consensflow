@@ -126,7 +126,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -174,8 +174,11 @@ jobs:
       # (2026-10-27: a mark read as the Alt key carrying it).
       - if: runner.os == 'Windows'
         run: cargo xtask conpty --into app/src-tauri/target/debug
+      # 55 since 3.0.7-alpha.18's first batch: N35's model (400 seeds, one test, 135 s on a quick
+      # Mac) took 13 minutes on a hosted Mac in the dispatcher's own run, and the whole step
+      # finished everything green at 40:00 on the run (45919558645) that the old limit cut.
       - run: cargo test --workspace --exclude app --exclude cf-e2e
-        timeout-minutes: 40
+        timeout-minutes: 55
 
   daemons:
     strategy:
@@ -401,10 +404,12 @@ jobs:
       # would hide (T-842's P1). cf-engine holds no code of one system's (T-1132's
       # coverage read the same lines on both). As `cargo xtask check` runs it, a test
       # holds the two alike (tools/xtask/src/check.rs).
+      # 25 since 3.0.7-alpha.18's first batch: the dispatcher's suite took 14.2 minutes on
+      # a hosted Linux runner, N35's model (400 seeds, one thread) being the last test in.
       - run: cargo test --package cf-engine --test dispatcher
         env:
           CF_KIT_PACED: 1
-        timeout-minutes: 15
+        timeout-minutes: 25
 
   # The app as a download is built, and run as a user would (T-904): the packaged
   # smoke opens a pane, a worker takes a task, and the built app answers a command
