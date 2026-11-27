@@ -154,8 +154,8 @@ runs = ["login-words"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                        cf_harness::records::hold_form(because),\n                    )?;"
-replace = "                        None,\n                    )?;"
+find = "                    &handle,\n                    cf_harness::records::hold_form(because),"
+replace = "                    &handle,\n                    None,"
 
 [[plant]]
 name = "login retry: the raw reason passed to the human's note again"
@@ -185,4 +185,4 @@ runs = ["login-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
 find = "    } else if rest.ends_with(TAIL_UNAVAILABLE) {"
-replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\": its login was refused:\") {"
+replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\"its login was refused:\") {"
