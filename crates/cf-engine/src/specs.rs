@@ -103,7 +103,7 @@ impl Dispatcher {
         let rules = project
             .staff_rules
             .as_deref()
-            .filter(|_| !(participant.role == "chief" && project.own_hands));
+            .filter(|_| !(participant.seat().is_chief() && project.own_hands));
         let instructions = with_staff_rules(instructions, &participant.role, rules);
         Ok(RoleText {
             specs,
@@ -121,7 +121,7 @@ impl Dispatcher {
         project: &ProjectView,
         participant: &ParticipantView,
     ) -> Option<SpecsSetting> {
-        if participant.role != "chief" {
+        if !participant.seat().coordinates() {
             return None;
         }
         let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);

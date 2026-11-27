@@ -84,7 +84,7 @@ impl Dispatcher {
         let prelude = Prelude {
             replacement: replacement.id,
             displaced: first.as_ref().map(|message| message.id),
-            chief: participant.role == "chief",
+            chief: participant.seat().coordinates(),
             since: self.now(),
             begun: false,
         };

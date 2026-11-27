@@ -191,7 +191,7 @@ impl Dispatcher {
         record: &Record,
         role: &RoleText,
     ) {
-        if participant.role != "chief" {
+        if !participant.seat().coordinates() {
             return;
         }
         let mut part = record.window.borrow_mut();

@@ -356,7 +356,7 @@ fn paused_answers_in(
     carried: &[MessageView],
 ) -> Result<Vec<i64>, LedgerError> {
     let mut paused = Vec::new();
-    if message.recipient_role == "chief" {
+    if message.recipient_seat().coordinates() {
         for row in std::iter::once(message).chain(carried) {
             if row.kind != "answer" {
                 continue;
@@ -527,7 +527,7 @@ pub(crate) fn admit(
         // handover mark can outlive it, so only the engine's explicit Enter uses the
         // original words without this check.
         if !again
-            && message.recipient_role == "chief"
+            && message.recipient_seat().coordinates()
             && (message.kind == "answer" || carried.iter().any(|row| row.kind == "answer"))
             && paused_answers_in(store, &message, &carried)?
                 != super::paused_answers::tell_pause_ways_on(store, message_id)?

@@ -54,7 +54,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
             let mut question_idle_generation = None;
             let question_holding = if request.method == hyper::Method::POST
                 && request.path == "/api/questions"
-                && participant.role != "chief"
+                && participant.seat().is_member()
             {
                 let mut ledger = context.ledger.borrow_mut();
                 if let Some(start) = identity.question_start {

@@ -666,7 +666,7 @@ const LIST: Shape = Shape {
 /// one is over. The chief's lane never is, and a lane with no task, which the
 /// list never prints, is none either.
 fn is_idle(lane: &Value, tasks: &[Value]) -> bool {
-    js::text(lane.get("role")) != "chief"
+    !cf_proto::seat::Seat::of(&js::text(lane.get("role"))).coordinates()
         && !tasks.is_empty()
         && tasks
             .iter()

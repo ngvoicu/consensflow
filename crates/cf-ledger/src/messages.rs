@@ -331,7 +331,7 @@ pub(crate) fn ask_naming(
         )?;
         if !question.urgent {
             let asker = store.participant_by_handle(project_id, from)?;
-            if !matches!(asker.role.as_str(), "chief" | "human") {
+            if asker.seat().is_member() {
                 crate::holding::bind(store, message.id, asker.id)?;
             }
         }

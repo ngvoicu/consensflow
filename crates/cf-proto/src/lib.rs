@@ -15,6 +15,7 @@ pub mod models;
 pub mod page;
 pub mod panes;
 pub mod questions;
+pub mod seat;
 pub mod specs;
 pub mod trace;
 pub mod wake_ups;

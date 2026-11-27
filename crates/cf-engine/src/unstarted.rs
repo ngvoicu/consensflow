@@ -192,7 +192,7 @@ impl Dispatcher {
             since: self.now(),
             rested_since: None,
             launch: true,
-            chief: participant.role == "chief",
+            chief: participant.seat().coordinates(),
             queued: false,
             free_since: None,
             turned: false,
@@ -205,7 +205,7 @@ impl Dispatcher {
             work: OnWork::default(),
             not_ready: None,
         };
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             // A chief's window the host would not kill is looked at again.
             let closed = match &pane {
                 Some(pane) => self.close_own(record, pane).await?,
@@ -290,7 +290,7 @@ impl Dispatcher {
             }
         };
         // The chief's window goes without taking its project with it: the chief is tried again.
-        let said = if participant.role == "chief" {
+        let said = if participant.seat().coordinates() {
             self.close_own(record, &pane).await?;
             say()
         } else {

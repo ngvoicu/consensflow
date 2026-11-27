@@ -868,7 +868,7 @@ impl Dispatcher {
             self.pay_with_words(record)?;
         }
         // A member's window that held no task's work holds this one's from now on.
-        let member = participant.is_some_and(|participant| participant.role != "chief");
+        let member = participant.is_some_and(|participant| participant.seat().is_member());
         if let Some(number) = begun.message.task_number.filter(|_| member) {
             record.window.borrow_mut().owner.get_or_insert(number);
         }

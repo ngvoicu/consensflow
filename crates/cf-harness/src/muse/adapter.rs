@@ -212,7 +212,7 @@ impl Adapter for MuseAdapter {
             argv.extend(integration.args);
             argv.extend(compaction_limit(launch.compaction));
             argv.extend(invocation.args);
-            if launch.role != "chief" {
+            if launch.seat().is_member() {
                 argv.push(NO_QUESTION_TOOL.to_owned());
             }
             Ok(Prepared {

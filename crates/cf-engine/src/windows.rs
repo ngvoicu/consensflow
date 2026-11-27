@@ -732,7 +732,7 @@ impl Dispatcher {
         // what waits for it stays queued for Switch chief
         // ([`Dispatcher::chief_model_from_record`]).
         let resolved;
-        let participant = if participant.role == "chief" && participant.needs_edit {
+        let participant = if participant.seat().coordinates() && participant.needs_edit {
             if !self.chief_model_from_record(participant, record).await? {
                 return Ok(());
             }
@@ -771,7 +771,7 @@ impl Dispatcher {
             prelude: None,
             role: None,
         };
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             conversation = self.conversation_to_go_on_with(participant).await?;
             let first =
                 self.chief_first(project, participant, conversation.as_ref(), compared.first)?;
@@ -792,7 +792,7 @@ impl Dispatcher {
             // A launch's first message is waited for by the launch's own time.
             rested_since: None,
             launch: true,
-            chief: participant.role == "chief",
+            chief: participant.seat().coordinates(),
             queued: false,
             free_since: None,
             turned: false,
@@ -1328,7 +1328,7 @@ impl Dispatcher {
     ) -> Result<Option<Planned>, EngineError> {
         // A member the update could not run on what it ran on (T-1202) opens no window on
         // its harness's default: its work goes back to the board, and the human hears why.
-        if participant.role != "chief" && participant.needs_edit {
+        if participant.seat().is_member() && participant.needs_edit {
             self.needs_an_edit(record, project, participant, delivering)?;
             return Ok(None);
         }
@@ -1344,7 +1344,7 @@ impl Dispatcher {
         }
         // The task the session's conversation was last given, before this launch's first
         // message is begun (`ownership`).
-        let before = if participant.role == "chief" {
+        let before = if participant.seat().coordinates() {
             None
         } else {
             self.seams.ledger.borrow().task_given(participant.id)?
@@ -1361,7 +1361,7 @@ impl Dispatcher {
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
         // as one that comes while the window is prepared is, and the launch is over.
-        let conversation = if participant.role == "chief" {
+        let conversation = if participant.seat().coordinates() {
             conversation
         } else {
             let found = self.conversation_to_go_on_with(participant).await?;
@@ -1406,7 +1406,7 @@ impl Dispatcher {
         };
         // The task whose work the window holds: its first message's, or what its
         // conversation was last given where it goes on with one.
-        let owner = if participant.role == "chief" {
+        let owner = if participant.seat().coordinates() {
             None
         } else {
             first.and_then(|first| first.task_number).or_else(|| {
@@ -1422,7 +1422,7 @@ impl Dispatcher {
         // message of its window: it goes back to its queue with its attempt, to go
         // in after the note that says the role. It is still what a launch that does
         // not come up fails ([`Dispatcher::launch_failed`]).
-        let (begun, role, prelude) = if participant.role == "chief" {
+        let (begun, role, prelude) = if participant.seat().coordinates() {
             (begun, role, prelude)
         } else {
             let resumed = conversation
@@ -1449,7 +1449,7 @@ impl Dispatcher {
         };
         // A chief whose last launch found its model gone starts on its harness's default.
         let started;
-        let participant = if participant.role == "chief" {
+        let participant = if participant.seat().coordinates() {
             match self
                 .start_on_default(record, project, participant, &*adapter, delivering)
                 .await?
@@ -1466,7 +1466,7 @@ impl Dispatcher {
         // A member runs on its own harness, model and effort (harness-models). A chief
         // runs on what its harness's record says it ran on last, or the model and effort
         // picked for it (CHF-05).
-        let runs = if participant.role == "chief" {
+        let runs = if participant.seat().coordinates() {
             self.chief_runs(participant, &*adapter, resume).await
         } else {
             ChiefRuns::picked(participant)
@@ -1492,7 +1492,7 @@ impl Dispatcher {
         };
         // What a chief is told of its role by this launch, which a note tells it the change of
         // when the human changes it while the window is open (`role_news`).
-        let told = (participant.role == "chief")
+        let told = (participant.seat().coordinates())
             .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));
         // The folder the window works in, as the system names it.
         let directory = workspace(project);
@@ -1511,7 +1511,7 @@ impl Dispatcher {
             resume,
             previous_gone,
             message: text.as_deref().filter(|_| !delivered),
-            agent: if participant.role == "chief" {
+            agent: if participant.seat().coordinates() {
                 runs.agent()
             } else {
                 Some(runs.member_agent(participant.designer))
@@ -1528,14 +1528,14 @@ impl Dispatcher {
             // changed (T-1439).
             compaction: project
                 .compaction
-                .filter(|_| participant.role != "chief")
+                .filter(|_| participant.seat().is_member())
                 .map(launch_size),
             // The project leaves Claude Code's own advisor tool off until the human ticks it in
             // Project settings: every member's launch is told to switch it off, at launch and on
             // resume alike, and each adapter acts on it by its own harness (only Claude Code has
             // such a tool); the chief's launch never is, and keeps its harness's own setting
             // (2026-11-10).
-            advisor_off: !project.advisor_tool && participant.role != "chief",
+            advisor_off: !project.advisor_tool && participant.seat().is_member(),
             // The project leaves Claude Code's prompt suggestion off until the human ticks it in
             // Project settings, and it is every window's, the chief's as a member's: each launch
             // is told to switch it off, at launch and on resume alike, and each adapter acts on
@@ -1557,7 +1557,7 @@ impl Dispatcher {
         let prepared = cf_harness::while_wanted(wanted, returning(adapter.prepare(&launch)))
             .await
             .map_err(|cause| EngineError::said("launch-failed", cause))?;
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             self.chief_launched(participant, &runs)?;
         }
         Ok(Some(Planned {
@@ -1686,7 +1686,7 @@ impl Dispatcher {
             }
             return Ok(true);
         }
-        let Some(delivering) = delivering.filter(|_| participant.role != "chief") else {
+        let Some(delivering) = delivering.filter(|_| participant.seat().is_member()) else {
             return Ok(false);
         };
         let holds = {
@@ -1759,7 +1759,7 @@ impl Dispatcher {
     ) -> Result<Option<String>, EngineError> {
         let Some(number) = message
             .task_number
-            .filter(|_| message.recipient_role != "chief")
+            .filter(|_| message.recipient_seat().is_member())
         else {
             return Ok(None);
         };
@@ -1837,7 +1837,7 @@ impl Dispatcher {
         if !self.in_open_project(participant.project_id)? {
             return self.ended_closed(record, participant, delivering);
         }
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             if record.window.borrow().coming.is_some() {
                 if let Some(delivering) = delivering {
                     self.give_back(delivering.message, because)?;
@@ -1974,7 +1974,7 @@ impl Dispatcher {
         // (the ledger's `next_delivery`), and is the window's to read.
         let (Some(number), true, true) = (
             found.task_number,
-            participant.role != "chief",
+            participant.seat().is_member(),
             found.kind == "task",
         ) else {
             return true;
@@ -2009,7 +2009,7 @@ impl Dispatcher {
                 .borrow_mut()
                 .launch_called_off(delivering.message)?;
         }
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             self.withdraw_replacements(participant)?;
             record.window.borrow_mut().coming = None;
         }

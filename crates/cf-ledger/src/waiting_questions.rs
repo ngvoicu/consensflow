@@ -50,14 +50,20 @@ pub(crate) fn other_holding_sql(message: &str) -> String {
 /// an answer at the gate stands, even though the member still awaits approval.
 fn is_open() -> String {
     format!(
-        "q.kind = 'question' AND q.urgent = 0
+        concat!(
+            "q.kind = 'question' AND q.urgent = 0
          AND ((q.state IN ('delivered', 'read') AND q.delivered_at IS NOT NULL)
            OR (q.state = 'delivering' AND EXISTS (SELECT 1 FROM question_reminder early
                    WHERE early.question_id=q.id AND early.first_read_at IS NOT NULL)))
-         AND s.role NOT IN ('chief', 'human')
-         AND s.left_at IS NULL AND r.role = 'chief' AND r.left_at IS NULL
+         AND s.role NOT IN ",
+            cf_proto::non_member_roles_sql!(),
+            "
+         AND s.left_at IS NULL AND r.role IN ",
+            cf_proto::coordinator_roles_sql!(),
+            " AND r.left_at IS NULL
          AND NOT {} AND ({} IS NULL OR (t.id IS NOT NULL AND t.deleted_at IS NULL
-             AND t.state NOT IN ('accepted', 'cancelled', 'failed')))",
+             AND t.state NOT IN ('accepted', 'cancelled', 'failed')))"
+        ),
         has_standing_answer("q"),
         crate::holding::task_for_question_sql("q")
     )
@@ -114,7 +120,8 @@ pub(crate) fn waiting(store: &Store, project: i64) -> Result<Vec<QuestionWait>, 
 /// holds a higher id than the close's place (a queued or gated one counts, one
 /// that failed or was taken back does not). Read, never kept, so each end of the
 /// wait ends the reminders with no step of its own. The clock is not part of it.
-const CLOSED_FROM: &str = "FROM question_wait w
+const CLOSED_FROM: &str = concat!(
+    "FROM question_wait w
     JOIN question_binding b ON b.question_id=w.question_id AND b.closed=2
     JOIN message q ON q.id=w.question_id AND q.kind='question'
     JOIN task t ON t.id=b.task_id AND t.project_id=q.project_id AND t.assignee_id=b.participant_id
@@ -123,12 +130,17 @@ const CLOSED_FROM: &str = "FROM question_wait w
     JOIN participant r ON r.id=q.recipient_id AND r.project_id=q.project_id
     LEFT JOIN message n ON n.id=w.note_id
     WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working')
-      AND s.left_at IS NULL AND s.role NOT IN ('chief','human')
-      AND r.role='chief' AND r.left_at IS NULL
+      AND s.left_at IS NULL AND s.role NOT IN ",
+    cf_proto::non_member_roles_sql!(),
+    "
+      AND r.role IN ",
+    cf_proto::coordinator_roles_sql!(),
+    " AND r.left_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM message a JOIN participant c ON c.id=a.sender_id
             WHERE c.role='chief' AND a.recipient_id=b.participant_id AND a.task_id=t.id
               AND a.kind IN ('task','note') AND a.id > w.after_id
-              AND a.state IN ('queued','gated','delivering','delivered','read'))";
+              AND a.state IN ('queued','gated','delivering','delivered','read'))"
+);
 
 /// When a closed question's reminders are counted from: the update, for a wait
 /// an earlier build left with no note the ledger names; else when the chief first

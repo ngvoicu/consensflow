@@ -211,12 +211,16 @@ fn hand_brief_as(store: &mut Store, message: i64, launched: bool) -> Result<(), 
     let brief: Option<(i64, i64)> = store
         .db
         .query_row(
-            "SELECT m.recipient_id, m.task_id FROM message m
+            concat!(
+                "SELECT m.recipient_id, m.task_id FROM message m
          JOIN task t ON t.id = m.task_id AND t.project_id = m.project_id
          JOIN participant p ON p.id = m.recipient_id AND p.project_id = m.project_id
          WHERE m.id = ? AND m.kind = 'task' AND t.assignee_id = m.recipient_id
-           AND p.role NOT IN ('chief', 'human') AND p.left_at IS NULL AND t.deleted_at IS NULL
-           AND t.state NOT IN ('accepted', 'cancelled', 'failed')",
+           AND p.role NOT IN ",
+                cf_proto::non_member_roles_sql!(),
+                " AND p.left_at IS NULL AND t.deleted_at IS NULL
+           AND t.state NOT IN ('accepted', 'cancelled', 'failed')"
+            ),
             [message],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -323,12 +327,16 @@ pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), Ledg
     let brief: Option<(i64, i64, bool)> = store
         .db
         .query_row(
-            "SELECT m.recipient_id, m.task_id,
+            concat!(
+                "SELECT m.recipient_id, m.task_id,
            t.assignee_id IS m.recipient_id AND p.left_at IS NULL AND t.deleted_at IS NULL
              AND t.state NOT IN ('accepted', 'cancelled', 'failed')
          FROM message m JOIN task t ON t.id = m.task_id AND t.project_id = m.project_id
          JOIN participant p ON p.id = m.recipient_id AND p.project_id = m.project_id
-         WHERE m.id = ? AND m.kind = 'task' AND p.role NOT IN ('chief', 'human')",
+         WHERE m.id = ? AND m.kind = 'task' AND p.role NOT IN ",
+                cf_proto::non_member_roles_sql!(),
+                ""
+            ),
             [message],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -927,7 +935,7 @@ pub(crate) fn return_answer(
             to: recipient.id,
             kind: "note",
             body: &body,
-            urgent: recipient.role != "chief",
+            urgent: !recipient.seat().coordinates(),
             ..Queued::default()
         },
     )?;
@@ -1145,7 +1153,7 @@ pub(crate) fn close_project_question(
     ).optional()?;
     type Notice = (i64, i64, i64, String, i64, String, String, bool);
     let notice: Option<Notice> = store.db.query_row(
-        "SELECT q.project_id, q.sender_id, q.recipient_id, sender.handle, t.number, q.body, q.state,
+        concat!("SELECT q.project_id, q.sender_id, q.recipient_id, sender.handle, t.number, q.body, q.state,
                 (q.delivered_at IS NOT NULL OR EXISTS (SELECT 1 FROM question_reminder r
                    WHERE r.question_id=q.id AND r.first_read_at IS NOT NULL))
          FROM message q JOIN question_binding b ON b.question_id=q.id
@@ -1154,9 +1162,9 @@ pub(crate) fn close_project_question(
          JOIN participant recipient ON recipient.id=q.recipient_id AND recipient.project_id=q.project_id
          WHERE q.id=? AND b.closed=0 AND q.kind='question' AND q.urgent=0
            AND q.state IN ('queued','delivering','gated','delivered','read')
-           AND sender.role NOT IN ('chief','human') AND recipient.role='chief'
+           AND sender.role NOT IN ", cf_proto::non_member_roles_sql!(), " AND recipient.role IN ", cf_proto::coordinator_roles_sql!(), "
            AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to=q.id AND a.kind='answer'
-                           AND a.state NOT IN ('cancelled','failed'))",
+                           AND a.state NOT IN ('cancelled','failed'))"),
         [question], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?)),
     ).optional()?;
     if wait.is_some() {

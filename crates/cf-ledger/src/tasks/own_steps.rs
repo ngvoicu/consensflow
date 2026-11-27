@@ -24,7 +24,10 @@ pub(super) fn is_own_step(store: &Store, task: &TaskRow) -> Result<bool, LedgerE
     if task.assignee_id != Some(task.requester_id) {
         return Ok(false);
     }
-    Ok(store.participant_row(task.requester_id)?.role == "chief")
+    Ok(store
+        .participant_row(task.requester_id)?
+        .seat()
+        .coordinates())
 }
 
 /// Why what of the step `task` had not reached its chief, `chief`, goes no further.

@@ -312,7 +312,7 @@ pub(crate) fn note(
         )?;
         // A note first written after the task moved on is already over: it must not
         // put an obsolete pause on the task's line.
-        if shown && requester.role == "chief" && moved {
+        if shown && requester.seat().coordinates() && moved {
             let at = store.at();
             store.db.execute(
                 "UPDATE message SET receipt = json_set(receipt, '$.over', ?) WHERE id = ?",
@@ -335,17 +335,21 @@ fn answered_on_board(
     Ok(store
         .db
         .query_row(
-            "SELECT a.id FROM message q
+            concat!(
+                "SELECT a.id FROM message q
            JOIN participant member ON member.id = q.recipient_id
            JOIN participant requester ON requester.id = q.sender_id
            JOIN message a ON a.reply_to = q.id
           WHERE q.id = ?1 AND q.project_id = ?2 AND q.task_id = ?3
             AND q.kind = 'question' AND q.urgent = 1
-            AND q.sender_id = ?4 AND requester.role = 'chief' AND member.handle = ?5
+            AND q.sender_id = ?4 AND requester.role IN ",
+                cf_proto::coordinator_roles_sql!(),
+                " AND member.handle = ?5
             AND a.project_id = q.project_id AND a.task_id = q.task_id
             AND a.sender_id = q.recipient_id AND a.recipient_id = q.sender_id
             AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read')
-          ORDER BY a.id DESC LIMIT 1",
+          ORDER BY a.id DESC LIMIT 1"
+            ),
             params![tell, task.project_id, task.id, task.requester_id, handle],
             |row| row.get(0),
         )
@@ -454,14 +458,17 @@ pub(crate) fn answer_to_current_pause(
     Ok(store
         .db
         .query_row(
-            "SELECT t.number FROM message a
+            concat!(
+                "SELECT t.number FROM message a
            JOIN message q ON q.id = a.reply_to
            JOIN task t ON t.id = q.task_id AND a.task_id = t.id
            JOIN participant chief ON chief.id = a.recipient_id
            JOIN event sent ON sent.project_id = q.project_id AND sent.kind = 'message.sent'
               AND json_valid(sent.data)
               AND json_extract(sent.data, '$.message') = q.id
-          WHERE a.id = ?1 AND a.kind = 'answer' AND chief.role = 'chief'
+          WHERE a.id = ?1 AND a.kind = 'answer' AND chief.role IN ",
+                cf_proto::coordinator_roles_sql!(),
+                "
             AND q.kind = 'question' AND q.urgent = 1
             AND q.sender_id = a.recipient_id AND q.recipient_id = a.sender_id
             AND t.state = 'paused' AND t.assignee_id = q.recipient_id
@@ -470,7 +477,8 @@ pub(crate) fn answer_to_current_pause(
                   WHERE moved.project_id = t.project_id AND moved.id > sent.id
                     AND moved.kind = 'task.state' AND json_valid(moved.data)
                     AND json_extract(moved.data, '$.task') = t.number)
-          LIMIT 1",
+          LIMIT 1"
+            ),
             [answer],
             |row| row.get(0),
         )

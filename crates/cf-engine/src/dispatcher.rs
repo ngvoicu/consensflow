@@ -280,7 +280,7 @@ impl Dispatcher {
             self.require_adapter(&member.harness)?;
         }
         let project = self.seams.ledger.borrow_mut().create_project(&request)?;
-        if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
+        if let Some(chief) = project.participants.iter().find(|p| p.seat().is_chief()) {
             self.open_soon(chief.id, None).await;
         }
         self.project_now(project.id)
@@ -301,7 +301,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .create_project_with_staff(&source)?;
-        if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
+        if let Some(chief) = project.participants.iter().find(|p| p.seat().is_chief()) {
             self.open_soon(chief.id, None).await;
         }
         self.project_now(project.id)
@@ -1047,7 +1047,7 @@ impl Dispatcher {
         if self.is_out(&owner) {
             return Ok(());
         }
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             self.went_on_by_itself(&project, participant, &observed)?;
         }
         let working = self
@@ -1309,7 +1309,7 @@ impl Dispatcher {
             let own = record.window.borrow().own_exit_of(pane).is_some();
             self.settle_exited_launch(&record, &project, &participant, &prelude, &because, own)?;
         }
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             // What the chief's window left running is the human's to know: no task's giver
             // is there to tell.
             self.tell_human_left_running(
@@ -1611,7 +1611,7 @@ impl Dispatcher {
         // to nothing: what waits for it stays queued for the chief the human switches in,
         // and no delivery is begun to be given back, nor its harness read, pass after pass
         // (Calliope's P2a, T-994). The launch's own hold stays behind it.
-        if participant.role == "chief" && held_for_no_default(participant) {
+        if participant.seat().coordinates() && held_for_no_default(participant) {
             return Ok(());
         }
         // A chief whose window keeps failing to start is tried again ever more slowly.
@@ -1626,7 +1626,7 @@ impl Dispatcher {
         // queued stayed closed (Sol and Astra on round 2 of the chief's restart). A turn
         // its record holds with no end is told as cut, once, as the human's Resume tells
         // one the app's quit cut, and the chief goes on from it.
-        let reopens = participant.role == "chief"
+        let reopens = participant.seat().coordinates()
             && record
                 .window
                 .borrow()
@@ -1652,7 +1652,7 @@ impl Dispatcher {
             .await;
             return Ok(());
         }
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             return Ok(());
         }
         // A member's session is its task's: with the window gone and nothing due to it, nobody is doing the work.
@@ -1786,7 +1786,7 @@ impl Dispatcher {
                     }
                     // A chief read at work while a message has waited ten minutes for it: its
                     // lane says so, as the human is told (`held_not_at_rest`, T-958).
-                    None if state == ActivityState::Working && participant.role == "chief" => {
+                    None if state == ActivityState::Working && participant.seat().coordinates() => {
                         match self.held_long(record) {
                             Some(message) => Activity::because(
                                 state,
@@ -1826,7 +1826,7 @@ impl Dispatcher {
         self.tell_drift(project, participant, record, &observed)?;
         // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
         // chief has no task to hold and try again, and a hold would lose its turn unheard.
-        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+        let chief_busy = participant.seat().coordinates() && busy_turn(&observed);
         if !chief_busy && self.refused_here(record, &owner) {
             // A count at its limit with the turn's proven answer: the answer is collected
             // first, then main's hold (`turn_retry`).
@@ -1888,7 +1888,7 @@ impl Dispatcher {
         }
         // A turn that ended with the window's answer ends the outage its last failure told of.
         self.answered_again(record, &observed);
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {
                 return Ok(());
@@ -1991,7 +1991,7 @@ impl Dispatcher {
         if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
-            if participant.role == "chief" {
+            if participant.seat().is_chief() {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;
@@ -2041,7 +2041,7 @@ impl Dispatcher {
         } else {
             // A chief's window not at rest holds its queue: from ten minutes on, the human
             // is told what waits and why, and its lane says it (`held_not_at_rest`, T-958).
-            if participant.role == "chief" && project.state == "open" {
+            if participant.seat().coordinates() && project.state == "open" {
                 self.held_not_at_rest(record, &observed, drawing).await?;
             }
             if free && self.ready_while_drawing(record) {
@@ -2095,7 +2095,7 @@ impl Dispatcher {
         self.set_activity(record, Activity::because(ActivityState::Out, words))?;
         // A refusal of its own, dated before its member was marked out, holds the
         // window's work as the first did, with no note of its own.
-        if participant.role != "chief" && self.refused_unhandled(record) {
+        if participant.seat().is_member() && self.refused_unhandled(record) {
             self.handled(record);
             self.hold_work(project, participant, owner, &until, None, unwell)?;
             self.changed();
@@ -2106,7 +2106,7 @@ impl Dispatcher {
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
             prelude.since = self.now();
         }
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {
                 self.tell_resume_wait(project, participant, record)?;
@@ -2130,7 +2130,7 @@ impl Dispatcher {
         let chief = found
             .participants
             .iter()
-            .find(|p| p.role == "chief")
+            .find(|p| p.seat().is_chief())
             .cloned()
             .ok_or_else(|| {
                 EngineError::said("no-chief", format!("no chief in project {project}"))
@@ -2244,7 +2244,7 @@ impl Dispatcher {
         if let Some(unwell) = unwell {
             self.tell_unwell(project, participant, &marked, unwell)?;
         }
-        if participant.role != "chief" {
+        if participant.seat().is_member() {
             self.close_if_free(record).await?;
         }
         self.changed();

@@ -692,7 +692,7 @@ fn links(asked: Option<&Value>, field: &str) -> Result<Option<Links>, Failure> {
 /// Whether the window may do what only the chief or the one who gave the task
 /// may: read what it did, and move it.
 pub(super) fn may_move(caller: &Caller, requester: &str) -> bool {
-    caller.participant.role == "chief" || requester == caller.participant.handle
+    caller.participant.seat().coordinates() || requester == caller.participant.handle
 }
 
 /// A task route's last word, as the path spells it.

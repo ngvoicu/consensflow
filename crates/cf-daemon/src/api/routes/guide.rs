@@ -12,7 +12,7 @@ pub(super) async fn handle(
     caller: &Caller,
     _request: Request,
 ) -> Result<Answer, Failure> {
-    if caller.participant.role != "chief" {
+    if !caller.participant.seat().coordinates() {
         return Err(Failure::refuse(
             403,
             "not-the-chief",

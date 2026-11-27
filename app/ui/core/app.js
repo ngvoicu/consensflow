@@ -8,6 +8,7 @@ import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { poolName, readRoles } from './roles.js'
+import { coordinates, holdsMemberSeat } from './seat.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
@@ -470,7 +471,7 @@ function waitingMemberOf(task) {
   if (assignee === undefined) return null
   const handle = assignee.participant.member ?? assignee.participant.handle
   const owner = lanes.find((lane) => lane.participant.handle === handle)
-  if (owner === undefined || ['chief', 'human'].includes(owner.participant.role)) return null
+  if (owner === undefined || !holdsMemberSeat(owner.participant)) return null
   return { participant: owner.participant, busy: owner.busy ?? null }
 }
 
@@ -496,7 +497,7 @@ function terminalOf(task) {
   const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
   if (lane === undefined) return null
   const { participant } = lane
-  if (participant.member === null && participant.role !== 'chief') return null
+  if (participant.member === null && !coordinates(participant)) return null
   return { participant, closed: lane.pane === null, hidden: lane.hidden === true }
 }
 

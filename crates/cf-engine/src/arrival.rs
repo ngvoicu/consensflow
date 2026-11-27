@@ -720,7 +720,7 @@ impl Dispatcher {
                 who = message.recipient,
             ),
         }];
-        if message.recipient_role != "chief" && message.recipient != to {
+        if !message.recipient_seat().is_chief() && message.recipient != to {
             notes.push(NewNote {
                 from: None,
                 to: message.recipient.clone(),

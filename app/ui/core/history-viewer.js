@@ -1,6 +1,7 @@
 import { button, element } from '../dom.js'
 import { itemLabel } from './board.js'
 import { render } from './markdown.js'
+import { coordinates } from './seat.js'
 
 /** The most characters a search holds: the daemon refuses more. */
 const FIND_MOST = 1_000
@@ -466,7 +467,7 @@ function clock(iso) {
  * two words after, which it leaves out.
  */
 function formerly(participant) {
-  if (participant.role === 'chief') return []
+  if (coordinates(participant)) return []
   const session = participant.session ? `-${participant.session}` : null
   const left = (participant.formerHandles ?? []).map((handle) =>
     session !== null && handle.endsWith(session) ? handle.slice(0, -session.length) : handle,

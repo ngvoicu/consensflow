@@ -2,6 +2,7 @@ import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
 import { aPool, roleIds, roleLabel, takesNoTier } from './roles.js'
+import { coordinates, holdsMemberSeat, isChief } from './seat.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -198,10 +199,7 @@ function stateAge(iso, now = Date.now()) {
  * neither one of a member's sessions, nor the chief, nor the human.
  */
 export const isMember = (participant) =>
-  participant.harness !== null &&
-  participant.member === null &&
-  participant.role !== 'chief' &&
-  participant.role !== 'human'
+  participant.harness !== null && participant.member === null && holdsMemberSeat(participant)
 
 /** The role a member's task is for: its pool's. */
 const roleOf = (task, roles) => task.pool ?? roles[0]
@@ -267,7 +265,7 @@ function boardRows(board) {
   const ordered = laneOrder(board.lanes).filter(
     (lane) =>
       lane.participant.role !== 'human' &&
-      (lane.participant.role !== 'chief' || rowTasks(lane, board).length > 0),
+      (!coordinates(lane.participant) || rowTasks(lane, board).length > 0),
   )
   const members = new Set(
     ordered.filter((lane) => isMember(lane.participant)).map((lane) => lane.participant.handle),
@@ -497,12 +495,12 @@ function boardGroups(board) {
   const groups = new Map()
   for (const row of rows) {
     const { role } = row.participant
-    if (role === 'chief') continue
+    if (coordinates(row.participant)) continue
     if (!groups.has(role)) groups.set(role, [])
     groups.get(role).push(row)
   }
   return {
-    chief: rows.filter((row) => row.participant.role === 'chief'),
+    chief: rows.filter((row) => coordinates(row.participant)),
     groups: [...groups]
       .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
       .map(([role, members]) => ({ role, rows: members })),
@@ -602,7 +600,7 @@ function groupMarks(rows, board, now) {
 /** The human and the chief first, then each member with its sessions right under it. */
 export function laneOrder(lanes) {
   const rank = ({ participant }) => [
-    participant.role === 'chief' ? 0 : 1,
+    coordinates(participant) ? 0 : 1,
     participant.memberId ?? participant.id,
     participant.memberId === null ? 0 : participant.id,
   ]
@@ -795,7 +793,7 @@ const identityParts = (participant, inLane = false) => {
         part('harness', harnessLabel(participant)),
         ...runs,
       ]
-    : participant.role === 'chief'
+    : coordinates(participant)
       ? [
           part('harness', HARNESS_NAMES[participant.harness] ?? participant.harness),
           part('model', chiefModel(participant)),
@@ -874,7 +872,7 @@ export function laneStatus(lane, board, now) {
     ]
   }
   if (
-    participant.role === 'chief' &&
+    coordinates(participant) &&
     activity?.state === 'closed' &&
     activity.reason?.startsWith("The chief's window could not be opened: ")
   ) {
@@ -882,7 +880,7 @@ export function laneStatus(lane, board, now) {
     return ['closed', `${reason} Close then Resume the project to try again.`]
   }
   // A meeting with the human: what comes for the chief waits until its Stop.
-  if (participant.role === 'chief' && board.project?.meeting) {
+  if (isChief(participant) && board.project?.meeting) {
     const held = board.held?.length ?? 0
     return [
       'meeting',
@@ -898,14 +896,14 @@ export function laneStatus(lane, board, now) {
   const holding = holdingWords(lane)
   // A chief the update could not tell the model of (T-1202), whose harness's record named
   // none: its window stays closed until a model is picked for it, and nothing is lost.
-  if (participant.needsEdit && participant.role === 'chief') {
+  if (participant.needsEdit && coordinates(participant)) {
     return [
       'missing',
       "Needs a model: ConsensFlow couldn't tell which model this chief used before the update. Pick one with Switch chief; what was written to the chief waits until then",
     ]
   }
   // A member the update could not run on what it ran on (T-1202) runs nothing until edited.
-  if (participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]
+  if (participant.needsEdit && !coordinates(participant)) return ['missing', NEEDS_EDIT]
   const out = outWords(lane, now)
   if (out !== null) {
     const backup = lane.backupReady?.[participant.role]
@@ -1094,7 +1092,7 @@ export class BoardView {
     const held = board.held ?? []
     // The chief waits for the human only in its terminal: its own question,
     // or a prompt. Messages for the chief stay its own, however long it waits.
-    const chief = board.lanes.find((lane) => lane.participant.role === 'chief')
+    const chief = board.lanes.find((lane) => coordinates(lane.participant))
     const asking = acts(board) && chief?.activity?.state === 'waiting' ? chief : null
     const count = waiting.length + (asking === null ? 0 : 1)
     // The human's notes not yet read: each reads and is marked read, in its
@@ -1483,7 +1481,7 @@ export class BoardView {
     head.append(title)
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
-    if (participant.role === 'chief') return head
+    if (coordinates(participant)) return head
     const meta = identityLine(participant, 'row-meta')
     // A backup's session is marked as the team's backup is (T-1847), not named after it again.
     if (participant.ofBackup) meta.prepend(element('span', 'team-kind', 'backup'))
@@ -2068,7 +2066,9 @@ export class TaskDrawer {
         ),
       )
     }
-    if (PAUSABLE.includes(task.state) && task.assignee !== 'chief') {
+    // A coordinator's own task shows its terminal and none of the member's controls.
+    const coordinators = this.#terminal !== null && coordinates(this.#terminal.participant)
+    if (PAUSABLE.includes(task.state) && !coordinators) {
       actions.push(button('Pause', 'quiet-button', on(this.#actions.onPause)))
     }
     if (task.state === 'paused') {
@@ -2100,7 +2100,7 @@ export class TaskDrawer {
     // ConsensFlow raised as the question it waits on (T-1119); the question is withdrawn. It ends nothing the turn left running, which ends with
     // its window, or outlives it where the host cannot tell what is the window's: the
     // button promises no end of it.
-    if (FINISHABLE.includes(task.state) && task.assignee !== null && task.assignee !== 'chief') {
+    if (FINISHABLE.includes(task.state) && task.assignee !== null && !coordinators) {
       actions.push(
         button(
           'Finish',

@@ -206,7 +206,7 @@ impl Dispatcher {
         prelude: Option<&Prelude>,
     ) -> Option<Delivering> {
         let message = prelude?.displaced?;
-        (participant.role != "chief").then(|| Delivering {
+        (participant.seat().is_member()).then(|| Delivering {
             message,
             since: self.now(),
             // A launch's first message is waited for by the launch's own time.
@@ -268,7 +268,7 @@ impl Dispatcher {
         because: &str,
         own: bool,
     ) -> Result<(), EngineError> {
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             let went_by_itself = project.state == "open" && !own;
             return if went_by_itself {
                 self.launch_failed(record, project, participant, None, because)
@@ -317,7 +317,7 @@ impl Dispatcher {
             Some("queued") if slow => "the window was never ready for the note that says its role",
             _ => return Ok(false),
         };
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             self.abandon_launch(project, participant, record, because)
                 .await?;
             return Ok(true);
@@ -356,7 +356,7 @@ impl Dispatcher {
         };
         let said = self.unstarted_because(record, because, &shown);
         let failing = self.displaced(participant, Some(&prelude));
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             // The chief's window goes without taking its project with it, and the
             // chief is tried again. A window the host would not kill is still its
             // window, under the role it has: the launch is looked at again at the

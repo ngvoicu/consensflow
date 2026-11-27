@@ -379,7 +379,7 @@ impl Dispatcher {
         let Some(moved) = current
             .participants
             .iter()
-            .find(|participant| participant.role == "chief")
+            .find(|participant| participant.seat().is_chief())
             .cloned()
         else {
             return Ok(());

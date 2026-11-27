@@ -9,9 +9,7 @@ use serde_json::{json, Map, Value};
 
 use super::{delivery_body, m_list, release_ready, require_task_state, task_by_id, task_row_by_id};
 use crate::messages::{leave_pause_notes, transfer, Afterwards};
-use crate::model::{
-    self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, PURPOSES,
-};
+use crate::model::{self, title_of, LedgerError, ACTIVE_TASK_STATES, MAX_BODY, PURPOSES};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::roles::{self, a_pool, pool_name, Role};
 use crate::staff::{
@@ -341,7 +339,7 @@ pub(crate) fn create_task(
     let pool = request.pool.as_deref().unwrap_or_default();
     store.write(|store| {
         let requester = store.participant_by_handle(project_id, &request.from)?;
-        if !COORDINATOR_ROLES.contains(&requester.role.as_str()) {
+        if !requester.seat().gives_tasks() {
             return Err(LedgerError::refused_with(
                 "not-a-coordinator",
                 format!(
@@ -352,7 +350,7 @@ pub(crate) fn create_task(
             ));
         }
         // Advice is the chief's alone to ask: the human gives the chief work, not its advisors.
-        if pool == roles::ADVISOR.id && !named && requester.role != "chief" {
+        if pool == roles::ADVISOR.id && !named && !requester.seat().coordinates() {
             return Err(LedgerError::refused_with(
                 "advice-for-the-chief",
                 "only the chief asks an advisor",

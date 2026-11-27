@@ -19,7 +19,6 @@ use crate::views::ParticipantRow;
 
 /// Who hands out work and hears when the staff changes: the human and the chief.
 pub const COORDINATOR_HANDLES: [&str; 2] = ["human", "chief"];
-pub const COORDINATOR_ROLES: [&str; 2] = ["human", "chief"];
 pub const TIERS: [&str; 4] = ["critical", "complex", "standard", "light"];
 pub const PURPOSES: [&str; 4] = [
     "critical-review",

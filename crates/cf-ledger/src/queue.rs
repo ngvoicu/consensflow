@@ -185,7 +185,7 @@ pub(crate) fn send(
         let recipient = store.participant_by_handle(project_id, message.to)?;
         let shown = message
             .shown
-            .filter(|_| message.from.is_none() && recipient.role == "chief");
+            .filter(|_| message.from.is_none() && recipient.seat().coordinates());
         let task_id = message
             .task
             .map(|task| store.task_row(project_id, task).map(|row| row.id))

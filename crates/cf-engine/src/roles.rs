@@ -114,8 +114,7 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
         .participants
         .iter()
         .filter(|member| {
-            member.role != "chief"
-                && member.role != "human"
+            member.seat().is_member()
                 && member.harness.is_some()
                 && member.member_id.is_none()
                 && member.backup_of.is_none()
@@ -217,10 +216,11 @@ fn built(
     mac: bool,
 ) -> Result<String, RoleError> {
     // The staff's members, who have one window a task, hold the roles of the ledger's table.
-    if role != "chief" && !cf_ledger::roles::is_role(role) {
-        return Err(RoleError::Unknown(role.to_owned()));
-    }
-    if role != "chief" {
+    let seat = match cf_proto::seat::Seat::parse(role) {
+        Some(seat) if seat.is_chief() || seat.is_member() => seat,
+        _ => return Err(RoleError::Unknown(role.to_owned())),
+    };
+    if seat.is_member() {
         return member::text(role, cf, mac);
     }
     if own_hands {
@@ -324,7 +324,7 @@ pub fn with_staff_rules(instructions: String, role: &str, rules: Option<&str>) -
     let Some(rules) = rules else {
         return instructions;
     };
-    let said = if role == "chief" {
+    let said = if cf_proto::seat::Seat::of(role).coordinates() {
         STAFF_RULES_FOR_THE_CHIEF
     } else {
         STAFF_RULES_FOR_A_MEMBER

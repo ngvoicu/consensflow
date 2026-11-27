@@ -20,7 +20,8 @@ pub(crate) const MESSAGE_SELECT: &str = "
 
 /// A task with its requester's and assignee's handles, the assignee's member
 /// when it is a session, and the tasks it needs with their states.
-pub(crate) const TASK_SELECT: &str = "
+pub(crate) const TASK_SELECT: &str = concat!(
+    "
   SELECT t.*, q.handle AS requester, a.handle AS assignee,
          am.handle AS assignee_member, a.left_at AS assignee_left_at,
          (SELECT json_group_array(json_object('number', d.number, 'state', d.state))
@@ -46,7 +47,9 @@ pub(crate) const TASK_SELECT: &str = "
            ORDER BY r.id DESC LIMIT 1) AS retry,
          (SELECT h.body FROM message h JOIN participant hp ON hp.id = h.recipient_id
            WHERE t.held_until IS NOT NULL AND h.task_id = t.id AND h.sender_id IS NULL
-             AND h.kind = 'note' AND hp.role = 'chief'
+             AND h.kind = 'note' AND hp.role IN ",
+    cf_proto::coordinator_roles_sql!(),
+    "
              AND h.state IN ('queued', 'delivering', 'delivered', 'read')
              AND NOT (json_valid(h.receipt) AND json_extract(h.receipt, '$.shown') IS NOT NULL)
              AND h.body LIKE 'T-' || t.number || ' waits with @%'
@@ -64,7 +67,8 @@ pub(crate) const TASK_SELECT: &str = "
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
-  LEFT JOIN participant am ON am.id = a.member_id";
+  LEFT JOIN participant am ON am.id = a.member_id"
+);
 
 /// A participant with its member's handle, when it is a member's session.
 pub(crate) const PARTICIPANT_SELECT: &str = "
@@ -106,6 +110,13 @@ pub(crate) struct ParticipantRow {
     pub(crate) gone_model: Option<String>,
     pub(crate) designer: i64,
     pub(crate) member_handle: Option<String>,
+}
+
+impl ParticipantRow {
+    /// The seat it holds on the board.
+    pub(crate) fn seat(&self) -> cf_proto::seat::Seat {
+        cf_proto::seat::Seat::of(&self.role)
+    }
 }
 
 impl ParticipantRow {
@@ -179,8 +190,7 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
         agent: row.agent.clone(),
         harness: row.harness.clone(),
         // A member's name, or a window's, that holds its model: the card says no more of it.
-        name_apart: row.role != "human"
-            && row.role != "chief"
+        name_apart: row.seat().is_member()
             && !crate::handles::names_its_model(
                 &row.handle,
                 model_name.as_deref(),

@@ -289,7 +289,7 @@ impl Adapter for CodexAdapter {
             )
             .await??;
             let mut args = Vec::new();
-            if launch.role != "chief" {
+            if launch.seat().is_member() {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
             }
             args.extend(WINDOW.map(str::to_owned));

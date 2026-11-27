@@ -17,7 +17,7 @@ pub(super) async fn ask(
     mut request: Request,
 ) -> Result<Answer, Failure> {
     // The human works with the chief in its terminal and is asked there.
-    if caller.participant.role == "chief" {
+    if caller.participant.seat().coordinates() {
         return Err(Failure::refuse(
             403,
             "ask-in-your-terminal",

@@ -422,9 +422,10 @@ fn caller_is_chief(board: &Board) -> Result<bool, Failure> {
         .get("role")
         .and_then(Value::as_str)
         .ok_or_else(|| answer.lacks("participant.role"))?;
-    if role == "chief" {
+    let seat = cf_proto::seat::Seat::parse(role);
+    if seat.is_some_and(cf_proto::seat::Seat::coordinates) {
         Ok(true)
-    } else if cf_ledger::roles::is_role(role) {
+    } else if seat.is_some_and(cf_proto::seat::Seat::is_member) {
         Ok(false)
     } else {
         Err(answer.lacks("known participant.role").into())

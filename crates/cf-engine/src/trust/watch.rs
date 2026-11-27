@@ -218,7 +218,7 @@ impl Dispatcher {
             && !w.record.window.borrow().trust.asks()
             && owes_first(w.record);
         if no_prompt
-            && w.participant.role == "chief"
+            && w.participant.seat().coordinates()
             && !w.told_no_prompt
             && self.now() - w.began > NO_PROMPT_MS
         {

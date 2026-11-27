@@ -198,8 +198,7 @@ fn active_member(
         return Err(Said(format!("no project {project}")));
     };
     Ok(view.participants.into_iter().find(|member| {
-        member.role != "chief"
-            && member.role != "human"
+        member.seat().is_member()
             && member.member_id.is_none()
             && member.left_at.is_none()
             && which(member)

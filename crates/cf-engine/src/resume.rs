@@ -299,7 +299,7 @@ impl Dispatcher {
                 .await?;
         }
         let at_work = self.at_work(&resumed)?;
-        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
+        if let Some(chief) = resumed.participants.iter().find(|p| p.seat().is_chief()) {
             // The human asks for the chief now: a chief that failed before is tried at once.
             self.record_of(chief.id).window.borrow_mut().relaunch = None;
             self.open_soon(chief.id, Some(Coming::Chief)).await;
@@ -399,7 +399,7 @@ impl Dispatcher {
         board
             .lanes
             .into_iter()
-            .filter(|lane| !matches!(lane.participant.role.as_str(), "chief" | "human"))
+            .filter(|lane| lane.participant.seat().is_member())
             .filter_map(|lane| {
                 let task = lane.tasks.iter().find(|task| {
                     matches!(task.state.as_str(), "working" | "waiting")

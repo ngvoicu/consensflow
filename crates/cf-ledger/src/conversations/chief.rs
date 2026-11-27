@@ -308,8 +308,12 @@ pub(crate) fn chief_ran_on(
     model::require_model_id(model)?;
     store.write(|store| {
         store.db.execute(
-            "UPDATE participant SET model = ?, effort = ?, model_name = NULL, needs_edit = 0
-              WHERE id = ? AND role = 'chief'",
+            concat!(
+                "UPDATE participant SET model = ?, effort = ?, model_name = NULL, needs_edit = 0
+              WHERE id = ? AND role IN ",
+                cf_proto::coordinator_roles_sql!(),
+                ""
+            ),
             params![model, effort, participant_id],
         )?;
         Ok(())
@@ -329,7 +333,11 @@ pub(crate) fn chief_launched(
     }
     store.write(|store| {
         store.db.execute(
-            "UPDATE participant SET launched_model = ? WHERE id = ? AND role = 'chief'",
+            concat!(
+                "UPDATE participant SET launched_model = ? WHERE id = ? AND role IN ",
+                cf_proto::coordinator_roles_sql!(),
+                ""
+            ),
             params![model, participant_id],
         )?;
         Ok(())
@@ -352,8 +360,8 @@ pub(crate) fn chief_gone(
     }
     store.write(|store| {
         store.db.execute(
-            "UPDATE participant SET model = ?, model_name = NULL, gone_model = ?, launched_model = NULL
-             WHERE id = ? AND role = 'chief'",
+            concat!("UPDATE participant SET model = ?, model_name = NULL, gone_model = ?, launched_model = NULL
+             WHERE id = ? AND role IN ", cf_proto::coordinator_roles_sql!(), ""),
             params![model, gone, participant_id],
         )?;
         Ok(())

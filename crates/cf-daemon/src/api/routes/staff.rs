@@ -20,10 +20,7 @@ pub(super) async fn handle(
         .participants
         .iter()
         .filter(|member| {
-            member.role != "chief"
-                && member.role != "human"
-                && member.harness.is_some()
-                && member.member_id.is_none()
+            member.seat().is_member() && member.harness.is_some() && member.member_id.is_none()
         })
         .map(|member| {
             let mut row = json!({
@@ -78,8 +75,7 @@ pub(super) async fn handle(
                 .participants
                 .iter()
                 .filter(|member| {
-                    member.role != "chief"
-                        && member.role != "human"
+                    member.seat().is_member()
                         && member.harness.is_some()
                         && member.member_id.is_none()
                         && member.backup_of.is_none()

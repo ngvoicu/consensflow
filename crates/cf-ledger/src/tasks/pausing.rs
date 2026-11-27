@@ -145,7 +145,7 @@ fn pause_task_inner(
             require_task_state(&task, &pausable, "pause")?;
         }
         if let Some(assignee) = task.assignee_id {
-            if store.participant_row(assignee)?.role == "chief" {
+            if store.participant_row(assignee)?.seat().coordinates() {
                 return Err(LedgerError::refused_with(
                     "own-work",
                     format!("T-{number} is the chief's own: finish or cancel it"),
@@ -155,7 +155,7 @@ fn pause_task_inner(
         }
         let mut told = Vec::new();
         if let (Some(author), Some(window)) = (
-            author.filter(|author| author.role == "chief"),
+            author.filter(|author| author.seat().coordinates()),
             task.assignee_id,
         ) {
             // The statement gives back what it cancels: the told notes among them (a note of
@@ -1420,11 +1420,16 @@ fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), Ledger
     let lanes: Vec<(i64, String)> = store
         .db
         .prepare(&format!(
-            "SELECT p.id, p.handle FROM participant p
-             WHERE p.project_id = ? AND p.role NOT IN ('chief', 'human')
+            concat!(
+                "SELECT p.id, p.handle FROM participant p
+             WHERE p.project_id = ? AND p.role NOT IN ",
+                cf_proto::non_member_roles_sql!(),
+                "
                AND (SELECT COUNT(*) FROM task t
                     WHERE t.assignee_id = p.id AND t.state IN ({held})) > 1
              ORDER BY p.id"
+            ),
+            held = held
         ))?
         .query_map([project_id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;

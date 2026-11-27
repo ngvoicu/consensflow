@@ -3,6 +3,7 @@ import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
 import { DockStrip } from './dock-strip.js'
+import { isChief } from './seat.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
@@ -16,7 +17,7 @@ const CUT = [
 
 /** What a window's chip in the dock's map says: the chief, a session by its name, a member by its handle. */
 const chipLabel = (participant) =>
-  participant.role === 'chief'
+  isChief(participant)
     ? 'Chief'
     : participant.member
       ? participant.session
@@ -491,7 +492,7 @@ export class TerminalsView {
       else if (entry.arrival === null) entry.arrival = this.#arrivals++
     }
     const live = [...this.#cards.values()].filter((entry) => entry.project === project)
-    const chief = ordered.find((lane) => lane.participant.role === 'chief')
+    const chief = ordered.find((lane) => isChief(lane.participant))
     const rank = (entry) => (entry.handle === chief?.participant.handle ? 0 : 1)
     const cards = live
       .filter((entry) => this.#docked(entry))
@@ -761,23 +762,22 @@ export class TerminalsView {
       )
       return group
     }
-    const tools =
-      participant.role === 'chief'
-        ? [chiefTools(), about(lane, board, now, this.#onTryAgain)]
-        : [
-            element('span', 'terminal-meta', participant.harness ?? ''),
-            history,
-            ...(participant.member === null
-              ? []
-              : [
-                  iconButton(
-                    ICONS.hide,
-                    'Hide terminal',
-                    () => this.#onHideTerminal(entry.participant),
-                    `Hide ${name}'s terminal`,
-                  ),
-                ]),
-          ]
+    const tools = isChief(participant)
+      ? [chiefTools(), about(lane, board, now, this.#onTryAgain)]
+      : [
+          element('span', 'terminal-meta', participant.harness ?? ''),
+          history,
+          ...(participant.member === null
+            ? []
+            : [
+                iconButton(
+                  ICONS.hide,
+                  'Hide terminal',
+                  () => this.#onHideTerminal(entry.participant),
+                  `Hide ${name}'s terminal`,
+                ),
+              ]),
+        ]
     redraw(entry.head, [lamp(lane, now), element('span', 'terminal-name', name), ...tools])
     entry.card.setAttribute('aria-label', `${name}'s terminal`)
     entry.card.dataset.handle = participant.handle

@@ -19,7 +19,7 @@ pub(super) async fn handle(
         .ledger
         .borrow()
         .task_in_hand(caller.participant.id)?;
-    let chief = caller.participant.role == "chief";
+    let chief = caller.participant.seat().coordinates();
     if active.is_none() && !chief {
         refuse_cancelled(context, caller)?;
     }

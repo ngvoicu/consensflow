@@ -379,6 +379,13 @@ pub struct Launch<'a> {
     pub starts_given_up: u32,
 }
 
+impl Launch<'_> {
+    /// The seat its window is for.
+    pub fn seat(&self) -> cf_proto::seat::Seat {
+        cf_proto::seat::Seat::of(self.role)
+    }
+}
+
 /// What a harness's record says a conversation ran on last ([`Adapter::last_used`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Used {

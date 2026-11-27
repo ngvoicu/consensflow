@@ -85,7 +85,7 @@ impl Dispatcher {
         cause: &str,
     ) -> Result<Tried, EngineError> {
         let unit = self.seams.limits.turn_retry_ms;
-        if unit == 0 || participant.role == "chief" {
+        if unit == 0 || participant.seat().coordinates() {
             return Ok(Tried::Fails(said.to_owned()));
         }
         // The tries used are a number on the task, kept by the ledger in the writes that queue
@@ -147,7 +147,7 @@ impl Dispatcher {
         observed: &Observed,
     ) -> Result<(), EngineError> {
         let reported = record.quota.borrow().reported.clone();
-        if participant.role == "chief"
+        if participant.seat().coordinates()
             || !matches!(reported.as_deref(), Some(Quota::Usage { .. }))
             || !observed.settled
             || observed.failed

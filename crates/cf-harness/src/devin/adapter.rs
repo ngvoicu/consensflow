@@ -380,7 +380,7 @@ impl Adapter for DevinAdapter {
                 &self.services,
                 launch.id.as_str(),
                 &executable,
-                launch.role != "chief",
+                launch.seat().is_member(),
             )
             .await?;
             // The launch's files are written on the plan's own thread: each can wait, and the

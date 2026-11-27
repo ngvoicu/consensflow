@@ -589,9 +589,9 @@ pub(crate) fn delete_project(store: &mut Store, id: i64) -> Result<DeletedProjec
             directory: row.directory,
             created_at: row.created_at,
             members: count(
-                "SELECT COUNT(*) AS n FROM participant
-                 WHERE project_id = ? AND role NOT IN ('human', 'chief') AND member_id IS NULL
-                   AND left_at IS NULL",
+                concat!("SELECT COUNT(*) AS n FROM participant
+                 WHERE project_id = ? AND role NOT IN ", cf_proto::non_member_roles_sql!(), " AND member_id IS NULL
+                   AND left_at IS NULL"),
             )?,
             sessions: count("SELECT COUNT(*) AS n FROM participant WHERE project_id = ? AND member_id IS NOT NULL")?,
             tasks: count("SELECT COUNT(*) AS n FROM task WHERE project_id = ?")?,

@@ -291,7 +291,7 @@ impl Dispatcher {
         let decline = dialog
             .as_ref()
             .and_then(|dialog| window.safe_decline(dialog))
-            .filter(|decline| !(decline.members_only && participant.role == "chief"));
+            .filter(|decline| !(decline.members_only && participant.seat().coordinates()));
         let body = told(&participant.handle, dialog.as_ref(), decline.as_ref());
         let ends_without_answer = decline.is_some()
             || dialog
@@ -415,7 +415,7 @@ impl Dispatcher {
         &self,
         participant: &ParticipantView,
     ) -> Result<Option<cf_ledger::TaskThread>, EngineError> {
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             return Ok(None);
         }
         Ok(self
@@ -428,7 +428,7 @@ impl Dispatcher {
     /// The number of the task `participant`'s window holds paused, where it holds one: a member's
     /// last task, if it is paused and still its own. None for the chief.
     fn paused_task(&self, participant: &ParticipantView) -> Result<Option<i64>, EngineError> {
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             return Ok(None);
         }
         Ok(self

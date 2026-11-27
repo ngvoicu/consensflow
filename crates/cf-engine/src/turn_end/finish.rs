@@ -127,7 +127,7 @@ impl Dispatcher {
             .participants
             .into_iter()
             .find(|participant| {
-                !matches!(participant.role.as_str(), "chief" | "human")
+                participant.seat().is_member()
                     && Some(&participant.handle) == thread.task.assignee.as_ref()
             });
         let Some(worker) = worker else {

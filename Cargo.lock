@@ -638,6 +638,7 @@ name = "cf-proto"
 version = "3.0.7-alpha.18"
 dependencies = [
  "cf-base",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

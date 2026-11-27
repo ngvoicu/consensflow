@@ -84,6 +84,13 @@ pub struct ParticipantView {
     pub session: Option<String>,
 }
 
+impl ParticipantView {
+    /// The seat it holds on the board.
+    pub fn seat(&self) -> crate::seat::Seat {
+        crate::seat::Seat::of(&self.role)
+    }
+}
+
 /// A project with the participants still in it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -528,6 +535,13 @@ pub struct MessageView {
     pub urgent: bool,
     pub created_at: String,
     pub delivered_at: Option<String>,
+}
+
+impl MessageView {
+    /// The seat its recipient holds on the board.
+    pub fn recipient_seat(&self) -> crate::seat::Seat {
+        crate::seat::Seat::of(&self.recipient_role)
+    }
 }
 
 /// A task with its whole thread, oldest first.

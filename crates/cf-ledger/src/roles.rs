@@ -426,6 +426,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_seats_member_words_are_the_roles_ids() {
+        assert_eq!(ids(), cf_proto::seat::MEMBER_ROLES);
+    }
+
+    #[test]
     fn the_roles_are_the_nine_in_the_staff_pages_order() {
         assert_eq!(
             ids(),

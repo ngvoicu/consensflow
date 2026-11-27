@@ -257,7 +257,7 @@ impl Adapter for ClaudeAdapter {
                     let settings = install::settings(
                         env,
                         launch.id,
-                        launch.role != "chief",
+                        launch.seat().is_member(),
                         launch.compaction,
                         launch.advisor_off,
                         launch.suggestion_off,

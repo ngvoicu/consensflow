@@ -628,7 +628,7 @@ impl Dispatcher {
         for owner in project.participants.iter().filter(|owner| {
             owner.member_id.is_none()
                 && owner.backup_of.is_none()
-                && owner.role != "chief"
+                && owner.seat().is_member()
                 && project
                     .participants
                     .iter()
@@ -1537,7 +1537,7 @@ impl Dispatcher {
         refused_at: Option<i64>,
         unwell: Option<Unwell<'_>>,
     ) -> Result<(), EngineError> {
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
@@ -1834,7 +1834,7 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         // A refusal the window has not acted on yet is no turn through; one it
         // acted on before the words went in is the record's last word no more.
-        if participant.role == "chief" || observed.failed || self.refused_unhandled(record) {
+        if participant.seat().coordinates() || observed.failed || self.refused_unhandled(record) {
             return Ok(());
         }
         let task = self
@@ -2064,7 +2064,7 @@ impl Dispatcher {
             .quota
             .as_deref()
             .is_some_and(|quota| quota.level() == Level::Exhausted);
-        if participant.role == "chief" || observed.failed || refused {
+        if participant.seat().coordinates() || observed.failed || refused {
             return Ok(());
         }
         let Some(thread) = self.seams.ledger.borrow().task_in_hand(participant.id)? else {

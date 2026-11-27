@@ -262,7 +262,7 @@ impl Dispatcher {
         record: &Record,
         observed: &Observed,
     ) -> Result<Option<Alone>, EngineError> {
-        if participant.role == "chief"
+        if participant.seat().coordinates()
             || record.delivery.borrow().delivering.is_some()
             || record.window.borrow().retiring
             || observed.failed

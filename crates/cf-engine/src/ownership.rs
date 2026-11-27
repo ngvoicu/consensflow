@@ -98,7 +98,7 @@ impl Dispatcher {
         record: &Record,
         message: &MessageView,
     ) -> Option<i64> {
-        if participant.role == "chief" {
+        if participant.seat().coordinates() {
             return None;
         }
         let number = message.task_number?;

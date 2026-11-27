@@ -67,7 +67,8 @@ pub(super) async fn list(
         let participant = &lane.participant;
         // A name that holds the model and effort says them already (HMD-12); the chief's
         // name is its role, and never does.
-        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+        if participant.harness.is_some()
+            && (participant.seat().coordinates() || participant.name_apart)
         {
             entry["runsOn"] = json!(cf_ledger::handles::runs_on(participant));
         }
@@ -87,7 +88,7 @@ pub(super) async fn create(
     caller: &Caller,
     mut request: Request,
 ) -> Result<Answer, Failure> {
-    if caller.participant.role != "chief" {
+    if !caller.participant.seat().coordinates() {
         return Err(Failure::refuse(
             403,
             "not-a-coordinator",

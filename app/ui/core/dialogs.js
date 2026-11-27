@@ -21,6 +21,7 @@ import {
   tierColumns,
   tiersOf,
 } from './roles.js'
+import { isChief } from './seat.js'
 import {
   anchorOf,
   crowded,
@@ -2085,9 +2086,7 @@ export class ProjectSettingsDialog {
   #chiefRunning() {
     const shown = this.#page.board()
     const board = shown?.project.id === this.#project ? shown : this.#board
-    return (board?.lanes ?? []).some(
-      (lane) => lane.participant.role === 'chief' && lane.pane !== null,
-    )
+    return (board?.lanes ?? []).some((lane) => isChief(lane.participant) && lane.pane !== null)
   }
 
   /**

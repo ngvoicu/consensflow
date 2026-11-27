@@ -164,7 +164,7 @@ pub(crate) fn add_participant(
         ],
     )?;
     let id = store.db.last_insert_rowid();
-    if role != "human" && role != "chief" {
+    if cf_proto::seat::Seat::of(role).is_member() {
         store.log(
             project_id,
             "member.added",
@@ -190,12 +190,12 @@ pub(crate) fn add_member(
         let left = store
             .db
             .query_row(
-                "SELECT id, handle FROM participant
+                concat!("SELECT id, handle FROM participant
                  WHERE project_id = ? AND left_at IS NOT NULL AND member_id IS NULL
-                   AND role NOT IN ('human', 'chief')
+                   AND role NOT IN ", cf_proto::non_member_roles_sql!(), "
                    AND backup_of IS NULL
                    AND harness = ? AND model IS ? AND effort IS ? AND designer = ?
-                 ORDER BY id DESC LIMIT 1",
+                 ORDER BY id DESC LIMIT 1"),
                 params![
                     project_id,
                     member.harness,

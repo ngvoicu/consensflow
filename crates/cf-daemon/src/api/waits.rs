@@ -116,7 +116,7 @@ impl<'a> Waits<'a> {
             Vec::new()
         };
         let meeting = if !closed
-            && caller.participant.role == "chief"
+            && caller.participant.seat().is_chief()
             && project.is_some_and(|project| project.meeting.is_some())
         {
             ledger
