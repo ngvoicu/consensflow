@@ -652,19 +652,9 @@ fn a_rest_after_tree_navigation_back_to_a_failure_is_that_failure_not_a_later_ab
     }
 }
 
-/// The number of a process that was there and is gone: a child of the test's own, ended by itself
-/// and waited for.
-fn gone_pid() -> u32 {
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .arg("--list")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let pid = child.id();
-    assert!(child.wait().unwrap().success());
-    pid
-}
+/// A process number no process of the system can have (past every 32-bit signed pid, which
+/// `cf_process::alive` reads as none on every platform): the window's process, gone.
+const GONE_PID: u32 = u32::MAX;
 
 #[test]
 fn a_window_that_goes_away_just_after_its_run_ended_gives_its_answer() {
@@ -687,7 +677,7 @@ fn a_window_that_goes_away_just_after_its_run_ended_gives_its_answer() {
         assert!(results(&window).is_empty(), "{what}");
         // The window goes: its process with it.
         let mut gone = word.clone();
-        gone["pid"] = json!(gone_pid());
+        gone["pid"] = json!(GONE_PID);
         window.says(Some(&gone));
         window.look();
         window.context.exit("zeus");

@@ -113,16 +113,6 @@ fn answer(record: &Record) -> Vec<String> {
         .collect()
 }
 
-/// The last answer the reading holds: its last assistant item's words.
-fn last_answer(record: &Record) -> Option<&str> {
-    record
-        .items
-        .iter()
-        .rev()
-        .find(|item| item.role == Role::Assistant && !item.synthetic)
-        .map(|item| &*item.text)
-}
-
 /// Whether the file's last message is the user's or a tool's result: a request Pi has to make.
 fn tail_asks(text: &str) -> bool {
     let role = text
