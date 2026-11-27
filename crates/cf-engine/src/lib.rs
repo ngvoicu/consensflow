@@ -61,7 +61,7 @@ mod wake_ups;
 mod windows;
 
 pub use chief_switch::SwitchTo;
-pub use deliveries::HeldBack;
+pub use deliveries::{HeldBack, CHANGED_AS_HANDED_OVER};
 pub use dispatcher::{require_chief_model, require_open, Dispatcher, SwitchWhen};
 pub use shown::{quotable, WORDS_WITHHELD};
 pub use stops::Unstopped;

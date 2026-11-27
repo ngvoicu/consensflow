@@ -59,6 +59,7 @@
 use std::path::PathBuf;
 
 use cf_e2e::devin_store;
+use cf_e2e::handed;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
@@ -276,16 +277,15 @@ fn once_each(settle: Option<&str>) -> Outcome {
 }
 
 /// What the daemon's own word says of `notes`: it pasted each once, and took no paste of either
-/// for lost.
+/// for lost. A hand-over the pane host refused before writing anything is no paste
+/// ([`handed`]); what the chief was given is read from its store after this, whatever the
+/// events say.
 fn pasted_once_each(events: &[Value], notes: [(i64, &str); 2]) {
     for (id, what) in notes {
-        let of_note = |kind: &str| -> Vec<&Value> {
-            events
-                .iter()
-                .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-                .collect()
-        };
-        let (pasted, retried) = (of_note("delivery.begun"), of_note("delivery.retried"));
+        let (pasted, retried) = (
+            handed::pastes(events, id),
+            handed::retried_after_a_paste(events, id),
+        );
         assert!(
             pasted.len() == 1 && retried.is_empty(),
             "{what} (m-{id}) was pasted {} times; the daemon took it for lost: {retried:?}",
@@ -328,6 +328,15 @@ fn a_hand_over_refused_for_its_box_before_anything_was_written_is_no_second_past
             (4, "the note of T-1's cancel"),
             (5, "the note of T-2's cancel"),
         ],
+    );
+}
+
+/// The words the cases read a refused hand-over by are the engine's own.
+#[test]
+fn the_words_of_a_refused_hand_over_are_the_engine_s() {
+    assert_eq!(
+        handed::CHANGED_AS_HANDED_OVER,
+        cf_engine::CHANGED_AS_HANDED_OVER
     );
 }
 

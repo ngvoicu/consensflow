@@ -77,6 +77,7 @@
 //! pseudoconsole does.
 
 use cf_e2e::devin_store::{self, Message};
+use cf_e2e::handed::of_message;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
@@ -269,14 +270,6 @@ fn until_both_are_in(rig: &Rig, project: &Project, pasted: [usize; 2]) -> cf_e2e
         }))
     })?;
     Ok(ids)
-}
-
-/// The daemon's events of `kind` about the message `id`.
-fn of_message<'a>(events: &'a [Value], kind: &str, id: i64) -> Vec<&'a Value> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .collect()
 }
 
 /// When the daemon's first event of `kind` about the message `id` was written, in

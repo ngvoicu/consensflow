@@ -103,6 +103,12 @@ pub(crate) struct Unread {
     pub(crate) told: Option<i64>,
 }
 
+/// How the reason of a `delivery.retried` begins where the pane host refused the hand-over
+/// before anything was written, for a look no longer true of the window (its box changed, output
+/// pending, the person typed since): nothing went in, no attempt is spent, and the next look
+/// pastes it. Whoever reads the events tells this from a paste taken for lost by these words.
+pub const CHANGED_AS_HANDED_OVER: &str = "the window changed as the message was handed over";
+
 /// Why the message at the head of a window's queue does not go in now: the one place
 /// that says it, for the trace, the board and the human's note of a message held long
 /// (T-842's P2; T-839's bound and note are built on it, T-883).
@@ -959,7 +965,7 @@ impl Dispatcher {
         // changed, output was pending, or the human typed): nothing went in, no attempt is
         // spent, and the message waits for the next look. A delivery does not fail for it.
         if let Admission::LookAgain { reason } = &outcome {
-            let why = format!("the window changed as the message was handed over: {reason}");
+            let why = format!("{CHANGED_AS_HANDED_OVER}: {reason}");
             {
                 let mut ledger = self.seams.ledger.borrow_mut();
                 ledger.retry_delivery(message.id, &why, true)?;

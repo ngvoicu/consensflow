@@ -92,12 +92,10 @@ pub(crate) fn at_ms(event: &Value) -> Option<i64> {
         .map(|at| at.as_millisecond())
 }
 
-/// The daemon's events of `kind` for the message `id`.
+/// The daemon's events of `kind` for the message `id`; a hand-over refused before anything was
+/// written is no paste ([`cf_e2e::handed`]).
 pub(crate) fn of<'a>(events: &'a [Value], kind: &str, id: i64) -> Vec<&'a Value> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .collect()
+    cf_e2e::handed::of_message(events, kind, id)
 }
 
 /// How many of the chief's user items hold the header of the message `id`.
