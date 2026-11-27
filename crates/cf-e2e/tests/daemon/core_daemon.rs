@@ -221,6 +221,9 @@ fn opens_a_window_with_the_agents_api_its_project_and_participant_and_the_bundle
     assert!(env.get("CONSENSFLOW_NODE").is_none(), "{env}");
     let path_delimiter = if cfg!(windows) { ";" } else { ":" };
     let path = env["PATH"].as_str().unwrap_or_default();
+    // The member guard's folder is first, then the bundle's, then what the daemon was given.
+    let (guard, path) = path.split_once(path_delimiter).unwrap_or((path, ""));
+    assert_eq!(Path::new(guard), d.home.consensflow().join("member-guard"));
     let (bundle, rest) = path.split_once(path_delimiter).unwrap_or((path, ""));
     let bundle = Path::new(bundle);
     assert!(holds_the_cf_under_test(bundle)?, "{path}");
