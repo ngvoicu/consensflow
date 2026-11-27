@@ -4827,7 +4827,7 @@ test('a button kept across redraws acts on what the board shows now', async ({ p
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'zeus', roles: ['reviewer'] }])
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['reviewer'], expected: ['worker', 'reviewer'] }])
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Close' }).click()
   // A project deleted and another of the same name in its place: the
@@ -8238,7 +8238,7 @@ test('adds a member as a tester, or gives a member the tester slot of its tier, 
   await dialog.getByRole('button', { name: 'Give the standard tester slot to @zeus' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'tester'] }])
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'tester'], expected: ['worker'] }])
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
 })
 
@@ -8346,7 +8346,7 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   await dialog.getByRole('button', { name: 'Remove Field scout @castor' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'castor', roles: ['worker'] }])
+    .toEqual([{ project: 1, agent: 'castor', roles: ['worker'], expected: ['worker', 'scout'] }])
   await expect(dialog.locator('.slot-words')).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Remove Field scout @argus' }).click()
   await dialog.getByRole('button', { name: 'Remove @argus', exact: true }).click()
@@ -8489,7 +8489,7 @@ test("drops one role from a member's slot, and asks before its last", async ({ p
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'diana', roles: ['reviewer'] }])
+    .toEqual([{ project: 1, agent: 'diana', roles: ['reviewer'], expected: ['worker', 'reviewer'] }])
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
   expect(await calls(page, 'member.remove')).toEqual([])
@@ -14256,6 +14256,7 @@ test('Project settings: open for a project they show and save its own, whole, wh
     project: 1,
     agent: 'zeus',
     roles: ['worker'],
+    expected: ['worker', 'reviewer'],
   })
   // And the one that leaves the staff altogether is harbour's.
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
@@ -22378,12 +22379,12 @@ test('D8 give it to a member at that tier, on both screens', async ({ page }) =>
   await settings.getByRole('button', { name: 'Give the complex tester slot to @hera' }).click()
   await expect
     .poll(() => calls(page, 'member.roles'))
-    .toEqual([{ project: 1, agent: 'hera', roles: ['reviewer', 'tester'] }])
+    .toEqual([{ project: 1, agent: 'hera', roles: ['reviewer', 'tester'], expected: ['reviewer'] }])
   await expect(slotCell(settings, 'tester:complex').locator('.slot-holder')).toHaveText(/@hera/)
   await choice.selectOption('diana')
   await expect
     .poll(async () => (await calls(page, 'member.roles')).at(-1))
-    .toEqual({ project: 1, agent: 'diana', roles: ['advisor', 'tester'] })
+    .toEqual({ project: 1, agent: 'diana', roles: ['advisor', 'tester'], expected: ['advisor'] })
   await expect(slotCell(settings, 'tester:standard').locator('.slot-holder')).toHaveText(/@diana/)
   await settings.getByRole('button', { name: 'Close' }).click()
   // New project gives it the same way, to the draft's member.
@@ -22903,7 +22904,7 @@ test('D8 a refused give or Remove in Project settings is said under its slot, in
   await settings.getByRole('button', { name: 'Remove Tester @zeus' }).click()
   await expect
     .poll(async () => (await calls(page, 'member.roles')).at(-1))
-    .toEqual({ project: 1, agent: 'zeus', roles: ['worker'] })
+    .toEqual({ project: 1, agent: 'zeus', roles: ['worker'], expected: ['worker', 'tester'] })
   await expect(settings.locator('.slot-refusal')).toHaveCount(0)
 })
 
