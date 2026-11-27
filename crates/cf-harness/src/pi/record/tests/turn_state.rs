@@ -107,8 +107,7 @@ fn tail_asks(text: &str) -> bool {
                 .unwrap_or_default()
                 .to_owned()
         })
-        .filter(|role| ["user", "assistant", "toolResult"].contains(&role.as_str()))
-        .next_back();
+        .rfind(|role| ["user", "assistant", "toolResult"].contains(&role.as_str()));
     matches!(role.as_deref(), Some("user" | "toolResult"))
 }
 
