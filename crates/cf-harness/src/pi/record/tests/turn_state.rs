@@ -39,7 +39,14 @@ fn moments() -> Vec<Moment> {
             for moment in each(&case) {
                 let read = |name: &str| fs::read_to_string(moment.join(name)).ok();
                 all.push(Moment {
-                    name: moment.strip_prefix(&root).unwrap().display().to_string(),
+                    // `<Pi>/<case>-<form>/<moment>`, with `/` on every platform.
+                    name: moment
+                        .strip_prefix(&root)
+                        .unwrap()
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                        .join("/"),
                     text: read("hazy-ridge.jsonl"),
                     word: read(&format!("{LAUNCH}.state.json")).map(|w| {
                         // The stage's session: the word is of the session it reads.
