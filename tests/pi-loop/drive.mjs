@@ -51,11 +51,12 @@ const ai = await import(pathToFileURL(join(nested('pi-ai'), 'dist/index.js')).hr
 const VERSION = pc.VERSION
 const [major, minor] = VERSION.split('.').map(Number)
 // Pi marks a run from the first line of `_startRun` from 1.2.0; before it, at its first request.
-// The extension tells it by Pi's own idleness at its first `before_agent_start`, never by this
-// number: each case checks the two agree.
+// The extension writes its word only on such a Pi, by the version Pi exports to it; each case
+// checks that Pi reads busy at a run's first hook exactly there.
 const marksEarly = major > 1 || (major === 1 && minor >= 2)
 const worded = marksEarly
-const LATE = { launchId: 'launch-loop', late: true }
+// No word at all, on a Pi before the line.
+const LATE = null
 // Pi's `agent_settled` carries its abort flag from 1.1.0; before it, the word's flag is null.
 const flags = major > 1 || (major === 1 && minor >= 1)
 const flag = (value) => (flags ? value : null)
@@ -112,6 +113,7 @@ async function open(base, { person = {}, ours = {}, retry = true, tokensPerSecon
       expired: join(dir, 'expired'),
       launchId: LAUNCH,
       pollMs: POLL_MS,
+      piVersion: VERSION,
       logger: { error: (...said) => loop.logs.push(said.join(' ')) },
       ...ours,
     },
@@ -187,18 +189,15 @@ async function open(base, { person = {}, ours = {}, retry = true, tokensPerSecon
   }
   const close = async () => {
     clearInterval(sampler)
-    // Whatever the case: Pi read idle at a run's `before_agent_start` exactly where it sets its run
-    // flag late; at every hook of a run in the person's extension, the word says `working` where
-    // Pi sets it early, and where it sets it late there is no word once a run has begun.
+    // Whatever the case: at every hook of a run in the person's extension, the word says
+    // `working` from the line on; before it there is never a word.
     for (const seen of loop.seen) {
-      if (seen.event === 'before_agent_start') assert.equal(seen.idle, !marksEarly, `${name}: idle at before_agent_start`)
       if (worded && RUN_EVENTS.has(seen.event)) assert.equal(seen.state, 'working', `${name}: ${seen.event} read ${seen.state}`)
     }
-    if (!worded && loop.seen.some((seen) => seen.event === 'before_agent_start')) {
-      assert.deepEqual(word(), LATE, `${name}: no word once a run began`)
-      const first = states.findIndex((state) => state !== null)
-      const mark = states.indexOf(null, Math.max(first, 0))
-      assert.ok(mark >= 0 && states.slice(mark).every((state) => state === null), `${name}: nothing written after the mark: ${states}`)
+    if (!worded) {
+      // A Pi before the line: no word is ever written, from the session's start on.
+      assert.equal(word(), null, `${name}: no word`)
+      assert.ok(states.every((state) => state === null), `${name}: a word was written: ${states}`)
     }
     if (recordAt !== null && moments.length > 0) {
       for (const [at, kept] of moments.entries()) {
@@ -250,7 +249,7 @@ const acked = (at, id) => {
 // At rest: Pi idle and the word `rest`, or, with no word, Pi idle for a few passes.
 const settles = async (at) => {
   if (worded) return at.until(() => at.word()?.state === 'rest' && at.session.isIdle)
-  await at.until(() => at.session.isIdle && (at.word()?.state === 'rest' || at.word()?.late === true))
+  await at.until(() => at.session.isIdle)
   await wait(3 * POLL_MS)
 }
 const W = (at) => (worded ? at.word() : null)
@@ -383,7 +382,7 @@ const CASES = {
     await settles(at)
     at.faux.setResponses([ai.fauxAssistantMessage('Answered the human.'), ai.fauxAssistantMessage('Answered ConsensFlow.')])
     const human = at.session.prompt('The human typed this')
-    await at.until(() => at.word()?.state === 'busy')
+    await at.until(() => (worded ? at.word()?.state === 'busy' : at.loop.seen.some((s) => s.event === 'input')))
     const sessionId = at.session.sessionManager.getSessionId()
     const id = envelope(at, sessionId, 'ConsensFlow words')
     await at.until(() => acked(at, id) !== null)
@@ -682,9 +681,11 @@ const CASES = {
       const file = join(folder, 'hazy-ridge.jsonl')
       writeFileSync(file, body)
       const again = await open(`resume-${kind}`, { resume: file })
-      await again.until(() => again.word() !== null)
-      assert.equal(again.word().state, 'rest', `${kind}: rest at the resume`)
-      assert.equal(again.word().ended, 0)
+      if (worded) {
+        await again.until(() => again.word() !== null)
+        assert.equal(again.word().state, 'rest', `${kind}: rest at the resume`)
+        assert.equal(again.word().ended, 0)
+      } else await wait(4 * POLL_MS)
       again.moment(`resumed-${kind}`, { at: 'rest' })
       await again.close()
     }
@@ -701,11 +702,14 @@ const CASES = {
     await settles(at)
     const before = at.word()
     await at.session.reload()
-    await at.until(() => at.word() !== null)
+    if (worded) await at.until(() => at.word() !== null)
+    else await wait(4 * POLL_MS)
     const after = at.word()
-    notes.push(`reload (${form}): events ${JSON.stringify(at.loop.seen.map((s) => s.event).slice(-4))}, ended ${before.ended} → ${after.ended}`)
-    assert.equal(after.launchId, before.launchId)
-    if (worded) assert.equal(after.sessionId, before.sessionId)
+    notes.push(`reload (${form}): events ${JSON.stringify(at.loop.seen.map((s) => s.event).slice(-4))}, ended ${before?.ended} → ${after?.ended}`)
+    if (worded) {
+      assert.equal(after.launchId, before.launchId)
+      assert.equal(after.sessionId, before.sessionId)
+    }
     if (worded) {
       assert.ok(after.ended >= before.ended, `the count went down across /reload: ${before.ended} → ${after.ended}`)
       assert.deepEqual(after.last, before.last, 'the last end of the same session stays')
@@ -908,9 +912,19 @@ const CASES = {
     await settles(at)
     at.faux.setResponses([ai.fauxAssistantMessage('Answered the human.'), ai.fauxAssistantMessage('Answered ConsensFlow.')])
     const human = at.session.prompt('The human typed this')
-    await at.until(() => at.word()?.held != null)
+    await at.until(() => (worded ? at.word()?.held != null : at.loop.seen.some((s) => s.event === 'input')))
     reloading = at.session.reload().then(() => 'reloaded', (cause) => `refused: ${cause?.message ?? cause}`)
     const reloaded = await reloading
+    if (!worded) {
+      // No word, nothing of the held prompt reaches the new instance: Pi's idleness gates, as on
+      // main (the limit).
+      hold.open()
+      await human
+      await settles(at)
+      notes.push(`reload while held (${form}): no word; ${reloaded}`)
+      await at.close()
+      return
+    }
     await wait(4 * POLL_MS)
     const id = envelope(at, at.session.sessionManager.getSessionId(), 'ConsensFlow words')
     await at.until(() => acked(at, id) !== null)
@@ -926,12 +940,220 @@ const CASES = {
     await at.close()
   },
 
+  /** Finding 23: two first runs a person's extension triggers (no `before_agent_start` before
+   * 1.2.0), then, while `/tree` awaits a person's handler, a person's `sendUserMessage` reaches the
+   * launch's first `before_agent_start` with Pi busy; then a held prompt and a board message.
+   * Before the line no word is ever written; from it the word says `working` through the held
+   * start and no message goes in ahead of the person's. */
+  async tree_while_busy() {
+    const leave = gate()
+    const slow = gate()
+    let entered = false
+    let held = false
+    let slowNow = false
+    const at = await open('tree-while-busy', {
+      ours: { pollMs: 200 },
+      person: {
+        session_start: (_e, _ctx, pi) => void (globalThis.__piLoop.api = pi),
+        session_before_tree: async () => {
+          entered = true
+          await leave.shut
+          return { cancel: true }
+        },
+        before_agent_start: async () => {
+          if (slowNow && !held) {
+            held = true
+            await slow.shut
+          }
+        },
+      },
+    })
+    await settles(at)
+    at.faux.setResponses(Array.from({ length: 7 }, (_, i) => ai.fauxAssistantMessage(`Answer ${i}`)))
+    for (let i = 1; i <= 2; i += 1) {
+      at.loop.api.sendMessage({ customType: 'seed', content: `Start ${i}`, display: true }, { triggerTurn: true })
+      await at.until(() => at.loop.seen.filter((s) => s.event === 'agent_settled').length === i)
+      await settles(at)
+    }
+    const target = at.rows().find((row) => row.message?.role === 'assistant').id
+    const navigating = at.session.navigateTree(target)
+    await at.until(() => entered)
+    const idleInTree = at.session.isIdle
+    at.loop.api.sendUserMessage('Prompt during navigation')
+    // The person's message runs during the navigation on some Pis, after it on others.
+    await at.until(() => at.loop.seen.filter((s) => s.event === 'agent_settled').length >= 3, 3_000).catch(() => {})
+    leave.open()
+    await navigating
+    // Some Pis drop a message sent while the tree is busy.
+    await at.until(() => at.loop.seen.filter((s) => s.event === 'agent_settled').length >= 3, 2_000).catch(() => {})
+    await settles(at)
+    slowNow = true
+    const prompt = at.session.prompt('Held subsequent prompt')
+    await at.until(() => held)
+    await wait(3 * 200)
+    const during = at.word()
+    const id = envelope(at, at.session.sessionManager.getSessionId(), 'board request')
+    await wait(600)
+    const ack = acked(at, id)
+    if (worded) {
+      assert.deepEqual([during.state, during.begun > during.ended], ['working', true], `a run held in its start: ${JSON.stringify(during)}`)
+      assert.equal(ack, null, 'no board message goes in while the run is held')
+    }
+    slow.open()
+    await prompt
+    await settles(at)
+    notes.push(`tree while busy (${form}): Pi idle in the tree ${idleInTree}; first before_agent_start idle ${JSON.stringify(at.loop.seen.find((x) => x.event === 'before_agent_start')?.idle)}; during ${JSON.stringify(during)}; board message ${JSON.stringify(ack)}`)
+    await at.close()
+  },
+
+  /** Finding 21: a person's `input` hook holds a prompt, Pi reloads, and the prompt is let go in
+   * either order: during the old instance's `session_shutdown` (the run begins before the new
+   * instance starts), or once the reload is over. Either way the run is `working` with more runs
+   * begun than ended while its request streams, and the window rests after it with nothing in
+   * hand. */
+  async reload_overlap() {
+    for (const order of ['during-shutdown', 'after-reload']) {
+      const input = gate()
+      const shutdown = gate()
+      const model = gate()
+      let inputHeld = false
+      let shutting = false
+      let requested = false
+      let taken = false
+      let once = false
+      const at = await open(`reload-overlap-${order}`, {
+        ours: { pollMs: 200 },
+        person: {
+          input: async () => {
+            if (!taken) {
+              taken = true
+              inputHeld = true
+              await input.shut
+            }
+          },
+          session_shutdown: async () => {
+            if (!once) {
+              once = true
+              shutting = true
+              if (order === 'during-shutdown') await shutdown.shut
+            }
+          },
+        },
+      })
+      await settles(at)
+      at.faux.setResponses([
+        async () => {
+          requested = true
+          await model.shut
+          return ai.fauxAssistantMessage('Completed after reload.')
+        },
+      ])
+      const prompt = at.session.prompt('Run the long script').catch((cause) => String(cause))
+      await at.until(() => inputHeld)
+      const reloading = at.session.reload().then(() => 'reloaded', (cause) => `refused: ${cause}`)
+      await at.until(() => shutting)
+      if (order === 'during-shutdown') {
+        const from = at.loop.seen.length
+        input.open()
+        await at.until(() => requested)
+        shutdown.open()
+        await reloading
+        // The run's hooks that came while the old instance had shut down and before the new one
+        // began read the old instance's last word: no instance of ours was there to write.
+        const to = at.loop.seen.findIndex((s, i) => i >= from && s.event === 'session_start')
+        notes.push(`reload overlap (${form}): hooks between the two instances ${JSON.stringify(at.loop.seen.slice(from, to).map((s) => [s.event, s.state]))}`)
+        at.loop.seen.splice(from, Math.max(0, to - from))
+      } else {
+        await reloading
+        await wait(3 * 200)
+        if (worded) assert.equal(at.word().state, 'busy', 'held through the reload')
+        input.open()
+        await at.until(() => requested)
+      }
+      await wait(5 * 200)
+      const streaming = at.word()
+      if (worded) assert.deepEqual([streaming?.state, streaming?.begun > streaming?.ended], ['working', true], `${order}: ${JSON.stringify(streaming)}`)
+      model.open()
+      await prompt
+      await settles(at)
+      if (worded) assert.deepEqual([at.word().state, at.word().held], ['rest', null], order)
+      notes.push(`reload overlap ${order} (${form}): while streaming ${JSON.stringify(streaming)}`)
+      await at.close()
+    }
+  },
+
+  /** Finding 22: a provider's final 503, then the person aborts while another extension's
+   * `agent_end` handler waits: Pi settles with its flag `aborted: true` and no omission. Recorded
+   * for the reader, which reads the refusal failed with its quota. */
+  async refused_then_aborted() {
+    const hold = gate()
+    let ended = false
+    const at = await open('refused-then-aborted', {
+      retry: false,
+      person: {
+        agent_end: async () => {
+          ended = true
+          await hold.shut
+        },
+      },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Partial answer', { stopReason: 'error', errorMessage: '503 Service Unavailable: overloaded' })])
+    const prompt = at.session.prompt('Run the long script')
+    await at.until(() => ended)
+    const cancel = at.session.abort()
+    hold.open()
+    await Promise.all([prompt, cancel])
+    await settles(at)
+    if (worded) assert.equal(at.word().last.aborted, true, "Pi's flag says aborted")
+    at.moment('refused', { at: 'rest', ended: 'failed', failure: '503 Service Unavailable: overloaded', quota: true })
+    await at.close()
+  },
+
+  /** Finding 24: a board message's prompt is held by a person's `input` hook and Pi reloads: the
+   * message is acknowledged as admitted once it runs, never as refused, and it runs once. */
+  async board_reload() {
+    const hold = gate()
+    let held = false
+    let one = true
+    const at = await open('board-reload', {
+      person: {
+        input: async () => {
+          if (one) {
+            one = false
+            held = true
+            await hold.shut
+          }
+        },
+      },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Original response'), ai.fauxAssistantMessage('Retry response')])
+    const id = envelope(at, at.session.sessionManager.getSessionId(), 'Run the long script')
+    await at.until(() => held)
+    await at.session.reload()
+    await wait(4 * POLL_MS)
+    const first = acked(at, id)
+    assert.notEqual(first?.admitted, false, `refused though it was sent: ${JSON.stringify(first)}`)
+    hold.open()
+    await at.until(() => at.faux.state.callCount >= 1)
+    await settles(at)
+    await at.until(() => acked(at, id) !== null)
+    assert.equal(acked(at, id).admitted, true, JSON.stringify(acked(at, id)))
+    await wait(6 * POLL_MS)
+    // With no word (before the line) the new instance knows nothing of what the old one sent, and
+    // sends it again, as main does.
+    if (worded) assert.equal(at.faux.state.callCount, 1, 'it runs once')
+    else notes.push(`board reload (${form}): no word, model calls ${at.faux.state.callCount}`)
+    await at.close()
+  },
+
   /** D5: a new session that was never written: `rest`, a leaf named, no file. A message goes in. */
   async new_session() {
     const at = await open('new-session')
     await settles(at)
     assert.equal(at.file(), null, 'Pi writes no file before a conversation')
-    assert.notEqual(at.word().leaf, null)
+    if (worded) assert.notEqual(at.word().leaf, null)
     at.moment('no-file', { at: 'rest', items: 0 })
     at.faux.setResponses([ai.fauxAssistantMessage('Got it.')])
     const id = envelope(at, at.session.sessionManager.getSessionId(), 'Your task')

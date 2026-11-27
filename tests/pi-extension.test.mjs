@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import {
   compactionOf,
-  createDeliveryExtension,
+  createDeliveryExtension as createExtension,
+  piVersionOf,
+  writesWord,
 } from '../hosts/pi-extension/consensflow-delivery.mjs'
+// A Pi from the line that gets the word, unless a test says another.
+const createDeliveryExtension = (pi, options = {}) => createExtension(pi, { piVersion: '1.6.1', ...options })
 import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {
@@ -95,6 +99,8 @@ async function setup(
     clock,
     // Whether the timer's first pass follows `session_start` (a test of the start alone says no).
     firstPass = true,
+    // The version of the Pi (`piVersion`): one from the line, unless a test says another.
+    piVersion = '1.6.1',
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -120,6 +126,7 @@ async function setup(
     ...(compactionLimitMs !== undefined ? { compactionLimitMs } : {}),
     ...(inHandMs !== undefined ? { inHandMs } : {}),
     ...(clock !== undefined ? { now: () => clock.t } : {}),
+    piVersion,
   })
   let currentIdle = idle
   // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
@@ -808,62 +815,144 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('on a Pi idle at its first before_agent_start, writes no word in this launch, and gates the inbox by Pi alone', async () => {
-    // Pi 0.87.0 and 1.1.0 set their run flag only at a run's first request.
-    const s = await setup(null, { watchInbox: () => ({ close() {} }) })
+  it('writes the word only on a Pi from 1.2.0, its version compared part by part', () => {
+    for (const version of ['1.2.0', '1.2.1', '1.6.1', '1.10.0', '2.0.0', '10.0.0', '1.2.0-beta.1'])
+      assert.equal(writesWord(version), true, version)
+    for (const version of ['0.87.0', '1.1.0', '1.1.9', '0.99.99', '1.2', 'v1.6.1', '', null, undefined, 16])
+      assert.equal(writesWord(version), false, String(version))
+  })
+
+  for (const [name, piVersion] of [['0.87.0', '0.87.0'], ['1.1.0', '1.1.0'], ['a Pi that says no version', null], ['one that says no three numbers', 'dev']]) {
+    it(`writes no word, ever, on ${name}, and gates the inbox by Pi alone`, async () => {
+      const s = await setup(null, { watchInbox: () => ({ close() {} }), piVersion })
+      try {
+        const file = join(s.settled, 'launch-pi-test.state.json')
+        assert.equal(existsSync(file), false, "no word at the session's start")
+        await s.pi.handlers.get('input')({ type: 'input', text: 'the human typed this' }, s.ctx)
+        await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+        // As before the word, Pi's own idleness gates: a message can go in before a run's first
+        // request (the limit), and waits while Pi works.
+        await writeFile(
+          join(s.inbox, 'm-00000000000000000000000000000052.json'),
+          `${JSON.stringify({ ...envelopeRecord, id: 'm-00000000000000000000000000000052', text: 'first', expiresAt: Date.now() + 30_000 })}\n`,
+        )
+        await s.extension.pass(true)
+        assert.deepEqual(s.pi.sent, ['first'], 'Pi idle: in')
+        await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+        await s.pi.handlers.get('message_start')({ message: { role: 'user', content: [{ type: 'text', text: 'first' }] } }, s.ctx)
+        s.pi.sent.length = 0
+        await writeFile(
+          join(s.inbox, `${envelopeRecord.id}.json`),
+          `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+        )
+        s.setIdle(false)
+        await s.extension.pass(true)
+        assert.deepEqual(s.pi.sent, [])
+        assert.equal(existsSync(join(s.ack, `${envelopeRecord.id}.json`)), false, 'left waiting')
+        s.setIdle(true)
+        await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+        await s.extension.pass(true)
+        assert.deepEqual(s.pi.sent, [envelope])
+        // The launch's next instance writes none either.
+        await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+        const again = fakePi()
+        createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000, piVersion })
+        await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+        await again.handlers.get('session_shutdown')({ reason: 'quit' })
+        assert.equal(existsSync(file), false, 'no word, ever')
+      } finally {
+        await s.close()
+      }
+    })
+  }
+
+  it("reads the version of the Pi it runs in from Pi's own package above the script Node runs", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-version-'))
     try {
-      assert.equal(wordOf(s).state, 'rest', "the session's start writes the word")
+      // As npm lays a published Pi out: its CLI at dist/bundle/cli.js, a link to it in .bin.
+      const make = async (name, version) => {
+        const pkg = join(root, 'node_modules', ...name.split('/'))
+        await mkdir(join(pkg, 'dist', 'bundle'), { recursive: true })
+        await writeFile(join(pkg, 'package.json'), JSON.stringify({ name, version }))
+        await writeFile(join(pkg, 'dist', 'bundle', 'cli.js'), '')
+        return join(pkg, 'dist', 'bundle', 'cli.js')
+      }
+      const cli = await make('@earendil-works/pi-coding-agent', '1.6.1')
+      await mkdir(join(root, 'node_modules', '.bin'), { recursive: true })
+      const link = join(root, 'node_modules', '.bin', 'pi')
+      await symlink(cli, link).catch(() => {})
+      assert.equal(await piVersionOf(cli), '1.6.1')
+      if (existsSync(link)) assert.equal(await piVersionOf(link), '1.6.1', 'through the link npm makes')
+      assert.equal(await piVersionOf(await make('@mariozechner/pi-coding-agent', '0.87.0')), '0.87.0')
+      // Another package's script, or none: no version.
+      assert.equal(await piVersionOf(await make('something-else', '9.9.9')), null)
+      assert.equal(await piVersionOf(join(root, 'nothing', 'here.js')), null)
+      assert.equal(await piVersionOf(undefined), null)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('starts working, one run more begun than ended, where a new instance finds Pi at work (a reload with a prompt let go)', async () => {
+    const s = await setup(null, { inHandMs: 30_000 })
+    try {
       await s.pi.handlers.get('input')({ type: 'input', text: 'the human typed this' }, s.ctx)
-      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
-      assert.deepEqual(wordOf(s), { launchId: 'launch-pi-test', late: true }, 'its place holds no word')
-      // As before the word, Pi's own idleness gates: a run Pi dropped holds nothing back (and a
-      // message can go in before a run's first request, as it could then: the limit).
-      await writeFile(
-        join(s.inbox, 'm-00000000000000000000000000000052.json'),
-        `${JSON.stringify({ ...envelopeRecord, id: 'm-00000000000000000000000000000052', text: 'first', expiresAt: Date.now() + 30_000 })}\n`,
-      )
-      await s.extension.pass(true)
-      assert.deepEqual(s.pi.sent, ['first'], 'Pi idle: in')
-      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
-      await s.pi.handlers.get('message_start')({ message: { role: 'user', content: [{ type: 'text', text: 'first' }] } }, s.ctx)
-      s.pi.sent.length = 0
-      // A message waits while Pi works, and goes in once Pi is idle.
-      await writeFile(
-        join(s.inbox, `${envelopeRecord.id}.json`),
-        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
-      )
-      s.setIdle(false)
-      await s.extension.pass(true)
-      assert.deepEqual(s.pi.sent, [])
-      assert.equal(existsSync(join(s.ack, `${envelopeRecord.id}.json`)), false, 'left waiting')
-      s.setIdle(true)
-      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
-      await s.extension.pass(true)
-      assert.deepEqual(s.pi.sent, [envelope])
-      assert.deepEqual(wordOf(s), { launchId: 'launch-pi-test', late: true }, 'nothing written after it')
-      // The launch's next instance (`/reload`) writes none either.
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun, wordOf(s).ended], ['busy', 0, 0])
+      // Across the shutdown the word holds the prompt in hand and the counts.
       await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      assert.deepEqual([wordOf(s).state, typeof wordOf(s).held, wordOf(s).begun], ['busy', 'number', 0])
+      // The prompt let go during the shutdown: Pi's run is at its request before the new instance
+      // starts.
+      s.setIdle(false)
+      s.ctx.signal = new AbortController().signal
       const again = fakePi()
-      createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000, inHandMs: 30_000 })
       await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
-      assert.deepEqual(wordOf(s), { launchId: 'launch-pi-test', late: true })
+      assert.deepEqual(
+        [wordOf(s).state, wordOf(s).begun, wordOf(s).ended, wordOf(s).held],
+        ['working', 1, 0, null],
+        'the run is on, the prompt its own',
+      )
+      // Its hooks begin nothing more; its end ends it.
+      await again.handlers.get('before_agent_start')({}, s.ctx)
+      assert.equal(wordOf(s).begun, 1)
+      s.setIdle(true)
+      await again.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      assert.deepEqual([wordOf(s).begun, wordOf(s).ended], [1, 1])
       await again.handlers.get('session_shutdown')({ reason: 'quit' })
     } finally {
       await s.close()
     }
   })
 
-  it('on a Pi whose run flag is set at before_agent_start, keeps the word for good', async () => {
-    const s = await setup(null)
+  it('keeps a message it sent through a /reload: never sent again, admitted once it runs', async () => {
+    const s = await setup(null, { watchInbox: () => ({ close() {} }) })
     try {
-      for (let n = 0; n < 2; n += 1) {
-        s.setIdle(false)
-        await s.pi.handlers.get('before_agent_start')({}, s.ctx)
-        s.setIdle(true)
-        await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
-        await s.extension.pass(true)
-      }
-      assert.deepEqual([wordOf(s).state, wordOf(s).ended], ['rest', 2])
+      await writeFile(
+        join(s.inbox, `${envelopeRecord.id}.json`),
+        `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`,
+      )
+      await s.extension.pass(true)
+      assert.deepEqual(s.pi.sent, [envelope])
+      assert.equal(wordOf(s).sent, envelopeRecord.id)
+      // Another extension's `input` handler holds it, and Pi reloads.
+      await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      const again = fakePi()
+      const second = createDeliveryExtension(again, {
+        inbox: s.inbox, ack: s.ack, settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000,
+        watchInbox: () => ({ close() {} }),
+      })
+      await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+      await second.pass(true)
+      assert.deepEqual(again.sent, [], 'not sent again')
+      assert.equal(existsSync(join(s.ack, `${envelopeRecord.id}.json`)), false, 'and not refused')
+      // It runs: admitted.
+      await again.handlers.get('message_start')({ message: { role: 'user', content: [{ type: 'text', text: envelope }] } }, s.ctx)
+      const ack = await waitFor(join(s.ack, `${envelopeRecord.id}.json`))
+      assert.deepEqual([ack.admitted, ack.mode], [true, 'tui'])
+      for (let n = 0; n < 60 && wordOf(s).sent !== null; n += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+      assert.equal(wordOf(s).sent, null, 'no message sent and unacknowledged')
+      await again.handlers.get('session_shutdown')({ reason: 'quit' })
     } finally {
       await s.close()
     }

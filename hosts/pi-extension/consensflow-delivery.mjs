@@ -1,6 +1,6 @@
 import { watch } from 'node:fs'
-import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 const MESSAGE_ID = /^m-[a-f0-9]{32}$/
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/
@@ -76,17 +76,75 @@ function frontierOf(ctx) {
 const IN_HAND_MS = 30_000
 
 /**
+ * The first Pi that gets the word: from 1.2.0 Pi sets its own run flag at the first line of
+ * `_startRun`, before a prompt is prepared and before any `before_agent_start` handler; 0.87.0 and
+ * 1.1.0 set it only at a run's first request, so a word there would say `rest` while a run starts
+ * (read in the published packages of 0.87.0, 1.1.0, 1.2.0, 1.6.0 and 1.6.1).
+ */
+const WORD_FROM = [1, 2, 0]
+
+/**
+ * Whether the Pi of `version` (its `VERSION`, `major.minor.patch` with anything after) gets the
+ * word: compared part by part with {@link WORD_FROM}. A version that is not there or does not
+ * read as three numbers gets none.
+ */
+export function writesWord(version) {
+  const parts = typeof version === 'string' ? /^(\d+)\.(\d+)\.(\d+)/.exec(version) : null
+  if (parts === null) return false
+  for (const [at, line] of WORD_FROM.entries()) {
+    const part = Number(parts[at + 1])
+    if (part !== line) return part > line
+  }
+  return true
+}
+
+/** Pi's packages, under their published names. */
+const PI_PACKAGES = new Set(['@earendil-works/pi-coding-agent', '@mariozechner/pi-coding-agent'])
+
+/**
+ * The version of the Pi this extension runs in: the `version` of Pi's own `package.json`, the
+ * nearest one above the script Node runs (`script`, Pi's CLI: `dist/bundle/cli.js` in every
+ * published package), its real path. None where that package is not Pi's or is not found (a Pi
+ * compiled to one binary). Pi loads a `.mjs` extension natively, so the `VERSION` its SDK exports
+ * is not to be imported from here, and Pi sets no variable of its version.
+ */
+export async function piVersionOf(script = process.argv[1]) {
+  if (typeof script !== 'string' || script.length === 0) return null
+  try {
+    let folder = dirname(await realpath(script))
+    for (let up = 0; up < 4; up += 1) {
+      let found
+      try {
+        found = JSON.parse(await readFile(join(folder, 'package.json'), 'utf8'))
+      } catch {
+        found = null
+      }
+      if (typeof found?.name === 'string') {
+        return PI_PACKAGES.has(found.name) && typeof found.version === 'string' ? found.version : null
+      }
+      const parent = dirname(folder)
+      if (parent === folder) break
+      folder = parent
+    }
+  } catch {
+    // No such script.
+  }
+  return null
+}
+
+/**
  * Install the delivery extension against Pi's ExtensionAPI.
  *
  * **The word** (`settled/<launchId>.state.json`, written under another name and moved into place):
- * `{launchId, sessionId, state, leaf, begun, ended, last, held, pid, n, at}`, Pi's own run state as
+ * `{launchId, sessionId, state, leaf, begun, ended, last, held, sent, pid, n, at}`, Pi's own run state as
  * this extension follows it (the brain's `architecture/pi-turn-state.md`). `state` is `working` (a
  * run is on), `busy` (no run, and Pi is not free: it compacts, sums up a branch, or holds a prompt
  * someone submitted) or `rest`. `leaf` is `getLeafId()` at the write. `begun` and `ended` count this
  * launch's runs; `last` is the last end in this session, `{leaf, aborted}`: its leaf and Pi's flag
  * at its `agent_settled` (null where Pi gave none, or the run was dropped). `held` is when the
  * prompt now in hand was submitted (null: none). `pid` is this process's, so that a reader can tell
- * a word whose window is gone. `n` counts the writes, `at` is the time of this one.
+ * a word whose window is gone. `sent` names the message this extension sent that has no
+ * acknowledgement yet. `n` counts the writes, `at` is the time of this one.
  *
  * Three notes, changed only by hooks: a run is on while `begun > ended`; `begun` goes up at the
  * first of `before_agent_start`, `agent_start` or `turn_start` since the last end, and `ended`
@@ -95,16 +153,16 @@ const IN_HAND_MS = 30_000
  * {@link IN_HAND_MS}). A run Pi dropped (begun, and Pi idle with no settle) is ended by a pass of
  * the 1 s timer that finds Pi idle, never by an inbox event's pass.
  *
- * **Only a Pi that sets its own run flag before a run's first hook gets the word.** Where Pi
- * reads idle at this extension's first `before_agent_start` of an instance with no run on, it sets
- * its flag only at the run's first request (Pi 0.87.0 and 1.1.0): the word would say `rest` while
- * a run starts. The extension then writes no word in this launch: it puts `{launchId, late: true}`
- * in the word's place, which no reader takes for a word and which the launch's next instances go
- * on from, and its gate is Pi's own idleness, as before the word.
+ * **Only a Pi from {@link WORD_FROM} gets the word** (`piVersion`, what Pi exports as
+ * `VERSION`, read once at the extension's start). On an older Pi, or one whose version cannot be
+ * read, no word is written in the launch, and the gate is Pi's own idleness, as before the word.
  *
  * The counts are the launch's. The word stays at `session_shutdown`, and the instance Pi starts
  * next in the launch (`/reload`, a new session, a switch) goes on from its counts, and, where the
- * session is the same, from its last end and its prompt in hand; a new session has no last end.
+ * session is the same, from its last end, its prompt in hand and its message sent; a new session
+ * has no last end. An instance that starts while Pi's run is at its requests (a prompt held across
+ * a reload and let go before the new instance began: Pi not idle, and its run's `signal` there)
+ * starts with that run on: `working`, one run more begun than ended, and nothing in hand.
  *
  * The state is `working` while a run is on; else `busy` while a prompt is in hand or Pi is not
  * idle; else `rest`. It is written when it changes, at every hook and every pass of the poll;
@@ -152,6 +210,8 @@ export function createDeliveryExtension(
     now = () => Date.now(),
     // The process the word names, for a reader to tell a window that is gone.
     pid = process.pid,
+    // The version of the Pi that loaded the extension (`piVersionOf`): none, no word.
+    piVersion,
   } = {},
 ) {
   let context
@@ -173,10 +233,19 @@ export function createDeliveryExtension(
   let last = null
   // When the prompt in hand was submitted.
   let inHand = null
-  // This Pi sets its run flag only at a run's first request: no word in this launch.
-  let late = false
-  // Whether this instance's first `before_agent_start` has told it.
-  let told = false
+  // Whether Pi's agent loop is at work: its signal is there only while a run's requests go on (a
+  // compaction has a signal of its own, and Pi before the loop has none).
+  const streams = (ctx) => {
+    try {
+      return ctx?.signal !== undefined && ctx?.signal !== null
+    } catch {
+      return false
+    }
+  }
+  // A Pi before the line, or one that says no version: no word in this launch.
+  const late = !writesWord(piVersion)
+  // The message this extension sent that has no acknowledgement yet.
+  let sentId = null
   let state = null
   let writes = 0
   let lastWord = null
@@ -233,7 +302,7 @@ export function createDeliveryExtension(
   }
   // Busy also from this extension's own ask of a compaction until it ends: Pi reads idle for a
   // moment after the ask, before it sets its compaction state.
-  // With no word (a Pi that sets its run flag late), Pi's own idleness is the gate, as before it.
+  // With no word (a Pi before the line), Pi's own idleness is the gate, as before the word.
   const sampled = () => {
     if (late) {
       if (inHand !== null || compacting) return 'busy'
@@ -265,6 +334,7 @@ export function createDeliveryExtension(
       ended,
       last,
       held: inHand,
+      sent: sentId,
       pid,
     }
     const key = JSON.stringify(word)
@@ -278,17 +348,6 @@ export function createDeliveryExtension(
         lastWord = null
         logError(`could not record Pi's run state: ${cause?.message ?? String(cause)}`)
       })
-    return writing
-  }
-
-  // This Pi sets its run flag late: the word goes, in its place the mark that this launch has none.
-  const unword = () => {
-    late = true
-    if (shut || stateFile === null) return writing
-    lastWord = null
-    writing = writing
-      .then(() => put(stateFile, `${JSON.stringify({ launchId, late: true })}\n`))
-      .catch((cause) => logError(`could not take back Pi's run state: ${cause?.message ?? String(cause)}`))
     return writing
   }
 
@@ -342,6 +401,10 @@ export function createDeliveryExtension(
     if (entry === undefined || entry.done) return
     entry.done = true
     settledIds.add(id)
+    if (id === sentId) {
+      sentId = null
+      void say(false)
+    }
     if (entry.timer !== null) clearTimeout(entry.timer)
     const response = { id, admitted }
     // Every refusal comes before the send: nothing went in.
@@ -477,6 +540,7 @@ export function createDeliveryExtension(
         )
         // The prompt is in hand from the moment it is sent, until its run begins.
         inHand = now()
+        sentId = id
         try {
           // The raw text goes verbatim. Only message_start proves entry;
           // the editor is never touched.
@@ -539,17 +603,39 @@ export function createDeliveryExtension(
   }
 
   // The word this launch wrote before, by an instance of this extension that Pi replaced
-  // (`/reload`, a new session, a switch), or its mark that the launch has none: its counts go on,
-  // and in the same session its last end and its prompt in hand.
+  // (`/reload`, a new session, a switch): its counts go on, and in the same session its last end,
+  // its prompt in hand and its message sent.
   const carried = async () => {
-    if (stateFile === null) return null
+    if (stateFile === null || late) return null
     try {
       const word = JSON.parse(await readFile(stateFile, 'utf8'))
-      if (word?.launchId !== launchId) return null
-      return word.late === true || Number.isSafeInteger(word.ended) ? word : null
+      return word?.launchId === launchId && Number.isSafeInteger(word.ended) ? word : null
     } catch {
       return null
     }
+  }
+
+  // The message an instance before this one sent in the same session and that has no
+  // acknowledgement: in hand here, never sent again, and acknowledged as admitted once it runs
+  // (its `message_start`), or as unknown at its expiry.
+  const adopt = async (id) => {
+    if (!validMessageId(id) || typeof inbox !== 'string' || typeof ack !== 'string') return
+    const file = `${id}.json`
+    const path = join(inbox, file)
+    let record
+    try {
+      record = JSON.parse(await readFile(path, 'utf8'))
+    } catch {
+      return
+    }
+    if (record?.id !== id || typeof record.text !== 'string' || !validExpiry(record.expiresAt)) return
+    const entry = { path, file, text: record.text, timer: null, done: false }
+    pending.set(id, entry)
+    sentId = id
+    entry.timer = setTimeout(
+      () => void acknowledge(id, null, 'admission-unknown'),
+      Math.max(0, record.expiresAt - now()),
+    )
   }
   const lastOf = (word) =>
     word?.last !== null && typeof word?.last === 'object'
@@ -565,19 +651,26 @@ export function createDeliveryExtension(
     watcher?.close()
     clearInterval(poller)
     await writeShown()
-    // The notes cleared: no run of this conversation is on. The counts go on: they are the
-    // launch's, from the word an instance before this one wrote; where the session is the same (a
-    // `/reload`), its last end, and the prompt it had in hand until a run begins or its time is
-    // up. A launch with no word goes on with none.
+    // The counts go on: they are the launch's, from the word an instance before this one wrote;
+    // where the session is the same (a `/reload`), its last end, its message sent, and the prompt
+    // it had in hand until a run begins or its time is up. Pi's own run at work as this instance
+    // starts (that prompt let go before it began, its request going on): the run is on, the prompt
+    // its own. Pi busy with no request going on (a compaction, a run not at its loop yet) is `busy`,
+    // and the run's next hook (`turn_start`) begins it.
     const before = await carried()
     const same = before !== null && before.sessionId === sessionIdOf(ctx)
-    late = before?.late === true
-    told = false
-    if (before !== null && !late && before.ended > ended) ended = before.ended
-    begun = ended
+    if (before !== null && before.ended > ended) ended = before.ended
     last = same ? lastOf(before) : null
-    inHand =
-      same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null
+    sentId = null
+    if (same) await adopt(before.sent)
+    if (!late && !idle() && streams(ctx)) {
+      begun = ended + 1
+      inHand = null
+    } else {
+      begun = ended
+      inHand =
+        same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null
+    }
     restAfter = ended
     lastWord = null
     // The word at once; the timer's first pass reads the inbox: nothing is sent from a handler.
@@ -596,10 +689,6 @@ export function createDeliveryExtension(
     return say(false).then(() => undefined)
   })
   pi.on('before_agent_start', async (_event, ctx) => {
-    context = ctx ?? context
-    // Idle here with no run on: this Pi sets its run flag only at the run's first request.
-    if (!told && !late && !runOn() && idle()) await unword()
-    told = true
     await begin(ctx)
     return undefined
   })
@@ -713,9 +802,11 @@ export function createDeliveryExtension(
 }
 
 // This is the only environment-reading entry point. The launch producer
-// supplies these names in the enabled Pi process environment.
-export default function consensflowDelivery(pi) {
+// supplies these names in the enabled Pi process environment. Pi awaits it.
+export default async function consensflowDelivery(pi) {
+  const piVersion = await piVersionOf()
   return createDeliveryExtension(pi, {
+    piVersion,
     inbox: process.env.CF_DELIVERY_INBOX,
     ack: process.env.CF_DELIVERY_ACK,
     quarantine: process.env.CF_DELIVERY_QUARANTINE,

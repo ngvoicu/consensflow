@@ -872,7 +872,12 @@ fn of_turn(record: &mut Record, turn: &Turn, step: Option<&Step>) {
                     record.failed = true;
                     record.failure_kind = step.failure_kind.map(str::to_owned);
                 }
-                Some((step, Some("error"))) if *flag != Some(true) && !step.omitted => {
+                // Pi's abort flag makes an error an interrupt, but not a refusal that had ended the
+                // run already (a person's stop after the provider's final 503): its quota and its
+                // failure are published together.
+                Some((step, Some("error")))
+                    if (*flag != Some(true) || step.quota.is_some()) && !step.omitted =>
+                {
                     record.failed = true;
                     record.failure = step.failure.clone().filter(|said| !said.trim().is_empty());
                 }

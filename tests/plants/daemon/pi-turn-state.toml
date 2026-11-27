@@ -114,7 +114,7 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (before !== null && !late && before.ended > ended) ended = before.ended\n"
+find = "    if (before !== null && before.ended > ended) ended = before.ended\n"
 replace = ""
 
 [[plant]]
@@ -154,8 +154,8 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    inHand =\n      same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null\n"
-replace = "    inHand = null\n"
+find = "      inHand =\n        same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null\n"
+replace = "      inHand = null\n"
 
 [[plant]]
 name = "pi turn state: a reload holds the prompt in hand anew"
@@ -164,8 +164,8 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    inHand =\n      same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null\n"
-replace = "    inHand = same && Number.isFinite(before.held) ? now() : null\n"
+find = "      inHand =\n        same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null\n"
+replace = "      inHand = same && Number.isFinite(before.held) ? now() : null\n"
 
 [[plant]]
 name = "pi turn state: the prompt in hand is not in the word"
@@ -178,38 +178,8 @@ find = "      held: inHand,\n"
 replace = "      held: null,\n"
 
 [[plant]]
-name = "pi turn state: a Pi that sets its run flag late keeps the word"
-meant = "on a Pi idle at its first before_agent_start, writes no word in this launch, and gates the inbox by Pi alone"
-runs = ["pts-extension"]
-
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (!told && !late && !runOn() && idle()) await unword()\n"
-replace = "    // never told\n"
-
-[[plant]]
-name = "pi turn state: a Pi that sets its run flag early loses the word"
-meant = "on a Pi whose run flag is set at before_agent_start, keeps the word for good"
-runs = ["pts-extension"]
-
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (!told && !late && !runOn() && idle()) await unword()\n"
-replace = "    if (!told && !late && !runOn()) await unword()\n"
-
-[[plant]]
-name = "pi turn state: the launch's next instance writes a word again"
-meant = "on a Pi idle at its first before_agent_start, writes no word in this launch, and gates the inbox by Pi alone"
-runs = ["pts-extension"]
-
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    late = before?.late === true\n"
-replace = "    late = false\n"
-
-[[plant]]
 name = "pi turn state: with no word a run Pi dropped holds the inbox"
-meant = "on a Pi idle at its first before_agent_start, writes no word in this launch, and gates the inbox by Pi alone"
+meant = "writes no word, ever, on 0.87.0, and gates the inbox by Pi alone"
 runs = ["pts-extension"]
 
 [[plant.edit]]
@@ -224,10 +194,101 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "      if (word?.launchId !== launchId) return null\n"
+find = "      return word?.launchId === launchId && Number.isSafeInteger(word.ended) ? word : null\n"
+replace = "      return Number.isSafeInteger(word?.ended) ? word : null\n"
+
+[[plant]]
+name = "pi turn state: the version is compared as text"
+meant = "writes the word only on a Pi from 1.2.0, its version compared part by part"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (part !== line) return part > line\n"
+replace = "    if (part !== line) return String(part) > String(line)\n"
+
+[[plant]]
+name = "pi turn state: a Pi below the line gets the word"
+meant = "writes no word, ever, on 1.1.0, and gates the inbox by Pi alone"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (part !== line) return part > line\n"
+replace = "    if (part !== line) return true\n"
+
+[[plant]]
+name = "pi turn state: a Pi that says no version gets the word"
+meant = "writes no word, ever, on a Pi that says no version, and gates the inbox by Pi alone"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "  if (parts === null) return false\n"
+replace = "  if (parts === null) return true\n"
+
+[[plant]]
+name = "pi turn state: the version is read from another package"
+meant = "reads the version of the Pi it runs in from Pi's own package above the script Node runs"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "        return PI_PACKAGES.has(found.name) && typeof found.version === 'string' ? found.version : null\n"
+replace = "        return typeof found.version === 'string' ? found.version : null\n"
+
+[[plant]]
+name = "pi turn state: a new instance inside a run says busy"
+meant = "starts working, one run more begun than ended, where a new instance finds Pi at work (a reload with a prompt let go)"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (!late && !idle() && streams(ctx)) {\n"
+replace = "    if (false) {\n"
+
+[[plant]]
+name = "pi turn state: a new instance in a compaction says working"
+meant = "says busy at the session's start for a Pi not idle"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (!late && !idle() && streams(ctx)) {\n"
+replace = "    if (!late && !idle()) {\n"
+
+[[plant]]
+name = "pi turn state: a reload sends its sent message again"
+meant = "keeps a message it sent through a /reload: never sent again, admitted once it runs"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (same) await adopt(before.sent)\n"
 replace = ""
 
+[[plant]]
+name = "pi turn state: the message sent is not in the word"
+meant = "keeps a message it sent through a /reload: never sent again, admitted once it runs"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      sent: sentId,\n"
+replace = "      sent: null,\n"
+
 # --- the reader ---
+
+[[plant]]
+name = "pi turn state: Pi's abort unmakes a refusal that ended the run"
+meant = "every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_clock"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "                Some((step, Some(\"error\")))\n                    if (*flag != Some(true) || step.quota.is_some()) && !step.omitted =>\n"
+replace = "                Some((step, Some(\"error\")))\n                    if *flag != Some(true) && !step.omitted =>\n"
+
 
 [[plant]]
 name = "pi turn state: a working word with as many ends as runs is at work"

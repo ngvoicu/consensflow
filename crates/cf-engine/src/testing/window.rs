@@ -534,6 +534,16 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             return Some(Arc::new(Reading::Unknown(reason.clone())));
         }
         let places = agent.says_places.then(|| (0..items.len()).collect());
+        if let Some(record) = &agent.record {
+            let mut record = record.clone();
+            record.lines.places = record
+                .lines
+                .places
+                .is_some()
+                .then(|| (0..items.len()).collect());
+            record.items = items;
+            return Some(Arc::new(Reading::Known(record)));
+        }
         Some(Arc::new(Reading::Known(Record {
             items,
             in_flight: false,
@@ -560,7 +570,6 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             lines: Box::new(Lines {
                 lost: agent.lost.clone(),
                 places,
-                said_at_work: agent.said_at_work,
                 ..Lines::default()
             }),
             beside: Vec::new(),

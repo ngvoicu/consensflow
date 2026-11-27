@@ -143,10 +143,10 @@ impl Window {
         }
     }
 
-    /// One look of the reader, given to the fake window whole: everything the real reader
-    /// publishes goes to it (its items, the recorded brief standing as the one the fake delivered,
-    /// a person's later prompts kept; quota, failure and its kind, whether it takes words, and
-    /// whether Pi's word says a run is on).
+    /// One look of the reader, given to the fake window whole: the real reader's record itself
+    /// (its quota, its aborted mark, its lines and every other field), with its items standing
+    /// after the brief the fake delivered in place of the recorded one, a person's later prompts
+    /// kept; and the look the Pi adapter makes of it (settled, whether it takes words, over).
     fn look(&mut self) {
         let reading = self.reader.look(&self.options, self.now);
         assert!(
@@ -174,7 +174,7 @@ impl Window {
             agent.failure.clone_from(&record.failure);
             agent.failure_kind.clone_from(&record.failure_kind);
             agent.quota.clone_from(&observed.quota);
-            agent.said_at_work = record.lines.said_at_work;
+            agent.record = Some(record.clone());
         });
     }
 

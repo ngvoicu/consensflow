@@ -3,7 +3,11 @@ import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { before, describe, it } from 'node:test'
-import { createDeliveryExtension } from '../hosts/pi-extension/consensflow-delivery.mjs'
+import {
+  createDeliveryExtension as createExtension,
+} from '../hosts/pi-extension/consensflow-delivery.mjs'
+// A Pi from the line that gets the word, unless a test says another.
+const createDeliveryExtension = (pi, options = {}) => createExtension(pi, { piVersion: '1.6.1', ...options })
 import { cargoMissing, rustPi } from './rust-channels.mjs'
 
 function fakePi() {

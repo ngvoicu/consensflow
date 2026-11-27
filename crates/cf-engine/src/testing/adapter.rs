@@ -27,7 +27,9 @@ use cf_harness::contract::{
     Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
     Work,
 };
-use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::records::{
+    Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Record, Role,
+};
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
@@ -124,9 +126,9 @@ pub struct FakeAgent {
     /// Its harness's live word says its window is at work, whatever its record says
     /// (`Window::at_work`: Codex's broker).
     pub at_work: bool,
-    /// Its record reads at work by its harness's own word (`Lines::said_at_work`: Pi's
-    /// extension says a run is on).
-    pub said_at_work: bool,
+    /// The record its harness's own reader read, given whole (Pi's): the look's reading is it, its
+    /// items those of `items`, in place of one made from the fields here.
+    pub record: Option<Record>,
     /// Whether its prompt takes words, where its harness says so apart from `settled` (Pi's
     /// look): none takes `settled`'s answer.
     pub takes_words: Option<bool>,
@@ -1341,7 +1343,7 @@ impl Asked {
             took_back: false,
             at_prompt: false,
             at_work: false,
-            said_at_work: false,
+            record: None,
             takes_words: None,
             at_work_after_recheck: None,
             rechecked: 0,

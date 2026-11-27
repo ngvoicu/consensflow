@@ -14,6 +14,7 @@ const EVENTS = [
   'agent_settled',
   'session_before_compact',
   'session_compact',
+  'session_before_tree',
   'session_shutdown',
 ]
 

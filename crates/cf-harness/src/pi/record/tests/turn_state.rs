@@ -151,6 +151,12 @@ fn ended_as(record: &Record, expect: &Value, what: &str) {
             "{what}: only the retry's words"
         );
     }
+    if expect["quota"] == json!(true) {
+        assert!(
+            record.quota.is_some(),
+            "{what}: the refusal is published: {record:?}"
+        );
+    }
     if expect["items"] == json!(0) {
         assert!(answer(record).is_empty(), "{what}: {record:?}");
     }
