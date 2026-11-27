@@ -1361,3 +1361,38 @@ fn a_reopened_workers_first_resume_words_go_once_when_its_own_turn_has_ended() {
     assert_eq!(handed(&context), 1, "the words went in, once, at its rest");
     context.close();
 }
+
+/// A launch's first message where the harness's live word says the window is at work while its
+/// record reads it at rest (Codex's broker missed a `turn/completed`, T-842's P2): the word is
+/// asked again once the record has read the window at rest for a settle, as for every message
+/// (`recheck_if_due`), and the message goes (T-2373, N8).
+#[test]
+fn a_first_message_held_by_a_stale_at_work_word_is_given_once_the_word_is_asked_again() {
+    let context = Context::made(Made {
+        settle_ms: 3_000,
+        ..Made::default()
+    });
+    context.adapter.first.set(FirstMessage::Delivered);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsaid))));
+    let (_, brief) = briefed(&context);
+    passes(&context, 3);
+    context.adapter.with("zeus", |agent| {
+        agent.at_work = true;
+        agent.at_work_after_recheck = Some(false);
+    });
+    *context.adapter.ready.borrow_mut() = None;
+    for _ in 0..12 {
+        context.advance(5_000);
+        passes(&context, 1);
+    }
+    assert!(
+        context.adapter.agent("zeus").rechecked > 0,
+        "the word was asked again"
+    );
+    assert_eq!(
+        times_handed(&context, SEAM, brief),
+        1,
+        "and the brief went in, once"
+    );
+    context.close();
+}

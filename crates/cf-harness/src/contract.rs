@@ -828,6 +828,7 @@ pub trait Window {
             let state = crate::BoxState {
                 stale_paste: self.stale_paste(),
                 put_back_by_our_stop: self.put_back_by_our_stop(),
+                typed_at_put_back: None,
             };
             Ok(
                 match crate::licence_paste(look, self.harness(), state, &[3]) {
@@ -863,6 +864,7 @@ pub trait Window {
                     crate::BoxState {
                         stale_paste: self.stale_paste(),
                         put_back_by_our_stop: self.put_back_by_our_stop(),
+                        typed_at_put_back: None,
                     },
                     &[3],
                 ),

@@ -1881,6 +1881,8 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
+            // A stale "at work" word of the harness's is asked again for a first message too.
+            self.recheck_if_due(record, &observed, !drawing).await;
             // A launch's first message keeps `settled`: a window opened again on a record that
             // ends in the old process's interrupt has a new Claude whose busy status says
             // nothing of its prompt (T-1985).

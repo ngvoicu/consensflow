@@ -297,6 +297,10 @@ pub struct BoxState {
     /// took the brief back out of the conversation): where the box cannot be read, the clear
     /// goes blind with the paste if no key of the person's was counted (N6).
     pub put_back_by_our_stop: bool,
+    /// The host's count of the person's keys at the first look that saw that put-back, where the
+    /// engine kept one: a key counted since may have recalled the person's own words into the box
+    /// (an arrow does, and leaves nothing unsent), so nothing of ours clears it (N11).
+    pub typed_at_put_back: Option<u64>,
 }
 
 /// What a look licenses for a window that takes pastes.
@@ -373,10 +377,18 @@ pub fn licence_paste(
         }
         // Said as what is in the box and what lifts the hold: Enter sends it, and the record
         // then no longer shows it put back. Nothing here says "typed", for nothing is unsent.
-        return PasteLicence::Wait(Held::ForHuman(
-            "its input box holds a message ConsensFlow put back there: press Enter in this window to send it"
-                .to_owned(),
-        ));
+        return PasteLicence::Wait(Held::ForHuman(PUT_BACK_UNREAD.to_owned()));
+    }
+    // A box that reads, with a key of the person's counted since our put-back: its words may be
+    // the person's own, which the clear would erase (N11).
+    if stale
+        && reads == BoxReading::Holds
+        && state.put_back_by_our_stop
+        && state
+            .typed_at_put_back
+            .is_some_and(|typed| look.at().typed > typed)
+    {
+        return PasteLicence::Wait(Held::ForHuman(PUT_BACK_KEYS.to_owned()));
     }
     if !over_count && !stale && reads == BoxReading::Holds {
         return PasteLicence::Wait(Held::Unsent);
@@ -388,6 +400,14 @@ pub fn licence_paste(
         clear_first,
     }
 }
+
+/// What the lane says while ConsensFlow's own message is in a box no reader reads and the person
+/// has pressed a key in the window (N7): what works, and never "press Enter", which would send
+/// the stopped message as it is.
+pub const PUT_BACK_UNREAD: &str = "ConsensFlow's own message was left in this window's input box and can't be read there. Clear the box and send a message of your own in this window, or close and reopen the window";
+
+/// The same where the box reads and keys of the person's came after our put-back (N11).
+pub const PUT_BACK_KEYS: &str = "ConsensFlow's own message was left in this window's input box, and keys of yours came after it, so ConsensFlow can't tell whose words are in the box. Clear the box and send a message of your own in this window, or close and reopen the window";
 
 /// What an Enter is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

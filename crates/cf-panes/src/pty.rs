@@ -247,24 +247,27 @@ fn lock_writer(
 /// time, and nothing of any other window, nor the pane table, the page or the journal, waits on
 /// it. A terminal slow to resize holds up that window's next size and no more.
 struct PaneMaster {
+    /// A handle of the console's output of the window's own, made when it opened (Windows): the
+    /// output's copies are made from it, which needs no lock. **Declared before the terminal**,
+    /// so that it is let go first: our end of the console's output has to go before the console
+    /// closes, which waits for ever on a read end that is still held (before Windows 11 24H2,
+    /// `conpty`).
+    #[cfg(windows)]
+    watch: Option<conpty::Watch>,
     terminal: Mutex<Box<dyn MasterPty + Send>>,
     /// The descriptor of the terminal, taken when the window opened (Unix): what the output's
     /// own copy is made from, which needs no lock.
     #[cfg(unix)]
     fd: Option<std::os::fd::RawFd>,
-    /// A handle of the console's output of the window's own, made when it opened (Windows): the
-    /// output's copies are made from it, which needs no lock.
-    #[cfg(windows)]
-    watch: Option<conpty::Watch>,
 }
 
 impl PaneMaster {
     fn new(terminal: Box<dyn MasterPty + Send>) -> Arc<Self> {
         Arc::new(Self {
-            #[cfg(unix)]
-            fd: terminal.as_raw_fd(),
             #[cfg(windows)]
             watch: conpty::watch(&*terminal).ok(),
+            #[cfg(unix)]
+            fd: terminal.as_raw_fd(),
             terminal: Mutex::new(terminal),
         })
     }

@@ -396,6 +396,7 @@ fn a_stale_paste_is_cleared_first_only_from_a_box_that_holds_it() {
     let stale = BoxState {
         stale_paste: true,
         put_back_by_our_stop: true,
+        typed_at_put_back: None,
     };
     let holds = look(&snapshot("/compact", false, None));
     match licence_paste(&holds, Harness::Claude, stale, CLEAR) {
@@ -438,6 +439,7 @@ fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons
     let stale = BoxState {
         stale_paste: true,
         put_back_by_our_stop: true,
+        typed_at_put_back: None,
     };
     let mut unread = snapshot("", false, None);
     unread["bottom"] = json!(["⏺ 4"]);
@@ -445,7 +447,9 @@ fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons
     match licence_paste(&look(&unread), Harness::Claude, stale, CLEAR) {
         PasteLicence::Wait(Held::ForHuman(words)) => {
             assert!(!words.contains("typed"), "{words}");
-            assert!(words.contains("Enter"), "{words}");
+            assert!(!words.contains("press Enter"), "{words}");
+            assert!(words.contains("send a message of your own"), "{words}");
+            assert!(words.contains("close and reopen"), "{words}");
         }
         other => panic!("{other:?}"),
     }
@@ -469,7 +473,8 @@ fn a_box_that_does_not_read_with_our_words_in_it_holds_once_a_key_of_the_persons
             Harness::Claude,
             BoxState {
                 stale_paste: true,
-                put_back_by_our_stop: false
+                put_back_by_our_stop: false,
+                typed_at_put_back: None,
             },
             CLEAR
         ),
@@ -578,4 +583,36 @@ fn after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets
         after_wait(Ok(&look(&printing)), Harness::Claude),
         AfterWait::Printing
     );
+}
+
+/// N11: a box that reads, after our stop's put-back, with a key of the person's counted since: an
+/// Up recalls their own words (the count of unsent keys is unmoved), and nothing of ours clears
+/// the box. With no key since, the clear goes as it did.
+#[test]
+fn a_put_back_in_a_box_that_reads_is_not_cleared_after_a_key_of_the_persons_since() {
+    let stopped = |typed_at_put_back| BoxState {
+        stale_paste: true,
+        put_back_by_our_stop: true,
+        typed_at_put_back,
+    };
+    let recalled = look(&snapshot("my own earlier words", false, None));
+    assert_eq!(recalled.at().typed, 4);
+    match licence_paste(&recalled, Harness::Claude, stopped(Some(3)), CLEAR) {
+        PasteLicence::Wait(Held::ForHuman(words)) => {
+            assert!(
+                !words.contains("press Enter") && !words.contains("typed"),
+                "{words}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    match licence_paste(&recalled, Harness::Claude, stopped(Some(4)), CLEAR) {
+        PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, Some(CLEAR)),
+        other => panic!("{other:?}"),
+    }
+    // Not kept (no look saw the put-back yet): as before.
+    match licence_paste(&recalled, Harness::Claude, stopped(None), CLEAR) {
+        PasteLicence::Go { clear_first, .. } => assert_eq!(clear_first, Some(CLEAR)),
+        other => panic!("{other:?}"),
+    }
 }

@@ -51,9 +51,22 @@ impl Dispatcher {
             .uncleared
             .as_ref()
             .is_some_and(|stale| &stale.pane == pane);
+        // The person's count of keys at the first look that saw our stop's put-back, kept until
+        // the put-back is gone.
+        let put_back = window.put_back_by_our_stop();
+        let typed_at_put_back = {
+            let mut part = record.delivery.borrow_mut();
+            if put_back {
+                Some(*part.put_back_typed.get_or_insert(look.at().typed))
+            } else {
+                part.put_back_typed = None;
+                None
+            }
+        };
         let state = BoxState {
             stale_paste: uncleared || window.stale_paste(),
-            put_back_by_our_stop: window.put_back_by_our_stop(),
+            put_back_by_our_stop: put_back,
+            typed_at_put_back,
         };
         licence_paste(look, window.harness(), state, clear)
     }

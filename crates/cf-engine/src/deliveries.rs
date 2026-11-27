@@ -152,6 +152,9 @@ pub(crate) struct DeliveryPart {
     pub(crate) unproven: bool,
     /// Since when the wait has been for [`Held::Settling`], with no other hold between.
     pub(crate) settling_since: Option<i64>,
+    /// The host's count of the person's keys at the first look that saw our stop's put-back in
+    /// the box (N11).
+    pub(crate) put_back_typed: Option<u64>,
     /// A message waits for what only the human can do in the window, in the window's words
     /// ([`Held::ForHuman`]): the board says them as the window's wait, and the window is
     /// asked again at every look.

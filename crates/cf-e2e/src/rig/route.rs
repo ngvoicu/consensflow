@@ -158,6 +158,9 @@ pub(super) struct Seen {
     /// The `pane.open` requests the pane host has not answered yet, by the
     /// request's id: the window each is for.
     opening: HashMap<String, Value>,
+    /// The key a `pane.write_paste` asks the host to press first (`clearFirst`), by the request's
+    /// id, until the host answers: it is pressed once the host admits the paste (N10).
+    clears: HashMap<String, (String, Vec<u8>)>,
     /// The process each window was opened on, as the pane host answered its
     /// `pane.open`: `{ id, generation, pid }`, in the order they were answered.
     pub pids: Vec<Value>,
@@ -535,11 +538,9 @@ impl Shared {
             // `clearFirst` (N17), and is a press as `pane.input`'s are (N5).
             if frame["kind"] == "req" && frame["op"] == "pane.write_paste" {
                 if let Some(keys) = frame["body"]["clearFirst"].as_str() {
-                    seen.presses.push(Press {
-                        pane: frame["body"]["id"].as_str().unwrap_or_default().to_owned(),
-                        bytes: keys.as_bytes().to_vec(),
-                        at_ms: jiff::Timestamp::now().as_millisecond(),
-                    });
+                    let pane = frame["body"]["id"].as_str().unwrap_or_default().to_owned();
+                    seen.clears
+                        .insert(id.to_owned(), (pane, keys.as_bytes().to_vec()));
                 }
             }
             // An Enter of a delivery that is not a paste's first goes as `pane.enter` (N17): the
@@ -598,6 +599,17 @@ impl Shared {
                 seen.roots.push(root);
             }
             if frame["kind"] == "res" {
+                // The paste's clearing key is pressed once the host has admitted the paste, not
+                // when the daemon asks (N10): one it refused pressed nothing.
+                if let Some((pane, bytes)) = seen.clears.remove(id) {
+                    if frame["body"]["ok"] == true {
+                        seen.presses.push(Press {
+                            pane,
+                            bytes,
+                            at_ms: jiff::Timestamp::now().as_millisecond(),
+                        });
+                    }
+                }
                 if let Some(mut window) = seen.opening.remove(id) {
                     if let Some(pid) = frame["body"]["pid"].as_u64() {
                         window["pid"] = json!(pid);
@@ -894,20 +906,39 @@ mod tests {
     /// N5: the key that empties a box a stale paste is in goes with the paste, as its
     /// `clearFirst`; the rig counts it as the key it presses, as it does `pane.input`'s.
     #[test]
-    fn the_key_that_goes_with_a_paste_as_its_clear_first_is_kept_as_a_press() {
+    fn the_key_that_goes_with_a_paste_as_its_clear_first_is_kept_as_a_press_once_the_host_admits_it(
+    ) {
         let shared = Shared::default();
-        let (host, host_lines, daemon, _) = sinks();
-        for body in [
-            json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
-            json!({"id":"p1-zeus","generation":1,"body":"words"}),
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        for (id, body) in [
+            (
+                "n-3",
+                json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
+            ),
+            (
+                "n-4",
+                json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
+            ),
+            ("n-5", json!({"id":"p1-zeus","generation":1,"body":"words"})),
         ] {
-            let line = json!({"v":1,"id":"n-3","kind":"req","op":"pane.write_paste","body":body})
-                .to_string();
+            let line =
+                json!({"v":1,"id":id,"kind":"req","op":"pane.write_paste","body":body}).to_string();
             shared.route_daemon(&line, &host, &daemon);
             assert_eq!(
                 host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
                 line
             );
+        }
+        assert!(
+            shared.seen().presses.is_empty(),
+            "nothing is pressed until the host admits the paste"
+        );
+        // The host admits the first and refuses the second; the third had no key.
+        for (id, ok) in [("n-3", true), ("n-4", false), ("n-5", true)] {
+            let answer =
+                json!({"v":1,"id":id,"kind":"res","op":"pane.write_paste","body":{"ok":ok}})
+                    .to_string();
+            shared.route_host(&answer, &host, &daemon);
         }
         let seen = shared.seen();
         let kept: Vec<(&str, &[u8])> = seen
@@ -918,7 +949,7 @@ mod tests {
         assert_eq!(
             kept,
             [("p1-zeus", &[3][..])],
-            "one press, of the paste that had a key"
+            "one press, of the paste the host admitted"
         );
     }
 

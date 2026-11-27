@@ -481,3 +481,14 @@ find = """            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => 
 replace = """            Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
             Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
                 Some("it began a turn as its first message was to go".to_owned())"""
+
+[[plant]]
+name = "first message: a stale at-work word is never asked again for a first message"
+meant = "a_first_message_held_by_a_stale_at_work_word_is_given_once_the_word_is_asked_again"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """            self.recheck_if_due(record, &observed, !drawing).await;
+            // A launch's first message keeps"""
+replace = """            // A launch's first message keeps"""

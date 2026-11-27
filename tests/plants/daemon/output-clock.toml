@@ -750,3 +750,13 @@ runs = ["oc-model", "oc-harness"]
 file = "crates/cf-harness/src/shared/look.rs"
 find = """state.put_back_by_our_stop && look.at().typed == 0"""
 replace = """state.put_back_by_our_stop && true"""
+
+[[plant]]
+name = "output clock: our put-back in a box that reads is cleared after a key of the person's since"
+meant = "a_put_back_in_a_box_that_reads_is_not_cleared_after_a_key_of_the_persons_since"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_some_and(|typed| look.at().typed > typed)"""
+replace = """            .is_some_and(|typed| look.at().typed > typed && false)"""

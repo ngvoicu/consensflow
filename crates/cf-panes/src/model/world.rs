@@ -549,6 +549,7 @@ impl World {
         let state = BoxState {
             stale_paste: self.stale.load(Ordering::SeqCst),
             put_back_by_our_stop: self.stale.load(Ordering::SeqCst),
+            typed_at_put_back: None,
         };
         let licence = licence_paste(&look, self.harness, state, &[3]);
         self.log.lock().unwrap().push(format!(
