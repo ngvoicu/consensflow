@@ -973,12 +973,17 @@ fn a_reader_held_at_the_room_is_behind_on_a_real_terminal() {
     let deadline = Instant::now() + Duration::from_secs(60);
     let held = loop {
         let now = look();
-        if now["outputDrawn"].as_u64() >= Some(4096) && now["outputRead"] == now["outputDrawn"] {
+        // Behind is what the reader says once it is held at the room: a look between its last
+        // read of the room and its being held reads it caught up for a moment.
+        if now["outputDrawn"].as_u64() >= Some(4096)
+            && now["outputRead"] == now["outputDrawn"]
+            && now["outputCaughtUp"] == false
+        {
             break now;
         }
         assert!(
             Instant::now() < deadline,
-            "the room was never filled: {now}"
+            "the room was never filled and held: {now}"
         );
         thread::sleep(Duration::from_millis(5));
     };
