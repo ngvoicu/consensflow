@@ -2230,10 +2230,13 @@ impl Dispatcher {
                 .borrow_mut()
                 .end_retry_holds_for_account(owner.id, &until)?;
             for (number, requester, handle) in waiting {
-                self.seams
-                    .ledger
-                    .borrow_mut()
-                    .note_hold_unavailable(project.id, &requester, number, &handle, because)?;
+                self.seams.ledger.borrow_mut().note_hold_unavailable(
+                    project.id,
+                    &requester,
+                    number,
+                    &handle,
+                    cf_harness::records::hold_form(because),
+                )?;
             }
         }
         if let Some(unwell) = unwell {

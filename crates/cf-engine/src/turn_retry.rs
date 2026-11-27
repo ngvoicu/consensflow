@@ -74,20 +74,8 @@ fn spoken(ms: i64) -> String {
 /// A refused login as a try says it: "its login was refused", and in brackets the status and the
 /// provider's error type the refusal carried, where it carried them (the closed form's literals).
 fn login_words(because: &str) -> String {
-    let Some(form) = cf_harness::records::hold_form(because) else {
-        return "its login was refused".to_owned();
-    };
-    let named: Vec<String> = form
-        .status()
-        .map(|status| status.to_string())
-        .into_iter()
-        .chain(form.code().map(str::to_owned))
-        .collect();
-    if named.is_empty() {
-        "its login was refused".to_owned()
-    } else {
-        format!("its login was refused ({})", named.join(", "))
-    }
+    cf_harness::records::hold_form(because)
+        .map_or_else(|| "its login was refused".to_owned(), |form| form.words())
 }
 
 /// What a failed turn comes to for its task.

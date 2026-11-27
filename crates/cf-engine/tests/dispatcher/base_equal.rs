@@ -8,6 +8,12 @@
 //! with `base_equal.golden.json`: the same test run on the base (`3375b7162`) with
 //! `CF_RECORD_GOLDEN=<path>`. The only differences the form allows are the keys it adds:
 //! `participant` and `form` of a `member.out` event, `outForm` of the board's participant.
+//!
+//! The one thing that differs on purpose since T-2367's round 3: the three notes of an account
+//! hold (the requester's, the human's, the task's aside) say the hold from its closed form and
+//! no word of the harness's. They are compared as such: each side's own words for them are
+//! masked, the observed one only where it is exactly the closed form's words, and every other
+//! note, aside and mark stays byte for byte the base's.
 
 use std::fmt::Write as _;
 
@@ -35,6 +41,32 @@ fn quota_of(kind: &str, words: &str, at: String) -> Quota {
             at: Some(at),
             because: words.to_owned(),
         },
+    }
+}
+
+const MASKED: &str = "<the note of an account hold>";
+
+/// The three notes of an account hold of `kind` with `words`, in the words they have when `said`
+/// is what the refusal was (the base's: the reader's whole reason; this build's: the closed form).
+fn account_notes(said: &str) -> [String; 3] {
+    [
+        format!("T-1 waits with @zeus-amber-pine: its account is unavailable ({said}), and nothing resets that; it goes on when the human says the account works again."),
+        format!("@zeus-amber-pine's account is unavailable: {said}. Nothing is sent to it until you say it works again: press Try again now on @zeus once it does."),
+        format!("waits with @zeus-amber-pine: its account is unavailable ({said}) until the human says it works"),
+    ]
+}
+
+/// `value` with each of `notes` that it holds as a whole string replaced by [`MASKED`].
+fn masked(value: &Value, notes: &[String]) -> Value {
+    match value {
+        Value::String(text) if notes.contains(text) => json!(MASKED),
+        Value::Array(all) => Value::Array(all.iter().map(|each| masked(each, notes)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, each)| (key.clone(), masked(each, notes)))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 
@@ -120,7 +152,15 @@ fn a_hold_keeps_shows_and_tells_of_a_harness_s_words_what_the_base_did() {
     assert_eq!(observed.len(), golden.len(), "the inputs");
     let mut differ = String::new();
     for (case, base) in golden {
-        if observed.get(case) != Some(base) {
+        let (mut mine, mut theirs) = (observed.get(case).cloned(), base.clone());
+        let (kind, words) = case.split_once(": ").expect("a case is `kind: words`");
+        if kind == "login" || kind == "billing" {
+            let reason = format!("its {kind} was refused: {}", words.trim());
+            let form = cf_harness::records::hold_form(&reason).expect("an account's reason");
+            theirs = masked(&theirs, &account_notes(&reason));
+            mine = mine.map(|seen| masked(&seen, &account_notes(&form.words())));
+        }
+        if mine.as_ref() != Some(&theirs) {
             let _ = writeln!(differ, "{case}");
         }
     }

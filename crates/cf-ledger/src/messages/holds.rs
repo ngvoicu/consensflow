@@ -24,6 +24,7 @@ use crate::model::LedgerError;
 use crate::queue::{send, Sent};
 use crate::store::Store;
 use crate::views::TaskRow;
+use cf_proto::hold::HoldForm;
 
 /// How a hold note ends: the time before it is an expected reset, not a promise.
 const TAIL: &str = ", or sooner if its account has quota again; it goes on by itself.";
@@ -46,12 +47,12 @@ fn render_moved(number: i64, handle: &str, because: &str) -> String {
     format!("T-{number} waits with @{handle}: {because}{TAIL_MOVED}")
 }
 
-/// The words of a hold note of an account that is unavailable for `because`
-/// (MUS-23): no time is named, for there is none.
-fn render_unavailable(number: i64, handle: &str, because: &str) -> String {
-    format!(
-        "T-{number} waits with @{handle}: its account is unavailable ({because}){TAIL_UNAVAILABLE}"
-    )
+/// The words of a hold note of an account that is unavailable (MUS-23): no time is named,
+/// for there is none. What it was is said from the hold's closed form alone, the form's own
+/// literals, never a word of the harness's: a note is typed into a window.
+pub(crate) fn render_unavailable(number: i64, handle: &str, form: Option<HoldForm>) -> String {
+    let what = form.map_or_else(String::new, |form| format!(" ({})", form.words()));
+    format!("T-{number} waits with @{handle}: its account is unavailable{what}{TAIL_UNAVAILABLE}")
 }
 
 /// The words of a hold note: T-`number` waits with `handle`, who is out of
@@ -256,16 +257,17 @@ pub(crate) fn note_hold(
 }
 
 /// Tells `to` that T-`number` is held with `handle` because its account is
-/// unavailable for `because`, which no time cures: the human's word does.
+/// unavailable, which no time cures: the human's word does. `form` is what the refusal was,
+/// the closed form's literals.
 pub(crate) fn note_hold_unavailable(
     store: &mut Store,
     project_id: i64,
     to: &str,
     number: i64,
     handle: &str,
-    because: &str,
+    form: Option<HoldForm>,
 ) -> Result<MessageView, LedgerError> {
-    let body = render_unavailable(number, handle, because);
+    let body = render_unavailable(number, handle, form);
     send_hold(store, project_id, to, number, &body)
 }
 
@@ -419,5 +421,55 @@ mod tests {
         ] {
             assert!(!is_hold_note(number, &body), "{number}: {body:?}");
         }
+    }
+
+    #[test]
+    fn an_account_hold_is_said_from_its_closed_form_and_no_word_of_a_harness_s() {
+        let login = HoldForm::checked("login", Some(401), Some("authentication_error"));
+        let billing = HoldForm::checked("billing", Some(402), Some("credit_balance_too_low"));
+        let bare = HoldForm::checked("login", None, None);
+        let at = "T-3 waits with @zeus: its account is unavailable";
+        let tail =
+            ", and nothing resets that; it goes on when the human says the account works again.";
+        for (form, said) in [
+            (
+                login,
+                " (its login was refused (401, authentication_error))",
+            ),
+            (
+                billing,
+                " (its billing was refused (402, credit_balance_too_low))",
+            ),
+            (bare, " (its login was refused)"),
+            (None, ""),
+        ] {
+            assert_eq!(
+                render_unavailable(3, "zeus", form),
+                format!("{at}{said}{tail}")
+            );
+        }
+    }
+
+    #[test]
+    fn an_account_hold_note_of_an_older_build_is_known_for_what_it_is_whatever_its_parenthesis_says(
+    ) {
+        let older = "T-3 waits with @zeus: its account is unavailable (its login was refused: 401 {\"error\":\"x\"}), and nothing resets that; it goes on when the human says the account works again.";
+        for body in [older, &render_unavailable(3, "zeus", None)] {
+            assert!(is_hold_note(3, body), "{body}");
+            assert!(
+                matches!(
+                    hold_of(3, body),
+                    Some(Hold {
+                        with: "zeus",
+                        kind: HoldKind::Unavailable
+                    })
+                ),
+                "{body}"
+            );
+            assert!(said(3, body)
+                .unwrap()
+                .ends_with("until the human says it works"));
+        }
+        assert!(hold_of(3, older) == hold_of(3, &render_unavailable(3, "zeus", None)));
     }
 }

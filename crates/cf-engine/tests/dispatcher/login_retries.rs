@@ -376,6 +376,7 @@ fn a_task_in_its_retry_hold_when_its_member_is_held_says_it_waits_for_the_login(
     c.give(t.project.id, "zeus", "Second");
     passes(&c, 8);
     let (first, second) = (t.assignee(1), t.assignee(2));
+    assert_ne!(first, second, "two windows of the one member");
     refuse(&c, &first, LOGIN);
     refuse(&c, &second, LOGIN);
     passes(&c, 3);
@@ -414,13 +415,22 @@ fn a_task_in_its_retry_hold_when_its_member_is_held_says_it_waits_for_the_login(
             .count();
         assert_eq!(told, 1, "T-{number} told its requester once");
     }
+    // What each window has been given now the member is held: no try goes into either after it.
+    let given_before = [&first, &second].map(|window| crate::fixtures::given(&c, window));
     c.advance(600_000);
     passes(&c, 6);
-    assert_eq!(
-        resumes(&c, "zeus"),
-        0,
-        "nothing is tried while the member is held"
-    );
+    for (window, before) in [&first, &second].into_iter().zip(&given_before) {
+        assert_eq!(
+            resumes(&c, window),
+            0,
+            "nothing is tried in @{window} while the member is held"
+        );
+        assert_eq!(
+            &crate::fixtures::given(&c, window),
+            before,
+            "nothing at all is pasted into @{window} while the member is held"
+        );
+    }
 }
 
 #[test]

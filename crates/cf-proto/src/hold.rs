@@ -83,6 +83,24 @@ impl HoldForm {
         self.code
     }
 
+    /// The form said in words: "its login was refused (401, authentication_error)", the kind
+    /// alone where the refusal carried no status and no code. Made only of the form's literals,
+    /// so no word of a harness's can be in it: the one way a note, a card or a try says an
+    /// account hold.
+    pub fn words(&self) -> String {
+        let named: Vec<String> = self
+            .status
+            .map(|status| status.to_string())
+            .into_iter()
+            .chain(self.code.map(str::to_owned))
+            .collect();
+        if named.is_empty() {
+            format!("its {} was refused", self.kind)
+        } else {
+            format!("its {} was refused ({})", self.kind, named.join(", "))
+        }
+    }
+
     /// The form of `kind`, `status` and `code` as the lists name them: the lists' own literals
     /// for what is in them, no status or no code for what is not, and nothing where the kind is
     /// none of [`KINDS`]. A code of the other kind's list is no code.

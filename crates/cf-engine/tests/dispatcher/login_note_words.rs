@@ -66,15 +66,30 @@ fn surfaces(c: &Context, t: &Tiers<'_>) -> Vec<(String, String)> {
     drop(ledger);
     for n in 1..=2 {
         let thread = t.task(n);
-        all.push((format!("T-{n} card"), serde_json::to_string(&thread.task).unwrap()));
-        all.push((format!("T-{n} thread"), serde_json::to_string(&thread.messages).unwrap()));
+        all.push((
+            format!("T-{n} card"),
+            serde_json::to_string(&thread.task).unwrap(),
+        ));
+        all.push((
+            format!("T-{n} thread"),
+            serde_json::to_string(&thread.messages).unwrap(),
+        ));
     }
-    all.push(("chief's notes".to_owned(), format!("{:?}", t.notes("chief"))));
+    all.push((
+        "chief's notes".to_owned(),
+        format!("{:?}", t.notes("chief")),
+    ));
     all.push((
         "human's notes".to_owned(),
-        format!("{:?}", crate::fixtures::notes(c, c.id(t.project.id, "human"))),
+        format!(
+            "{:?}",
+            crate::fixtures::notes(c, c.id(t.project.id, "human"))
+        ),
     ));
-    all.push(("chief's pastes".to_owned(), crate::fixtures::given(c, "chief").concat()));
+    all.push((
+        "chief's pastes".to_owned(),
+        crate::fixtures::given(c, "chief").concat(),
+    ));
     all
 }
 
@@ -92,7 +107,11 @@ fn a_task_held_from_its_retry_with_its_member_is_told_in_the_hold_s_own_words() 
     }
     passes(&c, 4);
     for n in 1..=2 {
-        assert_eq!(t.task(n).task.retry.unwrap().which, 1, "T-{n} waits for its try");
+        assert_eq!(
+            t.task(n).task.retry.unwrap().which,
+            1,
+            "T-{n} waits for its try"
+        );
     }
     c.advance(5_000);
     c.adapter.refuse(&windows[0], pi_refusal(&c));
@@ -103,10 +122,10 @@ fn a_task_held_from_its_retry_with_its_member_is_told_in_the_hold_s_own_words() 
         .filter(|(_, text)| text.contains(MARKER))
         .map(|(name, _)| name)
         .collect();
-    for n in 1..=2 {
-        eprintln!("T-{n} notes = {:?}", t.notes("chief").iter().filter(|x| x.starts_with(&format!("T-{n} waits with @"))).collect::<Vec<_>>());
-    }
-    assert!(leaked.is_empty(), "the provider's words reached: {leaked:?}");
+    assert!(
+        leaked.is_empty(),
+        "the provider's words reached: {leaked:?}"
+    );
     for n in 1..=2 {
         let told: Vec<String> = t
             .notes("chief")
@@ -114,6 +133,15 @@ fn a_task_held_from_its_retry_with_its_member_is_told_in_the_hold_s_own_words() 
             .filter(|note| note.starts_with(&format!("T-{n} waits with @")))
             .collect();
         assert_eq!(told.len(), 1, "T-{n} is told once: {told:?}");
-        eprintln!("T-{n} note = {told:?}");
+        assert!(
+            told[0].contains(": its account is unavailable (its login was refused (401)), and nothing resets that; it goes on when the human says the account works again."),
+            "T-{n} is told in the hold's closed words: {}",
+            told[0]
+        );
     }
+    let aside = t.task(2).task.aside.unwrap();
+    assert!(
+        aside.contains("its account is unavailable (its login was refused (401))"),
+        "{aside}"
+    );
 }
