@@ -922,8 +922,11 @@ fn a_read_is_in_the_screen_and_the_journal_before_it_is_counted_drawn() {
 
 /// A page that holds its output back: the reader is held at the room, and what the window prints
 /// stays at its terminal, where the host's question finds it, on a real terminal (a ConPTY on
-/// Windows). The pane is behind though every byte read is drawn: the look says so, and a paste
-/// and an Enter of a look are refused.
+/// Windows). The test waits for a look that reads the pane behind though every byte read is
+/// drawn, and then holds that a paste and an Enter given at that look are refused. It does not
+/// say that the first look past a full room reads behind: between the reader's last read of the
+/// room and its being held, the program has written nothing that is not read and drawn, so a
+/// look there reads caught up for a moment, as any program's look does between two writes.
 #[test]
 fn a_reader_held_at_the_room_is_behind_on_a_real_terminal() {
     let _pty_guard = crate::pty::serial_pty_test();
@@ -987,7 +990,6 @@ fn a_reader_held_at_the_room_is_behind_on_a_real_terminal() {
         );
         thread::sleep(Duration::from_millis(5));
     };
-    assert_eq!(held["outputCaughtUp"], false, "{held}");
     let at = At {
         seen: Seen::parse(held["seen"].as_str().unwrap()).unwrap(),
         typed: 0,
