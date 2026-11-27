@@ -722,6 +722,15 @@ find = "OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5"
 replace = "OR (q.reason IS NOT ?3 AND (q.reason IS NOT ?4 OR q.reason IS NOT ?5)"
 
 [[plant]]
+name = "reopen asks to answer again a question the result closed"
+meant = "a_task_finished_with_a_declined_answer_and_then_reopened_tells_nobody_to_answer_it_again"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_task_finished_with_a_declined_answer_and_then_reopened_tells_nobody_to_answer_it_again"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/again.rs"
+find = "               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' gave its result with it unanswered')\n"
+replace = ""
+
+[[plant]]
 name = "T1859: a done question loses the result review"
 meant = "t1859_state_done_question_at_restart_or_close"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1859_state_done_question_at_restart_or_close"]]
